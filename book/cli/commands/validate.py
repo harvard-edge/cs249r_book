@@ -500,6 +500,8 @@ class ValidateCommand:
                   note="space after period"),
             Scope("above-below", "_run_mitpress_above_below",
                   note='no "above"/"below" spatial refs'),
+            Scope("self-referential-xref", "_run_mitpress_self_referential_xref",
+                  note="no self-referential @sec- cross-references within their own section"),
             # ascii: corpus has many legitimate non-ASCII chars (em-dashes,
             # smart quotes from imports). Default=False until corpus-wide
             # ASCII pass lands.
@@ -7707,6 +7709,64 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-above-below",
             description='No "above"/"below" spatial refs — use cross-refs or "earlier"/"later"',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_self_referential_xref(self, root: Path) -> ValidationRunResult:
+        """Flag self-referential @sec- cross-references within their own section scope."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        heading_pattern = re.compile(r'^(#{1,6})\s+.*\{#(sec-[^\}\s]+)\}')
+        xref_pattern = re.compile(r'(@[Ss]ec-[a-zA-Z0-9_-]+)')
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            stack = []
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|"):
+                    continue
+
+                h_match = heading_pattern.match(stripped)
+                if h_match:
+                    level = len(h_match.group(1))
+                    sec_id = h_match.group(2).lower()
+                    while stack and stack[-1]['level'] >= level:
+                        stack.pop()
+                    stack.append({'level': level, 'sec_id': sec_id})
+                    continue
+
+                if not stack or stripped.startswith("#") or stripped.startswith("//"):
+                    continue
+
+                xrefs = xref_pattern.findall(stripped)
+                if xrefs:
+                    active_ids = {s['sec_id'] for s in stack}
+                    for xref in xrefs:
+                        ref_id = xref.lstrip('@').lower()
+                        if ref_id in active_ids:
+                            context = stripped[max(0, stripped.find(xref) - 15) : min(len(stripped), stripped.find(xref) + len(xref) + 15)].strip()
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="mitpress_self_referential_xref",
+                                    message=f'Avoid self-referential section cross-reference "{xref}" within its own section scope',
+                                    severity="warning",
+                                    context=context,
+                                )
+                            )
+
+        return ValidationRunResult(
+            name="mitpress-self-referential-xref",
+            description='No self-referential @sec- cross-references within their own section scope',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

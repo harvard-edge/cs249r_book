@@ -903,7 +903,7 @@ class AllReduceBottleneck:
     grad_70b_gb_str = fmt_qty(grad_70b, GB, precision=0, commas=False)
 ```
 
-Beyond classifying individual transfers, the same model identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
+Beyond classifying individual transfers, the same model identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis in this section focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
 
 ::: {#nbk-allreduce-bottleneck .callout-notebook title="AllReduce bottleneck threshold"}
 
@@ -1067,7 +1067,7 @@ Bisection bandwidth is a metric; the topology property that delivers full $\text
 
 :::
 
-Fat-trees build on Clos-style non-blocking network principles to supply full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global routing flexibility for lower cabling cost, and dragonfly topologies reduce optical link counts while introducing workload-placement constraints [@kim2008]. This fundamental balance between guaranteed bisection bandwidth and economic scalability drives every topology decision in large-scale ML clusters, as the detailed comparison below illustrates.
+Fat-trees build on Clos-style non-blocking network principles to supply full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global routing flexibility for lower cabling cost, and dragonfly topologies reduce optical link counts while introducing workload-placement constraints [@kim2008]. This fundamental balance between guaranteed bisection bandwidth and economic scalability drives every topology decision in large-scale ML clusters, as the topology comparisons in @sec-network-fabrics-fat-tree, @sec-network-fabrics-rail-optimized, and @sec-network-fabrics-dragonfly illustrate.
 
 ### Top-of-rack (ToR) and the failure domain {#sec-network-fabrics-tor}
 
@@ -1229,7 +1229,7 @@ For a bandwidth-optimal ring, ReduceScatter plus AllGather contributes a traffic
 2. **Oversubscribed (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by `{python} BisectionScaling.bbs_oversubscription_ratio_str` = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_s_str`.
 
-**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in @sec-network-fabrics-fat-tree. For training, network oversubscription is a false economy.
+**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in this section. For training, network oversubscription is a false economy.
 
 :::
 
@@ -1404,7 +1404,7 @@ Topology provides the structural capacity for the cluster of `{python} NetworkFa
 
 ## Level 4: Fabric Behavior (Congestion, Routing) {#sec-network-fabrics-behavior}
 
-Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to congestion, and the impact of this congestion is qualitatively different in ML clusters than in general-purpose networks. The BSP barrier introduced earlier is what makes the difference: web traffic is stochastic and asynchronous, so one user's 50 ms delay does not penalize the thousands of others, but under BSP the slowest flow in the fabric dictates the iteration time for the entire cluster. If a single link out of 10,000 becomes congested and doubles its latency, the effective throughput of the entire supercomputer drops for that step. In this synchronized regime, tail latency is the dominant performance constraint, not an outlier metric.
+Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to congestion, and the impact of this congestion is qualitatively different in ML clusters than in general-purpose networks. The BSP barrier introduced in @sec-network-workload-inversion is what makes the difference: web traffic is stochastic and asynchronous, so one user's 50 ms delay does not penalize the thousands of others, but under BSP the slowest flow in the fabric dictates the iteration time for the entire cluster. If a single link out of 10,000 becomes congested and doubles its latency, the effective throughput of the entire supercomputer drops for that step. In this synchronized regime, tail latency is the dominant performance constraint, not an outlier metric.
 
 ::: {#dfn-network-fabrics-bulk-synchronous-parallel-bsp .callout-definition title="Bulk synchronous parallel (BSP)"}
 
@@ -1440,7 +1440,7 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 *One paused receiver can freeze unrelated flows.*
 :::
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**The Incast Problem in Distributed Training**: During AllReduce synchronization, every GPU node sends line-rate traffic to a common aggregation switch port, producing a many-to-one traffic burst. The figure shows 256 GPU nodes each at 50 GB/s converging on a switch port with 400 Gb/s (50 GB/s) capacity and a 32 MB buffer: 12.8 TB/s of offered load against 50 GB/s of capacity oversubscribes the egress port by 256$\times$. This deterministic overload is the root cause of the PFC backpressure cascades described later in this section." fig-alt="Eight labeled GPU nodes (with 248 more implied) each at 50 GB/s converge on a central Switch Port with 400 Gb/s capacity and a 32 MB buffer that overflows. Callout notes 256-times egress oversubscription: 256 times 50 GB/s = 12.8 TB/s vs. 50 GB/s port capacity."}
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**The Incast Problem in Distributed Training**: During AllReduce synchronization, every GPU node sends line-rate traffic to a common aggregation switch port, producing a many-to-one traffic burst. The figure shows 256 GPU nodes each at 50 GB/s converging on a switch port with 400 Gb/s (50 GB/s) capacity and a 32 MB buffer: 12.8 TB/s of offered load against 50 GB/s of capacity oversubscribes the egress port by 256$\times$. This deterministic overload is the root cause of the PFC backpressure cascades described in this section." fig-alt="Eight labeled GPU nodes (with 248 more implied) each at 50 GB/s converge on a central Switch Port with 400 Gb/s capacity and a 32 MB buffer that overflows. Callout notes 256-times egress oversubscription: 256 times 50 GB/s = 12.8 TB/s vs. 50 GB/s port capacity."}
 ![](images/svg/incast-flow.svg)
 :::
 

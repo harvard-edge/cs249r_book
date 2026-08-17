@@ -213,7 +213,7 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 *Lifetime serving cost dwarfs one-time training.*
 :::
 
-The serving tax quantified above consumes a fraction of the latency budget per request. The true economic impact of inference emerges when evaluating cost over a model's entire operational lifetime. The **Serving Cost Dominance Law**\index{Serving Cost Dominance Law} (principle \ref{pri-serving-cost-dominance}) states that serving cost can dominate training cost by orders of magnitude because training is a *one-time capital expenditure* (CapEx) while serving is a *continuous operational expenditure* (OpEx) that scales with user growth. A quick cost calculation makes the multiplier concrete.
+The serving tax quantified in @eq-serving-tax consumes a fraction of the latency budget per request. The true economic impact of inference emerges when evaluating cost over a model's entire operational lifetime. The **Serving Cost Dominance Law**\index{Serving Cost Dominance Law} (principle \ref{pri-serving-cost-dominance}) states that serving cost can dominate training cost by orders of magnitude because training is a *one-time capital expenditure* (CapEx) while serving is a *continuous operational expenditure* (OpEx) that scales with user growth. A quick cost calculation makes the multiplier concrete.
 
 ```{python}
 #| echo: false
@@ -1117,7 +1117,7 @@ Admitting, completing, and refilling slots on every iteration keeps active-token
 
 The contrast in @fig-continuous-batching-comparison motivates the throughput analysis: static batching leaves slots idle until the longest sequence in a batch finishes, while continuous batching can refill those slots at iteration boundaries. Output-length variance creates the opportunity, but it does not determine the throughput gain by itself. The realized gain also depends on batch capacity, the full length distribution, request arrivals, KV-cache admission, prefill scheduling, and scheduler overhead. Consequently, there is no workload-independent gain formula based only on the coefficient of variation $\text{CV} = \sigma / \mu$; serving teams must compare policies under the same arrival trace, latency objective, and memory budget.
 
-The following implementation study examines how vLLM realizes continuous batching through iteration-level scheduling, paged memory management, preemption, throughput, and GPU utilization.
+The implementation study in \ref{exmp-inference-continuous-batching-vllm} examines how vLLM realizes continuous batching through iteration-level scheduling, paged memory management, preemption, throughput, and GPU utilization.
 
 ::: {#exmp-inference-continuous-batching-vllm .callout-example title="Continuous batching in vLLM"}
 
@@ -2042,7 +2042,7 @@ $$ M_{\text{total}} = M_{\text{weights}} + (B \times S \times M_{\text{KV}}) $$
 Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_decimal_gb_str` (Total) - `{python} KVCacheCapacityEstimator.weight_gb_str` (Weights) - `{python} KVCacheCapacityEstimator.system_gb_str` (System) = `{python} KVCacheCapacityEstimator.available_kv_gb_str`.
 `{python} KVCacheCapacityEstimator.step3_max_batch_math`
 
-**Systems insight**: Even with GQA, the shared-KV-head attention variant from @sec-performance-engineering-quant-strategies that the 8-head count above already reflects, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
+**Systems insight**: Even with GQA, the shared-KV-head attention variant from @sec-performance-engineering-quant-strategies that the 8-head count in this calculation already reflects, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
 
 :::
 
@@ -2209,7 +2209,7 @@ Request B page table: [0, 1, 2, 3, 4, 5, 12, 13, 14]  <- shares prefix blocks
 Request C page table: [0, 1, 2, 3, 4, 5, 15]  <- shares prefix blocks
 ```
 
-All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings can be substantial when many concurrent requests share the same system prompt; the following example quantifies them for a typical chatbot deployment.
+All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings can be substantial when many concurrent requests share the same system prompt; \ref{nbk-inference-prefix-caching-at-scale} quantifies them for a typical chatbot deployment.
 
 ```{python}
 #| echo: false
@@ -2315,7 +2315,7 @@ class PrefixCachingAnalysis:
 
 ### KV cache compression and architectural optimization {#sec-inference-scale-kv-cache-compression-943a}
 
-The capacity techniques above tolerate the cache; compression shrinks it. The calculation here uses a 64-KV-head multi-head attention baseline so the grouped query attention subsection can isolate the head-count reduction as a separate architectural lever. For a 70B parameter model with 80 layers, 64 heads, head dimension 128, and sequence length 4096 in FP16, the KV cache requires:
+The capacity-management techniques in @sec-inference-scale-pagedattention-3c94 and @sec-inference-scale-prefix-caching-8e8b tolerate the cache; compression shrinks it. The calculation here uses a 64-KV-head multi-head attention baseline so the grouped query attention subsection can isolate the head-count reduction as a separate architectural lever. For a 70B parameter model with 80 layers, 64 heads, head dimension 128, and sequence length 4096 in FP16, the KV cache requires:
 
 ```{python}
 #| echo: false
@@ -4043,7 +4043,7 @@ The invariant is deny before interference. A request that would exceed any tenan
 
 Soft quotas with fair sharing provide a more flexible alternative. Each tenant has a nominal token generation quota (for example, 10,000 tokens/sec), but when the cluster is underutilized (50 percent capacity), tenants can burst to 2$\times$ their quota. When the cluster saturates (90 percent capacity), quotas are enforced. This approach maximizes utilization during low-traffic periods while protecting tenants during contention.
 
-When total demand exceeds capacity, max-min fairness allocates resources to maximize the minimum allocation across tenants. The algorithm first gives each tenant an equal share, then redistributes unused capacity from tenants whose demand falls below their equal share. Raw request counts are an inadequate unit for this calculation because, as @sec-inference-scale-multitenancy-isolation-688c establishes, equal request counts are not equal load: a tenant issuing long-context summarization requests consumes far more KV cache and decode compute than a tenant issuing short classification queries. Token generation rate (tokens/sec) serves as the appropriate bounding metric, capturing both throughput and memory pressure. For three tenants with demands of 30,000, 20,000, and 80,000 tokens/sec competing for a GPU pool capable of 100,000 tokens/sec, max-min fairness yields allocations of 30,000, 20,000, and 50,000: each tenant receives up to its demand or its fair share, whichever is less, with excess capacity redistributed proportionally.
+When total demand exceeds capacity, max-min fairness allocates resources to maximize the minimum allocation across tenants. The algorithm first gives each tenant an equal share, then redistributes unused capacity from tenants whose demand falls below their equal share. Raw request counts are an inadequate unit for this calculation because, as established in this section, equal request counts are not equal load: a tenant issuing long-context summarization requests consumes far more KV cache and decode compute than a tenant issuing short classification queries. Token generation rate (tokens/sec) serves as the appropriate bounding metric, capturing both throughput and memory pressure. For three tenants with demands of 30,000, 20,000, and 80,000 tokens/sec competing for a GPU pool capable of 100,000 tokens/sec, max-min fairness yields allocations of 30,000, 20,000, and 50,000: each tenant receives up to its demand or its fair share, whichever is less, with excess capacity redistributed proportionally.
 
 ### Priority scheduling {#sec-inference-scale-priority-scheduling-3e37}
 
@@ -4177,7 +4177,7 @@ Failure isolation follows naturally from bulkhead boundaries. When a tenant subm
 
 :::
 
-The cost savings above depend on anticipating traffic before it arrives. Proactive provisioning avoids the SLO violations that reactive-only systems suffer during ramp-up periods (@fig-predictive-reactive-scaling).
+The cost savings demonstrated in \ref{exmp-inference-predictive-scaling-traffic} depend on anticipating traffic before it arrives. Proactive provisioning avoids the SLO violations that reactive-only systems suffer during ramp-up periods (@fig-predictive-reactive-scaling).
 
 ::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. Reactive Scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leading to periods of under-provisioning where SLOs are violated due to cold start latency. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, ensuring consistent performance." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
 
@@ -4726,7 +4726,7 @@ These serving optimizations span continuous batching, PagedAttention, global loa
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The Orca and vLLM mechanisms developed earlier provide the LLM-serving primitives; the cases below broaden the view to recommendation serving, global request routing, ranking cascades, and multimodal freshness.
+Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The Orca and vLLM mechanisms developed earlier in this chapter provide the LLM-serving primitives; the case studies in this section broaden the view to recommendation serving, global request routing, ranking cascades, and multimodal freshness.
 
 ### Meta recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
