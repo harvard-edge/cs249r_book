@@ -309,6 +309,79 @@ The C$^3$ Scorecard grades fleet efficiency against known thresholds, extending 
 
 : **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak,device}}$ when $R_{\text{peak}}$ is a per-device value. A fleet that passes all three thresholds has exhausted its easy optimizations; further gains require architectural changes, hardware upgrades, or larger problem sizes to improve the scaling regime. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
 
+## C³ Infrastructure Diagnostic Decision Tree & Fleet D·A·M Scorecard {#sec-appdx-c3-diagnostic-tree}
+
+To bridge hardware-level telemetry and architectural optimization, cluster operations teams require a systematic procedure for mapping low-level hardware signals to the binding C$^3$ bottleneck wall.
+
+### Telemetry signal mapping to C$^3$ walls {#sec-appdx-c3-telemetry-mapping}
+
+Modern GPU clusters generate dense telemetry across silicon, PCIe buses, thermal sensors, and network switches:
+
+- **MFU Drops**: Sudden or sustained drops in Model FLOPs Utilization below expected baselines.
+- **PCIe AER (Advanced Error Reporting) Retries**: Non-fatal bus errors causing packet retries, link downgrades (e.g., PCIe Gen 5 $\to$ Gen 3), or host-to-device DMA throttling.
+- **Thermal Throttling**: GPU SM clock downclocking (e.g., 1.9 GHz $\to$ 1.1 GHz) triggered by junction thermal limits or cooling fan degradation.
+- **InfiniBand Credit Stalls & PFC Pause Frames**: Priority Flow Control (PFC) pause frames, congestion notification packets (CNP), or switch buffer credit starvation.
+
+### Diagnostic decision tree {#sec-appdx-c3-diagnostic-tree-details}
+
+The hardware-first diagnostic tree below guides triage from initial telemetry signals to the underlying C$^3$ wall and remediation action.
+
+```
+                     ┌───────────────────────────────────────┐
+                     │     Telemetry Signal / Performance    │
+                     │          Anomaly Detected             │
+                     └──────────────────┬────────────────────┘
+                                        │
+             ┌──────────────────────────┴──────────────────────────┐
+             ▼                                                     ▼
+┌───────────────────────────┐                         ┌───────────────────────────┐
+│ System Telemetry:         │                         │ Network Telemetry:        │
+│ MFU drops, Thermal, AER   │                         │ PFC Pauses, Credit Stalls │
+└────────────┬──────────────┘                         └────────────┬──────────────┘
+             │                                                     │
+    ┌────────┴────────┐                                   ┌────────┴────────┐
+    ▼                 ▼                                   ▼                 ▼
+┌─────────┐       ┌─────────┐                         ┌─────────┐       ┌─────────┐
+│ Thermal │       │ PCIe    │                         │ IB Credit│       │ High    │
+│ Temp    │       │ AER     │                         │ Stalls  │       │ Tail    │
+│ > 85°C  │       │ Retries │                         │ > 5%    │       │ Latency │
+└────┬────┘       └────┬────┘                         └────┬────┘       └────┬────┘
+     │                 │                                   │                 │
+     ▼                 ▼                                   ▼                 ▼
+┌─────────┐       ┌─────────┐                         ┌─────────┐       ┌─────────┐
+│ COMPUTE │       │ COMPUTE │                         │ COMM.   │       │ COORD.  │
+│ WALL    │       │ WALL    │                         │ WALL    │       │ WALL    │
+└─────────┘       └─────────┘                         └─────────┘       └─────────┘
+ (Thermal           (PCIe Bus                           (Network          (Straggler
+Throttling)        Degradation)                        Congestion)        Barrier)
+```
+
+### Structured diagnostic telemetry table {#sec-appdx-c3-telemetry-table}
+
+@Tbl-c3-telemetry-diagnostic maps hardware-level telemetry counters to root causes, C$^3$ bottleneck walls, and concrete operational remediations.
+
+| **Telemetry Signal**                   | **Hardware / OS Counter**                                      | **Root Cause**                                      | **C$^3$ Bottleneck Wall** | **Remediation Action**                                                          |
+|:---------------------------------------|:---------------------------------------------------------------|:----------------------------------------------------|:--------------------------|:--------------------------------------------------------------------------------|
+| **MFU Drop with High GPU Temp**        | `gpu_temperature > 85°C`, `clocks_throttle_reasons.sw_thermal` | Thermal throttling reduces GPU SM clock speed       | **Compute Wall**          | Check coolant flow, replace thermal interface material (TIM), adjust fan curves |
+| **MFU Drop with Low Host-GPU BW**      | `pcie_aer_correctable_errors`, `pcie_link_width < x16`         | PCIe link degradation / retries due to signal noise | **Compute Wall**          | Reseat GPU/PCIe riser card, clean PCIe edge connectors, replace cable           |
+| **AllReduce Stalls with Pause Frames** | `PFC_PAUSE_XOFF_FRAMES`, `infiniband_credit_stalls`            | Network fabric congestion, IB buffer exhaustion     | **Communication Wall**    | Enable Adaptive Routing (AR), rebalance ECMP hashing, tune NCCL buffer size     |
+| **NCCL Barrier Timeout / Hang**        | `NCCL_WARN=INFO` log `Unhandled CUDA error`, `heartbeat_miss`  | Single-node straggler or silent kernel hang         | **Coordination Wall**     | Drain degraded node, isolate via node health check script, trigger fast restart |
+| **High Step Overhead with Idle GPU**   | `nvlink_throughput == 0`, `fs_write_latency > 1s`              | Blocking synchronous checkpoint write to storage    | **Coordination Wall**     | Switch to asynchronous double-buffered checkpointing or host RAM staging        |
+
+: **C$^3$ Telemetry Diagnostic Mapping**: Direct mapping from silicon-level telemetry signals to distributed bottleneck walls and remediation procedures. {#tbl-c3-telemetry-diagnostic}
+
+### Fleet D·A·M scorecard {#sec-appdx-c3-dam-scorecard}
+
+The **Fleet D·A·M Scorecard** in @tbl-c3-dam-scorecard generalizes single-node Data, Algorithm, and Machine (D·A·M) diagnostics to fleet-scale C$^3$ bottlenecks.
+
+| **D·A·M Axis**      | **Fleet Telemetry Signal**                                               | **C$^3$ Bottleneck Wall**        | **Target Efficiency Benchmark**                                                 |
+|:--------------------|:-------------------------------------------------------------------------|:---------------------------------|:--------------------------------------------------------------------------------|
+| **Data ($D$)**      | Network fabric RX/TX saturation, storage write I/O wait times            | **Communication / Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak |
+| **Algorithm ($A$)** | Model FLOPs utilization (MFU), pipeline bubble idle fraction             | **Compute / Coordination**       | MFU $> 60\%$; Pipeline bubble fraction $< \frac{p-1}{2K}$                       |
+| **Machine ($M$)**   | PCIe AER errors, thermal throttling counters, GPU power limit throttling | **Compute**                      | Thermal throttle events $= 0$; PCIe link width held at max (Gen 5 x16)          |
+
+: **Fleet D·A·M Scorecard**: Quantifies how single-node hardware telemetry maps into fleet-level C$^3$ execution constraints. {#tbl-c3-dam-scorecard}
+
 ## Scaling Laws Through the C$^3$ Lens {#sec-appdx-c3-taxonomy-scaling-laws}
 
 Scaling laws are usually written in algorithmic FLOPs, but a training fleet delivers only the useful FLOPs that survive utilization, communication, and coordination losses. Scaling-law targets translate directly into C$^3$ terms: the hidden perfect-systems assumption abstracts away losses, while effective FLOP/s defines the usable throughput connecting model-quality forecasts to real cluster capacity.
