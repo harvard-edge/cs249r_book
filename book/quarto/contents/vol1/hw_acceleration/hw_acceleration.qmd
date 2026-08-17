@@ -2679,57 +2679,120 @@ $$ I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}} $$
 
 This ratio partitions the deployment spectrum into two distinct regimes. High-end accelerators like the NVIDIA H100 have a balance of $\approx 150$--$300$, making them "Bandwidth-Hungry" giants where the challenge is moving data fast enough to saturate the ALUs. In contrast, TinyML microcontrollers often have a balance of $< 10$, making them "Compute-Starved" but relatively bandwidth-efficient. This explains why an architecture that is efficient in the cloud (where optimization targets $\text{BW}$ limits) can be a disaster at the edge: the hardware balance has shifted under the model, transforming a memory-bound success into a compute-bound failure.
 
-Peak computational capability has expanded far faster than memory bus performance over recent decades. Trace the historical growth curves in @fig-compute-memory-imbalance, noting the widening shaded separation between normalized FLOP throughput and memory bandwidth scaling.
-
-::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Illustrative indices normalized to 2000 and plotted on a log scale. By 2025, compute reaches $10^{12}$ times its baseline while bandwidth reaches $10^3$, leaving a nine-order-of-magnitude separation. The shaded gap represents the growing reuse burden that hardware and software must absorb." fig-alt="Line graph comparing illustrative compute and bandwidth growth indices from 2000 to 2025 on a log scale, each normalized to 1 in 2000. The shaded separation widens over time."}
+Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. @Fig-compute-memory-imbalance separates the two growth rates that produce the ridge point, each normalized to the V100 baseline, so the widening distance between them can be read directly.
 
 ```{python}
 #| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPUTE-MEMORY IMBALANCE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-compute-memory-imbalance—AI memory wall quantification
-# │
-# │ Goal: Plot compute throughput vs memory bandwidth over time; show widening
-# │       gap that defines the memory wall.
-# │ Show: Two curves on log scale; shaded divergence region.
-# │ How: Hardcoded years/values; fill_between; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot compute throughput vs memory bandwidth over time; show widening
+#| label: compute-bandwidth-divergence-calc
+# +-----------------------------------------------------------------------------
+# | COMPUTE VS BANDWIDTH GROWTH, V100 THROUGH B200
+# +-----------------------------------------------------------------------------
+# | Context: the lead-in prose above and @fig-compute-memory-imbalance.
+# |
+# | Goal: Quantify how much faster peak dense FP16 throughput grew than memory
+# |       bandwidth across five NVIDIA datacenter generations.
+# | Show: Growth multiples for compute, for bandwidth, and for the gap between
+# |       them, which is the ridge-point rise @fig-rising-ridge then plots.
+# | How:  Read peak_flops and memory.bandwidth per generation from the hardware
+# |       registry and normalize both series to the V100 baseline.
+# +-----------------------------------------------------------------------------
+from mlsysim.fmt import fmt_multiple, MarkdownStr
+
+class ComputeBandwidthDivergence:
+    """Registry-sourced compute vs bandwidth growth, V100 through B200."""
+
+    # +-- 1. LOAD (Constants) --------------------------------------------------
+    generations = [
+        Hardware.Cloud.V100,
+        Hardware.Cloud.A100,
+        Hardware.Cloud.H100,
+        Hardware.Cloud.H200,
+        Hardware.Cloud.B200,
+    ]
+
+    # +-- 2. EXECUTE (The Compute) ---------------------------------------------
+    # A comprehension body cannot see class-scope names, so the baselines are
+    # divided out in plain expressions rather than inside a comprehension.
+    years = [g.release_year for g in generations]
+    compute = [g.compute.peak_flops.to(TFLOP / second).magnitude for g in generations]
+    bandwidth = [g.memory.bandwidth.to(GB / second).magnitude for g in generations]
+    compute_growth = compute[-1] / compute[0]
+    bandwidth_growth = bandwidth[-1] / bandwidth[0]
+    gap_growth = compute_growth / bandwidth_growth
+
+    # +-- 3. GUARD (Invariants) ------------------------------------------------
+    check(compute_growth > bandwidth_growth, "Compute must outgrow bandwidth for the divergence to exist.")
+    check(compute[3] == compute[2], "H200 should match H100 peak compute; the narrowing lesson depends on it.")
+    check(bandwidth[3] > bandwidth[2], "H200 should exceed H100 bandwidth; the narrowing lesson depends on it.")
+
+    # +-- 4. OUTPUT (Formatting) -----------------------------------------------
+    span_str = MarkdownStr(f"{years[0]}--{years[-1]}")
+    compute_growth_mult_str = fmt_multiple(compute_growth, precision=0, commas=False)
+    bandwidth_growth_mult_str = fmt_multiple(bandwidth_growth, precision=1, commas=False)
+    gap_growth_mult_str = fmt_multiple(gap_growth, precision=1, commas=False)
+```
+
+::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
+
+```{python}
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | COMPUTE-BANDWIDTH DIVERGENCE (FIGURE)
+# +-----------------------------------------------------------------------------
+# | Context: @fig-compute-memory-imbalance
+# |
+# | Goal: Plot peak compute growth against memory bandwidth growth per
+# |       accelerator generation and shade the separation between them.
+# | Show: Two curves normalized to the V100 baseline, log y axis, shaded gap,
+# |       generations annotated so the H200 bandwidth step is visible.
+# | How:  Read peak_flops and memory.bandwidth from the hardware registry, the
+# |       same source as the calc cell above; no values are hardcoded here.
+# +-----------------------------------------------------------------------------
+# +-- 1. CANVAS ----------------------------------------------------------------
 from book.tools.figures import style as book_style
 import numpy as np
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.6))
-# =============================================================================
-# DATA
-# =============================================================================
 
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-years = [2000, 2005, 2010, 2015, 2020, 2025]
-compute_performance = [1e3, 1e5, 1e7, 1e9, 1e12, 1e15]
-memory_bandwidth = [1, 10, 50, 100, 500, 1000]
-compute_index = np.asarray(compute_performance) / compute_performance[0]
-bandwidth_index = np.asarray(memory_bandwidth) / memory_bandwidth[0]
+# +-- 2. ARRAYS ----------------------------------------------------------------
+_gens = [
+    ("V100", Hardware.Cloud.V100),
+    ("A100", Hardware.Cloud.A100),
+    ("H100", Hardware.Cloud.H100),
+    ("H200", Hardware.Cloud.H200),
+    ("B200", Hardware.Cloud.B200),
+]
+_labels = [n for n, _ in _gens]
+_years = [g.release_year for _, g in _gens]
+_compute = np.asarray([g.compute.peak_flops.to(TFLOP / second).magnitude for _, g in _gens])
+_bandwidth = np.asarray([g.memory.bandwidth.to(GB / second).magnitude for _, g in _gens])
+compute_index = _compute / _compute[0]
+bandwidth_index = _bandwidth / _bandwidth[0]
 
-# =============================================================================
-# PLOT: The Compute-Bandwidth Divergence
-# =============================================================================
+# +-- 3. RENDER ----------------------------------------------------------------
+# Semantic palette: compute is orange, memory is blue.
+ax.fill_between(_years, bandwidth_index, compute_index, color=COLORS['grid'], alpha=0.3)
+ax.plot(_years, compute_index, 'o-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=5, label='Peak compute growth')
+ax.plot(_years, bandwidth_index, 's-', color=COLORS['BlueLine'], linewidth=1.5, markersize=5, label='Memory bandwidth growth')
 
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.fill_between(years, bandwidth_index, compute_index, color=COLORS['grid'], alpha=0.3)
-ax.plot(years, compute_index, 'o-', color=COLORS['BlueLine'], linewidth=1.5, markersize=5, label='Compute growth index')
-ax.plot(years, bandwidth_index, 's-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=5, label='Bandwidth growth index')
+# +-- 4. DECORATE --------------------------------------------------------------
+for _x, _y, _n in zip(_years, compute_index, _labels):
+    ax.annotate(_n, xy=(_x, _y), xytext=(0, 7), textcoords='offset points', ha='center', fontsize=8, color=COLORS['primary'])
 
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.annotate('', xy=(2023, 1e10), xytext=(2023, 5e2), arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5))
+_gap = compute_index[-1] / bandwidth_index[-1]
+ax.annotate(
+    '',
+    xy=(_years[-1], compute_index[-1]),
+    xytext=(_years[-1], bandwidth_index[-1]),
+    arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5),
+)
 ax.text(
-    2022.2,
-    2e5,
-    'Growth-rate gap',
+    _years[-1] - 0.35,
+    np.sqrt(compute_index[-1] * bandwidth_index[-1]),
+    f'Reuse burden {_gap:.1f}x',
     rotation=90,
-    va='bottom',
+    va='center',
+    ha='right',
     fontsize=9,
     color=COLORS['primary'],
     fontweight='bold',
@@ -2738,7 +2801,8 @@ ax.text(
 
 ax.set_yscale('log')
 ax.set_xlabel('Year')
-ax.set_ylabel('Relative Growth (2000 = 1.0)')
+ax.set_ylabel('Relative growth (V100 = 1.0)')
+ax.set_xticks(_years)
 ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
 plt.show()
 plt.close()
