@@ -2460,10 +2460,15 @@ def enable_autograd(quiet=False):
     # Store original operations
     # These are guaranteed to exist from Module 01 (Tensor class)
     _original_add = Tensor.__add__
+    _original_radd = Tensor.__radd__
     _original_sub = Tensor.__sub__
+    _original_rsub = Tensor.__rsub__
     _original_mul = Tensor.__mul__
+    _original_rmul = Tensor.__rmul__
     _original_div = Tensor.__truediv__
+    _original_rdiv = Tensor.__rtruediv__
     _original_getitem = Tensor.__getitem__
+    _original_sum = Tensor.sum
 
     # These methods are also guaranteed from Module 01 - trust Single Tensor Class
     _original_matmul = Tensor.matmul
@@ -2517,8 +2522,18 @@ def enable_autograd(quiet=False):
         return result
 
     def tracked_radd(self, other):
-        """Scalar-left addition with gradient tracking."""
-        return tracked_add(self, other)
+        """
+        Scalar-left addition with gradient tracking.
+
+        Delegates to the original __radd__ from Module 01 (which itself
+        calls self.__add__(other)) rather than calling tracked_add
+        directly, so Module 01's own __radd__ source actually executes.
+        Addition is commutative, so this produces the same result either
+        way, self.__add__ resolves to tracked_add regardless, since
+        that's the currently-installed __add__ by the time this runs.
+        """
+        _ensure_grad_attrs(self)
+        return _original_radd(self, other)
 
     def tracked_mul(self, other):
         """
@@ -2546,8 +2561,14 @@ def enable_autograd(quiet=False):
         return result
 
     def tracked_rmul(self, other):
-        """Scalar-left multiplication with gradient tracking."""
-        return tracked_mul(self, other)
+        """
+        Scalar-left multiplication with gradient tracking.
+
+        Delegates to the original __rmul__ from Module 01 (which itself
+        calls self.__mul__(other)), same reasoning as tracked_radd above.
+        """
+        _ensure_grad_attrs(self)
+        return _original_rmul(self, other)
 
     def tracked_matmul(self, other):
         """
@@ -2637,10 +2658,33 @@ def enable_autograd(quiet=False):
         return result
 
     def tracked_rsub(self, other):
-        """Scalar-left subtraction with gradient tracking."""
+        """
+        Scalar-left subtraction with gradient tracking.
+
+        Unlike __radd__/__rmul__, __rsub__ computes a genuinely different
+        formula (other - self, not self - other), so it can't just
+        forward to tracked_sub without ever running Module 01's actual
+        __rsub__ body. Calls the original directly (with other in
+        whatever form the caller passed, so both its Tensor and
+        non-Tensor branches stay reachable) to get the value, then
+        attaches gradient tracking the same way tracked_sub(other, self)
+        already did.
+        """
+        _ensure_grad_attrs(self)
+
+        # Call original __rsub__ from Module 01: computes other - self
+        result = _original_rsub(self, other)
+        _ensure_grad_attrs(result)
+
         if not isinstance(other, Tensor):
             other = Tensor(other)
-        return tracked_sub(other, self)
+        _ensure_grad_attrs(other)
+
+        if _get_requires_grad(self) or _get_requires_grad(other):
+            result.requires_grad = True
+            result._grad_fn = SubBackward(other, self)
+
+        return result
 
     def tracked_div(self, other):
         """
@@ -2668,10 +2712,31 @@ def enable_autograd(quiet=False):
         return result
 
     def tracked_rdiv(self, other):
-        """Scalar-left division with gradient tracking."""
+        """
+        Scalar-left division with gradient tracking.
+
+        Same reasoning as tracked_rsub: __rtruediv__ computes a
+        genuinely different formula (other / self, not self / other),
+        so it calls the original directly to get the value (keeping
+        both its Tensor and non-Tensor branches reachable), then
+        attaches gradient tracking the same way tracked_div(other, self)
+        already did.
+        """
+        _ensure_grad_attrs(self)
+
+        # Call original __rtruediv__ from Module 01: computes other / self
+        result = _original_rdiv(self, other)
+        _ensure_grad_attrs(result)
+
         if not isinstance(other, Tensor):
             other = Tensor(other)
-        return tracked_div(other, self)
+        _ensure_grad_attrs(other)
+
+        if _get_requires_grad(self) or _get_requires_grad(other):
+            result.requires_grad = True
+            result._grad_fn = DivBackward(other, self)
+
+        return result
 
     def tracked_getitem(self, key):
         """
@@ -2697,13 +2762,14 @@ def enable_autograd(quiet=False):
         """
         Sum operation with gradient tracking.
 
-        Creates a new sum method that builds computation graphs
-        when requires_grad=True.
+        Delegates to the original .sum() from Module 01 for the actual
+        computation, rather than reimplementing it, so Module 01's own
+        sum() source stays reachable and testable.
         """
         _ensure_grad_attrs(self)
 
-        result_data = np.sum(self.data, axis=axis, keepdims=keepdims)
-        result = Tensor(result_data)
+        result = _original_sum(self, axis=axis, keepdims=keepdims)
+        _ensure_grad_attrs(result)
 
         if _get_requires_grad(self):
             result.requires_grad = True

@@ -148,6 +148,55 @@ def test_reshape_gradient_flow():
     print("✅ Reshape gradient flow works correctly")
 
 
+def test_reflected_operator_gradients():
+    """
+    Gradient-level regression for __radd__/__rsub__/__rmul__/__rtruediv__
+    and sum(). These previously computed their result via a duplicate
+    formula inside the autograd monkeypatch (tracked_radd/rsub/rmul/rdiv,
+    sum_op) instead of calling Module 01's own methods, so a bug
+    introduced into Module 01's source would never have been caught by
+    any test exercising the built package. They now delegate to the
+    original implementations, this locks in both the value and the
+    gradient for each.
+    """
+    # __radd__: 5 + x
+    x = Tensor(np.array([1.0, 2.0]), requires_grad=True)
+    y = 5 + x
+    y.sum().backward()
+    assert np.allclose(y.data, [6.0, 7.0])
+    assert np.allclose(x.grad, [1.0, 1.0])
+
+    # __rsub__: 10 - x
+    x = Tensor(np.array([1.0, 2.0, 3.0]), requires_grad=True)
+    y = 10 - x
+    y.sum().backward()
+    assert np.allclose(y.data, [9.0, 8.0, 7.0])
+    assert np.allclose(x.grad, [-1.0, -1.0, -1.0])
+
+    # __rmul__: 3 * x
+    x = Tensor(np.array([1.0, 2.0]), requires_grad=True)
+    y = 3 * x
+    y.sum().backward()
+    assert np.allclose(y.data, [3.0, 6.0])
+    assert np.allclose(x.grad, [3.0, 3.0])
+
+    # __rtruediv__: 20 / x
+    x = Tensor(np.array([2.0, 4.0, 5.0]), requires_grad=True)
+    y = 20 / x
+    y.sum().backward()
+    assert np.allclose(y.data, [10.0, 5.0, 4.0])
+    assert np.allclose(x.grad, -20.0 / (x.data ** 2))
+
+    # sum(): 2D sum(), no axis
+    x = Tensor(np.array([[1.0, 2.0], [3.0, 4.0]]), requires_grad=True)
+    y = x.sum()
+    y.backward()
+    assert np.isclose(y.data, 10.0)
+    assert np.allclose(x.grad, np.ones((2, 2)))
+
+    print("✅ Reflected operator and sum() gradients work correctly")
+
+
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("GRADIENT FLOW TEST SUITE")
@@ -159,6 +208,7 @@ if __name__ == "__main__":
     test_gelu_gradient_flow()
     test_layernorm_operations()
     test_reshape_gradient_flow()
+    test_reflected_operator_gradients()
 
     print("\n" + "="*70)
     print("✅ ALL GRADIENT FLOW TESTS PASSED")
