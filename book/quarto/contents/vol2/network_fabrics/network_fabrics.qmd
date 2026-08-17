@@ -32,7 +32,7 @@ engine: jupyter
 
 _Why does the network connecting accelerators matter more than the accelerators themselves at scale?_
 
-A single accelerator can perform trillions of operations per second, but distributed training requires coordination across thousands of devices. Synchronization for gradient averaging, activation exchange, and parameter updates depends on network bandwidth and latency. When network capacity cannot keep pace with accelerator throughput, accelerators sit idle waiting for data, and adding more accelerators can worsen rather than relieve the bottleneck. At sufficient scale, network design can dominate system performance. Topology determines which communication patterns are efficient, bandwidth constrains model partitioning, and latency limits how tightly training can be coupled. Organizations that treat networking as an afterthought may realize only a fraction of theoretical accelerator performance. In CÂ³ terms, the fabric is where the communication tax is paid, and its topology and bandwidth determine how tightly communication bounds compute across the fleet.
+A single accelerator can perform trillions of operations per second, but distributed training requires coordination across thousands of devices. Synchronization for gradient averaging, activation exchange, and parameter updates depends on network bandwidth and latency. When network capacity cannot keep pace with accelerator throughput, accelerators sit idle waiting for data, and adding more accelerators can worsen rather than relieve the bottleneck. At sufficient scale, network design can dominate system performance. Topology determines which communication patterns are efficient, bandwidth constrains model partitioning, and latency limits how tightly training can be coupled. Organizations that treat networking as an afterthought may realize only a fraction of theoretical accelerator performance. In C³ terms, the fabric is where the communication tax is paid, and its topology and bandwidth determine how tightly communication bounds compute across the fleet.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -58,13 +58,20 @@ from mlsysim.core.units import *
 
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, check, fmt_math
 
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── LEGO ───────────────────────────────────────────────
 class NetworkRunningExampleCluster:
     """Mid-scale training cluster (`Systems.Clusters.Training_1K`) for the 175B running example."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _cluster = Systems.Clusters.Training_1K
+    n_gpus = _cluster.total_accelerators
+    _model = Models.Language.GPT3
+    params = _model.parameters
+    grad_bytes = params * (2 * byte / param)
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
-    peer_gpus_str = fmt(n_gpus - 1, precision=0, commas=True)
+    peer_gpus_str = fmt(n_gpus - 1, precision=0, commas=False)
     grad_gb_str = fmt_qty(grad_bytes, GB, precision=0, commas=False)
     redundant_copy_gb_str = fmt_qty(2 * grad_bytes, GB, precision=0, commas=False)
 ```
@@ -104,40 +111,44 @@ In a single machine, the memory bus moves data between the processor and memory.
 ```{python}
 #| echo: false
 #| label: network-fabrics-bandwidth-hierarchy
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ BANDWIDTH HIERARCHY SPECS (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-introductionâ€”the bandwidth cliff paragraph,
-# â”‚          and pervasive IB NDR bandwidth references throughout the chapter.
-# â”‚
-# â”‚ Goal: Compute the bandwidth hierarchy (NVLink vs IB vs HBM) and the
-# â”‚       NVLink-to-IB ratio that defines the intra/inter-node cliff.
-# â”‚ Show: ~400 Gb/s NDR, ~50 GB/s NDR, ~900 GB/s NVLink, ~18x ratio.
-# â”‚ How: Preserve Pint quantities; extract only the dimensionless ratio.
-# â”‚
-# â”‚ Used by: @sec-network-fabrics-introduction (line ~173), and IB NDR
-# â”‚          bandwidth refs in Level 1, Level 2, Level 5, Virtualization,
-# â”‚          Monitoring, Fallacies sections.
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BANDWIDTH HIERARCHY SPECS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-introduction—the bandwidth cliff paragraph,
+# │          and pervasive IB NDR bandwidth references throughout the chapter.
+# │
+# │ Goal: Compute the bandwidth hierarchy (NVLink vs IB vs HBM) and the
+# │       NVLink-to-IB ratio that defines the intra/inter-node cliff.
+# │ Show: ~400 Gb/s NDR, ~50 GB/s NDR, ~900 GB/s NVLink, ~18x ratio.
+# │ How: Preserve Pint quantities; extract only the dimensionless ratio.
+# │
+# │ Used by: @sec-network-fabrics-introduction (line ~173), and IB NDR
+# │          bandwidth refs in Level 1, Level 2, Level 5, Virtualization,
+# │          Monitoring, Fallacies sections.
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_qty
 
 class NetworkFabricsContextScenario:
     """Bandwidth hierarchy specs for the chapter-wide fabric discussion."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     ib_ndr_raw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
     nvlink_h100_raw = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s datasheet bidirectional total
     nvlink_h100_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way
     h100_flops_raw = Hardware.Cloud.H100.compute.peak_flops
     h100_mem_bw_raw = Hardware.Cloud.H100.memory.bandwidth
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Honest cliff = like-with-like, both per-direction: NVLink 450 GB/s vs an
+    # NDR port's 50 GB/s = 9x. (Comparing NVLink's 900 GB/s bidirectional total
+    # against the per-direction port rate would double-count to a spurious 18x.)
     nvlink_to_ib_ratio_val = (nvlink_h100_perdir / ib_ndr_raw).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(ib_ndr_raw > 300 * Gbps, "NDR BW should exceed 300 Gb/s")
     check(nvlink_to_ib_ratio_val > 8, "Per-direction NVLink-to-IB cliff should be ~9x")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ib_ndr_raw, unit=Gbps, precision=0, commas=False)
     ib_ndr_gb_per_s_str = fmt_qty(ib_ndr_raw, GB / second, precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_qty(nvlink_h100_raw, GB / second, precision=0, commas=False)
@@ -186,7 +197,7 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
     util/.style={font=\scriptsize\mlsysFigureSans, anchor=west}
   }
 
-  %â€”Scenario A: Intra-node (NVLink) ---
+  %—Scenario A: Intra-node (NVLink) ---
   \begin{scope}[local bounding box=intra]
     \node[fwd, minimum width=4cm] (fwd1) at (0, 1.6) {Forward (100 ms)};
     \node[bwd, minimum width=4cm, right=0pt of fwd1] (bwd1) {Backward (100 ms)};
@@ -198,7 +209,7 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
     \node[sublabel, left=0.3cm of fwd1.west, yshift=-0.2cm] {8 GPUs, NVLink};
   \end{scope}
 
-  %â€”Scenario B: Inter-node (InfiniBand) ---
+  %—Scenario B: Inter-node (InfiniBand) ---
   \begin{scope}[local bounding box=inter, yshift=-1.6cm]
     \node[fwd, minimum width=4cm] (fwd2) at (0, 1.6) {Forward (100 ms)};
     \node[bwd, minimum width=4cm, right=0pt of fwd2] (bwd2) {Backward (100 ms)};
@@ -274,19 +285,19 @@ The levels are not an inventory of networking topics; they are the causal chain 
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Wire/link section â€” 175B cluster GPU count
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Wire/link section — 175B cluster GPU count
 class NetworkWireClusterRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Wire and link â€” NDR line rate references.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Wire and link — NDR line rate references.
 class IbNdrWireRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
@@ -308,8 +319,8 @@ Before protocols and topologies can be evaluated, physical medium constraints mu
 #| echo: false
 from mlsysim.fmt import fmt_time
 
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: PAM4 / FEC latency paragraph.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: PAM4 / FEC latency paragraph.
 class FECLatency:
     FEC_LATENCY_LOW = Systems.SwitchFabric.FecLatencyLow
     FEC_LATENCY_HIGH = Systems.SwitchFabric.FecLatencyHigh
@@ -323,7 +334,7 @@ class FECLatency:
     round_trip_high = ns_high * round_trip_hops
     check(round(three_hop_low.to(nanosecond).magnitude) == 300, "Three-hop one-way FEC lower bound should be 300 ns")
     check(round(round_trip_high.to(nanosecond).magnitude) == 1200, "Six-hop round-trip FEC upper bound should be 1200 ns")
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     three_hop_low_ns_str = fmt_time(three_hop_low, nanosecond, precision=0, commas=False)
     three_hop_high_ns_str = fmt_time(three_hop_high, nanosecond, precision=0, commas=False)
     round_trip_low_ns_str = fmt_time(round_trip_low, nanosecond, precision=0, commas=False)
@@ -360,26 +371,26 @@ For optical links, Forward Error Correction (FEC)[^fn-fec-latency] is part of th
 #| echo: false
 #| label: network-fabrics-spine-optics-cost
 
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ SPINE-LAYER OPTICS COST AND POWER
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @psp-network-fabrics-cost-distance â€” the "cost of distance"
-# â”‚          perspective quantifying spine-layer optics for a 10K-GPU cluster.
-# â”‚
-# â”‚ Goal: Compute the spine-optics dollar and power totals from the registry
-# â”‚       pluggable-optics power (the old prose hand-typed 10 W/link â€” the
-# â”‚       CPO value â€” and derived 200 kW where the registry 20 W gives 400 kW,
-# â”‚       contradicting the OpticalDividend cell later in this chapter).
-# â”‚ Show: Link count, per-link power, total cabling cost, total optics power.
-# â”‚ How: Derive the spine link count from the 10K training cluster; $500/link
-# â”‚      is a scenario assumption (optical-link unit cost is a registry gap,
-# â”‚      noted 2026-06 audit); power per link is Systems.SwitchFabric.OpticsPluggable400G.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPINE-LAYER OPTICS COST AND POWER
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @psp-network-fabrics-cost-distance — the "cost of distance"
+# │          perspective quantifying spine-layer optics for a 10K-GPU cluster.
+# │
+# │ Goal: Compute the spine-optics dollar and power totals from the registry
+# │       pluggable-optics power (the old prose hand-typed 10 W/link — the
+# │       CPO value — and derived 200 kW where the registry 20 W gives 400 kW,
+# │       contradicting the OpticalDividend cell later in this chapter).
+# │ Show: Link count, per-link power, total cabling cost, total optics power.
+# │ How: Derive the spine link count from the 10K training cluster; $500/link
+# │      is a scenario assumption (optical-link unit cost is a registry gap,
+# │      noted 2026-06 audit); power per link is Systems.SwitchFabric.OpticsPluggable400G.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count, fmt_power, fmt_qty_range, fmt_usd
 
 class SpineOpticsCost:
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
     n_links = 2 * cluster_gpus  # scenario assumption: two spine-layer optical links per accelerator
     link_cost = 500 * USD  # scenario assumption: per-link optics cost (registry gap)
@@ -387,14 +398,14 @@ class SpineOpticsCost:
     rack_power_low = 70 * kW  # scenario assumption: dense AI rack lower bound
     rack_power_high = 100 * kW  # scenario assumption: dense AI rack upper bound
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_cost = n_links * link_cost
     total_power = n_links * link_power
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_power.to(kW).magnitude == 400, "20,000 pluggable links at registry power should draw 400 kW")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     cluster_gpus_str = fmt_count(cluster_gpus, label="GPU", commas=True)
     n_links_str = fmt(n_links, precision=0, commas=True)
     link_cost_usd_str = fmt_usd(link_cost, precision=0, commas=False)
@@ -415,43 +426,43 @@ In an ML fleet, distance is money. A cluster of `{python} SpineOpticsCost.cluste
 ```{python}
 #| echo: false
 #| label: network-fabrics-serdes-power-budget
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ SERDES POWER BUDGET (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-serdes â€” the SerDes/interconnect power
-# â”‚          paragraph below.
-# â”‚
-# â”‚ Goal: Quantify the interconnect power draw for the running-example cluster
-# â”‚       and express it as a fraction of the GPU power budget.
-# â”‚ Show: 350 GB AllReduce, ~3,000 links, 25 W/port, 75 kW interconnect,
-# â”‚       ~10 percent of the accelerator power budget.
-# â”‚ How: gradient = GPT3 params Ã— 2 bytes (FP16); link count and per-port power
-# â”‚      are scenario assumptions; GPU power budget = total_accelerators Ã— TDP.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERDES POWER BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-serdes — the SerDes/interconnect power
+# │          paragraph below.
+# │
+# │ Goal: Quantify the interconnect power draw for the running-example cluster
+# │       and express it as a fraction of the GPU power budget.
+# │ Show: 350 GB AllReduce, ~3,000 links, 25 W/port, 75 kW interconnect,
+# │       ~10 percent of the accelerator power budget.
+# │ How: gradient = GPT3 params × 2 bytes (FP16); link count and per-port power
+# │      are scenario assumptions; GPU power budget = total_accelerators × TDP.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_qty, fmt_power, fmt_percent, check
 
 class SerDesPowerBudget:
     """Interconnect SerDes/transceiver power for the 175B running-example cluster."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     h100_tdp = Hardware.Cloud.H100.tdp
     gradient = Models.Language.GPT3.parameters * (2 * byte / param)  # 175B FP16 AllReduce
     n_links = 3000  # scenario assumption: high-speed links to sustain full BW_bisect
     port_power = 25 * watt  # scenario assumption: combined SerDes + optical transceiver per port
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     interconnect_power = n_links * port_power
     gpu_power_budget = n_gpus * h100_tdp
     power_fraction = (interconnect_power / gpu_power_budget).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(gradient.to(GB).magnitude - 350) < 1e-6, "175B FP16 AllReduce should be 350 GB")
     check(interconnect_power.to(kW).magnitude == 75, "3,000 links at 25 W should draw 75 kW")
     check(0.10 < power_fraction < 0.11, f"Interconnect should be ~10 percent of GPU power, got {power_fraction:.3f}")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     grad_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
     n_links_str = fmt(n_links, precision=0, commas=True)
     port_power_w_str = fmt_power(port_power, unit=watt, precision=0, commas=False)
@@ -461,16 +472,16 @@ class SerDesPowerBudget:
 
 Every port depends on a **Serializer/Deserializer (SerDes)**\index{SerDes!definition}\index{SerDes!definition}\index{Serializer/Deserializer} circuit that converts parallel data from the switch ASIC into a serial stream. As bandwidth scales, these circuits have become the dominant power consumer in the network fabric. Consider the energy implications for a cluster of `{python} NetworkWireClusterRecap.n_gpus_str`: maintaining full $\text{BW}_{\text{bisect}}$ for the `{python} SerDesPowerBudget.grad_gb_str` of gradient traffic requires roughly `{python} SerDesPowerBudget.n_links_str` high-speed links. If each `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port consumes `{python} SerDesPowerBudget.port_power_w_str` (combined SerDes and optical transceiver power), the interconnect alone draws `{python} SerDesPowerBudget.interconnect_kw_str` continuously, `{python} SerDesPowerBudget.power_frac_pct_str` of the cluster's power budget dedicated merely to moving bits, not computing on them.
 
-The **Link Budget**\index{Link Budget!definition}, a strict decibel (dB) allowance for signal attenuation, governs the reach of these links. As signals traverse copper, they lose energy to skin effect and dielectric absorption. The link budget is the difference between the transmitter's output power and the receiver's sensitivity limit. For a standard 50G PAM4 lane, the budget might be 30 dB. If a 3-meter DAC cable introduces 18 dB of loss and the connectors add another 2 dB, 10 dB of margin remains. However, as frequency doubles to support 100G lanes (for 800 Gb/s ports), the loss per meter increases sharply. The physics forces a demanding trade-off: to maintain signal integrity without exceeding the power budget, cable reach must decrease. Copper links operating at 800 Gb/s are limited to roughly 1â€“2 meters, physically constraining the diameter of a compute rack and forcing the use of expensive, power-hungry optics for any connection leaving the cabinet. In 1.6 Tb/s-class planning scenarios, SerDes and optical power can account for a large fraction of cluster energy, making power-per-bit a primary scaling constraint. The wire sets hard limits on reach and speed; the transport layer must build a reliable communication primitive on top of these physical links.
+The **Link Budget**\index{Link Budget!definition}, a strict decibel (dB) allowance for signal attenuation, governs the reach of these links. As signals traverse copper, they lose energy to skin effect and dielectric absorption. The link budget is the difference between the transmitter's output power and the receiver's sensitivity limit. For a standard 50G PAM4 lane, the budget might be 30 dB. If a 3-meter DAC cable introduces 18 dB of loss and the connectors add another 2 dB, 10 dB of margin remains. However, as frequency doubles to support 100G lanes (for 800 Gb/s ports), the loss per meter increases sharply. The physics forces a demanding trade-off: to maintain signal integrity without exceeding the power budget, cable reach must decrease. Copper links operating at 800 Gb/s are limited to roughly 1–2 meters, physically constraining the diameter of a compute rack and forcing the use of expensive, power-hungry optics for any connection leaving the cabinet. In 1.6 Tb/s-class planning scenarios, SerDes and optical power can account for a large fraction of cluster energy, making power-per-bit a primary scaling constraint. The wire sets hard limits on reach and speed; the transport layer must build a reliable communication primitive on top of these physical links.
 
 ## Level 2: Transport and the Performance Model {#sec-network-fabrics-transport}
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Transport section â€” 175B cluster GPU count
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Transport section — 175B cluster GPU count
 class NetworkTransportClusterRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
@@ -482,18 +493,18 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 
 ***Remote Direct Memory Access (RDMA)***\index{RDMA!definition}\index{Remote Direct Memory Access|see{RDMA}} is a networking technology used in ML training fabrics that allows one machine to read or write the memory of another machine directly, bypassing the operating system kernel and CPU of both endpoints by offloading transport processing to the network interface card.
 
-1.  **Significance**: RDMA reduces end-to-end message latency from the 50â€“100 Î¼s typical of kernel TCP to approximately 1â€“2 Î¼s, cutting the $L_{\text{lat}}$ term in the iron law by 25--50$\times$. For a 175B-parameter model exchanging `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data across `{python} NetworkTransportClusterRecap.n_gpus_str`, RDMA also eliminates `{python} NetworkRunningExampleCluster.redundant_copy_gb_str` of redundant memory copies per step by allowing the NIC to read GPU memory directly without staging through host RAM (GPUDirect RDMA).
+1.  **Significance**: RDMA reduces end-to-end message latency from the 50–100 μs typical of kernel TCP to approximately 1–2 μs, cutting the $L_{\text{lat}}$ term in the iron law by 25--50$\times$. For a 175B-parameter model exchanging `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data across `{python} NetworkTransportClusterRecap.n_gpus_str`, RDMA also eliminates `{python} NetworkRunningExampleCluster.redundant_copy_gb_str` of redundant memory copies per step by allowing the NIC to read GPU memory directly without staging through host RAM (GPUDirect RDMA).
 2.  **Distinction**: Unlike traditional TCP/IP, where the CPU processes every packet through the kernel network stack (consuming tens of CPU cores to saturate a 400 Gb/s link), RDMA offloads the entire transport to dedicated NIC hardware, freeing the CPU to orchestrate computation rather than move data.
-3.  **Common pitfall**: A frequent misconception is that RDMA works reliably on any Ethernet network. RDMA lacks TCP's retransmission logic; a single dropped packet can stall an entire 1,024-GPU AllReduce for 100â€“500 ms as the Go-Back-N recovery retransmits from the loss point. RDMA requires a lossless fabric (InfiniBand or Ethernet with Priority Flow Control) to operate correctly at scale.
+3.  **Common pitfall**: A frequent misconception is that RDMA works reliably on any Ethernet network. RDMA lacks TCP's retransmission logic; a single dropped packet can stall an entire 1,024-GPU AllReduce for 100–500 ms as the Go-Back-N recovery retransmits from the loss point. RDMA requires a lossless fabric (InfiniBand or Ethernet with Priority Flow Control) to operate correctly at scale.
 
 :::
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Transport â€” NDR line rate in TCP/RDMA discussion.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Transport — NDR line rate in TCP/RDMA discussion.
 class IbNdrTransportRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
@@ -524,7 +535,7 @@ The InfiniBand\index{IB|see{InfiniBand}}[^fn-infiniband-origin] row reflects a p
 
 This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compares the two stacks, showing how RDMA-based protocols expose a user-space **Verbs API**\index{Verbs API!definition} that bypasses the kernel's traditional TCP/IP stack.
 
-::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA/RoCE v2 Stacks**: Side-by-side comparison. Traditional TCP/IP (left) traverses application, OS kernel (context switch), Socket API, TCP/UDP, IP/Ethernet, and NIC, with latency of 10--20 Î¼s and 2â€“3$\times$ CPU copies. RDMA/RoCE v2 (right) exposes a user-space Verbs API that bypasses the kernel, offloading transport to the RDMA NIC (GPUDirect reads GPU HBM directly), with latency of 1--3 Î¼s and zero-copy CPU overhead." fig-alt="Two protocol stacks. Left Traditional TCP/IP: Application, OS Kernel, Socket, TCP/UDP, IP, NIC (10-20 Î¼s, 2 to 3 copies). Right RDMA/RoCE v2: user-space Verbs API bypasses kernel to RDMA NIC with GPUDirect (1-3 Î¼s, zero copy)."}
+::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA/RoCE v2 Stacks**: Side-by-side comparison. Traditional TCP/IP (left) traverses application, OS kernel (context switch), Socket API, TCP/UDP, IP/Ethernet, and NIC, with latency of 10--20 μs and 2–3$\times$ CPU copies. RDMA/RoCE v2 (right) exposes a user-space Verbs API that bypasses the kernel, offloading transport to the RDMA NIC (GPUDirect reads GPU HBM directly), with latency of 1--3 μs and zero-copy CPU overhead." fig-alt="Two protocol stacks. Left Traditional TCP/IP: Application, OS Kernel, Socket, TCP/UDP, IP, NIC (10-20 μs, 2 to 3 copies). Right RDMA/RoCE v2: user-space Verbs API bypasses kernel to RDMA NIC with GPUDirect (1-3 μs, zero copy)."}
 
 ![](images/svg/networking-stacks.svg)
 
@@ -553,22 +564,22 @@ Protocol choice determines whether the fabric can behave as a lossless medium; p
 ```{python}
 #| echo: false
 #| label: network-alpha-beta-refactor
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ NETWORK ALPHA-BETA MODEL (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-performance-model
-# â”‚
-# â”‚ Goal: Quantify the latency-bandwidth crossover for InfiniBand vs Ethernet.
-# â”‚ Show: Crossover points (~75 KB for IB); impact on small vs large messages.
-# â”‚ How: T = alpha + n/beta. Small msg: 4 KB; Large msg: 350 MB.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK ALPHA-BETA MODEL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-performance-model
+# │
+# │ Goal: Quantify the latency-bandwidth crossover for InfiniBand vs Ethernet.
+# │ Show: Crossover points (~75 KB for IB); impact on small vs large messages.
+# │ How: T = alpha + n/beta. Small msg: 4 KB; Large msg: 350 MB.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_time, fmt_qty, fmt_multiple
 
 class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Level 1: Hardware Specs
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
     alpha_ib = FABRIC_ALPHA_NDR  # 1.5 us (typical for IB NDR)
@@ -580,7 +591,7 @@ class NetworkAlphaBeta:
     n_small = 4000 * byte  # scenario assumption: 4 KB control message
     n_large = 350 * MB  # scenario assumption: 350 MB gradient shard
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     n_cross_ib = calc_alpha_beta_crossover(alpha_ib, beta_ib)
     n_cross_eth = calc_alpha_beta_crossover(eth_alpha, eth_beta)
 
@@ -597,13 +608,13 @@ class NetworkAlphaBeta:
     t_large_eth = calc_point_to_point_time(n_large, eth_alpha, eth_beta)
     large_speedup = (t_large_eth / t_large_ib).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_cross_ib < 100 * KB, f"Crossover ({n_cross_ib.to(KB).magnitude:.0f} KB) should be < 100 KB for IB")
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
-    check(3.0 < small_speedup < 4.0, "Small-message speedup should be about 3.4Ã— for IB vs Ethernet")
-    check(3.5 < large_speedup < 4.5, "Large-message speedup should be about 4Ã— for IB vs 100G Ethernet")
+    check(3.0 < small_speedup < 4.0, "Small-message speedup should be about 3.4× for IB vs Ethernet")
+    check(3.5 < large_speedup < 4.5, "Large-message speedup should be about 4× for IB vs 100G Ethernet")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_cross_ib_kb_str = fmt_qty(n_cross_ib, KB, precision=0, commas=False)
     n_cross_eth_kb_str = fmt_qty(n_cross_eth, KB, precision=1, commas=False)
     t_small_ib_us_str = fmt_time(t_small_ib, microsecond, precision=2, commas=False)
@@ -635,13 +646,11 @@ class NetworkAlphaBeta:
         rf"= {_a_eth:.1f} + {eth_small_xfer_us:.2f} = \mathbf{{{t_small_eth.to(microsecond).magnitude:.2f}\,\mu\text{{s}}}}"
     )
     small_speedup_mult_str = fmt_multiple(small_speedup, precision=1, commas=False)
-    t_large_ib_eq_math = fmt_math(rf"T = \alpha + n/\beta = \mathbf{{{t_large_ib_ms_str}}}")
-    t_large_eth_eq_math = fmt_math(rf"T = \alpha + n/\beta = \mathbf{{{t_large_eth_ms_str}}}")
 ```
 
 The model reveals two regimes that lead to different engineering responses. For messages with $n < \alpha\beta$, startup cost $\alpha$ dominates the transfer time; small control messages and pipeline bubbles fall in this latency-bound region. For messages with $n > \alpha\beta$, the $n/\beta$ term dominates; gradient AllReduce falls in this bandwidth-bound region.
 
-For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta$ is approximately `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that the 175B training job generates on every iteration makes this distinction actionable.
+For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that the 175B training job generates on every iteration makes this distinction actionable.
 
 ::: {#nbk-network-fabrics-alpha-beta-crossover .callout-notebook title="The alpha-beta crossover"}
 
@@ -655,8 +664,8 @@ Apply $T(n) = \alpha + n/\beta$ for a `{python} NetworkAlphaBeta.n_small_kb_str`
    - Ethernet: `{python} NetworkAlphaBeta.small_eth_eq_math`
    - **Result**: InfiniBand is `{python} NetworkAlphaBeta.small_speedup_mult_str` faster purely due to lower $\alpha$.
 2. **Large message** (`{python} NetworkAlphaBeta.n_large_mb_str`):
-   - InfiniBand: `{python} NetworkAlphaBeta.t_large_ib_eq_math`
-   - Ethernet: `{python} NetworkAlphaBeta.t_large_eth_eq_math`
+   - InfiniBand: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_ib_ms_str`
+   - Ethernet: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_eth_ms_str`
    - **Result**: InfiniBand is `{python} NetworkAlphaBeta.large_speedup_mult_str` faster purely due to higher $\beta$.
 
 **Systems insight**: For large-scale training, the crossover point $(n^* = \alpha\beta)$ is typically around `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Because gradients are megabytes to gigabytes, large-scale training operates almost entirely in the bandwidth-dominated regime. However, pipeline parallelism and distributed coordination rely on small messages in the latency-dominated regime\index{Latency!dominated regime}, where wire-speed upgrades provide zero benefit and only topology and hop-count reductions matter.
@@ -673,26 +682,26 @@ The second message is a `{python} NetworkAlphaBeta.n_large_grad_mb_str` gradient
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ ALPHA-BETA CROSSOVER (FIGURE)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @fig-alpha-beta-crossoverâ€”latency vs bandwidth regime in fabric
-# â”‚          selection
-# â”‚
-# â”‚ Goal: Visualize transfer time vs message size for InfiniBand NDR vs Ethernet
-# â”‚       RoCE; show latency-dominated (flat) vs bandwidth-dominated (linear).
-# â”‚ Show: Log-log plot with crossover points (~75 KB for IB); alpha/beta model.
-# â”‚ How: T = alpha + n/beta; plot for both fabrics; annotate crossover.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”Œâ”€â”€ 1. CANVAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Visualize transfer time vs message size for InfiniBand NDR vs Ethernet
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ALPHA-BETA CROSSOVER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-alpha-beta-crossover—latency vs bandwidth regime in fabric
+# │          selection
+# │
+# │ Goal: Visualize transfer time vs message size for InfiniBand NDR vs Ethernet
+# │       RoCE; show latency-dominated (flat) vs bandwidth-dominated (linear).
+# │ Show: Log-log plot with crossover points (~75 KB for IB); alpha/beta model.
+# │ How: T = alpha + n/beta; plot for both fabrics; annotate crossover.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize transfer time vs message size for InfiniBand NDR vs Ethernet
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 from mlsysim.fmt import fmt_qty
 
-# â”Œâ”€â”€ 2. ARRAYS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 alpha_ib_q = Systems.SwitchFabric.AlphaNdr
 beta_ib_q = Systems.Fabrics.InfiniBand_NDR.bandwidth
 alpha_eth_q = Systems.SwitchFabric.AlphaRoce
@@ -716,7 +725,7 @@ t_cross_eth = 2 * alpha_eth
 
 fig, ax = plt.subplots(figsize=(9, 5))
 
-# â”Œâ”€â”€ 3. RENDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ib_beta_label = fmt_qty(beta_ib_q, GB / second, precision=0, commas=False)
 eth_beta_label = fmt_qty(beta_eth_q, GB / second, precision=1, commas=False)
 ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {ib_beta_label})', color='#006395', linewidth=2.5)
@@ -725,7 +734,7 @@ ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {eth_beta_label}
 ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolors='white')
 ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
 
-# â”Œâ”€â”€ 4. DECORATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 # blue
 ax.annotate(
     f'Crossover\n~{fmt_qty(n_cross_ib_q, KB, precision=0, commas=False)}',
@@ -803,25 +812,25 @@ from mlsysim.fmt import (
     sci_latex,
 )
 
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ ALLREDUCE BOTTLENECK ANALYSIS
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Network Performance Modeling - Alpha-Beta Model.
-# â”‚
-# â”‚ Goal: Identify when communication intensity overwhelms computation.
-# â”‚ Show: Growth of comm overhead from GPT-2-scale to 70B parameter models.
-# â”‚ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ALLREDUCE BOTTLENECK ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Network Performance Modeling - Alpha-Beta Model.
+# │
+# │ Goal: Identify when communication intensity overwhelms computation.
+# │ Show: Growth of comm overhead from GPT-2-scale to 70B parameter models.
+# │ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── LEGO ───────────────────────────────────────────────
 class AllReduceBottleneck:
     """
     Scenario: Cluster of 1024 H100 GPUs training models of varying scale.
     Alpha-Beta parameters for NDR InfiniBand.
     """
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     from mlsysim.physics import calc_ring_allreduce_time
 
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
@@ -837,7 +846,7 @@ class AllReduceBottleneck:
     m_small = Models.Language.GPT2  # GPT-2-scale model from the registry
     m_70b = Models.Language.Llama2_70B
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute time per GPU
     t_comp = flops_per_sample_base / (peak_flops * gpu_util)
 
@@ -852,11 +861,11 @@ class AllReduceBottleneck:
 
     comm_frac_small = (t_comm_small / (t_comp + t_comm_small)).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_comp > 0.1 * second, f"Compute time should be significant, got {t_comp.to(second).magnitude:.2f}s")
     check(t_comm_70b > t_comm_small * 40, "70B comm should be >40x GPT-2-scale comm")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     flops_per_sample_math = fmt_math(sci_latex(flops_per_sample_base.to(flop).magnitude))
     compute_phase_ms_str = fmt_time(round(t_comp.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
     t_comp_ms_value_str = fmt_magnitude(t_comp, unit=ms, precision=None, commas=False)
@@ -928,10 +937,10 @@ Now communication dominates computation under pure data parallelism. The 175B mo
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Transport-to-topology bridge â€” cluster GPU count
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Transport-to-topology bridge — cluster GPU count
 class NetworkTransportBridgeRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
@@ -941,10 +950,10 @@ The $\alpha$-$\beta$ model quantifies the speed of a single link, but the 175B-p
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Topology section â€” rack-scale cluster GPU count
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Topology section — rack-scale cluster GPU count
 class NetworkTopologyRadixRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
@@ -953,34 +962,34 @@ The physical arrangement of switches determines the bisection bandwidth $\text{B
 ```{python}
 #| echo: false
 #| label: nonblocking-oversubscription-loss
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ NON-BLOCKING OVERSUBSCRIPTION LOSS (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @dfn-network-fabrics-non-blocking-fabric.
-# â”‚ Goal: Tie the stated throughput loss to the communication fraction and
-# â”‚       oversubscription ratio.
-# â”‚ How: relative_throughput = 1 / ((1 - f_comm) + f_comm Ã— oversub_ratio).
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NON-BLOCKING OVERSUBSCRIPTION LOSS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-network-fabrics-non-blocking-fabric.
+# │ Goal: Tie the stated throughput loss to the communication fraction and
+# │       oversubscription ratio.
+# │ How: relative_throughput = 1 / ((1 - f_comm) + f_comm × oversub_ratio).
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_qty
 
 class NonBlockingOversubscription:
     """Throughput loss from a 2:1 oversubscribed spine."""
 
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     comm_fraction = 0.30
     oversubscription_ratio = 2.0
 
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     relative_throughput, throughput_loss = calc_oversubscription_effect(
         comm_fraction,
         oversubscription_ratio,
     )
     throughput_loss_pct = throughput_loss * 100
 
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(throughput_loss_pct - 23.0769230769) < 1e-6, f"Expected about 23.1%, got {throughput_loss_pct}")
 
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     comm_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
     throughput_loss_pct_str = fmt_percent(throughput_loss_pct / 100, precision=1, commas=False, style='prose')
 ```
@@ -990,40 +999,40 @@ The first property, bisection bandwidth, quantifies the worst-case throughput ce
 ```{python}
 #| echo: false
 #| label: bisection-bandwidth-definition-example
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ BISECTION BANDWIDTH DEFINITION EXAMPLE (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @dfn-network-fabrics-bisection-bandwidth â€” the significance bullet.
-# â”‚
-# â”‚ Goal: Quantify the 1,024-GPU fat-tree bisection bandwidth at 1:1 and 4:1
-# â”‚       subscription, and the slowdown the oversubscribed spine imposes.
-# â”‚ Show: 512 Ã— 50 GB/s = 25.6 TB/s (1:1); 6.4 TB/s (4:1); 4Ã— slower.
-# â”‚ How: BW_bisect = (N/2) Ã— beta / oversub_ratio via calc_bisection_bandwidth.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BISECTION BANDWIDTH DEFINITION EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-network-fabrics-bisection-bandwidth — the significance bullet.
+# │
+# │ Goal: Quantify the 1,024-GPU fat-tree bisection bandwidth at 1:1 and 4:1
+# │       subscription, and the slowdown the oversubscribed spine imposes.
+# │ Show: 512 × 50 GB/s = 25.6 TB/s (1:1); 6.4 TB/s (4:1); 4× slower.
+# │ How: BW_bisect = (N/2) × beta / oversub_ratio via calc_bisection_bandwidth.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, fmt_bandwidth, fmt_qty, fmt_multiple, fmt_math, check
 from mlsysim.physics import calc_bisection_bandwidth
 
 class BisectionDefinitionExample:
     """1,024-GPU fat-tree bisection bandwidth at 1:1 vs 4:1 subscription."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s (50 GB/s) per port
     oversub_ratio = 4.0  # scenario assumption: oversubscribed spine ratio
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpus_per_side = n_gpus // 2
     bisect_1_1 = calc_bisection_bandwidth(gpus_per_side, beta)
     bisect_4_1 = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversub_ratio)
     slowdown = (bisect_1_1 / bisect_4_1).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(bisect_1_1.to(TB / second).magnitude - 25.6) < 1e-6, "1:1 bisection should be 25.6 TB/s")
     check(abs(bisect_4_1.to(TB / second).magnitude - 6.4) < 1e-6, "4:1 bisection should be 6.4 TB/s")
     check(round(slowdown, 3) == 4.0, "Slowdown must match the oversubscription ratio")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
     link_gbit_per_s_str = fmt_bandwidth(beta, unit=Gbps, precision=0, commas=False)
     bisect_1_1_math = fmt_math(
@@ -1078,7 +1087,7 @@ The ToR provides non-blocking bandwidth within a single rack, but connecting 32 
 
 1.  **Significance**: A $k$-ary fat-tree built from radix-$k$ switches supports $k^2/2$ hosts in a two-tier (pod) configuration and $k^3/4$ hosts in a three-tier configuration with full $\text{BW}_{\text{bisect}}$. With $k=64$, a two-tier pod supports 2,048 GPUs and a three-tier fabric supports 65,536 hosts. Because every AllReduce can use any available spine path, the fabric sustains simultaneous full-rate communication from all accelerators, meeting the $\text{BW}_{\text{bisect}}$ requirement for global gradient synchronization.
 2.  **Distinction**: Unlike a standard tree (where bandwidth at the root is a single bottleneck shared by all leaves), a fat-tree replaces each root with multiple spine switches whose combined uplink capacity matches the total edge bandwidth, eliminating the bottleneck.
-3.  **Common pitfall**: A frequent misconception is that fat-trees guarantee zero network cost. They require $\mathcal{O}(N \log N)$ switches and dense cabling: a non-blocking three-tier fat-tree at the 4,000-GPU scale needs hundreds of switches and tens of thousands of optical cables, costing \$20â€“100 million in switching hardware alone.
+3.  **Common pitfall**: A frequent misconception is that fat-trees guarantee zero network cost. They require $\mathcal{O}(N \log N)$ switches and dense cabling: a non-blocking three-tier fat-tree at the 4,000-GPU scale needs hundreds of switches and tens of thousands of optical cables, costing \$20–100 million in switching hardware alone.
 
 :::
 
@@ -1095,35 +1104,35 @@ The fat-tree[^fn-fat-tree-clos] is a common default for ML clusters because a no
 ```{python}
 #| echo: false
 #| label: network-fabrics-fat-tree-scaling
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ FAT-TREE HOST SCALING (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-fat-treeâ€”three-tier fat-tree host count.
-# â”‚
-# â”‚ Goal: Compute the maximum host count for a fat-tree with radix k = 64.
-# â”‚ Show: k^3/4 = 65,536 hosts for a three-tier fat-tree.
-# â”‚ How: Integer arithmetic on switch radix.
-# â”‚
-# â”‚ Used by: paragraph immediately below (three-tier scaling sentence).
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FAT-TREE HOST SCALING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-fat-tree—three-tier fat-tree host count.
+# │
+# │ Goal: Compute the maximum host count for a fat-tree with radix k = 64.
+# │ Show: k^3/4 = 65,536 hosts for a three-tier fat-tree.
+# │ How: Integer arithmetic on switch radix.
+# │
+# │ Used by: paragraph immediately below (three-tier scaling sentence).
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_usd, check
 
 class FatTreeScaling:
     """Fat-tree host count for radix-64 switches."""
 
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     fat_tree_k = 64
 
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     fat_tree_hosts_val = (fat_tree_k**3) // 4
     fat_tree_two_tier_hosts_val = (fat_tree_k // 2) ** 2
     fat_tree_switches_val = (5 * fat_tree_k**2) // 4
 
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(fat_tree_hosts_val == 65536, f"k=64 fat-tree should support 65,536 hosts, got {fat_tree_hosts_val}")
     check(fat_tree_two_tier_hosts_val == 1024, f"k=64 two-tier should support 1,024 hosts, got {fat_tree_two_tier_hosts_val}")
 
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     fat_tree_hosts_str = fmt_int(fat_tree_hosts_val, commas=True)
     fat_tree_switches_str = fmt_int(fat_tree_switches_val, commas=True)
     switch_cost_low_str = fmt_usd(10000, precision=0)
@@ -1134,38 +1143,38 @@ class FatTreeScaling:
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Fat-tree capacity paragraph below
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Fat-tree capacity paragraph below
 class NetworkFatTreeRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt(Systems.Clusters.Training_1K.total_accelerators, precision=0, commas=True)
     production_2k_gpus_str = fmt(Systems.Clusters.Production_2K.total_accelerators, precision=0, commas=True)
 ```
 
-A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers, and two distinct two-tier framings, which differ only in whether the upper tier is treated as the cluster's edge or as an aggregation layer below a future core. The first framing counts every switch in the two tiers as line-rate capacity for hosts. With radix-64 switches, the fabric spends half of each leaf's ports on hosts and half on spine uplinks, giving $k^{2}/2$ (or `{python} NetworkFatTreeRecap.production_2k_gpus_str`) host ports across the pod. The second framing reserves the upper tier as aggregation that will later uplink to a core layer rather than terminating hosts: each leaf still provides $k/2$ host ports, but the pod now contains only $k/2$ leaves, so it reaches $(k/2)^2$ (or `{python} NetworkFatTreeRecap.n_gpus_str`) hosts per pod. The two counts are the same switches accounted differently: whether the upper tier terminates as the cluster spine or as a pod aggregation stage. Either framing comfortably accommodates the `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
+A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers, and two distinct two-tier framings, which differ only in whether the upper tier is treated as the cluster's edge or as an aggregation layer below a future core. The first framing counts every switch in the two tiers as line-rate capacity for hosts. With radix-64 switches, the fabric spends half of each leaf's ports on hosts and half on spine uplinks, giving $k^{2}/2 =$ `{python} NetworkFatTreeRecap.production_2k_gpus_str` host ports across the pod. The second framing reserves the upper tier as aggregation that will later uplink to a core layer rather than terminating hosts: each leaf still provides $k/2$ host ports, but the pod now contains only $k/2$ leaves, so it reaches $(k/2)^2 =$ `{python} NetworkFatTreeRecap.n_gpus_str` hosts per pod. The two counts are the same switches accounted differently: whether the upper tier terminates as the cluster spine or as a pod aggregation stage. Either framing comfortably accommodates the `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
 
 A concrete bisection estimate shows how quickly oversubscription turns into synchronization delay.
 
 ```{python}
 #| echo: false
 #| label: bisection-bandwidth-scaling
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ BISECTION BANDWIDTH SCALING (NOTEBOOK)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: "Bisection Bandwidth: The Cost of Oversubscription" .callout-notebook
-# â”‚
-# â”‚ Goal: Quantify synchronization slowdown and idle-compute waste when moving
-# â”‚       from a non-blocking (1:1) to an oversubscribed network.
-# â”‚ Show: slowdown_factor, cluster cost, communication share, and wasted cost
-# â”‚       inline in the notebook result.
-# â”‚ How: T = f_ring * M / BW_bisect, where f_ring = 2(N-1)/N;
-# â”‚      BW_bisect = N_side * BW_link / Oversub_Ratio.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BISECTION BANDWIDTH SCALING (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Bisection Bandwidth: The Cost of Oversubscription" .callout-notebook
+# │
+# │ Goal: Quantify synchronization slowdown and idle-compute waste when moving
+# │       from a non-blocking (1:1) to an oversubscribed network.
+# │ Show: slowdown_factor, cluster cost, communication share, and wasted cost
+# │       inline in the notebook result.
+# │ How: T = f_ring * M / BW_bisect, where f_ring = 2(N-1)/N;
+# │      BW_bisect = N_side * BW_link / Oversub_Ratio.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, fmt_int, fmt_qty, fmt, fmt_multiple, fmt_percent, fmt_usd, check, fmt_time
 
 class BisectionScaling:
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
     gradient = 100 * GB  # scenario assumption: AllReduce payload per GPU
@@ -1173,7 +1182,7 @@ class BisectionScaling:
     cluster_cost_m = 300  # scenario assumption: cluster cost in millions USD
     comm_fraction = 0.30  # scenario assumption: training time spent communicating
 
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
     bw_1_1_q = calc_bisection_bandwidth(gpus_per_side, beta)
     bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversubscription_ratio)
@@ -1184,12 +1193,12 @@ class BisectionScaling:
     slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
     _, throughput_loss = calc_oversubscription_effect(comm_fraction, oversubscription_ratio)
     waste_m = throughput_loss * cluster_cost_m
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
     check(abs(time_1_1.to(second).magnitude - 3.99609375) < 1e-9, "Ring AllReduce time should be about 3.996 s")
     check(round(slowdown, 3) == round(oversubscription_ratio, 3), "Slowdown must match oversubscription ratio")
     check(round(waste_m, 1) == 142.1, f"Expected oversubscription waste to be about $142.1M, got ${waste_m:.1f}M")
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────
     bbs_n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     bbs_gpus_per_side_value_str = fmt(gpus_per_side, precision=0, commas=False)
     bbs_beta_gb_per_s_str = fmt_qty(beta, GB / second, precision=0, commas=False)
@@ -1205,12 +1214,6 @@ class BisectionScaling:
     bbs_cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
     bbs_comm_fraction_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
     bbs_waste_m_str = fmt_usd(waste_m * MILLION, precision=1, commas=False, scale="M")
-    bisect_1_1_math = fmt_math(
-        rf"\text{{BW}}_{{\text{{bisect}}}} = {gpus_per_side} \times {bbs_beta_gb_per_s_str} = \mathbf{{{bbs_bw_1_1_gb_per_s_str}}}"
-    )
-    bisect_4_1_math = fmt_math(
-        rf"\text{{BW}}_{{\text{{bisect}}}} = \frac{{{bbs_bw_1_1_gb_per_s_str}}}{{{bbs_oversubscription_ratio_str}}} = \mathbf{{{bbs_bw_4_1_gb_per_s_str}}}"
-    )
 ```
 
 ::: {#nbk-network-fabrics-bisection-bandwidth-cost-oversubscription .callout-notebook title="Bisection bandwidth: The cost of oversubscription"}
@@ -1221,9 +1224,9 @@ class BisectionScaling:
 Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter between halves of the cluster.
 For a bandwidth-optimal ring, ReduceScatter plus AllGather contributes a traffic factor $2(N-1)/N$ = `{python} BisectionScaling.bbs_ring_factor_str` per GPU.
 
-1. **Non-blocking (1:1)**: `{python} BisectionScaling.bisect_1_1_math` per direction.
+1. **Non-blocking (1:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_gpus_per_side_value_str` $\times$ `{python} BisectionScaling.bbs_beta_gb_per_s_str` $=$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_1_1_s_str`.
-2. **Oversubscribed ({python} BisectionScaling.bbs_oversubscription_ratio_str:1)**: `{python} BisectionScaling.bisect_4_1_math` per direction.
+2. **Oversubscribed (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by `{python} BisectionScaling.bbs_oversubscription_ratio_str` = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_s_str`.
 
 **Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in @sec-network-fabrics-fat-tree. For training, network oversubscription is a false economy.
@@ -1251,7 +1254,7 @@ Scaling beyond this requires a three-tier architecture with core switches, enabl
 
 Rail-optimized topology begins from the communication pattern rather than from a generic switch hierarchy. In dense accelerator nodes, GPUs can be grouped by local slot position into rails; @fig-rail-optimized-cabling makes that physical cabling pattern concrete.
 
-::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**: In dense accelerator nodes (for example, DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that data-parallel AllReduce trafficâ€”which synchronizes between corresponding GPUsâ€”never competes for $\\text{BW}_{\\text{bisect}}$ with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, and so on."}
+::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**: In dense accelerator nodes (for example, DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that data-parallel AllReduce traffic—which synchronizes between corresponding GPUs—never competes for $\\text{BW}_{\\text{bisect}}$ with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, and so on."}
 
 ![](images/svg/rail-optimized.svg)
 
@@ -1262,20 +1265,20 @@ The wiring pattern connects corresponding GPUs across nodes (GPU 0 to GPU 0, GPU
 ```{python}
 #| echo: false
 #| label: rail-optimized-latency-notebook
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ RAIL-OPTIMIZED LATENCY BUDGET (NOTEBOOK)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: "The Rail-Optimized Dividend" .callout-notebook
-# â”‚
-# â”‚ Goal: Quantify the latency savings of rail-optimized topology.
-# â”‚ Show: speedup â‰ˆ 2xâ€”inline in notebook result.
-# â”‚ How: T = Hop_Count * T_hop.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RAIL-OPTIMIZED LATENCY BUDGET (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Rail-Optimized Dividend" .callout-notebook
+# │
+# │ Goal: Quantify the latency savings of rail-optimized topology.
+# │ Show: speedup ≈ 2x—inline in notebook result.
+# │ How: T = Hop_Count * T_hop.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_time
 
 class RailLatency:
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────
     FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
     t_hop = FABRIC_HOP_LATENCY  # switch + wire latency
     n_nodes = 128
@@ -1284,13 +1287,13 @@ class RailLatency:
     # Rail-optimized: one shared rail switch = 1 traversal.
     n_hops_std = 3
     n_hops_rail = 1
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     lat_std = calc_hop_latency(n_hops_std, t_hop)
     lat_rail = calc_hop_latency(n_hops_rail, t_hop)
     speedup = (lat_std / lat_rail).to_base_units().magnitude
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────
     check(speedup == 3.0, f"Speedup {speedup:.1f}x unexpected")
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────
     rol_hop_lat_us_str = fmt_time(t_hop, microsecond, precision=1, commas=False)
     rol_std_hops_str = fmt(n_hops_std, precision=0, commas=False)
     rol_rail_hops_str = fmt(n_hops_rail, precision=0, commas=False)
@@ -1327,11 +1330,11 @@ The engineering consequence of this alignment is measurable at cluster scale. Be
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Rail-optimized paragraph below â€” cluster node and rail counts
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Rail-optimized paragraph below — cluster node and rail counts
 class NetworkRailRecap:
     _cluster = Systems.Clusters.Training_1K
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(_cluster.total_accelerators, commas=True, label="GPU")
     n_nodes_str = fmt_count(_cluster.count, commas=False, label="node")
     gpus_per_rail_str = fmt_count(_cluster.total_accelerators // 8, commas=False, label="GPU")
@@ -1356,7 +1359,7 @@ A **Dragonfly**\index{Dragonfly Topology!definition}[^fn-dragonfly-isca] topolog
 
 [^fn-dragonfly-isca]: **Dragonfly Topology**\index{Dragonfly!topology origin}: Introduced by John Kim and William Dally at ISCA 2008, the dragonfly uses high-radix routers grouped into fully connected "super-nodes." For systems with at least 16K terminals, the paper reports a 52 percent network-cost reduction relative to a folded Clos of the same bandwidth, and its adaptive-routing evaluation approaches ideal throughput [@kim2008].
 
-A **Torus**\index{Torus!definition} topology connects each node directly to its neighbors in a multidimensional grid, most commonly a 3D torus where every node links to its six adjacent peers (up/down, left/right, front/back). The design offers full local bandwidth with minimal switching hardware, as connections travel only 1â€“2 hops to reach neighbors. However, global communication requires traversing the diameter of the mesh ($\mathcal{O}(N^{1/3})$ hops), making latency scale poorly with cluster size. Google adopted this architecture for its Tensor Processing Unit (TPU) pods because Transformer training is dominated by data parallelism and pipeline parallelism, both of which use nearest-neighbor communication patterns that map naturally onto the physical grid. The limitation becomes apparent with Mixture-of-Experts (MoE), which relies on AllToAll communication patterns. On a torus, these random permutations can congest the limited $\text{BW}_{\text{bisect}}$ of the mesh and degrade performance relative to a non-blocking switch fabric.
+A **Torus**\index{Torus!definition} topology connects each node directly to its neighbors in a multidimensional grid, most commonly a 3D torus where every node links to its six adjacent peers (up/down, left/right, front/back). The design offers full local bandwidth with minimal switching hardware, as connections travel only 1–2 hops to reach neighbors. However, global communication requires traversing the diameter of the mesh ($\mathcal{O}(N^{1/3})$ hops), making latency scale poorly with cluster size. Google adopted this architecture for its Tensor Processing Unit (TPU) pods because Transformer training is dominated by data parallelism and pipeline parallelism, both of which use nearest-neighbor communication patterns that map naturally onto the physical grid. The limitation becomes apparent with Mixture-of-Experts (MoE), which relies on AllToAll communication patterns. On a torus, these random permutations can congest the limited $\text{BW}_{\text{bisect}}$ of the mesh and degrade performance relative to a non-blocking switch fabric.
 
 The trade-offs between these topologies become stark when quantified for a large-scale deployment. Consider a 4,096-GPU cluster. A non-blocking fat-tree at this scale, built from radix-64 switches, requires hundreds of switches (two 2,048-GPU pods plus a bridging core layer) and tens of thousands of optical cables to deliver 100 percent $\text{BW}_{\text{bisect}}$, enabling any GPU to communicate with any other at full speed. A 3D torus connecting the same nodes might use zero external switches (relying on direct host-to-host links) and only short copper cables, but offers only a fraction of $\text{BW}_{\text{bisect}}$ (scaling with $N^{2/3}$). The architecture choice follows from workload regularity. Google's TPU Pods have used torus topologies because their workloads, primarily transformer training, are predictable and the structured grid efficiently supports collective communication algorithms (ring AllReduce, AllGather, ReduceScatter) that map onto the 3D mesh. General-purpose GPU clusters often favor fat-trees because their workloads are more diverse, ranging from recommendation systems to graph neural networks, and rely heavily on global AllReduce patterns that require the full $\text{BW}_{\text{bisect}}$ only a tree can provide. A torus saves millions in switch costs but rigidly constrains the software; a fat-tree costs more but provides the universality needed for general-purpose AI research.
 
@@ -1390,10 +1393,10 @@ You are designing the network for a new ML cluster that will run two primary wor
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Fabric behavior bridge â€” synchronized gradient traffic at cluster scale
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Fabric behavior bridge — synchronized gradient traffic at cluster scale
 class NetworkFabricBridgeRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
@@ -1405,7 +1408,7 @@ Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to co
 
 ::: {#dfn-network-fabrics-bulk-synchronous-parallel-bsp .callout-definition title="Bulk synchronous parallel (BSP)"}
 
-***Bulk Synchronous Parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel execution model in which every worker completes a local computation phase, exchanges data with all other workers, and then waits at a global barrier before any worker begins the next phaseâ€”making the slowest participant the pacing constraint for the entire cluster.
+***Bulk Synchronous Parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel execution model in which every worker completes a local computation phase, exchanges data with all other workers, and then waits at a global barrier before any worker begins the next phase—making the slowest participant the pacing constraint for the entire cluster.
 
 1.  **Significance**: BSP makes system efficiency $\eta_{\text{scaling}}$ directly proportional to the slowest worker: if one GPU in a 1,024-GPU cluster runs 10 percent slower due to thermal throttling or network jitter, the barrier stalls the remaining 1,023 GPUs for that fraction of the step, wasting effectively 102 GPU-steps of compute per iteration. At \$3/GPU-hour, a 5 percent straggler gap across a \$50M training run wastes roughly \$2.5M in idle accelerator time.
 2.  **Distinction**: Unlike asynchronous parallelism, which allows workers to proceed with stale weights from previous steps, BSP enforces a global state update at every barrier, providing mathematical equivalence to single-device training and predictable convergence behavior.
@@ -1423,7 +1426,7 @@ The BSP weakest-link property means that even a single dropped packet can trigge
 
 ***Priority Flow Control (PFC)***\index{Priority Flow Control!definition} is a link-layer mechanism used by RoCEv2 ML cluster fabrics to prevent switch buffer overflow by sending PAUSE frames to an upstream sender when a port's queue depth crosses a configured threshold, throttling injection on a per-priority basis without dropping packets.
 
-1.  **Significance**: PFC is the foundation for lossless Ethernet required by RoCEv2 RDMA. A PFC PAUSE frame must reach the upstream sender within one round-trip time (roughly 1â€“5 Î¼s at switch-to-switch distances) before the buffer overflows. In a 1,000-node cluster, a single slow receiver can trigger PAUSE frames that propagate 3â€“5 hops upstream within 10â€“50 ms, halting gradient traffic across thousands of unrelated GPU pairs and collapsing cluster throughput to near zero.
+1.  **Significance**: PFC is the foundation for lossless Ethernet required by RoCEv2 RDMA. A PFC PAUSE frame must reach the upstream sender within one round-trip time (roughly 1–5 μs at switch-to-switch distances) before the buffer overflows. In a 1,000-node cluster, a single slow receiver can trigger PAUSE frames that propagate 3–5 hops upstream within 10–50 ms, halting gradient traffic across thousands of unrelated GPU pairs and collapsing cluster throughput to near zero.
 2.  **Distinction**: Unlike standard IEEE 802.3 flow control, which pauses all traffic classes on a link, PFC operates per priority class, allowing latency-sensitive control messages to continue flowing while only pausing the congested gradient data queue.
 3.  **Common pitfall**: A frequent misconception is that PFC solves congestion. It transforms packet loss into congestion spreading: a backpressure cascade can freeze the entire fabric within 200 ms of a single faulty transceiver, because no mechanism limits how far PAUSE frames propagate across the network.
 
@@ -1446,34 +1449,34 @@ A production incident shows how this cascade can freeze a cluster.
 ```{python}
 #| echo: false
 #| label: transceiver-degradation-probability
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ TRANSCEIVER DEGRADATION PROBABILITY (NOTEBOOK)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: "Probability of at least one transceiver degradation" notebook
-# â”‚
-# â”‚ Goal: Quantify component-degradation exposure in a large RoCE cluster.
-# â”‚ Show: probability of at least one degradation â‰ˆ 22%.
-# â”‚ How: Pr(any degradation) = 1 - (1 - p)^N_transceivers.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRANSCEIVER DEGRADATION PROBABILITY (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Probability of at least one transceiver degradation" notebook
+# │
+# │ Goal: Quantify component-degradation exposure in a large RoCE cluster.
+# │ Show: probability of at least one degradation ≈ 22%.
+# │ How: Pr(any degradation) = 1 - (1 - p)^N_transceivers.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_percent, check
 
 class TransceiverDegradationRisk:
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 4096
     links_per_gpu = 3  # leaf + spine + core
     transceivers_per_link = 2
     p_transceiver_degrade = 1e-5  # 0.001% per day
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     n_total_links = n_gpus * links_per_gpu
     n_total_transceivers = n_total_links * transceivers_per_link
     p_no_degradation = (1 - p_transceiver_degrade) ** n_total_transceivers
     p_any_degradation = 1 - p_no_degradation
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────
     check(n_total_links == 12288, f"Total links {n_total_links} outside expected range")
     check(n_total_transceivers == 24576, f"Total transceivers {n_total_transceivers} outside expected range")
     check(0.2 < p_any_degradation < 0.23, f"Degradation probability {p_any_degradation:.2f} outside expected range")
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ────────────────────────────────────────
     n_gpus_str = fmt_int(n_gpus, commas=False)
     p_degrade_pct_str = fmt_percent(
         p_transceiver_degrade,
@@ -1557,26 +1560,26 @@ Congestion control and adaptive routing manage flows that traverse the interior 
 ```{python}
 #| echo: false
 #| label: network-fabrics-incast-burst
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ INCAST BURST (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @dfn-network-fabrics-incast â€” the incast significance bullet, and
-# â”‚          the SuperPOD scalable-unit injection bandwidth (@sec-network-fabrics-dgx-superpod).
-# â”‚
-# â”‚ Goal: Quantify the many-to-one incast burst onto one switch egress port.
-# â”‚ Show: 256 senders Ã— 50 GB/s = 12.8 TB/s offered; 400 Gb/s port; 32 MB
-# â”‚       buffer holds 640 Î¼s of one egress stream; net fill 12.75 TB/s after
-# â”‚       subtracting one egress port; overflow in ~2.5 Î¼s; 256Ã— oversubscription.
-# â”‚ How: offered = n_senders Ã— beta; port = Ethernet_400G; buffer/egress and
-# â”‚      buffer/(offered âˆ’ egress) give hold and overflow times.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INCAST BURST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-network-fabrics-incast — the incast significance bullet, and
+# │          the SuperPOD scalable-unit injection bandwidth (@sec-network-fabrics-dgx-superpod).
+# │
+# │ Goal: Quantify the many-to-one incast burst onto one switch egress port.
+# │ Show: 256 senders × 50 GB/s = 12.8 TB/s offered; 400 Gb/s port; 32 MB
+# │       buffer holds 640 μs of one egress stream; net fill 12.75 TB/s after
+# │       subtracting one egress port; overflow in ~2.5 μs; 256× oversubscription.
+# │ How: offered = n_senders × beta; port = Ethernet_400G; buffer/egress and
+# │      buffer/(offered − egress) give hold and overflow times.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, fmt_qty, fmt_bandwidth, fmt_multiple, fmt_time, check
 
 class IncastBurst:
     """Many-to-one incast burst onto a single switch egress port."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     su_nodes = 32  # scenario assumption: SuperPOD scalable unit (32 DGX nodes)
     gpus_per_node = Systems.Clusters.Training_1K.node.accelerators_per_node  # 8 GPUs per DGX node
     n_senders = su_nodes * gpus_per_node  # 256 scalable-unit GPUs (one per egress)
@@ -1584,20 +1587,20 @@ class IncastBurst:
     egress_port = Systems.Fabrics.Ethernet_400G.bandwidth  # 400 Gb/s (50 GB/s) egress port
     buffer = 32 * MB  # scenario assumption: switch egress buffer
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     offered = n_senders * sender_bw
     oversub = (offered / egress_port).to_base_units().magnitude
     buffer_hold = buffer / egress_port  # time one egress stream takes to drain the buffer
     net_fill = offered - egress_port  # fill rate after the single egress port drains
     overflow = buffer / net_fill
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 Ã— 50 GB/s should be 12.8 TB/s")
-    check(round(oversub) == 256, "Offered load should oversubscribe the egress port 256Ã—")
-    check(abs(buffer_hold.to(microsecond).magnitude - 640) < 1e-3, "32 MB / 50 GB/s should be 640 Î¼s")
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 × 50 GB/s should be 12.8 TB/s")
+    check(round(oversub) == 256, "Offered load should oversubscribe the egress port 256×")
+    check(abs(buffer_hold.to(microsecond).magnitude - 640) < 1e-3, "32 MB / 50 GB/s should be 640 μs")
     check(overflow.to(microsecond).magnitude < 5, "Buffer should overflow in a few microseconds")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_senders_str = fmt_count(n_senders, commas=False)
     su_nodes_str = fmt_count(su_nodes, commas=False, label="node")
     n_senders_gpus_str = fmt_count(n_senders, commas=False, label="GPU")
@@ -1624,10 +1627,10 @@ class IncastBurst:
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Incast paragraph below â€” cluster GPU count
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Incast paragraph below — cluster GPU count
 class NetworkIncastClusterRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
@@ -1647,13 +1650,13 @@ The final level of the stack is cluster design\index{Cluster Design}, where wire
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Gradient bus â€” NVLink/IB cliff and SuperPOD specs.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Gradient bus — NVLink/IB cliff and SuperPOD specs.
 class NetworkFabricsClusterRecap:
     ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (for display)
     nvlink_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way for the cliff ratio
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # Per-direction-vs-per-port cliff (honest 9x; 900-vs-50 would double-count to 18x)
     nvlink_to_ib_ratio_mult_str = fmt_multiple((nvlink_perdir / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_qty(nvlink, GB / second, precision=0, commas=False)
@@ -1694,10 +1697,10 @@ Production ML clusters are rarely dedicated to a single training job, creating a
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: SR-IOV and QoS â€” NDR line rate.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: SR-IOV and QoS — NDR line rate.
 class IbNdrVirtualizationRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
@@ -1718,25 +1721,25 @@ Virtualization solves the sharing problem but makes performance diagnosis harder
 ```{python}
 #| echo: false
 #| label: network-fabrics-silent-waste
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ SILENT WASTE BUDGET (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-monitoring â€” the silent-waste paragraph.
-# â”‚
-# â”‚ Goal: Quantify the GPU-hours and dollars a slow transceiver wastes over a
-# â”‚       30-day run before any alarm fires.
-# â”‚ Show: 10 percent BW loss â†’ 2-3 percent per-iteration slowdown â†’
-# â”‚       ~15,000-22,000 wasted GPU-hours â†’ ~\$45,000-\$66,000 at \$3/GPU-hour.
-# â”‚ How: total GPU-hours = N Ã— days Ã— 24; waste = total Ã— slowdown; cost =
-# â”‚      waste Ã— GpuTrainingUtilityScenarioPerHour. Range rounded to thousands.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SILENT WASTE BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-monitoring — the silent-waste paragraph.
+# │
+# │ Goal: Quantify the GPU-hours and dollars a slow transceiver wastes over a
+# │       30-day run before any alarm fires.
+# │ Show: 10 percent BW loss → 2-3 percent per-iteration slowdown →
+# │       ~15,000-22,000 wasted GPU-hours → ~\$45,000-\$66,000 at \$3/GPU-hour.
+# │ How: total GPU-hours = N × days × 24; waste = total × slowdown; cost =
+# │      waste × GpuTrainingUtilityScenarioPerHour. Range rounded to thousands.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, fmt_percent, fmt_percent_range, fmt_usd, fmt_range, fmt, check
 
 class SilentWaste:
     """Silent waste a degraded transceiver inflicts on a 30-day run."""
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     gpu_hour_rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate
     bw_loss = 0.10  # scenario assumption: bandwidth loss from a degraded transceiver
@@ -1744,7 +1747,7 @@ class SilentWaste:
     slowdown_hi = 0.03  # scenario assumption: per-iteration slowdown (high end)
     run_days = 30  # scenario assumption: training-run duration
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_gpu_hours = n_gpus * run_days * 24
     waste_lo = round(total_gpu_hours * slowdown_lo / 1000) * 1000
     waste_hi = round(total_gpu_hours * slowdown_hi / 1000) * 1000
@@ -1752,12 +1755,12 @@ class SilentWaste:
     cost_lo = round(waste_lo * _rate / 1000) * 1000
     cost_hi = round(waste_hi * _rate / 1000) * 1000
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    check(total_gpu_hours == 737280, "1,024 GPUs Ã— 30 days Ã— 24 h should be 737,280 GPU-hours")
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_gpu_hours == 737280, "1,024 GPUs × 30 days × 24 h should be 737,280 GPU-hours")
     check(waste_lo < waste_hi, "Low waste estimate must be below the high estimate")
     check(cost_hi < 100_000, "Silent waste should be tens of thousands of dollars, not millions")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
     bw_loss_pct_str = fmt_percent(bw_loss, precision=0, commas=False, style='prose')
     slowdown_pct_range_str = fmt_percent_range(slowdown_lo, slowdown_hi, precision=0, commas=False, style='prose')
@@ -1776,31 +1779,31 @@ At the physical layer, hardware counters answer whether the wire still behaves l
 ```{python}
 #| echo: false
 #| label: network-fabrics-hdr-ndr-reference
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ HDR/NDR BANDWIDTH REFERENCE (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-link-telemetryâ€”silent degradation from
-# â”‚          HDR fallback; @sec-network-fabrics-fallaciesâ€”bandwidth fallacy.
-# â”‚
-# â”‚ Goal: Provide HDR bandwidth for comparison against NDR in monitoring and
-# â”‚       fallacy discussions.
-# â”‚ Show: ~200 Gb/s HDR vs ~400 Gb/s NDR.
-# â”‚ How: Preserve the Pint bandwidth quantity through the guard and formatter.
-# â”‚
-# â”‚ Used by: silent degradation paragraph below; Fallacies section.
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HDR/NDR BANDWIDTH REFERENCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-link-telemetry—silent degradation from
+# │          HDR fallback; @sec-network-fabrics-fallacies—bandwidth fallacy.
+# │
+# │ Goal: Provide HDR bandwidth for comparison against NDR in monitoring and
+# │       fallacy discussions.
+# │ Show: ~200 Gb/s HDR vs ~400 Gb/s NDR.
+# │ How: Preserve the Pint bandwidth quantity through the guard and formatter.
+# │
+# │ Used by: silent degradation paragraph below; Fallacies section.
+# └─────────────────────────────────────────────────────────────────────────────
 
 class IbHdrReference:
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt, check, fmt_bandwidth
 
     check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_hdr_gbit_per_s_str = fmt_bandwidth(hdr_bw, unit=Gbps, precision=0, commas=False)
 ```
 
@@ -1808,15 +1811,15 @@ class IbHdrReference:
 #| echo: false
 from mlsysim.fmt import fmt_bandwidth, fmt_qty
 
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Monitoring â€” NDR negotiated speed checks.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Monitoring — NDR negotiated speed checks.
 class IbNdrMonitoringRecap:
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
     ib_ndr_gb_per_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB / second, precision=0, commas=False)
 ```
 
-These metrics are typically polled by a centralized monitoring system (for example, Prometheus with Grafana dashboards) at 10â€“30 second intervals to catch **Silent Degradation**\index{Silent Degradation!definition}. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} IbHdrReference.ib_hdr_gbit_per_s_str`) instead of NDR (`{python} IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str`), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a cluster of `{python} SilentWaste.n_gpus_str` with over 3,000 links, a 0.1 percent point-in-time component degradation rate implies about 3 degraded links in expectation, with a high probability that at least one link is degraded. Because distributed training algorithms like ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.
+These metrics are typically polled by a centralized monitoring system (for example, Prometheus with Grafana dashboards) at 10–30 second intervals to catch **Silent Degradation**\index{Silent Degradation!definition}. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} IbHdrReference.ib_hdr_gbit_per_s_str`) instead of NDR (`{python} IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str`), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a cluster of `{python} SilentWaste.n_gpus_str` with over 3,000 links, a 0.1 percent point-in-time component degradation rate implies about 3 degraded links in expectation, with a high probability that at least one link is degraded. Because distributed training algorithms like ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.
 
 ### Bandwidth and latency validation {#sec-network-fabrics-bw-testing}
 
@@ -1857,37 +1860,37 @@ The first pressure point is reliability. The Ultra Ethernet Consortium (UEC)\ind
 ```{python}
 #| echo: false
 #| label: next-gen-link-density
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ NEXT-GENERATION LINK DENSITY (LEGO)
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: @sec-network-fabrics-protocol-convergenceâ€”800G/XDR and 1.6T link density.
-# â”‚
-# â”‚ Goal: Keep the exact next-generation port-rate and switch-capacity claims
-# â”‚       local to the paragraph that uses them.
-# â”‚ Show: 800 Gb/s XDR/800GbE, 1.6 Tb/s Ethernet ports, 102.4 Tb/s switch ASIC.
-# â”‚ How: Decimal link-rate arithmetic; 1.6 Tb/s / 400 Gb/s = 4.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NEXT-GENERATION LINK DENSITY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-protocol-convergence—800G/XDR and 1.6T link density.
+# │
+# │ Goal: Keep the exact next-generation port-rate and switch-capacity claims
+# │       local to the paragraph that uses them.
+# │ Show: 800 Gb/s XDR/800GbE, 1.6 Tb/s Ethernet ports, 102.4 Tb/s switch ASIC.
+# │ How: Decimal link-rate arithmetic; 1.6 Tb/s / 400 Gb/s = 4.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_bandwidth, fmt_qty, fmt_ratio, check
 
 class NextGenLinkDensity:
     """Port-rate and switch-capacity references for next-generation fabrics."""
 
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────
     ETHERNET_800G_BW = Systems.Fabrics.Ethernet_800G.bandwidth
     ETHERNET_1P6T_BW = Systems.Fabrics.Ethernet_1P6T.bandwidth
     ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
     SWITCH_ASIC_102T4_BW = Systems.SwitchFabric.SwitchAsic102T4
 
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     port_ratio_val = (ETHERNET_1P6T_BW / ETHERNET_400G_BW).to_base_units().magnitude
     equivalent_1_6t_ports_val = (SWITCH_ASIC_102T4_BW / ETHERNET_1P6T_BW).to_base_units().magnitude
 
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────
     check(round(port_ratio_val) == 4, "1.6T should equal four 400G ports")
     check(equivalent_1_6t_ports_val == 64, "102.4 Tb/s should equal 64 * 1.6T ports")
 
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────
     xdr_port_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=Gbps, precision=0, commas=False)
     eth_1_6t_port_tbit_per_s_str = fmt_bandwidth(ETHERNET_1P6T_BW, unit=terabit / second, precision=1, commas=False)
     switch_capacity_tbit_per_s_str = fmt_bandwidth(SWITCH_ASIC_102T4_BW, unit=terabit / second, precision=1, commas=False)
@@ -1928,21 +1931,21 @@ from mlsysim.fmt import fmt_int, fmt_power, fmt_qty, fmt, check
 class OpticalDividend:
     """Power savings from Co-Packaged Optics (CPO)."""
 
-    # â”Œâ”€â”€ 1. LOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD ──────────────────────────────────────────
     SWITCH_ASIC_51T2_BW = Systems.SwitchFabric.SwitchAsic51T2
     ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
     OPTICS_POWER_PLUGGABLE_400G_W = Systems.SwitchFabric.OpticsPluggable400G
     OPTICS_POWER_CPO_400G_W = Systems.SwitchFabric.OpticsCpo400G
     n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude)  # 51.2 Tb/s switch
     n_switches = 1000  # scenario assumption: large-cluster switch count
-    # â”Œâ”€â”€ 2. EXECUTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
     total_cpo = n_ports * OPTICS_POWER_CPO_400G_W
     savings = total_pluggable - total_cpo
     cluster_pluggable = total_pluggable * n_switches
     cluster_savings = savings * n_switches
     equivalent_h100_gpus = (cluster_savings / Hardware.Cloud.H100.tdp).to_base_units().magnitude
-    # â”Œâ”€â”€ 3. GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD ─────────────────────────────────────────
     check(savings == 1.28 * kilowatt, f"Savings {savings.to(kW).magnitude:.2f}kW unexpected")
 
     @classmethod
@@ -1957,7 +1960,7 @@ class OpticalDividend:
             ylabel="Total Optics Power (kW)",
         )
 
-    # â”Œâ”€â”€ 4. OUTPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT ────────────────────────────────────────
     n_ports_str = fmt(n_ports, precision=0, commas=False)
     p_pluggable_w_str = fmt_qty(OPTICS_POWER_PLUGGABLE_400G_W, watt, precision=0, commas=False)
     p_cpo_w_str = fmt_qty(OPTICS_POWER_CPO_400G_W, watt, precision=0, commas=False)
@@ -2002,8 +2005,8 @@ Designing and operating high-performance fabrics for ML requires unlearning assu
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Bandwidth fallacy â€” HDR vs NDR line rates.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Bandwidth fallacy — HDR vs NDR line rates.
 from mlsysim import Systems
 from mlsysim.core.units import Gbps
 from mlsysim.fmt import fmt, check, fmt_bandwidth
@@ -2014,7 +2017,7 @@ class IbBandwidthFallaciesRecap:
     check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
     check(round(ndr_bw.to(Gbps).magnitude) == 400, "NDR bandwidth should be 400 Gb/s")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_hdr_gbit_per_s_str = fmt_bandwidth(hdr_bw, unit=Gbps, precision=0, commas=False)
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ndr_bw, unit=Gbps, precision=0, commas=False)
 ```
@@ -2028,26 +2031,26 @@ Engineers assume upgrading from HDR (`{python} IbBandwidthFallaciesRecap.ib_hdr_
 ```{python}
 #| echo: false
 #| label: bandwidth-fallacy
-# â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ BANDWIDTH FALLACY
-# â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Fallacy "More bandwidth always means faster training"
-# â”‚
-# â”‚ Goal: Show diminishing returns of BW in the latency-dominated regime.
-# â”‚ Show: That a 2x BW increase yields minimal gain for small messages.
-# â”‚ How: Calculate T(n) for HDR vs NDR for 10 KB message.
-# â”‚
-# â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BANDWIDTH FALLACY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fallacy "More bandwidth always means faster training"
+# │
+# │ Goal: Show diminishing returns of BW in the latency-dominated regime.
+# │ Show: That a 2x BW increase yields minimal gain for small messages.
+# │ How: Calculate T(n) for HDR vs NDR for 10 KB message.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ┌── LEGO ───────────────────────────────────────────────
 class BandwidthFallacy:
     """
     Scenario: Latency comparison for small messages across HDR vs NDR.
     Illustrates why doubling bandwidth does not halve latency for small packets.
     """
 
-    # â”Œâ”€â”€ 1. LOAD (Constants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     from mlsysim import Hardware
 
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
@@ -2056,19 +2059,19 @@ class BandwidthFallacy:
     alpha = FABRIC_ALPHA_NDR
     msg = 10 * KB  # scenario assumption: small control packet
 
-    # â”Œâ”€â”€ 2. EXECUTE (The Compute) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T(n) = alpha + n/beta, computed via pint to keep units explicit.
     t_hdr = calc_point_to_point_time(msg, alpha, ib_hdr.bandwidth)
     t_ndr = calc_point_to_point_time(msg, alpha, ib_ndr.bandwidth)
 
     speedup_pct = (1 - (t_ndr / t_hdr).to_base_units().magnitude) * 100
 
-    # â”Œâ”€â”€ 3. GUARD (Invariants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
 
     check(speedup_pct < 25, f"Speedup ({speedup_pct:.1f}%) too high; fallacy argument weakened.")
 
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_bandwidth, fmt_time, fmt_qty
 
     msg_kb_str = fmt_qty(msg, KB, precision=0, commas=False)
@@ -2099,8 +2102,8 @@ RoCE over Ethernet can achieve throughput comparable to InfiniBand for large tra
 
 ```{python}
 #| echo: false
-# â”Œâ”€â”€ LEGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”‚ Context: Fallacies â€” bisection waste recap.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Fallacies — bisection waste recap.
 class BisectionWasteRecap:
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     gradient_size_gb = 100
@@ -2109,7 +2112,7 @@ class BisectionWasteRecap:
     comm_fraction = 0.30
     rel_throughput, throughput_loss = calc_oversubscription_effect(comm_fraction, oversub_ratio_b)
     waste_val = throughput_loss * cluster_cost_m
-    # â”Œâ”€â”€ 4. OUTPUT (Formatting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     oversub_ratio_b_value_str = fmt(oversub_ratio_b, precision=0, commas=False)
     oversub_ratio_b_mult_str = fmt_multiple(oversub_ratio_b, precision=0, commas=False)
     cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
@@ -2131,7 +2134,7 @@ In general-purpose clouds, 4:1 or 8:1 oversubscription at the spine is common be
 
 **Fallacy**: *TCP bandwidth tests are sufficient for ML fabric validation.*
 
-Standard benchmarks like `iperf` measure kernel-based TCP/IP performance. Because TCP requires CPU-managed buffer copies and context switches, it often caps at 20â€“40 Gb/s regardless of the wire speed. ML training uses RDMA, which bypasses the kernel entirely. A link that appears "broken" at 30 Gb/s in `iperf` might be perfectly healthy and deliver 390 Gb/s in `ib_write_bw`. Validation protocols must use RDMA-specific tools from the `perftest` suite to match the workload's data path.
+Standard benchmarks like `iperf` measure kernel-based TCP/IP performance. Because TCP requires CPU-managed buffer copies and context switches, it often caps at 20–40 Gb/s regardless of the wire speed. ML training uses RDMA, which bypasses the kernel entirely. A link that appears "broken" at 30 Gb/s in `iperf` might be perfectly healthy and deliver 390 Gb/s in `ib_write_bw`. Validation protocols must use RDMA-specific tools from the `perftest` suite to match the workload's data path.
 
 :::
 
