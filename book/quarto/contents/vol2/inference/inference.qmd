@@ -177,7 +177,7 @@ The contrast between training and inference optimization extends beyond the basi
 | **Failure tolerance**   |    Restart from checkpoint    | Redirect without user impact |
 | **Cost structure**      | Fixed duration, variable rate | Variable duration, fixed SLO |
 
-: **Training vs. Inference System Requirements**: The fundamental inversion from throughput to latency optimization ripples through every aspect of system design. {#tbl-training-inference-inversion}
+: **Training vs. Inference System Requirements**: The fundamental inversion from throughput to latency optimization ripples through system design, state management, batch formation, and failure recovery. {#tbl-training-inference-inversion}
 
 Training tolerates substantial latency variance because the optimization target is aggregate progress over hours or days. A training iteration that takes 2 seconds instead of the usual 1 second represents acceptable variation. An inference request that takes 2 seconds instead of 100 milliseconds represents catastrophic failure, potentially causing user abandonment or cascading timeouts in dependent services.
 
@@ -378,7 +378,7 @@ The same leverage holds across application categories with different cost struct
 | **LLM API**                   |    \$1M--\$100M   |       \$10M--\$1B       |  10--100$\times$  |
 | **Internal analytics**        |    \$1K--\$10K    |      \$10K--\$100K      |  10--100$\times$  |
 
-: **Training vs. Serving Cost Ratios**: High-QPS applications like recommendation systems show the most extreme cost dominance of serving over training. {#tbl-cost-ratios}
+: **Training vs. Serving Cost Ratios**: High-QPS applications like recommendation systems show extreme serving cost dominance over training (up to 1000$\times$), whereas lower-volume LLM APIs and analytics exhibit more moderate ratios (10--100$\times$). {#tbl-cost-ratios}
 
 The cost structure motivates serving optimization: every percentage point of efficiency improvement yields ongoing cost reduction over the model's operational lifetime. @Fig-serving-cost-curve illustrates why optimization matters by showing how the gap between naive and optimized serving determines whether an inference service is profitable or hemorrhaging money.
 
@@ -608,7 +608,7 @@ Each level has distinct optimization levers, and @tbl-serving-hierarchy shows wh
 | **Service**  |    Aggregate capacity   | Load balancing, routing, autoscaling   |
 | **Platform** |   Resource efficiency   | Multi-tenancy, scheduling, placement   |
 
-: **Serving Hierarchy Optimization Targets**: Each level of the hierarchy addresses different metrics with different techniques. {#tbl-serving-hierarchy}
+: **Serving Hierarchy Optimization Targets**: Each level of the serving hierarchy targets distinct performance metrics—from per-request latency at the request tier to aggregate resource efficiency at the platform tier. {#tbl-serving-hierarchy}
 
 ::: {#chk-inference-serving-hierarchy .callout-checkpoint title="The serving hierarchy"}
 
@@ -849,7 +849,7 @@ Translating these batch-level equations into system-wide capacity planning requi
 | **RecSys**        |    Feature-parallel   |      1000–10000s       |  Embedding lookup  |  Depends on sharding   |
 | **Speech**        |       Streaming       |           1            |     Real-time      |  N/A (latency-bound)   |
 
-: **Batching Strategy by Model Type**: Each model type has characteristic batching behavior determined by its computational bottleneck. {#tbl-batching-by-model}
+: **Batching Strategy by Model Type**: Each model class requires a distinct batching policy (from static/dynamic in vision to continuous in LLM decode and feature-parallel in recommendation) matched to its dominant hardware bottleneck. {#tbl-batching-by-model}
 
 ```{python}
 #| echo: false
@@ -1849,7 +1849,7 @@ Is it autoregressive text generation?
 | **Feature-parallel** |  Accumulation window  | Match embedding shard capacity   |
 | **Streaming**        |     Pipeline depth    | Meet real-time deadline          |
 
-: **Batching Strategy Parameters**: Each strategy has distinct parameters requiring tuning for the specific deployment. {#tbl-batching-parameters}
+: **Batching Strategy Parameters**: Key configurable parameters (max batch size, queue timeout, iteration limits) tuned across static, dynamic, continuous, feature-parallel, and streaming strategies to optimize throughput vs. latency. {#tbl-batching-parameters}
 
 Even a well-tuned continuous batching strategy cannot eliminate a deeper, architecture-specific bottleneck for large language models. The context window of every active request must be stored in GPU memory, making KV cache management the next binding constraint on serving throughput.
 
@@ -2697,7 +2697,7 @@ where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ i
 | **Memory (embeddings)** |    DLRM (100 TB)     |      1000+ way       | Embedding sharding |
 | **Latency**             |   Any large model    |        Varies        | Tensor parallelism |
 
-: **Sharding Triggers**: Different constraints lead to different sharding requirements and strategies. {#tbl-sharding-triggers}
+: **Sharding Triggers**: Model memory, KV-cache capacity, embedding table size, and forward-pass latency limits dictate minimum sharding degrees and candidate distribution strategies. {#tbl-sharding-triggers}
 
 ### Tensor parallelism {#sec-inference-scale-tensor-parallelism-b29f}
 
@@ -2923,7 +2923,7 @@ Pipeline parallelism is appropriate for inference in three scenarios:
 | **Memory efficiency**      |      Activations replicated      |      Activations passed along      |
 | **Complexity**             | Higher (requires custom kernels) |  Lower (layer-level partitioning)  |
 
-: **Pipeline vs. Tensor Parallelism**: Each strategy has distinct trade-offs in latency, throughput, and implementation complexity. {#tbl-pipeline-tensor-comparison}
+: **Pipeline vs. Tensor Parallelism**: Key trade-offs between layer-internal tensor splitting (reduces single-request latency, requires high-bandwidth NVLink) and inter-layer pipeline staging (maximizes batch throughput, introduces pipeline bubbles). {#tbl-pipeline-tensor-comparison}
 
 The decision rule is latency first, topology second. Tensor parallelism is the right default when single-request latency matters and NVLink-class bandwidth is available; pipeline parallelism is a throughput tool for relaxed-latency workloads or placements where only point-to-point stage communication is affordable.
 
@@ -3187,7 +3187,7 @@ Each device stores a slice of every embedding. Hybrid sharding combines both app
 | **Column-wise**       |  All devices per lookup  |     AllGather     |      Hot embeddings     |
 | **Hybrid**            |   Varies by embedding    |       Mixed       |    Production RecSys    |
 
-: **Embedding Sharding Strategies**: Different strategies trade off lookup locality against load balance. {#tbl-embedding-sharding}
+: **Embedding Sharding Strategies**: Comparison of row-wise, column-wise, and hybrid embedding placement strategies, balancing lookup locality against network communication collectives and memory load balancing. {#tbl-embedding-sharding}
 
 The trade-off is locality against load balance. Row-wise sharding keeps each embedding vector whole on one device, which localizes the lookup but needs an AllToAll gather to collect vectors scattered by entity ID; column-wise sharding parallelizes every lookup across devices at the cost of an AllGather; and hybrid sharding splits the difference, replicating hot embeddings column-wise while row-sharding the cold tail. @Fig-embedding-sharding shows the three layouts, where the row-wise "network gather" is the AllToAll collective named in @tbl-embedding-sharding.
 
@@ -3544,7 +3544,7 @@ The choice of sharding strategy depends on model architecture and deployment pri
 | **Interconnect limited**  |       Poor fit      |        Good fit       |       Moderate      |       Good fit      |
 | **Implementation effort** |         High        |          Low          |       Moderate      |         High        |
 
-: **Sharding Strategy Selection Guide**: Match strategy to deployment priorities and constraints. {#tbl-sharding-selection}
+: **Sharding Strategy Selection Guide**: Evaluation of tensor, pipeline, expert, and embedding sharding across latency targets, throughput priorities, interconnect constraints, and implementation complexity. {#tbl-sharding-selection}
 
 Strategy selection starts from the deployment bottleneck. Use tensor parallelism when latency dominates and the interconnect can sustain frequent collectives, pipeline parallelism when throughput matters more than per-request latency, expert parallelism when MoE routing defines the model structure, and embedding sharding when large sparse tables dominate capacity.
 
@@ -3890,7 +3890,7 @@ The choice of load balancing algorithm has quantitative impact on system perform
 | **Least-connections** |  1.4 requests |      19 ms      |   Global state   |
 | **Two-choices + LC**  |  1.2 requests |      17 ms      | 2 probes + state |
 
-: **Load Balancing Algorithm Comparison**: More sophisticated algorithms reduce queue lengths and latency at the cost of increased overhead. {#tbl-lb-comparison}
+: **Load Balancing Algorithm Comparison**: Trade-offs across random, round-robin, power-of-two-choices, least-connections, and hybrid routing, showing how stateful probes cut P99 latency at the expense of control-plane overhead. {#tbl-lb-comparison}
 
 @Tbl-lb-comparison shows the familiar serving trade-off: random and round-robin routing keep CPU overhead near zero but leave longer queues and higher latency variance; two-choices roughly halves p99 latency with only two probes per request; least-connections improves further when request cost varies but requires global state; and combining two-choices with least-connections produces the shortest queues at the highest implementation complexity.
 
@@ -3981,7 +3981,7 @@ The same sharing creates the isolation problem and multi-tenancy trade-offs that
 | **Isolation**            |        Complete        |  Requires engineering  |
 | **Operational overhead** | Higher (many clusters) | Lower (fewer clusters) |
 
-: **Single vs. Multi-Tenant Tradeoffs**: Multi-tenancy reduces cost but requires careful isolation engineering. {#tbl-tenancy-comparison}
+: **Single vs. Multi-Tenant Tradeoffs**: Multi-tenant deployments double GPU utilization and cut per-request cost but introduce noisy-neighbor risks that demand strict isolation controls. {#tbl-tenancy-comparison}
 
 ### Noisy neighbor problems {#sec-inference-scale-noisy-neighbor-problems-1b87}
 
@@ -4013,7 +4013,7 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 
 Resource quotas limit what each tenant can consume, preventing any single tenant from monopolizing shared resources. Hard quotas turn shared serving into admission control: the system checks concurrency, KV-cache memory, and request rate before admitting each request. @Lst-resource-quotas uses those three gates so a tenant can be throttled at the scarce resource boundary instead of degrading the whole batch.
 
-::: {#lst-resource-quotas lst-cap="**Resource Quotas**: Admission control that enforces per-tenant limits on concurrency, KV cache memory, and request rate."}
+::: {#lst-resource-quotas lst-cap="**Resource Quotas**: Admission control enforcement that evaluates per-tenant limits on concurrency, KV-cache memory allocation, and request rate before admitting requests."}
 
 ```{.python}
 class TenantQuota:
@@ -4171,7 +4171,7 @@ Failure isolation follows naturally from bulkhead boundaries. When a tenant subm
 | 20:00    |  Scale down  |          10         |    -10 terminating    |
 | 00:00    |  Scale down  |          5          |     -5 terminating    |
 
-: **Predictive scaling schedule**: Per-time-bucket scaling actions, active replicas, and replicas in cold-start warming for the same chatbot service. {#tbl-inference-chatbot-predictive-schedule}
+: **Predictive Scaling Schedule**: Per-time-bucket scaling actions, active replicas, and replicas in cold-start warming for the chatbot workload. {#tbl-inference-chatbot-predictive-schedule}
 
 **Systems insight**: A reactive-only autoscaler must over-provision during each ramp (about 45 replicas at peak) because it cannot anticipate the curve. Predictive scaling sizes the fleet to the actual peak (30 replicas), recovering roughly 33 percent of GPU spend without sacrificing latency headroom.
 
@@ -4376,7 +4376,7 @@ Because cross-region sharding is so costly on the steady-state path, most produc
 
 When a region becomes unavailable, traffic must reroute to healthy regions. @Lst-active-failover shows active-active failover routing logic that falls back to the next healthy region after timeout or unavailability.
 
-::: {#lst-active-failover lst-cap="**Active-Active Failover**: Global routing that falls back to the second-nearest healthy region on timeout or unavailability."}
+::: {#lst-active-failover lst-cap="**Active-Active Failover**: Global routing implementation that attempts the primary regional endpoint with a strict timeout before falling back to the secondary healthy region."}
 
 ```{.python}
 # Simplified global routing logic
@@ -4424,7 +4424,7 @@ GPU pricing varies by region. @Tbl-gpu-region-pricing shows representative H100 
 
 Cost-aware routing directs latency-tolerant workloads (batch inference, background processing) to the cheapest available region (@lst-cost-aware-routing).
 
-::: {#lst-cost-aware-routing lst-cap="**Cost-Aware Routing**: Priority-based routing that sends low-priority batch requests to the cheapest region while keeping interactive traffic local."}
+::: {#lst-cost-aware-routing lst-cap="**Cost-Aware Routing**: Priority-based request router that dispatches low-priority batch requests to the lowest-cost region with available capacity while routing latency-sensitive interactive traffic to the nearest region."}
 
 ```{.python}
 def route_batch_request(request):
@@ -5061,7 +5061,7 @@ Across these cases, the common pattern is specialization instead of a universal 
 | **Google** | Ranking cascade       | Speculative execution     |
 | **TikTok** | Two-tower caching     | Multimodal fusion         |
 
-: **Case Study Summary**: Each system innovates on a core technique matched to its workload characteristics. {#tbl-case-studies-summary tbl-colwidths="[24,38,38]"}
+: **Case Study Summary**: Synthesis of primary serving techniques and key architectural innovations across Meta, Google, and TikTok production workloads. {#tbl-case-studies-summary tbl-colwidths="[24,38,38]"}
 
 The case studies show why serving architectures must be adapted to their workloads. Applying conventional web-service assumptions to GPU-bound systems creates the fallacies and pitfalls examined next.
 
