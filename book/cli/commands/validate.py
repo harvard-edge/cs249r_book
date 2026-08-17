@@ -626,6 +626,15 @@ class ValidateCommand:
                   note="A/B=C prose lines must match computed values", default=False),
             Scope("lego-units", "_run_lego_units",
                   note="LEGO unit discipline (warning-only + baseline)", default=True),
+            # Added 2026-08-17 after a pass that hand-tightened stage-3 guards
+            # across ~15 chapters (46f6f80d, and the fix(...) run that followed).
+            # lego.md forbids a guard that only proves a value exists or is
+            # positive: it passes even when a registry change invalidates the
+            # prose claim it is supposed to protect. Opt-in until the existing
+            # occurrences are retired, then flip to default=True.
+            Scope("lego-guard-strength", "_run_lego_guard_strength",
+                  note="stage-3 check() guards must bound the prose claim, "
+                       "not merely assert existence or positivity", default=False),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
@@ -11533,6 +11542,103 @@ class ValidateCommand:
         return ValidationRunResult(
             name="hardware-version-form",
             description="Accelerator version naming uses one canonical (spaced) form book-wide",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ── LEGO stage-3 guard strength ────────────────────────────────────────
+    #
+    # lego.md, "Stage 3 (GUARD) Rule: Guard the Prose Claims":
+    #
+    #     Loose check (Forbidden): check(result > 0) or check(die_area is not
+    #     None). Loose checks pass even when a parameter change invalidates
+    #     the text!
+    #
+    # A guard exists so that a registry or formula change fails loudly instead
+    # of silently drifting away from the sentence it backs. A positivity or
+    # existence assertion cannot do that: almost every physical quantity in the
+    # book is positive, so the check is true before and after the drift.
+    #
+    # Added 2026-08-17, after a pass hand-tightened these across ~15 chapters.
+
+    #: Predicate shapes that prove nothing about the prose claim.
+    _WEAK_GUARD_PATTERNS = (
+        (re.compile(r"^.+\bis\s+(?:not\s+)?None$"), "existence only"),
+        (re.compile(r"^len\s*\(.+\)\s*(?:>|>=|!=)\s*0$"), "non-empty only"),
+        (re.compile(r"^.+?(?:>|>=|!=)\s*0(?:\.0+)?\s*(?:\*\s*[\w.]+)?$"), "positivity only"),
+    )
+
+    @staticmethod
+    def _first_call_argument(text: str) -> str | None:
+        """Return the first top-level argument of a call, given the text after '('.
+
+        Splits on the first comma that is not nested inside brackets or quotes,
+        so `check(abs(a - b) < 0.1, "msg")` yields `abs(a - b) < 0.1`.
+        """
+        depth = 0
+        quote = None
+        for idx, ch in enumerate(text):
+            if quote:
+                if ch == quote and (idx == 0 or text[idx - 1] != "\\"):
+                    quote = None
+                continue
+            if ch in "\"'":
+                quote = ch
+            elif ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    return text[:idx]
+                depth -= 1
+            elif ch == "," and depth == 0:
+                return text[:idx]
+        return None
+
+    def _run_lego_guard_strength(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-guard-strength: stage-3 guards must bound the claim."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        call = re.compile(r"\bcheck\s*\(")
+
+        for file in files:
+            in_python = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    # Track only python cells; guards live nowhere else.
+                    in_python = (not in_python) and "{python}" in stripped
+                    continue
+                if not in_python or stripped.startswith("#"):
+                    continue
+                m = call.search(line)
+                if not m:
+                    continue
+                predicate = self._first_call_argument(line[m.end():])
+                if predicate is None:
+                    continue  # guard wraps onto the next line; skip rather than guess
+                predicate = predicate.strip()
+                for pattern, why in self._WEAK_GUARD_PATTERNS:
+                    if pattern.match(predicate):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="lego_guard_strength",
+                                message=(
+                                    f"Guard asserts {why}; bound the prose claim "
+                                    f"instead (see lego.md stage 3)"
+                                ),
+                                severity="warning",
+                                context=predicate[:120],
+                            )
+                        )
+                        break
+
+        return ValidationRunResult(
+            name="lego-guard-strength",
+            description="Stage-3 check() guards must bound the prose claim",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
