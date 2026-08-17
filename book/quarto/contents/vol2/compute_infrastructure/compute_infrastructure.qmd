@@ -942,7 +942,7 @@ class MemoryBandwidthPitfallRecap:
 
 ***High Bandwidth Memory (HBM)***\index{HBM!definition}\index{High Bandwidth Memory|see{HBM}} is the 3D-stacked DRAM architecture used by ML accelerators, in which multiple memory dies are vertically bonded and connected to the processor through thousands of Through-Silicon Vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale PCB traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
 
-1.  **Significance**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth (roughly 16$\times$ DDR5's ~200 GB/s) at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
+1.  **Significance**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth (roughly 16$\times$ DDR5's ~200 GB/s) at roughly 2--5 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
 2.  **Distinction**: Unlike DDR memory, which connects through centimeters of PCB trace (introducing capacitance, attenuation, and high driving current), HBM uses 1,024-bit-wide TSV buses with path lengths measured in micrometers, a 1,000$\times$ reduction in signal distance that enables the wider bus without proportionally higher power.
 3.  **Common pitfall**: A frequent misconception is that HBM solves the memory wall. HBM moves the wall rather than eliminates it: Tensor Core throughput $(R_{\text{peak}})$ has scaled faster than HBM bandwidth across generations (from `{python} V100MemoryWallRecap.mem_bw_gb_per_s_str` with `{python} V100MemoryWallRecap.flops_fp16_tflop_per_s_str` FP16 in V100 to `{python} MemoryBandwidthPitfallRecap.h100_bw_tb_per_s_str` with `{python} MemoryBandwidthPitfallRecap.h100_flops_fp16_tflop_per_s_str` FP16 in H100), so the ridge point continues rising and more operations remain memory-bound despite HBM improvements.
 
@@ -972,7 +972,7 @@ The vertical stacking represents a fundamental change in memory architecture: ra
 
 The shortened distance has three direct physical benefits:
 
-- **Energy per bit**\index{HBM!energy efficiency}: The transfer cost drops by an order of magnitude, from approximately 20 pJ/bit for DDR5 to approximately 2 pJ/bit for HBM, because shorter traces have lower capacitance and require less driving current.
+- **Energy per bit**\index{HBM!energy efficiency}: The transfer cost drops by roughly 4--10$\times$, from approximately 20 pJ/bit for DDR5 to roughly 2--5 pJ/bit for HBM, because shorter traces have lower capacitance and require less driving current.
 - **Latency**: Electrical signals propagate through silicon at roughly two thirds the speed of light, so the shorter path reduces propagation time.
 - **Signaling rate**: Lower capacitance allows higher signaling frequencies without the sophisticated equalization circuits required by long PCB traces, enabling the high per-pin data rates that complement the wide bus width.
 
@@ -3250,23 +3250,40 @@ from mlsysim.fmt import fmt_int, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierNodeModelRecap:
+    # ┌── 1. LOAD (Constants) ─────────────────────────────────────────────────
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
     h100_mem = Hardware.Cloud.H100.memory.capacity
     host_ddr = Systems.Nodes.DGX_H100.host_memory
     weight = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
+    act = 20 * GB  # scenario assumption: activation peak WITH checkpointing
+    buf = 5 * GB  # scenario assumption: workspace and communication buffers
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────────
     weight_per_gpu = weight / node_gpus
-    opt_state = weight_per_gpu * 4
-    act = 20 * GB
     grad = weight_per_gpu
-    buf = 5 * GB
-    total_per_gpu = weight_per_gpu + act + grad + buf
+    # Adam first and second moments in FP32 are 4x the FP16 weights, matching
+    # the per-parameter breakdown in @tbl-memory-breakdown.
+    opt_state = weight_per_gpu * 4
+    # The optimizer state is part of what the GPU must hold, so it belongs in
+    # the total. Leaving it out produced a total smaller than the component the
+    # prose blamed for the overflow.
+    total_per_gpu = weight_per_gpu + grad + opt_state + act + buf
+    # What offloading the optimizer state to host DDR5 actually leaves behind.
+    post_offload_per_gpu = total_per_gpu - opt_state
     optimizer_pool = weight * 4
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
+    check(opt_state > weight_per_gpu + grad, "Optimizer state must dominate; the example's diagnosis rests on it.")
+    check(total_per_gpu > h100_mem, "The budget must exceed one GPU's HBM, or there is nothing to diagnose.")
+    check(post_offload_per_gpu > h100_mem, "Offloading the optimizer alone must NOT fit; the systems lesson says so.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     opt_state_gb_str = fmt_memory(opt_state, unit=GB, precision=0, commas=False)
     total_per_gpu_gb_str = fmt_qty_int(total_per_gpu, GB, commas=False)
+    post_offload_per_gpu_gb_str = fmt_qty_int(post_offload_per_gpu, GB, commas=False)
+    weights_grads_per_gpu_gb_str = fmt_qty_int(weight_per_gpu + grad, GB, commas=False)
 ```
 
 To solidify the memory planning concepts, consider a concrete sizing exercise for our `{python} InfraFrontierNodeSizingRecap.frontier_params_b_str` model on a DGX H100 node.
@@ -3275,9 +3292,9 @@ To solidify the memory planning concepts, consider a concrete sizing exercise fo
 
 **Scenario**: An engineering team calculates the memory budget for training a `{python} InfraFrontierNodeModelRecap.frontier_params_b_str` parameter model using 8-way Tensor Parallelism on an 8-GPU DGX H100 node (`{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM per GPU).
 
-**Diagnosis**: Un-sharded optimizer state alone requires `{python} InfraFrontierNodeModelRecap.opt_state_gb_str` per GPU, causing per-GPU memory (`{python} InfraFrontierNodeModelRecap.total_per_gpu_gb_str`) to exceed the 80 GB HBM limit. Activation memory adds 100–200 GB per GPU without activation checkpointing.
+**Diagnosis**: Un-sharded optimizer state alone requires `{python} InfraFrontierNodeModelRecap.opt_state_gb_str` per GPU, which is more than the weights and gradients combined (`{python} InfraFrontierNodeModelRecap.weights_grads_per_gpu_gb_str`). It drives the per-GPU budget to `{python} InfraFrontierNodeModelRecap.total_per_gpu_gb_str`, well past the `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM limit. That budget already assumes activation checkpointing; without it, activations alone would add 100–200 GB per GPU.
 
-**Systems lesson**: Sizing training memory requires managing weights, gradients, optimizer states, activations, and buffers holistically. Offloading optimizer states to host DDR5 and applying activation checkpointing reduces per-GPU HBM usage to 70–75 GB, fitting within the 80 GB envelope.
+**Systems lesson**: Sizing training memory requires managing weights, gradients, optimizer states, activations, and buffers holistically, because relieving one component does not necessarily clear the envelope. Offloading the optimizer state to host DDR5 removes the dominant term and still leaves `{python} InfraFrontierNodeModelRecap.post_offload_per_gpu_gb_str` per GPU, because 8-way tensor parallelism keeps a full weight and gradient shard resident on every GPU. Fitting this model on this node therefore takes a second axis of sharding, such as distributing gradients and parameters with ZeRO Stage 3, rather than optimizer offload alone.
 
 :::
 
