@@ -241,6 +241,11 @@ def _load_completed_module_numbers() -> set:
     except (json.JSONDecodeError, IOError):
         return completed
 
+    if not isinstance(progress_data, dict):
+        # Valid JSON but not the expected object shape (e.g. a bare list),
+        # treat it the same as a decode failure rather than crashing below.
+        return completed
+
     for module_value in progress_data.get("completed_modules", []):
         module_num = _module_progress_to_int(module_value)
         if module_num is not None:
@@ -507,6 +512,8 @@ class MilestoneSystem:
             try:
                 with open(progress_file, 'r') as f:
                     progress_data = json.load(f)
+                    if not isinstance(progress_data, dict):
+                        return False
                     module_num = _module_progress_to_int(module_name)
                     completed_nums = {
                         _module_progress_to_int(mod)
@@ -527,7 +534,9 @@ class MilestoneSystem:
         if progress_file.exists():
             try:
                 with open(progress_file, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
             except (json.JSONDecodeError, IOError):
                 pass
 
@@ -1444,11 +1453,12 @@ class MilestoneCommand(BaseCommand):
                     try:
                         with open(progress_file, 'r') as f:
                             progress_data = json.load(f)
-                            for mod in progress_data.get("completed_modules", []):
-                                try:
-                                    completed_modules.append(int(mod.split("_")[0]))
-                                except (ValueError, IndexError):
-                                    pass
+                            if isinstance(progress_data, dict):
+                                for mod in progress_data.get("completed_modules", []):
+                                    try:
+                                        completed_modules.append(int(mod.split("_")[0]))
+                                    except (ValueError, IndexError):
+                                        pass
                     except (json.JSONDecodeError, IOError):
                         pass
 
@@ -1565,7 +1575,9 @@ class MilestoneCommand(BaseCommand):
         if progress_file.exists():
             try:
                 with open(progress_file, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
             except (json.JSONDecodeError, IOError):
                 pass
 
