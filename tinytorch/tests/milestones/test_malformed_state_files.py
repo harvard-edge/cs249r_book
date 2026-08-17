@@ -83,6 +83,50 @@ class TestProgressJsonWrongType:
 
         assert result == {1, 2}
 
+    def test_null_completed_modules_value_does_not_crash(self, tmp_path, monkeypatch):
+        """'completed_modules' present but explicitly null (a bad merge or
+        partial write) is a different corruption mode than the key being
+        absent entirely: dict.get(key, []) only substitutes the default
+        when the key is missing, not when its value is None."""
+        monkeypatch.chdir(tmp_path)
+        _write(Path(".tito/progress.json"), json.dumps({"completed_modules": None}))
+
+        result = _load_completed_module_numbers()
+
+        assert result == set()
+
+    def test_non_list_completed_modules_value_does_not_crash(self, tmp_path, monkeypatch):
+        """'completed_modules' present but holding a non-list value (bool,
+        number, string) rather than being absent or null."""
+        monkeypatch.chdir(tmp_path)
+        for bad_value in (True, 42, "01_tensor"):
+            _write(Path(".tito/progress.json"), json.dumps({"completed_modules": bad_value}))
+
+            result = _load_completed_module_numbers()
+
+            assert result == set()
+
+    def test_progress_json_with_non_cp1252_unicode_does_not_crash(self, tmp_path, monkeypatch):
+        """A progress.json containing a Unicode character outside cp1252's
+        range (the platform's default text encoding on Windows, not
+        UTF-8) must be read correctly rather than raising a raw
+        UnicodeDecodeError. Reproduces via a real string value, not
+        malformed bytes, since the file itself is valid, well-formed
+        UTF-8 JSON; the bug was reading it without an explicit encoding."""
+        monkeypatch.chdir(tmp_path)
+        # An emoji is valid UTF-8 and valid JSON content, but not
+        # representable in cp1252. ensure_ascii=False is required here:
+        # the default True would escape it to a \uXXXX sequence, an
+        # all-ASCII file that wouldn't reproduce the encoding bug at all.
+        content = json.dumps({"completed_modules": ["01_tensor"], "note": "\U0001f600"}, ensure_ascii=False)
+        progress_path = tmp_path / ".tito" / "progress.json"
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        progress_path.write_bytes(content.encode("utf-8"))
+
+        result = _load_completed_module_numbers()
+
+        assert result == {1}
+
 
 class TestMilestonesJsonWrongType:
     """milestones.json is syntactically valid JSON, but not an object."""

@@ -228,6 +228,18 @@ def _module_progress_to_int(module_value):
         return None
 
 
+def _get_completed_modules_list(progress_data: dict) -> list:
+    """Safely extract the 'completed_modules' list from progress data.
+
+    dict.get(key, []) only falls back to the default when the key is
+    absent, not when its value is present but the wrong type (null,
+    a bool, a string, ...), a real corruption mode from a bad merge or
+    partial write. Always returns a list, iterating it is always safe.
+    """
+    value = progress_data.get("completed_modules")
+    return value if isinstance(value, list) else []
+
+
 def _load_completed_module_numbers() -> set:
     """Read completed module numbers from the canonical .tito progress file."""
     progress_file = Path(".tito") / "progress.json"
@@ -236,9 +248,9 @@ def _load_completed_module_numbers() -> set:
         return completed
 
     try:
-        with open(progress_file, 'r') as f:
+        with open(progress_file, 'r', encoding='utf-8') as f:
             progress_data = json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError, UnicodeDecodeError):
         return completed
 
     if not isinstance(progress_data, dict):
@@ -246,7 +258,7 @@ def _load_completed_module_numbers() -> set:
         # treat it the same as a decode failure rather than crashing below.
         return completed
 
-    for module_value in progress_data.get("completed_modules", []):
+    for module_value in _get_completed_modules_list(progress_data):
         module_num = _module_progress_to_int(module_value)
         if module_num is not None:
             completed.add(module_num)
@@ -510,17 +522,17 @@ class MilestoneSystem:
         progress_file = Path(".tito") / "progress.json"
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     progress_data = json.load(f)
                     if not isinstance(progress_data, dict):
                         return False
                     module_num = _module_progress_to_int(module_name)
                     completed_nums = {
                         _module_progress_to_int(mod)
-                        for mod in progress_data.get("completed_modules", [])
+                        for mod in _get_completed_modules_list(progress_data)
                     }
                     return module_num in completed_nums
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError, UnicodeDecodeError):
                 pass
         return False
 
@@ -533,11 +545,11 @@ class MilestoneSystem:
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     return data
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError, UnicodeDecodeError):
                 pass
 
         return {
@@ -557,7 +569,7 @@ class MilestoneSystem:
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
@@ -1451,15 +1463,15 @@ class MilestoneCommand(BaseCommand):
                 completed_modules = []
                 if progress_file.exists():
                     try:
-                        with open(progress_file, 'r') as f:
+                        with open(progress_file, 'r', encoding='utf-8') as f:
                             progress_data = json.load(f)
                             if isinstance(progress_data, dict):
-                                for mod in progress_data.get("completed_modules", []):
+                                for mod in _get_completed_modules_list(progress_data):
                                     try:
                                         completed_modules.append(int(mod.split("_")[0]))
                                     except (ValueError, IndexError):
                                         pass
-                    except (json.JSONDecodeError, IOError):
+                    except (json.JSONDecodeError, IOError, UnicodeDecodeError):
                         pass
 
                 # Check if unlocked
@@ -1574,11 +1586,11 @@ class MilestoneCommand(BaseCommand):
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     return data
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError, UnicodeDecodeError):
                 pass
 
         return {
@@ -1598,7 +1610,7 @@ class MilestoneCommand(BaseCommand):
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
