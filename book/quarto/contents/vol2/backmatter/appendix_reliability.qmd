@@ -773,3 +773,77 @@ class ReliabilitySummaryRecap:
 * **Availability stacks exponentially with independent replicas**: Independent replicas improve availability exponentially, but correlated failures collapse that benefit. Failure domain isolation is the prerequisite that makes redundancy effective.
 
 :::
+
+---
+
+## Derivation of the 2nd-Order Daly Checkpoint Interval {#sec-appdx-reliability-daly-2nd-order}
+
+While Young's formula ($\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \text{MTBF}}$) provides an accurate baseline when checkpoint write time is negligible compared to system MTBF ($\delta \ll M$), frontier-scale clusters experience non-negligible write times. Daly (2006) derived a tighter 2nd-order optimal interval that accounts for failure probability during checkpoint execution.
+
+### Mathematical formulation and taylor expansion proof {#sec-appdx-reliability-daly-proof}
+
+Let $M = \text{MTBF}_{\text{system}}$ and $\delta = T_{\text{write}}$. Assuming Poisson failure arrivals with rate $\lambda = 1/M$, the expected total time $E[T_{\text{total}}]$ per compute interval $\tau$ is:
+
+$$ E[T_{\text{total}}] = M \left( e^{\frac{\tau + \delta}{M}} - 1 \right) $$ {#eq-daly-total-time}
+
+Expanding the exponential term $e^{x}$ using a 2nd-order Taylor series around $x = 0$:
+
+$$ e^{\frac{\tau + \delta}{M}} \approx 1 + \frac{\tau + \delta}{M} + \frac{(\tau + \delta)^2}{2 M^2} + \frac{(\tau + \delta)^3}{6 M^3} $$
+
+Substituting this expansion into @eq-daly-total-time yields the expected wasted time $E[T]$ per interval in @eq-daly-wasted-time:
+
+$$ E[T] = E[T_{\text{total}}] - \tau \approx \delta + \frac{\tau^2}{2M} + \frac{\delta \tau}{M} $$ {#eq-daly-wasted-time}
+
+Minimizing the wasted time fraction $W(\tau) = \frac{E[T]}{\tau}$ by setting $\frac{d W}{d \tau} = 0$ yields the quadratic equation:
+
+$$ \tau^2 + 2 \delta \tau - 2 \delta M - \frac{\delta^2}{3} = 0 $$
+
+Applying the quadratic formula and taking the positive root yields the 2nd-order Daly optimal checkpoint interval in @eq-daly-2nd-order-tau:
+
+$$ \tau_{\text{opt}} = \sqrt{2 \delta M + \frac{\delta^2}{3}} - \delta $$ {#eq-daly-2nd-order-tau}
+
+#### Comparison of 1st-order young vs. 2nd-order daly {.unnumbered}
+
+As the ratio of checkpoint write time to MTBF ($\gamma = T_{\text{write}}/\text{MTBF} = \delta / M$) grows, 1st-order Young ($\sqrt{2 \delta M}$) increasingly overestimates the optimal compute interval calculated in @eq-daly-2nd-order-tau because it ignores the nonzero probability of multiple failures during long checkpoint execution windows. At $\delta/M = 0.10$, 1st-order Young overestimates the optimal interval by 27.44%, causing delayed checkpointing and excessive recomputation work upon failure.
+
+---
+
+## Silent Data Corruption (SDC) Attention Perturbation Model {#sec-appdx-reliability-sdc-perturbation}
+
+Not all hardware faults manifest as explicit system crashes, ECC double-bit errors, or kernel traps. **Silent Data Corruption (SDC)** occurs when single-bit errors or arithmetic logic unit (ALU) faults slip past parity checks, corrupting tensor values in SRAM, HBM, or register files without triggering an exception. In deep learning workloads, SDC is particularly dangerous because single corrupted floating-point values propagate through non-linear operations, destabilizing fleet-wide training [@dixit2021silent].
+
+### Exponent bit flip model in FP16 {#sec-appdx-reliability-sdc-fp16-model}
+
+Consider an IEEE 754 half-precision floating-point (FP16) tensor element representing a query vector $Q_{i,k}$, activation value, or weight matrix entry. FP16 allocates 16 total bits: 1 sign bit ($s$), 5 exponent bits ($e$), and 10 mantissa bits ($m$).
+
+The scalar value $x$ represented by the bitstring $(s, e, m)$ is given by:
+
+$$ x = (-1)^s \times 2^{e - 15} \times \left(1 + \frac{m}{1024}\right) $$
+
+Suppose a cosmic ray, voltage drop, or SRAM failure causes a single bit flip in the most significant exponent bit (bit 14). The exponent value changes from $e$ to $e' = e \pm 16$:
+
+$$ x_{\text{corrupt}} = (-1)^s \times 2^{(e \pm 16) - 15} \times \left(1 + \frac{m}{1024}\right) = x \times 2^{\pm 16} $$
+
+A single exponent bit flip scales the floating-point magnitude by a multiplier of $2^{\pm 16} = 65,536\times$.
+
+### Softmax probability saturation and gradient explosion {#sec-appdx-reliability-sdc-softmax-explosion}
+
+Let $S = \frac{Q K^T}{\sqrt{d_k}} \in \mathbb{R}^{B \times H \times N \times N}$ be the pre-softmax attention score matrix for sequence length $N$ and projection dimension $d_k$. Suppose an SDC event corrupts token entry $i$ in query matrix $Q$ by $\Delta Q$, where $\Delta Q_{i} \approx 2^{16} \cdot Q_i$:
+
+$$ S_{\text{corrupt}} = \frac{(Q + \Delta Q) K^T}{\sqrt{d_k}} = S + \Delta S $$
+
+where the perturbation matrix $\Delta S$ has nonzero entries for row $i$: $\Delta S_{i, j} = \frac{\Delta Q_i K_j^T}{\sqrt{d_k}}$.
+
+The attention probability perturbation $\Delta \text{Attention}$ for token row $i$ is:
+
+$$ \Delta \text{Attention}_i = \text{Softmax}\left( S_{i, \cdot} + \Delta S_{i, \cdot} \right) - \text{Softmax}\left( S_{i, \cdot} \right) $$
+
+Because $\Delta S_{i, j} \approx 65,536 \cdot S_{i, j}$, the exponent $e^{S_{i, j} + \Delta S_{i, j}}$ completely dominates all other terms in the row denominator:
+
+$$ \text{Softmax}(S_{i, \cdot} + \Delta S_{i, \cdot})_j \to 1.0, \qquad \text{Softmax}(S_{i, \cdot} + \Delta S_{i, \cdot})_{k \neq j} \to 0.0 $$
+
+This probability saturation forces the attention distribution to collapse into a delta function on the corrupted key position. During backward propagation, the gradient of the loss with respect to query weight parameters $\mathbf{W}_Q$ receives an unclipped scalar multiplier proportional to $\Delta Q \cdot 2^{16}$:
+
+$$ \|\nabla_{\mathbf{W}_Q} L\| \to \infty $$
+
+This causes catastrophic parameter corruption across all parallel ranks during the subsequent optimizer step, rendering all subsequent model outputs garbage and requiring a rollback to the last verified clean checkpoint.
