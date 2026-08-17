@@ -180,6 +180,43 @@ local function part_principles_index(book, fname)
   return nil
 end
 
+-- Convert an appendix ordinal to its letter (1 → A, 2 → B, ...).
+local function to_letter(n)
+  local num = tonumber(n) or 0
+  if num < 1 or num > 26 then return tostring(n) end
+  return string.char(string.byte("A") + num - 1)
+end
+
+-- Build the ordered list of appendix file stems and return this file's ordinal.
+--
+-- Quarto numbers every `type == "chapter"` entry in book.render sequentially,
+-- appendices included, so chapterinfo() hands back 17 for the first appendix of
+-- a 16-chapter volume. The *sections* in that file are lettered by Quarto's own
+-- appendix handling, which produced pages where "B.1 Data Engineering
+-- Foundations" sat directly above "Napkin Math 18.1". Numbering callouts by
+-- appendix letter puts the two back in agreement.
+--
+-- Appendices are identified by the `appendix_` stem prefix, which matches every
+-- entry of the `appendices:` block in config/_quarto-pdf-vol*.yml. Trailing
+-- entries in that block (glossary, references) are not `appendix_*` and carry no
+-- numbered callouts, so skipping them does not shift the letters.
+local function appendix_index(book, fname)
+  if not book or not book.render then return nil end
+  local stems = {}
+  for _, v in ipairs(book.render) do
+    if str(v.type) == "chapter" then
+      local stem = pandoc.path.split_extension(str(v.file))
+      if pandoc.path.filename(stem):find("^appendix_") then
+        table.insert(stems, stem)
+      end
+    end
+  end
+  for ano, stem in ipairs(stems) do
+    if stem == fname then return ano end
+  end
+  return nil
+end
+
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
@@ -206,9 +243,13 @@ local function Meta_findChapterNumber(meta)
     -- Principles live in part files (e.g. parts/foundations_principles.qmd). Use Roman part
     -- as prefix so numbering is Part I → I.1, I.2; Part II → II.1, II.2; etc.
     local partno = part_principles_index(meta.book, processedfile)
+    local appno = appendix_index(meta.book, processedfile)
     fbx.in_part_principles = (partno ~= nil)
     if partno ~= nil then
       fbx.chapno = to_roman(partno)
+    elseif appno ~= nil then
+      -- Appendix callouts take the appendix letter, matching their sections.
+      fbx.chapno = to_letter(appno)
     elseif meta.chapno then
       fbx.chapno = str(meta.chapno)
     else
