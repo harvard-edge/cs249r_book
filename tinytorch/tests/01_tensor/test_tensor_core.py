@@ -568,6 +568,30 @@ class TestTensorPyTorchCompat:
         assert np.array_equal(stacked.data[0], t1.data)
         assert np.array_equal(stacked.data[1], t2.data)
 
+    def test_reshape_infers_minus_one_across_multiple_known_dims(self):
+        """
+        reshape's -1 inference multiplies every OTHER dimension together
+        to get known_size (unknown_dim = self.size // known_size). Every
+        existing reshape(-1, ...) test only ever has a single other
+        dimension (e.g. reshape(8, -1)), so that multiplication loop
+        never actually needed to combine more than one term. This uses
+        two known dimensions to confirm the product, not just the
+        single-dimension case, is computed correctly.
+        """
+        t = Tensor(np.arange(24))  # 24 elements
+        reshaped = t.reshape(2, 3, -1)  # known_size = 2*3 = 6, infer 24//6 = 4
+
+        assert reshaped.shape == (2, 3, 4)
+        assert np.array_equal(reshaped.data.flatten(), np.arange(24))
+
+    def test_reshape_minus_one_first_position(self):
+        """The -1 can appear in any position, not just the last."""
+        t = Tensor(np.arange(24))
+        reshaped = t.reshape(-1, 3, 4)  # known_size = 3*4 = 12, infer 24//12 = 2
+
+        assert reshaped.shape == (2, 3, 4)
+        assert np.array_equal(reshaped.data.flatten(), np.arange(24))
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
