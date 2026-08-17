@@ -303,6 +303,46 @@ The two quiz corrections already applied (the benchmarking orders-of-magnitude
 span and the LayerNorm mechanism) stay in: they were cheap, and they are
 correct whenever the quizzes come back.
 
+### 5d. Prose sign-off verification — 2026-08-17
+
+All fifteen remaining §5 Medium rows were checked individually against current
+source. **Thirteen were already fixed**; two survive as soft observations, and
+neither is a print defect.
+
+Already fixed, verified: `training` ResNet-50 4 GB vs 3.2 GB · `data_engineering`
+1,843 vs 12,682 img/s · `compute_infrastructure` A100 23 percent vs B200 55.2
+percent byte bases · `compute_infrastructure` 2.9--3.2 TB vs 2.1 TB (now guarded
+at 2,100 GB) · `compute_infrastructure` raw `mttf_hours` (now goes through
+`fmt_time(..., style='word')`) · `benchmarking` the 1,825-sample estimate ·
+`benchmarking` two refs to a table lacking the data (all 21 `@tbl-` refs in that
+chapter now resolve; zero missing, zero orphaned) · `responsible_ai` Table 8 loan
+metrics (table and following prose now read from one `FairnessMetricsTable` cell,
+so they cannot diverge) · `responsible_ai` Kleinberg "at most one of three" (now
+"generally incompatible", "except in special cases such as equal base rates",
+"under the theorem's conditions") · and all five `edge_intelligence` rows: the
+counterpart values `3--5x`, `33x`, `2--5 MB`, and `2--3 W` occur **zero** times,
+and the amplification table is internally coherent with distinct ranges per row
+(footprint 4--12x, compute 2--3x, bandwidth 5--10x, energy 10--50x).
+
+Remaining, both non-blocking:
+
+1. `fleet_orchestration` — serving peak 400 plus training 618 allocates 1,018 of
+   1,024, leaving 6 accelerators unexplained. The cell is fully guarded (static
+   768, util 75 percent, dynamic 901) and internally consistent, so nothing is
+   *wrong*; the 6 is simply unaccounted for in prose. Fixing it moves four guards
+   and several published percentages, so it is an authorial call, not a defect.
+2. `compute_infrastructure` — single-node 175B training described as taking
+   "several months". At 16,000 TFLOP/s aggregate the figure is roughly 7.5 months
+   at 100 percent MFU and about 19 months at a realistic 40 percent, so "several"
+   understates it. No conflicting figure exists anywhere in the chapter (the
+   ledger's "its own 17 months" is not reproducible), so this is a soft hedge to
+   tighten, not a contradiction.
+
+**Prose sign-off:** no known prose-domain release blocker remains. The
+title-echo class stays HTML-only and print-correct; do not rewrite it. What is
+still unverified is not prose but *render*: nothing has been built, so layout,
+the LaTeX log, and margin overflow remain open until a full build runs.
+
 ### Still open and deliberately untouched
 
 Everything in §5b B1–B3 and the §5 High table that turns on **which of two
