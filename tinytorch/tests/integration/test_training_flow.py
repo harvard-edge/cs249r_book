@@ -188,11 +188,27 @@ class TestGradientChainNotBroken:
 
     def test_deep_network_gradient_chain(self):
         """Gradients must flow through 5 layers"""
-        # Use fixed seed for reproducibility - prevents flaky test due to
-        # random initialization that might kill all ReLUs
+        # Fixed seed for reproducibility. Note this only seeds x/target
+        # below: Linear's default weight init draws from a *different*,
+        # module-level shared rng in tinytorch.core.layers that isn't
+        # reset per test, so its state (and therefore these layers'
+        # initial weights) depends on how many other tests ran before
+        # this one and how many Linear layers *they* created. That
+        # previously made this test genuinely flaky under a large test
+        # suite: an unlucky draw could zero out every ReLU in a layer,
+        # killing the gradient chain by design, not by bug. Overriding
+        # each layer's weights explicitly below makes the test fully
+        # deterministic regardless of suite composition or run order.
         rng = np.random.default_rng(7)
 
         layers = [Linear(4, 4) for _ in range(5)]
+        for layer in layers:
+            # Small, well-conditioned, non-zero weights: guarantees every
+            # ReLU sees a mix of positive and negative pre-activations,
+            # so no layer can go fully dead regardless of the input.
+            layer.weight.data = (rng.standard_normal((4, 4)) * 0.5 + 0.1).astype(np.float32)
+            if layer.bias is not None:
+                layer.bias.data = np.full(4, 0.1, dtype=np.float32)
 
         # Enable gradient tracking on all layer parameters
         for layer in layers:
