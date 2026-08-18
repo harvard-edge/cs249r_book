@@ -445,6 +445,94 @@ class TestGradientClippingIntegration:
 
 
 # ─────────────────────────────────────────────
+# Gradient accumulation remainder handling
+# ─────────────────────────────────────────────
+
+class TestGradientAccumulationRemainder:
+    """train_epoch's in-loop update fires when (batch_idx + 1) % accumulation_steps == 0.
+    When the number of batches is not a multiple of accumulation_steps, a final
+    partial group is left over and must be flushed by the post-loop
+    'if accumulated_loss > 0' branch. Every existing accumulation test in this
+    suite uses batch counts that divide evenly, so that remainder branch, and
+    the total_loss/num_batches accounting around it, was never exercised."""
+
+    def test_remainder_batch_still_updates_weights(self):
+        """3 batches with accumulation_steps=2: batches 1-2 update in-loop,
+        batch 3 must be flushed by the post-loop remainder branch."""
+        trainer, model = simple_trainer(lr=0.1)
+        weights_before = model.parameters()[0].data.copy()
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]])) for _ in range(3)]
+        trainer.train_epoch(data, accumulation_steps=2)
+        assert not np.allclose(model.parameters()[0].data, weights_before), (
+            "The leftover third batch's gradient should still produce a weight update"
+        )
+
+    def test_avg_loss_divides_by_update_groups_not_batch_count(self):
+        """3 batches / accumulation_steps=2 means 2 update groups total (one of
+        2 batches, one of 1 leftover), so avg_loss = total_loss / 2, not / 3.
+        Manually replay the same _process_batch/_optimizer_update sequence
+        train_epoch is documented to perform, on a fresh trainer with
+        identical initial weights, and compare against train_epoch's own
+        computed avg_loss."""
+        trainer, model = simple_trainer(lr=0.1)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]])) for _ in range(3)]
+        avg_loss = trainer.train_epoch(data, accumulation_steps=2)
+
+        trainer2, model2 = simple_trainer(lr=0.1)
+        group1 = trainer2._process_batch(data[0][0], data[0][1], accumulation_steps=2)
+        group1 += trainer2._process_batch(data[1][0], data[1][1], accumulation_steps=2)
+        trainer2._optimizer_update()
+        group2 = trainer2._process_batch(data[2][0], data[2][1], accumulation_steps=2)
+        trainer2._optimizer_update()
+        expected_avg_loss = (group1 + group2) / 2
+
+        assert abs(avg_loss - expected_avg_loss) < 1e-6, (
+            f"avg_loss={avg_loss} should equal total_loss/num_update_groups="
+            f"{expected_avg_loss} (2 groups: batches [1,2] and [3]), not "
+            f"total_loss/num_batches (which would divide by 3)"
+        )
+
+    def test_single_leftover_batch_with_no_full_group(self):
+        """1 batch with accumulation_steps=3: the in-loop condition never
+        fires at all, so the entire epoch is handled by the remainder branch."""
+        trainer, model = simple_trainer(lr=0.1)
+        weights_before = model.parameters()[0].data.copy()
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        avg_loss = trainer.train_epoch(data, accumulation_steps=3)
+        assert not np.allclose(model.parameters()[0].data, weights_before)
+        assert np.isfinite(avg_loss) and avg_loss > 0
+
+    def test_remainder_group_increments_num_batches_for_history(self):
+        """train_loss history should record one entry per epoch regardless
+        of whether the epoch ends on a full or partial accumulation group."""
+        trainer, _ = simple_trainer(lr=0.1)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]])) for _ in range(3)]
+        trainer.train_epoch(data, accumulation_steps=2)
+        assert len(trainer.history['train_loss']) == 1
+
+    def test_no_spurious_extra_update_group_when_batches_divide_evenly(self):
+        """When num_batches is an exact multiple of accumulation_steps, the
+        in-loop branch already resets accumulated_loss to 0.0 and counts the
+        final update group; the post-loop remainder branch must then be a
+        true no-op. If its condition used >= 0 instead of > 0, it would fire
+        again on the already-zeroed accumulated_loss, adding a phantom
+        update group to the denominator and halving avg_loss even though no
+        new batch was ever processed."""
+        trainer, model = simple_trainer(lr=0.1)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        avg_loss = trainer.train_epoch(data, accumulation_steps=1)
+
+        trainer2, _ = simple_trainer(lr=0.1)
+        expected_avg_loss = trainer2._process_batch(data[0][0], data[0][1], accumulation_steps=1)
+
+        assert abs(avg_loss - expected_avg_loss) < 1e-6, (
+            f"avg_loss={avg_loss} should equal the single batch's loss "
+            f"({expected_avg_loss}); a phantom extra update group in the "
+            f"denominator would incorrectly halve it"
+        )
+
+
+# ─────────────────────────────────────────────
 # Train / eval mode switching
 # ─────────────────────────────────────────────
 
