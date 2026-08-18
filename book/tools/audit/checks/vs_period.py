@@ -91,6 +91,7 @@ def check(
                     before=line,
                     suggested_after=new_line,
                     auto_fixable=True,
+                    reason="Bare 'vs' without period -> change to 'vs.'",
                 )
             )
             counter += 1

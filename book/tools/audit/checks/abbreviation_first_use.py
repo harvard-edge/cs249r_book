@@ -444,8 +444,13 @@ def check(
         )
         if intro_ln is None:
             reason += " (no introduction found in this file)"
+            suggested_after = f"Expand at first use: '{_expansion_label(abbrev)} ({abbrev})'"
         else:
             reason += f" (first introduction is later, at line {intro_ln})"
+            suggested_after = (
+                f"Move canonical expansion from line {intro_ln} to first use at line {line_num} "
+                f"(or expand here and use bare '{abbrev}' at line {intro_ln})"
+            )
         issues.append(
             Issue(
                 id=make_issue_id(scope, CATEGORY, counter),
@@ -456,7 +461,7 @@ def check(
                 line=line_num,
                 col=col,
                 before=line,
-                suggested_after="",  # fix requires editorial judgment
+                suggested_after=suggested_after,
                 auto_fixable=False,
                 needs_subagent=True,
                 reason=reason,
@@ -481,7 +486,10 @@ def check(
                     line=line_num,
                     col=col,
                     before=line,
-                    suggested_after="",  # fix requires editorial judgment
+                    suggested_after=(
+                        f"Replace repeat expansion with bare acronym '{abbrev}' "
+                        f"(already introduced at line {occurrences[0][0]})"
+                    ),
                     auto_fixable=False,
                     needs_subagent=True,
                     reason=(

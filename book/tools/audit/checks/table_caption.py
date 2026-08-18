@@ -156,13 +156,12 @@ def check(
                         line=table_start,
                         col=0,
                         before=header_preview,
-                        suggested_after="",  # No automatic fix.
+                        suggested_after=": **Title**: Description. {#tbl-slug}",
                         auto_fixable=False,
-                        needs_subagent=False,
+                        needs_subagent=True,
                         reason=(
-                            "Pipe table at line "
-                            f"{table_start} has no `: **Title**: … {{#tbl-…}}` "
-                            "caption within four lines of its last row."
+                            "Pipe table lacks a caption line "
+                            "(`: **Title**: Description. {#tbl-...}`)"
                         ),
                     )
                 )

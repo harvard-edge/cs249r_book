@@ -449,7 +449,7 @@ def check(
                 line=line_num,
                 col=0,
                 before=line,
-                suggested_after="",  # Subagent fills this in
+                suggested_after=f"Convert H{level} heading to sentence case (preserve proper nouns and acronyms)",
                 auto_fixable=False,
                 needs_subagent=True,
                 reason=f"H{level} heading in title case: {heading_text!r}",

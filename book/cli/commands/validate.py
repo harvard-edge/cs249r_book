@@ -8216,6 +8216,7 @@ class ValidateCommand:
                         ),
                         severity="error",
                         context=line.strip()[:100],
+                        suggestion=f"Replace @{prefix}-{slug} with \\ref{{{prefix}-{slug}}}",
                     ))
 
                 dup_m = re.search(
@@ -8234,6 +8235,7 @@ class ValidateCommand:
                         ),
                         severity="error",
                         context=line.strip()[:100],
+                        suggestion=f"Remove duplicate callout noun inside parens: change to '(\\ref{{...}})'",
                     ))
 
         return ValidationRunResult(
@@ -8277,6 +8279,7 @@ class ValidateCommand:
                             message='Use @sec-/@fig- cross-refs or "earlier"/"later", not "above"/"below"',
                             severity="warning",
                             context=context,
+                            suggestion="Replace spatial phrase with a section cross-reference (@sec-...) or temporal word ('earlier' / 'later')",
                         )
                     )
 
@@ -8335,6 +8338,7 @@ class ValidateCommand:
                                     message=f'Avoid self-referential section cross-reference "{xref}" within its own section scope',
                                     severity="warning",
                                     context=context,
+                                    suggestion=f"Remove self-referential '{xref}' or refer to current section directly ('this section')",
                                 )
                             )
 
@@ -8351,11 +8355,6 @@ class ValidateCommand:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        # Two+ digit numbers separated by a single hyphen (not en dash).
-        # Word boundary + negative lookbehind on `CVE-` so CVE IDs like
-        # CVE-2021-44228 aren't flagged (where 2021-44228 is part of the
-        # identifier, not a year range). The \b prevents finditer from
-        # advancing into the middle of the CVE number and re-matching.
         hyphen_range = re.compile(r"(?<!CVE-)\b(\d{2,})-(\d{2,})")
 
         for file in files:
@@ -8385,6 +8384,7 @@ class ValidateCommand:
                                 message=f'Use en dash for ranges: {m.group(1)}–{m.group(2)} not {m.group()} (§2)',
                                 severity="warning",
                                 context=context,
+                                suggestion=f"Use en-dash for number range: '{m.group(1)}--{m.group(2)}'",
                             )
                         )
 
@@ -8433,6 +8433,7 @@ class ValidateCommand:
                     message=f"Footnote [^{fn_id}] also defined in {len(occurrences) - 1} other file(s)",
                     severity="warning",
                     context=content[:80],
+                    suggestion=f"Rename footnote ID '[^{fn_id}]' to be distinct to this chapter (e.g. '[^{fn_id}-<topic>]')",
                 ))
 
         return ValidationRunResult(
@@ -9856,10 +9857,10 @@ class ValidateCommand:
                 safe_msg = _rich_escape(str(msg))
                 code_label = f" {_rich_escape(f'[{code}]')}" if code else ""
                 console.print(f"  [{sev_style}]{sev_label}[/{sev_style}] {safe_file}:{line}{code_label} {safe_msg}")
-                if verbose and issue.get("context"):
+                if issue.get("context"):
                     console.print(f"     [dim]source: {_rich_escape(str(issue['context']))}[/dim]")
-                if verbose and issue.get("suggestion"):
-                    console.print(f"     [dim]fix: {_rich_escape(str(issue['suggestion']))}[/dim]")
+                if issue.get("suggestion"):
+                    console.print(f"     [dim cyan]fix: {_rich_escape(str(issue['suggestion']))}[/dim cyan]")
             if run["issue_count"] > 30:
                 console.print(f"  [dim]... {run['issue_count'] - 30} more[/dim]")
             console.print()
@@ -11030,6 +11031,7 @@ class ValidateCommand:
                     message=message,
                     severity=severity,
                     context=(issue.before or "")[:160],
+                    suggestion=getattr(issue, "suggested_after", "") or "",
                 ))
         return ValidationRunResult(
             name=name,
@@ -11085,6 +11087,7 @@ class ValidateCommand:
                     message=message,
                     severity=severity,
                     context=(issue.before or "")[:160],
+                    suggestion=getattr(issue, "suggested_after", "") or "",
                 ))
         return ValidationRunResult(
             name=name,
