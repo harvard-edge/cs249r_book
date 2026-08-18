@@ -114,6 +114,7 @@ class LineState:
     in_tip_callout: bool = False  # .callout-tip (Learning Objectives)
     in_checkpoint_callout: bool = False  # .callout-checkpoint
     in_definition_callout: bool = False  # .callout-definition (Platinum Standard)
+    in_tikz: bool = False  # \begin{tikzpicture} ... \end{tikzpicture}
     callout_depth: int = 0  # depth of any div (::: {...}) we're inside
 
 
@@ -143,6 +144,8 @@ class LineWalker:
     _CODE_FENCE_RE = re.compile(r"^\s*```")
     _HTML_OPEN_RE = re.compile(r"<(style|script)\b", re.IGNORECASE)
     _HTML_CLOSE_RE = re.compile(r"</(style|script)>", re.IGNORECASE)
+    _TIKZ_OPEN_RE = re.compile(r"^\s*\\begin\{tikzpicture\}")
+    _TIKZ_CLOSE_RE = re.compile(r"^\s*\\end\{tikzpicture\}")
     # Quarto div fences. We track these to know when we enter/exit
     # callout-tip and callout-checkpoint blocks. `::: {.callout-tip}`
     # opens a div; a bare `:::` closes it. Nested divs are supported
@@ -392,9 +395,13 @@ class LineWalker:
             # ── HTML <style>/<script> blocks ──
             if self._HTML_OPEN_RE.search(line):
                 self.state.in_html_style_block = True
+            if self._TIKZ_OPEN_RE.search(line):
+                self.state.in_tikz = True
             yield line, self.state, i + 1
             if self._HTML_CLOSE_RE.search(line):
                 self.state.in_html_style_block = False
+            if self._TIKZ_CLOSE_RE.search(line):
+                self.state.in_tikz = False
 
 
 # ── Inline span computation ──────────────────────────────────────────────────

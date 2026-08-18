@@ -1,18 +1,12 @@
-from __future__ import annotations
-
-import importlib.util
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "book" / "tools" / "scripts" / "mit_press" / "check_footnote_caps.py"
+cli_path = str(ROOT / "book")
+if cli_path not in sys.path:
+    sys.path.insert(0, cli_path)
 
-spec = importlib.util.spec_from_file_location("check_footnote_caps_for_test", SCRIPT)
-footnote_caps = importlib.util.module_from_spec(spec)
-sys.modules["check_footnote_caps_for_test"] = footnote_caps
-assert spec.loader is not None
-spec.loader.exec_module(footnote_caps)
+from cli.checks import footnote_caps
 
 
 def _write_qmd(tmp_path: Path, body: str) -> Path:

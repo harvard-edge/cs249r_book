@@ -105,43 +105,19 @@ RULE_TEXT = "§10.3 concept terms must be lowercase in body prose"
 #   - "Machine Learning Operations": context-dependent with "MLOps"
 #     acronym form; best left as a subagent-lane category.
 
-_TERMS = {
-    # Core ten from round 1 pass 4 (proven against vol1):
-    "Iron Law":            "iron law",
-    "Degradation Equation": "degradation equation",
-    "Verification Gap":    "verification gap",
-    "ML Node":             "ML node",
-    "Bitter Lesson":       "bitter lesson",
-    "Data Wall":           "data wall",
-    "Compute Wall":        "compute wall",
-    "Memory Wall":         "memory wall",
-    "Power Wall":          "power wall",
-    "Energy Corollary":    "energy corollary",
-    # Low-risk additions from §10.3 (book-coined or domain-specific):
-    "Scaling Laws":        "scaling laws",
-    "Information Roofline": "information roofline",
-    "Data Gravity":        "data gravity",
-    "Napkin Math":         "napkin math",
-    "Starving Accelerator": "starving accelerator",
-    "Latency Cliff":       "latency cliff",
-    "Four Pillars Framework": "four pillars framework",
-    #
-    # Tier 5 family extensions (walls, taxes, gaps, bottlenecks, cliffs
-    # beyond the core list above) are NOT enforced auto-fixably here.
-    # They follow the categorical-default lowercase rule per §10.3.2 but
-    # have contextual exceptions the auto-fix cannot reliably distinguish:
-    # scare-quoted canonical introductions ("Coordination Tax." at first
-    # mention), pedagogical bullets in `.callout-learning-objectives` and
-    # `.callout-checkpoint`, italic uniform structural-label patterns
-    # ("**The Impediment**: *Physical Limits*" / "*The Coordination Tax*").
-    # Use the manual grep + LLM-Edit workflow per §10.3.3 for Tier 5
-    # family sweeps. Audit grep example:
-    #
-    #   grep -rEn '\b(Coordination Tax|Iteration Tax|...|Network Wall|
-    #     Capacity Wall|Communication Wall)\b' book/quarto/contents \
-    #     --include='*.qmd' \
-    #     | grep -vE '(\\index\{|^[^:]*:[0-9]+:##|title=|...)'
-}
+import yaml
+
+DATA_FILE = Path(__file__).resolve().parents[3] / "cli" / "data" / "concept_terms.yaml"
+if not DATA_FILE.is_file():
+    raise FileNotFoundError(f"Authoritative concept terms data file missing: {DATA_FILE}")
+
+with open(DATA_FILE, "r", encoding="utf-8") as _f:
+    _DATA = yaml.safe_load(_f)
+
+if not _DATA or "terms" not in _DATA:
+    raise ValueError(f"Invalid concept terms data in {DATA_FILE}")
+
+_TERMS = _DATA["terms"]
 
 
 # ── Span helper that excludes attribute values ────────────────────────────

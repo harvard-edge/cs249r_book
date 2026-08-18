@@ -530,9 +530,8 @@ class ValidateCommand:
                   note="pre-/non- close-up (§10.8)"),
             Scope("concept-caps", "_run_mitpress_concept_term_capitalization",
                   note="iron law, memory wall lowercase (§10.3)"),
-            # abbreviation-first-use currently opt-in because some findings
-            # require editorial judgment.
-            Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use", default=False),
+            Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use",
+                  note="expand abbreviations on first use (§10.5)"),
             Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
         ],
@@ -605,6 +604,8 @@ class ValidateCommand:
             Scope("render-audit", "_run_math_render_audit", default=False),
         ],
         "structure": [
+            Scope("concept-maps", "_run_concept_maps",
+                  note="validate concept-map YAML files and frontmatter wiring"),
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
@@ -622,6 +623,8 @@ class ValidateCommand:
                        "not a Purpose heading or hook question"),
         ],
         "code": [
+            Scope("inline-order", "_run_inline_ref_order",
+                  note="inline {python} references must not appear before their defining cell"),
             Scope("python-echo", "_run_python_echo",
                   note="echo: false on python blocks"),
             Scope("str-latex-leak", "_run_str_latex_leak",
@@ -762,6 +765,8 @@ class ValidateCommand:
             # Narrow rendered-layout gate for table/prose crowding. Useful
             # after chapter-only builds where `verify` can be noisy.
             Scope("table-spacing", "_run_pdf_table_spacing"),
+            Scope("purpose-overflow", "_run_pdf_purpose_overflow", default=False,
+                  note="chapter Purpose must fit on its opener page in rendered PDF"),
             # Added 2026-05-26: scan PDF text for "UserWarning" strings that
             # may indicate a Python warning leaked into the rendered output.
             # Default=False — post-build audit, not a pre-commit gate.
@@ -4702,6 +4707,46 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    # ------------------------------------------------------------------
+    # Inline Reference Execution Order
+    # ------------------------------------------------------------------
+
+    def _run_inline_ref_order(self, root: Path) -> ValidationRunResult:
+        """Check that inline {python} references appear after their defining cell."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        try:
+            from cli.checks.inline_ref_order import check_inline_order
+        except ImportError:
+            from book.cli.checks.inline_ref_order import check_inline_order
+
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            order_issues = check_inline_order(f, text)
+            for oi in order_issues:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(f),
+                        line=oi.line,
+                        code="inline_ref_before_definition",
+                        message=oi.message,
+                        severity="error",
+                        context=oi.raw,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="inline-order",
+            description="Inline {python} references defined before use",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_python_echo(self, root: Path) -> ValidationRunResult:
         """Ensure every ```{python} block has #| echo: false (code must not appear in output)."""
         start = time.time()
@@ -4952,6 +4997,42 @@ class ValidateCommand:
             name="parts",
             description="Validate \\part{{key:...}} against summaries.yml",
             files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Concept Maps Validation
+    # ------------------------------------------------------------------
+
+    def _run_concept_maps(self, root: Path) -> ValidationRunResult:
+        """Validate concept-map YAML files and QMD frontmatter wiring."""
+        start = time.time()
+        issues: List[ValidationIssue] = []
+        try:
+            from cli.checks.concept_maps import check_concept_maps
+        except ImportError:
+            from book.cli.checks.concept_maps import check_concept_maps
+
+        repo_root = self.config_manager.root_dir
+        contents_dir = root if "contents" in str(root) else repo_root / "book" / "quarto" / "contents"
+        findings = check_concept_maps(contents_dir, repo_root)
+        for finding in findings:
+            issues.append(
+                ValidationIssue(
+                    file=finding.path,
+                    line=1,
+                    code="concept_map_wiring",
+                    message=finding.message,
+                    severity=finding.severity,
+                )
+            )
+
+        map_files = list(contents_dir.glob("**/*_concepts.y*ml"))
+        return ValidationRunResult(
+            name="concept-maps",
+            description="Concept-map YAML files and frontmatter wiring",
+            files_checked=len(map_files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
@@ -8382,25 +8463,14 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        import importlib.util
-        import sys as _sys
-        script_path = (
-            Path(__file__).resolve().parents[2]
-            / "tools" / "scripts" / "mit_press" / "check_footnote_caps.py"
-        )
-        mod_name = "mlsys_check_footnote_caps"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script_path)
-            mod = importlib.util.module_from_spec(spec)
-            # Register before exec_module so @dataclass can resolve cls.__module__.
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        try:
+            from cli.checks.footnote_caps import DEFAULT_ALLOWLIST, load_allowlist, scan_file
+        except ImportError:
+            from book.cli.checks.footnote_caps import DEFAULT_ALLOWLIST, load_allowlist, scan_file
 
-        allowlist = mod.load_allowlist(mod.DEFAULT_ALLOWLIST)
+        allowlist = load_allowlist(DEFAULT_ALLOWLIST)
         for f in files:
-            for v in mod.scan_file(f, allowlist):
+            for v in scan_file(f, allowlist):
                 snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
                 if getattr(v, "kind", "") == "term_head_case":
                     code = "footnote_term_head_case"
@@ -8545,22 +8615,12 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        import importlib.util
-        import sys as _sys
-        script_path = (
-            Path(__file__).resolve().parents[2]
-            / "tools" / "scripts" / "mit_press" / "check_footnote_caps.py"
-        )
-        mod_name = "mlsys_check_footnote_caps"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script_path)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        try:
+            from cli.checks.footnote_caps import DEFAULT_ALLOWLIST, load_allowlist
+        except ImportError:
+            from book.cli.checks.footnote_caps import DEFAULT_ALLOWLIST, load_allowlist
 
-        allowlist = mod.load_allowlist(mod.DEFAULT_ALLOWLIST)
+        allowlist = load_allowlist(DEFAULT_ALLOWLIST)
         fn_pat = re.compile(r"\[\^(fn-[a-z0-9-]+)\]")
 
         for file in files:
@@ -8686,7 +8746,7 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         fn_def_pat = re.compile(r'^\[\^(fn-[a-z0-9-]+)\]:\s*(.+)$')
-        abbrevs = ['e.g.', 'i.e.', 'vs.', 'etc.', 'al.', 'ref.', 'fig.', 'tab.', 'lst.', 'eq.', 'sec.', 'appdx.', 'no.', 'vol.', 'p.', 'pp.', 'dr.', 'prof.', 'approx.', 'inc.', 'corp.', 'ltd.', 'h.', 't.', 'e.', 'c.', 'j.', 'm.', 'a.', 's.']
+        abbrevs = ['e.g.', 'i.e.', 'vs.', 'v.', 'co.', 'etc.', 'al.', 'ref.', 'fig.', 'tab.', 'lst.', 'eq.', 'sec.', 'appdx.', 'no.', 'vol.', 'p.', 'pp.', 'dr.', 'prof.', 'approx.', 'inc.', 'corp.', 'ltd.', 'h.', 't.', 'e.', 'c.', 'j.', 'm.', 'a.', 's.']
 
         for file in files:
             lines = file.read_text(encoding="utf-8").split("\n")
@@ -8775,40 +8835,21 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_table_content(self, root: Path) -> ValidationRunResult:
-        """Validate grid table content (bare pipes, fracs, HTML entities).
-
-        Native import of book/tools/scripts/content/validate_tables.py
-        via importlib — no subprocess. The script's per-file API
-        (`validate_file(path) -> List[TableIssue]`) is the entry point;
-        each TableIssue maps directly to a ValidationIssue. The script
-        itself remains callable as a standalone CLI for its --fix mode.
-        """
-        import importlib.util
-        import sys as _sys
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "content" / "validate_tables.py"
-        )
-        mod_name = "mlsys_validate_tables"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        """Validate grid table content (bare pipes, fracs, HTML entities)."""
+        try:
+            from cli.checks.table_content import validate_file
+        except ImportError:
+            from book.cli.checks.table_content import validate_file
 
         t0 = time.time()
         qmd_files = sorted(root.rglob("*.qmd"))
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             try:
-                table_issues = mod.validate_file(qmd)
+                table_issues = validate_file(qmd)
             except Exception:
                 continue
             for ti in table_issues:
-                # ti.file may already be relative (str) or absolute.
                 p = Path(ti.file)
                 if p.is_absolute():
                     try:
@@ -8830,25 +8871,70 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Spelling checks  (delegated to check_prose_spelling.py / check_tikz_spelling.py)
+    # Spelling checks
     # ------------------------------------------------------------------
 
     def _run_spelling_prose(self, root: Path) -> ValidationRunResult:
         """Spell check prose text (requires aspell)."""
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "content" / "check_prose_spelling.py"
+        t0 = time.time()
+        try:
+            from cli.checks.spelling_prose import check_file
+        except ImportError:
+            from book.cli.checks.spelling_prose import check_file
+
+        qmd_files = sorted(root.rglob("*.qmd"))
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for err in check_file(qmd):
+                misspelled_str = ", ".join(err.get("misspelled", []))
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(qmd),
+                        line=err.get("line", 0),
+                        code="spelling-prose",
+                        message=f"Misspelled: {misspelled_str}",
+                        severity="warning",
+                        context=err.get("text", "")[:120],
+                    )
+                )
+        return ValidationRunResult(
+            name="spelling-prose",
+            description="Spell check prose text (aspell)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [str(root)], "spelling-prose")
 
     def _run_spelling_tikz(self, root: Path) -> ValidationRunResult:
         """Spell check TikZ diagram text (requires aspell)."""
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "content" / "check_tikz_spelling.py"
+        t0 = time.time()
+        try:
+            from cli.checks.spelling_tikz import check_file
+        except ImportError:
+            from book.cli.checks.spelling_tikz import check_file
+
+        qmd_files = sorted(root.rglob("*.qmd"))
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for err in check_file(qmd):
+                suggestions_str = ", ".join(err.get("suggestions", []))
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(qmd),
+                        line=err.get("line", 0),
+                        code="spelling-tikz",
+                        message=f"TikZ text typo: {suggestions_str}",
+                        severity="warning",
+                        context=err.get("context", "")[:120],
+                    )
+                )
+        return ValidationRunResult(
+            name="spelling-tikz",
+            description="Spell check TikZ diagram text (aspell)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        # check_tikz_spelling.py auto-scans from repo root, so pass no args
-        return self._delegate_script(script, [], "spelling-tikz")
 
     # ------------------------------------------------------------------
     # EPUB validation
@@ -9387,6 +9473,56 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_pdf_purpose_overflow(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+    ) -> ValidationRunResult:
+        """Check that chapter Purpose sections fit on their opener page in the built PDF."""
+        from cli.commands._pdf_checks import default_pdf_path, scan_purpose_overflow
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            if not pdf_path.is_file():
+                continue
+            checked += 1
+            for issue in scan_purpose_overflow(pdf_path, vol, repo_root):
+                issues.append(
+                    ValidationIssue(
+                        file=str(pdf_path.relative_to(repo_root))
+                        if pdf_path.is_absolute()
+                        else str(pdf_path),
+                        line=0,
+                        code=issue.code,
+                        message=issue.message,
+                        severity=issue.severity,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="purpose-overflow",
+            description=f"Chapter Purpose opener page fit in PDF ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     # ------------------------------------------------------------------
     # Registry: constants → registry migration gates
     # ------------------------------------------------------------------
@@ -9806,28 +9942,11 @@ class ValidateCommand:
             )
 
     def _run_grid_tables(self, root: Path) -> ValidationRunResult:
-        """Check for grid tables (prefer pipe tables).
-
-        Native import of book/tools/scripts/utilities/convert_grid_to_pipe_tables.py
-        via importlib — no subprocess. The script's `check_grid_tables(content)`
-        per-content API is the entry point. The script itself remains
-        callable as a standalone CLI for its --fix mode.
-        """
-        import importlib.util
-        import sys as _sys
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "utilities" / "convert_grid_to_pipe_tables.py"
-        )
-        mod_name = "mlsys_convert_grid_to_pipe_tables"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        """Check for grid tables (prefer pipe tables)."""
+        try:
+            from cli.checks.grid_tables import check_grid_tables
+        except ImportError:
+            from book.cli.checks.grid_tables import check_grid_tables
 
         t0 = time.time()
         qmd_files = sorted(root.rglob("*.qmd"))
@@ -9838,7 +9957,7 @@ class ValidateCommand:
             except (OSError, UnicodeDecodeError):
                 continue
             try:
-                grid_hits = mod.check_grid_tables(content)
+                grid_hits = check_grid_tables(content)
             except Exception:
                 continue
             for line_num, desc in grid_hits:
@@ -10876,10 +10995,13 @@ class ValidateCommand:
         """
         import importlib
         import sys as _sys
-        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
-        audit_root_str = str(audit_root)
-        if audit_root_str not in _sys.path:
-            _sys.path.insert(0, audit_root_str)
+        # Prefer native book/cli/audit, fallback to book/tools
+        cli_root = Path(__file__).resolve().parent.parent
+        tools_root = cli_root.parent / "tools"
+        for p in (cli_root, tools_root):
+            p_str = str(p)
+            if p_str not in _sys.path:
+                _sys.path.insert(0, p_str)
         mod = importlib.import_module(module_path)
 
         t0 = time.time()
@@ -10928,10 +11050,12 @@ class ValidateCommand:
         import importlib
         import sys as _sys
 
-        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
-        audit_root_str = str(audit_root)
-        if audit_root_str not in _sys.path:
-            _sys.path.insert(0, audit_root_str)
+        cli_root = Path(__file__).resolve().parent.parent
+        tools_root = cli_root.parent / "tools"
+        for p in (cli_root, tools_root):
+            p_str = str(p)
+            if p_str not in _sys.path:
+                _sys.path.insert(0, p_str)
         mod = importlib.import_module(module_path)
 
         t0 = time.time()
@@ -11096,45 +11220,27 @@ class ValidateCommand:
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
-        """Validate image file formats using Pillow.
-
-        Native import of book/tools/scripts/images/manage_images.py via
-        importlib — no subprocess. Calls `check_file()` per image; each
-        returned tuple becomes a ValidationIssue. The script remains
-        callable as a standalone CLI for its --fix mode.
-        """
-        import importlib.util
-        import sys as _sys
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "images" / "manage_images.py"
-        )
-        mod_name = "mlsys_manage_images"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        """Validate image file formats using Pillow."""
+        try:
+            from cli.checks.image_formats import check_file
+        except ImportError:
+            from book.cli.checks.image_formats import check_file
 
         t0 = time.time()
         image_files: List[Path] = []
-        for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif"):
-            image_files.extend(sorted(root.rglob(ext)))
+        for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"):
+            image_files.extend([
+                f for f in sorted(root.rglob(ext))
+                if "_files/mediabag/" not in str(f)
+            ])
 
         issues: List[ValidationIssue] = []
         for img in image_files:
             try:
-                # show_progress=False suppresses the script's own console
-                # output; binder owns the rendering channel.
-                bad = mod.check_file(str(img), strict=False, verbose=False,
-                                     fix=False, show_progress=False)
+                bad = check_file(img, strict=False, verbose=False, fix=False, show_progress=False)
             except Exception:
                 continue
             for tup in bad:
-                # tuple shape: (filepath, msg, actual_format, expected_format)
                 fp, msg = tup[0], tup[1]
                 actual = tup[2] if len(tup) > 2 else None
                 expected = tup[3] if len(tup) > 3 else None
@@ -11157,51 +11263,27 @@ class ValidateCommand:
         )
 
     def _run_external_images(self, root: Path) -> ValidationRunResult:
-        """Check for external image URLs in QMD files.
-
-        Native import of book/tools/scripts/images/manage_external_images.py
-        via importlib — no subprocess. Calls
-        `ImageDownloader.validate_external_images()` which returns the
-        list of (file, fig_id, url) tuples; each becomes a
-        ValidationIssue. The script remains callable as a standalone
-        CLI for its download / fix modes.
-        """
-        import importlib.util
-        import sys as _sys
-        import io
-        import contextlib
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "images" / "manage_external_images.py"
-        )
-        mod_name = "mlsys_manage_external_images"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        """Check for external image URLs in QMD files."""
+        try:
+            from cli.checks.external_images import ImageDownloader
+        except ImportError:
+            from book.cli.checks.external_images import ImageDownloader
 
         t0 = time.time()
-        downloader = mod.ImageDownloader(str(root))
-        # ImageDownloader prints status banners; suppress so binder owns
-        # the rendering channel.
-        with contextlib.redirect_stdout(io.StringIO()):
-            try:
-                files_processed, external_images = downloader.validate_external_images(False)
-            except Exception as e:
-                elapsed = int((time.time() - t0) * 1000)
-                return ValidationRunResult(
-                    name="external-images", description="External image URL detection",
-                    files_checked=0, elapsed_ms=elapsed,
-                    issues=[ValidationIssue(
-                        file=str(script.name), line=0, code="external-images-runtime",
-                        message=f"validate_external_images failed: {type(e).__name__}: {e}",
-                        severity="error",
-                    )],
-                )
+        downloader = ImageDownloader(str(root))
+        try:
+            files_processed, external_images = downloader.validate_external_images(False)
+        except Exception as e:
+            elapsed = int((time.time() - t0) * 1000)
+            return ValidationRunResult(
+                name="external-images", description="External image URL detection",
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file=str(root), line=0, code="external-images-runtime",
+                    message=f"validate_external_images failed: {type(e).__name__}: {e}",
+                    severity="error",
+                )],
+            )
 
         issues: List[ValidationIssue] = []
         for tup in external_images:

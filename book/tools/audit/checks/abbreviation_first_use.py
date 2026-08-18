@@ -90,56 +90,23 @@ RULE_TEXT_OVER = "Do not repeat a full expansion after the chapter introduced it
 #     rationale. These terms should be introduced once in the book (in
 #     their canonical chapter) and may be used bare everywhere else.
 
-# An entry's expansion may be a tuple when the book legitimately uses the same
-# letters for two different concepts in different chapters. Chapter-level first
-# use means either expansion introduces the term for its own chapter; the
-# checker accepts whichever one that chapter actually teaches.
+import yaml
+
+DATA_FILE = Path(__file__).resolve().parents[3] / "cli" / "data" / "abbreviations.yaml"
+if not DATA_FILE.is_file():
+    raise FileNotFoundError(f"Authoritative abbreviations data file missing: {DATA_FILE}")
+
+with open(DATA_FILE, "r", encoding="utf-8") as _f:
+    _DATA = yaml.safe_load(_f)
+
+if not _DATA or "canonical_expansions" not in _DATA:
+    raise ValueError(f"Invalid abbreviations data in {DATA_FILE}")
+
 _CANONICAL = [
-    # Specialized abbreviations — must be expanded on first use per chapter
-    ("AST",    "abstract syntax tree"),
-    ("AULC",   "area under the learning curve"),
-    ("CTM",    "continuous therapeutic monitoring"),
-    ("DAG",    "directed acyclic graph"),
-    ("DCE",    "dead-code elimination"),
-    ("ELT",    "extract, load, transform"),
-    ("ETL",    "extract, transform, load"),
-    ("FFT",    "fast Fourier transform"),
-    ("GELU",   "Gaussian Error Linear Unit"),
-    ("HELM",   "Holistic Evaluation of Language Models"),
-    ("HIS",    "hospital information systems"),
-    ("HOG",    "histogram of oriented gradients"),
-    ("ICR",    "information-compute ratio"),
-    ("ILSVRC", "ImageNet Large Scale Visual Recognition Challenge"),
-    ("KWS",    "keyword spotting"),
-    ("MMLU",   "Massive Multitask Language Understanding"),
-    ("MSWC",   "Multilingual Spoken Words Corpus"),
-    # NAS is the ambiguous case abbreviations.md calls out by name. Vol 1
-    # (model_compression, nn_architectures) and vol2/sustainable_ai and
-    # vol2/ops_scale mean "neural architecture search"; vol2/data_storage
-    # means "network-attached storage". Both are live in the book today, so
-    # both count as a valid chapter-level introduction.
-    ("NAS",    ("neural architecture search", "network-attached storage")),
-    ("OLAP",   "online analytical processing"),
-    ("OLTP",   "online transaction processing"),
-    ("OTA",    "over-the-air"),
-    ("PTX",    "Parallel Thread Execution"),
-    ("RBAC",   "role-based access control"),
-    ("RFM",    "recency, frequency, and monetary"),
-    # SIFT is deliberately excluded: the §10.5 expansion is
-    # "scale-invariant feature transform" (computer vision), but the
-    # book also uses SIFT as "software-implemented fault tolerance" in
-    # fault_tolerance.qmd — a different acronym that spells the same.
-    # Homonym handling would require per-context disambiguation; skip
-    # the term to avoid FPs.
-    ("SSA",    "static single-assignment"),
-    ("TFDV",   "TensorFlow Data Validation"),
-    ("UAT",    "universal approximation theorem"),
-    ("V2X",    "vehicle-to-everything"),
-    ("XLA",    "Accelerated Linear Algebra"),
-    # "CAP theorem" — multi-word acronym handled separately (not in this list
-    # because the abbreviation includes a lowercase word "theorem" that
-    # would require custom word-boundary matching).
+    (abbrev, tuple(exp) if isinstance(exp, list) else exp)
+    for abbrev, exp in _DATA["canonical_expansions"].items()
 ]
+_EXEMPT_BASELINES = set(_DATA.get("exempt_baselines", []))
 
 # File-level exclusions. Files listed here are skipped entirely because
 # their purpose is to define terms, not use them in running prose.
@@ -287,7 +254,7 @@ def _skip_line_for_bare(line: str, state) -> bool:
     Intro-finding uses a separate, looser filter so that introductions
     appearing inside headings still count as valid.
     """
-    if state.in_yaml or state.in_code_fence or state.in_display_math:
+    if state.in_yaml or state.in_code_fence or state.in_display_math or state.in_tikz:
         return True
     if state.in_html_style_block or state.in_html_comment:
         return True
@@ -316,7 +283,7 @@ def _skip_line_for_intro(line: str, state) -> bool:
     non-prose: YAML frontmatter, code fences, display math, HTML style
     blocks/comments, Python chunk options, and div fences.
     """
-    if state.in_yaml or state.in_code_fence or state.in_display_math:
+    if state.in_yaml or state.in_code_fence or state.in_display_math or state.in_tikz:
         return True
     if state.in_html_style_block or state.in_html_comment:
         return True

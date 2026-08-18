@@ -641,24 +641,15 @@ class LayoutCommand:
     # ------------------------------------------------------------------
 
     def _purpose(self, pdf_path: Path, volume: str) -> bool:
-        """Gate: no chapter's Purpose section may overflow past its opener page.
+        """Gate: no chapter's Purpose section may overflow past its opener page."""
+        from ._pdf_checks import scan_purpose_overflow
 
-        Delegates to book/tools/audit/check_purpose_overflow.py so the logic is
-        testable standalone and identical to the preflight runner.
-        """
-        script = self._repo_root() / "book" / "tools" / "audit" / "check_purpose_overflow.py"
-        if not script.exists():
-            console.print(f"[red]Purpose check missing:[/red] {script}")
+        issues = scan_purpose_overflow(pdf_path, volume, self._repo_root())
+        if issues:
+            for issue in issues:
+                console.print(f"[red]Purpose overflow:[/red] {issue.message}")
             return False
-        try:
-            proc = subprocess.run(
-                ["python3", str(script), str(pdf_path), "--vol", volume],
-                cwd=self._repo_root(),
-            )
-        except OSError as exc:
-            console.print(f"[red]Failed to run Purpose check:[/red] {exc}")
-            return False
-        return proc.returncode == 0
+        return True
 
     # ------------------------------------------------------------------
     # tables
