@@ -260,6 +260,108 @@ class TestCheckpointing:
             assert os.path.exists(path)
 
 
+class TestOptimizerMomentumCheckpointState:
+    """_get_optimizer_state / _set_optimizer_state conditionally include
+    momentum buffers, gated on optimizer.has_momentum(). Every existing
+    checkpoint test uses a plain SGD with momentum=0 (the default), so the
+    has_momentum()==True branch on both the save and load sides was never
+    exercised, and the momentum buffers were never actually round-tripped."""
+
+    def _trainer_with_momentum(self, momentum=0.9, lr=0.1):
+        model = simple_model()
+        opt = SGD(model.parameters(), lr=lr, momentum=momentum)
+        return Trainer(model, opt, MSELoss()), model, opt
+
+    def test_optimizer_state_includes_momentum_buffers_key(self):
+        trainer, model, opt = self._trainer_with_momentum()
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        trainer.train_epoch(data)  # populate momentum buffers via a real step
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            with open(path, "rb") as f:
+                ckpt = pickle.load(f)
+            assert "momentum_buffers" in ckpt["optimizer_state"]
+        finally:
+            os.remove(path)
+
+    def test_no_momentum_buffers_key_without_momentum(self):
+        """SGD with momentum=0.0 (has_momentum() is False) must not include
+        momentum_buffers in the saved state at all."""
+        trainer, _ = simple_trainer(lr=0.1)  # momentum defaults to 0.0
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        trainer.train_epoch(data)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            with open(path, "rb") as f:
+                ckpt = pickle.load(f)
+            assert "momentum_buffers" not in ckpt["optimizer_state"]
+        finally:
+            os.remove(path)
+
+    def test_momentum_buffers_round_trip_values(self):
+        """The actual momentum buffer values (not just presence of the key)
+        must be restored, so training resumes with the same effective
+        velocity rather than restarting momentum from zero."""
+        trainer, model, opt = self._trainer_with_momentum(momentum=0.9)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        trainer.train_epoch(data)
+        buffers_before = [b.copy() for b in opt.get_momentum_state()]
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            # Corrupt the momentum buffers, then restore.
+            for b in opt.momentum_buffers:
+                if b is not None:
+                    b[:] = 999.0
+            trainer.load_checkpoint(path)
+            buffers_after = opt.get_momentum_state()
+            for before, after in zip(buffers_before, buffers_after):
+                np.testing.assert_allclose(before, after)
+        finally:
+            os.remove(path)
+
+    def test_momentum_actually_affects_next_update_after_restore(self):
+        """Restored momentum must actually influence the next optimizer
+        step's effective velocity, not just be stored inertly."""
+        trainer_a, model_a, opt_a = self._trainer_with_momentum(momentum=0.9, lr=0.1)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        trainer_a.train_epoch(data)  # builds up momentum
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer_a.save_checkpoint(path)
+
+            # Fresh trainer with zeroed momentum, then restore from checkpoint.
+            trainer_b, model_b, opt_b = self._trainer_with_momentum(momentum=0.9, lr=0.1)
+            model_b.weight.data[:] = model_a.weight.data
+            model_b.bias.data[:] = model_a.bias.data
+            trainer_b.load_checkpoint(path)
+
+            # Fresh trainer with the SAME weights but no momentum history.
+            trainer_c, model_c, opt_c = self._trainer_with_momentum(momentum=0.9, lr=0.1)
+            model_c.weight.data[:] = model_a.weight.data
+            model_c.bias.data[:] = model_a.bias.data
+
+            trainer_b.train_epoch(data)
+            trainer_c.train_epoch(data)
+
+            assert not np.allclose(model_b.weight.data, model_c.weight.data), (
+                "A trainer restored with prior momentum should take a "
+                "different step than one starting momentum from zero"
+            )
+        finally:
+            os.remove(path)
+
+
 # ─────────────────────────────────────────────
 # Trainer.evaluate
 # ─────────────────────────────────────────────
