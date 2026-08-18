@@ -490,6 +490,8 @@ class ValidateCommand:
                   note="supported callout types, titles, and attributes"),
             Scope("callout-title-hygiene", "_run_callout_title_hygiene",
                   note="callout title presence, generic titles, trailing periods, and @-ref leaks"),
+            Scope("unclosed-html-comments", "_run_unclosed_html_comments",
+                  note="unclosed <!-- HTML comment tags that silently swallow prose"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -711,6 +713,8 @@ class ValidateCommand:
             Scope("formats", "_run_image_formats"),
             Scope("external", "_run_external_images"),
             Scope("svg-xml", "_run_svg_wellformedness"),
+            Scope("missing", "_run_missing_image_files",
+                  note="every local image referenced in QMD must exist on disk"),
         ],
         "json": [
             Scope("syntax", "_run_json_syntax"),
@@ -7893,6 +7897,128 @@ class ValidateCommand:
         return ValidationRunResult(
             name="callout-title-hygiene",
             description="Flag callout blocks with generic, missing, or improperly formatted titles",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_unclosed_html_comments(self, root: Path) -> ValidationRunResult:
+        """Flag unclosed <!-- HTML comment tags that silently swallow prose and code."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            in_comment = False
+            comment_start_line = 0
+
+            for idx, line in enumerate(lines, 1):
+                pos = 0
+                while pos < len(line):
+                    if not in_comment:
+                        start_idx = line.find("<!--", pos)
+                        if start_idx != -1:
+                            in_comment = True
+                            comment_start_line = idx
+                            pos = start_idx + 4
+                        else:
+                            break
+                    else:
+                        end_idx = line.find("-->", pos)
+                        if end_idx != -1:
+                            in_comment = False
+                            pos = end_idx + 3
+                        else:
+                            break
+
+            if in_comment:
+                context = lines[comment_start_line - 1].strip()[:100] if comment_start_line <= len(lines) else ""
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=comment_start_line,
+                        code="unclosed_html_comment",
+                        message=(
+                            f"Unclosed '<!--' HTML comment starting on line {comment_start_line} "
+                            f"-- add '-->' to close comment and prevent text from being swallowed"
+                        ),
+                        severity="error",
+                        context=context,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="unclosed-html-comments",
+            description="Flag unclosed <!-- HTML comment tags",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_missing_image_files(self, root: Path) -> ValidationRunResult:
+        """Flag local image file references in QMD files that do not exist on disk."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        md_img_re = re.compile(r"!\[.*?\]\(([^)]+)\)")
+        html_img_re = re.compile(r'<img\s+[^>]*src=["\']([^"\']+)["\']')
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|") or stripped.startswith("<!--"):
+                    continue
+
+                for m in md_img_re.finditer(line):
+                    src = m.group(1).strip()
+                    if src.startswith(("http://", "https://", "data:", "#")):
+                        continue
+                    src_clean = src.split()[0].strip('"\'')
+                    img_path = (file.parent / src_clean).resolve()
+                    if not img_path.exists():
+                        context = stripped[:100]
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="missing_image_file",
+                                message=f"Image file '{src_clean}' referenced in QMD does not exist on disk at '{self._relative_file(img_path)}'",
+                                severity="error",
+                                context=context,
+                            )
+                        )
+
+                for m in html_img_re.finditer(line):
+                    src = m.group(1).strip()
+                    if src.startswith(("http://", "https://", "data:", "#")):
+                        continue
+                    src_clean = src.split()[0].strip('"\'')
+                    img_path = (file.parent / src_clean).resolve()
+                    if not img_path.exists():
+                        context = stripped[:100]
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="missing_image_file",
+                                message=f"HTML img src '{src_clean}' referenced in QMD does not exist on disk at '{self._relative_file(img_path)}'",
+                                severity="error",
+                                context=context,
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="missing-image-files",
+            description="Flag local image file references that do not exist on disk",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
