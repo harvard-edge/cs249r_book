@@ -12,7 +12,7 @@ This appendix is designed as a reference when translating fleet-scale design que
 
 - **When evaluating inter-node communication**: Consult @sec-appdx-fleet-foundations-numbers-to-know for the bandwidth and latency hierarchy.
 - **When sizing GPU allocations**: Consult @sec-appdx-fleet-foundations-scaling-physics to analyze why doubling accelerator counts does not halve training time.
-- **When calculating cluster reliability**: Check @sec-appdx-fleet-foundations-numbers-to-know for MTBF tables and failure probability models.
+- **When calculating cluster reliability**: Check @sec-appdx-fleet-foundations-numbers-to-know for mean time between failures (MTBF) tables and failure probability models.
 - **When evaluating power and cooling limits**: Consult @sec-appdx-fleet-foundations-thermal-power for power density ceilings and cooling constraints.
 - **When budgeting runtime overhead**: Use @sec-appdx-fleet-foundations-numbers-to-know for the four overhead categories that erode goodput.
 
@@ -56,7 +56,7 @@ The following provides a compact reference for the key foundational ideas that r
 - **Iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
 - **Roofline model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **Network-Bound**\index{Network-bound workload} workloads whose performance is limited by inter-node bandwidth.
 - **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ [@amdahl1967]. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
-- **Training state rule**: About 14 bytes per parameter for common mixed-precision Adam checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
+- **Training state rule**: About 14 bytes per parameter for common mixed-precision Adaptive Moment Estimation (Adam) checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
 - **Little's Law** ($Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$): Sizes inference infrastructure, where $\lambda_{\text{arr}}$ is the request arrival rate and $Q_{\text{req}}$ is the expected concurrent request count [@little1961]. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
@@ -69,7 +69,7 @@ Just as single-machine analysis depends on a set of core numbers, fleet-scale en
 
 ::: {#psp-appendix-fleet-node-level-numbers .callout-perspective title="Node-level numbers for fleet reasoning"}
 
-Fleet reasoning depends on a few node-level numbers that directly affect fleet design: the training state rule\index{Training state rule} of about 14 bytes per parameter for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; NVLink vs. HBM bandwidth for intra-node parallelism placement; and peak FLOP/s and HBM capacity for MFU, effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
+Fleet reasoning depends on a few node-level numbers that directly affect fleet design: the training state rule\index{Training state rule} of about 14 bytes per parameter for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; NVLink vs. high-bandwidth memory (HBM) bandwidth for intra-node parallelism placement; and peak FLOP/s and HBM capacity for model FLOPs utilization (MFU), effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
 :::
 
 ```{python}
@@ -211,7 +211,7 @@ For $N$ independent components under a constant-failure-rate assumption, system 
 
 $$ \text{MTBF}_{\text{system}} = \frac{\text{MTBF}_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
 
-This is pure arithmetic, not an approximation. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU MTTF of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this---the question is how quickly the system recovers.
+This is pure arithmetic, not an approximation. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this---the question is how quickly the system recovers.
 
 #### AllReduce overhead scaling {.unnumbered}
 
@@ -300,9 +300,9 @@ class FleetComputationNumbers:
 
 ### Compute numbers {.unnumbered}
 
-Raw peak FLOP/s is a necessary but misleading metric for fleet capacity planning. Two multiplicative losses---Model FLOPs Utilization (MFU) and scaling efficiency---reduce effective throughput dramatically. Understanding these losses transforms fleet sizing from guesswork into engineering.
+Raw peak FLOP/s is a necessary but misleading metric for fleet capacity planning. Two multiplicative losses---MFU and scaling efficiency---reduce effective throughput dramatically. Understanding these losses transforms fleet sizing from guesswork into engineering.
 
-Model FLOPs Utilization (MFU) measures what fraction of peak FLOP/s a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FleetComputationNumbers.mfu_range_str` MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below the low end of that range signals optimization opportunities; MFU above the high end indicates excellent hardware utilization.
+MFU measures what fraction of peak FLOP/s a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FleetComputationNumbers.mfu_range_str` MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below the low end of that range signals optimization opportunities; MFU above the high end indicates excellent hardware utilization.
 
 Scaling efficiency ($\eta_{\text{scaling}}$) measures how much useful computation survives as accelerators are added. Empirical scaling efficiency (@tbl-fleet-scaling-efficiency) demonstrates throughput degradation as cluster size expands.
 
@@ -510,7 +510,7 @@ class FleetPowerNumbers:
 
 #### Power and sustainability numbers {.unnumbered}
 
-Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **Rack Power Density**\index{Power Density!rack}, **PUE**\index{PUE}, and the **Air-Cooling Limit**\index{Air-cooling limit}---they determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values:
+Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **Rack Power Density**\index{Power Density!rack}, **Power Usage Effectiveness (PUE)**\index{PUE}, and the **Air-Cooling Limit**\index{Air-cooling limit}---they determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values:
 
 | **Quantity**               |                    **Typical value**                    | **Use**                                                                                                                                                |
 |:---------------------------|:-------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -525,7 +525,7 @@ Fleet-scale capacity planning and sustainability reporting require a few power n
 
 : **Power and Cooling Reference Numbers**: Rack power densities, air-cooling limits, and PUE values that govern fleet-scale capacity planning and sustainability reporting. Each row pairs a typical value with the engineering decision it informs. {#tbl-appendix-fleet-power-cooling-reference}
 
-Rule of thumb: IT load\index{PUE!IT load} (MW) = (number of GPUs $\times$ TDP per GPU)/$10^6$; facility load\index{PUE!facility load} = IT load $\times$ PUE. A `{python} FleetPowerNumbers.tenk_gpus_str`-GPU H100 cluster at `{python} FleetPowerNumbers.h100_tdp_w_str` each is `{python} FleetPowerNumbers.tenk_it_mw_str` IT; at PUE `{python} FleetPowerNumbers.pue_typical_str` that is `{python} FleetPowerNumbers.tenk_facility_mw_typical_str` facility draw. For carbon and cost, see @sec-appdx-fleet-foundations-thermal-power and @sec-sustainable-ai.
+Rule of thumb: IT load\index{PUE!IT load} (MW) = (number of GPUs $\times$ thermal design power (TDP) per GPU)/$10^6$; facility load\index{PUE!facility load} = IT load $\times$ PUE. A `{python} FleetPowerNumbers.tenk_gpus_str`-GPU H100 cluster at `{python} FleetPowerNumbers.h100_tdp_w_str` each is `{python} FleetPowerNumbers.tenk_it_mw_str` IT; at PUE `{python} FleetPowerNumbers.pue_typical_str` that is `{python} FleetPowerNumbers.tenk_facility_mw_typical_str` facility draw. For carbon and cost, see @sec-appdx-fleet-foundations-thermal-power and @sec-sustainable-ai.
 
 ### Current hardware reference (c. 2025--2026) {.unnumbered}
 
@@ -565,9 +565,9 @@ class FleetHardwareRef:
 | **Intra-Node Link**  | `{python} FleetPowerNumbers.b200_nvlink_bw_gb_per_s_str` (NVLink 5.0) |               ~890 GB/s (Infinity Fabric)                |  800 GB/s bidirectional (ICI) [@googleCloudTpuV6eDocs]  |
 | **TDP**              |               `{python} FleetHardwareRef.b200_tdp_w_str`              |       `{python} FleetHardwareRef.mi300x_tdp_w_str`       |                    ~600 W (estimated)                   |
 
-: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the 2025--2026 generations. The B200, MI300X, and Tensor Processing Unit (TPU) v6e (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
+: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the 2025--2026 generations. The B200, MI300X, and TPU v6e (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
 
-For scale context, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta announced two 24,576-H100 data-center-scale clusters built on the Grand Teton hardware platform. Google's TPU v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
+For scale context, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta announced two 24,576-H100 data-center-scale clusters built on the Grand Teton hardware platform. Google's Tensor Processing Unit (TPU) v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
 
 ---
 
@@ -986,7 +986,7 @@ The `{python} FleetThermalRecap.rack_ratio_mult_str` increase in rack power dens
 
 ### The energy hierarchy at scale {#sec-appdx-fleet-foundations-energy-hierarchy}
 
-Power Usage Effectiveness (PUE) measures facility energy overhead: total facility energy divided by IT equipment energy [@thegreengrid2007pue; @davis2022uptime]. A PUE of 1.0 would mean all facility energy is delivered to IT equipment; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems.
+PUE measures facility energy overhead: total facility energy divided by IT equipment energy [@thegreengrid2007pue; @davis2022uptime]. A PUE of 1.0 would mean all facility energy is delivered to IT equipment; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems.
 
 @Tbl-fleet-pue-fleet compares PUE across data center generations and cooling technologies.
 

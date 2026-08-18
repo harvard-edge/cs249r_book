@@ -12,12 +12,12 @@ This appendix is designed as a reference. Reach for it when translating a profil
 
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
-- **When GEMMs are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
+- **When general matrix multiplys (GEMMs) are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
 - **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-mechanics-learning-24f6 and the training memory decomposition.
 - **When tensor code "should work" but does not**: Use @sec-appdx-algorithm-foundations-shapes-strides-1aea and @sec-appdx-algorithm-foundations-broadcasting-ec16.
 - **When sparsity is proposed as a fix**: Use @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
-- **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode AD complexity theorem.
-- **When analyzing sequence length bottlenecks**: Use @sec-appdx-algorithm-flash-attention for the online softmax recurrence and FlashAttention HBM I/O reduction proof.
+- **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode automatic differentiation (AD) complexity theorem.
+- **When analyzing sequence length bottlenecks**: Use @sec-appdx-algorithm-flash-attention for the online softmax recurrence and FlashAttention high-bandwidth memory (HBM) I/O reduction proof.
 - **When allocating compute between parameters and tokens**: Use @sec-appdx-algorithm-chinchilla-derivation for the Kaplan and Chinchilla compute-optimal scaling law derivation.
 
 ```{=latex}
@@ -34,7 +34,7 @@ Deep learning systems are, at their core, engines for transforming massive matri
 ```
 ::: {#psp-appendix-algorithm-linear-algebra-matters .callout-perspective title="Why this matters"}
 
-Many modern dense neural networks, especially transformers and large CNNs, spend much of their compute time in matrix multiplication or GEMM-like kernels. A self-attention block performs the Q, K, V, and output projection GEMMs plus two attention matrix multiplications: one for the attention scores and one for the attention-weighted values. The layer's feed-forward block adds more GEMMs. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory bound *before* any profiler trace runs.
+Many modern dense neural networks, especially transformers and large convolutional neural networks (CNNs), spend much of their compute time in matrix multiplication or GEMM-like kernels. A self-attention block performs the Q, K, V, and output projection GEMMs plus two attention matrix multiplications: one for the attention scores and one for the attention-weighted values. The layer's feed-forward block adds more GEMMs. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory bound *before* any profiler trace runs.
 
 :::
 
@@ -63,7 +63,7 @@ This geometric interpretation is why dot products appear everywhere in modern ar
 
 GEMM[^fn-gemm-blas-routines] is the computational workhorse of deep learning. For matrices of size $M{\times}K$ and $K{\times}N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-[^fn-gemm-blas-routines]: **General Matrix Multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
+[^fn-gemm-blas-routines]: **General Matrix Multiply (GEMM)**\index{GEMM!appendix refresher}: The Basic Linear Algebra Subprograms (BLAS) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
 ```{python}
 #| echo: false
@@ -167,7 +167,7 @@ To see the trade-off concretely, consider a vocabulary embedding matrix with `{p
 
 *   **Dense (FP32)**: `{python} SparseEmbeddingExample.total_elements_str` parameters $\times$ `{python} SparseEmbeddingExample.bytes_fp32_value_str` bytes each = `{python} SparseEmbeddingExample.dense_gb_str`.
 *   **Sparse** (`{python} SparseEmbeddingExample.sparsity_pct_str` density): CSR stores roughly `{python} SparseEmbeddingExample.nonzeros_str` entries $\times$ (`{python} SparseEmbeddingExample.bytes_fp32_value_str`-byte value + `{python} SparseEmbeddingExample.bytes_int32_value_str`-byte column index), plus one row pointer per row and a final pointer, totaling ≈ `{python} SparseEmbeddingExample.sparse_mb_str`.
-*   *Result*: A `{python} SparseEmbeddingExample.reduction_factor_mult_str` reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
+*   *Result*: A `{python} SparseEmbeddingExample.reduction_factor_mult_str` reduction in memory footprint, fitting a model that would otherwise run out of memory (OOM).
 
 Linear algebra tells us *what* to compute; the next question is *how* to express those computations in code. Tensor programming primitives—shapes, strides, and broadcasting—bridge the gap between mathematical notation and the array operations that actually execute on hardware.
 
@@ -448,7 +448,7 @@ Compilers transform graphs into static single-assignment (SSA) form\index{Static
 
 #### Operator fusion {#sec-appdx-algorithm-foundations-operator-fusion-5d73}
 
-Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to High Bandwidth Memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
+Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to HBM and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of size $N$ bytes, fusion reduces memory traffic from $2kN$ bytes (each op reads and writes) to $2N$ bytes (one read, one write)—a $k\times$ reduction.
 
@@ -517,13 +517,13 @@ The independence of $C \le 5$ from input dimension $N$ is the mathematical reaso
 * **Reverse-Mode Backward Pass**: Computes both weight gradients $\frac{\partial \mathcal{L}}{\partial W} = X^T \frac{\partial \mathcal{L}}{\partial Y}$ ($2P$ FLOPs) and input activation gradients $\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Y} W^T$ ($2P$ FLOPs), totaling $4P$ FLOPs per token.
 * **Total Training Work**: $2P (\text{fwd}) + 4P (\text{bwd}) = 6P$ FLOPs per token. The backward compute factor is exactly $\frac{4P}{2P} = 2$, well within the Baur–Strassen theoretical bound of $C \le 5$.
 
-If we instead used **Forward-Mode AD** or finite differences to compute $\nabla f \in \mathbb{R}^P$, evaluating each partial derivative separately would require $P$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla f) = \mathcal{O}(P \cdot W) = \mathcal{O}(P^2)$ FLOPs. For $P = 175 \times 10^9$, computing a single gradient step would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token—making training a single batch take longer than the age of the universe. Reverse-mode AD collapses this $\mathcal{O}(P)$ factor into a constant multiplier of 2.
+If we instead used forward-mode AD or finite differences to compute $\nabla f \in \mathbb{R}^P$, evaluating each partial derivative separately would require $P$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla f) = \mathcal{O}(P \cdot W) = \mathcal{O}(P^2)$ FLOPs. For $P = 175 \times 10^9$, computing a single gradient step would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token—making training a single batch take longer than the age of the universe. Reverse-mode AD collapses this $\mathcal{O}(P)$ factor into a constant multiplier of 2.
 
 :::
 
 ## FlashAttention Tiling & Online Softmax Recurrence Proof {#sec-appdx-algorithm-flash-attention}
 
-Standard self-attention in transformers requires materializing an $N \times N$ attention score matrix in High Bandwidth Memory (HBM), creating an $\mathcal{O}(N^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
+Standard self-attention in transformers requires materializing an $N \times N$ attention score matrix in HBM, creating an $\mathcal{O}(N^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
 
 ### Standard softmax HBM I/O bottleneck {#sec-appdx-algorithm-flash-attention-hbm-bottleneck}
 
@@ -615,7 +615,7 @@ By reducing HBM traffic by over $13\times$, FlashAttention converts attention fr
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
 
-Determining the compute-optimal allocation between model parameters $N$ and training dataset tokens $D$ for a given floating-point budget $C$ is a central decision in LLM system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
+Determining the compute-optimal allocation between model parameters $N$ and training dataset tokens $D$ for a given floating-point budget $C$ is a central decision in large language model (LLM) system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
 
 ### Parametric loss surface formulation {#sec-appdx-algorithm-chinchilla-loss-surface}
 
@@ -630,7 +630,7 @@ where:
 * $A, B > 0$: Empirical scaling constants.
 * $\alpha, \beta > 0$: Power-law scaling exponents for model size and dataset size, respectively.
 
-### Constrained optimization via lagrange multipliers {#sec-appdx-algorithm-chinchilla-lagrange}
+### Constrained optimization via Lagrange multipliers {#sec-appdx-algorithm-chinchilla-lagrange}
 
 The total floating-point operations required to train a transformer with $N$ non-embedding parameters for $D$ tokens is given by:
 $$ C = 6 N D \text{ FLOPs} $$
