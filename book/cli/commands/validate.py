@@ -1009,7 +1009,7 @@ class ValidateCommand:
                 else:
                     label_types = {
                         k: v for k, v in LABEL_DEF_PATTERNS.items()
-                        if k in ("Figure", "Table", "Listing")
+                        if k in ("Figure", "Table", "Listing", "Equation")
                     }
                 results.append(method(root, label_types))
             elif method_name == "_run_unreferenced_labels":
