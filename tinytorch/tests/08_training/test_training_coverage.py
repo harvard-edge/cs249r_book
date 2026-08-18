@@ -352,6 +352,99 @@ class TestTrainerEvaluate:
         _, accuracy = trainer.evaluate(data)
         assert accuracy == 0.0, f"Wrong classifier should have accuracy=0.0, got {accuracy}"
 
+    def test_classification_accuracy_with_onehot_targets(self):
+        """evaluate() must handle one-hot encoded targets (2D, shape (N, C)),
+        not just integer class-index targets (1D). Every other classification
+        test in this suite uses integer targets, leaving evaluate's one-hot
+        branch (targets.data.shape has ndim > 1) completely untested.
+
+        Uses a stub loss (CrossEntropyLoss itself only accepts integer class
+        indices per its own docstring, so it can't be paired with one-hot
+        targets here) to isolate evaluate()'s own one-hot accuracy logic."""
+        class PerfectClassifier:
+            training = True
+
+            def forward(self, x):
+                batch = x.data.shape[0]
+                logits = np.zeros((batch, 3))
+                logits[:, 0] = 10.0  # always predicts class 0
+                return Tensor(logits)
+
+            def parameters(self):
+                return []
+
+        class StubLoss:
+            def forward(self, outputs, targets):
+                return Tensor(0.0)
+            __call__ = forward
+
+        opt = SGD([], lr=0.01)
+        trainer = Trainer(PerfectClassifier(), opt, StubLoss())
+
+        # One-hot target for class 0: [1, 0, 0]
+        data = [(Tensor([[1.0, 0.0]]), Tensor(np.array([[1.0, 0.0, 0.0]])))]
+        _, accuracy = trainer.evaluate(data)
+        assert accuracy == 1.0, f"Perfect classifier on one-hot targets should have accuracy=1.0, got {accuracy}"
+
+    def test_zero_accuracy_for_wrong_predictions_onehot_targets(self):
+        """One-hot counterpart of test_zero_accuracy_for_wrong_predictions."""
+        class WrongClassifier:
+            training = True
+
+            def forward(self, x):
+                batch = x.data.shape[0]
+                logits = np.zeros((batch, 3))
+                logits[:, 1] = 10.0  # always predicts class 1
+                return Tensor(logits)
+
+            def parameters(self):
+                return []
+
+        class StubLoss:
+            def forward(self, outputs, targets):
+                return Tensor(0.0)
+            __call__ = forward
+
+        opt = SGD([], lr=0.01)
+        trainer = Trainer(WrongClassifier(), opt, StubLoss())
+
+        # One-hot target for class 0: [1, 0, 0], predicted class is 1
+        data = [(Tensor([[1.0, 0.0]]), Tensor(np.array([[1.0, 0.0, 0.0]])))]
+        _, accuracy = trainer.evaluate(data)
+        assert accuracy == 0.0, f"Wrong classifier on one-hot targets should have accuracy=0.0, got {accuracy}"
+
+    def test_mixed_onehot_batch_partial_accuracy(self):
+        """A batch with some correct and some incorrect one-hot predictions
+        must produce a fractional accuracy, exercising the np.sum(...) count
+        in the one-hot branch rather than only the all-correct/all-wrong
+        extremes."""
+        class FixedPredictor:
+            training = True
+
+            def forward(self, x):
+                # Predicts class 0 for every sample in the batch.
+                batch = x.data.shape[0]
+                logits = np.zeros((batch, 3))
+                logits[:, 0] = 10.0
+                return Tensor(logits)
+
+            def parameters(self):
+                return []
+
+        class StubLoss:
+            def forward(self, outputs, targets):
+                return Tensor(0.0)
+            __call__ = forward
+
+        opt = SGD([], lr=0.01)
+        trainer = Trainer(FixedPredictor(), opt, StubLoss())
+
+        # 2 samples: one one-hot target is class 0 (correct), the other class 1 (wrong).
+        targets = Tensor(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+        data = [(Tensor([[1.0, 0.0], [0.0, 1.0]]), targets)]
+        _, accuracy = trainer.evaluate(data)
+        assert abs(accuracy - 0.5) < 1e-9, f"Expected accuracy=0.5, got {accuracy}"
+
 
 # ─────────────────────────────────────────────
 # Scheduler integration
