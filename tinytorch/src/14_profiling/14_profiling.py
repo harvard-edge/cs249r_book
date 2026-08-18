@@ -754,43 +754,6 @@ class Profiler:
         }
         ### END SOLUTION
 
-    def profile_forward_pass(self, model, input_tensor) -> Dict[str, Any]:
-        """
-        Comprehensive profiling of a model's forward pass.
-
-        TODO: Gather measurements, then use _compute_derived_metrics and _analyze_bottleneck
-
-        APPROACH:
-        1. Gather raw measurements (parameters, FLOPs, memory, latency)
-        2. Use _compute_derived_metrics() for throughput and efficiency
-        3. Use _analyze_bottleneck() for bottleneck identification
-
-        EXAMPLE:
-        >>> model = Linear(256, 128)
-        >>> input_data = Tensor(rng.standard_normal((32, 256)))
-        >>> profiler = Profiler()
-        >>> profile = profiler.profile_forward_pass(model, input_data)
-        >>> print(f"Throughput: {profile['gflops_per_second']:.2f} GFLOP/s")
-        Throughput: 2.45 GFLOP/s
-
-        HINT: Compose helper outputs with ** unpacking into return dict
-        """
-        ### BEGIN SOLUTION
-        param_count = self.count_parameters(model)
-        flops = self.count_flops(model, input_tensor.shape)
-        memory_stats = self.measure_memory(model, input_tensor.shape)
-        latency_ms = self.measure_latency(model, input_tensor, warmup=5, iterations=20)
-
-        derived = self._compute_derived_metrics(flops, latency_ms, memory_stats['peak_memory_mb'])
-        bottleneck = self._analyze_bottleneck(derived['gflops_per_second'],
-                                              derived['memory_bandwidth_mbs'])
-
-        return {
-            'parameters': param_count, 'flops': flops, 'latency_ms': latency_ms,
-            **memory_stats, **derived, **bottleneck
-        }
-        ### END SOLUTION
-
     def _estimate_backward_costs(self, forward_flops: int,
                                   forward_latency_ms: float) -> Dict[str, float]:
         """
@@ -846,6 +809,43 @@ class Profiler:
             'sgd': 0,
             'adam': gradient_memory_mb * 2,
             'adamw': gradient_memory_mb * 2,
+        }
+        ### END SOLUTION
+    
+    def profile_forward_pass(self, model, input_tensor) -> Dict[str, Any]:
+        """
+        Comprehensive profiling of a model's forward pass.
+
+        TODO: Gather measurements, then use _compute_derived_metrics and _analyze_bottleneck
+
+        APPROACH:
+        1. Gather raw measurements (parameters, FLOPs, memory, latency)
+        2. Use _compute_derived_metrics() for throughput and efficiency
+        3. Use _analyze_bottleneck() for bottleneck identification
+
+        EXAMPLE:
+        >>> model = Linear(256, 128)
+        >>> input_data = Tensor(rng.standard_normal((32, 256)))
+        >>> profiler = Profiler()
+        >>> profile = profiler.profile_forward_pass(model, input_data)
+        >>> print(f"Throughput: {profile['gflops_per_second']:.2f} GFLOP/s")
+        Throughput: 2.45 GFLOP/s
+
+        HINT: Compose helper outputs with ** unpacking into return dict
+        """
+        ### BEGIN SOLUTION
+        param_count = self.count_parameters(model)
+        flops = self.count_flops(model, input_tensor.shape)
+        memory_stats = self.measure_memory(model, input_tensor.shape)
+        latency_ms = self.measure_latency(model, input_tensor, warmup=5, iterations=20)
+
+        derived = self._compute_derived_metrics(flops, latency_ms, memory_stats['peak_memory_mb'])
+        bottleneck = self._analyze_bottleneck(derived['gflops_per_second'],
+                                              derived['memory_bandwidth_mbs'])
+
+        return {
+            'parameters': param_count, 'flops': flops, 'latency_ms': latency_ms,
+            **memory_stats, **derived, **bottleneck
         }
         ### END SOLUTION
 
