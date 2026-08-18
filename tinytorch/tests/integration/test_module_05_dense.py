@@ -169,7 +169,7 @@ if __name__ == "__main__":
     result = subprocess.run(
         [sys.executable, '-m', 'pytest', __file__, '-v', '--tb=short'],
         capture_output=True,
-        text=True
+        text=True, encoding='utf-8', errors='replace'
     )
 
     print(result.stdout)
