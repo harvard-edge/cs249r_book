@@ -2988,15 +2988,8 @@ def enable_autograd(quiet=False):
 
         def tracked_bce_forward(self, predictions, targets):
             """Binary cross-entropy with gradient tracking."""
-            # Compute BCE loss
-            eps = EPSILON
-            clamped_preds = np.clip(predictions.data, eps, 1 - eps)
-            log_preds = np.log(clamped_preds)
-            log_one_minus_preds = np.log(1 - clamped_preds)
-            bce_per_sample = -(targets.data * log_preds + (1 - targets.data) * log_one_minus_preds)
-            bce_loss = np.mean(bce_per_sample)
-
-            result = Tensor(bce_loss)
+            # Call original forward to get result using the module's own implementation
+            result = _original_bce_forward(self, predictions, targets)
 
             if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
@@ -3006,12 +2999,8 @@ def enable_autograd(quiet=False):
 
         def tracked_mse_forward(self, predictions, targets):
             """MSE loss with gradient tracking."""
-            # Compute MSE loss
-            diff = predictions.data - targets.data
-            squared_diff = diff ** 2
-            mse = np.mean(squared_diff)
-
-            result = Tensor(mse)
+            # Call original forward to get result using the module's own implementation
+            result = _original_mse_forward(self, predictions, targets)
 
             if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
@@ -3021,20 +3010,8 @@ def enable_autograd(quiet=False):
 
         def tracked_ce_forward(self, logits, targets):
             """Cross-entropy loss with gradient tracking."""
-            from tinytorch.core.losses import log_softmax
-
-            # Compute log-softmax for numerical stability
-            log_probs = log_softmax(logits, dim=-1)
-
-            # Select log-probabilities for correct classes
-            batch_size = logits.shape[0]
-            target_indices = targets.data.astype(int)
-            selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
-
-            # Return negative mean
-            ce_loss = -np.mean(selected_log_probs)
-
-            result = Tensor(ce_loss)
+            # Call original forward to get result using the module's own implementation
+            result = _original_ce_forward(self, logits, targets)
 
             if _GRAD_TRACKING_ENABLED and logits.requires_grad:
                 result.requires_grad = True
