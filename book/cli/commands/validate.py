@@ -7565,7 +7565,7 @@ class ValidateCommand:
                                     f"Lowercase @{type_lower}- at sentence start "
                                     f"-- use {cap_form} for uppercase prefix"
                                 ),
-                                severity="warning",
+                                severity="error",
                                 context=context,
                             )
                         )
@@ -7580,7 +7580,7 @@ class ValidateCommand:
                                     f"Capitalized @{ref_type}- mid-sentence "
                                     f"-- use {low_form} for lowercase prefix"
                                 ),
-                                severity="warning",
+                                severity="error",
                                 context=context,
                             )
                         )
