@@ -386,6 +386,8 @@ class ValidateCommand:
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
             Scope("unlinked-prose-refs", "_run_unlinked_prose_refs",
                   note="hardcoded Appendix A / Section 3.1 / Chapter 2 in prose must use @sec- cross-references"),
+            Scope("cross-volume-epub-refs", "_run_cross_volume_epub_refs",
+                  note="cross-volume targets defined in Vol 1 but missing from Vol 2 TOC break EPUB builds"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -486,6 +488,8 @@ class ValidateCommand:
                   note=":::/ :::: balance and form"),
             Scope("callouts", "_run_callout_structure",
                   note="supported callout types, titles, and attributes"),
+            Scope("callout-title-hygiene", "_run_callout_title_hygiene",
+                  note="callout title presence, generic titles, trailing periods, and @-ref leaks"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -7698,6 +7702,181 @@ class ValidateCommand:
         return ValidationRunResult(
             name="unlinked-prose-refs",
             description="Flag unlinked hardcoded prose references like 'Appendix B' or 'Section 3.1'",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_cross_volume_epub_refs(self, root: Path) -> ValidationRunResult:
+        """Flag cross-volume reference targets that will break single-volume EPUB/HTML builds.
+
+        References in Volume II chapters pointing ONLY to Volume I section/table IDs
+        (which are not present in Volume II's TOC) will fail epubcheck because
+        the Volume I HTML target is missing from Volume II's EPUB package.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        vol1_dir = root / "quarto" / "contents" / "vol1"
+        vol2_dir = root / "quarto" / "contents" / "vol2"
+
+        if not vol1_dir.is_dir() or not vol2_dir.is_dir():
+            return ValidationRunResult("cross-volume-epub-refs", "Cross-volume EPUB ref check", 0, [], 0)
+
+        vol1_ids = set()
+        vol2_ids = set()
+
+        for qmd in vol1_dir.rglob("*.qmd"):
+            text = self._read_text(qmd)
+            for m in re.finditer(r"\{#([a-zA-Z0-9_-]+)\}", text):
+                vol1_ids.add(m.group(1).lower())
+
+        for qmd in vol2_dir.rglob("*.qmd"):
+            text = self._read_text(qmd)
+            for m in re.finditer(r"\{#([a-zA-Z0-9_-]+)\}", text):
+                vol2_ids.add(m.group(1).lower())
+
+        for file in files:
+            is_vol2 = file.is_relative_to(vol2_dir)
+            if not is_vol2:
+                continue
+
+            text = self._read_text(file)
+            lines = text.splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|") or stripped.startswith(":::") or stripped.startswith("|"):
+                    continue
+
+                for m in re.finditer(r"@([a-zA-Z0-9]+-[a-zA-Z0-9_-]+)", line):
+                    ref_id = m.group(1).lower()
+                    if ref_id.startswith(("sec-", "tbl-", "fig-", "eq-", "lst-")):
+                        if ref_id in vol1_ids and ref_id not in vol2_ids:
+                            context = stripped[:100]
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="cross_volume_epub_ref",
+                                    message=(
+                                        f"Cross-volume reference '{m.group(0)}' points to a Volume 1 target missing from Volume 2 TOC "
+                                        f"-- use Volume 2 target ID (e.g. '@sec-appdx-fleet-system-assumptions') to prevent broken EPUB links"
+                                    ),
+                                    severity="error",
+                                    context=context,
+                                )
+                            )
+
+        return ValidationRunResult(
+            name="cross-volume-epub-refs",
+            description="Flag cross-volume references that break single-volume EPUB builds",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_callout_title_hygiene(self, root: Path) -> ValidationRunResult:
+        """Flag callout blocks with generic titles, missing titles, trailing periods, or broken markup."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start_re = re.compile(r"^:::\s*\{?\.?([a-zA-Z0-9_-]+)(.*?)\}?\s*$")
+        title_attr_re = re.compile(r'title=["\'](.*?)["\']')
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                m = block_start_re.match(stripped)
+                if not m:
+                    continue
+
+                block_type = m.group(1).lower()
+                attrs = m.group(2)
+
+                if not (
+                    block_type.startswith("callout")
+                    or block_type in ("dfn", "exmp", "nbk", "pri", "thm", "lem", "cor", "prop", "rem", "case", "lighthouse", "takeaway")
+                ):
+                    continue
+
+                if block_type in ("callout-learning-objectives", "callout-chapter-takeaways", "chapter-takeaways", "learning-objectives"):
+                    continue
+
+                title = None
+                tm = title_attr_re.search(attrs)
+                if tm:
+                    title = tm.group(1)
+                else:
+                    for k in range(idx, min(idx + 5, len(lines))):
+                        next_l = lines[k].strip()
+                        if not next_l or next_l == ":::":
+                            continue
+                        if next_l.startswith("#"):
+                            title = next_l.lstrip("#").strip()
+                            break
+                        elif next_l.startswith("**") and next_l.endswith("**") and len(next_l) < 80:
+                            title = next_l.strip("*").strip()
+                            break
+
+                context = stripped[:100]
+                if title is None or not title.strip():
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="callout_missing_title",
+                            message=f"Callout ':::.{block_type}' is missing a descriptive title -- add title=\"...\"",
+                            severity="error",
+                            context=context,
+                        )
+                    )
+                else:
+                    t = title.strip()
+                    if t.lower() in ("note", "tip", "important", "warning", "caution", "callout", "untitled", "title", "example", "definition"):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_generic_title",
+                                message=f"Callout title '{t}' is generic -- use a specific descriptive title",
+                                severity="error",
+                                context=context,
+                            )
+                        )
+                    elif t.endswith(".") and not t.endswith(("etc.", "e.g.", "p.")):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_title_trailing_period",
+                                message=f"Callout title '{t}' has trailing period -- remove trailing period per title style",
+                                severity="error",
+                                context=context,
+                            )
+                        )
+                    elif "@" in t:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_title_xref_leak",
+                                message=f"Callout title attribute '{t}' contains '@' cross-reference -- remove @-ref from title attribute",
+                                severity="error",
+                                context=context,
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="callout-title-hygiene",
+            description="Flag callout blocks with generic, missing, or improperly formatted titles",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
