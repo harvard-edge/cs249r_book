@@ -308,7 +308,7 @@ class HealthCommand(BaseCommand):
                     kernel_dir = kernels[kernel_name].get("resource_dir", "")
                     kernel_json = Path(kernel_dir) / "kernel.json"
                     if kernel_json.exists():
-                        spec = json.loads(kernel_json.read_text())
+                        spec = json.loads(kernel_json.read_text(encoding='utf-8'))
                         argv = spec.get("argv", [])
                         if argv:
                             return argv[0]  # First element is the Python path
