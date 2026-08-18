@@ -7738,8 +7738,9 @@ class ValidateCommand:
                 vol2_ids.add(m.group(1).lower())
 
         for file in files:
+            is_vol1 = file.is_relative_to(vol1_dir)
             is_vol2 = file.is_relative_to(vol2_dir)
-            if not is_vol2:
+            if not is_vol1 and not is_vol2:
                 continue
 
             text = self._read_text(file)
@@ -7756,7 +7757,7 @@ class ValidateCommand:
                 for m in re.finditer(r"@([a-zA-Z0-9]+-[a-zA-Z0-9_-]+)", line):
                     ref_id = m.group(1).lower()
                     if ref_id.startswith(("sec-", "tbl-", "fig-", "eq-", "lst-")):
-                        if ref_id in vol1_ids and ref_id not in vol2_ids:
+                        if is_vol2 and ref_id in vol1_ids and ref_id not in vol2_ids:
                             context = stripped[:100]
                             issues.append(
                                 ValidationIssue(
@@ -7764,8 +7765,23 @@ class ValidateCommand:
                                     line=idx,
                                     code="cross_volume_epub_ref",
                                     message=(
-                                        f"Cross-volume reference '{m.group(0)}' points to a Volume 1 target missing from Volume 2 TOC "
+                                        f"Cross-volume reference '{m.group(0)}' in Volume 2 points to a Volume 1 target missing from Volume 2 TOC "
                                         f"-- use Volume 2 target ID (e.g. '@sec-appdx-fleet-system-assumptions') to prevent broken EPUB links"
+                                    ),
+                                    severity="error",
+                                    context=context,
+                                )
+                            )
+                        elif is_vol1 and ref_id in vol2_ids and ref_id not in vol1_ids:
+                            context = stripped[:100]
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="cross_volume_epub_ref",
+                                    message=(
+                                        f"Cross-volume reference '{m.group(0)}' in Volume 1 points to a Volume 2 target missing from Volume 1 TOC "
+                                        f"-- use Volume 1 target ID to prevent broken EPUB links"
                                     ),
                                     severity="error",
                                     context=context,
