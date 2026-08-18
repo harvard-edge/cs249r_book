@@ -384,6 +384,8 @@ class ValidateCommand:
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
             Scope("callout-ref-form", "_run_callout_ref_form",
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
+            Scope("unlinked-prose-refs", "_run_unlinked_prose_refs",
+                  note="hardcoded Appendix A / Section 3.1 / Chapter 2 in prose must use @sec- cross-references"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -7630,6 +7632,72 @@ class ValidateCommand:
         return ValidationRunResult(
             name="xref-sentence-start-case",
             description="Flag crossref prefix casing that fights sentence position (MIT Press convention)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_unlinked_prose_refs(self, root: Path) -> ValidationRunResult:
+        """Flag unlinked hardcoded prose references such as 'Appendix B', 'Section 3.1', or 'Chapter 2'.
+
+        All section and appendix references in prose must use @sec- cross-references.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        unlinked_re = re.compile(r"\b(Appendix|Section|Chapter)\s+([A-Z]\b|\d+(?:\.\d+)*)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if (
+                    in_code
+                    or stripped.startswith("#|")
+                    or stripped.startswith(":::")
+                    or stripped.startswith("|")
+                    or stripped.startswith("<!--")
+                ):
+                    continue
+
+                for m in unlinked_re.finditer(line):
+                    before = line[: m.start()]
+                    if (
+                        "`" in before
+                        or "\\index" in before
+                        or "\\ref" in before
+                        or "fig-cap" in before
+                        or "fig-alt" in before
+                    ):
+                        continue
+                    if (
+                        "Chapter Reference" in stripped
+                        or "Section References" in stripped
+                    ):
+                        continue
+
+                    context = stripped[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="unlinked_prose_ref",
+                            message=(
+                                f"Unlinked hardcoded reference '{m.group(0)}' in prose "
+                                f"-- use @sec- cross-references instead of plain text"
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="unlinked-prose-refs",
+            description="Flag unlinked hardcoded prose references like 'Appendix B' or 'Section 3.1'",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
