@@ -7722,30 +7722,40 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        vol1_dir = root / "quarto" / "contents" / "vol1"
-        vol2_dir = root / "quarto" / "contents" / "vol2"
-
-        if not vol1_dir.is_dir() or not vol2_dir.is_dir():
-            return ValidationRunResult("cross-volume-epub-refs", "Cross-volume EPUB ref check", 0, [], 0)
+        # Classify by path rather than by a constructed directory. The previous
+        # form built `root / "quarto" / "contents" / "vol1"`, which never
+        # resolved for the roots this command is actually invoked with, so the
+        # early return below fired every time and the check reported success
+        # having scanned 0 files. Two cross-volume table refs reached the EPUB
+        # build behind that silent pass. (2026-08-18)
+        def _volume_of(path: Path) -> str | None:
+            parts = path.parts
+            if "vol1" in parts:
+                return "vol1"
+            if "vol2" in parts:
+                return "vol2"
+            return None
 
         vol1_ids = set()
         vol2_ids = set()
 
-        for qmd in vol1_dir.rglob("*.qmd"):
+        for qmd in files:
+            vol = _volume_of(qmd)
+            if vol is None:
+                continue
             text = self._read_text(qmd)
-            for m in re.finditer(r"\{#([a-zA-Z0-9_-]+)\}", text):
-                vol1_ids.add(m.group(1).lower())
-
-        for qmd in vol2_dir.rglob("*.qmd"):
-            text = self._read_text(qmd)
-            for m in re.finditer(r"\{#([a-zA-Z0-9_-]+)\}", text):
-                vol2_ids.add(m.group(1).lower())
+            # An anchor may carry trailing attributes, e.g.
+            #   {#tbl-foo tbl-colwidths="[20,80]"}
+            # so do NOT require "}" immediately after the id.
+            for m in re.finditer(r"\{#([a-zA-Z0-9_-]+)", text):
+                (vol1_ids if vol == "vol1" else vol2_ids).add(m.group(1).lower())
 
         for file in files:
-            is_vol1 = file.is_relative_to(vol1_dir)
-            is_vol2 = file.is_relative_to(vol2_dir)
-            if not is_vol1 and not is_vol2:
+            vol = _volume_of(file)
+            if vol is None:
                 continue
+            is_vol1 = vol == "vol1"
+            is_vol2 = vol == "vol2"
 
             text = self._read_text(file)
             lines = text.splitlines()
@@ -9662,7 +9672,16 @@ class ValidateCommand:
                 str(run["files_checked"]),
                 str(run["issue_count"]),
                 f'{run["elapsed_ms"]}ms',
-                "[green]PASS[/green]" if run["passed"] else "[red]FAIL[/red]",
+                # A check that scanned nothing is not a passing check. The
+                # cross-volume-epub-refs scope reported PASS for weeks while
+                # examining 0 files because its directory never resolved, and
+                # two cross-volume refs reached the EPUB build behind it.
+                # Surface that state distinctly instead of dressing it as PASS.
+                (
+                    "[yellow]NO-OP[/yellow]"
+                    if run["passed"] and run["files_checked"] == 0
+                    else "[green]PASS[/green]" if run["passed"] else "[red]FAIL[/red]"
+                ),
             )
         console.print(Panel(table, title="Binder Check Summary", border_style="cyan"))
 
