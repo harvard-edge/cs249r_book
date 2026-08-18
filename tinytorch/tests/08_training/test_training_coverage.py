@@ -153,6 +153,63 @@ class TestClipGradNorm:
         np.testing.assert_allclose(params[0].grad, np.zeros(3))
 
 
+class TestClipGradNormTensorGradients:
+    """clip_grad_norm's own docstring example assigns .grad as a Tensor
+    (`params[0].grad = Tensor([10, 20, 30])`), and the implementation has a
+    dedicated isinstance(param.grad, np.ndarray) branch specifically to
+    support both Tensor and plain-ndarray gradients. Every test above only
+    ever exercises the ndarray branch, leaving the Tensor branch completely
+    untested despite being the documented usage pattern."""
+
+    def _params_with_tensor_grads(self, grad_values):
+        params = []
+        for v in grad_values:
+            p = Tensor(np.zeros_like(np.array(v, dtype=np.float64)), requires_grad=True)
+            p.grad = Tensor(np.array(v, dtype=np.float64))
+            params.append(p)
+        return params
+
+    def test_returns_original_norm(self):
+        params = self._params_with_tensor_grads([[3.0, 4.0]])  # norm = 5
+        original_norm = clip_grad_norm(params, max_norm=10.0)
+        assert abs(original_norm - 5.0) < 1e-6
+
+    def test_clips_large_gradients(self):
+        params = self._params_with_tensor_grads([[3.0, 4.0]])  # norm = 5
+        clip_grad_norm(params, max_norm=1.0)
+        clipped_norm = np.linalg.norm(params[0].grad.data)
+        assert abs(clipped_norm - 1.0) < 1e-6
+
+    def test_does_not_clip_small_gradients(self):
+        params = self._params_with_tensor_grads([[0.1, 0.1]])  # norm ≈ 0.14
+        original_grad = params[0].grad.data.copy()
+        clip_grad_norm(params, max_norm=1.0)
+        np.testing.assert_allclose(params[0].grad.data, original_grad)
+
+    def test_clips_across_multiple_params(self):
+        """Global norm is computed over all params together."""
+        params = self._params_with_tensor_grads([[3.0, 4.0], [0.0, 0.0]])
+        # global norm = 5; max_norm = 1 → scale = 0.2
+        clip_grad_norm(params, max_norm=1.0)
+        expected = np.array([3.0, 4.0]) * (1.0 / 5.0)
+        np.testing.assert_allclose(params[0].grad.data, expected, rtol=1e-5)
+
+    def test_mixed_ndarray_and_tensor_gradients_share_one_global_norm(self):
+        """Params can legitimately have a mix of Tensor and ndarray gradients
+        (e.g. manually-set vs autograd-produced); the global norm must be
+        computed across both together, and each must be scaled by the same
+        coefficient in its own representation."""
+        p_tensor = Tensor(np.zeros(2), requires_grad=True)
+        p_tensor.grad = Tensor(np.array([3.0, 4.0]))
+        p_ndarray = Tensor(np.zeros(2), requires_grad=True)
+        p_ndarray.grad = np.array([0.0, 0.0])
+
+        # global norm = 5; max_norm = 1 → scale = 0.2
+        clip_grad_norm([p_tensor, p_ndarray], max_norm=1.0)
+        expected = np.array([3.0, 4.0]) * (1.0 / 5.0)
+        np.testing.assert_allclose(p_tensor.grad.data, expected, rtol=1e-5)
+
+
 # ─────────────────────────────────────────────
 # Checkpoint round-trip
 # ─────────────────────────────────────────────
