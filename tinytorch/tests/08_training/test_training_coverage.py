@@ -260,6 +260,105 @@ class TestCheckpointing:
             assert os.path.exists(path)
 
 
+class TestSchedulerCheckpointState:
+    """_get_scheduler_state / _set_scheduler_state round-trip through
+    save_checkpoint / load_checkpoint. No existing checkpoint test used a
+    Trainer with a scheduler attached, leaving this entire round-trip, and
+    the None-guard branches on both sides, completely untested."""
+
+    def test_scheduler_attributes_round_trip(self):
+        scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=20)
+        trainer, _ = simple_trainer(scheduler=scheduler)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            # Corrupt the scheduler's attributes, then restore from checkpoint.
+            trainer.scheduler.max_lr = 999.0
+            trainer.scheduler.min_lr = 999.0
+            trainer.scheduler.total_epochs = 999
+            trainer.load_checkpoint(path)
+            assert trainer.scheduler.max_lr == 0.1
+            assert trainer.scheduler.min_lr == 0.01
+            assert trainer.scheduler.total_epochs == 20
+        finally:
+            os.remove(path)
+
+    def test_scheduler_state_survives_into_get_lr_behavior(self):
+        """A restored scheduler must produce the same learning rates as
+        before, not just have matching attribute values by coincidence."""
+        scheduler = CosineSchedule(max_lr=0.2, min_lr=0.02, total_epochs=10)
+        trainer, _ = simple_trainer(scheduler=scheduler)
+        expected_lrs = [scheduler.get_lr(e) for e in range(10)]
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            trainer.scheduler.max_lr = 1.0
+            trainer.scheduler.min_lr = 0.5
+            trainer.load_checkpoint(path)
+            restored_lrs = [trainer.scheduler.get_lr(e) for e in range(10)]
+            assert restored_lrs == expected_lrs
+        finally:
+            os.remove(path)
+
+    def test_checkpoint_scheduler_state_is_none_without_scheduler(self):
+        """_get_scheduler_state must return None when the trainer has no
+        scheduler, and the saved checkpoint dict must record that."""
+        trainer, _ = simple_trainer(scheduler=None)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            with open(path, "rb") as f:
+                ckpt = pickle.load(f)
+            assert ckpt["scheduler_state"] is None
+        finally:
+            os.remove(path)
+
+    def test_loading_none_scheduler_state_does_not_crash_with_scheduler_present(self):
+        """A checkpoint saved WITHOUT a scheduler (scheduler_state=None) must
+        load safely into a trainer that DOES have a scheduler attached,
+        leaving that scheduler's attributes untouched rather than crashing
+        or wiping them to None."""
+        trainer_no_sched, _ = simple_trainer(scheduler=None)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer_no_sched.save_checkpoint(path)
+
+            scheduler = CosineSchedule(max_lr=0.3, min_lr=0.03, total_epochs=5)
+            trainer_with_sched, _ = simple_trainer(scheduler=scheduler)
+            trainer_with_sched.load_checkpoint(path)
+
+            assert trainer_with_sched.scheduler.max_lr == 0.3
+            assert trainer_with_sched.scheduler.min_lr == 0.03
+            assert trainer_with_sched.scheduler.total_epochs == 5
+        finally:
+            os.remove(path)
+
+    def test_loading_scheduler_state_into_trainer_without_scheduler_does_not_crash(self):
+        """The reverse direction: a checkpoint saved WITH a scheduler must
+        load safely into a trainer that has none, without raising."""
+        scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=20)
+        trainer_with_sched, _ = simple_trainer(scheduler=scheduler)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer_with_sched.save_checkpoint(path)
+
+            trainer_no_sched, _ = simple_trainer(scheduler=None)
+            trainer_no_sched.load_checkpoint(path)  # must not raise
+            assert trainer_no_sched.scheduler is None
+        finally:
+            os.remove(path)
+
+
 # ─────────────────────────────────────────────
 # Trainer.evaluate
 # ─────────────────────────────────────────────
