@@ -204,12 +204,13 @@ def _build_canonical_regex_reverse(abbrev: str, expansion) -> re.Pattern:
 
 
 def _build_bare_regex(abbrev: str) -> re.Pattern:
-    """Regex for bare `\\b<ABBREV>s?\\b` word-boundary match.
+    """Regex for bare word-boundary match.
 
     Case-sensitive. Matches both singular and plural (e.g. `CNN` and
-    `CNNs`) as the same logical abbreviation.
+    `CNNs`) as the same logical abbreviation. Excludes hyphenated prefixes
+    and suffixes (e.g., `DP-SGD` is not treated as a bare occurrence of `SGD`).
     """
-    return re.compile(r"\b" + re.escape(abbrev) + r"s?\b")
+    return re.compile(r"(?<![-\w])" + re.escape(abbrev) + r"s?(?![-\w])")
 
 
 # Precompile both regex sets at import time.
