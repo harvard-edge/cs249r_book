@@ -634,7 +634,16 @@ class CrossEntropyLoss:
 
         # Step 2: Select log-probabilities for correct classes
         batch_size = logits.shape[0]
+        num_classes = logits.shape[-1]
         target_indices = targets.data.astype(int)
+
+        out_of_range = (target_indices < 0) | (target_indices >= num_classes)
+        if np.any(out_of_range):
+            bad_values = np.unique(target_indices[out_of_range])
+            raise ValueError(
+                f"CrossEntropyLoss target index out of range: {bad_values.tolist()}\n"
+                f"  Valid range for {num_classes} classes is [0, {num_classes - 1}]"
+            )
 
         # Select correct class log-probabilities using advanced indexing
         selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
