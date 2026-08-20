@@ -1322,7 +1322,16 @@ def test_unit_count_conv_flops():
     assert flops_s2 == expected_s2, f"Expected {expected_s2}, got {flops_s2}"
     print(f"✅ Conv2d(3, 64, 7, stride=2): {flops_s2} FLOPs")
 
-    # Test 3: Missing attributes returns 0
+    # Test 3: Padding size 3 for each side
+    conv_p3 = MockConv(3, 10, 3, 1, 3)
+    flops_p3 = profiler._count_conv_flops(conv_p3, (1, 3, 28, 28))
+    out_h_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    out_w_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    expected_p3 = out_h_p3 * out_w_p3 * 3 * 3 * 3 * 10 * 2
+    assert flops_p3 == expected_p3, f"Expected {expected_p3}, got {flops_p3}"
+    print(f"✅ Conv2d(3, 10, 3, stride=1, padding=3): {flops_p3} FLOPs")
+
+    # Test 4: Missing attributes returns 0
     class Incomplete:
         pass
 
