@@ -13,7 +13,7 @@ This appendix is designed as a reference. Reach for it when translating a profil
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
 - **When general matrix multiplys (GEMMs) are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
-- **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-mechanics-learning-24f6 and the training memory decomposition.
+- **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-mechanics-learning-24f6 and the training memory \mbox{decomposition.}
 - **When tensor code "should work" but does not**: Use @sec-appdx-algorithm-foundations-shapes-strides-1aea and @sec-appdx-algorithm-foundations-broadcasting-ec16.
 - **When sparsity is proposed as a fix**: Use @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
 - **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode automatic differentiation (AD) complexity theorem.
@@ -21,10 +21,13 @@ Conventions used here follow the book-wide notation (for example, $B$ is reserve
 - **When allocating compute between parameters and tokens**: Use @sec-appdx-algorithm-chinchilla-derivation for the Kaplan and Chinchilla compute-optimal scaling law derivation.
 
 ```{=latex}
-\vspace*{-1ex}
+\vspace*{-0.5ex}
 ```
 Neural networks turn linear algebra into learned behavior: matrices transform activations, tensor layouts determine how data move through memory, and backpropagation carries error signals through the resulting computation. These foundations support the deep learning treatment in @sec-neural-computation, the framework internals in @sec-ml-frameworks, and the training strategies in @sec-model-training. Architectures change, but the underlying mathematical machinery remains constant.
 
+```{=latex}
+\vspace*{-1ex}
+```
 ## Linear Algebra {#sec-appdx-algorithm-foundations-linear-algebra-c937}
 
 Deep learning systems are, at their core, engines for transforming massive matrices. Frameworks like PyTorch abstract away the raw math, but performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations, this section focuses on how they are manipulated.
@@ -181,7 +184,7 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percen
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.3}
+\renewcommand{\arraystretch}{1.6}
 ```
 
 | **Layer Type**                |        **Output Shape**       |                                       **Parameters ($P$)**                                       |                              **FLOPs (per Forward Pass)**                              |
@@ -191,7 +194,7 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percen
 | **Multi-Head Self-Attention** |   $(B, S, d_{\text{model}})$  | $4 \times d_{\text{model}}^2$, plus $4 \times d_{\text{model}}$ if projection biases are enabled |              $B \times (4 S^2 d_{\text{model}} + 8 S d_{\text{model}}^2)$              |
 | **LayerNorm**                 |   $(B, S, d_{\text{model}})$  |                 $2 \times d_{\text{model}}$ if affine scale and bias are enabled                 |                   $\mathcal{O}(B \times S \times d_{\text{model}})$                    |
 
-: **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, and $K$ is kernel size. The attention FLOPs include QKV projections and score interactions. The $S^2$ term applies to full-sequence training and prefill, while KV-cached generation is linear per token in cached context; $d^2$ projection work dominates at large hidden dimensions. {#tbl-tensor-op-ref tbl-colwidths="[25,21,21,33]"}
+: **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, and $K$ is kernel size. The attention FLOPs include QKV projections and score interactions. The $S^2$ term applies to full-sequence training and prefill, while KV-cached generation is linear per token in cached context; $d^2$ projection work dominates at large hidden dimensions. {#tbl-tensor-op-ref tbl-colwidths="[13,18,36,33]"}
 
 ```{=latex}
 \endgroup
@@ -417,9 +420,6 @@ class GPT2TrainingMem:
 - Optimizer (FP32 master + momentum + variance): `{python} GPT2TrainingMem.P_math` $\times$ `{python} GPT2TrainingMem.optim_bytes_value_str` bytes = `{python} GPT2TrainingMem.optim_gb_str`
 - **Total model state**: `{python} GPT2TrainingMem.model_state_gb_str`—fits on an `{python} GPT2TrainingMem.accel_class_gb_str`-class A100/H100 (`{python} GPT2TrainingMem.accel_gb_str` in decimal units), but leaves only `{python} GPT2TrainingMem.remaining_gb_str` for activations.
 
-```{=latex}
-\vspace*{-1.25ex}
-```
 **Activations (scale with batch)**:
 
 Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times N_{\text{heads}} \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
@@ -470,7 +470,7 @@ where $C \le 5$ is a universal constant independent of the input dimension $N$. 
 
 ### Step-by-step chain rule adjoint graph propagation proof {#sec-appdx-algorithm-baur-strassen-proof}
 
-Let the computational graph $G = (V, E)$ be topologically ordered with nodes $v_{1-N}, \dots, v_0, v_1, v_2, \dots, v_W$, where input variables are $x_i = v_{i-N}$ for $i \in \{1, \dots, N\}$ and the final output is $f(x) = v_W$. Each intermediate node $v_j$ is evaluated via a primitive operation:
+Let the computational graph $G = (V, E)$ be topologically ordered with nodes $v_{1-N}, \dots, v_0, v_1$, $v_2, \dots, v_W$, where input variables are $x_i = v_{i-N}$ for $i \in \{1, \dots, N\}$ and the final output is $f(x) = v_W$. Each intermediate node $v_j$ is evaluated via a primitive operation:
 $$ v_j = \phi_j\left( \{ v_k \mid k \in \text{Parents}(j) \} \right) $$
 
 Define the *adjoint variable* $\bar{v}_i$ for every node $v_i$ as the partial derivative of the scalar output $v_W$ with respect to $v_i$:
@@ -506,8 +506,7 @@ Summing across all primitive nodes in $G$, every forward operation generates at 
 $$ \text{Work}_{\text{Backward}}(\nabla f) \le 4 \cdot W(f) $$
 
 Adding the forward pass work $W(f)$ yields the total work bound:
-$$ \text{Work}_{\text{Reverse}}(f, \nabla f) = W(f) + \text{Work}_{\text{Backward}}(\nabla f) \le 5 \cdot W(f) $$
-$\blacksquare$
+$$ \text{Work}_{\text{Reverse}}(f, \nabla f) = W(f) + \text{Work}_{\text{Backward}}(\nabla f) \le 5 \cdot W(f) \qquad\blacksquare$$
 
 ::: {#psp-appendix-algorithm-baur-strassen-llm-scaling .callout-perspective title="Why 175B-parameter LLMs can be trained"}
 
@@ -539,7 +538,7 @@ Standard GPU implementations execute this in three discrete kernel launches:
 2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $d$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{N \times N}$ to HBM ($\Theta(N^2)$ reads + writes).
 3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{N \times d}$ to HBM ($\Theta(N^2 + Nd)$ reads + writes).
 
-Total HBM memory traffic is $\Theta(N^2 + Nd)$ elements. For $N = 8192, d = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
+Total HBM memory traffic is $\Theta(N^2 + Nd)$ elements. For $N = 8192$, $d = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
 
 ### Online softmax recurrence proof {#sec-appdx-algorithm-flash-attention-online-softmax-proof}
 
@@ -579,8 +578,8 @@ The algorithm executes two nested loops:
 
 * Partition $\mathbf{Q}$ into $T_r = \lceil N/B_r \rceil$ blocks of size $B_r \times d$.
 * Partition $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil N/B_c \rceil$ blocks of size $B_c \times d$.
-* **Outer loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$ into SRAM ($B_r d$ reads). Initialize $m_i = -\infty, d_i = 0, \mathbf{O}_i = \mathbf{0}$.
-* **Inner loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j, \mathbf{V}_j$ into SRAM ($2 B_c d$ reads). Compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM, update $m_i, d_i, \mathbf{O}_i$ via online softmax, then drop $\mathbf{S}_{ij}$.
+* **Outer loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$ into SRAM ($B_r d$ reads). Initialize $m_i = -\infty$, $d_i = 0$, $\mathbf{O}_i = \mathbf{0}$.
+* **Inner loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j$, $\mathbf{V}_j$ into SRAM ($2 B_c d$ reads). Compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM, update $m_i$, $d_i$, $\mathbf{O}_i$ via online softmax, then drop $\mathbf{S}_{ij}$.
 * Write completed $\mathbf{O}_i$ to HBM ($B_r d$ writes).
 
 #### Total memory access accounting {.unnumbered}
@@ -621,7 +620,6 @@ Determining the compute-optimal allocation between model parameters $N$ and trai
 
 The cross-entropy evaluation loss $\mathcal{L}(N, D)$ of an autoregressive transformer language model trained with $N$ non-embedding parameters on $D$ tokens is modeled by the power-law formulation:
 $$ \mathcal{L}(N, D) = E + \frac{A}{N^\alpha} + \frac{B}{D^\beta} $$
-
 where:
 
 * $E$: Irreducible loss representing the entropy of natural language data.
