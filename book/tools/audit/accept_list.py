@@ -1,10 +1,11 @@
-"""Persistent accept-list for editorially-verified scanner false positives.
+"""Persistent accept-list for editorially reviewed scanner exceptions.
 
 Pass 16 — Item A (the highest-leverage Pass 16 change).
 
 Context
 -------
-The Pass 15 h3_titlecase scanner's multi-cap-token heuristic over-flags any
+The mechanism was introduced because the Pass 15 h3_titlecase scanner's
+multi-cap-token heuristic over-flags any
 heading that contains two or more capitalized tokens, even when the capitals
 are proper nouns, acronyms, named principles (Amdahl's Law), legislation
 (EU AI Act), D·A·M / C³ taxonomy axis labels, or the first word after a
@@ -15,7 +16,7 @@ mechanism, those 75 known-good hits re-appear as "open" in every future
 scan, drowning the signal from any new category the scanner gains.
 
 This module provides that durable mechanism. A JSON file next to the
-scanner holds the accepted-FP entries; `apply_accept_list` is called at
+scanner holds reviewed exception entries; `apply_accept_list` is called at
 the end of `scan()` and flips matching ledger issues from `open` to
 `accepted`, recording the rule tag in `Issue.protected_context`.
 
@@ -81,7 +82,7 @@ DEFAULT_NOTATION_ACCEPT_LIST = (
 class MatchKey:
     """Exact-match key for accept-list lookup.
 
-    Three fields fully identify an accepted FP: the rule category it came
+    Three fields fully identify an accepted exception: the rule category it came
     from, the repo-relative path of the source file, and the exact raw
     source line (`before`). Line number is intentionally NOT part of the
     key — lines drift when edits happen above, but `before` does not.
@@ -100,7 +101,7 @@ class AcceptEntry:
     file: str          # repo-relative, forward slashes
     line: int          # hint only, not part of match key
     before: str
-    rule: str          # e.g. "§10.9-named-principle"
+    rule: str          # e.g. "§10.9-named-principle" or a layout exception
     accepted_in_pass: int = 0
     accepted_date: str = ""
 
@@ -291,7 +292,7 @@ def format_stale_warnings(result: ApplyResult, max_show: int = 10) -> list[str]:
         return []
     lines = [
         f"WARNING: {len(result.stale)} accept-list entries did not match "
-        f"any scanned issue (likely edited headings):"
+        f"any scanned issue (likely edited source lines):"
     ]
     for entry in result.stale[:max_show]:
         lines.append(
@@ -302,6 +303,6 @@ def format_stale_warnings(result: ApplyResult, max_show: int = 10) -> list[str]:
         lines.append(f"  ... and {len(result.stale) - max_show} more")
     lines.append(
         "Remove stale entries from book/tools/audit/accepted_fps.json "
-        "if the corresponding headings have been intentionally edited."
+        "if the corresponding source lines have been intentionally edited."
     )
     return lines

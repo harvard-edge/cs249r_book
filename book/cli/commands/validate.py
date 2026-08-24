@@ -11132,11 +11132,68 @@ class ValidateCommand:
         §10.5's expanded Special Cases. Ordinary specialized acronyms
         reset by chapter. Formal model names and recurring lighthouse
         labels are governed by the lighthouse roster rules, not this
-        abbreviation check.
+        abbreviation check. Routes through the audit scanner so the
+        persistent exact-line accept-list can grandfather reviewed layout
+        exceptions without hiding new violations.
         """
-        return self._run_audit_check(
-            root, "audit.checks.abbreviation_first_use",
-            "abbreviation-first-use", "expand abbreviations on first use (§10.5)",
+        import importlib
+        import sys as _sys
+
+        cli_root = Path(__file__).resolve().parent.parent
+        tools_root = cli_root.parent / "tools"
+        for path in (cli_root, tools_root):
+            path_str = str(path)
+            if path_str not in _sys.path:
+                _sys.path.insert(0, path_str)
+        scan_mod = importlib.import_module("audit.scan")
+
+        contents_root = cli_root.parent / "quarto" / "contents"
+        resolved_root = root.resolve()
+        if resolved_root == (contents_root / "vol1").resolve():
+            scope = "vol1"
+        elif resolved_root == (contents_root / "vol2").resolve():
+            scope = "vol2"
+        elif resolved_root == contents_root.resolve():
+            scope = "both"
+        else:
+            scope = str(resolved_root)
+
+        t0 = time.time()
+        ledger = scan_mod.scan(
+            scope=scope,
+            categories=["abbreviation-first-use"],
+            verbose=False,
+            use_accept_list=True,
+        )
+
+        issues: List[ValidationIssue] = []
+        for issue in ledger.issues:
+            if issue.status != "open":
+                continue
+            try:
+                rel = str(Path(issue.file).resolve().relative_to(resolved_root))
+            except ValueError:
+                rel = str(issue.file)
+            message = issue.reason or issue.rule_text or issue.category
+            severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+            issues.append(ValidationIssue(
+                file=rel,
+                line=issue.line,
+                code=issue.category,
+                message=message,
+                severity=severity,
+                context=(issue.before or "")[:160],
+                suggestion=getattr(issue, "suggested_after", "") or "",
+            ))
+
+        return ValidationRunResult(
+            name="abbreviation-first-use",
+            description="expand abbreviations on first use (§10.5)",
+            files_checked=sum(
+                1 for path in scan_mod.resolve_scope(scope) if path.suffix == ".qmd"
+            ),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_notation_consistency(self, root: Path) -> ValidationRunResult:
