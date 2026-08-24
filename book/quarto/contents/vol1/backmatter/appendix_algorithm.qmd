@@ -12,12 +12,12 @@ This appendix is designed as a reference. Reach for it when translating a profil
 
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
-- **When GEMMs are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
+- **When general matrix multiply (GEMM) kernels are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
 - **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-mechanics-learning-24f6 and the training memory \mbox{decomposition.}
 - **When tensor code "should work" but does not**: Use @sec-appdx-algorithm-foundations-shapes-strides-1aea and @sec-appdx-algorithm-foundations-broadcasting-ec16.
 - **When sparsity is proposed as a fix**: Use @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
-- **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode AD complexity theorem.
-- **When analyzing sequence length bottlenecks**: Use @sec-appdx-algorithm-flash-attention for the online softmax recurrence and FlashAttention HBM I/O reduction proof.
+- **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode automatic differentiation (AD) complexity theorem.
+- **When analyzing sequence length bottlenecks**: Use @sec-appdx-algorithm-flash-attention for the online softmax recurrence and FlashAttention high-bandwidth memory (HBM) I/O reduction proof.
 - **When allocating compute between parameters and tokens**: Use @sec-appdx-algorithm-chinchilla-derivation for the Kaplan and Chinchilla compute-optimal scaling law derivation.
 
 ```{=latex}
@@ -37,7 +37,7 @@ Deep learning systems are, at their core, engines for transforming massive matri
 ```
 ::: {#psp-appendix-algorithm-linear-algebra-matters .callout-perspective title="Why this matters"}
 
-Many modern dense neural networks, especially transformers and large CNNs, spend much of their compute time in matrix multiplication or GEMM-like kernels. A self-attention block performs the Q, K, V, and output projection GEMMs plus two attention matrix multiplications: one for the attention scores and one for the attention-weighted values. The layer's feed-forward block adds more GEMMs. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory bound *before* any profiler trace runs.
+Many modern dense neural networks, especially transformers and large convolutional neural networks, spend much of their compute time in matrix multiplication or GEMM-like kernels. A self-attention block performs the Q, K, V, and output projection GEMMs plus two attention matrix multiplications: one for the attention scores and one for the attention-weighted values. The layer's feed-forward block adds more GEMMs. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory bound *before* any profiler trace runs.
 
 :::
 
@@ -448,7 +448,7 @@ Compilers transform graphs into static single-assignment (SSA) form\index{Static
 
 #### Operator fusion {#sec-appdx-algorithm-foundations-operator-fusion-5d73}
 
-Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to High Bandwidth Memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
+Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to HBM and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of size $N$ bytes, fusion reduces memory traffic from $2kN$ bytes (each op reads and writes) to $2N$ bytes (one read, one write)—a $k\times$ reduction.
 
@@ -508,7 +508,7 @@ $$ \text{Work}_{\text{Backward}}(\nabla f) \le 4 \cdot W(f) $$
 Adding the forward pass work $W(f)$ yields the total work bound:
 $$ \text{Work}_{\text{Reverse}}(f, \nabla f) = W(f) + \text{Work}_{\text{Backward}}(\nabla f) \le 5 \cdot W(f) \qquad\blacksquare$$
 
-::: {#psp-appendix-algorithm-baur-strassen-llm-scaling .callout-perspective title="Why 175B-parameter LLMs can be trained"}
+::: {#psp-appendix-algorithm-baur-strassen-llm-scaling .callout-perspective title="Why 175B-parameter large language models can be trained"}
 
 The independence of $C \le 5$ from input dimension $N$ is the mathematical reason deep learning works. Consider training a transformer model with $P = 175 \times 10^9$ parameters:
 
@@ -522,7 +522,7 @@ If we instead used forward-mode AD or finite differences to compute $\nabla f \i
 
 ## FlashAttention Tiling & Online Softmax Recurrence Proof {#sec-appdx-algorithm-flash-attention}
 
-Standard self-attention in transformers requires materializing an $N \times N$ attention score matrix in High Bandwidth Memory (HBM), creating an $\mathcal{O}(N^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
+Standard self-attention in transformers requires materializing an $N \times N$ attention score matrix in HBM, creating an $\mathcal{O}(N^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
 
 ### Standard softmax HBM I/O bottleneck {#sec-appdx-algorithm-flash-attention-hbm-bottleneck}
 
@@ -614,7 +614,7 @@ By reducing HBM traffic by over $13\times$, FlashAttention converts attention fr
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
 
-Determining the compute-optimal allocation between model parameters $N$ and training dataset tokens $D$ for a given floating-point budget $C$ is a central decision in LLM system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
+Determining the compute-optimal allocation between model parameters $N$ and training dataset tokens $D$ for a given floating-point budget $C$ is a central decision in large language model system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
 
 ### Parametric loss surface formulation {#sec-appdx-algorithm-chinchilla-loss-surface}
 
