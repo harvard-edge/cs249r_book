@@ -354,7 +354,7 @@ The *Bandwidth Hog* archetype suffers more from serial bottlenecks. Even infinit
 
 These examples reveal that hardware optimization turns on whether a workload is limited by compute rate or data movement. That distinction determines which accelerator to choose, which optimizations matter, and whether a 10$\times$ more powerful chip will help. The Roofline Model\index{Roofline Model!hardware diagnosis} provides the analytical framework for making this diagnosis [@williams2009]; it is introduced formally in @sec-appdx-machine-foundations-roofline-model-2529 and @sec-hardware-acceleration-roofline-model-42ff applies it to AI workloads. It plots an operation's arithmetic intensity,[^fn-arithmetic-intensity-roofline] defined as the ratio of floating-point operations to bytes of memory traffic (FLOP/byte), against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOP/s; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. High-reuse ResNet-50 convolutions can cross into the compute-bound regime, while low-batch autoregressive attention can be memory bound. This distinction is precisely *why* these workloads require different optimization strategies.
 
-[^fn-arithmetic-intensity-roofline]: **Arithmetic Intensity**\index{Arithmetic Intensity!roofline diagnostic}: The ratio of compute operations performed for each byte of data moved from memory (FLOP/byte). This metric provides the direct, quantitative answer to the text's central question: workloads with high arithmetic intensity, such as well-tiled convolutions and GEMMs above the hardware ridge point (the intensity at which compute, not memory, becomes the limit), are compute bound and accelerate with more TFLOP/s. Workloads with low intensity, such as some low-batch attention and decoding kernels, are memory bound and need more bandwidth or reuse rather than only more compute throughput.
+[^fn-arithmetic-intensity-roofline]: **Arithmetic Intensity**\index{Arithmetic Intensity!roofline diagnostic}: The ratio of compute operations performed for each byte of data moved from memory (FLOP/byte). This metric provides the direct, quantitative answer to the text's central question: workloads with high arithmetic intensity, such as well-tiled convolutions and general matrix multiplication (GEMM) kernels above the hardware ridge point (the intensity at which compute, not memory, becomes the limit), are compute bound and accelerate with more TFLOP/s. Workloads with low intensity, such as some low-batch attention and decoding kernels, are memory bound and need more bandwidth or reuse rather than only more compute throughput.
 
 The chapter develops these ideas from hardware history through computational primitives, memory hierarchies, roofline analysis, mapping, dataflow, and runtime support. The core analysis stays with single-accelerator and single-node systems; the closing material uses multi-device examples only to show how the same bottleneck diagnoses scale. The history of specialized hardware comes first because it reveals the recurring design patterns behind modern accelerators.
 
@@ -481,7 +481,6 @@ These diverse acceleration patterns converged in a broader architectural shift. 
 The scale of this challenge becomes stark in @fig-systems-gap, which plots an illustrative systems gap between model demand and hardware supply, sometimes discussed under the informal label Huang's Law\index{Huang's Law!GPU performance scaling}.[^fn-huangs-law-gpu] The normalized scenario assumes GPU supply rises about 1.7$\times$ per year while model demand rises about 6$\times$ per year, producing a gap that widens by roughly 3--4$\times$ each year. Published compute trends motivate the qualitative divergence, while the plotted rates are scenario assumptions rather than a forecast [@amodei2018ai; @epochai2024compute].
 
 [^fn-huangs-law-gpu]: **Huang's Law**\index{Huang's Law!GPU performance scaling}: The observation that GPU performance for AI workloads has improved through architectural innovations such as Tensor Cores as well as transistor scaling. The normalized figure uses illustrative GPU-supply and model-demand curves to show how unequal growth rates create a widening systems gap; it is not a forecast of either rate [@amodei2018ai; @epochai2024compute; @NVIDIA2020; @choquette2023].
-
 
 ::: {#fig-systems-gap fig-env="figure" fig-pos="htb" fig-cap="**The Systems Gap**: Relative compute growth (log scale) comparing model demand to hardware supply, normalized to 2012 = 1.0. The gray dotted line (CPU) and blue dashed line (GPU) reflect hardware progress, which lags the exponential red solid line (Model Demand). The purple region is the 'Systems Gap' that must be bridged through parallelism and co-design." fig-alt="Log-scale line chart from 2012 to 2024. Red line (model demand) rises steeply. Blue line (GPU supply) rises moderately. Gray line (CPU trend) rises slowly. A large purple shaded area between red and blue is labeled 'The Systems Gap.'"}
 
@@ -791,7 +790,7 @@ Machine learning constitutes a computational domain with unique characteristics 
 
 **Diagnosis**: General-purpose CPU server capacity was economically unable to absorb the exponential growth in inference FLOPs, threatening a capital infrastructure bottleneck.
 
-**Systems lesson**: Custom hardware acceleration becomes mandatory when workload volume crosses fleet-level economic thresholds. Aggregate arithmetic intensity and server TCO drive custom ASIC deployment decisions.
+**Systems lesson**: Custom hardware acceleration becomes mandatory when workload volume crosses fleet-level economic thresholds. Aggregate arithmetic intensity and server total cost of ownership drive custom ASIC deployment decisions.
 
 :::
 
@@ -831,7 +830,6 @@ Training and inference\index{Training vs. Inference!accelerator design} present 
 
 [^fn-latency-throughput-hw]: **Latency vs. Throughput in Accelerator Design**\index{Latency vs. Throughput!accelerator design}: Training's bidirectional data flow and large activation memory footprint favor throughput-oriented designs that use large batches to maximize arithmetic utilization. Inference's simple forward-pass computation, by contrast, is judged on latency, where single-request response time is the critical metric. This forces a hardware trade-off: a training-optimized architecture built to maximize FLOP/s can introduce pipeline and batching overhead that worsens tail latency for latency-sensitive inference workloads compared with a chip or runtime path optimized for single-request service.
 
-
 ::: {#dfn-hw-acceleration-ml-accelerator .callout-definition title="ML accelerator"}
 
 ***Machine Learning Accelerators***\index{ML Accelerator!definition}\index{Accelerator!ML} are domain-specific processors whose silicon is designed primarily for the dense matrix operations and regular data flow of neural networks, achieving high $R_{\text{peak}}$ and memory bandwidth utilization for these workloads by devoting die area to arithmetic units rather than to general-purpose control logic.
@@ -847,7 +845,6 @@ Training and inference\index{Training vs. Inference!accelerator design} present 
 
 *A DRAM access costs over 100$\times$ one FP32 multiply per event.*
 :::
-
 
 Deployment context shapes architectural choices by identifying the binding constraint. In data centers, the constraint is often time-to-result for training massive models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023]; whether that trade lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate. Google's TPUv4\index{TPU!data center integration} makes a similar architectural trade, prioritizing throughput through systolic arrays and high-bandwidth memory [@jouppi2023].
 
@@ -866,10 +863,9 @@ Use the energy hierarchy to decide when specialization pays.
 
 :::
 
-At the opposite extreme, edge deployment\index{Edge Deployment!power constraints} inverts this priority: the binding constraint is *energy per inference*, not *throughput*. A smartphone camera or always-on audio path operating inside a few-watt power budget cannot afford the DRAM-intensive access patterns of a data center accelerator. Instead, edge architectures minimize data movement through local scratchpads, tightly integrated accelerators, dynamic voltage scaling, and event-driven processing when the workload allows it. The systems insight is that the same memory wall principle applies at both extremes: data center chips fight it with bandwidth (terabytes per second of HBM), while edge chips fight it with proximity (keeping data in registers and scratchpads).
+At the opposite extreme, edge deployment\index{Edge Deployment!power constraints} inverts this priority: the binding constraint is *energy per inference*, not *throughput*. A smartphone camera or always-on audio path operating inside a few-watt power budget cannot afford the DRAM-intensive access patterns of a data center accelerator. Instead, edge architectures minimize data movement through local scratchpads, tightly integrated accelerators, dynamic voltage scaling, and event-driven processing when the workload allows it. The systems insight is that the same memory wall principle applies at both extremes: data center chips fight it with bandwidth (terabytes per second of high-bandwidth memory (HBM)), while edge chips fight it with proximity (keeping data in registers and scratchpads).
 
 The success of application-specific accelerators demonstrates that no single architecture can efficiently address all ML workloads. A massive installed base of edge devices demands architectures optimized for energy efficiency and real-time latency targets, while cloud-scale training continues advancing the boundaries of computational throughput. This diversity drives continued innovation in specialized architectures, each optimized for its specific deployment context and computational requirements. However, despite this diversity, all accelerators operate under the same physical constraint: the energy cost of moving data.
-
 
 @Tbl-hw-evolution summarizes these milestones in hardware specialization. While floating-point coprocessors addressed arithmetic precision and early GPUs addressed graphics throughput, AI accelerators target a qualitatively different challenge: the integration bottleneck between memory hierarchies and massively parallel execution units.
 
@@ -933,9 +929,9 @@ class HbmVsGddr:
     gap_mult_range_str = fmt_multiple_range(gap_low, gap_high, precision=1, commas=False)
 ```
 
-The primary engineering challenge is no longer maximizing calculation rate but keeping data close to the calculation. In modern accelerators, accessing data from external memory (DRAM)\index{DRAM!energy cost} can consume 100$\times$ more energy than the actual arithmetic operation. This disparity is precisely why modern accelerator architectures prioritize high-bandwidth memory (HBM)[^fn-hbm-bandwidth-cost] and large on-chip scratchpads\index{Scratchpad Memory!accelerator design} over simply adding more compute units.
+The primary engineering challenge is no longer maximizing calculation rate but keeping data close to the calculation. In modern accelerators, accessing data from external memory (DRAM)\index{DRAM!energy cost} can consume 100$\times$ more energy than the actual arithmetic operation. This disparity is precisely why modern accelerator architectures prioritize HBM[^fn-hbm-bandwidth-cost] and large on-chip scratchpads\index{Scratchpad Memory!accelerator design} over simply adding more compute units.
 
-[^fn-hbm-bandwidth-cost]: **HBM (High Bandwidth Memory)**\index{HBM!bandwidth-cost trade-off}: Achieves `{python} HbmVsGddr.hbm_bw_range_str` bandwidth in current data center accelerators (A100's HBM2e to H100's HBM3) through 3D die stacking with thousands of through-silicon vias (TSVs), compared to `{python} HbmVsGddr.gddr6x_bw_str` for GDDR6X [@NVIDIA2020; @choquette2023]. This `{python} HbmVsGddr.gap_mult_range_str` bandwidth advantage transforms memory-bound ML workloads toward compute-bound performance, which is why high-end data center AI accelerators such as H100, A100, and TPUv4 use HBM [@jouppi2023]. The trade-off is cost: HBM is a dominant cost component in data center AI accelerators, limiting it to applications where the bandwidth-per-dollar justifies the substantial premium over consumer-grade GDDR.
+[^fn-hbm-bandwidth-cost]: **HBM**\index{HBM!bandwidth-cost trade-off}: Achieves `{python} HbmVsGddr.hbm_bw_range_str` bandwidth in current data center accelerators (A100's HBM2e to H100's HBM3) through 3D die stacking with thousands of through-silicon vias (TSVs), compared to `{python} HbmVsGddr.gddr6x_bw_str` for GDDR6X [@NVIDIA2020; @choquette2023]. This `{python} HbmVsGddr.gap_mult_range_str` bandwidth advantage transforms memory-bound ML workloads toward compute-bound performance, which is why high-end data center AI accelerators such as H100, A100, and TPUv4 use HBM [@jouppi2023]. The trade-off is cost: HBM is a dominant cost component in data center AI accelerators, limiting it to applications where the bandwidth-per-dollar justifies the substantial premium over consumer-grade GDDR.
 
 Hardware acceleration addresses the memory bottleneck through specialized spatial layout and multi-tiered storage. Examine the architectural blueprint in @fig-accelerator-anatomy, noting how high-bandwidth memory feeds local scratchpads surrounding the processing element grid.
 
@@ -1254,7 +1250,6 @@ Vector processing units solve this by operating on multiple data elements simult
 4.  **Vector multiply and reduction**: Multiplies corresponding elements and reduces the products to a partial scalar sum.
 5.  **Pointer arithmetic**: Advances the pointers and decrements the remaining element count by the run-time vector length.
 
-
 In this assembly sequence, the vector multiply instruction processes several element pairs at once, while the reduction completes each partial dot product and the vector loads amortize instruction overhead across multiple data elements. The run-time vector length determines how many values each iteration transfers and processes, so the same loop works across implementations with different vector widths. The illustrative workload is divided into roughly `{python} WeightMatrixCalc.wm_vector_chunks_str` vector chunks, each executed by several vector and scalar instructions.
 
 Key vector operations map directly to common deep learning patterns. @Tbl-vector enumerates how operations such as reduction, gather, scatter, and masked operations appear frequently in pooling, embedding lookups, and attention mechanisms, clarifying the direct mapping between low-level vector hardware and high-level machine learning workloads.
@@ -1330,7 +1325,6 @@ output = matmul(kernel, patches)
 
 :::
 
-
 #### Matrix operations hardware acceleration {#sec-hardware-acceleration-matrix-operations-hardware-acceleration-514a}
 
 This pervasive pattern of matrix multiplication has direct implications for hardware design\index{Matrix Operation!hardware acceleration}: accelerators need specialized units that can handle these computations at scale. @Lst-matrix_unit demonstrates a representative dedicated matrix unit that processes an entire $16{\times}16$ block at once, illustrating why matrix instructions and tensor cores can deliver much higher throughput than scalar or vector-only execution paths [@nvidia_tensors_fp16_2017; @intel2021amx].
@@ -1347,7 +1341,6 @@ mstore (output_ptr), mr3    # Store computed output block
 ```
 
 :::
-
 
 ```{=latex}
 \vspace*{-1.5ex}
@@ -1381,7 +1374,7 @@ Special Function Units (SFUs)\index{Special Function Unit!SFU} provide dedicated
 #### Nonlinear functions {#sec-hardware-acceleration-nonlinear-functions-cc93}
 
 ```{=latex}
-\noindent 
+\noindent
 \begin{minipage}{1\linewidth}
 ```
 To see why dedicated hardware matters, consider a typical layer sequence [@goodfellow2016deep]. @Lst-nonlinear_layer combines linear transformations with nonlinear activations—operations that appear simple in Python but reveal substantial computational complexity at the hardware level.
@@ -1398,7 +1391,7 @@ output = layer(input_tensor)
 :::
 ```{=latex}
 \end{minipage}
-``` 
+```
 
 This sequence introduces multiple nonlinear transformations that extend beyond simple matrix operations. @Lst-nonlinear_math breaks down these operations into their mathematical components, exposing the computational complexity that hardware must address.
 
@@ -1492,7 +1485,7 @@ Applying ReLU to a 512-element vector shows why execution models matter: the ope
 
 The progression from computational primitives to execution units follows a structured hierarchy that reflects the increasing complexity and specialization of AI accelerators:
 
-* Vector operations → SIMD/SIMT units that enable parallel processing of independent data elements
+* Vector operations → SIMD and single instruction, multiple threads (SIMT) units that enable parallel processing of independent data elements
 * Matrix operations → Tensor cores and systolic arrays that provide structured matrix multiplication
 * Special functions → Dedicated hardware units integrated within processing elements
 
@@ -1500,7 +1493,7 @@ Each execution unit combines these computational primitives with specialized mem
 
 ### Evolution from SIMD to SIMT architectures {#sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd}
 
-Imagine applying ReLU activation to a 512-element vector. A scalar processor executes 512 comparison-and-select operations sequentially. A SIMD (Single Instruction, Multiple Data)\index{SIMD!hardware execution} unit processes 8 or 16 elements per instruction, reducing the work to 32–64 instructions. A **SIMT**\index{SIMT!definition} (Single Instruction, Multiple Thread)\index{SIMT!definition} GPU can launch one lightweight thread per element; the hardware schedules those threads in warps or waves, completing the vector through multiple parallel groups while hiding latency. This progression reflects two related ideas: Flynn's SIMD taxonomy formalized data-parallel execution [@flynn1966], and GPU SIMT architectures extend that principle to many lightweight threads scheduled in warps [@lindholm2008; @nickolls2008].
+Imagine applying ReLU activation to a 512-element vector. A scalar processor executes 512 comparison-and-select operations sequentially. A SIMD\index{SIMD!hardware execution} unit processes 8 or 16 elements per instruction, reducing the work to 32–64 instructions. A **SIMT**\index{SIMT!definition} GPU can launch one lightweight thread per element, each maintaining its own independent execution state; the hardware schedules those threads in warps or waves, completing the vector through multiple parallel groups while hiding latency. This progression reflects two related ideas: Flynn's SIMD taxonomy formalized data-parallel execution [@flynn1966], and GPU SIMT architectures extend that principle to many lightweight threads scheduled in warps [@lindholm2008; @nickolls2008].
 
 SIMD execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The Arm Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement scalable SIMD operations efficiently [@stephens2017]. @Lst-arm_sve_vector demonstrates this approach.
 
@@ -2320,7 +2313,6 @@ Each processing element in a 2D array performs a multiply-accumulate operation i
 
 This structured computation model minimizes data movement between global memory and processing elements, improving both efficiency and scalability. 2D matrix multiplication operations map naturally onto grid-structured systolic processing arrays: follow the synchronized dataflow in @fig-systolic-array, tracing how input activations stream horizontally while stationary weights accumulate partial products vertically. As systolic arrays operate in a streaming fashion, they are particularly effective for high-throughput workloads such as deep learning training and inference. However, as detailed in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, practical effectiveness is ultimately constrained by memory bandwidth bottlenecks.
 
-
 ::: {#psp-hw-acceleration-matching-architecture-workload .callout-perspective title="Matching architecture to workload"}
 
 **Challenge**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types. @Tbl-hw-acceleration-systolic-dataflow previews the three stationary-operand strategies and the workloads each favors; @sec-hardware-acceleration-dataflow-optimization-strategies-ce52 develops each one in full as a general mapping decision.
@@ -2336,7 +2328,6 @@ This structured computation model minimizes data movement between global memory 
 There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with LLM inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
 
 :::
-
 
 ```{python}
 #| echo: false
@@ -2412,8 +2403,7 @@ As AI models continue to scale, precision support connects the compute primitive
 
 Mastery of the single-machine stack requires understanding how bits move between GPUs and the CPU. In the 1–8 GPU regime, scaling is achieved through high-speed intra-node interconnects such as NVLink\index{NVLink!intra-node scaling} and host-to-device PCIe\index{PCIe!host-to-device transfers} transfers that mitigate the memory wall. These links form a **bandwidth taper**\index{Bandwidth Taper!interconnect hierarchy}: data-movement speed falls at each step away from the compute units, from on-package HBM through the GPU-to-GPU NVLink bridge down to the host PCIe link. The PCIe step is much slower than the accelerator-local memory and inter-GPU fabric, so any data path that touches the CPU can become a performance hazard, the "PCIe Wall"\index{NVLink!PCIe wall} that NVLink exists to avoid [@NVIDIA2020nvlink]. @Sec-hardware-acceleration-nodelevel-interconnect-topology-b45b develops this hierarchy quantitatively, where host-accelerator communication is the operative concern.
 
-Modern AI processors exhibit a range of design trade-offs based on their intended applications, and comparing their configurations reveals how deployment constraints drive architectural divergence. A training-optimized accelerator like the NVIDIA A100 packs many Streaming Multiprocessors with wide SIMD units and FP16 tensor cores because training throughput scales with aggregate multiply-accumulate capacity [@NVIDIA2020]. Google's TPUv4 makes a radically different bet: just two cores per chip, each containing massive BF16 systolic arrays, a design that trades programmer flexibility for efficiency on dense matrix multiplications [@jouppi2023]. At the inference end, Intel's Sapphire Rapids dedicates Advanced Matrix Extensions (AMX) tile engines to INT8 and BF16, reflecting the insight from @sec-model-compression that inference models tolerate reduced precision [@intel2021amx]. Mobile neural engines take this further by shrinking matrix engines into low-power SoC blocks, prioritizing energy efficiency per operation over peak throughput. @Tbl-execution-units compares these architectural configurations.
-
+Modern AI processors exhibit a range of design trade-offs based on their intended applications, and comparing their configurations reveals how deployment constraints drive architectural divergence. A training-optimized accelerator like the NVIDIA A100 packs many Streaming Multiprocessors with wide SIMD units and FP16 tensor cores because training throughput scales with aggregate multiply-accumulate capacity [@NVIDIA2020]. Google's TPUv4 makes a radically different bet: just two cores per chip, each containing massive BF16 systolic arrays, a design that trades programmer flexibility for efficiency on dense matrix multiplications [@jouppi2023]. At the inference end, Intel's Sapphire Rapids dedicates Advanced Matrix Extensions (AMX) tile engines to INT8 and BF16, reflecting the insight from @sec-model-compression that inference models tolerate reduced precision [@intel2021amx]. Mobile neural engines take this further by shrinking matrix engines into low-power system-on-chip (SoC) blocks, prioritizing energy efficiency per operation over peak throughput. @Tbl-execution-units compares these architectural configurations.
 
 | Processor                                       | **Vector Execution**\index{Vector Execution!definition} | **Matrix Engine**\index{Matrix Engine!definition} |  Processing Elements  | **Primary Workloads**\index{Primary Workloads!definition} |
 |:------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------:|:---------------------:|:----------------------------------------------------------|
@@ -2425,7 +2415,6 @@ Modern AI processors exhibit a range of design trade-offs based on their intende
 : **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics for specific workloads: NVIDIA A100 uses wide SIMD and tensor cores for training, Google TPUv4 emphasizes high-throughput BF16 matrix multiplication, Intel Sapphire Rapids focuses on INT8-optimized inference, and mobile NPUs prioritize low-power execution. These variations in SIMD width, tensor core size, and processing element count reflect the growing diversity in AI hardware architectures. {#tbl-execution-units tbl-colwidths="[15,23,20,23,19]"}
 
 The pattern across these configurations reveals a consistent engineering principle: each design sacrifices generality to optimize for its target workload's dominant operation and precision. Training chips invest silicon in wide floating-point datapaths; inference chips trade precision for throughput; mobile chips trade throughput for energy efficiency. No single design dominates across all workloads, which is precisely why hardware selection depends on workload analysis rather than headline specifications.
-
 
 ### Cost-performance analysis {#sec-hardware-acceleration-costperformance-analysis-e925}
 
@@ -3285,7 +3274,6 @@ Many ML systems contain both access regimes. @Tbl-traditional-vs-ml-mem contrast
 
 One key source of irregularity in ML workloads stems from batch size and execution order. The way input data is processed in batches directly affects memory reuse, creating a complex optimization challenge. Small batch sizes decrease the likelihood of reusing cached activations and weights, resulting in frequent memory fetches from slower, off-chip memory. Larger batch sizes can improve reuse and amortize memory access costs, but simultaneously place higher demands on available memory bandwidth, potentially creating congestion at different memory hierarchy levels. This delicate balance requires careful consideration of model architecture and available hardware resources.
 
-
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.4}
@@ -3393,12 +3381,11 @@ To reduce the need for constant data movement between registers and external mem
 
 For larger working datasets, many AI accelerators include scratchpad memory\index{Scratchpad Memory!software-managed storage}, which offers more storage than caches but with a key difference: it allows explicit software control over what data is stored and when it is evicted. Unlike caches, which rely on hardware-based eviction policies, scratchpad memory enables machine learning workloads to retain key values such as activations and filter weights for multiple layers of computation. This capability is useful in models like convolutional neural networks, where the same input feature maps and filter weights are reused across multiple operations. By keeping this data in scratchpad memory rather than reloading it from external memory, accelerators can significantly reduce unnecessary memory transfers and improve overall efficiency [@chen2017]. On NVIDIA GPUs, the hardware exposes scratchpad memory to programmers as *shared memory*: a fast, software-managed SRAM region that all threads in a thread block can read and write, distinct from the hardware-managed L1/L2 caches. Custom ML kernels written in CUDA or Triton control this memory explicitly. FlashAttention achieves its substantial throughput gains for transformer attention layers precisely by exploiting this mechanism: rather than materializing the full $S{\times}S$ attention score matrix in HBM, it tiles queries, keys, and values through SRAM/shared memory and writes only the final output back to HBM [@dao2022]. The reduction in HBM round-trips—not fewer arithmetic operations—is the primary source of the speedup.
 
-
 #### Off-chip memory {#sec-hardware-acceleration-offchip-memory-ecdb}
 
 Once a model's working set outgrows on-chip SRAM, the design question is whether it fits in the accelerator's device-local DRAM. An accelerator may use HBM, GDDR, or LPDDR; these are alternative memory technologies rather than sequential tiers. Data that does not fit must be staged or offloaded through host memory or storage, adding interconnect transfers before the accelerator can use it.
 
-Beyond on-chip memory, high-bandwidth memory (HBM)\index{HBM!3D die stacking} provides rapid access to larger model parameters and activations that do not fit within caches or scratchpad buffers. It stacks multiple memory dies and uses wide interfaces to deliver much higher aggregate bandwidth than conventional off-chip DRAM interfaces. It is often used for model parameters and activations on high-performance accelerators, while its cost, packaging complexity, and power requirements make it less common in constrained edge devices.
+Beyond on-chip memory, HBM\index{HBM!3D die stacking} provides rapid access to larger model parameters and activations that do not fit within caches or scratchpad buffers. It stacks multiple memory dies and uses wide interfaces to deliver much higher aggregate bandwidth than conventional off-chip DRAM interfaces. It is often used for model parameters and activations on high-performance accelerators, while its cost, packaging complexity, and power requirements make it less common in constrained edge devices.
 
 Accelerators without HBM may instead use device-local GDDR\index{GDDR!off-chip DRAM variant} or LPDDR\index{LPDDR!low-power DRAM variant}. When a model exceeds device-memory capacity, systems can offload data to host DRAM, but the accelerator must move that data across an interconnect such as PCIe before computation. Effective offloading therefore stages only the portions needed for each computation and overlaps transfers when possible.
 
@@ -3412,7 +3399,7 @@ Advertised memory bandwidth is only a ceiling; achievable bandwidth depends on a
 
 As established in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, on-chip memory access typically consumes energy in the single-digit-to-tens of picojoules per access, while external DRAM can be on the order of hundreds of picojoules per access, an orders-of-magnitude energy penalty. AI accelerators minimize DRAM access through three key strategies: weight stationarity (keeping model parameters in on-chip memory), input stationarity (buffering input activations locally), and output stationarity (accumulating partial sums on-chip).
 
-Memory bandwidth scaling follows different trajectories across accelerator designs. GPU architectures scale bandwidth by adding memory channels, reaching on the order of 1 TB/s in mainstream products and a few TB/s in high-end systems. TPU-class designs achieve their bandwidth efficiency through systolic array dataflow and aggressive on-chip reuse, often trading flexibility for efficiency on dense tensor kernels. Mobile system on chip (SoC) designs face the tightest constraints, delivering on the order of hundreds of GB/s of unified memory bandwidth within a few-watt power envelope, which demands careful workload scheduling and thermal management.
+Memory bandwidth scaling follows different trajectories across accelerator designs. GPU architectures scale bandwidth by adding memory channels, reaching on the order of 1 TB/s in mainstream products and a few TB/s in high-end systems. TPU-class designs achieve their bandwidth efficiency through systolic array dataflow and aggressive on-chip reuse, often trading flexibility for efficiency on dense tensor kernels. Mobile SoC designs face the tightest constraints, delivering on the order of hundreds of GB/s of unified memory bandwidth within a few-watt power envelope, which demands careful workload scheduling and thermal management.
 
 HBM provides far higher bandwidth than commodity DDR memory, but at substantially higher cost and packaging complexity. High-bandwidth accelerators therefore trade higher memory-system cost for higher sustained performance on bandwidth-bound workloads. Edge accelerators often sacrifice bandwidth to meet tight cost and power targets while maintaining sufficient performance for inference workloads.
 
@@ -3566,7 +3553,7 @@ At node level, three links define the bandwidth taper:
 
 1. **Device-device interconnect (NVLink/Infinity Fabric)**: Modern multi-GPU nodes use specialized high-speed bridges like NVLink[^fn-nvlink-interconnect-bandwidth]\index{NVLink!GPU interconnect}\index{GPU Interconnect!switching fabric}\index{Infinity Fabric!AMD interconnect} to connect accelerators directly, bypassing the host CPU. Bandwidth ranges from `{python} InterconnectHierarchy.nvlink_a100_gb_per_s_str` to `{python} InterconnectHierarchy.nvlink_h100_gb_per_s_str` per GPU [@NVIDIA2020nvlink; @choquette2023]. This link matters whenever tensors must move between accelerators within one server, including model partitioning, activation exchange, and gradient synchronization during training. The hardware lesson for this chapter is the boundary: traffic that stays on the accelerator fabric is far cheaper than traffic that falls back through the host.
 2. **Host-device interconnect (PCIe)**: The link between the CPU and the accelerator. Bandwidth ranges from 32 to 64 GB/s (PCIe Gen4/Gen5)\index{PCIe!host-device interconnect}\index{PCIe!bandwidth generations}. Host-staged training data can bottleneck here, although resident data, direct storage or network I/O, and coherent accelerator links can use other paths. Multi-GPU servers may also provide multiple PCIe links rather than a single shared 64 GB/s path.
-3. **Node-network interconnect (NIC)**: The link to the outside world, connecting to other nodes. Bandwidth ranges from 25 to 50 GB/s (`{python} InterconnectHierarchy.ib_hdr_gbit_per_s_str` to `{python} InterconnectHierarchy.ib_ndr_gbit_per_s_str` Ethernet/InfiniBand[^fn-infiniband-rdma-interconnect])\index{Network Interface Card!node interconnect}\index{InfiniBand!bandwidth tiers}. This interconnect is the first step from single-node hardware reasoning into the next frontier: scale. Here, the point is that leaving the node moves traffic onto a much narrower and higher-latency path.
+3. **Network interface card**: The link from the host to the outside world, connecting to other nodes. Bandwidth ranges from 25 to 50 GB/s (`{python} InterconnectHierarchy.ib_hdr_gbit_per_s_str` to `{python} InterconnectHierarchy.ib_ndr_gbit_per_s_str` Ethernet/InfiniBand[^fn-infiniband-rdma-interconnect])\index{Network Interface Card!node interconnect}\index{InfiniBand!bandwidth tiers}. This interconnect is the first step from single-node hardware reasoning into the next frontier: scale. Here, the point is that leaving the node moves traffic onto a much narrower and higher-latency path.
 
 [^fn-nvlink-interconnect-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect exists to keep accelerator-to-accelerator traffic off PCIe when tensors must move inside a server. Its 600--900 GB/s aggregate bidirectional bandwidth is roughly 300--450 GB/s per direction under balanced full-duplex traffic, several times the directional bandwidth of a standard PCIe link, so workloads with frequent cross-device tensor movement can remain in the fast part of the bandwidth taper [@NVIDIA2020nvlink; @choquette2023]. The training algorithms that determine how much tensor traffic must cross this link are developed later; the hardware fact needed here is the bandwidth gap. \index{NVLink!training scaling}
 
@@ -3612,7 +3599,7 @@ Despite their bandwidth-heavy nature, MLPs exhibit regular and predictable memor
 
 #### Convolutional neural networks {#sec-hardware-acceleration-convolutional-neural-networks-3085}
 
-Convolutional Neural Networks (CNNs)\index{CNN!spatial data reuse} are widely used in image processing and computer vision tasks. Unlike MLPs, which require dense matrix multiplications, CNNs process input feature maps using small filter kernels that slide across the image. This localized computation structure results in high spatial data reuse, where the same input pixels contribute to multiple convolutions.
+CNNs\index{CNN!spatial data reuse} are widely used in image processing and computer vision tasks. Unlike MLPs, which require dense matrix multiplications, CNNs process input feature maps using small filter kernels that slide across the image. This localized computation structure results in high spatial data reuse, where the same input pixels contribute to multiple convolutions.
 
 CNN accelerators benefit from on-chip memory optimizations, as convolution filters exhibit extensive reuse, allowing weights to be stored in fast local SRAM instead of repeatedly accessing device DRAM. Activation maps require careful management due to their size, so CNN accelerators divide them into tiles that fit within on-chip buffers. This reduces device-memory traffic and improves efficiency [@chen2017].
 
@@ -4473,7 +4460,6 @@ These interacting factors define a vast combinatorial design space where small v
 
 : **Placement-Allocation-Scheduling Trade-Offs**: AI accelerator performance depends on mapping computations to hardware, allocating data to memory tiers, and scheduling execution over time. Careful consideration of these interdependent factors is essential for maximizing throughput and minimizing energy consumption. {#tbl-combinatorial-complexity tbl-colwidths="[25,38,37]"}
 
-
 #### Ordering computation and execution {#sec-hardware-acceleration-ordering-computation-execution-59e5}
 
 Machine learning workloads are often structured as nested loops that iterate over various dimensions of computation. For instance, a matrix multiplication kernel may loop over batch size ($B$), input features ($C_{\text{in}}$), and output features ($C_{\text{out}}$). The order in which these loops execute\index{Loop Ordering!computational efficiency} has a profound effect on data locality, reuse patterns, and computational efficiency.
@@ -4737,7 +4723,7 @@ I(0,0,0), I(0,1,0), I(0,2,0), I(1,0,0), I(1,1,0), I(1,2,0), \ldots, \\
 I(0,0,1), I(0,1,1), I(0,2,1), \ldots, I(0,0,2), I(0,1,2), I(0,2,2), \ldots
 \end{gather*}
 
-In this format, all red channel values for the entire image are stored first, followed by all green values, and then all blue values. This ordering can allow some hardware accelerators to efficiently load and process data across channels in parallel, which is important for convolution operations and SIMD (Single Instruction, Multiple Data) execution models [@chetlur2014cudnn].
+In this format, all red channel values for the entire image are stored first, followed by all green values, and then all blue values. This ordering can allow some hardware accelerators to efficiently load and process data across channels in parallel, which is important for convolution operations and SIMD execution models [@chetlur2014cudnn].
 
 The advantage of a given layout becomes clear only relative to a specific backend. Convolutional layers process images by applying a shared set of filters across all channels. Depending on the kernel implementation, NCHW, NHWC, or a blocked internal layout may minimize scattered memory fetches, reduce memory latency, and improve data locality for the lowered matrix multiplications that implement convolution.
 
@@ -5118,7 +5104,6 @@ Register blocking, double buffering, and hierarchical tiling extend the same loc
 
 When machine learning models grow in size and complexity, tiling remains a critical tool for improving hardware efficiency, ensuring that AI accelerators operate near their practical potential. While manual tiling strategies can provide substantial benefits, compilers and hardware-aware optimization techniques further enhance performance by automatically selecting effective tiling strategies for a given workload.
 
-
 | Aspect                                                    | **Spatial Tiling (Data Tiling)**                                                           | **Temporal Tiling (Loop Blocking)**                                    | **Hybrid Tiling**\index{Hybrid Tiling!definition}              |
 |:----------------------------------------------------------|:-------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------------------------------------------------------------|
 | Primary Goal                                              | Reduce memory accesses by keeping data in fast memory longer                               | Increase data reuse across loop iterations                             | Adapt dynamically to workload constraints                      |
@@ -5130,7 +5115,6 @@ When machine learning models grow in size and complexity, tiling remains a criti
 | **Best When**\index{Best When!definition}                 | Data is large and needs to be partitioned for efficient processing                         | The same data is accessed multiple times across iterations             | Both data partitioning and iteration-based reuse are important |
 
 : **Tiling Strategies**: Spatial, temporal, and hybrid tiling optimize memory access patterns for improved performance. Spatial tiling maximizes data reuse within fast memory, temporal tiling exploits loop structure for reduced accesses, and hybrid tiling combines both approaches. AI compilers and runtime systems use these techniques to automatically optimize model execution on diverse hardware. {#tbl-tiling-strategies tbl-colwidths="[16,31,27,26]"}
-
 
 ### Applying mapping strategies to neural networks {#sec-hardware-acceleration-applying-mapping-strategies-neural-networks-3110}
 
@@ -5347,15 +5331,15 @@ Resource allocation and synchronization determine how compute cores share memory
 
 #### Code generation {#sec-hardware-acceleration-code-generation-85c8}
 
-With scheduling complete, the final compilation stage translates this optimized execution plan into hardware-specific instructions. Unlike the previous phases, which required AI-specific optimizations, code generation\index{Code Generation!hardware-specific instructions} follows many of the same principles as traditional compilers. This process includes instruction selection, register allocation, and final optimization passes, ensuring that execution makes full use of hardware-specific features such as vectorized execution, memory prefetching, and instruction reordering. Crucially, however, instruction selection for ML targets is not generic: the compiler must emit instructions that engage the hardware's matrix-specific ISA extensions. On NVIDIA GPUs, this means emitting Parallel Thread Execution (PTX) instructions such as `mma.sync.aligned` to invoke Tensor Cores directly, as shown in @lst-tensor_core_op. On Intel CPUs with Advanced Matrix Extensions (AMX), the compiler targets tile-multiply instructions operating on 2D register tiles. On Arm CPUs with the Scalable Matrix Extension, the target is outer-product accumulation across scalable matrix tiles. A code generation backend that emits generic floating-point instructions instead of these extensions leaves the hardware's primary matrix engines idle, which can reduce effective throughput by an order of magnitude regardless of how well prior compilation phases performed. For CPUs and GPUs, AI compilers typically generate machine code or optimized assembly instructions, while for TPUs, FPGAs,[^fn-fpga-reconfigurable-logic] and other accelerators, the output may be optimized bytecode or execution graphs that are interpreted by the hardware's runtime system.
+With scheduling complete, the final compilation stage translates this optimized execution plan into hardware-specific instructions. Unlike the previous phases, which required AI-specific optimizations, code generation\index{Code Generation!hardware-specific instructions} follows many of the same principles as traditional compilers. This process includes instruction selection, register allocation, and final optimization passes, ensuring that execution makes full use of hardware-specific features such as vectorized execution, memory prefetching, and instruction reordering. Crucially, however, instruction selection for ML targets is not generic: the compiler must emit instructions that engage the hardware's matrix-specific ISA extensions. On NVIDIA GPUs, this means emitting Parallel Thread Execution (PTX) instructions such as `mma.sync.aligned` to invoke Tensor Cores directly, as shown in @lst-tensor_core_op. On Intel CPUs with Advanced Matrix Extensions (AMX), the compiler targets tile-multiply instructions operating on 2D register tiles. On Arm CPUs with the Scalable Matrix Extension, the target is outer-product accumulation across scalable matrix tiles. A code generation backend that emits generic floating-point instructions instead of these extensions leaves the hardware's primary matrix engines idle, which can reduce effective throughput by an order of magnitude regardless of how well prior compilation phases performed. AI compilers typically generate machine code or optimized assembly for CPUs and GPUs. For TPUs, field-programmable gate arrays (FPGAs),[^fn-fpga-reconfigurable-logic] and other accelerators, they may generate optimized bytecode or runtime-interpreted execution graphs.
 
-[^fn-fpga-reconfigurable-logic]: **FPGA (Field-Programmable Gate Array)**\index{FPGA!reconfigurability trade-off}: "Field-programmable" means the logic fabric is configurable after manufacturing, contrasting with fixed-function ASICs. FPGAs can improve performance for latency-sensitive data center services by implementing custom pipelines matched to a particular workload [@putnam2014]. This reconfigurability makes FPGAs attractive for rapidly evolving ML architectures where committing to an ASIC risks obsolescence, but the requirement for hardware description languages (Verilog/VHDL) and compilation times measured in hours creates a productivity barrier that limits adoption to deployments where the efficiency benefit justifies the engineering cost.
+[^fn-fpga-reconfigurable-logic]: **Field-Programmable Gate Array**\index{FPGA!reconfigurability trade-off}: "Field-programmable" means the logic fabric is configurable after manufacturing, contrasting with fixed-function ASICs. FPGAs can improve performance for latency-sensitive data center services by implementing custom pipelines matched to a particular workload [@putnam2014]. This reconfigurability makes FPGAs attractive for rapidly evolving ML architectures where committing to an ASIC risks obsolescence, but the requirement for hardware description languages (Verilog/VHDL) and compilation times measured in hours creates a productivity barrier that limits adoption to deployments where the efficiency benefit justifies the engineering cost.
 
 ### From compilation to runtime {#sec-hardware-acceleration-compilationruntime-support-0206}
 
 The compiler transforms high-level machine learning models into optimized execution plans tailored to specialized hardware, but that plan is still an assumption about future runtime conditions: batch shape, available memory, accelerator occupancy, and competing workloads. Graph optimization restructures computation, kernel selection maps operations to hardware-efficient implementations, memory planning optimizes data placement, and computation scheduling ensures efficient parallel execution. Together, these phases enable AI models to fully use modern accelerators with high throughput, minimal memory overhead, and efficient execution pipelines.
 
-Ahead-of-time compiler and engine-building optimizations occur before execution begins. This static nature enables aggressive graph optimization but limits adaptation when input shapes or resource conditions diverge from the prepared profiles. Graph restructuring, fusion, tactic selection, tiling, precision choices, and much of memory planning are therefore based on the shapes and hardware known at build time. JIT systems may compile additional variants later, but each generated kernel still has a fixed implementation.
+Ahead-of-time compiler and engine-building optimizations occur before execution begins. This static nature enables aggressive graph optimization but limits adaptation when input shapes or resource conditions diverge from the prepared profiles. Graph restructuring, fusion, tactic selection, tiling, precision choices, and much of memory planning are therefore based on the shapes and hardware known at build time. Just-in-time compilation systems may compile additional variants later, but each generated kernel still has a fixed implementation.
 
 Production AI systems inhabit a dynamic world that may not match these static assumptions. Batch sizes vary, multiple workloads may compete for an accelerator, and thermal throttling can reduce sustained performance below short-benchmark peaks. Runtimes and serving systems respond by selecting among supported profiles, managing buffers and streams, batching requests, and applying admission control; they do not generally invent new fusion or tiling strategies for a built engine. The serving chapter treats batching, admission control, and service-level objectives as end-to-end system problems (@sec-model-serving); here the narrower question is how the accelerator runtime dispatches prepared execution plans once a request or batch reaches the hardware.
 
@@ -5528,7 +5512,7 @@ Data center scaling and edge deployment represent opposite ends of a deployment 
 
 ## Heterogeneous SoC Design {#sec-hardware-acceleration-heterogeneous-soc-ai-acceleration-b1bb}
 
-Mobile, automotive, and IoT deployments operate under much tighter power, thermal, and latency constraints than data center hardware. These constraints force specialized compute units, memory hierarchy optimization, and workload mapping strategies to operate under dramatically different rules. The result is heterogeneous System-on-Chip (SoC) architectures\index{System-on-Chip!heterogeneous AI acceleration} that integrate CPU cores, GPU shaders, digital signal processors (DSPs), and dedicated neural processing units (NPUs) within a single chip. Orchestrating these diverse processors to achieve optimal performance under strict power, thermal, and latency requirements demands wholly different approaches than data center deployments.
+Mobile, automotive, and IoT deployments operate under much tighter power, thermal, and latency constraints than data center hardware. These constraints force specialized compute units, memory hierarchy optimization, and workload mapping strategies to operate under dramatically different rules. The result is heterogeneous SoC architectures\index{System-on-Chip!heterogeneous AI acceleration} that integrate CPU cores, GPU shaders, digital signal processors (DSPs), and dedicated neural processing units (NPUs) within a single chip. Orchestrating these diverse processors to achieve optimal performance under strict power, thermal, and latency requirements demands wholly different approaches than data center deployments.
 
 ### Mobile SoC architecture evolution {#sec-hardware-acceleration-mobile-soc-architecture-evolution-6ca8}
 
@@ -5913,7 +5897,7 @@ Vendors advertise peak FLOP/s\index{Peak FLOPS!misleading metric} as the definit
 
 **Fallacy**: *Any FLOP/s rating can estimate a low-precision workload.*
 
-Accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically across them. An H100 delivers roughly `{python} FpPeakVsSustainedRecap.h100_fp16_tflop_per_s_str` in FP16 tensor operations but only about `{python} FpPeakVsSustainedRecap.h100_fp32_tflop_per_s_str` in FP32 CUDA-core operations: a roughly `{python} FpPeakVsSustainedRecap.h100_prec_gap_mult_str` gap within the same chip [@choquette2023]. Estimating training time with the FP32 number when the workload actually uses BF16 produces utilization figures that look catastrophic for no reason, and matching against the wrong roofline misclassifies kernels as compute-bound when they are memory-bound (or vice versa). Always match the peak constant to the precision the workload actually issues, and quote precision explicitly when reporting MFU.
+Accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically across them. An H100 delivers roughly `{python} FpPeakVsSustainedRecap.h100_fp16_tflop_per_s_str` in FP16 tensor operations but only about `{python} FpPeakVsSustainedRecap.h100_fp32_tflop_per_s_str` in FP32 CUDA-core operations: a roughly `{python} FpPeakVsSustainedRecap.h100_prec_gap_mult_str` gap within the same chip [@choquette2023]. Estimating training time with the FP32 number when the workload actually uses BF16 produces utilization figures that look catastrophic for no reason, and matching against the wrong roofline misclassifies kernels as compute-bound when they are memory-bound (or vice versa). Always match the peak constant to the precision the workload actually issues, and quote precision explicitly when reporting model FLOPs utilization.
 
 :::
 
