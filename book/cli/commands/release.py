@@ -169,7 +169,10 @@ SOURCE_STAGES: tuple[ReleaseStage, ...] = (
         "figures-flow",
         "Figure/object flow audit",
         "objects",
-        "required",
+        # Advisory while the copyeditor owns print placement. The source
+        # heuristic intentionally conflicts with page-balancing moves; the
+        # rendered PDF and sign-off catalog are the authoritative layout gate.
+        "advisory",
         ("check", "figures", "--scope", "flow", "--quiet"),
     ),
     _stage(

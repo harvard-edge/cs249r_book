@@ -5415,7 +5415,11 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_self_referential(self, root: Path) -> ValidationRunResult:
-        """Detect sections that reference themselves, their parent, or child."""
+        """Detect sections that reference themselves or their parent.
+
+        A parent section may legitimately introduce and link to one of its
+        child subsections. That is forward navigation, not a self-reference.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5448,14 +5452,11 @@ class ValidateCommand:
                 parent_stack[level] = hd
                 parent_stack = {k: v for k, v in parent_stack.items() if k <= level}
 
-            # Build section map and children map
+            # Build section map for parent-title lookup.
             section_map: Dict[str, Dict] = {}
-            children_map: Dict[str, List[str]] = defaultdict(list)
             for hd in headings:
                 if hd["id"]:
                     section_map[hd["id"]] = hd
-                    if hd["parent_id"]:
-                        children_map[hd["parent_id"]].append(hd["id"])
 
             # Check references
             for idx, line in enumerate(lines, 1):
@@ -5490,20 +5491,9 @@ class ValidateCommand:
                             severity="warning",
                             context=line.strip()[:120],
                         ))
-                    elif ref_id in children_map.get(cur_id, []):
-                        child = section_map.get(ref_id)
-                        ctitle = child["title"] if child else ref_id
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file), line=idx,
-                            code="child_reference",
-                            message=f"Section '{current['title']}' references its child '{ctitle}' (@{ref_id})",
-                            severity="warning",
-                            context=line.strip()[:120],
-                        ))
-
         return ValidationRunResult(
             name="self-referential",
-            description="Detect self-referential section references",
+            description="Detect self-references and references to a parent section",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
