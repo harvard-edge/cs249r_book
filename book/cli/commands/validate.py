@@ -11116,13 +11116,12 @@ class ValidateCommand:
     def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
         """Expand abbreviations on first use per §10.5.
 
-        Enforces the specialized-abbreviation list (XLA, MMLU, HELM,
-        HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
-        abbreviations (CNN, GPU, JIT, NVMe, SLA, ...) are exempt per
-        §10.5's expanded Special Cases. Ordinary specialized acronyms
-        reset by chapter. Formal model names and recurring lighthouse
-        labels are governed by the lighthouse roster rules, not this
-        abbreviation check. Routes through the audit scanner so the
+        Enforces the authoritative abbreviation registry in
+        `book/cli/data/abbreviations.yaml`. Terms under
+        `canonical_expansions` reset by chapter; terms listed only under
+        `exempt_baselines` may remain bare. Formal model names and recurring
+        lighthouse labels are governed by the lighthouse roster rules, not
+        this abbreviation check. Routes through the audit scanner so the
         persistent exact-line accept-list can grandfather reviewed layout
         exceptions without hiding new violations.
         """
