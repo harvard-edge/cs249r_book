@@ -1144,7 +1144,7 @@ def frameworks_training_memory_ladder(candidate=None):
     make_ladder(
         "vol1/frameworks",
         "vol1_frameworks_margin_001",
-        [("train 8-12 GB", training_mid_gb), ("infer %.0f MB" % (infer_gb * 1000), infer_gb)],
+        [("train 8-12 GB", training_mid_gb), ("weights %.0f MB" % (infer_gb * 1000), infer_gb)],
         domain="memory",
         wall=False,
     )
