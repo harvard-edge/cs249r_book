@@ -507,10 +507,24 @@ def model_compression_memory_ladder(candidate=None):
     make_ladder(
         "vol1/model_compression",
         "vol1_model_compression_margin_001",
-        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 524 KB", 0.000524288)],
+        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 512 KB", 0.000524288)],
         domain="memory",
         wall=False,
     )
+
+
+def model_compression_sparsity_break_even(candidate=None):
+    """Show that sparse-kernel payoff has no universal density threshold."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.18, 0.72))
+    x = np.linspace(0.0, 1.0, 160)
+    y = 0.20 + 0.04 * x + 0.56 * np.clip((x - 0.56) / 0.44, 0.0, None) ** 2
+    ax.axvspan(0.52, 0.78, color=REDFILL, alpha=0.40)
+    ax.plot(x, y, color=MEM, lw=1.45)
+    ax.text(0.20, 0.42, "overhead\nbound", ha="center", va="center", color=INK, fontsize=4.7)
+    ax.text(0.65, 0.82, "kernel-dependent\nbreak-even", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.86, 0.20, "speedup", ha="center", va="center", color=MEM, fontsize=4.6, fontweight="bold")
+    ax.text(0.50, 0.07, "sparsity", ha="center", va="center", color=INK, fontsize=4.8)
+    write(fig, "vol1/model_compression", "vol1_model_compression_margin_003")
 
 
 def fault_tolerance_kv_live_state_ladder():
@@ -2071,6 +2085,8 @@ def _other_new(candidate):
         nn_computation_mnist_roofline(candidate)
     elif cid == "vol1-model-compression-margin-001":
         model_compression_memory_ladder(candidate)
+    elif cid == "vol1-model-compression-margin-003":
+        model_compression_sparsity_break_even(candidate)
     elif cid == "vol1-frameworks-margin-001":
         frameworks_training_memory_ladder(candidate)
     elif cid == "vol1-frameworks-margin-002":
@@ -2197,6 +2213,7 @@ def generate_curated_margin_figures() -> None:
             "vol1-data-selection-margin-003",
             "vol1-data-selection-margin-004",
             "vol1-model-compression-margin-001",
+            "vol1-model-compression-margin-003",
             "vol1-nn-computation-margin-001",
             "vol1-nn-computation-margin-002",
             "vol1-nn-computation-margin-003",
