@@ -395,7 +395,7 @@ def pipeline_rows(chapter, name, rows, *, title=None):
             if sw > 0.06 + 0.037 * len(seg_label):
                 ax.text(cur + sw / 2, y + h / 2, seg_label, ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
             cur += sw
-        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f}ms", ha="left", va="center", color="#555555", fontsize=4.7)
+        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f} ms", ha="left", va="center", color="#555555", fontsize=4.7)
     write(fig, chapter, name)
 
 
@@ -649,7 +649,7 @@ def benchmarking_component_speedup_bars(candidate=None):
             ("before", [("other", other, GRID), ("model", model_latency, COMP)], 0.58),
             ("after", [("other", other, GRID), ("model", optimized_model, COMP)], 0.28),
         ],
-        title="3x -> 1.2x",
+        title="3× → 1.2×",
     )
 
 
@@ -673,7 +673,7 @@ def ml_systems_camera_pipeline_amdahl(candidate=None):
             ("before", [("ISP", 100, GRID), ("ML", 60, COMP), ("post", 40, GRID)], 0.58),
             ("after", [("ISP", 100, GRID), ("ML", 6, COMP), ("post", 40, GRID)], 0.28),
         ],
-        title="10x -> 1.37x",
+        title="10× → 1.37×",
     )
 
 
@@ -686,7 +686,7 @@ def ml_systems_thermal_throttling(candidate=None):
     ax.plot([0.44], [0.72], "o", color=RED, ms=3.2)
     ax.plot([0.90], [0.36], "o", color=MEM, ms=3.2)
     ax.text(0.26, 0.83, "burst", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
-    ax.text(0.73, 0.24, "sustain", ha="center", va="center", color=MEM, fontsize=5.0, fontweight="bold")
+    ax.text(0.73, 0.24, "sustained", ha="center", va="center", color=MEM, fontsize=5.0, fontweight="bold")
     ax.text(0.57, 0.57, "throttle", ha="left", va="center", color=INK, fontsize=4.7)
     write(fig, "vol1/ml_systems", "vol1_ml_systems_margin_003")
 
