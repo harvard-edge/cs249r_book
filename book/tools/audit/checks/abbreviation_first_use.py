@@ -115,6 +115,29 @@ _EXCLUDED_FILES = (
 _FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:")
 
 
+def _is_formal_definition_intro(line: str, start: int, end: int) -> bool:
+    r"""Return True for a bold expansion carrying a definition index entry.
+
+    Formal definitions are intentionally self-contained even when running prose
+    introduced the abbreviation earlier.  The house form is:
+
+        **Neural Architecture Search (NAS)**\index{NAS!definition}
+
+    Require both the enclosing bold span and the adjacent ``!definition``
+    index marker so ordinary bold emphasis cannot hide an over-expansion.
+    """
+    open_bold = line.rfind("**", 0, start)
+    if open_bold < 0 or "**" in line[open_bold + 2 : start]:
+        return False
+    close_bold = line.find("**", end)
+    if close_bold < 0 or line[end:close_bold].strip():
+        return False
+    suffix = line[close_bold + 2 :]
+    return bool(
+        re.match(r"\s*\\index\{[^{}]*!definition(?:![^{}]*)?\}", suffix, re.I)
+    )
+
+
 # Markup that may legitimately sit between an expansion and its `(ABBREV)`
 # parenthetical. The house index convention (index.md) places the `\index{}`
 # tag immediately after the term, which lands it in exactly this position:
@@ -395,7 +418,13 @@ def check(
                             continue
                         if abbrev not in intro_line:
                             intro_line[abbrev] = line_num
-                        if is_body_prose and not _FOOTNOTE_DEF_RE.match(line.lstrip()):
+                        if (
+                            is_body_prose
+                            and not _FOOTNOTE_DEF_RE.match(line.lstrip())
+                            and not _is_formal_definition_intro(
+                                line, m.start(), m.end()
+                            )
+                        ):
                             intro_body.setdefault(abbrev, []).append(
                                 (line_num, m.start(), line)
                             )
@@ -685,6 +714,19 @@ _TESTS = [
         "\n"
         "[^fn-dag]: **Directed Acyclic Graph (DAG)**: The scheduling structure.\n",
         set(),
+    ),
+    (
+        "formal bold definition repeating the expansion is exempt",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "**Neural Architecture Search (NAS)**\\index{NAS!definition} "
+        "automates architecture design.\n",
+        set(),
+    ),
+    (
+        "bold emphasis without a definition index is still over-expansion",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "Later, **neural architecture search (NAS)** narrows the space.\n",
+        {"over:NAS"},
     ),
     (
         "three body expansions flag the second and third",
