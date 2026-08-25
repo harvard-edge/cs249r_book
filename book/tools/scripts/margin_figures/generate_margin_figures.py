@@ -121,6 +121,30 @@ def make_knee(chapter, name, *, knee_frac=0.72, style="shaded", pct_label=None):
     write(fig, chapter, name)
 
 
+def nn_architectures_attention_quadratic_scaling() -> None:
+    """Show the exact 2x input -> 4x score-interaction relationship."""
+    fig, ax = new_fig("scale-anchor")
+    clean(ax)
+    ax.set_xlim(0, 2.25)
+    ax.set_ylim(-0.35, 5.1)
+
+    ax.annotate("", xy=(2.18, 0), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+    ax.annotate("", xy=(0.10, 4.90), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+
+    x = np.linspace(0.2, 2.08, 160)
+    ax.plot(x, x**2, color=INK, lw=1.35)
+    ax.plot([1, 1], [0, 1], color=GRID, lw=0.6, ls="--")
+    ax.plot([2, 2], [0, 4], color=GRID, lw=0.6, ls="--")
+    ax.scatter([1, 2], [1, 4], s=14, color=[DATA, RED], edgecolors="white", linewidths=0.45, zorder=3)
+
+    ax.text(1, -0.16, "$S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(2, -0.16, "$2S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(0.86, 1.16, "$1\\times$", ha="right", va="bottom", color=DATA, fontsize=5.1, fontweight="bold")
+    ax.text(1.88, 4.05, "$4\\times$", ha="right", va="bottom", color=RED, fontsize=5.1, fontweight="bold")
+    ax.text(1.35, 2.75, "$S^2$", ha="left", va="center", color=INK, fontsize=5.5)
+    write(fig, "vol1/nn_architectures", "nn_architectures_attention_memory_wall")
+
+
 def make_labeled_knee(
     chapter,
     name,
@@ -2293,7 +2317,7 @@ def generate() -> None:
     list_dots("vol1/nn_architectures", "nn_architectures_inductive_bias", [("CNN", INK), ("Transformer", "#888888"), ("MLP", GRID)])
     make_dam("vol1/nn_architectures", "nn_architectures_algorithm_axis", focus=1, vol="vol1", style="boxes")
     make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 80", 80), ("MobileNet 43", 43), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop", figsize=(1.242246906, 1.75))
-    make_knee("vol1/nn_architectures", "nn_architectures_attention_memory_wall", knee_frac=0.72)
+    nn_architectures_attention_quadratic_scaling()
     labeled_memory_bars("vol1/nn_architectures", "nn_architectures_capacity_wall", [("Item+User 102", 102), ("A100 80", 80), ("Item 51", 51)])
     labeled_memory_bars("vol1/nn_computation", "nn_computation_memory_explosion", [("GPT-2 6 GB", 6000), ("MNIST 438 KB", 0.438)], title="model memory")
     simple_bar("vol1/nn_computation", "nn_computation_matmul_dominance", [("MatMul", 0.92, COMP, "white"), ("", 0.08, GRID, INK)])
