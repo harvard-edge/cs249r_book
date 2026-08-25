@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Format Python code blocks in .qmd files using Black.
+"""Format executable Python cells in .qmd files using Black.
 
-Also wraps long comments and docstrings that Black doesn't handle.
+Reader-visible code is typeset content: automatic rewrites can change line
+counts and invalidate an approved page layout.  Display blocks are therefore
+preserved byte-for-byte by default and may be reformatted only through the
+explicit ``--include-display`` opt-in.
 
 Two block profiles:
-- Display blocks (```python / ```{.python}): Black at 70 chars + comment
-  wrapping — narrow snippets shown to the reader.
 - Executable LEGO cells (```{python}): Black at 150 chars with string
   normalization off and no comment wrapping — keeps the one-line
   `field_str = fmt_*(...)` export style and never touches `#|` options
   or LEGO box-drawing headers.
+- Opt-in display blocks (```python / ```{.python}): Black at 70 chars +
+  comment wrapping. Use only before visual layout approval.
 """
 
 import ast
@@ -254,10 +257,14 @@ def format_exec_cell(code: str) -> str:
     return _collapse_cell_blanks(formatted.replace(_QMD_OPT_SENTINEL, "#|"))
 
 
-def format_python_blocks(content: str, line_length: int = 70) -> str:
+def format_python_blocks(
+    content: str, line_length: int = 70, include_display: bool = False
+) -> str:
     """Find and format Python code blocks in markdown using Black.
 
-    Also wraps long comments and docstrings (display blocks only).
+    Executable cells are always formatted. Display blocks are unchanged unless
+    ``include_display`` is true; in that opt-in mode, long comments and
+    docstrings are wrapped as well.
     """
     lines = content.split("\n")
     result = []
@@ -284,6 +291,9 @@ def format_python_blocks(content: str, line_length: int = 70) -> str:
                     # Executable LEGO cell: wide one-liners, no comment
                     # wrapping, `#|` options and quotes preserved.
                     result.extend(format_exec_cell(code).split("\n"))
+                elif not include_display:
+                    # Displayed code is layout-sensitive reader content.
+                    result.extend(python_lines)
                 # Validate Python syntax before attempting to format
                 elif not is_valid_python(code):
                     # Skip Black for invalid Python, but still wrap comments
@@ -317,15 +327,19 @@ def format_python_blocks(content: str, line_length: int = 70) -> str:
     return "\n".join(result)
 
 
-def main(files: List[str], line_length: int = 70) -> int:
-    """Format Python blocks in .qmd files."""
+def main(
+    files: List[str], line_length: int = 70, include_display: bool = False
+) -> int:
+    """Format executable Python blocks and optionally displayed blocks."""
     changed = 0
     for filepath in files:
         path = Path(filepath)
         if path.suffix == ".qmd":
             try:
                 content = path.read_text(encoding="utf-8")
-                formatted = format_python_blocks(content, line_length)
+                formatted = format_python_blocks(
+                    content, line_length, include_display=include_display
+                )
 
                 if formatted != content:
                     path.write_text(formatted, encoding="utf-8")
@@ -339,4 +353,7 @@ def main(files: List[str], line_length: int = 70) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    args = sys.argv[1:]
+    include_display = "--include-display" in args
+    files = [arg for arg in args if arg != "--include-display"]
+    sys.exit(main(files, include_display=include_display))
