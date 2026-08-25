@@ -121,6 +121,30 @@ def make_knee(chapter, name, *, knee_frac=0.72, style="shaded", pct_label=None):
     write(fig, chapter, name)
 
 
+def nn_architectures_attention_quadratic_scaling() -> None:
+    """Show the exact 2x input -> 4x score-interaction relationship."""
+    fig, ax = new_fig("scale-anchor")
+    clean(ax)
+    ax.set_xlim(0, 2.25)
+    ax.set_ylim(-0.35, 5.1)
+
+    ax.annotate("", xy=(2.18, 0), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+    ax.annotate("", xy=(0.10, 4.90), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+
+    x = np.linspace(0.2, 2.08, 160)
+    ax.plot(x, x**2, color=INK, lw=1.35)
+    ax.plot([1, 1], [0, 1], color=GRID, lw=0.6, ls="--")
+    ax.plot([2, 2], [0, 4], color=GRID, lw=0.6, ls="--")
+    ax.scatter([1, 2], [1, 4], s=14, color=[DATA, RED], edgecolors="white", linewidths=0.45, zorder=3)
+
+    ax.text(1, -0.16, "$S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(2, -0.16, "$2S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(0.86, 1.16, "$1\\times$", ha="right", va="bottom", color=DATA, fontsize=5.1, fontweight="bold")
+    ax.text(1.88, 4.05, "$4\\times$", ha="right", va="bottom", color=RED, fontsize=5.1, fontweight="bold")
+    ax.text(1.35, 2.75, "$S^2$", ha="left", va="center", color=INK, fontsize=5.5)
+    write(fig, "vol1/nn_architectures", "nn_architectures_attention_memory_wall")
+
+
 def make_labeled_knee(
     chapter,
     name,
@@ -395,7 +419,7 @@ def pipeline_rows(chapter, name, rows, *, title=None):
             if sw > 0.06 + 0.037 * len(seg_label):
                 ax.text(cur + sw / 2, y + h / 2, seg_label, ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
             cur += sw
-        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f}ms", ha="left", va="center", color="#555555", fontsize=4.7)
+        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f} ms", ha="left", va="center", color="#555555", fontsize=4.7)
     write(fig, chapter, name)
 
 
@@ -483,10 +507,24 @@ def model_compression_memory_ladder(candidate=None):
     make_ladder(
         "vol1/model_compression",
         "vol1_model_compression_margin_001",
-        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 524 KB", 0.000524288)],
+        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 512 KB", 0.000524288)],
         domain="memory",
         wall=False,
     )
+
+
+def model_compression_sparsity_break_even(candidate=None):
+    """Show that sparse-kernel payoff has no universal density threshold."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.18, 0.72))
+    x = np.linspace(0.0, 1.0, 160)
+    y = 0.20 + 0.04 * x + 0.56 * np.clip((x - 0.56) / 0.44, 0.0, None) ** 2
+    ax.axvspan(0.52, 0.78, color=REDFILL, alpha=0.40)
+    ax.plot(x, y, color=MEM, lw=1.45)
+    ax.text(0.20, 0.42, "overhead\nbound", ha="center", va="center", color=INK, fontsize=4.7)
+    ax.text(0.65, 0.82, "kernel-dependent\nbreak-even", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.86, 0.20, "speedup", ha="center", va="center", color=MEM, fontsize=4.6, fontweight="bold")
+    ax.text(0.50, 0.07, "sparsity", ha="center", va="center", color=INK, fontsize=4.8)
+    write(fig, "vol1/model_compression", "vol1_model_compression_margin_003")
 
 
 def fault_tolerance_kv_live_state_ladder():
@@ -649,7 +687,7 @@ def benchmarking_component_speedup_bars(candidate=None):
             ("before", [("other", other, GRID), ("model", model_latency, COMP)], 0.58),
             ("after", [("other", other, GRID), ("model", optimized_model, COMP)], 0.28),
         ],
-        title="3x -> 1.2x",
+        title="3× → 1.2×",
     )
 
 
@@ -673,7 +711,7 @@ def ml_systems_camera_pipeline_amdahl(candidate=None):
             ("before", [("ISP", 100, GRID), ("ML", 60, COMP), ("post", 40, GRID)], 0.58),
             ("after", [("ISP", 100, GRID), ("ML", 6, COMP), ("post", 40, GRID)], 0.28),
         ],
-        title="10x -> 1.37x",
+        title="10× → 1.37×",
     )
 
 
@@ -1120,7 +1158,7 @@ def frameworks_training_memory_ladder(candidate=None):
     make_ladder(
         "vol1/frameworks",
         "vol1_frameworks_margin_001",
-        [("train 8-12 GB", training_mid_gb), ("infer %.0f MB" % (infer_gb * 1000), infer_gb)],
+        [("train 8-12 GB", training_mid_gb), ("weights %.0f MB" % (infer_gb * 1000), infer_gb)],
         domain="memory",
         wall=False,
     )
@@ -1160,10 +1198,35 @@ def data_selection_compute_data_gap():
 
 
 def data_selection_echo_threshold(candidate=None):
-    fig, ax = new_fig("scale-anchor")
-    knee(ax, knee_frac=0.63, style="dashed", pct_label="e=R")
-    ax.text(82, 23.5, "over", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    """Show useful echoing up to the pipeline-ratio threshold, then saturation."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.30, 0.82))
+    threshold = 0.63
+    x = np.linspace(0.08, 0.94, 180)
+    progress = (x - 0.08) / (0.94 - 0.08)
+    utilization = 0.18 + 0.56 * np.minimum(progress / threshold, 1.0)
+    threshold_x = 0.08 + threshold * (0.94 - 0.08)
+    ax.plot(x, utilization, color=INK, lw=1.35)
+    ax.axvspan(threshold_x, 0.94, color=REDFILL, alpha=0.34)
+    ax.plot([threshold_x, threshold_x], [0.12, 0.80], color=RED, lw=0.65, ls="--")
+    ax.plot(threshold_x, 0.74, "o", color=RED, ms=3.2)
+    ax.text(threshold_x - 0.025, 0.84, "e=R", ha="right", va="center", color=RED, fontsize=5.3, fontweight="bold")
+    ax.text(0.80, 0.58, "e > R", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    ax.text(0.47, 0.08, "echo factor", ha="center", va="center", color=INK, fontsize=4.5)
     write(fig, "vol1/data_selection", "vol1_data_selection_margin_003")
+
+
+def data_selection_synthetic_collapse(candidate=None):
+    """Plot the chapter's stated generation-1 to generation-5 accuracy loss."""
+    fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
+    generations = np.arange(1, 6)
+    accuracy = np.array([95.0, 92.0, 88.0, 83.0, 78.0])
+    x = 0.10 + 0.78 * (generations - 1) / 4
+    y = 0.22 + 0.56 * (accuracy - 75.0) / 22.0
+    ax.plot(x, y, color=RED, lw=1.45, marker="o", ms=2.4)
+    ax.text(x[0], y[0] + 0.12, "Gen 1  95%", ha="left", va="center", color=INK, fontsize=4.6)
+    ax.text(x[-1], y[-1] - 0.12, "Gen 5  78%", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.70, 0.84, "−17 pp", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    write(fig, "vol1/data_selection", "vol1_data_selection_margin_004")
 
 
 def model_serving_model_load_slo(candidate=None):
@@ -2004,6 +2067,8 @@ def _other_new(candidate):
         data_engineering_segmentation_ladder(candidate)
     elif cid == "vol1-data-selection-margin-003":
         data_selection_echo_threshold(candidate)
+    elif cid == "vol1-data-selection-margin-004":
+        data_selection_synthetic_collapse(candidate)
     elif cid == "vol1-nn-computation-margin-001":
         nn_computation_paradigm_ops_ladder(candidate)
     elif cid == "vol1-nn-computation-margin-002":
@@ -2014,6 +2079,8 @@ def _other_new(candidate):
         nn_computation_mnist_roofline(candidate)
     elif cid == "vol1-model-compression-margin-001":
         model_compression_memory_ladder(candidate)
+    elif cid == "vol1-model-compression-margin-003":
+        model_compression_sparsity_break_even(candidate)
     elif cid == "vol1-frameworks-margin-001":
         frameworks_training_memory_ladder(candidate)
     elif cid == "vol1-frameworks-margin-002":
@@ -2138,7 +2205,9 @@ def generate_curated_margin_figures() -> None:
             "vol1-data-engineering-margin-003",
             "vol1-data-engineering-margin-004",
             "vol1-data-selection-margin-003",
+            "vol1-data-selection-margin-004",
             "vol1-model-compression-margin-001",
+            "vol1-model-compression-margin-003",
             "vol1-nn-computation-margin-001",
             "vol1-nn-computation-margin-002",
             "vol1-nn-computation-margin-003",
@@ -2293,7 +2362,7 @@ def generate() -> None:
     list_dots("vol1/nn_architectures", "nn_architectures_inductive_bias", [("CNN", INK), ("Transformer", "#888888"), ("MLP", GRID)])
     make_dam("vol1/nn_architectures", "nn_architectures_algorithm_axis", focus=1, vol="vol1", style="boxes")
     make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 80", 80), ("MobileNet 43", 43), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop", figsize=(1.242246906, 1.75))
-    make_knee("vol1/nn_architectures", "nn_architectures_attention_memory_wall", knee_frac=0.72)
+    nn_architectures_attention_quadratic_scaling()
     labeled_memory_bars("vol1/nn_architectures", "nn_architectures_capacity_wall", [("Item+User 102", 102), ("A100 80", 80), ("Item 51", 51)])
     labeled_memory_bars("vol1/nn_computation", "nn_computation_memory_explosion", [("GPT-2 6 GB", 6000), ("MNIST 438 KB", 0.438)], title="model memory")
     simple_bar("vol1/nn_computation", "nn_computation_matmul_dominance", [("MatMul", 0.92, COMP, "white"), ("", 0.08, GRID, INK)])

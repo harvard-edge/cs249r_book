@@ -1786,7 +1786,7 @@ A training system is easiest to reason about from its boundaries inward. The dat
 
 The core engine of neural network learning sequences forward predictions, backward error propagation, and parameter optimization into a closed loop. Follow the cyclic data path in @fig-training-loop across the three sequential stages: forward pass, gradient calculation, and weight updates.
 
-::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction (retaining activations), backward error propagation (computing gradients via the chain rule), and optimizer state updates. Inter-stage data dependencies and memory residency dictate the minimum execution time and memory floor of every training step." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Training Batch, labeled Next Iteration."}
+::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction, gradient computation by backpropagation, and an optimizer update. Updated parameters return to the next forward pass while the next batch remains a separate input. Data dependencies and memory residency set the step's minimum execution time and memory floor." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Forward Pass (Model), labeled Next Iteration."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -1844,13 +1844,14 @@ The core engine of neural network learning sequences forward predictions, backwa
 \draw[arrow] (grads) -- (backward);
 \draw[arrow] (backward) -- (optim);
 \draw[arrow] (optim) -- (update);
-% Loop back
+% Updated parameters feed the model, while each new batch remains a separate input.
 \draw[dash_arrow] (update.east) -- ++(0.5,0) coordinate(a)
-    -- (a |- optim.south) -- ++(0,-0.35) coordinate(b) % down below optim
+    -- (a |- optim.south) -- ++(0,-0.35) coordinate(b)
     node[right, font=\footnotesize\sffamily\itshape,
 color=gray, pos=0] {Next Iteration}
-    -- (b -| backward.west) -- ++(-0.8,0) coordinate(c) % left of everything
-    -- (c |- batch.west) -- (batch.west);
+    -- (b -| backward.west) -- ++(-0.8,0) coordinate(c)
+    -- (c |- batch.south) -- ++(0,-0.10) coordinate(d)
+    -- (d -| forward.south) -- (forward.south);
 % Step labels
 \node[above=1pt of forward, font=\small\sffamily\bfseries, color=TextBlack] {Step 1: Predict};
 \node[above=1pt of grads, font=\small\sffamily\bfseries, color=TextBlack] {Step 2: Gradients};
@@ -2861,7 +2862,7 @@ class OptimizerStateRecap:
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} OptimizerStateRecap.model_params_b_str` model requires `{python} OptimizerStateRecap.adam_state_gb_str` for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Adafactor factorizes second-moment state [@shazeer2018adafactor], 8-bit optimizers quantize optimizer statistics [@dettmers2022eightbit], and GaLore computes updates in a low-rank space. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLore attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
-::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of a 7-billion-parameter LLaMA model across four memory-efficient optimizer configurations (BF16 Adam, Adafactor, 8-bit Adam, and 8-bit GaLore), decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit. Standard FP32 Adam (omitted from the bars; it requires well above 70 GB for this model) does not fit on a single 24 GB GPU; the bars compare relative memory reductions, but even the smallest illustrated total remains above the 24 GB line, with 8-bit GaLore shrinking optimizer state most aggressively." fig-alt="Stacked horizontal bar chart comparing memory usage across four memory-efficient optimizer configurations for a 7-billion-parameter LLaMA model. Components: others, weight gradient, optimizer state, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
+::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Memory Footprint Breakdown**: Memory usage of a 7-billion-parameter LLaMA model across four memory-efficient optimizer configurations (BF16 Adam, Adafactor, 8-bit Adam, and 8-bit GaLore), decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit. Standard FP32 Adam (omitted from the bars; it requires well above 70 GB for this model) does not fit on a single 24 GB GPU; the bars compare relative memory reductions, but even the smallest illustrated total remains above the 24 GB line, with 8-bit GaLore shrinking optimizer state most aggressively." fig-alt="Stacked horizontal bar chart comparing illustrative memory usage across four memory-efficient optimizer configurations for a 7-billion-parameter LLaMA model. Components are others, weight gradient, optimizer state, activation, and weight. A dashed red line marks the RTX 4090 memory limit at 24 GB."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -3436,8 +3437,8 @@ from mlsysim.fmt import fmt_time
 # └─────────────────────────────────────────────────────────────────────────────
 
 class PipelineTimingRecap:
-    seq_pipeline_time = 105
-    opt_pipeline_time = 55
+    seq_pipeline_time = 95
+    opt_pipeline_time = 65
     pipeline_speedup_pct = (1 - opt_pipeline_time / seq_pipeline_time) * 100
 
     seq_pipeline_time_min_str = fmt_time(seq_pipeline_time, 'minute', precision=0, commas=False)
@@ -3447,7 +3448,7 @@ class PipelineTimingRecap:
 
 Prefetching addresses these inefficiencies by loading data into memory before its scheduled computation time. During the processing of the current batch, framework data pipelines such as `tf.data` load and prepare subsequent batches, maintaining a consistent supply of ready data [@murray2021].
 
-::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Sequential Data Fetching**: Under the assumed stage durations, file-open, read, and train operations execute serially while the GPU remains idle during file operations. The schedule spans approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` and provides a schematic baseline for the overlap comparison." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows. Operations execute serially, ending at 105 on a time axis labeled in minutes up to 01:45."}
+::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Sequential Data Fetching**: Under the assumed stage durations, file-open, read, and train operations execute serially while the GPU remains idle during file operations. The schedule spans approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` and provides a schematic baseline for the overlap comparison." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows. Operations execute serially, ending at 95 minutes on a time axis labeled up to 01:35."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -3456,7 +3457,7 @@ Prefetching addresses these inefficiencies by loading data into memory before it
   execute at begin picture={
     %
     \def\W{128mm}   % total width of the diagram (time axis)
-    \def\Tmax{105}  % total duration (units on x-axis)
+    \def\Tmax{95}   % total duration (units on x-axis)
     \def\rowH{9mm}  % row height
     %
     \pgfmathsetlengthmacro{\Xunit}{\W/\Tmax}
@@ -3541,7 +3542,7 @@ Prefetching addresses these inefficiencies by loading data into memory before it
 \Bar{train}{\yTrain}{80}{95}{Train 3}
 % Epoch
 \Bar{epoch}{\yEpoch}{0}{60}{Epoch 1}
-\Bar{epoch}{\yEpoch}{60}{105}{Epoch 2}
+\Bar{epoch}{\yEpoch}{60}{95}{Epoch 2}
 
 % ---------------------------
 % LOWER TIME AXIS (labels on 15 min)
@@ -3556,7 +3557,7 @@ Prefetching addresses these inefficiencies by loading data into memory before it
   60/01:00,
   75/01:15,
   90/01:30,
-  105/01:45
+  95/01:35
 }{
   \node[font=\scriptsize\sffamily, anchor=north] at (\t,\yAxis+0.20) {\lbl};
 }
@@ -3567,7 +3568,7 @@ Prefetching addresses these inefficiencies by loading data into memory before it
 
 Overlapping extends prefetching by coordinating multiple pipeline stages to execute concurrently. The system processes the current batch while simultaneously preparing future batches through data loading and preprocessing operations. Compare the illustrative schedules in @fig-fetching-naive and @fig-fetching-optimized. Under their assumed stage durations, overlap reduces completion time from approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` to `{python} PipelineTimingRecap.opt_pipeline_time_min_str`, a `{python} PipelineTimingRecap.pipeline_speedup_pct_str` reduction. Actual gains depend on stage balance and available concurrency.
 
-::: {#fig-fetching-optimized fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Overlapped Data Prefetching**: Read and train operations execute concurrently under the same assumed stage durations. The schematic schedule spans approximately `{python} PipelineTimingRecap.opt_pipeline_time_min_str`, compared with `{python} PipelineTimingRecap.seq_pipeline_time_min_str` for the serial schedule." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows in which read and train operations overlap, with the schedule ending at 55 on the time axis."}
+::: {#fig-fetching-optimized fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Overlapped Data Prefetching**: File-open and read work overlaps accelerator training while preserving the same individual stage durations as the serial schedule. The schematic schedule spans approximately `{python} PipelineTimingRecap.opt_pipeline_time_min_str`, compared with `{python} PipelineTimingRecap.seq_pipeline_time_min_str` for the serial schedule." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows. The same stage durations as the serial schedule overlap, and the schedule ends at 65 minutes."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -3576,7 +3577,7 @@ Overlapping extends prefetching by coordinating multiple pipeline stages to exec
   execute at begin picture={
     %
     \def\W{140mm}   % total width of the diagram (time axis)
-    \def\Tmax{60}   % total duration (units on x-axis)
+    \def\Tmax{65}   % total duration (units on x-axis)
     \def\rowH{9mm}  % row height
     %
     \pgfmathsetlengthmacro{\Xunit}{\W/\Tmax}
@@ -3649,17 +3650,18 @@ Overlapping extends prefetching by coordinating multiple pipeline stages to exec
 % ---------------------------
 % Open
 \Bar{open}{\yOpen}{0}{7.5}{Open 1}
+\Bar{open}{\yOpen}{30}{37.5}{Open 2}
 % Read
 \Bar{read}{\yRead}{7.5}{20}{Read 1}
-\Bar{read}{\yRead}{20}{32.5}{Read 2}
-\Bar{read}{\yRead}{32.5}{44}{Read 3}
+\Bar{read}{\yRead}{20}{30}{Read 2}
+\Bar{read}{\yRead}{37.5}{50}{Read 3}
 % Train
-\Bar{train}{\yTrain}{20}{32.5}{Train 1}
-\Bar{train}{\yTrain}{32.5}{44}{Train 2}
-\Bar{train}{\yTrain}{44}{55}{Train 3}
+\Bar{train}{\yTrain}{20}{35}{Train 1}
+\Bar{train}{\yTrain}{35}{50}{Train 2}
+\Bar{train}{\yTrain}{50}{65}{Train 3}
 
 % Epoch
-\Bar{epoch}{\yEpoch}{0}{55}{Epochs (Overlapped)}
+\Bar{epoch}{\yEpoch}{0}{65}{Epochs (Overlapped)}
 % ---------------------------
 % LOWER TIME AXIS (labels on 15 min)
 % ---------------------------
@@ -3671,6 +3673,7 @@ Overlapping extends prefetching by coordinating multiple pipeline stages to exec
   30/00:30,
   45/00:45,
   60/01:00,
+  65/01:05
 }{
   \node[font=\scriptsize\sffamily, anchor=north] at (\t,\yAxis+0.20) {\lbl};
 }
