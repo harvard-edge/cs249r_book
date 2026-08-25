@@ -1190,10 +1190,35 @@ def data_selection_compute_data_gap():
 
 
 def data_selection_echo_threshold(candidate=None):
-    fig, ax = new_fig("scale-anchor")
-    knee(ax, knee_frac=0.63, style="dashed", pct_label="e=R")
-    ax.text(82, 23.5, "over", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    """Show useful echoing up to the pipeline-ratio threshold, then saturation."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.30, 0.82))
+    threshold = 0.63
+    x = np.linspace(0.08, 0.94, 180)
+    progress = (x - 0.08) / (0.94 - 0.08)
+    utilization = 0.18 + 0.56 * np.minimum(progress / threshold, 1.0)
+    threshold_x = 0.08 + threshold * (0.94 - 0.08)
+    ax.plot(x, utilization, color=INK, lw=1.35)
+    ax.axvspan(threshold_x, 0.94, color=REDFILL, alpha=0.34)
+    ax.plot([threshold_x, threshold_x], [0.12, 0.80], color=RED, lw=0.65, ls="--")
+    ax.plot(threshold_x, 0.74, "o", color=RED, ms=3.2)
+    ax.text(threshold_x - 0.025, 0.84, "e=R", ha="right", va="center", color=RED, fontsize=5.3, fontweight="bold")
+    ax.text(0.80, 0.58, "e > R", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    ax.text(0.47, 0.08, "echo factor", ha="center", va="center", color=INK, fontsize=4.5)
     write(fig, "vol1/data_selection", "vol1_data_selection_margin_003")
+
+
+def data_selection_synthetic_collapse(candidate=None):
+    """Plot the chapter's stated generation-1 to generation-5 accuracy loss."""
+    fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
+    generations = np.arange(1, 6)
+    accuracy = np.array([95.0, 92.0, 88.0, 83.0, 78.0])
+    x = 0.10 + 0.78 * (generations - 1) / 4
+    y = 0.22 + 0.56 * (accuracy - 75.0) / 22.0
+    ax.plot(x, y, color=RED, lw=1.45, marker="o", ms=2.4)
+    ax.text(x[0], y[0] + 0.12, "Gen 1  95%", ha="left", va="center", color=INK, fontsize=4.6)
+    ax.text(x[-1], y[-1] - 0.12, "Gen 5  78%", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.70, 0.84, "−17 pp", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    write(fig, "vol1/data_selection", "vol1_data_selection_margin_004")
 
 
 def model_serving_model_load_slo(candidate=None):
@@ -2034,6 +2059,8 @@ def _other_new(candidate):
         data_engineering_segmentation_ladder(candidate)
     elif cid == "vol1-data-selection-margin-003":
         data_selection_echo_threshold(candidate)
+    elif cid == "vol1-data-selection-margin-004":
+        data_selection_synthetic_collapse(candidate)
     elif cid == "vol1-nn-computation-margin-001":
         nn_computation_paradigm_ops_ladder(candidate)
     elif cid == "vol1-nn-computation-margin-002":
@@ -2168,6 +2195,7 @@ def generate_curated_margin_figures() -> None:
             "vol1-data-engineering-margin-003",
             "vol1-data-engineering-margin-004",
             "vol1-data-selection-margin-003",
+            "vol1-data-selection-margin-004",
             "vol1-model-compression-margin-001",
             "vol1-nn-computation-margin-001",
             "vol1-nn-computation-margin-002",
