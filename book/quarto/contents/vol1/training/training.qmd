@@ -1786,7 +1786,7 @@ A training system is easiest to reason about from its boundaries inward. The dat
 
 The core engine of neural network learning sequences forward predictions, backward error propagation, and parameter optimization into a closed loop. Follow the cyclic data path in @fig-training-loop across the three sequential stages: forward pass, gradient calculation, and weight updates.
 
-::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction (retaining activations), backward error propagation (computing gradients via the chain rule), and optimizer state updates. The updated parameters feed the model's next forward pass; the next training batch remains a separate input. Inter-stage data dependencies and memory residency dictate the minimum execution time and memory floor of every training step." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Forward Pass (Model), labeled Next Iteration."}
+::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction, gradient computation by backpropagation, and an optimizer update. Updated parameters return to the next forward pass while the next batch remains a separate input. Data dependencies and memory residency set the step's minimum execution time and memory floor." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Forward Pass (Model), labeled Next Iteration."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -1845,11 +1845,13 @@ The core engine of neural network learning sequences forward predictions, backwa
 \draw[arrow] (backward) -- (optim);
 \draw[arrow] (optim) -- (update);
 % Updated parameters feed the model, while each new batch remains a separate input.
-\draw[dash_arrow] (update.east) -- ++(4.2,0) coordinate(a)
+\draw[dash_arrow] (update.east) -- ++(0.5,0) coordinate(a)
+    -- (a |- optim.south) -- ++(0,-0.35) coordinate(b)
     node[right, font=\footnotesize\sffamily\itshape,
-color=gray] {Next Iteration}
-    -- (a |- forward.north east) -- ++(0,0.5) coordinate(b)
-    -- (b -| forward.north east) -- (forward.north east);
+color=gray, pos=0] {Next Iteration}
+    -- (b -| backward.west) -- ++(-0.8,0) coordinate(c)
+    -- (c |- batch.south) -- ++(0,-0.10) coordinate(d)
+    -- (d -| forward.south) -- (forward.south);
 % Step labels
 \node[above=1pt of forward, font=\small\sffamily\bfseries, color=TextBlack] {Step 1: Predict};
 \node[above=1pt of grads, font=\small\sffamily\bfseries, color=TextBlack] {Step 2: Gradients};
@@ -2339,7 +2341,7 @@ Training data traverses three memory tiers\index{Memory Hierarchy!ML training ti
 $$R_{\text{memory}} =\min(\text{BW}_{\text{storage}}, \text{BW}_{\text{system}}, \text{BW}_{\text{accelerator}})$$ {#eq-memory-hierarchy-bandwidth}
 
 ::: {.column-margin}
-![](images/svg/vol1_training_margin_002.svg){width="100%" fig-alt="Three-rung bandwidth ladder for the training data path: NVMe storage around 7 GB/s, system DRAM around 50 GB/s, and V100 HBM around 900 GB/s."}
+![](images/svg/vol1_training_margin_002.svg){width="100%" fig-alt="Three-rung bandwidth ladder for the training data path: storage around 1.5 GB/s, DRAM around 75 GB/s, and V100 HBM around 900 GB/s."}
 
 *Bandwidth steps up the storage to DRAM to HBM hierarchy.*
 :::
@@ -2860,7 +2862,7 @@ class OptimizerStateRecap:
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} OptimizerStateRecap.model_params_b_str` model requires `{python} OptimizerStateRecap.adam_state_gb_str` for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Adafactor factorizes second-moment state [@shazeer2018adafactor], 8-bit optimizers quantize optimizer statistics [@dettmers2022eightbit], and GaLore computes updates in a low-rank space. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLore attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
-::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Estimated LLaMA 7B Training Memory**: Approximate reconstruction of the six configurations in the cited GaLore comparison for a token batch of 256 on one device, without activation checkpointing or memory offloading. Weight and activation storage stay fixed across bars; optimizer state changes by method, and the three layerwise-update variants labeled 'no grad' avoid retaining a full-model weight-gradient buffer. The dashed line marks the RTX 4090 24 GB limit. Source: [@zhao2024galorememoryefficientllmtraining]." fig-alt="Stacked horizontal bar chart comparing six estimated LLaMA 7B training-memory configurations. Every bar has the same weight and activation components. Optimizer-state size varies by method, while three no-retaining-gradient variants omit the full weight-gradient component. Only 8-bit GaLore with no retained full-model gradient falls below the RTX 4090 24 GB line."}
+::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Memory Footprint Breakdown**: Memory usage of a 7-billion-parameter LLaMA model across four memory-efficient optimizer configurations (BF16 Adam, Adafactor, 8-bit Adam, and 8-bit GaLore), decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit. Standard FP32 Adam (omitted from the bars; it requires well above 70 GB for this model) does not fit on a single 24 GB GPU; the bars compare relative memory reductions, but even the smallest illustrated total remains above the 24 GB line, with 8-bit GaLore shrinking optimizer state most aggressively." fig-alt="Stacked horizontal bar chart comparing illustrative memory usage across four memory-efficient optimizer configurations for a 7-billion-parameter LLaMA model. Components are others, weight gradient, optimizer state, activation, and weight. A dashed red line marks the RTX 4090 memory limit at 24 GB."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -2880,8 +2882,8 @@ At billion-parameter scale, optimizer state dominates the memory budget. As quan
     xbar stacked,
     legend style={
         legend columns=1,
-        at={(axis cs:64,5.25)},
-        anchor=north east,
+        at={(axis cs:65,2.2)},
+        anchor=north west,
         cells={anchor=west},
         row sep=1pt,
         draw=none,
@@ -2894,36 +2896,36 @@ At billion-parameter scale, optimizer state dominates the memory budget. As quan
     axis x line*=bottom,
     tick label style={font=\footnotesize\sffamily},
     label style={font=\footnotesize\sffamily},
-    xtick={0,20,40,60},
+    xtick={0,20,40,60,80},
     width=120mm,
-    bar width=5mm,
+   % height=90mm,
+    bar width=7mm,
     xlabel={Memory Cost (GB)},
-    yticklabels={8-bit GaLore (no grad), 8-bit Adam (no grad), 8-bit Adam, AdamW (no grad), Adafactor, BF16 AdamW},
+    yticklabels={8-bit GaLore, 8-bit Adam, Adafactor, BF16},
     xmin=0,
-    xmax=65,
-    ymax=5.35,
+    xmax=85,
+    ymax=3.35,
     area legend,
-    y=7mm,
-    enlarge y limits={abs=0.45},
+    y=10mm,
+    enlarge y limits={abs=0.55},
 ]
-\addplot[BlueLine,fill=BlueL] coordinates {(14,0) (14,1) (14,2) (14,3) (14,4) (14,5)};
-\addplot[OrangeLine,fill=OrangeL] coordinates {(2,0) (2,1) (2,2) (2,3) (2,4) (2,5)};
-\addplot[GreenLine,fill=GreenL] coordinates {(5,0) (13,1) (13,2) (27,3) (14,4) (27,5)};
-\addplot[violet!70,fill=violet!30] coordinates {(0,0) (0,1) (14,2) (0,3) (14,4) (14,5)};
-\addplot[GrayLine,fill=GrayL] coordinates {(1.5,0) (1.5,1) (1.5,2) (1.5,3) (1.5,4) (1.5,5)};
+\addplot[GrayLine,fill=GrayL] coordinates {(1,0) (2,1) (3,2) (5,3)};
+\addplot[OrangeLine,fill=OrangeL] coordinates {(4,0) (6,1) (8,2) (10,3)};
+\addplot[GreenLine,fill=GreenL] coordinates {(6,0) (8,1) (10,2) (15,3)};
+\addplot[BlueLine,fill=BlueL] coordinates {(12,0) (15,1) (20,2) (25,3)};
+\addplot[violet!70,fill=violet!30] coordinates {(8,0) (10,1) (15,2) (20,3)};
 
-\legend{Weights, Activations, Optimizer State, Weight Gradients, Other}
-\draw[dashed,RedLine,ultra thick] (axis cs:24,-0.45) -- (axis cs:24,5.45);
-\node[rotate=90, anchor=east, RedLine, font=\scriptsize\bfseries\sffamily,
-fill=white, fill opacity=0.9, text opacity=1, inner sep=1.5pt]
-at (axis cs:23.6,5.1) {24 GB GPU limit};
+\legend{Others, Weight Gradient, Optimizer State, Activation, Weights}
+\draw[dashed,RedLine,ultra thick] (axis cs:24,-0.5) -- (axis cs:24,3.5)
+node[above right=0pt, RedLine, font=\footnotesize\bfseries\sffamily,
+fill=white, fill opacity=0.85, text opacity=1, inner sep=2pt, pos=1] {24 GB Limit (RTX 4090)};
 \end{axis}
 \end{tikzpicture}
 ```
 
 :::
 
-The bars separate two memory-saving mechanisms. Adafactor, 8-bit Adam, and GaLore reduce optimizer state; layerwise updates additionally avoid retaining a full-model gradient tensor. In the cited estimate, only the combined 8-bit GaLore and layerwise-update configuration falls below the 24 GB device limit.
+The bars make the ranking concrete: BF16 Adam alone pushes past the single-GPU budget line, Adafactor and 8-bit Adam bring optimizer state back within it, and 8-bit GaLore leaves the most headroom of all by computing its updates in a low-rank space.
 
 #### Batch size and parameter updates {#sec-model-training-batch-size-parameter-updates-4d0b}
 

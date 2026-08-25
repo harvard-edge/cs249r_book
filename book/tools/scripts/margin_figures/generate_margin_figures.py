@@ -724,7 +724,7 @@ def ml_systems_thermal_throttling(candidate=None):
     ax.plot([0.44], [0.72], "o", color=RED, ms=3.2)
     ax.plot([0.90], [0.36], "o", color=MEM, ms=3.2)
     ax.text(0.26, 0.83, "burst", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
-    ax.text(0.73, 0.24, "sustained", ha="center", va="center", color=MEM, fontsize=5.0, fontweight="bold")
+    ax.text(0.73, 0.24, "sustain", ha="center", va="center", color=MEM, fontsize=5.0, fontweight="bold")
     ax.text(0.57, 0.57, "throttle", ha="left", va="center", color=INK, fontsize=4.7)
     write(fig, "vol1/ml_systems", "vol1_ml_systems_margin_003")
 
@@ -769,16 +769,10 @@ def training_bandwidth_path_ladder(candidate=None):
     from mlsysim import Hardware
 
     v100_bw = Hardware.Cloud.V100.memory.bandwidth.m_as("GB/s")
-    system_memory_bw = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as("GB/s")
-    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
     make_ladder(
         "vol1/training",
         "vol1_training_margin_002",
-        [
-            ("HBM %.0f GB/s" % v100_bw, v100_bw),
-            ("DRAM %.0f GB/s" % system_memory_bw, system_memory_bw),
-            ("NVMe %.0f GB/s" % nvme_bw, nvme_bw),
-        ],
+        [("HBM %.0f GB/s" % v100_bw, v100_bw), ("DRAM 75 GB/s", 75), ("Storage 1.5 GB/s", 1.5)],
         domain="bandwidth",
         wall=False,
     )
