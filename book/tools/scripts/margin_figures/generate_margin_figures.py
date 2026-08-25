@@ -755,10 +755,16 @@ def training_bandwidth_path_ladder(candidate=None):
     from mlsysim import Hardware
 
     v100_bw = Hardware.Cloud.V100.memory.bandwidth.m_as("GB/s")
+    system_memory_bw = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as("GB/s")
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
     make_ladder(
         "vol1/training",
         "vol1_training_margin_002",
-        [("HBM %.0f GB/s" % v100_bw, v100_bw), ("DRAM 75 GB/s", 75), ("Storage 1.5 GB/s", 1.5)],
+        [
+            ("HBM %.0f GB/s" % v100_bw, v100_bw),
+            ("DRAM %.0f GB/s" % system_memory_bw, system_memory_bw),
+            ("NVMe %.0f GB/s" % nvme_bw, nvme_bw),
+        ],
         domain="bandwidth",
         wall=False,
     )
