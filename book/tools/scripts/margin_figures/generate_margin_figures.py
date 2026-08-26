@@ -1265,15 +1265,20 @@ def model_serving_paged_attention_waste(candidate=None):
     # first range and the stated upper bound of the second as usable shares.
     rows = [("contiguous", 0.30, 0.58, "~30%"), ("paged", 0.96, 0.28, ">96%")]
     for label, used, y, value_label in rows:
-        ax.text(x - 0.025, y + h / 2, label, ha="right", va="center", color=INK, fontsize=4.4, fontweight="bold")
+        ax.text(x - 0.025, y + h / 2, label, ha="right", va="center", color=INK, fontsize=4.4)
         rect(ax, x, y, w * used, h, MEM, ec="white", lw=0.35)
         rect(ax, x + w * used, y, w * (1 - used), h, RED, ec="white", lw=0.35)
-        if used < 0.4:
-            ax.text(x + w * used / 2, y + h / 2, value_label, ha="center", va="center", color="white", fontsize=3.6, fontweight="bold")
-        else:
-            ax.text(x + w * used / 2, y + h / 2, value_label, ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
-    ax.text(x + w / 2, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
-    ax.text(x + w, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8, fontweight="bold")
+        ax.text(
+            x + w * used / 2,
+            y + h / 2,
+            value_label,
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=3.5,
+        )
+    ax.text(x + w / 2, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(x + w, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8)
     write(fig, "vol1/model_serving", "vol1_model_serving_margin_002")
 
 
