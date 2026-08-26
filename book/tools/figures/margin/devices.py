@@ -142,7 +142,7 @@ def save(fig, path, pad=0.02):
 # ── magnitude-span → hierarchy-ladder ──────────────────────────────────────────
 def ladder(ax, tiers, wall=False, color=None, domain=None, style='bars'):
     """tiers=[(label,value),...]; rungs top(biggest)→bottom, label INSIDE the bar
-    (white bold) when it fits, else just outside in dark ink; an optional red ceiling
+    (white regular) when it fits, else just outside in dark ink; an optional red ceiling
     line marks a limit (sacred red).
 
     SCALE IS ADAPTIVE so bars read honestly:
@@ -184,12 +184,13 @@ def ladder(ax, tiers, wall=False, color=None, domain=None, style='bars'):
         lab = _clean_label(lab)
         # Margin labels need a conservative fit test; a bar can be visibly
         # substantial yet still too short for a right-aligned Helvetica label.
-        if style != 'lollipop' and frac > 0.040 * len(lab) + 0.08:   # fits inside the bar
+        longest_line = max(len(part) for part in lab.splitlines())
+        if style != 'lollipop' and frac > 0.040 * longest_line + 0.08:   # fits inside the bar
             ax.text(inside_x, yy, lab, fontsize=5.2, va="center", ha="right",
-                    color="white", fontweight="bold")
+                    color="white", multialignment="right")
         else:                                            # outside (always for lollipop), dark ink
             ax.text(out_x, yy, lab, fontsize=5.2, va="center", ha="left",
-                    color=INK, fontweight="bold")
+                    color=INK)
 
     if log_scale:
         xmin = min(vals) * 0.4; xmax = max(vals) * 2.2
@@ -455,7 +456,7 @@ def blast(ax, n=5, style='fan'):
 
 # ── bounded operating budget → budget-envelope ────────────────────────────────
 def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1.0,
-                    style='burn', limit_label=None):
+                    style='burn', limit_label=None, limit_label_offset=0.0):
     """finite budget, quota, capacity, or matched-rate envelope.
 
       • 'burn'    → one or more bars on a shared denominator with a red limit
@@ -497,7 +498,7 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
                 else:
                     value_x = x0 + bar_w - 0.02
             ax.text(value_x, y, f"{value:g}", ha="center", va="center",
-                    color="white", fontsize=4.7, fontweight="bold")
+                    color="white", fontsize=4.7)
         else:
             ax.text(x0 + bar_w + 0.02, y, f"{value:g}", ha="left", va="center",
                     color=INK, fontsize=4.7)
@@ -509,8 +510,11 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
     elif limit_x < 0.22:
         label_x = limit_x + 0.01
         label_ha = "left"
+    if limit_label_offset:
+        label_x += limit_label_offset
+        label_ha = "left" if limit_label_offset > 0 else "right"
     ax.text(label_x, 0.82, limit_label or "limit", ha=label_ha, va="center",
-            color=RED, fontsize=4.8, fontweight="bold")
+            color=RED, fontsize=4.8)
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); _clean(ax)
 
 # ── short ordered window/process → sequence-strip ─────────────────────────────
