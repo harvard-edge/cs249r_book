@@ -236,6 +236,45 @@ jobs:
           tags: |
             type=raw,value=${{ env.CONTAINER_TAG }}
 
+      - name: 🔓 Allow non-distributable layers to reach the registry
+        shell: pwsh
+        run: |
+          # The image is built FROM mcr.microsoft.com/windows/server, whose base
+          # layers are marked non-distributable. Docker refuses to upload those
+          # by default, so the manifest lands at GHCR referencing blobs the
+          # registry never received and the push ends in "unknown blob" after a
+          # two-hour build. Opting in for this registry uploads them instead.
+          $configDir = "C:\ProgramData\Docker\config"
+          $configPath = Join-Path $configDir "daemon.json"
+          New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+
+          if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          } else {
+            $config = [PSCustomObject]@{}
+          }
+
+          $registries = @("${{ env.REGISTRY }}")
+          $config | Add-Member -NotePropertyName "allow-nondistributable-artifacts" `
+                               -NotePropertyValue $registries -Force
+
+          $config | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
+          Write-Host "📄 daemon.json:"
+          Get-Content $configPath | Write-Host
+
+          Restart-Service docker
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Date) -lt $deadline) {
+            docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 3
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker daemon did not come back after restart"
+            exit 1
+          }
+          Write-Host "✅ Docker daemon restarted with $($registries -join ', ') allowed"
+
       - name: 🐳 Build and Push Windows container
         id: build
         shell: pwsh
