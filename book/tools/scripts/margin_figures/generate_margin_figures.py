@@ -650,10 +650,10 @@ def data_engineering_debt_compounding():
     ax.fill_between(x, y_low, y_high, color=REDFILL, alpha=0.28)
     ax.plot(x[-1], y_high[-1], "o", color=RED, ms=3.3)
     ax.plot(x[-1], y_low[-1], "o", color=TIME, ms=3.0)
-    ax.text(0.60, 0.76, "30%", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
-    ax.text(0.69, 0.33, "10%", ha="center", va="center", color=TIME, fontsize=5.0, fontweight="bold")
-    ax.text(0.20, 0.08, "Debt0", ha="center", va="center", color=INK, fontsize=4.8)
-    ax.text(0.76, 0.08, "n periods", ha="center", va="center", color=INK, fontsize=4.8)
+    ax.text(0.60, 0.58, "30%", ha="center", va="center", color=RED, fontsize=5.0)
+    ax.text(0.69, 0.33, "10%", ha="center", va="center", color=TIME, fontsize=5.0)
+    ax.text(0.20, 0.04, r"Debt$_0$", ha="center", va="center", color=INK, fontsize=4.8)
+    ax.text(0.76, 0.04, "n periods", ha="center", va="center", color=INK, fontsize=4.8)
     write(fig, "vol1/data_engineering", "data_engineering_debt_compounding")
 
 
