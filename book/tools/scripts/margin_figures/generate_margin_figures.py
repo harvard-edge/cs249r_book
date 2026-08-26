@@ -769,12 +769,19 @@ def training_bandwidth_path_ladder(candidate=None):
     from mlsysim import Hardware
 
     v100_bw = Hardware.Cloud.V100.memory.bandwidth.m_as("GB/s")
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
+    system_memory_bw = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as("GB/s")
     make_ladder(
         "vol1/training",
         "vol1_training_margin_002",
-        [("HBM %.0f GB/s" % v100_bw, v100_bw), ("DRAM 75 GB/s", 75), ("Storage 1.5 GB/s", 1.5)],
+        [
+            ("HBM %.0f GB/s" % v100_bw, v100_bw),
+            ("DRAM %.0f GB/s" % system_memory_bw, system_memory_bw),
+            ("NVMe %.0f GB/s" % nvme_bw, nvme_bw),
+        ],
         domain="bandwidth",
         wall=False,
+        figsize=(1.18078, 1.75),
     )
 
 
@@ -1252,15 +1259,21 @@ def model_serving_model_load_slo(candidate=None):
 
 def model_serving_paged_attention_waste(candidate=None):
     fig, ax = margin_axes("iron-law-bar", figsize=(1.20, 0.66))
-    x, w, h = 0.25, 0.60, 0.15
-    rows = [("contig", 0.55, 0.58), ("paged", 0.96, 0.28)]
-    for label, used, y in rows:
-        ax.text(0.07, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.9)
+    x, w, h = 0.38, 0.48, 0.15
+    # The adjacent prose states 60--80% waste for static contiguous
+    # reservation and below 4% for PagedAttention. Use the midpoint of the
+    # first range and the stated upper bound of the second as usable shares.
+    rows = [("contiguous", 0.30, 0.58, "~30%"), ("paged", 0.96, 0.28, ">96%")]
+    for label, used, y, value_label in rows:
+        ax.text(x - 0.025, y + h / 2, label, ha="right", va="center", color=INK, fontsize=4.4, fontweight="bold")
         rect(ax, x, y, w * used, h, MEM, ec="white", lw=0.35)
         rect(ax, x + w * used, y, w * (1 - used), h, RED, ec="white", lw=0.35)
-        ax.text(x + w * used / 2, y + h / 2, f"{int(round(used * 100))}%", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
-    ax.text(0.54, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0)
-    ax.text(0.91, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8)
+        if used < 0.4:
+            ax.text(x + w * used / 2, y + h / 2, value_label, ha="center", va="center", color="white", fontsize=3.6, fontweight="bold")
+        else:
+            ax.text(x + w * used / 2, y + h / 2, value_label, ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
+    ax.text(x + w / 2, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
+    ax.text(x + w, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8, fontweight="bold")
     write(fig, "vol1/model_serving", "vol1_model_serving_margin_002")
 
 
