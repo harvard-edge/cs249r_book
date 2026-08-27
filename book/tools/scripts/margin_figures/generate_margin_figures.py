@@ -1028,8 +1028,8 @@ def sustainable_ai_carbon_frontier(candidate=None):
     ratio_annotation_ladder(
         "vol2/sustainable_ai",
         "vol2_sustainable_ai_margin_001",
-        [("Poland 80 tCO2", 80), ("Quebec 2 tCO2", 2)],
-        ratio_label="40x",
+        [("Poland 8,200 t CO2", 8_200), ("Quebec 200 t CO2", 200)],
+        ratio_label="41x",
         domain="energy",
     )
 
@@ -2455,7 +2455,7 @@ def generate() -> None:
     conclusion_tail_latency_fanout()
     make_dam("vol2/data_storage", "data_storage_dai_locator", focus=2, vol="vol2", style="pills")
     make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 7.56 PB", 7560), ("Data 6 TB", 6)], domain="memory")
-    make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200", 200), ("NVMe 7", 7)], domain="bandwidth")
+    make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200 GB/s", 200), ("NVMe 7 GB/s", 7)], domain="bandwidth")
     data_storage_checkpoint_storm_write_time()
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")
     distributed_training_pipeline_bubble_tax()
