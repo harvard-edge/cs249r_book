@@ -1028,8 +1028,8 @@ def sustainable_ai_carbon_frontier(candidate=None):
     ratio_annotation_ladder(
         "vol2/sustainable_ai",
         "vol2_sustainable_ai_margin_001",
-        [("Poland 80 tCO2", 80), ("Quebec 2 tCO2", 2)],
-        ratio_label="40x",
+        [("Poland 8,200 t CO2", 8_200), ("Quebec 200 t CO2", 200)],
+        ratio_label="41x",
         domain="energy",
     )
 
