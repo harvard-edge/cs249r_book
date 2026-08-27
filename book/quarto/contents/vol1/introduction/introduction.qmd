@@ -514,6 +514,8 @@ MYCIN performed well in specific tests, but its success exposed the **Knowledge 
 
 Faster machines could evaluate more rules, but they could not extract human judgment faster. Scalable AI needed a way to infer useful decision boundaries from examples rather than requiring engineers to enumerate those boundaries in advance.
 
+That change did not remove human design; it changed what engineers designed. Instead of encoding every decision, they chose the examples, representations, objectives, and measurements from which a decision could be learned. The next era therefore exchanged the knowledge-acquisition bottleneck for a new question: which evidence should the learner see?
+
 ### The statistical learning era and the feature engineering bottleneck {#sec-introduction-statistical-learning-era-feature-engineering-bottleneck-8cf5}
 
 The 1990s marked the shift to **Statistical Learning**\index{Statistical Learning!definition} and probabilistic systems. Instead of hard-coded logic, systems estimated probabilities from data ($p(y \mid x)$). This transition was driven by the availability of digital data and the "unreasonable effectiveness"[^fn-unreasonable-data-effectiveness] of large datasets.
@@ -1269,15 +1271,13 @@ The implication is that realizing the bitter lesson's promise requires expertise
 
 [^fn-memory-bandwidth-bottleneck]: **Memory Bandwidth**\index{Memory Bandwidth!bottleneck}: The rate at which a model's parameters move from memory to the processor. The gigawatt-hour-scale energy consumed by GPT-scale training is shaped not only by computation but also by the physically expensive process of fetching billions of weights through the memory hierarchy. Moving data from off-chip memory can cost one to several orders of magnitude more energy than local arithmetic, depending on precision and memory level, making bandwidth, not processor speed alone, a direct driver of the data center's massive power draw.
 
-The world is rushing to build AI systems, but building them is not enough. Sutton's bitter lesson shows why. Progress depends on the data, computation, and infrastructure that make learning at scale possible. This book therefore treats the machine learning system as an engineering object: one that must be designed, deployed, evaluated, and maintained under real constraints. That broader responsibility is AI engineering. Before defining the discipline formally, we must first define its object, beginning with a familiar production workload.
+The world is rushing to build AI systems, but building them is not enough. Sutton's bitter lesson shows why. Progress depends on the data, computation, and infrastructure that make learning at scale possible. This book therefore treats the machine learning system as an engineering object: one that must be designed, deployed, evaluated, and maintained under real constraints. That broader responsibility is AI engineering, the discipline defined formally in @sec-introduction-defining-ai-engineering-19ce. Before defining the discipline, we must first define its object, beginning with a familiar production workload.
 
 ## Defining ML Systems {#sec-introduction-defining-ml-systems-d4af}
 
 Return to the spam filter introduced in the history of statistical learning. At production scale, the same apparently simple classifier operates against global email traffic measured in hundreds of billions of sent and received messages per day [@statista2024email], and large providers must decide in milliseconds which messages deserve attention and which should be quarantined.
 
-This deceptively simple task reveals *what* distinguishes machine learning systems from traditional software. The challenge begins with data. The filter trains on millions of labeled examples and must keep adapting as spammers evolve their tactics, rather than relying on programmers to encode every spam pattern manually. It then becomes an algorithmic problem, because the model must generalize from those examples to messages it has never seen before while balancing precision against recall so legitimate email is not hidden. Finally, the same decision becomes an infrastructure problem. Providers must process billions of emails daily, store and update models as spam evolves, and serve predictions with sub-100 ms latency across horizontally scaled data centers.
-
-The classifier is therefore only one component of a changing data, software, and infrastructure system. That observation gives us the object this book studies.
+This deceptively simple task reveals *what* distinguishes machine learning systems from traditional software. The challenge begins with data. The filter trains on millions of labeled examples and must keep adapting as spammers evolve their tactics, rather than relying on programmers to encode every spam pattern manually. It then becomes an algorithmic problem, because the model must generalize from those examples to messages it has never seen before while balancing precision against recall so legitimate email is not hidden. Finally, the same decision becomes an infrastructure problem. Providers must process billions of emails daily, store and update models as spam evolves, and serve predictions with sub-100 ms latency across horizontally scaled data centers. The classifier is therefore only one component of a changing data, software, and infrastructure system. That observation gives us the object this book studies.
 
 When a new phishing template appears, the data layer must capture representative messages, the algorithm must separate attacks from legitimate mail, and the machine must distribute updated parameters before delivery. Any layer can fail while the others continue working, so the full chain from measurement through learning to execution is the right unit of analysis.
 
@@ -1291,7 +1291,15 @@ When a new phishing template appears, the data layer must capture representative
 
 :::
 
-The definition exposes three diagnostic variables: the data that describes the task, the algorithm that turns those examples into behavior, and the machine that executes that behavior within the operating budget. The D·A·M taxonomy gives those variables a reusable form.
+The definition exposes three diagnostic axes: the data that describes the task, the algorithm that turns those examples into behavior, and the machine that executes that behavior within the operating budget. The D·A·M taxonomy gives those axes a reusable form.
+
+The same user-visible symptom can originate in any of the three. A missed phishing message may mean that representative examples were absent, that the learned decision boundary was inadequate, or that the serving path missed its latency budget. Treating every miss as a model problem risks improving the wrong component. A useful systems taxonomy must separate these causes without pretending that they are independent.
+
+Each explanation calls for different evidence. The data hypothesis sends the engineer to coverage, labels, and distribution shift. The algorithm hypothesis sends the engineer to error slices, model capacity, and the learning objective. The machine hypothesis sends the engineer to latency, throughput, memory, and utilization. These investigations are not interchangeable. Faster hardware cannot supply examples that were never collected, while a larger dataset cannot repair a serving path that misses its deadline because memory is saturated.
+
+The relevant constraint is the one whose relaxation improves the end-to-end result. This idea of a *binding constraint* prevents teams from optimizing the most visible component instead of the component that governs the outcome. The purpose of D·A·M is therefore operational: it identifies the next hypothesis to test and the class of intervention capable of changing system behavior. The diagnosis is provisional. Once an intervention relaxes one limit, the system must be measured again because a different axis may now bind. D·A·M is a loop, not a one-time label.
+
+At first pass, D·A·M is a three-part mental model. Data supplies evidence, Algorithm turns it into behavior, and Machine executes it within the operating budget. The axes describe the system as a whole, not isolated pipeline stages.
 
 ::: {#dfn-introduction-d-m-taxonomy .callout-definition title="The D·A·M taxonomy"}
 
@@ -1303,9 +1311,148 @@ The definition exposes three diagnostic variables: the data that describes the t
 
 :::
 
-The three axes are simple to name, but their intersections create a much richer design space. Data is the fuel that supplies evidence, Algorithm is the blueprint that turns evidence into behavior, and Machine is the engine that executes that behavior. @Fig-ai-triad maps how engineering questions emerge wherever those axes overlap.
+@Fig-dam-axis-triad-intro turns the definition into a first-pass map.
 
-::: {#fig-ai-triad fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Intersection Landscape**: Data, Algorithm, and Machine begin as distinct diagnostic lenses, but practical ML systems live at their boundaries. Pairwise intersections ask what a system can learn from, how information moves, and how computation executes efficiently. Their center is ML systems engineering, where all three constraints must be balanced together." fig-alt="Three-circle Venn diagram labeled Data, Algorithm, and Machine. Data lists storage formats, data quality, distribution properties, and labeling. Algorithm lists loss functions, architectures, optimization mathematics, and gradients. Machine lists silicon, memory hierarchy, peak FLOP/s, and power envelope. The Data–Algorithm overlap is titled What to Learn From, the Data–Machine overlap is titled How to Move Information, and the Algorithm–Machine overlap is titled How to Execute Efficiently. The central overlap is labeled ML systems engineering."}
+::: {#fig-dam-axis-triad-intro fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Axis Triad**: Data, Algorithm, and Machine are three interdependent parts of an ML system. The bidirectional links emphasize that changing one part can change the requirements imposed on the other two." fig-alt="Triangle with circles at vertices labeled Algorithm at the top, Data at lower left, and Machine at lower right. Double-headed purple arrows connect all three, showing bidirectional dependencies. Icons depict a neural network, database cylinders, and a cloud server."}
+
+```{.tikz}
+\scalebox{0.85}{
+\begin{tikzpicture}[line join=round,font=\sffamily\small]
+\tikzset{
+ Line/.style={line width=0.35pt,black!50,text=black},
+ ALineA/.style={violet!80!black!50,line width=3pt,shorten <=2pt,shorten >=2pt,
+  {Triangle[width=1.1*6pt,length=0.8*6pt]}-{Triangle[width=1.1*6pt,length=0.8*6pt]}},
+LineD/.style={line width=0.75pt,black!50,text=black,dashed,dash pattern=on 5pt off 3pt},
+Circle/.style={inner xsep=2pt,
+  circle,
+    draw=BrownLine,
+    line width=0.75pt,
+    fill=BrownL!40,
+    minimum size=16mm
+  },
+ circles/.pic={
+\pgfkeys{/channel/.cd, #1}
+\node[circle,draw=\channelcolor,line width=\Linewidth,fill=\channelcolor!10,
+minimum size=2.5mm](\picname){};
+        }
+}
+\tikzset {
+pics/cloud/.style = {
+        code = {\colorlet{red}{RedLine}
+\begin{scope}[local bounding box=CLO,scale=0.5, every node/.append style={transform shape}]
+\draw[red,fill=white,line width=0.9pt](0.67,1.21)to[out=55,in=90,distance=13](1.5,0.96)
+to[out=360,in=30,distance=9](1.68,0.42);
+\draw[red,fill=white,line width=0.9pt](0,0)to[out=170,in=180,distance=11](0.1,0.61)
+to[out=90,in=105,distance=17](1.07,0.71)
+to[out=20,in=75,distance=7](1.48,0.36)
+to[out=350,in=0,distance=7](1.48,0)--(0,0);
+\draw[red,fill=white,line width=0.9pt](0.27,0.71)to[bend left=25](0.49,0.96);
+
+\end{scope}
+    }
+  }
+}
+%streaming
+\tikzset{%
+ LineST/.style={-{Circle[\channelcolor,fill=RedLine,length=4pt]},draw=\channelcolor,line width=\Linewidth,rounded corners},
+ ellipseST/.style={fill=\channelcolor,ellipse,minimum width = 2.5mm, inner sep=2pt, minimum height =1.5mm},
+ BoxST/.style={line width=\Linewidth,fill=white,draw=\channelcolor,rectangle,minimum width=56,
+ minimum height=16,rounded corners=1.2pt},
+ pics/streaming/.style = {
+        code = {\pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[BoxST,minimum width=44,minimum height=48](\picname-RE1){};
+\foreach \i/\j in{1/north,2/center,3/south}{
+\node[BoxST](\picname-GR\i)at(\picname-RE1.\j){};
+\node[ellipseST]at($(\picname-GR\i.west)!0.2!(\picname-GR\i.east)$){};
+\node[ellipseST]at($(\picname-GR\i.west)!0.4!(\picname-GR\i.east)$){};
+}
+\draw[LineST](\picname-GR3)--++(2,0)coordinate(\picname-C4);
+\draw[LineST](\picname-GR3.320)--++(0,-0.7)--++(0.8,0)coordinate(\picname-C5);
+\draw[LineST](\picname-GR3.220)--++(0,-0.7)--++(-0.8,0)coordinate(\picname-C6);
+\draw[LineST](\picname-GR3)--++(-2,0)coordinate(\picname-C7);
+ \end{scope}
+     }
+  }
+}
+%data
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {\pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\channelcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\channelcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\channelcolor!10] (C) {};
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=0.5pt,
+  picname=C
+}
+\node[Circle](MO){};
+\node[Circle,below right=0.85 and 2.5 of MO,draw=GreenLine,fill=GreenL!40,](IN){};
+\node[Circle,below left=0.85 and 2.5 of MO,draw=OrangeLine,fill=OrangeL!40,](DA){};
+\draw[ALineA](MO)--(IN);
+\draw[ALineA](MO)--(DA);
+\draw[ALineA](DA)--(IN);
+\node[below=2pt of MO]{Algorithm};
+\node[below=2pt of IN]{Machine};
+\node[below=2pt of DA]{Data};
+%%
+\begin{scope}[local bounding box=CIRCLE1,shift={($(MO)+(0.04,-0.24)$)},
+scale=0.55, every node/.append style={transform shape}]
+%1 column
+\foreach \j in {1,2,3} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.43 + 0.7}
+  \pic at (-0.8,\y) {circles={channelcolor=RedLine,picname=1CD\j}};
+}
+%2 column
+\foreach \i in {1,...,4} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.43+0.7}
+  \pic at (0,\y) {circles={channelcolor=RedLine, picname=2CD\i}};
+}
+%3 column
+\foreach \j in {1,2} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.43 + 0.7}
+  \pic at (0.8,\y) {circles={channelcolor=RedLine,picname=3CD\j}};
+}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[Line](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[Line](2CD\i)--(3CD\j);
+}}
+\end{scope}
+%
+\pic[shift={(-0.4,-0.08)}] at (IN) {cloud};
+%
+\pic[shift={(-0.05,-0.13)}] at  (IN){streaming={scalefac=0.25,picname=2,channelcolor=RedLine, Linewidth=0.65pt}};
+%
+\pic[shift={(0,-0.3)}] at  (DA){data={scalefac=0.3,picname=1,channelcolor=green!70!black, Linewidth=0.4pt}};
+\end{tikzpicture}}
+```
+
+:::
+
+The triangle provides the first diagnostic pass. It converts a visible outcome into three measurement paths: inspect the evidence, characterize the work, and measure the execution. Each path demands different evidence. Coverage and distribution measurements probe Data, error patterns and operation counts probe Algorithm, and latency, bandwidth, and utilization probe Machine. The diagnostic process begins with an end-to-end result, such as accuracy, latency, throughput, or cost, and tests each path rather than assuming that the component nearest the symptom is responsible. A diagnosis earns confidence only when relaxing its candidate constraint improves the full-system result. The arrows matter because an intervention at one vertex can move the bottleneck to another.
+
+The triangle deliberately suppresses those interactions to keep the first diagnosis simple. Once a candidate axis is identified, the next step is to trace what that constraint depends on and what it constrains. Real systems rarely remain at one vertex. Data formats change memory traffic, model structure changes hardware utilization, and deployment constraints reshape both data and algorithm choices. @Fig-ai-triad expands the triangle into the richer design space created by these intersections.
+
+::: {#fig-ai-triad fig-env="figure" fig-pos="H" fig-cap="**The D·A·M Intersection Landscape**: Data, Algorithm, and Machine begin as distinct diagnostic lenses, but practical ML systems live at their boundaries. Pairwise intersections ask what a system can learn from, how information moves, and how computation executes efficiently. Their center is ML systems engineering, where all three constraints must be balanced together." fig-alt="Three-circle Venn diagram labeled Data, Algorithm, and Machine. Data lists storage formats, data quality, distribution properties, and labeling. Algorithm lists loss functions, architectures, optimization mathematics, and gradients. Machine lists silicon, memory hierarchy, peak FLOP/s, and power envelope. The Data–Algorithm overlap is titled What to Learn From, the Data–Machine overlap is titled How to Move Information, and the Algorithm–Machine overlap is titled How to Execute Efficiently. The central overlap is labeled ML systems engineering."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,outer sep=0pt,inner sep=3pt]
@@ -1425,9 +1572,11 @@ Comp. graphs, mixed precision\\Operator scheduling, Tensor Cores
 
 :::
 
-Read the figure from the outer regions inward. Data and Algorithm determine *what the system can learn from*. Data and Machine determine *how information moves*. Algorithm and Machine determine *how computation executes efficiently*. At the center, all three questions must be answered together. That center is the discipline of ML systems engineering.
+Read the Venn diagram from the outer regions inward. Data and Algorithm determine *what the system can learn from*. Data and Machine determine *how information moves*. Algorithm and Machine determine *how computation executes efficiently*. At the center, all three questions must be answered together. That center is the discipline of ML systems engineering.
 
-The techniques named in the figure are a preview, not a checklist to memorize. They show why a local choice rarely remains local: selecting data changes the work presented to the algorithm, choosing an architecture changes memory and compute demands, and choosing a machine changes which algorithms and data paths are practical. The recurring diagnostic step throughout this book is to locate the binding region before choosing an optimization.
+The overlap labels are also signposts for the chapters ahead. Several names may be unfamiliar because they denote problems the rest of the book develops in sequence. Data selection and model training develop the Data–Algorithm question. Data engineering and hardware acceleration trace the Data–Machine path. Frameworks, compression, and serving develop the Algorithm–Machine question. The figure is therefore an orientation, not a list to memorize. Later chapters turn each region into concrete measurements, design choices, and interventions.
+
+The techniques named in the figure also show why no choice remains local: data selection changes the work presented to the algorithm, architecture changes memory and compute demand, and machine choice changes which algorithms and data paths are practical. Throughout this book, first locate the binding region, then optimize.
 
 The D·A·M landscape provides the diagnostic lens, but building systems also requires a layered view that connects physical limits to a user-facing mission.
 
@@ -1968,7 +2117,9 @@ class GPT4TrainingCostRecap:
 
 Common public estimates for GPT-4-class training place the compute budget around `{python} GPT4TrainingCostRecap.accelerator_days_million_str`, representing millions of dollars in compute costs and substantial environmental impact. Many research institutions and companies cannot afford to compete through brute-force scaling. Those cost and access constraints make efficient use of existing compute a complementary path to progress.
 
-Efficiency is a bottleneck diagnosis, not a single technique. Three complementary dimensions map directly to the D·A·M landscape (@fig-ai-triad), and each changes a different term in the resource budget. **Algorithmic Efficiency**\index{Algorithmic Efficiency!definition}, the earliest frontier, reduces computational requirements through better model design and training procedures. Its goal is to produce more useful behavior per operation, so capability rises without scaling every resource in lockstep. As algorithms demanded ever more computation, **Compute Efficiency**\index{Compute Efficiency!definition} became the second critical dimension. It maximizes hardware utilization by aligning algorithmic logic with machine physics, turning theoretical processor capability into useful work. Most recently, **Data Selection**\index{Data Selection!definition} emerged as the third dimension, extracting more learning signal from limited examples and thereby reducing the total operations term $O$ of the iron law. The timeline in @fig-evolution-efficiency places these three dimensions side by side before the chapter sequence presents them in build order. Together, these three dimensions provide the engineering tools to overcome the data, algorithm, and machine walls that pure scaling alone cannot address.
+Efficiency is a bottleneck diagnosis, not a single technique. The D·A·M landscape (@fig-ai-triad) now becomes an action map. Data selection improves *what the system can learn from*, algorithmic efficiency reduces the work required to learn or predict, and compute efficiency aligns that work with the machine. The remaining intersection, *how information moves*, cuts across all three because every improvement must survive the memory and communication path.
+
+**Algorithmic Efficiency**\index{Algorithmic Efficiency!definition}, the earliest frontier, reduces computational requirements through better model design and training procedures. Its goal is to produce more useful behavior per operation, so capability rises without scaling every resource in lockstep. As algorithms demanded ever more computation, **Compute Efficiency**\index{Compute Efficiency!definition} became the second critical dimension. It maximizes hardware utilization by aligning algorithmic logic with machine physics, turning theoretical processor capability into useful work. Most recently, **Data Selection**\index{Data Selection!definition} emerged as the third dimension, extracting more learning signal from limited examples and thereby reducing the total operations term $O$ of the iron law. The timeline in @fig-evolution-efficiency places these three dimensions side by side before the chapter sequence presents them in build order. Together, these three dimensions provide the engineering tools to overcome the data, algorithm, and machine walls that pure scaling alone cannot address.
 
 ::: {#fig-evolution-efficiency fig-env="figure" fig-pos="htb" fig-cap="**Historical Efficiency Trends**: Three color-coded sequences align the algorithmic, compute, and data-selection eras. The paired dates beneath each box mark its interval: 1980–2010, 2010–2022, and 2023–future." fig-alt="Three horizontal, color-coded groups, each containing three era boxes. Two rows beneath each group read 1980, 2010, 2023 and 2010, 2022, Future."}
 
@@ -2417,7 +2568,7 @@ class EfficiencyParadoxBridge:
     compute_growth_order_str = fmt(compute_growth_order, precision=0, commas=False)
 ```
 
-Taken together, these two figures reveal a seeming contradiction that defines the economics of modern AI development. @Fig-algo-efficiency shows efficiency improving `{python} EfficiencyParadoxBridge.algo_efficiency_max_mult_str` while @fig-ai-training-compute-growth shows compute demand growing by roughly `{python} EfficiencyParadoxBridge.compute_growth_order_str` orders of magnitude. The resolution lies in understanding how efficiency and scale co-evolve.
+Taken together, these two figures reveal a seeming contradiction that defines the economics of modern AI development. @Fig-algo-efficiency shows efficiency improving `{python} EfficiencyParadoxBridge.algo_efficiency_max_mult_str` while @fig-ai-training-compute-growth shows compute demand growing by roughly `{python} EfficiencyParadoxBridge.compute_growth_order_str` orders of magnitude. The plots, however, hold different quantities constant. The first asks how much computation is required to reach a roughly fixed capability target, whereas the second permits the target to expand and records the resulting training budget. Efficiency lowers the cost of a given capability; scale determines how the newly affordable computation is spent. The apparent contradiction is therefore an economic feedback rather than a disagreement between the measurements.
 
 ::: {#psp-introduction-efficiency-paradox .callout-perspective title="The efficiency paradox"}
 
@@ -2912,7 +3063,7 @@ Production ML therefore needs a framework that assigns responsibility for data, 
 
 This work organizes ML systems engineering around five interconnected disciplines that directly address these challenge categories. @Fig-pillars presents five engineering pillars, each targeting a distinct challenge category and resting on a shared foundation that reflects the physical and economic constraints every pillar must respect. Together, they represent the core engineering capabilities required to bridge the gap between research prototypes and production systems capable of operating reliably at scale. While these pillars organize the practice of ML engineering, they are supported by the foundational technical imperatives of Performance Optimization and Hardware Acceleration (covered in Part III), which provide the efficiency required to make large-scale training and deployment economically and physically viable.
 
-::: {#fig-pillars fig-env="figure" fig-pos="H" fig-cap="**Five-Pillar Framework**: The architectural foundation of ML systems engineering organized into five core disciplines: Data Engineering, Training Systems (Model Training), Deployment Infrastructure (Model Deployment), Operations & Monitoring (Operation & Maintenance), and Ethics & Governance, supported by foundational efficiency, evaluation, and reliability practices." fig-alt="Greek temple with five pillars labeled Data Engineering, Model Training, Model Deployment, Operation & Maintenance, and Ethics & Governance. A separate pillar on the left contains five bands labeled Technical Foundation, Efficiency & Optimization, Benchmark & Evaluation, Robustness & Reliability, and Responsible & Ethical Engr."}
+::: {#fig-pillars fig-env="figure" fig-pos="t" fig-cap="**Five-Pillar Framework**: The architectural foundation of ML systems engineering organized into five core disciplines: Data Engineering, Training Systems (Model Training), Deployment Infrastructure (Model Deployment), Operations & Monitoring (Operation & Maintenance), and Ethics & Governance, supported by foundational efficiency, evaluation, and reliability practices." fig-alt="Greek temple with five pillars labeled Data Engineering, Model Training, Model Deployment, Operation & Maintenance, and Ethics & Governance. A separate pillar on the left contains five bands labeled Technical Foundation, Efficiency & Optimization, Benchmark & Evaluation, Robustness & Reliability, and Responsible & Ethical Engr."}
 
 ![](images/png/book_pillars.png)
 
@@ -3051,6 +3202,9 @@ Engineers optimize inference latency in isolation, but Amdahl's Law governs end-
 :::
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-6mm}
+```
 ![](images/svg/vol1_introduction_margin_004.svg){width="100%" fig-alt="Two stacked latency bars, before and after: the inference segment shrinks sharply in the after bar while the pre-processing and post-processing segments stay the same, so the total barely changes."}
 
 *Optimizing only inference leaves end-to-end latency mostly intact.*
