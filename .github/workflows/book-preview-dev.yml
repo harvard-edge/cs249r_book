@@ -281,16 +281,39 @@ jobs:
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
-          # Add github.com to known hosts to avoid prompt
+          # Add github.com to known hosts to avoid prompt. Port 22 intermittently
+          # refuses connections from runners, so trust the 443 endpoint too and
+          # keep it available as a fallback rather than losing a whole build.
           mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p 443 ssh.github.com >> ~/.ssh/known_hosts
 
           echo "🔧 Configuring git..."
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
           echo "🔄 Cloning target repository (${{ vars.DEV_REPO }})..."
-          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          clone_target() {
+            git clone --depth=1 "${{ vars.DEV_REPO_URL }}" target-repo
+          }
+          cloned=false
+          for attempt in 1 2 3; do
+            if clone_target; then
+              cloned=true
+              break
+            fi
+            rm -rf target-repo
+            echo "⚠️  Clone attempt ${attempt} failed."
+            if [ "$attempt" -eq 2 ]; then
+              echo "🔁 Falling back to ssh.github.com:443 for the final attempt."
+              printf 'Host github.com\n  Hostname ssh.github.com\n  Port 443\n  User git\n' >> ~/.ssh/config
+            fi
+            sleep $((attempt * 10))
+          done
+          if [ "$cloned" != true ]; then
+            echo "❌ Could not reach the dev site repository over SSH after 3 attempts."
+            exit 1
+          fi
 
           echo "🔄 Entering target repository..."
           cd target-repo

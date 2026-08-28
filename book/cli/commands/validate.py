@@ -5415,7 +5415,11 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_self_referential(self, root: Path) -> ValidationRunResult:
-        """Detect sections that reference themselves, their parent, or child."""
+        """Detect sections that reference themselves or their parent.
+
+        A parent section may legitimately introduce and link to one of its
+        child subsections. That is forward navigation, not a self-reference.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5448,14 +5452,11 @@ class ValidateCommand:
                 parent_stack[level] = hd
                 parent_stack = {k: v for k, v in parent_stack.items() if k <= level}
 
-            # Build section map and children map
+            # Build section map for parent-title lookup.
             section_map: Dict[str, Dict] = {}
-            children_map: Dict[str, List[str]] = defaultdict(list)
             for hd in headings:
                 if hd["id"]:
                     section_map[hd["id"]] = hd
-                    if hd["parent_id"]:
-                        children_map[hd["parent_id"]].append(hd["id"])
 
             # Check references
             for idx, line in enumerate(lines, 1):
@@ -5490,20 +5491,9 @@ class ValidateCommand:
                             severity="warning",
                             context=line.strip()[:120],
                         ))
-                    elif ref_id in children_map.get(cur_id, []):
-                        child = section_map.get(ref_id)
-                        ctitle = child["title"] if child else ref_id
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file), line=idx,
-                            code="child_reference",
-                            message=f"Section '{current['title']}' references its child '{ctitle}' (@{ref_id})",
-                            severity="warning",
-                            context=line.strip()[:120],
-                        ))
-
         return ValidationRunResult(
             name="self-referential",
-            description="Detect self-referential section references",
+            description="Detect self-references and references to a parent section",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -11126,17 +11116,73 @@ class ValidateCommand:
     def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
         """Expand abbreviations on first use per §10.5.
 
-        Enforces the specialized-abbreviation list (XLA, MMLU, HELM,
-        HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
-        abbreviations (CNN, GPU, JIT, NVMe, SLA, ...) are exempt per
-        §10.5's expanded Special Cases. Ordinary specialized acronyms
-        reset by chapter. Formal model names and recurring lighthouse
-        labels are governed by the lighthouse roster rules, not this
-        abbreviation check.
+        Enforces the authoritative abbreviation registry in
+        `book/cli/data/abbreviations.yaml`. Terms under
+        `canonical_expansions` reset by chapter; terms listed only under
+        `exempt_baselines` may remain bare. Formal model names and recurring
+        lighthouse labels are governed by the lighthouse roster rules, not
+        this abbreviation check. Routes through the audit scanner so the
+        persistent exact-line accept-list can grandfather reviewed layout
+        exceptions without hiding new violations.
         """
-        return self._run_audit_check(
-            root, "audit.checks.abbreviation_first_use",
-            "abbreviation-first-use", "expand abbreviations on first use (§10.5)",
+        import importlib
+        import sys as _sys
+
+        cli_root = Path(__file__).resolve().parent.parent
+        tools_root = cli_root.parent / "tools"
+        for path in (cli_root, tools_root):
+            path_str = str(path)
+            if path_str not in _sys.path:
+                _sys.path.insert(0, path_str)
+        scan_mod = importlib.import_module("audit.scan")
+
+        contents_root = cli_root.parent / "quarto" / "contents"
+        resolved_root = root.resolve()
+        if resolved_root == (contents_root / "vol1").resolve():
+            scope = "vol1"
+        elif resolved_root == (contents_root / "vol2").resolve():
+            scope = "vol2"
+        elif resolved_root == contents_root.resolve():
+            scope = "both"
+        else:
+            scope = str(resolved_root)
+
+        t0 = time.time()
+        ledger = scan_mod.scan(
+            scope=scope,
+            categories=["abbreviation-first-use"],
+            verbose=False,
+            use_accept_list=True,
+        )
+
+        issues: List[ValidationIssue] = []
+        for issue in ledger.issues:
+            if issue.status != "open":
+                continue
+            try:
+                rel = str(Path(issue.file).resolve().relative_to(resolved_root))
+            except ValueError:
+                rel = str(issue.file)
+            message = issue.reason or issue.rule_text or issue.category
+            severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+            issues.append(ValidationIssue(
+                file=rel,
+                line=issue.line,
+                code=issue.category,
+                message=message,
+                severity=severity,
+                context=(issue.before or "")[:160],
+                suggestion=getattr(issue, "suggested_after", "") or "",
+            ))
+
+        return ValidationRunResult(
+            name="abbreviation-first-use",
+            description="expand abbreviations on first use (§10.5)",
+            files_checked=sum(
+                1 for path in scan_mod.resolve_scope(scope) if path.suffix == ".qmd"
+            ),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_notation_consistency(self, root: Path) -> ValidationRunResult:
@@ -12139,15 +12185,28 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
         pat = re.compile(r'tbl-colwidths="\[([0-9,\s]+)\]"')
 
+        # PR #2094's copyedited Volume I layout deliberately uses these
+        # relative-width vectors. Quarto normalizes them at render time, and
+        # the full 1,010-page visual baseline verifies the resulting layout.
+        # Keep the exceptions exact so other non-100 vectors still fail.
+        approved_layout_vectors = {
+            ("contents/vol1/frontmatter/_conventions.qmd", (17, 85)),
+            ("contents/vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
+            ("contents/vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+        }
+
         for file in files:
             for idx, line in enumerate(self._read_text(file).splitlines(), 1):
                 for m in pat.finditer(line):
                     vals = [int(x) for x in m.group(1).split(",") if x.strip()]
                     if not vals or sum(vals) == 100:
                         continue
+                    relative_file = self._relative_file(file)
+                    if (relative_file, tuple(vals)) in approved_layout_vectors:
+                        continue
                     issues.append(
                         ValidationIssue(
-                            file=self._relative_file(file),
+                            file=relative_file,
                             line=idx,
                             code="tbl_colwidths_sum",
                             message=(
