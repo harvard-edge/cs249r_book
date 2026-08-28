@@ -67,7 +67,7 @@ Training pays the iron-law cost for every example it processes, but not every ex
 
 Increasing the amount of training data has long been a standard way to improve models. Scaling laws\index{Scaling Laws!data-compute asymmetry}[^fn-scaling-laws-origin] [@kaplan2020scaling; @hoffmann2022chinchilla] quantify how model performance can improve with dataset size, and teams have responded by collecting and generating more examples. Accelerator fleets, however, can expand usable compute faster than the supply of novel, high-quality human-generated text and images. Much of the easily accessible public web has already been incorporated into large training corpora, and expert labeling capacity grows slowly. This asymmetry is the **Data Wall**\index{Data Wall!definition},[^fn-data-wall-scaling] and it shifts attention from collecting more data to extracting more value from existing data. The sections that follow develop the selection methods and cost models needed to make that choice.
 
-[^fn-scaling-laws-origin]: **Scaling Laws**\index{Scaling Laws!power-law origin}: Jared Kaplan and colleagues at Johns Hopkins and OpenAI empirically demonstrated in 2020 that language model loss follows power-law relationships with model size, dataset size, and compute budget, each with predictable exponents. For data selection, the key consequence is quantitative: loss scales as $\mathcal{L} \propto D^{-\alpha}$ with $\alpha \approx 0.095$, meaning each doubling of data yields diminishing returns---making it possible to reason about when selection becomes more cost-effective than collection.
+[^fn-scaling-laws-origin]: **Scaling Laws**\index{Scaling Laws!power-law origin}: Jared Kaplan and colleagues at Johns Hopkins and OpenAI empirically demonstrated in 2020 that language model loss follows power-law relationships with model size, dataset size, and compute budget over the regimes they studied. Their fitted data exponent was approximately $\alpha = 0.095$ in $\mathcal{L} \propto D^{-\alpha}$. The value is not universal, but the diminishing-return shape makes it possible to reason about when selection becomes more cost-effective than collection.
 
 ```{python}
 #| echo: false
@@ -296,11 +296,11 @@ The three-stage pipeline needs a quantity that lets engineers compare samples be
 
 1.  **Significance**: It identifies data worth retaining, prioritizing, or generating for the target objective, reducing the total operations $(O)$ when redundant or noisy samples can be excluded without losing required coverage.
 2.  **Distinction**: Unlike data engineering, which focuses on the cleanliness and consistency of data, data selection focuses on the informativeness and diversity of the samples.
-3.  **Common pitfall**: A frequent misconception is that more data is always better. In reality, it is the quality of the samples that matters: adding 10$\times$ more low-quality data may yield less accuracy than 1.1$\times$ carefully selected, high-quality data.
+3.  **Common pitfall**: A frequent misconception is that more data is always better. Additional low-quality data can yield less improvement than a much smaller, carefully selected set, so retained volume must be evaluated together with coverage and target quality.
 
 :::
 
-To make this concrete, consider training a model in the GPT-2\index{GPT-2!data selection}/Llama\index{Llama!data selection} Lighthouse family from @sec-network-architectures-lighthouse-roster-model-biographies-a763, which spans the autoregressive large language model\index{LLM} family from GPT-2's 1.5 billion parameters to Llama's 7-70 billion parameter range, here using a 70-billion-parameter language model.
+To make this concrete, consider training an autoregressive language model\index{LLM} in the GPT-2\index{GPT-2!data selection}/Llama\index{Llama!data selection} Lighthouse family from @sec-network-architectures-lighthouse-roster-model-biographies-a763. The scenario uses a 70-billion-parameter model to make the compute-data gap visible at large scale.
 
 ```{python}
 #| echo: false
@@ -350,7 +350,7 @@ The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{pyt
 
 Under these assumptions, the decision criterion favors selection over buying more accelerator time.
 
-The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50\index{ResNet-50!data selection} Lighthouse, GPT-2/Llama models are memory bandwidth-bound during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
+The opportunity applies across model architectures, though the bottlenecks and safe reduction differ. Unlike our compute-bound ResNet-50\index{ResNet-50!data selection} Lighthouse, GPT-2/Llama models can be memory-bandwidth-bound during inference and compute-bound during training. When a validated selection method removes examples or tokens without adding compensating steps, fewer samples mean fewer training FLOPs. The appropriate framing is therefore systemic rather than purely statistical.
 
 ### Systems perspective {#sec-data-selection-systems-perspective-bd61}
 
@@ -429,7 +429,7 @@ class IronLawSavings:
 
 ::: {#psp-data-selection-data-selection-iron-law .callout-perspective title="Data selection and the iron law"}
 
-In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, data selection is the only technique that reduces the total operations term at its source. Later model-level optimizations reduce $O$ per forward/backward pass, and machine-level optimizations increase $R_{\text{peak}}$ (peak throughput) and $\eta_{\text{hw}}$ (utilization). Data selection, by contrast, reduces the number of passes through the entire equation.
+In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, data selection reduces the number of examples or tokens that enter the workload. Later model-level optimizations reduce operations per forward/backward pass, and machine-level optimizations increase $R_{\text{peak}}$ (peak throughput) and $\eta_{\text{hw}}$ (utilization). Selection removes work before those downstream optimizations execute it.
 
 This makes data selection multiplicatively valuable in the iron law\index{Iron Law of ML Systems!multiplicative savings from data selection}: when all three optimization layers act on the same bottleneck, a `{python} IronLawSavings.factor_data_mult_str` reduction in dataset size with `{python} IronLawSavings.factor_model_mult_str` fewer operations per sample and `{python} IronLawSavings.factor_hw_mult_str` higher effective throughput yields `{python} IronLawSavings.combined_factor_mult_str` total cost reduction, not `{python} IronLawSavings.additive_sum_mult_str`.
 
@@ -1061,7 +1061,7 @@ On CIFAR-10, @paul2021deep report that EL2N pruning removed half of the training
 
 The reported gains are benchmark-specific. Pruning effectiveness depends on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture; validate the result on the specific task before deploying aggressive pruning in production.
 
-Individual data points need not provide equal value for training. This heterogeneity follows from how neural networks learn decision boundaries. Most samples fall far from any class boundary: a picture of a dog in good lighting is unambiguously a dog. These "easy" examples provide diminishing returns after the first few epochs because the model has already mastered them. The informative samples cluster near boundaries where classes become ambiguous. Beyond sample redundancy, label quality\index{Data Quality!noise penalty on convergence} also dramatically affects data requirements: symmetric label noise degrades the **Effective Sample Size**\index{Effective Sample Size!label noise penalty} proportionally to $(1 - 2\epsilon)^2$, where an $\epsilon = 10\%$ error rate forces a system to collect $\approx 1.56\times$ more data to achieve equivalent convergence bounds as clean data. A quick calculation quantifies the **Data Quality Multiplier**\index{Data Quality Multiplier!label noise penalty}: how label noise penalizes convergence\index{Convergence!rate, clean vs. noisy data}.
+Individual data points need not provide equal value for training. This heterogeneity follows in part from how classifiers learn decision boundaries. Many samples fall far from a boundary: a picture of a dog in good lighting may become easy once the model has learned its dominant features, while ambiguous and underrepresented cases can remain informative. Label quality\index{Data Quality!noise penalty on convergence}\index{Convergence!rate, clean vs. noisy data} also affects data requirements. In a simplified binary symmetric-noise model, a label-flip rate $\rho$ reduces an effective-sample-size factor\index{Effective Sample Size!label noise penalty} to $(1 - 2\rho)^2$; at $\rho = 10\%$, matching the clean-data bound requires about $1/(1-2\rho)^2 \approx 1.56\times$ as many samples. The notebook below uses a separate toy learning-curve model to illustrate another **Data Quality Multiplier**\index{Data Quality Multiplier!label noise penalty}; neither multiplier is universal.
 
 ```{python}
 #| echo: false
