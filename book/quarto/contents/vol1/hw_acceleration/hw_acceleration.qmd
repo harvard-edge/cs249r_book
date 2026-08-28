@@ -104,54 +104,54 @@ class HwAccelSetup:
 *Hardware acceleration turns on the machine axis.*
 :::
 
-Reducing parameters, precision, or operations only matters when the machine can execute the resulting representation efficiently. Data selection reduced the data term, and compression reduced the algorithm's work; hardware acceleration asks what the machine can actually deliver. The answer starts with the memory wall: arithmetic is *cheap*, but moving data is *expensive*. In the time a modern accelerator computes a thousand floating-point operations, a single value travels from main memory. Specialized hardware matters because it raises compute throughput while organizing memory, dataflow, and parallelism so those arithmetic units stay fed.
+Reducing parameters, precision, or operations only matters when the machine can execute the resulting representation efficiently. Data selection reduced the data term, and compression reduced the algorithm's work; hardware acceleration asks what the machine can actually deliver. The answer starts with the memory wall: arithmetic is often cheap relative to data movement. An off-chip memory access can take many processor cycles and consume orders of magnitude more energy than a low-precision arithmetic operation, with the exact ratio depending on the device and memory level. Specialized hardware matters because it raises compute throughput while organizing memory, dataflow, and parallelism so those arithmetic units stay fed.
 
 ::: {#dfn-hw-acceleration-hardware-acceleration .callout-definition title="Hardware acceleration"}
 
-***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of replacing general-purpose processor logic with domain-specific silicon optimized for the regular tensor operations of ML workloads, trading programmability for the compute density $(R_{\text{peak}})$ and performance-per-watt gains that data-parallel matrix multiplication can exploit.
+***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of mapping work from general-purpose execution onto specialized processors or functional units optimized for a narrower operation class. For ML workloads, that specialization commonly trades some programmability for the compute density $(R_{\text{peak}})$ and performance-per-watt gains that regular tensor operations can exploit.
 
 1.  **Significance**: An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication; against this chapter's illustrative 1–2 TFLOP/s reference-CPU baseline, this is a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap. Its 54.2 billion transistors devote far more silicon to parallel arithmetic than to branch prediction, out-of-order scheduling, and large caches [@NVIDIA2020; @choquette2021].
-2.  **Distinction**: Unlike a general-purpose CPU, which is optimized to minimize latency for any single instruction in an arbitrary serial program, an accelerator is optimized to maximize throughput for a specific operation class—meaning it achieves its gains only when the workload presents enough parallel work to keep all arithmetic units busy simultaneously.
+2.  **Distinction**: A general-purpose CPU is designed for flexible execution, low-latency control, and varied workloads. An accelerator instead concentrates resources on a narrower operation class, so it achieves its gains only when the workload exposes the supported operations and enough parallel work to keep its arithmetic units busy.
 3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is the lower of the compute ceiling and what memory bandwidth can feed, the roofline constraint: a low-arithmetic-intensity kernel can sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
 
 :::
 
-This definition frames the chapter's central engineering trade-off. General-purpose processors devote substantial silicon area to branch prediction, speculative execution\index{Speculative Execution!eliminated in accelerators}, and complex cache coherence protocols. Accelerators strip away that generality, filling the die with arithmetic units tuned to the regular, data-parallel patterns that characterize neural network computation. The result is order-of-magnitude improvements in throughput per watt for the workloads that match these patterns.
+This definition frames the chapter's central engineering trade-off. General-purpose processors support broad control flow, memory, and execution patterns. An accelerator can devote more of its design budget to the arithmetic, storage, and data paths of a narrower workload class. The result can be order-of-magnitude improvements in throughput per watt when the workload and software path match that specialization.
 
 Hardware alone, however, cannot achieve these gains. The algorithms must be designed to exploit what the hardware offers, and the hardware must be built to accelerate the operations algorithms actually use. This symbiosis motivates a complementary principle: hardware-software co-design.
 
 ::: {#dfn-hw-acceleration-hardware-software-co-design .callout-definition title="Hardware-software co-design"}
 
-***Hardware-Software Co-design***\index{Hardware-Software Co-design!definition} is the ML accelerator development methodology that intentionally violates traditional hardware-software abstraction layers, allowing algorithm constraints to inform silicon design and hardware capabilities to directly shape algorithm formulation.
+***Hardware-Software Co-design***\index{Hardware-Software Co-design!definition} is the ML accelerator development methodology that deliberately crosses conventional hardware-software abstraction boundaries, allowing algorithm constraints to inform silicon design and hardware capabilities to shape algorithm formulation.
 
-1.  **Significance**: Co-design enables gains unavailable to either layer acting alone. 8-bit integer (INT8) quantization can deliver multi-fold throughput improvement not because 8-bit arithmetic is faster in the abstract, but because modern tensor-core datapaths pack lower-precision operations more densely than FP32 operations; the algorithm change pays off only when the hardware was co-designed to exploit it [@NVIDIA2020; @dally2021; @dally2023].
+1.  **Significance**: Co-design enables gains unavailable to either layer acting alone. 8-bit integer (INT8) quantization can deliver multi-fold throughput improvement on a supported tensor-core path, not because 8-bit arithmetic is faster in the abstract, but because the hardware can execute lower-precision operations more densely and move fewer bytes than an FP32 path; the exact gain depends on the architecture and workload [@NVIDIA2020; @dally2021; @dally2023].
 2.  **Distinction**: Unlike layered abstraction (where software calls a hardware API without knowing the silicon details), co-design exposes hardware constraints directly to algorithm and compiler authors: data alignment requirements, precision formats, and memory access patterns all become visible inputs to global cross-layer optimization.
 3.  **Common pitfall**: A frequent misconception is that co-design is a one-time hardware design choice. In practice, the supported features continue to evolve: NVIDIA Tensor Cores began with FP16 matrix multiplication, later generations added TF32 and broader integer support, and Ampere added acceleration for 2:4 structured sparsity [@nvidia_tensors_fp16_2017; @NVIDIA2020].
 
 :::
 
-Co-design explains *why* the compression techniques introduced in @sec-model-compression deliver real speedups. The quantization techniques in @sec-model-compression-quantization-precision-cd46 show why converting FP32 to INT8\index{Quantization!INT8 co-design} yields 2--4$\times$ acceleration: not because of fewer bits in the abstract, but because accelerators pack roughly 4$\times$ more low-precision operations into the same silicon and move fewer bytes per value [@NVIDIA2020]. Structured pruning\index{Structured Pruning!hardware alignment} improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. Evaluating accelerator performance requires tracing the path from workload to silicon: compute primitives, memory systems, roofline diagnosis, mapping and dataflow, then compiler and runtime support. The recurring question is why some promising algorithmic optimizations survive contact with hardware while others remain paper savings.
+Co-design explains *why* the compression techniques introduced in @sec-model-compression deliver real speedups. The quantization techniques in @sec-model-compression-quantization-precision-cd46 show why converting FP32 to INT8\index{Quantization!INT8 co-design} can accelerate a supported hardware path: fewer bytes reduce traffic, and the accelerator may execute more low-precision operations per cycle than FP32 operations [@NVIDIA2020]. Structured pruning\index{Structured Pruning!hardware alignment} can improve performance when it produces smaller dense shapes or a sparsity pattern supported by the hardware, whereas arbitrary unstructured sparsity needs matching sparse kernels and metadata handling. Evaluating accelerator performance requires tracing the path from workload to silicon: compute primitives, memory systems, roofline diagnosis, mapping and dataflow, then compiler and runtime support. The recurring question is why some promising algorithmic optimizations survive contact with hardware while others remain paper savings.
 
 ::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's Law)"}
 
-Hardware acceleration *does not speed up the entire system*; it *speeds up the parallelizable fraction ($p$)*. For parallelizable fraction $p$ and accelerator gain $G_{\text{accel}}$, **Amdahl's Law for AI**\index{Amdahl's Law!parallel fraction}\index{Parallel Computing!Amdahl's Law} [@amdahl1967] governs this limit. @Eq-amdahl formalizes the resulting speedup bound.
+Hardware acceleration *does not speed up the entire system*; it speeds up only the fraction of baseline execution time that uses the accelerated path. For accelerated fraction $p$ and accelerator gain $G_{\text{accel}}$, **Amdahl's Law for AI**\index{Amdahl's Law!parallel fraction}\index{Parallel Computing!Amdahl's Law} [@amdahl1967] governs this limit. @Eq-amdahl formalizes the resulting speedup bound.
 $$ \text{Speedup} = \frac{1}{(1 - p) + \frac{p}{G_{\text{accel}}}} $$ {#eq-amdahl}
 
-*   **Parallel fraction**\index{Parallel fraction!definition} ($p$): The portion of the workload, often matrix multiplication, that the accelerator can execute.
+*   **Accelerated fraction**\index{Parallel fraction!definition} ($p$): The portion of baseline execution time, often in matrix multiplication or another supported kernel, that receives the stated accelerator gain.
 *   **Accelerator gain**\index{Accelerator gain!definition} ($G_{\text{accel}}$): The raw speed advantage of the GPU or Tensor Processing Unit (TPU) over the CPU for the accelerated portion of the workload.
-*   **Serial fraction**\index{Serial Fraction!Amdahl bottleneck} ($1-p$): Data loading, Python overhead, and kernel launch latency\index{Kernel Launch Latency!serial overhead}.
+*   **Unaccelerated fraction**\index{Serial Fraction!Amdahl bottleneck} ($1-p$): Work not improved by the chosen accelerator path, which may include data loading, host overhead, unsupported operators, and kernel launch latency\index{Kernel Launch Latency!serial overhead}.
 
-**Pitfall**: *Serial work caps total accelerator speedup.* If data loading takes 10 percent of the time ($p=0.9$), even an infinite-speed accelerator ($G_{\text{accel}}=\infty$) can only achieve a 10$\times$ total speedup. The serial component dominates the parallel accelerator component once the latter is sufficiently fast.
+**Pitfall**: *Unaccelerated work caps total speedup.* If 10 percent of baseline execution time is unaffected by the accelerator ($p=0.9$), even an infinite gain on the accelerated path ($G_{\text{accel}}=\infty$) can only achieve a 10$\times$ total speedup. The unaffected component dominates once the accelerated component becomes sufficiently fast.
 
 :::
 
 Hardware acceleration targets specific terms in the iron law of ML systems\index{Iron Law of ML Systems!hardware acceleration} (@sec-introduction-iron-law-ml-systems-c32a), which decomposes end-to-end time into data volume $(D_{\text{vol}}/\text{BW})$, computation $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$, and fixed latency $(L_{\text{lat}})$. While data selection reduced the total data and model compression reduced $O$ per sample, hardware acceleration increases the rate at which those operations execute by improving $R_{\text{peak}}$, $\eta_{\text{hw}}$, and $\text{BW}$. @Sec-appdx-machine-foundations-physics-computing-c77f supplies the analytical performance models that diagnose which of these terms dominates a given workload, including the dimensional analysis that confirms each iron law term resolves to seconds. Yet acceleration has a hard ceiling, established by Amdahl's Law.[^fn-amdahls-law-acceleration]
 
-[^fn-amdahls-law-acceleration]: **Amdahl's Law**\index{Amdahl's Law!acceleration ceiling}: Maps directly onto the iron law's additive terms. Even if hardware drives the computation term $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$ to near zero, total time is still bounded below by the serial data-loading $(D_{\text{vol}}/\text{BW})$ and fixed-latency $(L_{\text{lat}})$ terms, which acceleration cannot touch. This is why large improvements in raw accelerator throughput can produce much smaller end-to-end task speedups when data loading, launch overhead, or preprocessing remains serial.
+[^fn-amdahls-law-acceleration]: **Amdahl's Law**\index{Amdahl's Law!acceleration ceiling}: Maps onto the iron law only after the proposed change is specified. If a faster tensor unit reduces the computation term $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$ but leaves data transfer and fixed latency unchanged, those unaffected terms bound total speedup. A different accelerator or memory system may improve bandwidth as well. The unaccelerated fraction is therefore defined by the intervention, not by a permanent classification of each term as serial.
 
-Amdahl's Law also explains *why* many GPU upgrades disappoint in practice. @Fig-iron-law-heatmap visualizes the **acceleration wall**\index{Acceleration Wall!diminishing returns}, the diminishing returns from faster hardware when serial bottlenecks persist. Unless a workload is highly parallelizable ($p > 0.99$), investing in faster hardware yields diminishing returns. The contour values are illustrative ranges for intuition.
+Amdahl's Law also explains *why* many GPU upgrades disappoint in practice. @Fig-iron-law-heatmap visualizes the **acceleration wall**\index{Acceleration Wall!diminishing returns}, the diminishing returns from faster hardware when a meaningful share of baseline time remains unaffected. As $G_{\text{accel}}$ grows, the ceiling $1/(1-p)$ makes further investment progressively less valuable unless $p$ is correspondingly close to one. The contour values are illustrative ranges for intuition.
 
-::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($G_{\text{accel}}$) and parallel fraction ($p$). High speedup appears only near the top-right corner, where both accelerator gain and parallel fraction are high. The acceleration wall is the lower-$p$ region: when more than 10 percent of the workload is serial ($p < 0.9$), increasing hardware speed yields little benefit. Contours span roughly 1$\times$–500$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and parallel fraction. High speedup in red and orange appears near the top-right corner where parallel fraction is near 1.0 and accelerator gain is high; lower-parallel-fraction regions remain blue. White contour lines are labeled from 1x to 200x, and text labels mark a Compute Bound region above and a Serial Bound region below."}
+::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($G_{\text{accel}}$) and accelerated fraction ($p$). High speedup appears only near the top-right corner, where both accelerator gain and accelerated fraction are high. At $p=0.9$, for example, even an infinite gain on the accelerated path cannot exceed 10$\times$ end-to-end speedup. Contours span roughly 1$\times$–500$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and accelerated fraction. High speedup in red and orange appears near the top-right corner where the accelerated fraction is near 1.0 and accelerator gain is high; lower-fraction regions remain blue. White contour lines are labeled from 1x to 200x, and text labels mark a Compute Bound region above and an Unaccelerated Bound region below."}
 
 ```{python}
 #| echo: false
@@ -198,7 +198,7 @@ ax.clabel(cs, inline=1, fontsize=8, fmt='%gx', colors='black')
 
 ax.set_xscale('log')
 ax.set_xlabel(r'Accelerator gain ($G_{\mathrm{accel}}$)')
-ax.set_ylabel('Parallelizable Fraction (p)')
+ax.set_ylabel('Accelerated Fraction (p)')
 
 ax.text(
     100,
@@ -214,7 +214,7 @@ ax.text(
 ax.text(
     100,
     0.82,
-    "Serial Bound",
+    "Unaccelerated Bound",
     color='white',
     ha='center',
     va='bottom',
@@ -230,7 +230,7 @@ plt.close()
 
 :::
 
-The key intuition to carry into specific hardware architectures is that raw speedups matter only after the serial fraction has been reduced. The parallel fraction $p$ can differ substantially between workload archetypes running on the same hardware, and at fleet scale these differences determine whether an accelerator investment pays off or stalls at the serial bottleneck.
+The key intuition to carry into specific hardware architectures is that raw speedups matter only after the unaccelerated fraction has been reduced. The accelerated fraction $p$ can differ substantially between workload archetypes running on the same hardware, and at fleet scale these differences determine whether an accelerator investment pays off or stalls at the remaining bottleneck.
 
 ::: {#chk-hw-acceleration-parallelism-gate .callout-checkpoint title="The parallelism gate"}
 
@@ -240,7 +240,7 @@ These checks turn Amdahl's bound into a hardware-selection test.
 
 - [ ] **Serial bottlenecks**: use Amdahl's bound to explain why a 1,000$\times$ faster GPU may only speed up training by 5$\times$ when data loading is slow.
 - [ ] **Speedup ceiling**: for $p=0.95$ and $G_{\text{accel}}=100$, estimate total speedup and compare it with the infinite-accelerator ceiling.
-- [ ] **Workload variation**: compare the parallelizable fractions of ResNet-50\index{ResNet-50!compute-bound workload} and MobileNet, then predict which benefits more from accelerator throughput.
+- [ ] **Workload variation**: compare the accelerated fractions of ResNet-50\index{ResNet-50!compute-bound workload} and MobileNet under a proposed hardware change, then predict which benefits more from accelerator throughput.
 
 :::
 
@@ -331,30 +331,30 @@ class AmdahlH100:
     )
 ```
 
-::: {#lhs-amdahl-h_h100 .callout-lighthouse title="Amdahl's Law on H100"}
+::: {#lhs-amdahl-h_h100 .callout-lighthouse title="An illustrative Amdahl budget on H100"}
 
-**ResNet-50 inference on NVIDIA H100**:
+**Illustrative ResNet-50 inference on NVIDIA H100**:
 
-- H100 delivers $G_{\text{accel}}$ = `{python} AmdahlH100.hw_speedup_mult_str` speedup over the baseline CPU assumption for matrix multiply (`{python} AmdahlH100.h100_int8_tops_str` INT8 vs. ~`{python} AmdahlH100.cpu_int8_tops_str` on baseline CPU without AMX extensions) [@choquette2023]
-- In this worked example, inference has $p$ = `{python} AmdahlH100.p_resnet_str` (`{python} AmdahlH100.p_resnet_pct_str` parallelizable, `{python} AmdahlH100.serial_resnet_pct_str` serial: data loading, preprocessing, postprocessing)
+- The scenario assumes that H100 provides $G_{\text{accel}}$ = `{python} AmdahlH100.hw_speedup_mult_str` on the matrix-multiplication path relative to a reference CPU without matrix extensions (`{python} AmdahlH100.h100_int8_tops_str` INT8 vs. ~`{python} AmdahlH100.cpu_int8_tops_str`) [@choquette2023].
+- It also assumes $p$ = `{python} AmdahlH100.p_resnet_str`: `{python} AmdahlH100.p_resnet_pct_str` of baseline time receives that gain, while `{python} AmdahlH100.serial_resnet_pct_str` remains in data loading, preprocessing, postprocessing, and other unaffected work.
 $$
 \text{`{python} AmdahlH100.resnet_speedup_eq_math`}
 $$
-Despite a `{python} AmdahlH100.hw_speedup_mult_str` hardware advantage, total system speedup is only `{python} AmdahlH100.amdahl_resnet_speedup_mult_str`. The `{python} AmdahlH100.serial_resnet_pct_str` serial fraction caps practical gains.
+Under these assumptions, a `{python} AmdahlH100.hw_speedup_mult_str` gain on the accelerated path produces only `{python} AmdahlH100.amdahl_resnet_speedup_mult_str` end-to-end speedup. The `{python} AmdahlH100.serial_resnet_pct_str` unaffected fraction sets the ceiling.
 
 **Contrast with GPT-2 (autoregressive)**:
 
-- Same H100, but the GPT-2 token-generation scenario uses $p$ = `{python} AmdahlH100.p_gpt2_str` (`{python} AmdahlH100.serial_gpt2_pct_str` serial: KV-cache updates, sampling, Python overhead)
+- The GPT-2 token-generation scenario instead assumes $p$ = `{python} AmdahlH100.p_gpt2_str`; the remaining `{python} AmdahlH100.serial_gpt2_pct_str` includes host overhead, sampling, and portions of the sequential decoding path that do not receive the stated matrix-multiplication gain.
 $$
 \text{`{python} AmdahlH100.gpt2_speedup_eq_math`}
 $$
-The *Bandwidth Hog* archetype suffers more from serial bottlenecks. Even infinite accelerator speed yields only $1/(1-p)$ = `{python} AmdahlH100.amdahl_gpt2_ceiling_speedup_mult_str` maximum speedup. This is *why* large language model (LLM) inference optimization focuses on reducing the serial fraction through serving-side techniques such as batching and speculative decoding, where a small draft model proposes tokens for parallel verification, rather than raw hardware speed.
+Less of this token-generation path benefits from the assumed matrix-multiplication gain. Even an infinite gain on that path yields only $1/(1-p)$ = `{python} AmdahlH100.amdahl_gpt2_ceiling_speedup_mult_str` maximum speedup. Serving-side techniques therefore change more than raw hardware speed: batching improves utilization across requests, while speculative decoding uses a small draft model to reduce the number of sequential verification steps.
 
 :::
 
 These examples reveal that hardware optimization turns on whether a workload is limited by compute rate or data movement. That distinction determines which accelerator to choose, which optimizations matter, and whether a 10$\times$ more powerful chip will help. The Roofline Model\index{Roofline Model!hardware diagnosis} provides the analytical framework for making this diagnosis [@williams2009]; it is introduced formally in @sec-appdx-machine-foundations-roofline-model-2529 and @sec-hardware-acceleration-roofline-model-42ff applies it to AI workloads. It plots an operation's arithmetic intensity,[^fn-arithmetic-intensity-roofline] defined as the ratio of floating-point operations to bytes of memory traffic (FLOP/byte), against hardware capabilities, revealing whether performance is capped by compute or bandwidth. A dense matrix multiplication with high arithmetic intensity benefits from more TFLOP/s; a LayerNorm with low arithmetic intensity benefits from more memory bandwidth. High-reuse ResNet-50 convolutions can cross into the compute-bound regime, while low-batch autoregressive attention can be memory bound. This distinction is precisely *why* these workloads require different optimization strategies.
 
-[^fn-arithmetic-intensity-roofline]: **Arithmetic Intensity**\index{Arithmetic Intensity!roofline diagnostic}: The ratio of compute operations performed for each byte of data moved from memory (FLOP/byte). This metric provides the direct, quantitative answer to the text's central question: workloads with high arithmetic intensity, such as well-tiled convolutions and general matrix multiplication (GEMM) kernels above the hardware ridge point (the intensity at which compute, not memory, becomes the limit), are compute bound and accelerate with more TFLOP/s. Workloads with low intensity, such as some low-batch attention and decoding kernels, are memory bound and need more bandwidth or reuse rather than only more compute throughput.
+[^fn-arithmetic-intensity-roofline]: **Arithmetic Intensity**\index{Arithmetic Intensity!roofline diagnostic}: The ratio of compute operations to bytes transferred across the memory interface being modeled (FLOP/byte). Workloads above that hardware level's ridge point, such as well-tiled matrix multiplications with substantial reuse, are compute bound and can benefit from more TFLOP/s. Low-intensity operations, including some low-batch attention and decoding kernels, are bandwidth bound at that level and need more bandwidth or reuse rather than only more compute throughput.
 
 The chapter develops these ideas from hardware history through computational primitives, memory hierarchies, roofline analysis, mapping, dataflow, and runtime support. The core analysis stays with single-accelerator and single-node systems; the closing material uses multi-device examples only to show how the same bottleneck diagnoses scale. The history of specialized hardware comes first because it reveals the recurring design patterns behind modern accelerators.
 
@@ -2325,7 +2325,7 @@ This structured computation model minimizes data movement between global memory 
 
 : **Systolic-Array Dataflow Strategies**: Three stationary-operand choices for systolic arrays, the reuse pattern each maximizes, and the workload class that benefits, showing how a fixed dataflow choice hard-codes an accelerator's affinity for specific models. {#tbl-hw-acceleration-systolic-dataflow tbl-colwidths="[20,18,18,44]"}
 
-There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with LLM inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
+There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with large language model (LLM) inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
 
 :::
 
