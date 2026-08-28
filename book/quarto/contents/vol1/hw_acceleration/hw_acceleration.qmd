@@ -3641,7 +3641,7 @@ Memory efficiency can matter as much as raw compute power. Representative energy
 *Low arithmetic intensity pins the workload in the memory-bound regime.*
 :::
 
-The Roofline Model\index{Roofline Model!efficiency measurement} answers this question by plotting arithmetic intensity against attainable performance, revealing whether each operation hits a compute ceiling or a memory bandwidth ceiling. Rather than relying on peak FLOP/s figures, which reflect marketing rather than achievable throughput, the Roofline Model maps a workload onto a specific hardware platform and exposes the binding constraint.
+The Roofline Model\index{Roofline Model!efficiency measurement} answers this question by plotting arithmetic intensity against attainable performance, revealing whether an operation meets a compute ceiling or a memory-bandwidth ceiling. Peak FLOP/s remains one input, but the model combines it with workload traffic and platform bandwidth to produce a more useful bound.
 
 The Roofline Model[^fn-roofline-performance-model] [@williams2009] provides the standard framework for understanding whether workloads are compute bound\index{Compute-Bound!roofline classification} or memory bound\index{Memory-Bound!roofline classification}, directly connecting the memory wall discussion to practical performance analysis. This model enables quantitative reasoning about accelerator utilization and guides optimization decisions.
 
@@ -3743,7 +3743,6 @@ class RooflineGap:
     dense_matmul_ai_str = fmt(dense_matmul_ai, precision=1, commas=False)
     bandwidth_ratio_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
     flops_ratio_mult_str = fmt_multiple(flops_growth, precision=1, commas=False)
-    relu_below_roofline_mult_str = fmt_multiple(relu_gap, precision=1, commas=True)
     full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
 ```
 
@@ -3752,9 +3751,9 @@ $$R_{\text{attain}} = \min(R_{\text{peak}}, \text{BW} \times I)$$ {#eq-roofline}
 
 ::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
 
-***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations to bytes of memory traffic for a given computation ($\text{FLOP}/\text{byte}$), determining whether the workload is limited by compute throughput $(R_{\text{peak}})$ or memory bandwidth $(\text{BW})$ on a given accelerator. It is the key metric that determines which ceiling a workload hits.
+***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
 
-1.  **Significance**: The intensity threshold separating memory-bound from compute-bound regimes is the roofline ridge point: $R_{\text{peak}} / \text{BW}$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), the ridge point is roughly `{python} RooflineGap.a100_ridge_str`. Matrix multiplications around 100--200 FLOP/byte straddle that threshold, while a larger well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` matrix multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte and is compute bound; a pointwise ReLU performs around `{python} RooflineGap.relu_ai_str` FLOP/byte under a read-plus-write traffic model (memory bound), placing these operations in different optimization regimes on the same hardware.
+1.  **Significance**: The threshold between the two ceilings is the ridge point $R_{\text{peak}} / \text{BW}$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), it is roughly `{python} RooflineGap.a100_ridge_str`. Under the stated traffic models, a large well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, while standalone ReLU is about `{python} RooflineGap.relu_ai_str`. They therefore meet different ceilings on the same hardware.
 2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns have different arithmetic intensities and will be bottlenecked by different hardware resources.
 3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix-multiply that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
 
@@ -3786,7 +3785,7 @@ The ridge point\index{Ridge Point!hardware comparison}, the hardware balance $I_
 \endgroup
 ```
 
-These ridge point values reveal a surprising trend: as hardware has become more powerful, keeping it fully in use has become harder. A ridge-point comparison makes that trend concrete.
+These ridge points show that later tensor paths require more reuse to reach their arithmetic ceiling. A ridge-point comparison makes that trend concrete.
 
 ::: {#nbk-hw-acceleration-utilization-gap .callout-notebook title="The utilization gap"}
 
@@ -3800,9 +3799,9 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 *   **A100 (`{python} RooflineGap.a100_year_str`)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
 *   **H100 (`{python} RooflineGap.h100_year_str`)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
 
-**Result**: The "bar" for compute intensity has doubled. An algorithm with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte was compute-bound (good) on A100 but is bandwidth-bound (bad) on H100. This explains why "legacy" code often sees only `{python} RooflineGap.bandwidth_ratio_mult_str` speedup on H100 (bandwidth ratio) instead of the advertised `{python} RooflineGap.flops_ratio_mult_str` (FLOPs ratio).
+**Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is then closer to the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio than the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio.
 
-**Systems insight**: A standard ReLU performs 1 operation for every 8 bytes (0.125 FLOP/byte), placing it `{python} RooflineGap.relu_below_roofline_mult_str` below the H100 roofline. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense MatMul reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, making it compute bound even on H100. Most operations fall short of the ridge point, which is why kernel fusion is the most important optimization, as explored in @sec-hardware-acceleration-kernel-fusion-7faf.
+**Systems insight**: A standalone ReLU under a one-read, one-write FP32 traffic model performs about 1 operation per 8 bytes, far below the H100 tensor ridge. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte under its idealized traffic model. Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
 
 :::
 
@@ -4208,11 +4207,11 @@ $I$ = `{python} LayernormAnalysisCalc.ln_total_mflop_str` / `{python} LayernormA
 This arithmetic intensity sits severely below the A100 ridge point (`{python} LayernormAnalysisCalc.ln_ridge_gap_mult_str` below). Performance is limited to:
 $R_{\text{attain}}$ = `{python} LayernormAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte = `{python} LayernormAnalysisCalc.ln_attainable_tflop_per_s_str`
 
-**Systems insight**: Delivered throughput reaches only about 1 percent of A100's compute capacity, explaining why normalization layers can contribute significant latency despite their small FLOP count.
+**Systems insight**: The simple HBM roofline bounds this standalone LayerNorm at about 1 percent of A100's tensor peak. Actual latency also depends on fusion, reduction strategy, launch overhead, and which memory level supplies the data.
 
 :::
 
-The situation becomes even more extreme for element-wise operations like normalization layers. These operations perform negligible computation relative to the data they touch, as LayerNorm\index{Roofline Analysis!layer normalization} makes clear. Each element is loaded, transformed by a simple formula, and written back, leaving essentially no opportunity for data reuse.
+Standalone normalization performs little arithmetic relative to the bytes it touches, as the LayerNorm\index{Roofline Analysis!layer normalization} example shows. Within that isolated pass, each element is read and written with little reuse; fusion with adjacent operators can remove some of those round-trips.
 
 ### Optimization by intensity regime {#sec-hardware-acceleration-optimization-intensity-regime-cb3a}
 
@@ -4287,7 +4286,7 @@ Example: Dense layer with M=N=`{python} BatchAiCalc.matrix_dim_str` (FP16)
 
 The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
 
-For workloads where batching is impractical, such as interactive LLM generation where users expect streaming responses, the arithmetic intensity remains inherently low. Understanding this ceiling is essential for setting realistic performance expectations.
+When service latency limits batching, batch-1 or small-batch LLM decode often retains low weight reuse and low arithmetic intensity. The next worked model quantifies that particular regime rather than treating all LLM inference as identical.
 
 ```{python}
 #| echo: false
