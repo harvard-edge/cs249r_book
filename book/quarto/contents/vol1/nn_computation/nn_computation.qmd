@@ -3560,7 +3560,7 @@ Network architecture, neurons, and parameters are now in place, but a central qu
 
 ## Learning Process {#sec-neural-computation-learning-process-0b83}
 
-The MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` initialized randomly—numbers that encode no knowledge at all. The transformation of these random values into a digit classifier achieving over 95 percent accuracy relies on four operations repeated millions of times: forward propagation computes a prediction, a loss function measures the error, backpropagation assigns blame to each weight, and an optimizer adjusts those weights to reduce the error.
+The MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` initialized randomly—numbers that encode no knowledge at all. The transformation of these random values into a digit classifier achieving over 95 percent accuracy relies on four operations repeated millions of times: forward propagation computes a prediction, a loss function measures the error, backpropagation computes each parameter's loss gradient, and an optimizer uses those gradients to update the parameters.
 
 ### Supervised learning from labeled examples {#sec-neural-computation-supervised-learning-labeled-examples-5e6d}
 
@@ -4012,7 +4012,7 @@ Forward propagation transforms inputs into predictions, but a prediction alone i
 
 The forward propagation process described in @sec-neural-computation-forward-pass-computation-e5dd suffices for **Inference**\index{Inference!forward pass only}, using a pretrained model to make predictions. To train a model, however, we need a way to measure how well those predictions match reality. Loss functions\index{Loss Function!error measurement}\index{Loss Function!optimization target} quantify these errors, serving as the feedback mechanism that guides learning. They convert the abstract goal of "making good predictions" into a concrete optimization problem.
 
-Continuing with the MNIST digit recognition example: when the network processes a handwritten digit image, it outputs ten numbers representing its confidence in each possible digit (0--9). The loss function measures how far these predictions deviate from the true answer. If an image displays a "seven", the network should exhibit high confidence for digit "seven" and low confidence for all other digits. The loss function penalizes deviations from this target, with higher loss values signaling that the network needs significant improvement.
+Continuing with the MNIST digit recognition example: when the network processes a handwritten digit image, it outputs ten class scores, often converted to predicted probabilities for digits 0--9. The loss function measures those predictions against the target. If an image displays a "seven," cross-entropy penalizes the model when it assigns too little probability to digit seven. A higher loss indicates a worse value of the chosen objective on that example; it does not by itself diagnose the cause or establish that every task metric is worse.
 
 #### Error measurement fundamentals {#sec-neural-computation-error-measurement-fundamentals-844a}
 
@@ -4094,7 +4094,7 @@ $$ \mathcal{L}_{\text{batch}} = -\frac{1}{B}\sum_{i=1}^B \sum_{j=1}^{10} y_{ij} 
 
 Here, $i$ indexes examples in the batch, $j$ indexes the ten output classes, $y_{ij}$ is the one-hot target indicator for class $j$ on example $i$, and $\hat{y}_{ij}$ is the predicted probability for that class. Averaging over $B$ keeps the loss scale comparable as batch size changes.
 
-Computing this loss efficiently requires careful consideration of numerical precision. The dangerous case is not an ordinary small probability, but a probability that an unstable softmax rounds to zero. If the correct-class probability becomes 0, then $\log(0)$ becomes $-\infty$ and the loss can turn into a not a number (NaN) during later arithmetic.
+Computing this loss efficiently requires careful consideration of numerical precision. The dangerous case is not an ordinary small probability, but a probability that an unstable softmax rounds to zero. If the correct-class probability becomes 0, then $\log(0)$ becomes $-\infty$ and subsequent arithmetic can produce a not-a-number value (NaN).
 
 Stable implementations avoid materializing a numerically fragile probability before taking its logarithm:
 
@@ -4117,13 +4117,13 @@ The loss function's gradients with respect to the network's output logits provid
 
 The choice of loss function also influences other training decisions. Gradient scale interacts with the learning rate, while loss averaging across batches affects gradient noise and thus the useful batch-size regime. Curvature influences optimizer behavior, and convergence decisions require validation metrics and a stopping rule rather than the training-loss trajectory alone.
 
-Loss functions quantify prediction error, but the error signal alone does not tell the system how to correct it. With `{python} MnistFlopsCalc.total_params_str` in the MNIST network, determining which weights should change, by *how much*, and in *what* direction is intractable without an efficient credit-assignment algorithm. This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: determining which of thousands of connections contributed to the error. The next section introduces backpropagation, which solves this problem through the chain rule of calculus, systematically computing each weight's responsibility for the final prediction error.
+Loss functions quantify prediction error, but the error signal alone does not tell the system how sensitive that loss is to each parameter. With `{python} MnistFlopsCalc.total_params_str` in the MNIST network, estimating every derivative through independent perturbations would be computationally prohibitive. This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: connecting the final error to the parameters and intermediate values that can change it. The next section introduces backpropagation, which applies the chain rule to compute all of those local sensitivities efficiently.
 
 ### Gradient computation and backpropagation {#sec-neural-computation-gradient-computation-backpropagation-dacf}
 
 ::: {#dfn-nn-computation-backpropagation .callout-definition title="Backpropagation"}
 
-***Backpropagation***\index{Backpropagation!definition}\index{Backpropagation!gradient computation}\index{Gradient!backpropagation} is the gradient-computation algorithm training systems use to apply the chain rule to a computational graph, the recorded operations and saved intermediate values from the forward pass, computing the gradient of the loss with respect to every parameter in a single backward traversal to solve the credit assignment problem.
+***Backpropagation***\index{Backpropagation!definition}\index{Backpropagation!gradient computation}\index{Gradient!backpropagation} is the gradient-computation algorithm training systems use to apply the chain rule to a computational graph, using recorded operations and saved or recomputed forward-pass values to compute the gradient of the loss with respect to every parameter in a single backward traversal.
 
 1.  **Significance**: For dense layers, the backward pass is often on the order of twice the forward-pass FLOPs and requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $N_L$ layers, batch size $B$, and layer widths $n_1,\ldots,n_{N_L}$, a simplified activation ledger scales as $\mathcal{O}\!\left(B\sum_{\ell=1}^{N_L} n_\ell\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
 2.  **Distinction**: Numerical differentiation requires a perturbed evaluation for each of $P$ parameters. Reverse-mode automatic differentiation computes all $P$ gradients in one backward traversal whose cost is proportional to the computational graph, avoiding $P$ separate forward passes.
@@ -4135,9 +4135,11 @@ A car factory gives a concrete version of the same credit-assignment problem. Ve
 
 The solution works backward. Starting from the defect, inspectors trace responsibility through each station: how much D's assembly contributed vs. what it received from C, and how much C's work contributed vs. what came from B. Each station receives adjustment feedback proportional to its contribution. If Station B's engine mounting was the primary cause, it receives the strongest signal to change.
 
-Backpropagation solves this credit assignment problem identically. The output layer receives direct feedback about what went wrong, calculates how its inputs contributed, and sends adjustment signals backward. Each layer receives guidance proportional to its contribution and adjusts weights accordingly—the most responsible connections making the largest adjustments.
+Backpropagation follows an analogous backward trace, but it computes sensitivity rather than causal blame. Starting from the loss, it evaluates how a small change in each layer's inputs would change that loss and propagates those derivatives backward. The optimizer later converts the resulting parameter gradients into actual updates.
 
-In neural networks, each layer acts like a station on the assembly line, and backpropagation determines how much each connection contributed to the final prediction error. Translating this intuition into mathematics requires the chain rule of calculus, which provides the precise mechanism for computing each layer's contribution. In the factory analogy, "Station D's adjustment signal" corresponds to the gradient at the output layer, "proportion of contribution" maps to partial derivatives, and "sending feedback backward" describes the chain rule multiplication that propagates error signals through the network.
+In neural networks, each layer acts like a station on the assembly line, and backpropagation determines the sensitivity of the final loss to each connection. Translating this intuition into mathematics requires the chain rule of calculus. In the factory analogy, "Station D's adjustment signal" corresponds to the gradient at the output layer, local sensitivity maps to a partial derivative, and "sending feedback backward" describes the chain-rule multiplication that propagates gradients through the network.
+
+The sensitivity is local to the current parameter values, input batch, and loss. It answers a counterfactual question—how an infinitesimal change here would change this loss—not whether a weight is permanently important or historically caused the prediction. The computational graph makes that question operational. Each node records an operation, and its backward rule maps an incoming loss gradient to gradients for its inputs. The reverse traversal begins at the scalar loss, applies those local rules in reverse dependency order, and accumulates contributions when one value influences the loss through several downstream paths. This accumulation is why backpropagation is more than sending one error signal down a chain: the runtime must respect graph dependencies and combine every relevant path before a gradient is complete. The algorithm below turns that graph-level description into a layer-by-layer procedure.
 
 ```{=latex}
 \vspace*{-1ex}
@@ -4189,7 +4191,7 @@ Consider what happens when the digit classifier misclassifies a "seven" as a "th
 For a network with $N_L$ layers, the gradient flow can be expressed mathematically. At each layer $\ell$, we can express how the layer's output affected the final loss using the chain rule[^fn-chain-rule-depth] and the schematic Jacobian notation in @eq-chain-rule:
 $$ \frac{\partial \mathcal{L}}{\partial \mathbf{A}^{(\ell)}} = \frac{\partial \mathcal{L}}{\partial \mathbf{A}^{(\ell+1)}} \frac{\partial \mathbf{A}^{(\ell+1)}}{\partial \mathbf{A}^{(\ell)}} $$ {#eq-chain-rule}
 
-This computation cascades backward through the network, with each layer's gradients depending on the gradients from the layer above it. The process reveals how each layer's transformation contributed to the final prediction error. If certain weights in an early layer strongly influenced a misclassification, they receive larger gradient values, indicating a need for more substantial adjustment.
+This computation cascades backward through the network, with each layer's gradients depending on those from the layer above it. The result is a local sensitivity, not causal blame: equivalent parameterizations can represent the same function with differently scaled gradients. Backpropagation supplies these sensitivities, while the optimizer may normalize, accumulate, or otherwise transform them before updating the weights.
 
 [^fn-chain-rule-depth]: **Chain Rule**\index{Chain Rule!depth constraint}: The calculus identity $\frac{\partial \mathcal{L}}{\partial w} = \frac{\partial \mathcal{L}}{\partial a_n} \cdot \frac{\partial a_n}{\partial a_{n-1}} \cdots \frac{\partial a_1}{\partial w}$ becomes a *product* of $n$ terms for an $n$-layer network. If each partial derivative is slightly less than one, the product vanishes exponentially; if slightly greater, it explodes. This multiplicative structure is why depth is a systems constraint, not just a design choice: it dictates the numerical precision requirements and initialization strategies [@glorot2010xavier; @he2015] needed to keep training stable.
 
@@ -4201,7 +4203,7 @@ Computing gradients involves calculating several partial derivatives\index{Parti
 
 At each layer $\ell$, we compute three main gradient components. Each serves a distinct purpose in the learning process.
 
-Weight gradients\index{Gradient!weight gradients} measure how changing each weight affects the final loss. These gradients dictate precisely how to adjust the connection strengths between neurons to reduce prediction errors (@eq-weight-gradient):
+Weight gradients\index{Gradient!weight gradients} measure the local sensitivity of the final loss to each weight. The optimizer uses these gradients to determine parameter updates (@eq-weight-gradient):
 $$ \frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(\ell)}} = {\mathbf{A}^{(\ell-1)}}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\ell)}} $$ {#eq-weight-gradient}
 
 Bias gradients\index{Gradient!bias gradients} measure how changing each bias term affects the loss. Since biases shift the activation threshold of neurons, these gradients indicate whether neurons should become more or less easily activated, as expressed in @eq-bias-gradient:
@@ -4412,7 +4414,7 @@ Modern frameworks handle these computations through sophisticated autograd\index
 
 ::: {#chk-nn-computation-backpropagation .callout-checkpoint title="Backpropagation"}
 
-The credit assignment problem asks which weight caused a given error. Backpropagation answers it via the chain rule; verify that the mechanism is clear:
+The credit assignment problem asks how the loss depends on parameters throughout the network. Backpropagation computes those gradients via the chain rule; verify that the mechanism is clear:
 
 **Mechanism**
 
@@ -4427,7 +4429,7 @@ The credit assignment problem asks which weight caused a given error. Backpropag
 
 :::
 
-Backpropagation computes *what* each weight should change, but not *how much*\index{Training!weight optimization}\index{Weight Update!optimization}. Backpropagation produces gradients; optimization decides how to apply them as parameter updates. The step size, the direction refinement, and the momentum across iterations are all governed by the optimizer—the algorithm that converts raw gradients into weight updates. No optimizer is universally best across all possible problems [@wolpert1997], so neural-network training depends on choosing update rules and hyperparameters that match the model, data, and hardware constraints.
+Backpropagation computes the local gradient of the loss with respect to each weight\index{Training!weight optimization}\index{Weight Update!optimization}; the optimizer converts that signal into the actual parameter update. The step size, direction refinement, and momentum across iterations are governed by the optimizer. No optimizer is universally best across all possible problems [@wolpert1997], so neural-network training depends on choosing update rules and hyperparameters that match the model, data, and hardware constraints.
 
 #### Parameter update algorithms {#sec-neural-computation-parameter-update-algorithms-b592}
 
@@ -4441,7 +4443,7 @@ Backpropagation computes *what* each weight should change, but not *how much*\in
 
 :::
 
-The optimization process now needs an update rule that turns the backpropagated error signal into parameter changes. This iterative process calculates how each weight contributes to the error and updates parameters to reduce loss, gradually refining the network's predictive ability. The fundamental update rule\index{Update Rule!gradient descent} combines backpropagation's gradient computation with parameter adjustment, as defined in @eq-gradient-descent:
+The optimization process now needs an update rule that turns the backpropagated gradient into parameter changes. This iterative process uses each weight's local loss sensitivity to update parameters, seeking to reduce loss over successive steps. The fundamental update rule\index{Update Rule!gradient descent} combines backpropagation's gradient computation with parameter adjustment, as defined in @eq-gradient-descent:
 $$ \theta_{\text{new}} = \theta_{\text{old}} - \eta \nabla_{\theta}\mathcal{L} $$ {#eq-gradient-descent}
 where $\theta$ represents the collection of network parameters (weights and biases), $\eta$ is the learning rate\index{Learning Rate!update magnitude}\index{Hyperparameter!learning rate}, and $\nabla_{\theta}\mathcal{L}$ is the gradient computed through backpropagation.
 
@@ -4451,7 +4453,7 @@ For the digit classifier, this means adjusting weights to improve classification
 
 {{< margin-video "https://youtu.be/tIeHLnjs5U8?si=Uckr8YPwwAZ_UI6t" "Backpropagation" "3Blue1Brown" >}}
 
-Despite neural network loss landscapes\index{Loss Landscape!nonconvex optimization} being highly nonconvex with multiple local minima, gradient descent reliably finds effective solutions in practice. The theoretical reasons, involving concepts like the Lottery Ticket Hypothesis [@frankle2019lottery], implicit bias [@neyshabur2017exploring], and overparameterization benefits [@nakkiran2019deep], remain active research areas. For practical ML systems engineering, the key insight is that gradient descent with appropriate learning rates, initialization, and regularization consistently trains neural networks to high performance.
+Despite neural network loss landscapes\index{Loss Landscape!nonconvex optimization} being highly nonconvex, gradient-based methods often find useful solutions when the model, data, initialization, and optimization regime are well matched. The theoretical reasons, involving concepts like the Lottery Ticket Hypothesis [@frankle2019lottery], implicit bias [@neyshabur2017exploring], and overparameterization benefits [@nakkiran2019deep], remain active research areas. For practical ML systems engineering, the key insight is empirical: learning rates, initialization, regularization, and the training configuration must be validated together.
 
 #### Mini-batch gradient updates {#sec-neural-computation-minibatch-gradient-updates-4a04}
 
@@ -4460,7 +4462,7 @@ Neural networks typically process multiple examples simultaneously during traini
 For a batch of size $B$, let $\mathcal{L}_i$ denote the loss for example $i$; the mean loss gradient becomes @eq-batch-gradient:
 $$ \nabla_{\theta}\mathcal{L}_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B \nabla_{\theta}\mathcal{L}_i $$ {#eq-batch-gradient}
 
-With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. The choice of batch size therefore directly determines how much hardware parallelism the system can use.
+With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. Batch size therefore influences available parallelism and utilization together with model shape, kernel implementation, and hardware.
 
 #### Iterative learning process {#sec-neural-computation-iterative-learning-process-10b9}
 
@@ -4505,7 +4507,7 @@ The complete training process combines forward propagation, backward propagation
 
 A single pass through the entire training dataset is called an epoch\index{Epoch!dataset iteration}.[^fn-epoch-training-nn] For MNIST, with `{python} MnistEpochLocal.training_examples_str` training images and a batch size of `{python} MnistEpochLocal.batch_size_str`, each epoch consists of `{python} MnistEpochLocal.epoch_batches_str` batch iterations. @Algo-minibatch-sgd lays out the mini-batch SGD\index{Stochastic Gradient Descent!mini-batch procedure} loop: each epoch shuffles the data, steps through it one mini-batch at a time with a forward and backward pass, and applies a single parameter update per batch.
 
-[^fn-epoch-training-nn]: **Epoch**\index{Epoch!training cycles}: One complete pass through all training data. The number of epochs is a direct multiplier on total compute cost: a 100-epoch MNIST run executes 100$\times$ more forward and backward passes than a single epoch. At frontier scale, this multiplier becomes the binding constraint: GPT-3 trained for only ~1 epoch over 300 billion tokens because the per-epoch cost already consumed thousands of GPU-weeks.
+[^fn-epoch-training-nn]: **Epoch**\index{Epoch!training cycles}: One complete pass through a training dataset. The number of passes is a direct multiplier on total work: a 100-epoch MNIST run executes 100$\times$ more forward and backward passes than a single epoch. Large language-model training is often specified by a token budget rather than a simple epoch count because data sources may be mixed and sampled at different rates. The same accounting still applies: every additional training token adds another forward and backward computation.
 
 ```pseudocode
 #| label: algo-minibatch-sgd
@@ -4536,7 +4538,7 @@ The mini-batch loop makes the batch size $B$ a hardware unit of work: a larger $
 
 #### Convergence and stability considerations {#sec-neural-computation-convergence-stability-considerations-a9b7}
 
-A network that achieves 99.5 percent accuracy on training data but only 85 percent on new data has not learned the underlying patterns—it has memorized the training set. This failure mode, overfitting, is the central risk in practical training.
+A network that achieves 99.5 percent accuracy on training data but only 85 percent on relevant unseen data exhibits a large generalization gap, a strong sign of overfitting. The model may have learned useful patterns while also specializing too closely to the training sample.
 
 ::: {#dfn-nn-computation-overfitting .callout-definition title="Overfitting"}
 
@@ -4550,7 +4552,7 @@ A network that achieves 99.5 percent accuracy on training data but only 85 perce
 
 Learning rate selection\index{Learning Rate!selection criteria}\index{Hyperparameter!tuning} strongly influences training dynamics. A rate that is too large for the optimizer, batch size, normalization, and schedule can make loss oscillate or diverge; one that is too small can waste epochs making negligible progress. There is no universal "moderate" value, so engineers test rates within the intended training configuration and monitor both optimization stability and validation performance.
 
-Convergence monitoring\index{Convergence!monitoring}\index{Validation!accuracy plateau} provides essential feedback during training and continues into production deployment, as covered in @sec-ml-operations. As training progresses, the loss value typically stabilizes around a particular value, indicating the network is approaching a local optimum. Validation accuracy often plateaus as well, suggesting the network has extracted most learnable patterns from the data. The gap between training and validation performance reveals whether the network is overfitting\index{Overfitting!training challenge} or generalizing well to new examples. The interplay between batch size, available memory, and computational resources requires careful balancing to achieve efficient training within hardware constraints, the same memory-computation trade-offs established earlier in this section.
+Convergence monitoring\index{Convergence!monitoring}\index{Validation!accuracy plateau} provides essential feedback during training and continues into production deployment, as covered in @sec-ml-operations. A flattening training-loss curve signals slowing optimization, but it does not identify the cause: the run may be approaching a useful solution, encountering an optimization limit, or underfitting. A validation plateau is similarly diagnostic rather than conclusive. The gap between training and validation performance helps distinguish overfitting\index{Overfitting!training challenge} from improvements that transfer to held-out examples. The interplay between batch size, available memory, and computational resources requires careful balancing to achieve efficient training within hardware constraints, the same memory-computation trade-offs established earlier in this section.
 
 ::: {#chk-nn-computation-neural-network-learning-process .callout-checkpoint title="Neural network learning process"}
 
@@ -4568,7 +4570,7 @@ If any concepts feel unclear, review the earlier sections on forward passes, los
 
 :::
 
-Detecting the optimal stopping point requires periodically evaluating the model on the validation set and saving its weights to durable storage, a practice called **Checkpointing**\index{Checkpointing!I/O cost}. For a small model like the MNIST network, writing a checkpoint costs a negligible amount of time. For a model whose parameters occupy tens to hundreds of gigabytes, a checkpoint write serializes all of those bytes to disk or object storage, stalling the training loop for seconds to minutes while the I/O completes. Running validation itself requires a full forward pass over the held-out dataset, which at large scale consumes meaningful accelerator time that would otherwise go to training. Checkpointing and validation are therefore not free statistical observations: they impose a recurring I/O and compute tax whose frequency must be tuned against the risk of missing the generalization peak. Saving too infrequently risks losing the best weights to a subsequent degradation epoch; saving too frequently stresses storage bandwidth and adds overhead. This is why convergence monitoring, while conceptually straightforward, becomes a systems infrastructure problem at scale.
+Selecting a stopping point requires periodically evaluating the model on the validation set and saving its weights to durable storage, a practice called **Checkpointing**\index{Checkpointing!I/O cost}. For a small model like the MNIST network, writing a checkpoint costs a negligible amount of time. For a model whose parameters occupy tens to hundreds of gigabytes, a synchronous checkpoint write can stall the training loop while those bytes are serialized to disk or object storage; asynchronous and distributed checkpointing reduce that pause but still consume memory, network, and storage bandwidth. Running validation itself requires a full forward pass over the held-out dataset, which at large scale consumes meaningful accelerator time that would otherwise go to training. Checkpointing and validation are therefore not free statistical observations: they impose recurring I/O and compute costs whose frequency must be balanced against recovery and model-selection needs. Saving too infrequently risks losing useful weights after a failure or later degradation; saving too frequently stresses storage bandwidth and adds overhead. This is why convergence monitoring, while conceptually straightforward, becomes a systems infrastructure problem at scale.
 
 The complete training pipeline runs from forward propagation through loss computation to gradient-based weight updates. Training, however, is preparation, not the end goal—once parameters are optimized, deploying the model for real-time predictions changes the resource profile entirely.
 
