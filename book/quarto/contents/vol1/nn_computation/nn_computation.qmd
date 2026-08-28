@@ -2099,11 +2099,11 @@ Consider recognizing the digit "seven" in the MNIST example. A single-layer netw
 
 Each layer builds on the previous, allowing later computations to reuse earlier features. This hierarchy can be much more parameter-efficient than a shallow representation when the task has suitable compositional structure. The same edge detectors learned for "seven" can also contribute to recognizing "one," "four," and other digits. This **Parameter Reuse**\index{Parameter!reuse, hierarchical learning} helps explain why depth is an effective design choice without implying a fixed parameter advantage for every task. However, the choice between adding layers and widening existing ones is not symmetric\index{Neural Network!depth vs. width trade-off}: depth and width contribute to representational capacity through different mechanisms.
 
-Biological visual systems employ the same hierarchical decomposition, and the specific architectures examined in @sec-network-architectures formalize different ways to encode this hierarchical structure for images, sequences, and other data types. Depth explains why layered representations are useful; the remaining mechanics explain how the hierarchy is implemented. The following sections develop those mechanics: how neurons compute, how layers connect, and how information flows from input to output.
+Layered processing in biological vision helped motivate hierarchical models, without implying that artificial networks reproduce the same mechanisms. The architectures examined in @sec-network-architectures encode different structural assumptions for images, sequences, and other data types. Depth explains why layered representations can be useful; the remaining mechanics explain how the hierarchy is implemented. The following sections develop those mechanics: how neurons compute, how layers connect, and how information flows from input to output.
 
 ::: {#psp-nn-computation-depth-vs-width-trade-off .callout-perspective title="The depth vs. width trade-off"}
 
-The theoretical power of depth comes from the exponential advantage\index{Depth!exponential advantage}: for certain function classes, a network with $N_L$ layers can represent functions that would require exponentially more neurons in a single-layer network [@telgarsky2016benefits]. Composing nonlinear layers enables exponentially more complex decision boundaries with only linearly more parameters.
+For certain function classes, depth provides an exponential representational advantage\index{Depth!exponential advantage}: a network with $N_L$ layers can represent functions that require exponentially more units in a shallow network [@telgarsky2016benefits]. This restricted theoretical result explains why nonlinear composition can be parameter-efficient; it is not a universal guarantee for every task.
 
 However, depth introduces three engineering challenges with each additional layer:
 
@@ -2111,7 +2111,7 @@ However, depth introduces three engineering challenges with each additional laye
 - Increases gradient path length, risking vanishing/exploding gradients
 - Requires storing intermediate activations for backpropagation
 
-Modern architectures balance depth (representational power) against width (parallelism). A network with ten layers of 100 neurons has the same 1,000 total hidden neurons as one with two layers of 500 neurons, but fundamentally different computational characteristics. The deeper network can represent more complex functions; the wider network can compute all neurons in a layer simultaneously.
+Modern architectures balance depth against width. A network with ten layers of 100 neurons has the same 1,000 total hidden units as one with two layers of 500, but not the same parameter count, function class, or execution graph. Both expose parallelism within each layer; the deeper network adds sequential dependencies and may represent some compositional functions more efficiently.
 
 :::
 
@@ -2161,7 +2161,7 @@ class MnistArchitectureConstants:
 
 **Scenario**: Deploying a basic handwritten digit classifier on $28{\times}28$ grayscale images across 10 output classes.
 
-**Diagnosis**: Treating raw pixel intensities (784 features) as input requires an architecture scaling `{python} MnistArchitectureConstants.mnist_l1_dim_str` $\to$ `{python} MnistArchitectureConstants.mnist_l2_dim_str` $\to$ `{python} MnistArchitectureConstants.mnist_l3_dim_str` $\to$ `{python} MnistArchitectureConstants.mnist_l4_dim_str` neurons (~100K parameters).
+**Diagnosis**: The chapter's running architecture maps 784 raw pixel features through `{python} MnistArchitectureConstants.mnist_l2_dim_str` and `{python} MnistArchitectureConstants.mnist_l3_dim_str` hidden units to `{python} MnistArchitectureConstants.mnist_l4_dim_str` outputs, creating roughly 100K parameters.
 
 **Systems lesson**: Inspecting input vector dimensions and layer parameters on a compact dataset establishes baseline compute and memory bandwidth requirements before scaling to high-dimensional production workloads.
 
@@ -2169,7 +2169,7 @@ class MnistArchitectureConstants:
 
 #### The perceptron's weighted sum {#sec-neural-computation-perceptron-weighted-sum-9b3e}
 
-The computational machinery within each layer is the artificial neuron, or perceptron, whose signal path (inputs, weights, bias, aggregation, activation) @sec-neural-computation-artificial-neuron-computing-primitive-45b4 traced through its biological origins. What remains is to formalize that path mathematically, because the formal version is what hardware executes millions of times per prediction. In the MNIST network, a single first-layer neuron must combine all 784 pixel intensities into one output that signals whether its learned pattern, perhaps a vertical edge shared by "one" and "seven," is present. Follow the signal path through @fig-perceptron to see how weighted inputs combine with activation functions to produce a decision: each input $x_i$ multiplies by its corresponding weight $w_{ij}$, the products sum with a bias term, and the activation function produces the final output.
+The computational machinery within each dense layer is a perceptron-style artificial neuron whose signal path (inputs, weights, bias, aggregation, activation) @sec-neural-computation-artificial-neuron-computing-primitive-45b4 traced through its biological origins. What remains is to formalize that path mathematically, because this repeated operation becomes the layer-level kernel that hardware executes. In the MNIST network, a first-layer unit combines all 784 pixel intensities into one activation that may respond to a learned pattern, such as a vertical edge shared by "one" and "seven." Follow @fig-perceptron from left to right: each input $x_i$ is multiplied by its corresponding weight $w_{ij}$, the products are accumulated with a bias, and an activation function transforms the resulting score. Different neurons repeat the same structure with different learned weights, allowing one layer to test many patterns against the same input.
 
 ::: {#fig-perceptron fig-env="figure" fig-pos="htb" fig-cap="**Perceptron Architecture**: Inputs enter on the left, each scaled by its own weight, and the weighted products plus a bias meet at the summation node before a single activation function produces the output. The multiplies and the accumulation along this path are the per-neuron unit of work that the chapter's layer-cost calculations multiply out." fig-alt="Perceptron diagram with inputs x1 through xi on left, each connected to weight circles w1j through wij. Weights feed into red summation node, which receives bias b from below. Output z flows to blue sigma activation function box, producing output y-hat on right."}
 
@@ -2230,15 +2230,15 @@ Here, $j$ identifies the receiving neuron once perceptrons are assembled into a 
 A bias term $b$ shifts the linear output up or down, giving the model additional flexibility to fit the data. Thus, the intermediate linear combination computed by the perceptron including the bias becomes @eq-weighted-sum-bias:
 $$ z = \sum (x_i \cdot w_{ij}) + b $$ {#eq-weighted-sum-bias}
 
-With this weighted sum in hand, a perceptron can serve either regression or classification: regression uses the activated output $\hat{y}$ directly, while classification thresholds it—above the threshold, one class; below it, another.
+With this weighted sum in hand, a suitable output activation and loss can support regression or classification. A binary linear-threshold classifier selects one of two classes around a threshold; multiclass networks instead produce several scores and commonly normalize them with softmax.
 
-The per-neuron cost is the one established earlier: $N$ multiply-accumulate operations and $2N+2$ memory accesses. What the formalization adds is the layer view. Perceptrons work in concert, each layer's output feeding the next, and a layer of $M$ neurons repeats the weighted sum $M$ times, so the layer's total cost is $M \times N$ MACs—exactly the matrix multiplication $\mathbf{x}\mathbf{W}$ that hardware must execute, and the form in which the rest of this chapter counts work.
+Under the direct scalar, no-reuse accounting established earlier, one neuron performs $N$ multiply-accumulate operations and moves its inputs, weights, bias, and output. What the formalization adds is the layer view. A dense layer of $M$ neurons repeats the weighted sum $M$ times, so its arithmetic cost is $M \times N$ MACs—exactly the matrix multiplication $\mathbf{x}\mathbf{W}$ that hardware must execute, and the form in which the rest of this chapter counts work.
 
 #### Nonlinear activation functions {#sec-neural-computation-nonlinear-activation-functions-38bc}
 
 **Activation Functions**\index{Activation Function!definition} are where expressiveness, gradient flow, and hardware cost meet. They convert linear weighted sums into nonlinear outputs; without them, multiple linear layers would collapse into a single linear transformation, severely limiting the network's expressive power. @Fig-activation-functions compares three commonly used element-wise activation functions and one vector-level function (softmax), each with mathematical characteristics that shape both learning behavior and execution cost.
 
-::: {#fig-activation-functions fig-env="figure" fig-pos="htb" fig-cap="**Common Activation Functions**: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax (bottom-right) shows one component of a 3-element vector, illustrating how a single logit's probability varies as it changes relative to the other elements. The softmax panel uses a magnified y-axis (roughly $0$ to $0.05$) that is not comparable to the other three panels: it plots a single output component, not softmax's full vector-level behavior, where all $K$ outputs are interdependent and sum to 1." fig-alt="Four plots arranged in 2x2 grid. Top-left: sigmoid S-curve from 0 to 1. Top-right: tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: softmax showing one output component on a magnified vertical axis spanning roughly 0 to 0.05, not on the same scale as the other panels."}
+::: {#fig-activation-functions fig-env="figure" fig-pos="htb" fig-cap="**Common Activation Functions**: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, and ReLU outputs zero for negative inputs. Softmax (bottom-right) shows one component of a 3-element vector while the other two logits are fixed at 13 and 0. Its magnified y-axis (roughly $0$ to $0.05$) is not comparable to the other panels, and it shows only one component of a vector whose outputs are interdependent and sum to 1." fig-alt="Four plots arranged in 2x2 grid. Top-left: sigmoid S-curve from 0 to 1. Top-right: tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: one softmax component as its logit varies while the other two logits remain fixed at 13 and 0, shown on a magnified vertical axis spanning roughly 0 to 0.05."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
@@ -2349,14 +2349,14 @@ BlueLine,line width=2pt,
 
 :::
 
-The choice of activation function affects both learning effectiveness and computational efficiency, and the history of that choice reveals why systems constraints shape algorithmic design. ReLU ($\max(0, x)$) became the default hidden-layer activation for many feed-forward networks, and it remains a useful baseline for good reason: it is computationally trivial (a single comparison), its gradient never vanishes for positive inputs, and it introduces natural sparsity. ReLU's dominance, however, only makes sense against the backdrop of what came before. The earliest networks used sigmoid and tanh activations, whose smooth S-curves seemed mathematically elegant but created a systems nightmare: gradients that shrank exponentially through deep layers, killing learning before it could begin. Understanding *why* sigmoid and tanh fail in deep networks is essential for understanding *why* ReLU succeeded and what its own limitations imply for later architectures.
+The choice of activation function affects both learning and computational efficiency, revealing how systems constraints shape algorithmic design. ReLU ($\max(0, x)$) became a common hidden-layer activation for feed-forward networks because it is inexpensive, has local derivative one for positive inputs, and can produce sparse activations. Earlier differentiable deep networks often used sigmoid or tanh. Their smooth S-curves can saturate, causing gradients to shrink across many layers and impeding early-layer learning. That contrast is not a simple ranking: sigmoid remains appropriate for some binary outputs, tanh remains useful when bounded zero-centered activations are desired, and modern architectures use additional activation families. The relevant design question is which function supplies the required output semantics and gradient behavior at an acceptable execution cost. Understanding those roles explains ReLU's adoption without turning it into a universal default.
 
 ##### Sigmoid {#sec-neural-computation-sigmoid-a98f}
 
 The logistic sigmoid function[^fn-sigmoid-etymology-activation] squashes continuous inputs onto the open interval $(0,1)$ (@eq-sigmoid):
 $$ \sigma(x) = \frac{1}{1 + e^{-x}} $$ {#eq-sigmoid}
 
-[^fn-sigmoid-etymology-activation]: **Sigmoid**\index{Sigmoid!etymology}\index{Sigmoid!computational cost}: From Greek *sigma* + *eidos* ("sigma-shaped"), referring to the S-curve that maps inputs to the bounded (0, 1) range. The mapping requires a floating-point exponential ($e^{-x}$), which is substantially more expensive than ReLU's comparator-style operation. This arithmetic penalty scales with every neuron in every layer, making sigmoid's replacement by ReLU as much a hardware efficiency decision as a gradient stability one.
+[^fn-sigmoid-etymology-activation]: **Sigmoid**\index{Sigmoid!etymology}\index{Sigmoid!computational cost}: From Greek *sigma* + *eidos* ("sigma-shaped"), referring to the S-curve that maps inputs to the bounded (0, 1) range. The mapping requires an exponential approximation, commonly implemented through specialized instructions, lookup tables, or polynomial methods. It is generally more expensive than ReLU's comparison-and-selection operation, although the measured gap depends on precision, vectorization, and hardware. ReLU's adoption reflected both easier gradient flow on its positive branch and cheaper execution.
 
 The S-shaped curve maps logits to $(0,1)$, so sigmoid can parameterize a binary probability. It approaches one for large positive inputs and zero for large negative inputs. Although sigmoid is smooth and differentiable everywhere, gradient-based learning need not be: ReLU uses an assigned subgradient at zero.
 
@@ -2364,14 +2364,14 @@ Sigmoid has a significant limitation: for inputs with large absolute values (far
 
 [^fn-vanishing-gradient-depth]: **Vanishing Gradient Problem**\index{Vanishing Gradient Problem!exponential decay}: The chain rule's multiplication of Jacobian factors across layers can cause gradients to shrink. Sigmoid's derivative is at most 0.25, so along a simplified 10-layer path the activation-derivative factors alone contribute at most $0.25^{10} \approx 10^{-6}$. The complete gradient also includes weights and other operations, but repeated saturated activation derivatives can still make early-layer updates negligible.
 
-Sigmoid outputs are not zero-centered (all outputs are positive). This asymmetry can cause inefficient weight updates during optimization, as gradients for weights connected to sigmoid units will all have the same sign.
+Sigmoid outputs are not zero-centered. When the inputs feeding a parameter update are also nonnegative, their weight gradients can become correlated in sign, producing less direct optimization trajectories. The complete gradient still depends on upstream errors and is not universally one-signed.
 
 ##### Tanh {#sec-neural-computation-tanh-e981}
 
 The hyperbolic tangent[^fn-tanh-etymology-activation] centers output activations around zero over the interval $(-1,1)$ (@eq-tanh):
 $$ \tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} $$ {#eq-tanh}
 
-[^fn-tanh-etymology-activation]: **Tanh (Hyperbolic Tangent)**\index{Tanh!etymology}\index{Tanh!zero-centered advantage}: By centering its output range on zero, `tanh` allows weight gradients to be both positive and negative, fixing the all-positive update bias that slows sigmoid-based training. Its computational cost is similar to sigmoid because it also depends on exponentials, but the zero-centered output makes optimization better behaved than sigmoid in hidden layers.
+[^fn-tanh-etymology-activation]: **Tanh (Hyperbolic Tangent)**\index{Tanh!etymology}\index{Tanh!zero-centered advantage}: By centering its output range on zero, `tanh` can reduce the correlated-update behavior associated with all-positive activations. Its computational cost is similar to sigmoid because it also depends on exponential approximations, while its saturation behavior still permits vanishing gradients.
 
 Tanh produces an S-shaped curve similar to sigmoid but centered at zero: negative inputs map to negative outputs and positive inputs to positive outputs. This symmetry balances gradient flow during training, often yielding faster convergence than sigmoid.
 
@@ -2381,14 +2381,14 @@ Both sigmoid and tanh share a critical limitation: gradient saturation at extrem
 
 ##### ReLU {#sec-neural-computation-relu-7184}
 
-The rectified linear unit (ReLU)[^fn-relu-hardware-efficiency] sets negative values to zero while maintaining linear identity for positive inputs (@eq-relu):
+ReLU[^fn-relu-hardware-efficiency] sets negative values to zero while maintaining linear identity for positive inputs (@eq-relu):
 $$ \text{ReLU}(x) = \max(0, x) = \begin{cases} x & \text{if } x > 0 \\ 0 & \text{if } x \leq 0 \end{cases} $$ {#eq-relu}
 
 [^fn-relu-hardware-efficiency]: **ReLU (Rectified Linear Unit)**\index{ReLU!etymology}\index{ReLU!hardware efficiency}: Unlike the costly exponential operations in prior activation functions, ReLU's `max(0, x)` operation maps to a simple comparison and selection. This efficiency, together with better gradient flow for positive activations, helped make the deep architectures of the AlexNet era computationally tractable [@nair2010rectified; @krizhevsky2012imagenet].
 
 [^fn-dropout-train-infer]: **Dropout**\index{Dropout!regularization technique}\index{Dropout!train-inference mismatch}: Randomly deactivating neurons during training forces a network to learn redundant representations, a regularization technique used in the AlexNet-era shift toward deep vision models [@srivastava2014; @krizhevsky2012imagenet]. This creates a systems-level divergence between the computational graphs for training (stochastic) and inference (deterministic). Failing to switch from the training to the inference graph is a common bug that can silently degrade accuracy.
 
-ReLU's characteristic shape—a straight line for positive inputs and zero for negative inputs—provides three advantages that explain its dominance. First, gradient flow remains intact for positive inputs: ReLU's gradient is one, allowing gradients to propagate without the saturation that plagues sigmoid and tanh in deep architectures. Second, ReLU introduces natural sparsity\index{Sparsity!activation sparsity} by zeroing negative activations, so part of the activation vector can become inactive for any given input.[^fn-dropout-train-infer] Third, computational efficiency\index{ReLU!computational efficiency} improves because ReLU is computed with a simple comparison, `output = (input > 0) ? input : 0`, rather than an exponential.
+ReLU's characteristic shape—a straight line for positive inputs and zero for negative inputs—provides three advantages. First, its local derivative is one for positive inputs, avoiding activation saturation on that branch; the complete network gradient can still shrink or grow through weights and other operations. Second, ReLU introduces deterministic activation sparsity\index{Sparsity!activation sparsity} by zeroing negative values; this differs from dropout's stochastic masking.[^fn-dropout-train-infer] Zero values do not automatically produce a speedup, because ordinary dense kernels still process their positions unless the implementation exploits sparsity. Third, ReLU uses a comparison and selection\index{ReLU!computational efficiency}, `output = (input > 0) ? input : 0`, rather than an exponential approximation. These are local properties of the operator, while end-to-end performance depends on how it is fused with neighboring work.
 
 ReLU is not without drawbacks. The **Dying ReLU Problem**\index{Dying ReLU Problem!definition}\index{ReLU!dying ReLU problem}—neurons that permanently output zero and cease learning—occurs when neurons become stuck in the inactive state. If a neuron's weights evolve during training such that the preactivation $z = \mathbf{w}^T\mathbf{x} + b$ is consistently negative across all training examples, the neuron outputs zero for every input. Since ReLU's gradient is also zero for negative inputs, no gradient flows back through this neuron during backpropagation: the weights cannot update, and the neuron remains dead. This can happen with large learning rates that push weights into unfavorable regions. From a systems perspective, dead neurons represent wasted capacity: parameters that consume memory and compute during inference but contribute nothing to the output. Careful initialization [@he2015], moderate learning rates, and leaky ReLU variants help mitigate dying ReLUs. Batch normalization\index{Batch Normalization!training stability}[^fn-batch-norm-cost] instead stabilizes layer inputs and permits higher learning rates [@ioffe2015batch].
 
@@ -2403,9 +2403,9 @@ $$ \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}} $$ {#eq-softmax}
 
 For a vector of $K$ values (often called logits\index{Logits!raw network scores}[^fn-logits-etymology-probability]), softmax transforms them into $K$ probabilities that sum to 1. One component of the softmax output appears in @fig-activation-functions (bottom-right); in practice, softmax processes entire vectors where each element's output depends on all input values.
 
-[^fn-logits-etymology-probability]: **Logits (Log-Odds Units)**\index{Logits!inference optimization}: Short for "log-odds units," these raw scores preserve the relative ordering of class evidence before softmax normalizes them into probabilities. Because `argmax` over logits and `argmax` over softmax probabilities always select the same class, optimized inference pipelines skip the softmax computation entirely when only the top prediction is needed, saving $K$ exponentiations per sample.
+[^fn-logits-etymology-probability]: **Logits**\index{Logits!inference optimization}: In multiclass neural classifiers, logits are unnormalized output scores. Score differences correspond to log probability ratios after softmax, while an individual multiclass logit is not itself a calibrated log-odds quantity. Because `argmax` over logits and `argmax` over softmax probabilities select the same class, inference can skip softmax when only the top class is needed.
 
-In multi-class classifiers, softmax is usually used in the output layer. By converting arbitrary real-valued logits into probabilities, softmax enables the network to express confidence across multiple classes. The class with the highest probability becomes the predicted class. The exponential function ensures that larger logits receive disproportionately higher probabilities, creating clear distinctions between classes when the network is confident.
+In multiclass classifiers, softmax is commonly used in the output layer. It converts arbitrary real-valued logits into normalized predicted probabilities, but those values are not necessarily calibrated confidence estimates. The class with the highest probability becomes the predicted class, and larger logits receive disproportionately higher probabilities.
 
 The mathematical relationship between input logits and output probabilities is differentiable, allowing gradients to flow back through softmax during training. When combined with cross-entropy loss (discussed in @sec-neural-computation-loss-functions-6fc2), softmax produces particularly clean gradient expressions that guide learning effectively. Beyond their mathematical properties, the choice of activation functions has direct consequences for hardware efficiency.
 
@@ -2438,18 +2438,17 @@ class ActivationLogic:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # ReLU is a comparator + mux
+    # Illustrative comparator-plus-selection budget
     relu_transistors = 50
 
-    # Sigmoid/Tanh require exp() -> iterative Taylor or Lookup + Interpolation
-    # High-precision floating point exponential unit
+    # Illustrative high-precision exponential-approximation budget
     sigmoid_transistors = 2500
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     ratio = sigmoid_transistors / relu_transistors
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ratio >= 40, f"Sigmoid should be much more expensive than ReLU. Ratio: {ratio:.1f}x")
+    check(ratio >= 40, f"Illustrative logic-cost ratio changed unexpectedly: {ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     relu_transistor_str = fmt(relu_transistors, precision=0, commas=False)
@@ -2471,10 +2470,10 @@ This illustrative disparity is **The Transistor Tax**\index{Transistor Tax!activ
 *An illustrative logic model shows why ReLU is generally cheaper to implement.*
 :::
 
-These nonlinear transformations convert the linear input sum into a nonlinear output, yielding the complete perceptron computation in @eq-perceptron:
-$$ \hat{y} = \sigma(z) = \sigma\left(\sum (x_i \cdot w_{ij}) + b\right) $$ {#eq-perceptron}
+These transformations convert the linear input sum into a nonlinear output, yielding the generic artificial-neuron computation in @eq-perceptron:
+$$ \hat{y} = f(z) = f\left(\sum (x_i \cdot w_{ij}) + b\right) $$ {#eq-perceptron}
 
-This nonlinearity is what makes deep networks expressive. Without it, stacking multiple layers would be pointless, as a composition of linear functions is still linear. Compare the two panels in @fig-nonlinear to see this principle in action: the left panel exposes a linear decision boundary that fails to separate the two classes (no amount of linear layers would help), while the right panel reveals how nonlinear activation functions enable the network to learn a curved boundary that correctly classifies the data.
+This nonlinearity expands what multilayer networks can represent. Without it, a stack of linear layers collapses algebraically into one linear transformation, regardless of how many intermediate matrices the implementation evaluates. In @fig-nonlinear, the left panel shows a linear boundary that cannot separate the classes, while the right shows one curved boundary that a multilayer network with nonlinear activations and suitable learned parameters can represent. The figure illustrates representational possibility rather than a guarantee that training will discover that boundary. Optimization, data coverage, and architecture still determine which function the learned parameters produce.
 
 ::: {#fig-nonlinear fig-env="figure" fig-pos="htb" fig-cap="**Linear vs. Nonlinear Decision Boundaries**: Two scatter plots compare classification with and without activation functions. Without activation, a straight line fails to separate the two classes. With a nonlinear activation function applied, the network produces a curved decision boundary that correctly separates the points." fig-alt="Two scatter plots side by side. Left plot shows cyan and green points with straight red line failing to separate them, labeled NN without activation function. Right plot shows same points with curved red decision boundary successfully separating classes, labeled NN with activation function."}
 
@@ -2654,20 +2653,20 @@ The learnable parameters[^fn-parameter-memory-cost] of neural networks, weights 
 
 #### Weight matrices {#sec-neural-computation-weight-matrices-9f9a}
 
-Weights\index{Weights!matrix organization}\index{Weight Matrix!layer connections} determine how strongly inputs influence neuron outputs. In larger networks, these organize into matrices for efficient computation across layers. In a layer with $n$ input features and $m$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{n \times m}$, where each column represents the weights for a single neuron. This organization allows the network to process multiple inputs simultaneously, an essential feature for handling real-world data efficiently.
+Weights\index{Weights!matrix organization}\index{Weight Matrix!layer connections} determine how strongly inputs influence neuron outputs. In dense layers, these weights organize into matrices that map efficiently to linear-algebra kernels. In a layer with $n$ input features and $m$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{n \times m}$, where each column represents the weights for a single neuron. A matrix-vector product processes one input, while a matrix-matrix product processes a batch of inputs and can expose more parallel work and data reuse.
 
 Recall that for a single neuron, we computed $z = \sum_{i=1}^n (x_i \cdot w_{ij}) + b$. When we have a layer of $m$ neurons, we could compute each neuron's output separately, but matrix operations provide a much more efficient approach. Rather than computing each neuron individually, matrix multiplication enables us to compute all $m$ outputs simultaneously (@eq-layer-linear):
 $$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$ {#eq-layer-linear}
 
-This single equation computes every neuron's output in one operation: the input vector $\mathbf{x}$ multiplied by the weight matrix $\mathbf{W}$ produces all $m$ preactivation values simultaneously, and the bias vector $\mathbf{b}$ shifts each one. From a systems perspective, this is the operation that dominates neural network runtime—a matrix-vector multiply whose dimensions $(n \text{ inputs} \times m \text{ neurons})$ determine whether the layer is compute bound or memory bound on the target hardware.
+This equation computes every neuron's preactivation for one input: the vector $\mathbf{x}$ multiplied by the weight matrix $\mathbf{W}$ produces all $m$ values, and the bias vector $\mathbf{b}$ shifts each one. For a batch, the input becomes a matrix and the same layer becomes a matrix-matrix product. These kernels account for much of the work in dense feed-forward networks, but whether they dominate runtime—and whether they are compute bound or memory bound—depends on their dimensions, batch size, precision, implementation, and target hardware.
 
 This matrix organization is more than mathematical convenience; it reflects how modern neural networks are implemented for efficiency. Each weight $w_{ij}$ represents the strength of the connection between input feature $i$ and neuron $j$ in the layer.
 
-In the simplest and most common case, each neuron in a layer is connected to every neuron in the previous layer, forming a "dense" or "fully-connected" layer\index{Fully-Connected Layer!dense connectivity}. This pattern means that each neuron has the opportunity to learn from all available features from the previous layer. Fully-connected layers establish foundational principles, but alternative connectivity patterns (explored in @sec-network-architectures) can dramatically improve efficiency for structured data by restricting connections based on problem characteristics.
+The canonical case studied here connects each neuron in a layer to every neuron in the previous layer, forming a "dense" or "fully-connected" layer\index{Fully-Connected Layer!dense connectivity}. This pattern allows each neuron to use all features from the previous layer. Fully connected layers establish the mathematical principles needed here, while alternative connectivity patterns (explored in @sec-network-architectures) exploit structure in the data and can reduce work or improve statistical efficiency.
 
-@Fig-connections makes the dense pattern explicit by laying out a small three-layer network with every connection weight labeled. Every input connects to every hidden neuron, and every hidden neuron connects to every output. Each labeled edge represents one learnable weight, making visible the total parameter count and, consequently, why matrix multiplication dominates neural network computation: the weight matrix dimensions directly determine both the layer's storage requirements and its arithmetic cost. The numerical values provide a concrete illustration of how inputs transform through the network. For a network with layers of sizes $(n_1, n_2, n_3)$, the weight matrices are $\mathbf{W}^{(1)} \in \mathbb{R}^{n_1 \times n_2}$ between the first and second layers and $\mathbf{W}^{(2)} \in \mathbb{R}^{n_2 \times n_3}$ between the second and third layers.
+@Fig-connections makes the dense pattern explicit by laying out a small three-layer network with every connection weight labeled. Every input connects to every hidden neuron, and every hidden neuron connects to every output. Each labeled edge represents one learnable weight, making the parameter count and arithmetic structure visible. Read one destination neuron at a time: its incoming edges form one column of the preceding weight matrix, and its bias shifts the resulting weighted sum. Reading all destinations together reveals the matrix operation. The numerical labels are illustrative rather than a worked forward pass; the important relationship is the matrix shape. For layers of sizes $(n_1, n_2, n_3)$, the weight matrices are $\mathbf{W}^{(1)} \in \mathbb{R}^{n_1 \times n_2}$ and $\mathbf{W}^{(2)} \in \mathbb{R}^{n_2 \times n_3}$, requiring $n_1n_2+n_2n_3$ weights before biases.
 
-::: {#fig-connections fig-env="figure" fig-pos="htb" fig-cap="**Fully-Connected Layers**: A three-layer network with dense connections between layers, where each neuron integrates information from all neurons in the preceding layer. Weight matrices between layers determine connection strengths, with labeled values shown on each edge alongside example activation values at each node." fig-alt="Three-layer network with three green input nodes, four blue hidden nodes, and two red output nodes. Labeled arrows show weight values on each connection. Input layer shows values 1.0, 5.0, 9.0. Hidden nodes show activation values. Bias values labeled at each layer."}
+::: {#fig-connections fig-env="figure" fig-pos="htb" fig-cap="**Fully-Connected Layers**: A three-layer network with dense connections between layers, where each neuron integrates information from all neurons in the preceding layer. Labeled edges and nodes illustrate the organization of weights, biases, and activations; they are not a worked numerical forward pass." fig-alt="Three-layer network with three green input nodes, four blue hidden nodes, and two red output nodes. Labeled arrows show illustrative weight values on each connection. Input, hidden, and output nodes show illustrative values, and bias values are labeled at the hidden and output layers."}
 
 ```{.tikz}
 \scalebox{0.78}{\begin{tikzpicture}[font=\small\sffamily]
@@ -2760,11 +2759,11 @@ $$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$
 
 [^fn-bias-parameter-cost]: **Bias Terms**\index{Bias!parameter overhead}: Biases add one parameter per neuron, compared with $n$ weights for a neuron with $n$ inputs, so they account for $1/(n+1)$ of that layer's parameters. Their model-wide share and effect on accuracy depend on layer widths, architecture, and normalization. Some modern architectures omit biases in layers followed by batch normalization because the normalization transform includes a learned shift.
 
-The organization of weights and biases across a neural network follows a systematic pattern. For a network with $N_L$ layers, three components per layer define its computation; the weights and biases are learned, while the activation function is usually chosen by the designer:
+The organization of weights and biases across a feed-forward network follows a systematic pattern. For each parameterized affine layer $\ell$, three components define its computation; the weights and biases are learned, while the activation function is usually chosen by the designer:
 
-* A weight matrix $\mathbf{W}^{(\ell)}$ for each layer $\ell$
-* A bias vector $\mathbf{b}^{(\ell)}$ for each layer $\ell$
-* Activation functions $f^{(\ell)}$ for each layer $\ell$
+* A weight matrix $\mathbf{W}^{(\ell)}$
+* A bias vector $\mathbf{b}^{(\ell)}$
+* An activation function $f^{(\ell)}$
 
 This yields the complete layer computation in @eq-layer-activation:
 $$ \mathbf{a}^{(\ell)} = f^{(\ell)}(\mathbf{z}^{(\ell)}) = f^{(\ell)}(\mathbf{a}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}) $$ {#eq-layer-activation}
@@ -2813,13 +2812,13 @@ If any of these feel unclear, review the earlier sections on neural network fund
 
 ### Architecture design {#sec-neural-computation-architecture-design-523c}
 
-Architecture design determines how individual neurons, activation functions, and weight matrices connect to solve problems that no single layer can handle. That design has direct systems consequences, because every topological choice (adding a layer, widening a hidden dimension, changing connectivity) multiplies the parameter count and, with it, memory footprint and arithmetic cost.
+Architecture design determines how individual neurons, activation functions, and weight matrices connect to solve problems that no single layer can handle. That design has direct systems consequences, because each topological choice (adding a layer, widening a hidden dimension, changing connectivity) changes the parameter count, memory footprint, and arithmetic cost.
 
 Network topology\index{Network Topology!layer organization} describes how individual neurons organize into layers and connect to form complete neural networks. Building intuition begins with a simple problem that became famous in AI history.[^fn-xor-depth-requirement]
 
-[^fn-xor-depth-requirement]: **XOR Problem**\index{XOR Problem!depth requirement}: The inability of a single layer of neurons to solve the XOR function is the canonical example of why network topology is a computational necessity. Minsky and Papert's 1969 proof demonstrated that this simple function is not linearly separable, forcing a topological shift from a single layer to one with a hidden layer. This proves that some problems *cannot* be solved by making a layer wider, but require depth, with a minimum of three total neurons needed to learn XOR.
+[^fn-xor-depth-requirement]: **XOR Problem**\index{XOR Problem!depth requirement}: XOR is the canonical example of why network topology matters. A single linear-threshold layer cannot represent this nonlinearly separable function, regardless of how many units it contains, whereas a small network with a nonlinear hidden layer can. The exact number of units required depends on the activation and representation conventions; the durable lesson is that adding nonlinear depth changes the class of functions the network can express.
 
-The XOR example established the canonical three-layer architecture, but real-world networks require systematic consideration of design constraints and computational scale. Recognizing handwritten digits using the MNIST\index{MNIST!digit recognition}\index{Dataset!MNIST benchmark} [@lecun1998] dataset illustrates how problem structure determines network dimensions while hidden layer configuration remains an important design decision.
+The XOR example motivates a network with a hidden layer, but real-world networks require systematic consideration of design constraints and computational scale. Recognizing handwritten digits using the MNIST\index{MNIST!digit recognition}\index{Dataset!MNIST benchmark} [@lecun1998] dataset illustrates how problem structure determines network dimensions while hidden layer configuration remains an important design decision.
 
 ::: {#exmp-nn-computation-building-intuition-xor-problem .callout-example title="Building intuition: The XOR problem"}
 
@@ -2870,7 +2869,7 @@ class MnistInputDimLocal:
 
 The input layer's width is directly determined by the data format. For a 28 by 28 pixel image, each pixel becomes an input feature, requiring `{python} MnistInputDimLocal.mnist_input_str` input neurons. Equivalently, 28 rows and 28 columns flatten into `{python} MnistInputDimLocal.mnist_input_str` values. We can think of this either as a 2D grid of pixels or as a flattened vector, where each value represents the intensity of one pixel.
 
-The output layer's structure is determined by the task requirements. For digit classification, we use 10 output neurons, one for each possible digit (0--9). When presented with an image, the network produces a value for each output neuron, where higher values indicate greater confidence that the image represents that particular digit.
+The output layer's structure is determined by the task requirements. For digit classification, we use 10 output neurons, one for each possible digit (0--9). When presented with an image, the network produces a score for each output neuron; a softmax can then convert those logits into predicted class probabilities.
 
 Between these fixed input and output layers, there is flexibility in designing the hidden layer topology. The choice of hidden layer structure, including the number of layers to use and their respective widths, represents one of the key design decisions in neural networks. Additional layers increase the network's depth, allowing it to learn more abstract features through successive transformations. The width of each layer provides capacity for learning different features at each level of abstraction.
 
@@ -3120,13 +3119,13 @@ minimum width=46,minimum height=56](\picname){};
 
 The fully connected architecture in @sec-neural-computation-parameters-connections-27c9 maximizes flexibility by connecting every neuron to every neuron in the next layer, but connectivity itself is an engineering decision. Dense, sparse, and skip patterns trade learning flexibility against parameter count, locality, and gradient flow.
 
-Dense connectivity\index{Dense Connectivity!parameter scaling} represents the standard pattern where each neuron connects to every neuron in the subsequent layer. In our MNIST example, connecting our 784-dimensional input layer to a hidden layer of 128 neurons requires 100,352 weight parameters ($784{\times}128$). This full connectivity enables the network to learn arbitrary relationships between inputs and outputs, but the number of parameters grows as the product of adjacent layer widths, so widening one layer scales them linearly while widening both scales them quadratically.
+Dense connectivity\index{Dense Connectivity!parameter scaling} represents the standard pattern where each neuron connects to every neuron in the subsequent layer. In our MNIST example, connecting our 784-dimensional input layer to a hidden layer of 128 neurons requires 100,352 weight parameters ($784{\times}128$). This full connectivity enables the layer to learn arbitrary linear combinations of its inputs; nonlinear activations between dense layers extend those combinations to nonlinear relationships. The number of parameters grows as the product of adjacent layer widths, so widening one layer scales them linearly while widening both scales them quadratically.
 
 Sparse connectivity\index{Sparse Connectivity!connection patterns} patterns introduce purposeful restrictions in how neurons connect between layers. Rather than maintaining all possible connections, neurons connect to only a subset of neurons in the adjacent layer. This approach draws inspiration from biological neural systems, where neurons typically form connections with a limited number of other neurons. In visual processing tasks like the MNIST example, neurons might connect only to inputs representing nearby pixels, reflecting the local nature of visual features.
 
 As networks grow deeper, the path from input to output becomes longer, potentially complicating the learning process. Skip connections\index{Skip Connection!gradient flow} address this by adding direct paths between nonadjacent layers. These connections provide alternative routes for information flow, supplementing the standard layer-by-layer progression. In our digit recognition example, skip connections might allow later layers to reference both high-level patterns and the original pixel values directly.
 
-These connection patterns have direct hardware consequences as well as theoretical ones. Dense connections maximize learning flexibility and map naturally onto general matrix multiply (GEMM) kernels that tensor cores and memory hierarchies execute at maximum bandwidth. Sparse connections reduce theoretical parameter counts and FLOPs, but a sparse weight matrix does not automatically execute faster than a dense one on standard hardware—without structured sparsity support (such as 2:4 patterns that hardware can exploit through compressed index formats), the arithmetic reduction does not translate to proportional reductions in execution time. Skip connections help maintain effective information flow in deeper networks while preserving the gradient paths that make very deep architectures trainable.
+These connection patterns have direct hardware consequences as well as theoretical ones. Dense connections maximize learning flexibility and map efficiently onto general matrix multiply (GEMM) kernels on tensor-oriented hardware. Sparse connections reduce theoretical parameter counts and FLOPs, but a sparse weight matrix does not automatically execute faster than a dense one on standard hardware—without structured sparsity support (such as 2:4 patterns that hardware can exploit through compressed index formats), the arithmetic reduction does not translate to proportional reductions in execution time. Skip connections help maintain effective information flow in deeper networks while preserving the gradient paths that make very deep architectures trainable.
 
 #### Model size and computational complexity {#sec-neural-computation-model-size-computational-complexity-1f0f}
 
