@@ -3830,7 +3830,7 @@ With the hardware condition established, the question becomes *how* to reduce pr
 
 Three approaches form a complexity ladder. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal engineering effort. Quantization-aware training (QAT) incorporates quantization effects into the training loop, enabling models to adapt to lower precision and retain higher accuracy. Mixed-precision training assigns different precision levels to different operations, matching precision to each layer's sensitivity. @Fig-quantization-roadmap maps quantization techniques into three progressive tiers based on implementation complexity, resource requirements, and target use cases.
 
-::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Complexity Roadmap**: Three progressive tiers of quantization techniques, from foundational approaches suitable for quick deployment to research frontier methods for extreme resource constraints. Effort rises monotonically across the tiers but accuracy loss does not, because the production tier's retraining recovers part of what the foundational tier gives away, 0.2 to 1 percent against 0.5 to 2 percent, before the research frontier spends 2 to 10 percent on extreme bit widths." fig-alt="Tiered diagram with three levels. Foundation tier includes PTQ and basic INT8. Production tier adds QAT and mixed precision. Research frontier tier shows INT4, binary, and ternary quantization with icons for increasing complexity."}
+::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Complexity Roadmap**: The tiers order techniques by typical engineering and validation effort, not by guaranteed accuracy. PTQ provides a low-cost starting point; QAT and mixed precision add training or kernel control; INT4, binary, and ternary methods require increasingly model- and hardware-specific validation. A deployment may stop at any tier once it meets measured quality, latency, memory, and energy criteria, and a more complex tier is not automatically better." fig-alt="Tiered diagram with three levels. Foundation includes PTQ and basic INT8. Production adds QAT and mixed precision. Research frontier shows INT4, binary, and ternary quantization with increasing implementation and validation complexity."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily]
@@ -4024,7 +4024,7 @@ The roadmap is a deployment-ordering device rather than a taxonomy of numerical 
 
 #### Post-training quantization {#sec-model-compression-posttraining-quantization-bb5b}
 
-Post-training quantization (PTQ) reduces numerical precision after training, converting weights and activations from FP32 to lower-precision integer representations such as INT8 without full retraining [@choukroun2019]. This achieves smaller model sizes, faster computation, and reduced energy consumption, making it practical for resource-constrained environments such as mobile devices, edge AI systems, and cloud inference platforms [@wu2020integer].
+Post-training quantization (PTQ) reduces numerical precision after training, converting selected weights or activations from FP32 to lower-precision representations such as INT8 without full retraining [@choukroun2019]. It reliably reduces raw value payload; latency and energy improve only when the exported graph maps to efficient low-precision kernels [@wu2020integer].
 
 PTQ's key advantage is low computational cost: it requires no retraining and usually no labeled training set, although activation calibration typically needs a small representative calibration dataset. However, reducing precision introduces quantization error that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks such as TensorFlow Lite, the Open Neural Network Exchange runtime, and PyTorch provide built-in PTQ support.
 
@@ -4075,13 +4075,13 @@ print(
 
 An alternative, nonuniform quantization, assigns finer-grained precision to numerical ranges that are more densely populated, which can preserve accuracy for models whose weight distributions concentrate around specific values. Nonuniform schemes require more complex calibration and are less common in production, but they can be effective for models particularly sensitive to precision changes.
 
-PTQ works well for computer vision models, where CNNs often tolerate quantization without significant accuracy loss. Models that rely on small numerical differences, such as NLP transformers or speech recognition systems, may require quantization-aware training or nonuniform strategies to retain performance.
+PTQ is a useful first experiment for many vision, language, and speech models, but sensitivity varies by architecture, layer, and distribution. When a uniform PTQ configuration misses the quality target, the next options include finer granularity, mixed precision, weight-only methods, better calibration, or QAT.
 
 ##### Calibration {#sec-model-compression-calibration-c650}
 
-An important aspect of PTQ is the calibration step, which selects the clipping range $[\alpha, \beta]$ for quantizing model weights and activations. The effectiveness of precision reduction depends heavily on this chosen range: without proper calibration, quantization may cause significant accuracy degradation. Calibration ensures that the chosen range minimizes information loss and preserves model performance.
+An important aspect of PTQ is the calibration step, which estimates a clipping range $[\alpha, \beta]$ for quantized tensors. A poor range either clips important values or wastes integer levels on outliers. Calibration reduces that error on the sampled distribution; it does not guarantee performance on deployment data.
 
-Post-training quantization relies on representative calibration data to determine optimal tensor clipping boundaries. Follow the step-by-step pipeline in @fig-ptq-calibration and the layer-by-layer calibration procedure in @algo-ptq-calibration, observing how activation distribution observers feed fixed scale metadata into quantized runtime execution.
+Post-training quantization relies on representative calibration data to estimate tensor clipping boundaries. Follow the step-by-step pipeline in @fig-ptq-calibration and the layer-by-layer procedure in @algo-ptq-calibration, observing how activation observers produce scale metadata for quantized runtime execution.
 
 ```pseudocode
 #| label: algo-ptq-calibration
@@ -4144,7 +4144,7 @@ The single calibration pass over $C$ avoids retraining, and FP32-to-INT8 weight 
 
 For example, consider quantizing activations to 8-bit integers. Mapping an unnecessarily wide real-valued clipping interval to $-128,\ldots,127$ wastes resolution. Calibration passes a representative dataset through the model and selects the real-valued clipping interval and scale.
 
-Common calibration methods include **Max**\index{Quantization Calibration!max method} (uses maximum absolute value, simple but susceptible to outliers), **Entropy**\index{Quantization Calibration!entropy method} (minimizes KL divergence between original and quantized distributions, TensorRT's default), and **Percentile**\index{Quantization Calibration!percentile method} (clips to a percentile, for example, 99 percent, avoiding outlier impact). @Fig-resnet-activations-histogram shows why outlier handling matters: ResNet50 activations exhibit long tails where outliers can skew the quantization range.
+Common calibration methods include **Max**\index{Quantization Calibration!max method} (uses the maximum absolute value and is susceptible to outliers), **Entropy**\index{Quantization Calibration!entropy method} (selects a range by minimizing a KL-divergence objective), and **Percentile**\index{Quantization Calibration!percentile method} (clips a chosen tail fraction). @Fig-resnet-activations-histogram shows why outlier handling matters: long activation tails can stretch the range and leave too few levels for the bulk of the distribution.
 
 ::: {#fig-resnet-activations-histogram fig-env="figure" fig-pos="htb" fig-cap="**Activation Distribution**: ResNet-50 layer activations exhibit a long tail, with outlier values that can lead to inefficient precision use if not handled carefully. Source: [@wu2020integer]." fig-alt="Histogram of ResNet50 activation values showing right-skewed distribution. Most values cluster near zero with long tail extending to outliers around 2.1."}
 
@@ -4437,7 +4437,7 @@ Suppose the activations range from `{python} QuantizationMathCalc.alpha_math` to
 
 :::
 
-Sharing a single quantization scale across an entire layer introduces severe clipping noise when channel weight distributions vary. Observe the filter range variations across the rows of @fig-quantization-granularity, contrasting shared layerwise clipping limits against independent per-channel scales.
+Sharing a single quantization scale across an entire layer can increase clipping or rounding error when channel ranges differ. Observe the filter-range variation in @fig-quantization-granularity, contrasting shared layerwise limits with independent per-channel scales.
 
 ::: {#fig-quantization-granularity fig-env="figure" fig-pos="htb" fig-cap="**Quantization Range Variation**: Different convolutional filters can have different weight ranges, motivating per-filter quantization to reduce quantization error. The differing clipping scales illustrate the choice between one layerwise range and separate channelwise ranges. Source: [@gholami2022]." fig-alt="Four rows showing CNN filters with Gaussian weight distributions. Each filter has different clipping ranges shown as red and blue dashed lines. Layer-wise clipping uses same range; channel-wise uses per-filter ranges."}
 
@@ -4660,7 +4660,7 @@ Box/.style={inner xsep=2pt,
 
 :::
 
-Quantization granularity is the control knob that trades calibration overhead for accuracy: fewer shared ranges are cheaper, while more local ranges preserve more information when channels differ. The four levels run from one shared range per layer to a separate range within each filter, trading rising overhead for rising precision, as @tbl-quantization-granularity summarizes.
+Quantization granularity trades calibration and metadata overhead against representation error. More local ranges can preserve information when channels differ, but they do not improve accuracy automatically and may lack an efficient kernel path. Each additional scale also has to be stored, loaded, and applied at the granularity supported by the backend. @Tbl-quantization-granularity summarizes four common levels, from one shared layer range to local ranges within a filter.
 
 | **Level**                                               | **Range sharing**                  | **Trade-off**                                                                                     |
 |:--------------------------------------------------------|:-----------------------------------|:--------------------------------------------------------------------------------------------------|
@@ -4734,9 +4734,9 @@ Box/.style={inner xsep=2pt,
 
 :::
 
-Activation quantization refers to the process of quantizing the activation values, or outputs of the layers, during model inference. This quantization can reduce the computational resources required during inference, particularly when targeting hardware optimized for integer arithmetic. It introduces challenges related to maintaining model accuracy, as the precision of intermediate computations is reduced. For instance, in a CNN, the activation maps (or feature maps) produced by convolutional layers, originally represented in FP32, may be quantized to INT8 during inference. This can significantly accelerate computation on hardware capable of efficiently processing lower-precision integers.
+Activation quantization maps layer outputs to a lower-precision representation during inference. It reduces intermediate payloads and can reduce arithmetic cost on hardware with an efficient integer path, but it also introduces error between layers. For example, a CNN may convert FP32 feature maps to INT8 before later convolutions. The benefit is greatest when consecutive operators remain on the integer path; isolated quantized operators may pay conversion cost without reducing enough work. Whether activation quantization improves latency therefore depends on supported kernels, scale handling, tensor lifetimes, and any quantize or dequantize boundaries that remain in the exported graph.
 
-Activation-aware methods such as **Activation-Aware Weight Quantization (AWQ)**\index{Quantization!activation-aware weight (AWQ)}[^fn-awq-salient-weights] compress and accelerate LLMs. This approach is particularly relevant for our GPT-2/Llama lighthouse, which is memory-bandwidth bound. By protecting only a small fraction of the most salient weights (approximately 1 percent) based on activation magnitude, AWQ enables effective INT4 weight quantization. This reduces the memory traffic required to load a large parameter set during token generation, directly addressing a common bottleneck in generative inference [@lin2023awq].
+Activation-aware methods such as **Activation-Aware Weight Quantization (AWQ)**\index{Quantization!activation-aware weight (AWQ)}[^fn-awq-salient-weights] target weight traffic in LLM inference. This approach is relevant to the GPT-2/Llama lighthouse when decoding is limited by loading model weights. By protecting a small fraction of salient weight channels based on activation magnitude, AWQ supports INT4-class weight quantization while controlling task degradation. Packed low-bit weights can reduce the memory traffic required during token generation when the runtime provides a matching kernel [@lin2023awq].
 
 [^fn-awq-salient-weights]:  **Activation-Aware Weight Quantization (AWQ)**\index{Quantization!AWQ bandwidth reduction}: Salience is determined by activation magnitude, not weight magnitude--a distinction that matters because a small weight multiplied by a large activation produces a large output contribution. AWQ protects about 1 percent of salient weight channels through activation-aware scaling while quantizing most weights to low-bit formats, so a 7-billion-parameter FP16 weight set that would occupy about 14 GB can move toward an INT4-class weight footprint of about 3.5 GB before metadata, scales, and kernel-specific packing overheads [@lin2023awq].
 
@@ -4746,7 +4746,7 @@ After determining the type and granularity of the clipping range, practitioners 
 
 In **Static Quantization**\index{Static Quantization!definition}, the clipping range is precalculated and remains fixed during inference. This method introduces no runtime range-estimation overhead. Quantize, requantize, or dequantize operations may still remain. The fixed range can, however, lead to lower accuracy compared to dynamic quantization. A typical implementation involves running calibration inputs to compute the typical activation range [@jacob2018; @yao2021hawq].
 
-**Dynamic Quantization**\index{Dynamic Quantization!definition} instead calculates the range for each activation map at runtime. This allows the quantization process to adjust based on the input, potentially yielding higher accuracy since the range is computed per activation. The trade-off is higher computational overhead, since the range must be recalculated at each step, which can be expensive at scale.
+**Dynamic Quantization**\index{Dynamic Quantization!definition} instead calculates a range at runtime for selected tensors. The range can adapt to the current input rather than rely on one calibration distribution, which may reduce clipping error. The trade-off is runtime work for range estimation and conversion; the net quality and latency effects depend on the operators and backend.
 
 These timing and granularity decisions interact with the broader choice of quantization methodology. @Tbl-quantization_methods compares post-training quantization, quantization-aware training, and dynamic quantization, each offering distinct strengths and trade-offs for different deployment scenarios.
 
