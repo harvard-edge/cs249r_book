@@ -2611,7 +2611,7 @@ When labeling budget, redundancy, rare classes, privacy, and convergence speed a
 
 Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
 
-| **Constraint**                 | **Best Technique**        | **Why**                                              |
+| **Constraint**                 | **Candidate Technique**   | **Why**                                              |
 |:-------------------------------|:--------------------------|:-----------------------------------------------------|
 | **Limited labeling budget**    | Active Learning           | Maximizes label ROI by selecting informative samples |
 | **High redundancy in data**    | Deduplication + Coreset   | Removes waste before training begins                 |
@@ -2620,7 +2620,7 @@ Once the dominant constraint is named, @tbl-technique-selection compares which t
 | **Privacy requirements**       | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
 | **Large model, small dataset** | Knowledge Distillation    | Use teacher model's knowledge as "data"              |
 
-: **Technique Selection Guide by Primary Constraint**: Recommended data selection techniques mapped to the dominant resource constraint in the ML pipeline. {#tbl-technique-selection .striped .hover}
+: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
 
 @Tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The decision tree in @fig-technique-decision-tree structures the selection process hierarchically: start by identifying the primary bottleneck, then follow the branches to narrow the field.
 
@@ -2697,7 +2697,7 @@ Each path requires a structured assessment because the same dataset symptom can 
 Identify which resource constraint most severely limits the training pipeline:
 
 - **Labeling cost**: Label-efficiency techniques such as active learning, semi-supervised learning, and self-supervised learning maximize the value extracted from each human annotation.
-- **Compute cost**: Dataset reduction through coreset selection, deduplication, and curriculum learning reduces the number of training iterations required.
+- **Compute cost**: Coreset selection and deduplication can reduce processed samples, while a validated curriculum may reduce the steps needed to reach a target metric.
 - **Data scarcity**: Data creation through augmentation, synthesis, and distillation expands the effective training set beyond what raw collection provides.
 
 This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
@@ -2734,11 +2734,11 @@ $$
 \text{ROI} = \frac{\text{(Baseline Cost)} - \text{(Technique Cost + Implementation Cost)}}{\text{Technique Cost + Implementation Cost}}
 $$
 
-A technique with high theoretical gains but high implementation cost may deliver lower ROI than a simpler approach. Deduplication, for example, often achieves the highest ROI because implementation cost is minimal and gains are immediate. Active learning, by contrast, requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles the team expects to amortize that investment across.
+A technique with high theoretical gains but high implementation cost may deliver lower ROI than a simpler approach. Exact deduplication is often an inexpensive first candidate because hashing is simple and repeated bytes are easy to identify, although downstream benefit still depends on corpus redundancy and intentional sample weighting. Active learning requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles amortize that investment.
 
 #### Step 4: Combine techniques {.unnumbered}
 
-The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to use knowledge learned from massive unlabeled corpora.
+The techniques in this chapter are not mutually exclusive, but combining them does not guarantee additive gains. One possible workflow deduplicates the raw corpus, applies a coverage-aware coreset method, orders selected samples with a validated curriculum, and augments them at runtime. A pretrained representation can supply a different starting point from random initialization. Each added stage must earn its place because overlapping filters can remove the same examples while their overheads continue to accumulate.
 
 *Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
 
@@ -2792,12 +2792,12 @@ class SelectionBottleneckAnchor:
     coreset_pct_str = fmt_percent(coreset_pct / 100, precision=0, commas=False, style='prose')
 ```
 
-Dynamic data selection introduces a new bottleneck: selection latency\index{Latency!selection, dynamic selection bottleneck}. In standard training, the data loader reads the next batch sequentially. In active learning or curriculum learning, the system must evaluate a selection function $f(x)$ over a large candidate pool to determine the next batch. Concretely, scoring a `{python} SelectionBottleneckAnchor.dataset_size_str` dataset with a large model can take `{python} SelectionBottleneckAnchor.scoring_time_hours_str`, potentially negating the savings from a `{python} SelectionBottleneckAnchor.coreset_pct_str` coreset if not performed with a smaller proxy model. The systems trade-off requires that the compute cost of running selection inference over the unlabeled pool ($O_{\text{select}}$) must be strictly less than the compute saved by training on the pruned dataset ($O_{\text{pruned}}$); otherwise, selection overhead inflates total training time despite reducing sample counts.
+Dynamic data selection introduces a new bottleneck: selection latency\index{Latency!selection, dynamic selection bottleneck}. A conventional loader follows a predetermined sampling plan, whereas active learning or adaptive curricula may evaluate a selection function $f(x)$ over a large candidate pool before forming later batches. Concretely, scoring a `{python} SelectionBottleneckAnchor.dataset_size_str` dataset with a large model can take `{python} SelectionBottleneckAnchor.scoring_time_hours_str`, potentially negating the savings from a `{python} SelectionBottleneckAnchor.coreset_pct_str` coreset if not performed with a smaller proxy model. The systems trade-off requires that selection cost remain below the training work the subset saves; otherwise, sample counts fall while end-to-end cost rises.
 
 For a selection strategy to be systems-efficient, selection plus subset training must cost less than training on the full dataset. Let $T_{\text{selection}}$ be wall-clock time spent scoring the pool, $T_{\text{train}}(D)$ be wall-clock training time for a dataset of size $D$, and $D_{\text{subset}}$ and $D_{\text{total}}$ be the retained and full sample counts. @Eq-selection-inequality expresses this break-even condition, the **Selection Inequality**\index{Selection Inequality!definition}.
 $$ T_{\text{selection}} + T_{\text{train}}(D_{\text{subset}}) < T_{\text{train}}(D_{\text{total}}) $$ {#eq-selection-inequality}
 
-If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, producing negative ROI. A concrete scenario illustrates this trade-off.
+Both training terms must reach the same target metric under comparable schedules, and $T_{\text{selection}}$ must include recurring rescoring and coordination. If $f(x)$ repeatedly scores the pool with a large model, selection can consume the training savings and produce negative ROI. A concrete scenario illustrates this trade-off.
 
 Equivalently, we can isolate the allowable selection overhead: $T_{\text{selection}} < T_{\text{train}}(D_{\text{total}}) - T_{\text{train}}(D_{\text{subset}})$. The allowable overhead therefore depends on how much training work the subset saves; no fixed percentage applies across workloads.
 
@@ -2899,7 +2899,7 @@ class SelectionInequalityCalc:
 
 :::
 
-Data selection algorithms are only beneficial if their compute overhead is less than the training time saved on the reduced dataset. Compare the three stacked time bars in @fig-selection-inequality, observing how expensive selection functions consume all subset training savings in computational overhead.
+Data selection improves end-to-end efficiency only if its overhead is smaller than the training time saved on the reduced dataset. Compare the three illustrative stacked time bars in @fig-selection-inequality, observing how an expensive selection function can consume all subset-training savings.
 
 ::: {#fig-selection-inequality fig-env="figure" fig-pos="htb" fig-cap="**The Selection Inequality**: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings." fig-alt="Stacked bar chart comparing three approaches: Baseline shows a single tall bar (100) for full training; Efficient Selection shows two short stacked bars (5 selection overhead plus 40 subset training) totaling 45 with a 55 percent savings annotation; Expensive Selection shows two stacked bars (60 selection overhead plus 40 subset training) totaling 100 with a No savings annotation."}
 
@@ -2981,7 +2981,7 @@ plt.close()
 
 :::
 
-The lesson from @fig-selection-inequality is unambiguous: selection overhead can negate the benefits of training on a smaller subset. The cost also compounds when selection runs every epoch instead of once: a per-epoch selection step that costs as much as one epoch of training spends as much compute on selection as on the subset itself, erasing any savings.
+The lesson from @fig-selection-inequality is unambiguous: selection overhead can negate the benefits of training on a smaller subset. The cost compounds when selection runs every epoch instead of once; if per-epoch scoring approaches the training work saved by the subset, the net advantage disappears.
 
 ### Hardware empathy: The random-access penalty {#sec-data-selection-hardware-empathy-random-access-penalty-ef16}
 
@@ -3072,7 +3072,7 @@ Data selection is not free. It introduces a new term to the iron law and a new I
 
 Equation checks:
 
-- [ ] **Selection cost**: can you explain why $T_{\text{selection}} + T_{\text{train}}(\text{subset})$ must be less than $T_{\text{train}}(\text{full})$ for the technique to be valid?
+- [ ] **Selection cost**: can you explain why $T_{\text{selection}} + T_{\text{train}}(\text{subset})$ must be less than $T_{\text{train}}(\text{full})$ for the technique to reduce end-to-end training time?
 - [ ] **Overhead management**: how do proxy models and cached embeddings keep $T_{\text{selection}}$ low?
 
 Systems implications:
@@ -3196,7 +3196,7 @@ class DataEchoingRoi:
 
 Echoing can introduce correlations when the same example appears within or across nearby batches, so implementations must preserve adequate shuffling and validate the target metric. @choi2020dataechoing did not observe a negative batch-normalization interaction in their ResNet-50 or Single Shot MultiBox Detector (SSD) experiments, but that result does not guarantee the same behavior for every workload.
 
-The engineering patterns in this section provide production-ready implementations of data selection principles. Proxy selection reduces the computational cost of identifying valuable samples. Sharded formats and shuffle buffers reconcile random access algorithms with sequential storage hardware. Data echoing maximizes GPU utilization when the data pipeline becomes the bottleneck. Together, they transform data selection from an algorithmic idea into a deployable system.
+The engineering patterns in this section make data selection deployable. Proxy selection can reduce scoring cost when its ranking transfers to the target model. Sharded formats and shuffle buffers reconcile randomized sampling with sequential storage access, while data echoing can recover idle accelerator time when input service is the bottleneck. Each pattern changes a different part of the pipeline, and each still requires workload-specific measurement of quality and end-to-end time.
 
 Engineering patterns solve the *how*, but a more fundamental question remains: whether to invest in data selection at all. A deduplication pipeline that costs \$50K to build but saves \$10K per training run requires a cost model to justify. @Sec-data-selection-cost-modeling-9b02 provides the quantitative framework for these investment decisions.
 
@@ -3440,7 +3440,7 @@ Suppose labeling costs `{python} BreakevenCalc.cost_label_str`, active learning 
 \text{ROI} = \frac{\text{`{python} BreakevenCalc.cost_random_total_str`} - \text{`{python} BreakevenCalc.cost_active_total_str`}}{\text{`{python} BreakevenCalc.cost_active_total_str`}}= \text{`{python} BreakevenCalc.roi_pct_math`}
 \end{gather*}
 
-The break-even occurs when the labeling reduction equals the selection overhead. If active learning only reduces labeling by 20 percent, and selection overhead is high, ROI may be negative.
+Break-even occurs when the cost of the labels avoided equals the selection overhead. If active learning reduces labeling by only 20 percent while scoring and retraining remain expensive, ROI may be negative.
 
 ### Amortization across training runs {#sec-data-selection-amortization-across-training-runs-f6b8}
 
@@ -3513,7 +3513,7 @@ class DeduplicationAmortization:
 \endgroup
 ```
 
-The ROI pattern in @tbl-amortized-roi reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions:
+The ROI pattern in @tbl-amortized-roi reveals which circumstances favor infrastructure investment. Three conditions tend to strengthen the return from data-selection investments:
 
 - **Repeated training runs**: Hyperparameter search, model iterations, and scheduled retraining reuse the same selection infrastructure many times.
 - **Shared datasets**: A cleaned or deduplicated corpus can support multiple teams or model architectures.
@@ -3526,9 +3526,9 @@ The ROI pattern in @tbl-amortized-roi reveals which circumstances favor infrastr
 | **10 runs**        |          +`{python} DeduplicationAmortization.roi_10_str` (positive) |
 | **50 runs**        | +`{python} DeduplicationAmortization.roi_50_str` (highly profitable) |
 
-: **Amortized ROI over Multiple Training Runs**: A deduplication pipeline that loses money on its first use becomes highly profitable when amortized across ten-plus runs, illustrating why infrastructure investments should be evaluated over their full expected lifetime. {#tbl-amortized-roi .striped .hover}
+: **Amortized ROI over Multiple Training Runs**: Under this scenario's costs and savings, a deduplication pipeline that loses money on its first use becomes profitable when reused across enough runs. Infrastructure investments should be evaluated over their expected lifetime rather than from one use. {#tbl-amortized-roi .striped .hover}
 
-Deduplication exemplifies a high-transfer investment because it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment.
+Deduplication can be a high-transfer investment because every model using the corpus inherits the storage and repeated-content changes, although quality effects can still differ by task. Task-specific coresets may transfer less reliably across architectures, limiting their amortization potential. For one-off runs, simple techniques such as random sampling or basic augmentation may yield better ROI than methods requiring substantial infrastructure.
 
 The investment decision therefore reduces to a practical split between high-reuse, data-limited workflows and one-off, already-curated ones.
 
