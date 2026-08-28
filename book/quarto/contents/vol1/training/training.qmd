@@ -810,7 +810,7 @@ $$ {#eq-batch-memory-decomposition}
 
 Because the activation term scales with $B$ while parameter and gradient memory stay fixed, doubling the batch doubles the activation working set, and a model that fits comfortably at a small batch can exhaust the 40--80 GB of HBM on a high-end training accelerator once the batch grows. @Sec-model-training-memory-management-c1ec works this budget through layer by layer for \mbox{ResNet-50.}
 
-Larger batches enable more efficient computation through improved parallelism and better memory access patterns. Accelerator utilization efficiency demonstrates this trade-off: larger batches generally expose more parallel work to the accelerator, while very small batches can leave compute units underfilled. Linear scaling rules for large-batch training (scale learning rate proportionally to batch size increase) help maintain convergence speed [@goyal2017accurate].
+Larger batches can enable more efficient computation through improved parallelism and better memory access patterns. Accelerator utilization efficiency demonstrates this trade-off: larger batches generally expose more parallel work to the accelerator, while very small batches can leave compute units underfilled. Linear scaling rules for large-batch training (scale learning rate proportionally to batch size increase) can help maintain convergence speed within an empirically validated range [@goyal2017accurate].
 
 This establishes a central theme in training systems: the hardware-software trade-off between memory constraints and computational efficiency. Training systems must select batch sizes that maximize hardware utilization while fitting within available memory. The optimal choice often requires gradient accumulation when memory constraints prevent using efficiently large batches, trading micro-batch serialization and some overhead for the same effective batch size.
 
@@ -820,7 +820,7 @@ Basic SGD applies one learning rate to every parameter, which can make optimizat
 
 ##### Momentum-based methods {#sec-model-training-momentumbased-methods-504c}
 
-Momentum methods\index{Momentum!optimization physics}\index{Momentum!memory overhead}[^fn-momentum-polyak-acceleration] address SGD's oscillation problem by accumulating a velocity vector across iterations, smoothing out noisy gradient directions. From a systems perspective, this smoothing comes at a cost: the training system must maintain a velocity vector with the same dimensionality as the parameter vector, effectively doubling the memory needed for optimization state.
+Momentum methods\index{Momentum!optimization physics}\index{Momentum!memory overhead}[^fn-momentum-polyak-acceleration] address SGD's oscillation problem by accumulating a velocity vector across iterations, smoothing out noisy gradient directions. From a systems perspective, this smoothing comes at a cost: the training system must maintain a velocity vector with the same dimensionality as the parameter vector. Parameters plus this auxiliary state therefore occupy twice the parameter storage before gradients and activations are counted.
 
 [^fn-momentum-polyak-acceleration]: **Momentum**\index{Momentum!memory overhead}: Borrowed from physics, where momentum (mass $\times$ velocity) describes an object's tendency to continue moving. The metaphor explains the design because accumulated velocity smooths noisy gradients and can reduce the iterations needed for convergence. The systems cost is one additional velocity value per parameter, while Adam maintains two moment values per parameter.
 
@@ -914,7 +914,7 @@ class OptimizerScenarios:
 
 #### Optimization algorithm system implications {#sec-model-training-optimization-algorithm-system-implications-f9f2}
 
-The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Optimizer auxiliary memory increases progressively from SGD (no auxiliary state) through Momentum (one velocity vector) to Adam (two moment vectors), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-rate-bounds] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. At GPT-2 scale, this overhead becomes a first-order memory constraint.
+The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Optimizer auxiliary memory increases progressively from SGD (no auxiliary state) through Momentum (one velocity vector) to Adam (two moment vectors), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-rate-bounds] benefits. Adam may require fewer iterations for some workloads, but its per-iteration memory and computation overhead can reduce training speed on memory-constrained systems. At GPT-2 scale, this overhead becomes a first-order memory constraint.
 
 [^fn-convergence-rate-bounds]: **Convergence**\index{Convergence!time-memory trade-off}: A run reaches its stopping criterion when the selected training or validation metric no longer improves enough to justify additional work. The required steps depend on the model, data, optimizer, schedule, batch size, and target quality. Fewer steps can reduce wall-clock time and cost, but adaptive optimizers add state whose memory and traffic must be included in the system budget.
 
@@ -1317,7 +1317,7 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 **Bottleneck**
 
-- [ ] Activation memory: Do you understand why activations (stored for backprop) dominate memory usage, often exceeding parameter size by 10$\times$?
+- [ ] Activation memory: Do you understand why activations stored for backpropagation can dominate memory usage and, for some model shapes and training recipes, exceed parameter size by more than 10$\times$?
 - [ ] Optimization strategy: Can you explain how gradient checkpointing trades compute (re-calculating activations) for memory capacity?
 - [ ] **Memory estimate**: for GPT-2 (1.5B parameters) in mixed precision, put a one-significant-figure number on each term in @eq-total-training-memory: weights, gradients, optimizer state, and activations at batch size 32. Which term is largest, and would the total fit a 32 GB accelerator?
 
@@ -2573,7 +2573,7 @@ Modern neural architectures extend beyond these basic matrix operations to inclu
 
 Transformer architectures introduce attention mechanisms\index{Attention Mechanism!similarity computation} (see @sec-network-architectures), which compute similarity scores between sequences. These operations combine matrix multiplications with softmax normalization, requiring efficient broadcasting and reduction operations across varying sequence lengths. The computational pattern here differs significantly from convolutions, demanding flexible execution strategies from hardware accelerators.
 
-Throughout these networks, elementwise operations play a supporting role. Activation functions like ReLU and sigmoid transform values independently and (see @sec-model-training-arithmetic-intensity-training-bottlenecks-4446) are memory-bandwidth-bound rather than compute bound. Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
+Throughout these networks, elementwise operations play a supporting role. Standalone implementations of activation functions such as ReLU and sigmoid transform values independently and are often memory-bandwidth-bound rather than compute-bound (see @sec-model-training-arithmetic-intensity-training-bottlenecks-4446). Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
 
 Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size groups of threads called warps\index{Warp!GPU execution unit}[^fn-warp-execution-model] on NVIDIA architectures or wavefronts on AMD architectures. Efficient matrix dimensions depend on the kernel's thread-block and tile mapping, including any alignment requirements imposed by Tensor Core instructions.
 
@@ -2676,7 +2676,7 @@ class VRAMRequirements:
 
 :::
 
-The total memory scales linearly with batch size (@eq-activation-memory-per-batch), which means the practical complexity lies not in the scaling law itself but in how these costs interact across layers.
+Only activation memory scales approximately linearly with batch size (@eq-activation-memory-per-batch); model and optimizer state are fixed. The practical complexity lies in how these costs interact across layers.
 
 ```{python}
 #| echo: false
@@ -2925,11 +2925,11 @@ fill=white, fill opacity=0.85, text opacity=1, inner sep=2pt, pos=1] {24 GB Limi
 
 :::
 
-The bars make the ranking concrete: BF16 Adam alone pushes past the single-GPU budget line, Adafactor and 8-bit Adam bring optimizer state back within it, and 8-bit GaLore leaves the most headroom of all by computing its updates in a low-rank space.
+The bars make the ranking concrete: BF16 Adam pushes farthest past the single-GPU budget line, and Adafactor, 8-bit Adam, and 8-bit GaLore progressively reduce the overage. Even the smallest illustrated total remains above 24 GB, so another memory-saving technique is still required.
 
 #### Batch size and parameter updates {#sec-model-training-batch-size-parameter-updates-4d0b}
 
-Scaling batch size without adjusting learning rate schedules leads to severe convergence degradation. Compare the loss trajectories in @fig-linear-scaling-failure, observing how the fixed learning rate slows convergence relative to the scaled run.
+Scaling batch size without retuning the learning-rate schedule can degrade convergence. Compare the illustrative loss trajectories in @fig-linear-scaling-failure, observing how the fixed learning rate slows convergence relative to the scaled run in this scenario.
 
 ::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Linear-Scaling Scenario**: Synthetic training-loss curves (arbitrary units) compare a batch-32 baseline with batch 256 under a fixed or linearly scaled learning rate. The curves illustrate why increasing batch size may require retuning; they are not measured traces or a guarantee that linear scaling preserves convergence." fig-alt="Synthetic line chart of loss vs. epochs. A batch-32 baseline and a batch-256 run with a scaled learning rate converge faster than the illustrative batch-256 run with a fixed learning rate."}
 
