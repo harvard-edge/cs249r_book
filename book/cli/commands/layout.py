@@ -2,6 +2,7 @@
 ``binder layout`` — PDF page-layout diagnostics.
 
 Subcommands:
+    chapter  — Render one chapter with full-volume numbering and references
     check    — Scan a built PDF for pages with excessive bottom whitespace
                in the main body column, and guess the likely cause (the
                block at the top of the next page that probably forced the
@@ -276,7 +277,39 @@ class LayoutCommand:
                 "Optional. Omit the subcommand when using --vol1/--vol2 for "
                 "the high-level auto-layout planner."
             ),
-            metavar="{collisions,check,margins,overlaps,tables}",
+            metavar="{chapter,collisions,check,margins,overlaps,purpose,tables}",
+        )
+
+        chapter = sub.add_parser(
+            "chapter",
+            help="Render one chapter with full-volume numbering and references.",
+            description=(
+                "Build an isolated chapter quickly while preserving its full-book "
+                "chapter number, starting folio, and external cross-reference text. "
+                "The source QMD is never modified; numbering comes from a trusted "
+                "full-volume LaTeX .aux file."
+            ),
+            epilog=(
+                "Example:\n"
+                "  binder layout chapter ml_workflow --vol1 --aux /tmp/full/Machine-Learning-Systems-Vol1.aux\n\n"
+                "Use this for iterative visual layout work. A full-volume PDF remains "
+                "the authoritative sign-off build. Do not run two mapped renders in "
+                "the same worktree; use separate worktrees for parallel builds."
+            ),
+            formatter_class=_LayoutHelpFormatter,
+        )
+        chapter.add_argument(
+            "chapter",
+            help="Chapter stem (for example ml_workflow) or QMD path relative to book/quarto.",
+        )
+        cvol = chapter.add_mutually_exclusive_group(required=True)
+        cvol.add_argument("--vol1", dest="volume", action="store_const", const="vol1")
+        cvol.add_argument("--vol2", dest="volume", action="store_const", const="vol2")
+        chapter.add_argument(
+            "--aux",
+            type=Path,
+            required=True,
+            help="LaTeX .aux file from the authoritative full-volume source build.",
         )
 
         collisions = sub.add_parser(
@@ -577,6 +610,22 @@ class LayoutCommand:
                 skip_frontmatter=not opts.include_frontmatter,
                 json_out=opts.plan_json,
             )
+        if opts.subcommand == "chapter":
+            from .layout_chapter import render_mapped_chapter
+
+            try:
+                result = render_mapped_chapter(
+                    self.config_manager,
+                    volume=opts.volume,
+                    chapter=opts.chapter,
+                    aux_path=opts.aux,
+                )
+            except (FileNotFoundError, FileExistsError, RuntimeError, ValueError,
+                    subprocess.CalledProcessError) as exc:
+                console.print(f"[red]Mapped chapter build failed:[/red] {exc}")
+                return False
+            console.print(json.dumps(result, indent=2))
+            return True
         if opts.subcommand == "collisions":
             return self._collisions(
                 Path(opts.pdf),

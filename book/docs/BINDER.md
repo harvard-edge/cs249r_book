@@ -27,6 +27,9 @@ Most chapter work needs only **build** (and optionally **preview**). You do not 
 
 Commit as usual; hooks handle validation. Run `./book/binder check all --vol1` only when you want a full local sweep before pushing.
 
+For fast chapter-by-chapter PDF layout iteration with full-volume numbering,
+see [Mapped Chapter Layout Builds](LAYOUT_CHAPTER_BUILDS.md).
+
 ## Public API policy
 
 Binder is the **single source of truth** for book automation in this repository.
