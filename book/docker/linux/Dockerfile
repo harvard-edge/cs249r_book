@@ -269,10 +269,11 @@ RUN echo "🔧 Setting up TeX Live PATH..." && \
 # Step 5.5: Install TeX Live collection packages (POSIX script; long RUN + $$ breaks dash on CI)
 RUN chmod 0755 /opt/install-tl-collections.sh && /opt/install-tl-collections.sh
 
-# Step 5.6: TeX Live cleanup and completion
-RUN echo "🧹 Cleaning up TeX Live installer..." && \
-    rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
-    echo "✅ === TEX LIVE INSTALLATION COMPLETE ===" && \
+# Step 5.6: TeX Live completion report
+# The installer payload is removed by install-texlive-base.sh, inside the SAME RUN that
+# downloads it. Removing it here instead only wrote a whiteout: `docker build` commits one
+# layer per RUN, so the 18,085,723 bytes stayed in the image and shipped in every pull.
+RUN echo "✅ === TEX LIVE INSTALLATION COMPLETE ===" && \
     echo "📊 Free disk space after: `df -h / | tail -1 | awk '{print $$4}'`" && \
     echo "📊 TeX Live disk usage: `du -sh /usr/local/texlive 2>/dev/null || echo 'N/A'`"
 

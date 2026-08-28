@@ -102,3 +102,12 @@ if [ "$INSTALL_SUCCESS" = false ]; then
     exit 1
 fi
 echo "📦 TeX Live base system installed"
+
+# Remove the installer payload HERE, in the same layer that created it.
+# `docker build` commits one layer per RUN and a layer can only add a whiteout entry, so an
+# `rm` in a later RUN does not reclaim anything -- the bytes ship in every pull. Nothing
+# after this point reads the payload: install-tl-collections.sh reads only /tmp/tl_packages
+# and drives tlmgr from /usr/local/texlive.
+echo "🧹 Removing installer payload in this layer..."
+rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz
+echo "✅ Installer payload removed"
