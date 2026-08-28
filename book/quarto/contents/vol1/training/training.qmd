@@ -5787,7 +5787,7 @@ dashed,line width=1pt,fit=(2T1)(2T4)(2B3)](F2){};
 
 :::
 
-Data parallelism's appeal lies in its simplicity and efficiency. Each GPU runs the identical forward-backward computation, just on different data. The only coordination required is averaging gradients at the end of each step---a single synchronization point per iteration. This makes data parallelism the natural first strategy to evaluate when models fit in GPU memory. Frameworks like PyTorch's `DistributedDataParallel` and TensorFlow's `MirroredStrategy` automate the gradient synchronization, making multi-GPU data parallelism nearly as simple as single-GPU training.
+Data parallelism's appeal lies in its simplicity and efficiency. Each GPU runs the same forward-backward computation on different data, and replicas agree on gradients before updating parameters. Modern implementations bucket and overlap reductions with backpropagation. This makes data parallelism the natural first strategy when models fit in GPU memory. PyTorch's `DistributedDataParallel` and TensorFlow's `MirroredStrategy` automate synchronization, keeping the programming model close to single-GPU training despite per-iteration communication.
 
 Unsharded data parallelism has a hard constraint: every GPU holds a complete model replica and ordinarily its local optimizer state. A 7-billion-parameter model uses 14 GB for FP16 weights alone, before gradients, optimizer states, or activations. Sharded data parallelism (such as the Zero Redundancy Optimizer, or ZeRO) distributes that state across devices: ZeRO-1 shards optimizer states, ZeRO-2 shards gradients, and ZeRO-3 (or FSDP) shards model parameters; otherwise, a model that exceeds local memory requires pipeline or tensor partitioning.
 
@@ -6188,7 +6188,7 @@ When single-node multi-GPU training remains insufficient, distributed training\i
 
 Recall the energy-movement invariant\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: data movement can cost substantially more energy and time than nearby arithmetic. In distributed training, this asymmetry contributes to the communication tax\index{Distributed Training!communication tax}.
 
-Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{move}}$ across the network) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like mixed precision (@sec-model-training-mixedprecision-training-9218) and gradient compression, which reduces communicated gradient bytes through sparsity, quantization, or encoding, address this directly by managing the physical limits of distributed scaling.
+Synchronizing gradients across GPUs moves megabytes over a network or PCIe every few milliseconds. Uncovered communication lowers utilization, while communication energy raises the run's energy budget; these are distinct costs. Mixed precision (@sec-model-training-mixedprecision-training-9218) and gradient compression reduce bytes through narrower formats, sparsity, quantization, or encoding, addressing both pressures.
 
 :::
 
@@ -6284,7 +6284,7 @@ Once training crosses the node boundary, the strategy must match communication f
 
 Tensor parallelism\index{Tensor Parallelism!operation splitting}\index{Tensor Parallelism!intra-layer splitting} takes a finer-grained approach: rather than assigning whole layers to devices, it splits individual operations across devices. (Sequence parallelism extends this principle by sharding activation tensors along the sequence dimension across devices during long-sequence transformer training.) Consider a transformer's feed-forward layer with a large matrix multiplication $\mathbf{Y} = \mathbf{X}\mathbf{W}$. Tensor parallelism splits the weight matrix $\mathbf{W}$ column-wise across GPUs, so each accelerator computes a portion of the output. The results are then gathered to form the complete output. This strategy is particularly effective for the massive attention and feed-forward layers in large transformers, where a single operation may involve matrices too large for one GPU's memory. Megatron-LM demonstrated that tensor parallelism enables training models with billions of parameters by distributing individual attention heads and feed-forward blocks across devices [@shoeybi2019megatron].
 
-Hybrid strategies combine these approaches because each has different scaling characteristics. @Tbl-hybrid-parallelism-placement shows the usual hierarchy: use the fastest links for the most frequent communication and reserve slower network tiers for less frequent synchronization.
+Hybrid strategies combine these approaches because each has different scaling characteristics. @Tbl-hybrid-parallelism-placement gives a topology-dependent heuristic: place the most frequent communication on the fastest links and less frequent synchronization on slower tiers.
 
 The placement rule is not arbitrary; it maps communication frequency to the fastest available bandwidth tier.
 
@@ -6294,7 +6294,7 @@ The placement rule is not arbitrary; it maps communication frequency to the fast
 | **Pipeline parallelism** | Across nodes within a rack | Moderate communication at layer boundaries                   |
 | **Data parallelism**     | Across racks               | Gradient synchronization once per iteration                  |
 
-: **Hybrid Parallelism Placement**: Production training stacks commonly match communication intensity to available bandwidth by using tensor parallelism within nodes, pipeline parallelism within racks, and data parallelism across racks. {#tbl-hybrid-parallelism-placement tbl-colwidths="[19,25,56]"}
+: **Hybrid Parallelism Placement**: A common heuristic places tensor parallelism within nodes, pipeline parallelism within racks, and data parallelism across racks. Actual placement depends on the model and topology. {#tbl-hybrid-parallelism-placement tbl-colwidths="[19,25,56]"}
 
 Data-parallel systems also rely on collective operations such as AllReduce to combine gradients across devices. The implementation details of collective algorithms, parameter-server and peer-to-peer communication patterns, fault tolerance mechanisms, and scaling-efficiency analysis for training runs spanning thousands of GPUs constitute a specialized domain that builds on the foundations established here.
 
@@ -6521,7 +6521,7 @@ Scaling changes the binding constraint rather than removing it: data parallelism
 
 Scaling trades compute bottlenecks for communication bottlenecks.
 
-- [ ] **Hard limits**: can you identify which limit is binding for a given training run: memory exhaustion, wall-clock time, or dataset scale?
+- [ ] **Hard limits**: can you identify which limit is binding for a given training run: memory capacity, wall-clock time, or input-service rate?
 - [ ] **Single-node first**: can you explain why mixed precision, accumulation, checkpointing, and prefetching should be exhausted before adding devices?
 - [ ] **Data vs. model parallelism**: given a model that does not fit on one GPU, can you justify why data parallelism fails and what model parallelism must partition?
 - [ ] Communication tax: Can you explain why scaling efficiency degrades with GPU count, and what quantity (synchronization fraction) controls the ceiling?
@@ -6764,7 +6764,7 @@ Kernel-level tuning is attractive because GPU utilization is easy to inspect, bu
 
 Training is the phase in which mathematical algorithms, memory management, and hardware acceleration combine to transform data into model parameters. Iterative parameter optimization becomes a substantial engineering challenge at scale. Forward and backward propagation require coordinated matrix operations, memory allocations, and gradient computations that must be balanced against hardware constraints and performance requirements.
 
-Single-machine techniques such as data prefetching, mixed-precision training, FlashAttention, gradient accumulation, and activation checkpointing address different limits in memory use, computational throughput, and convergence stability. Combining them effectively requires an understanding of both algorithmic properties and hardware characteristics. When single-machine limits are reached, distributed approaches such as data parallelism, model parallelism, pipeline parallelism, and tensor parallelism provide paths to further scaling, with increased system complexity.
+Single-machine techniques such as data prefetching, mixed-precision training, FlashAttention, gradient accumulation, and activation checkpointing address input throughput, memory use, computational throughput, and numerical behavior. Combining them effectively requires matching the technique to the binding constraint. When single-machine limits are reached, data, model, pipeline, and tensor parallelism provide paths to further scaling, with increased system complexity.
 
 This co-design principle, where algorithms, software frameworks, and hardware architectures evolve together, shapes large-scale training infrastructure. Matrix operation patterns drove GPU Tensor Core development, which frameworks exposed through mixed-precision APIs, enabling algorithmic techniques like FP16 training that further influenced next-generation hardware design. The chapter's FLOP and memory accounting provides the quantitative basis for comparing optimizers, estimating training cost at scale, and deciding when more hardware will help rather than merely move the bottleneck.
 
@@ -6818,7 +6818,7 @@ class GPT2SummaryChapterRecap:
 
 :::
 
-Practitioners who internalize the iron law can look at a slow training job and classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline prevents teams from treating symptoms with additional hardware. As training runs scale in cost and calendar time, profiling and targeted optimization determine whether iteration remains practical.
+Practitioners can apply the iron law to classify a slow training job: compute-bound (improve arithmetic or algorithms; increase batch only when hardware is underfilled), memory-bound (reduce state or traffic), data-bound (repair the input pipeline), or communication-bound (adjust accumulation or parallelism). This discipline prevents teams from treating symptoms with additional hardware. As training cost and calendar time grow, profiling and targeted optimization determine whether iteration remains practical.
 
 Training is where the iron law becomes a daily instrument. Mixed precision changes effective throughput and memory traffic; checkpointing exchanges memory for recomputation; scaling adds communication. The engineering task is to identify the dominant term and apply the least costly intervention that changes it.
 
