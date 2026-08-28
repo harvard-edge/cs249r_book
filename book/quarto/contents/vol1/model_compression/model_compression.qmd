@@ -2731,23 +2731,23 @@ The framework section established the gap that compression must close: a `{pytho
 
 ***Quantization*** is a model-compression technique that reduces information fidelity by mapping high-precision continuous values to a lower-precision discrete set.
 
-1.  **Significance**: It reduces the memory footprint and bandwidth demand by 4$\times$ (FP32 to INT8) or more, exploiting the inherent robustness of neural networks to low-precision arithmetic.
+1.  **Significance**: FP32-to-INT8 conversion reduces the raw payload per quantized value by 4$\times$. Real artifact size, traffic, and latency also depend on scales, metadata, packing, operator coverage, and the target kernels.
 2.  **Distinction**: Unlike pruning, which reduces the count of parameters, quantization reduces the bit depth of selected weights and/or activations.
 3.  **Common pitfall**: A frequent misconception is that quantization is just "rounding." In reality, it is a lossy mapping that requires careful range estimation and, often, quantization-aware training (QAT) to minimize its impact on accuracy.
 
 :::
 
-Quantization[^fn-quantization-shannon-theory] affects every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower. The bit width therefore becomes a critical systems parameter, directly determining memory bus bandwidth demand, cache footprint, and the silicon area required for multiply-accumulate logic in specialized matrix engines (@sec-hardware-acceleration-numerics-ai-acceleration-f7be).
+Quantization[^fn-quantization-shannon-theory] concerns every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower. Bit width therefore becomes a critical systems parameter. It constrains raw payload size and cache footprint, affects bandwidth demand when values remain packed, and shapes the area and throughput trade-offs of specialized matrix engines (@sec-hardware-acceleration-numerics-ai-acceleration-f7be).
 
 [^fn-quantization-shannon-theory]: **Quantization**\index{Quantization!information-theoretic origin}: Rooted in Shannon's theory of representing continuous signals with discrete values [@shannon1948], reducing FP32 to INT8 collapses over four billion representable values to just 256. Neural networks often tolerate this because trained weights concentrate information in relative magnitudes, not absolute precision: INT8 inference can stay close to the full-precision baseline with appropriate calibration or quantization-aware training, while INT4 and lower-bit methods become more architecture- and method-dependent [@jacob2018; @gholami2022; @shen2020; @lin2023awq]. The systems consequence is that quantization viability must be validated per-model and per-task, not assumed from aggregate benchmarks.
 
-Three system properties change. Memory shrinks because an INT8 model is 4$\times$ smaller than FP32, enabling deployment on devices that could never hold the full-precision weights. Bandwidth demand drops proportionally. Loading INT8 weights requires 4$\times$ less raw memory traffic and can accelerate bandwidth-bound inference, including low-batch large language model (LLM) decoding. Compute cost falls as well, since INT8 arithmetic is faster and cheaper than FP32 on most hardware with dedicated low-precision units [@gupta2015deep; @wang2019benchmarking].
+Three system properties can change. The raw weight payload falls by 4$\times$ from FP32 to INT8, before scale and packing metadata. Weight traffic can fall by a similar factor when values remain packed through the memory path, accelerating bandwidth-bound inference such as some low-batch large language model (LLM) decoding. Compute cost can also fall when the target provides efficient INT8 kernels; unsupported operators, conversions, or fallback paths can erase part of the gain [@gupta2015deep; @wang2019benchmarking].
 
-The accuracy cost of reduced precision varies by model and technique. CNNs typically tolerate INT8 quantization with <1 percent accuracy loss; transformers may require more care. Three approaches in increasing complexity are: **Post-Training Quantization**\index{Post-Training Quantization!definition} (PTQ) for rapid deployment, **Quantization-Aware Training**\index{Quantization-Aware Training!definition} (QAT) for production systems requiring minimal accuracy loss, and **Extreme Quantization**\index{Quantization!extreme (INT4, binary)} (INT4, binary) for the most constrained environments.
+The accuracy cost varies by model, task, quantizer, calibration data, and bit width. Many CNN inference models tolerate INT8 well; transformers, speech models, and outlier-heavy layers may need different granularity, mixed precision, or training-aware methods. The main approaches are **Post-Training Quantization**\index{Post-Training Quantization!definition} (PTQ), **Quantization-Aware Training**\index{Quantization-Aware Training!definition} (QAT), and **Extreme Quantization**\index{Quantization!extreme (INT4, binary)} for lower-bit deployment. They differ in training cost and control, not in a guaranteed ordering of accuracy.
 
-The viability of each approach depends on how much precision a model can shed before accuracy collapses. @Fig-quantization-free-lunch shows two distinct regimes: a "Free Lunch" zone where reducing precision has minimal impact on accuracy, and a "Cliff" where the model fails catastrophically.
+The viability of each approach depends on how much precision a particular model can shed before quality deteriorates. @Fig-quantization-free-lunch illustrates a common qualitative pattern: a plateau where modest precision reduction has little measured effect, followed by a model-dependent cliff. The bit width at either boundary is not universal.
 
-::: {#fig-quantization-free-lunch fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Regimes**: The accuracy-vs-precision trade-off divides into two operational zones. Down to INT8 (green 'free lunch' region), neural networks absorb precision loss with negligible accuracy degradation because relative weight order is preserved; below 4 bits (red 'cliff' region), severe discretization noise and dynamic range collapse trigger sharp accuracy loss requiring specialized fine-tuning." fig-alt="Line chart of accuracy vs. precision (bits). Blue line (CNN) stays flat to INT8 then drops at INT4 and INT3. Red line (transformer) holds higher and drops later, at INT3. Green shaded area marks the Free Lunch Zone of minimal loss."}
+::: {#fig-quantization-free-lunch fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Regimes**: The curves depict a qualitative plateau followed by an accuracy cliff as bit width falls. Their breakpoints are illustrative; actual boundaries depend on the model, layer distributions, quantizer, calibration or training method, and evaluation task." fig-alt="Illustrative line chart of accuracy versus precision. Two example curves remain nearly flat over part of the range and then fall at different low-bit thresholds. Shaded regions mark a low-loss plateau and a model-dependent cliff."}
 
 ```{python}
 #| echo: false
@@ -2849,7 +2849,6 @@ class QuantizationEnergyPhysics:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     energy_dram_pj_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
-    energy_int8_fetch_pj_str = fmt_qty(energy_int8_fetch, pJ, precision=0, commas=False)
     energy_dram_read_bits_value_str = fmt(energy_dram_read_bits, precision=0, commas=False)
     energy_flop_fp32_pj_per_op_str = fmt_energy_per_op(energy_flop_fp32, precision=1, commas=False)
     energy_op_int8_pj_per_op_str = fmt_energy_per_op(energy_op_int8, precision=1, commas=False)
@@ -2863,9 +2862,9 @@ class QuantizationEnergyPhysics:
 
 The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means that, in the physics of silicon, every fetched bit carries an energy cost [@horowitz2014]. @Sec-appdx-machine-foundations-numbers-know-b531 collects the reference energy ratios, and @sec-appdx-machine-foundations-numerical-representations-c889 compares numerical format trade-offs.
 
-According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
+According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, reducing bit width changes the data-movement and compute terms only through the execution path that uses the new representation. A first-order packed-value model gives two useful comparisons:
 
-1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching one 8-bit weight costs ≈ `{python} QuantizationEnergyPhysics.energy_int8_fetch_pj_str`.
+1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: A packed INT8 stream carries one quarter as many raw value bits as FP32. The corresponding energy estimate assumes full transactions are amortized across packed values; caches, metadata, alignment, and transaction size affect the realized cost.
 2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_per_op_str`. An INT8 multiply costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_per_op_str`.
 
 @Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
@@ -3072,11 +3071,11 @@ class EnergyDividend:
     dram_read_vs_int8_mac_mult_str = fmt_multiple(dram_read_vs_int8_mac, precision=1, commas=True)
 ```
 
-### The energy dividend: INT8 vs. FP32 reality {#sec-model-compression-energy-dividend}
+### The energy dividend: INT8 vs. FP32 {#sec-model-compression-energy-dividend}
 
-The memory reduction of quantization is often the primary motivation, but the **Energy Dividend**\index{Energy Dividend!quantization efficiency} is the most significant systems consequence. While moving from FP32 to INT8 precision reduces the model's footprint by exactly 4$\times$, the energy required to perform the math drops much more precipitously.
+Memory reduction is often the first motivation for quantization, but lower-precision arithmetic can also provide an **Energy Dividend**\index{Energy Dividend!quantization efficiency}. Moving from FP32 to INT8 reduces raw value payload by exactly 4$\times$; the operation-level energy ratio can be larger, while end-to-end energy remains workload- and device-dependent.
 
-The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication. An FP32 addition requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition requires only `{python} EnergyDividend.energy_add_int8_pj_per_op_str`. The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. The term "dividend" captures this exchange: the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the machine axis of the D·A·M taxonomy has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
+The framework section's energy hierarchy already exposed this asymmetry. In the reference technology model used here, an FP32 addition costs `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition costs `{python} EnergyDividend.energy_add_int8_pj_per_op_str`, an operation-level ratio of `{python} EnergyDividend.energy_dividend_factor_mult_str`. That ratio is not a device-level battery-life prediction: memory accesses, accumulation precision, control, sensors, and idle power remain. It does explain why many accelerators add specialized low-precision units and why quantization can be necessary when arithmetic or memory energy binds.
 
 ::: {.column-margin}
 ```{=latex}
@@ -3148,7 +3147,7 @@ class KwsQuantImperative:
 
 The keyword spotting (KWS) lighthouse, DS-CNN, operates at the opposite extreme of the iron law from DLRM [@zhang2017hello]. A typical TinyML budget is roughly `{python} KwsQuantImperative.budget_kb_str` of SRAM, and even the purpose-built DS-CNN keyword spotter overshoots it in FP32: its weights occupy `{python} KwsQuantImperative.fp32_kb_str`. Quantized to INT8, the same network shrinks to `{python} KwsQuantImperative.int8_kb_str` and fits with room for runtime buffers. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
 
-In FP32, even the compact DS-CNN architecture moves 4$\times$ more weight bytes than in INT8, and the arithmetic path is also more expensive on hardware with efficient integer units. For an always-on device running on a coin cell battery, that first-order byte reduction can translate directly into longer battery life, but the measured gain still depends on sensor, wake-up, feature-extraction, and idle-power costs. Here, quantization reduces both the data-movement term and the compute term $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ of the iron law.
+In FP32, even the compact DS-CNN architecture moves 4$\times$ more raw weight bytes than in INT8, and the arithmetic path can also cost more on hardware with efficient integer units. For an always-on coin-cell device, that reduction contributes to longer battery life, but sensor, wake-up, feature-extraction, and idle-power costs may dominate. Here, quantization reduces the model's data-movement term and can improve its compute term $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ when the integer path is supported.
 
 :::
 
@@ -3277,8 +3276,6 @@ class QuantizationSavings:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     params_b = round(Models.Language.Llama3_8B.parameters.to(Bparam).magnitude)
-    gpu_mem_fp16 = 24 * GB  # scenario requirement: 24 GB-class GPU for FP16 deployment
-    gpu_mem_int4 = 8 * GB  # scenario requirement: 8 GB-class GPU for INT4 deployment
     bytes_fp16 = BYTES_FP16.to(byte).magnitude
     bytes_int4 = BYTES_INT4.to(byte).magnitude
 
@@ -3304,8 +3301,6 @@ class QuantizationSavings:
     fp16_size_gb_str = fmt_qty_int(fp16_size, GB, commas=False)
     int4_size_gb_str = fmt_qty_int(int4_size, GB, commas=False)
     compression_ratio_mult_str = fmt_multiple(round(ratio), commas=False, precision=0)
-    gpu_mem_fp16_gb_str = fmt_qty(gpu_mem_fp16, GB, precision=0, commas=False)
-    gpu_mem_int4_gb_str = fmt_qty(gpu_mem_int4, GB, precision=0, commas=False)
 ```
 
 ::: {#nbk-model-compression-quantization-savings .callout-notebook title="Quantization savings"}
@@ -3314,15 +3309,13 @@ class QuantizationSavings:
 
 **FP16**
 
-- **Size**: `{python} QuantizationSavings.llm_params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSavings.fp16_bytes_value_str` bytes (16-bit) = `{python} QuantizationSavings.fp16_size_gb_str`
-- **Constraint**: Requires `{python} QuantizationSavings.gpu_mem_fp16_gb_str` GPU (for example, A10G, 3090, 4090).
+- **Raw weight size**: `{python} QuantizationSavings.llm_params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSavings.fp16_bytes_value_str` bytes (16-bit) = `{python} QuantizationSavings.fp16_size_gb_str`
+- **Runtime budget**: 16 GB leaves no headroom; a 24 GB-class device is practical.
 
-**INT4 (4-bit Quantization)**
+**INT4**
 
-- **Size**: `{python} QuantizationSavings.llm_params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSavings.int4_bytes_value_str` bytes (INT4) = `{python} QuantizationSavings.int4_size_gb_str`
-- **Constraint**: Fits comfortably on `{python} QuantizationSavings.gpu_mem_int4_gb_str` GPU (for example, RTX 3070, consumer laptops).
-
-**Systems insight**: `{python} QuantizationSavings.compression_ratio_mult_str` compression allows deployment on commodity hardware instead of requiring a larger accelerator primarily for weight storage.
+- **Raw weight size**: `{python} QuantizationSavings.llm_params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSavings.int4_bytes_value_str` bytes (INT4) = `{python} QuantizationSavings.int4_size_gb_str`
+- **Runtime budget**: `{python} QuantizationSavings.int4_size_gb_str` leaves about 4 GB on an 8 GB device for metadata, cache, activations, and workspace.
 
 :::
 
