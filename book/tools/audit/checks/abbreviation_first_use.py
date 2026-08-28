@@ -11,7 +11,9 @@ once and for each abbreviation in the §10.5 canonical-forms table:
   1. Finds the first "canonical introduction" — a match for the
      template `<expansion> (<ABBREV>)` where <expansion> matches
      case-insensitively and allows singular/plural inflection
-     (`convolutional neural networks (CNNs)`).
+     (`convolutional neural networks (CNNs)`). Square brackets also
+     count when they avoid nested parentheses in compact prose
+     (`feature extractors (Histogram of Oriented Gradients [HOG])`).
 
   2. Finds the first "bare use" — a word-boundary match of the
      abbreviation that is NOT inside a canonical introduction,
@@ -71,24 +73,10 @@ RULE_TEXT_OVER = "Do not repeat a full expansion after the chapter introduced it
 # inflection. The abbreviation itself is matched case-sensitively so that
 # `cnn` in lowercase prose doesn't falsely count as an introduction.
 #
-# Deliberately excluded from first-use checking:
-#   - CUDA, cuDNN: §10.5 explicitly says "no expansion needed"
-#   - i.i.d.: statistical convention, universally understood; has dots
-#     which break standard word-boundary detection
-#   - CI/CD: DevOps term with slash punctuation; commonly understood
-#   - vs.: not an abbreviation in the expansion sense
-#   - Baseline CS/ML abbreviations listed in §10.5's exempt list (Round 2,
-#     2026-04-24). These are universally understood by the book's graduate
-#     CS/ML audience and expanding them on every chapter's first use was
-#     judged pedantic. The exempt list includes: CPU/GPU/TPU/ASIC/FPGA/DSA
-#     hardware baseline; CNN/RNN/LSTM/MLP/LLM/ViT/GAN/VAE/MoE model
-#     baseline; JIT/AOT/IR/ONNX compiler baseline; ReLU/Adam/SGD/AD/BPTT/
-#     GEMM/BLAS numerical baseline; SIMD/RISC/MIPS architecture baseline;
-#     NVMe/HBM/DRAM/SRAM memory baseline; JSON protocol baseline; SLA/ROC/
-#     AUC/TCO operations baseline; GDPR/HIPAA legislation (proper nouns);
-#     MAC/IOPS/NaN numerical baseline. See §10.5 for the full list and
-#     rationale. These terms should be introduced once in the book (in
-#     their canonical chapter) and may be used bare everywhere else.
+# The YAML registry is authoritative. Terms in `canonical_expansions` are
+# checked; terms listed only in `exempt_baselines` are not. This keeps the
+# implementation synchronized with the editorial rule instead of maintaining
+# a second, inevitably stale exemption list in code comments.
 
 import yaml
 
@@ -125,6 +113,29 @@ _EXCLUDED_FILES = (
 # definition a reader meets cold in the margin. Practice wins here, so the check
 # does not fight it. If the rule is ever reconciled to match, drop this exemption.
 _FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:")
+
+
+def _is_formal_definition_intro(line: str, start: int, end: int) -> bool:
+    r"""Return True for a bold expansion carrying a definition index entry.
+
+    Formal definitions are intentionally self-contained even when running prose
+    introduced the abbreviation earlier.  The house form is:
+
+        **Neural Architecture Search (NAS)**\index{NAS!definition}
+
+    Require both the enclosing bold span and the adjacent ``!definition``
+    index marker so ordinary bold emphasis cannot hide an over-expansion.
+    """
+    open_bold = line.rfind("**", 0, start)
+    if open_bold < 0 or "**" in line[open_bold + 2 : start]:
+        return False
+    close_bold = line.find("**", end)
+    if close_bold < 0 or line[end:close_bold].strip():
+        return False
+    suffix = line[close_bold + 2 :]
+    return bool(
+        re.match(r"\s*\\index\{[^{}]*!definition(?:![^{}]*)?\}", suffix, re.I)
+    )
 
 
 # Markup that may legitimately sit between an expansion and its `(ABBREV)`
@@ -167,17 +178,21 @@ def _expansion_body(expansion, anchored: bool) -> str:
 
 
 def _build_canonical_regex(abbrev: str, expansion) -> re.Pattern:
-    """Regex for `<expansion> (<ABBREV>)` forward canonical introduction.
+    """Regex for a forward canonical introduction.
 
     The expansion part is case-insensitive and allows a trailing `s` for
     singular/plural inflection. The abbreviation part is case-sensitive
-    and also allows `s?`. Whitespace between words in the expansion is
-    flexible to handle line wrapping, and `\\index{}` / bold markup may sit
-    between the expansion and the parenthetical (see `_INTERPOSED`).
+    and also allows `s?`. Either parentheses or square brackets may delimit
+    the abbreviation; the bracket form avoids nested parentheses in compact
+    prose. Whitespace between words in the expansion is flexible to handle
+    line wrapping, and `\\index{}` / bold markup may sit between the expansion
+    and the delimiter (see `_INTERPOSED`).
     """
     # Case-insensitive expansion, case-sensitive abbreviation.
     expansion_re = _expansion_body(expansion, anchored=True)
-    pattern = f"(?i:{expansion_re})" + _INTERPOSED + r"\(" + re.escape(abbrev) + r"s?\)"
+    abbrev_re = re.escape(abbrev) + r"s?"
+    delimiter_re = rf"(?:\({abbrev_re}\)|\[{abbrev_re}\])"
+    pattern = f"(?i:{expansion_re})" + _INTERPOSED + delimiter_re
     return re.compile(pattern)
 
 
@@ -403,7 +418,13 @@ def check(
                             continue
                         if abbrev not in intro_line:
                             intro_line[abbrev] = line_num
-                        if is_body_prose and not _FOOTNOTE_DEF_RE.match(line.lstrip()):
+                        if (
+                            is_body_prose
+                            and not _FOOTNOTE_DEF_RE.match(line.lstrip())
+                            and not _is_formal_definition_intro(
+                                line, m.start(), m.end()
+                            )
+                        ):
                             intro_body.setdefault(abbrev, []).append(
                                 (line_num, m.start(), line)
                             )
@@ -513,11 +534,9 @@ def check(
 # "under:ABBREV" / "over:ABBREV" markers. The driver runs `check` on the text
 # as if it were a single chapter file and compares.
 #
-# NOTE (2026-08-17): these cases previously exercised CNN / RNN / LLM / MLP,
-# which moved to the §10.5 exempt baseline in the Round-2 change of 2026-04-24.
-# The suite had been red for six of seventeen cases ever since, so a genuine
-# regression would not have been noticed. Every case now uses an abbreviation
-# the checker actually tracks.
+# Every case uses an abbreviation in the authoritative YAML registry. Avoid
+# hard-coding assumptions about which terms are exempt here; the registry may
+# change as the editorial policy evolves.
 
 _TESTS = [
     # ---- Positive: bare use before canonical introduction ----
@@ -560,6 +579,13 @@ _TESTS = [
         "plural introduction covers plural bare use",
         "Directed acyclic graphs (DAGs) dominate graph compilers.\n"
         "The DAGs are then fused.\n",
+        set(),
+    ),
+    (
+        "square-bracket introduction avoids nested parentheses",
+        "The extractor suite (Histogram of Oriented Gradients [HOG]) "
+        "feeds a classifier.\n"
+        "The HOG features are then normalized.\n",
         set(),
     ),
     (
@@ -688,6 +714,19 @@ _TESTS = [
         "\n"
         "[^fn-dag]: **Directed Acyclic Graph (DAG)**: The scheduling structure.\n",
         set(),
+    ),
+    (
+        "formal bold definition repeating the expansion is exempt",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "**Neural Architecture Search (NAS)**\\index{NAS!definition} "
+        "automates architecture design.\n",
+        set(),
+    ),
+    (
+        "bold emphasis without a definition index is still over-expansion",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "Later, **neural architecture search (NAS)** narrows the space.\n",
+        {"over:NAS"},
     ),
     (
         "three body expansions flag the second and third",

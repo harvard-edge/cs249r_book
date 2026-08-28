@@ -186,8 +186,8 @@ def scan(
     persistent accept-list at `accept_list_path` (default:
     book/tools/audit/accepted_fps.json) is applied: any issue whose
     (category, repo-relative-file, raw-line) triple matches an entry is
-    flipped from `open` to `accepted` and tagged with the §10.9 rule that
-    justifies it. See book/tools/audit/accept_list.py.
+    flipped from `open` to `accepted` and tagged with the reviewed rule or
+    layout exception that justifies it. See book/tools/audit/accept_list.py.
     """
     files = resolve_scope(scope)
     if verbose:
@@ -254,8 +254,8 @@ def scan(
         )
 
     # Apply the persistent accept-list (Pass 16 Item A). This is the stage
-    # where editorially-verified scanner FPs get flipped from `open` to
-    # `accepted`. Runs after all check modules so the accept-list can match
+    # where editorially reviewed scanner exceptions get flipped from `open`
+    # to `accepted`. Runs after all check modules so the accept-list can match
     # issues from any category, and runs regardless of --categories filter
     # (matching is keyed on category so off-category entries are ignored).
     if use_accept_list:
