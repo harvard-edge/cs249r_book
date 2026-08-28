@@ -32,7 +32,7 @@ engine: jupyter
 
 _Why does training data function like source code in a machine learning system?_
 
-In conventional software, programmers write logic that computers execute. In machine learning, programmers write optimization procedures that extract operational logic from data. This inversion makes training data resemble source code: changing it can change the learned system when the model is retrained, even if no traditional code changes. A dataset with subtle labeling inconsistencies produces a model with subtle behavioral inconsistencies. A dataset missing edge cases produces a model that fails on edge cases. A dataset reflecting historical biases produces a model that perpetuates those biases. A model trained only on that dataset cannot infer task-relevant evidence absent from it, and systematic label errors can propagate into learned behavior. Unlike traditional source code, which sits inert until a programmer modifies it, the operating distribution can shift as the world changes, potentially changing production performance even when nothing in the codebase has been touched. Data engineering can consume substantial project effort because the work is consequential. Every decision in the data pipeline (what to collect, how to label, when to filter, how to split) propagates forward to constrain model architecture, training dynamics, and deployment viability. Data engineering is therefore not preprocessing but programming in a different language, one where quality control, versioning, and monitoring determine whether the compiled system works today and continues working tomorrow. In D·A·M terms, the pipeline itself is a data-machine co-design problem: however well curated the data, the algorithm can only learn as fast as the machine can deliver it.
+In conventional software, programmers write logic that computers execute. In machine learning, programmers write optimization procedures that extract operational logic from data. This inversion makes training data resemble source code: changing it can change the learned system when the model is retrained, even if no traditional code changes. Subtle labeling inconsistencies can induce behavioral inconsistencies; missing edge cases can leave corresponding failures unmeasured; historical biases can propagate into learned behavior. A model trained only on that dataset cannot infer task-relevant evidence absent from it, and systematic label errors can shape what it learns. Unlike traditional source code, which sits inert until a programmer modifies it, the operating distribution can shift as the world changes, potentially changing production performance even when nothing in the codebase has been touched. Data engineering can consume substantial project effort because the work is consequential. Every decision in the data pipeline (what to collect, how to label, when to filter, how to split) propagates forward to constrain model architecture, training dynamics, and deployment viability. Data engineering is therefore not preprocessing but programming in a different language, one where quality control, versioning, and monitoring determine whether the compiled system works today and continues working tomorrow. In D·A·M terms, the pipeline itself is a data-machine co-design problem: however well curated the data, the algorithm can only learn as fast as the machine can deliver it.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -454,7 +454,7 @@ This feedback loop creates an insidious operational failure mode: silent degrada
 
 **Scenario**: A production credit scoring model suddenly begins rejecting all applicants from a specific geographic region.
 
-**Diagnosis**: An upstream database team altered the `zip_code` field schema from `integer` to `string` ("02139") to support international codes without updating downstream data contracts. The pipeline implicitly cast the field, stripping leading zeros ("2139"), causing the model to treat familiar postal codes as unobserved, high-risk categories.
+**Diagnosis**: An upstream database team altered the `zip_code` field schema from `integer` to `string` ("02139") to support international codes without updating downstream data contracts. A legacy downstream transform still coerced the string back to an integer before serializing it, stripping the leading zero ("2139") and causing the model to treat a familiar postal code as an unobserved, high-risk category.
 
 **Systems lesson**: Unenforced feature boundaries create pipeline jungles where upstream schema modifications cause silent downstream model failures. Versioned data contracts with strict schema and range validation prevent cross-system data corruption.
 
@@ -732,7 +732,7 @@ pics/target/.style = {
 
 :::
 
-These four operational foundations establish the trade-off space for every architectural decision in this chapter. Optimizing for throughput (Efficiency) without rigorous schema validation (Consistency) accelerates pipeline execution at the cost of training-serving skew, while exhaustive auditing (Quality and Lifecycle) introduces storage and computation overheads that directly constrain training iteration velocity.
+These four operational foundations establish the trade-off space for every architectural decision in this chapter. Prioritizing scalability without quality validation or reliability contracts can increase throughput while allowing bad or inconsistent data to propagate. Conversely, exhaustive governance controls can add storage and computation overhead that constrains training iteration velocity.
 
 Reliability asks whether the same enrollment pipeline keeps working when the device, network, or user behavior is imperfect. A pipeline that produces excellent wake-word examples in a laboratory but fails during intermittent connectivity, battery pressure, or microphone glitches delivers no value in the user's home. Error handling, retries, local buffering, and graceful degradation turn the quality rule into a usable system: the device can request another utterance, defer upload until connectivity returns, or preserve a known-good enrollment rather than silently accepting corrupted audio.
 
@@ -754,7 +754,7 @@ Recommendation systems\index{Recommendation System!scalability challenge} built 
 
 : **DLRM Scalability Profile**: Recommendation models stress data engineering along memory capacity and sparse-access bandwidth rather than compute. {#tbl-data-engineering-dlrm-scalability tbl-colwidths="[10,29,61]"}
 
-Because categorical lookups act as uncoalesced memory gathers across terabytes of table state, the ingestion stage rapidly shifts from a throughput-bound streaming problem to a network- and memory-capacity bottleneck. Mitigating this asymmetry requires the feature-store caching and table-partitioning strategies developed later in the pipeline lifecycle.
+At ingestion, high-cardinality categorical IDs remain compact records in a throughput-bound stream. The network- and memory-capacity bottleneck emerges later, when training or serving must fetch sparse embeddings from terabytes of partitioned table state. Mitigating this asymmetry requires the feature-store caching and table-partitioning strategies developed later in the pipeline lifecycle.
 
 :::
 
@@ -886,7 +886,7 @@ class FalsePositiveTarget:
 ```{=latex}
 \vspace*{-3.5ex}
 ```
-**Systems insight**: Standard accuracy metrics (for example, "99 percent accuracy") are meaningless here. We must evaluate specifically on false accepts per hour (FA/Hr)\index{False Accepts per Hour}.
+**Systems insight**: Aggregate accuracy (for example, "99 percent accuracy") is insufficient here. Evaluation must report false accepts per hour (FA/Hr)\index{False Accepts per Hour} together with the corresponding false-rejection behavior.
 
 :::
 
@@ -1162,14 +1162,14 @@ The scenario combines these choices with 13 MFCCs and the computed 750K real-lab
 \renewcommand{\arraystretch}{1.35}
 ```
 
-| **Choice**            | **Selection**                                   | **Rationale**                                                                                                   |
-|:----------------------|:------------------------------------------------|:----------------------------------------------------------------------------------------------------------------|
-| **Sampling rate**     | 16 kHz                                          | +3% accuracy worth 2$\times$ storage within budget                                                              |
-| **MFCC coefficients** | 13                                              | Reduces feature-state memory and compute; final fit requires measurement                                        |
-| **Training examples** | 750K real + illustrative synthetic augmentation | Human-label count follows from the budget; synthetic volume is a scenario choice                                |
-| **Data diversity**    | Noisy + clean mix                               | Critical for real-world deployment                                                                              |
-| **Inference**         | Local, quantized                                | Quantization reduces footprint; the final 64 KB fit requires the compression analysis in @sec-model-compression |
-| **Augmentation**      | Heavy synthetic                                 | 10$\times$ cost efficiency                                                                                      |
+| **Choice**            | **Selection**                                   | **Rationale**                                                                                                          |
+|:----------------------|:------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------|
+| **Sampling rate**     | 16 kHz                                          | +3% accuracy worth 2$\times$ storage within budget                                                                     |
+| **MFCC coefficients** | 13                                              | Reduces feature-state memory and compute; final fit requires measurement                                               |
+| **Training examples** | 750K real + illustrative synthetic augmentation | Human-label count follows from the budget; synthetic volume is a scenario choice                                       |
+| **Data diversity**    | Noisy + clean mix                               | Critical for real-world deployment                                                                                     |
+| **Inference**         | Local, reduced precision                        | Reduced precision can lower footprint; the final 64 KB fit requires the compression analysis in @sec-model-compression |
+| **Augmentation**      | Heavy synthetic                                 | 10$\times$ cost efficiency                                                                                             |
 
 : **KWS Candidate Configuration**: A scenario that uses the computed real-label budget and records the remaining sampling, augmentation, and deployment choices for measurement against the quality and memory targets. {#tbl-data-engineering-kws-configuration tbl-colwidths="[16,20,64]"}
 
@@ -1655,15 +1655,15 @@ class LabelingComputeRatio:
     effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='prose')
 ```
 
-The contrast matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Labeling is the bottleneck. It often costs hundreds to more than a thousand times more than a single optimized training run: a `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8$\times$ A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_mult_str`--`{python} LabelingComputeRatio.ratio_high_mult_str` ratio. Within that labeling spend, the effort distribution itself is skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
+The contrast in this illustrative scenario matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Here, labeling is the bottleneck. A `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8$\times$ A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_mult_str`--`{python} LabelingComputeRatio.ratio_high_mult_str` ratio. Within that labeling spend, the assumed effort distribution is itself skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
 
-All cost figures reflect approximate 2024 cloud provider rates and are intended to convey relative magnitudes rather than exact pricing.[^fn-pricing-cost-ratios] The consistent pattern across these numbers is that human labor (labeling, annotation, expert review) dominates hardware and storage costs by one to three orders of magnitude. A team that optimizes its labeling pipeline before scaling compute or storage addresses the largest cost term first.
+All cost figures reflect approximate 2024 cloud provider rates and are intended to convey relative magnitudes rather than exact pricing.[^fn-pricing-cost-ratios] For this workload and cost model, human labor dominates the cost of a single training run. Other tasks, especially those that reuse existing labels or require repeated large-scale training, can have a different dominant term; teams should measure before deciding where to optimize.
 
 [^fn-pricing-cost-ratios]: **Pricing Ratios**\index{Cloud Pricing!cost-latency trade-off}: Archive-retrieval prices and tier ratios reflect provider policy, not a physical invariant. In this illustrative scenario, expedited retrieval costs three times the standard tier; actual prices and tier availability must be verified before deployment.
 
 Web scraping is the first lever on that cost structure, enabling dataset construction at scales that manual curation cannot match. Major vision datasets like ImageNet [@imagenet_website] and OpenImages [@kuznetsova2020] were built through systematic scraping, and large language models depend on web-scale text corpora [@groeneveld2024]. Targeted scraping of domain-specific sources, such as code repositories [@chen2021evaluating], further demonstrates the approach's versatility. However, production systems that rely on continuous scraping face pipeline reliability challenges: website structure changes break extractors, rate limiting throttles collection throughput, and dynamic content introduces inconsistencies that degrade model performance. Scraped results can also include historical images for contemporary queries, requiring systematic validation and cleaning.
 
-@Fig-traffic-light shows one such result from a web scrape for "traffic light": a historical photograph rather than a modern LED signal. A model trained on such data might learn that traffic lights are sometimes operated by uniformed officers standing in the street, a spurious correlation that would cause failures in any real-world deployment.
+@Fig-traffic-light shows one such result from a web scrape for "traffic light": a historical photograph rather than a modern LED signal. If images from this context were overrepresented or correlated with a label, a model could learn spurious cues involving uniformed officers or historical streets rather than the visual properties required in its deployment environment.
 
 ::: {#fig-traffic-light fig-env="figure" fig-pos="htb" fig-cap="**Data Source Noise**: A black-and-white photograph from 1914 showing early manually operated electric traffic signals, illustrating how historical images can appear in modern web scraping results for contemporary queries. Such anachronistic content requires systematic validation and filtering to prevent spurious correlations in training data. Image reproduced in [@stromberg2015traffic]." fig-alt="Black-and-white photograph of a busy Cleveland intersection with streetcars, pedestrians, a roadside control booth, and handwritten arrows labeling red and green traffic signals."}
 
