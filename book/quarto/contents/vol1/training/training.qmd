@@ -4491,7 +4491,7 @@ Both approaches require $\mathcal{O}(S^2 d)$ asymptotic FLOPs for dense attentio
 
 #### Implementation and hardware utilization {#sec-model-training-implementation-hardware-utilization-20a8}
 
-FlashAttention's performance gains materialize through careful exploitation of GPU memory hierarchy. Modern frameworks integrate these optimizations transparently, automatically selecting the most efficient attention implementation based on hardware capabilities and input characteristics. @Lst-flash-attention-comparison contrasts standard and optimized attention implementations.
+FlashAttention's performance gains materialize through careful exploitation of GPU memory hierarchy. Modern frameworks can dispatch eligible attention operations among fused and fallback implementations based on hardware, inputs, and layouts; profiling verifies which path ran and whether it helped. @Lst-flash-attention-comparison contrasts standard and optimized attention implementations.
 
 ::: {#lst-flash-attention-comparison lst-cap="**Attention Implementation Comparison**: Standard attention materializes the full $S{\times}S$ matrix in HBM, while FlashAttention uses PyTorch's optimized implementation or the dedicated flash-attn library."}
 
@@ -4513,7 +4513,7 @@ def standard_attention(q, k, v):
 
 # FlashAttention (no n-by-n materialization)
 def flash_attention(q, k, v):
-    # Automatically uses FlashAttention if available
+    # Can use FlashAttention when inputs and hardware are eligible
     output = F.scaled_dot_product_attention(q, k, v)
     return output
 
@@ -4609,7 +4609,7 @@ Subsequent versions have continued improving performance: FlashAttention-2\index
 
 For transformer training with long sequences, FlashAttention is usually the first attention implementation to test. It often becomes essential once sequence length pushes standard attention into an HBM-capacity or HBM-bandwidth bottleneck, especially around the multi-thousand-token regime where the $S{\times}S$ attention matrices dominate memory. A100- and H100-class GPUs with fast on-chip SRAM benefit most. The returns diminish for short sequences where tiling overhead is not worthwhile, on older GPU architectures without comparable SRAM bandwidth, and for nonattention architectures such as convolutional neural networks and multilayer perceptrons.
 
-In practice, deep learning frameworks handle much of FlashAttention's integration, but the decision still depends on layout, precision, and memory budget. PyTorch 2.0+ automatically selects FlashAttention when available and appropriate. Three practical checks determine whether FlashAttention is appropriate:
+In practice, deep learning frameworks handle much of FlashAttention's integration, but the decision still depends on layout, precision, and memory budget. PyTorch's `scaled_dot_product_attention` can dispatch to FlashAttention when hardware, inputs, and backend constraints permit; hand-written attention must use an eligible primitive. Three practical checks determine whether FlashAttention is appropriate:
 
 1. Ensure tensor layouts match library expectations (contiguous memory, correct dimension ordering)
 2. Use FP16 or BF16 for maximum speedup (FlashAttention optimized for mixed precision)
@@ -4619,27 +4619,27 @@ The integration is often a single-line change---swapping a manual attention call
 
 #### Systems implications and broader principles {#sec-model-training-systems-implications-broader-principles-c4f0}
 
-FlashAttention exemplifies a fundamental systems engineering principle: **IO-aware algorithm design**\index{I/O-Aware Design!algorithm optimization}\index{Memory Bandwidth!bottleneck mitigation}. The core insight recognizes that many accelerators are compute-abundant relative to their memory bandwidth. *An algorithm's runtime is determined not by FLOP count but by memory traffic.*
+FlashAttention exemplifies a fundamental systems engineering principle: **IO-aware algorithm design**\index{I/O-Aware Design!algorithm optimization}\index{Memory Bandwidth!bottleneck mitigation}. Many accelerators are compute-abundant relative to memory bandwidth. For a bandwidth-bound kernel, traffic can govern runtime even when FLOPs do not change.
 
 This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms\index{Tiling!algorithms, matrix computation} like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $m{\times}m$ matrix multiply performs $\mathcal{O}(m^3)$ FLOPs with $\mathcal{O}(m^2)$ memory traffic, while blocked algorithms maintain $\mathcal{O}(m^3)$ FLOPs but reduce cache misses through locality optimization.
 
 The same byte-movement principle reappears in communication-efficient distributed training, where gradient compression\index{Gradient Compression!definition} trades extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms. Trading 10 percent more arithmetic to halve memory traffic approaches a 2$\times$ energy reduction in the limit where data movement accounts for the entire budget, and falls short of that bound whenever arithmetic carries a meaningful share, because halving one additive term of a sum cannot more than halve the sum. This section establishes the IO-aware heuristic; distributed and edge deployment settings reuse the same byte-movement logic.
 
-FlashAttention transforms practical model training capabilities. By eliminating the $\mathcal{O}(S^2)$ memory bottleneck, FlashAttention enables three capabilities:
+FlashAttention transforms practical model training capabilities. By avoiding materialization of the $\mathcal{O}(S^2)$ attention matrices, it can enable three capabilities:
 
 - **Longer sequences**: In this illustrative configuration, enables 4$\times$ context length on the same hardware, moving GPT-2 on A100 from 2K to 8K context.
 - **Larger batch sizes**: In the same configuration, doubles batch size through freed memory, potentially improving utilization; convergence effects still require validation.
 - **Deeper models**: Reduces activation memory so more layers fit in the same memory budget.
 
-For a 7-billion-parameter model training on A100 GPUs, FlashAttention can transform the memory feasibility calculation from OOM at a 2K context to an 8K-context run with room for batch size 32 under the chapter's scenario assumptions.
+In the chapter's attention-only scenario, the optimized kernel shifts the context boundary from 2K to 8K tokens; full 7-billion-parameter training still depends on state, sharding, batch size, and other activations.
 
-The technique demonstrates that algorithmic innovation at the systems level, exploiting hardware characteristics like memory hierarchy, can provide order-of-magnitude improvements that hardware scaling alone would not deliver. Treating memory bandwidth as the primary constraint and compute as abundant is a recurring pattern in ML performance optimization.
+The technique demonstrates that systems-level algorithms can exploit memory hierarchy for large activation-memory reductions and workload-dependent speedups beyond hardware scaling alone. Treating memory bandwidth as the primary constraint and compute as abundant is a recurring pattern in ML performance optimization.
 
 FlashAttention addresses memory bandwidth bottlenecks during computation, but another class of memory constraints exists: the sheer capacity required to store activations and optimizer states simultaneously. When models or batch sizes exceed GPU memory capacity, two complementary techniques trade computation for memory.
 
 ### Gradient accumulation and checkpointing {#sec-model-training-gradient-accumulation-checkpointing-0c47}
 
-Training large models requires substantial memory for storing activations, gradients, and model parameters simultaneously. When GPU memory constrains the batch size or model complexity, gradient accumulation[^fn-gradient-accumulation-training]\index{Gradient Accumulation!memory efficiency} and activation checkpointing address these limitations by trading computation for memory. These techniques exploit the efficiency principles formalized by the iron law in @sec-introduction-iron-law-ml-systems-c32a and become standard tools when memory is the binding constraint.
+Training large models requires substantial memory for activations, gradients, and parameters. When memory constrains batch size or model complexity, gradient accumulation[^fn-gradient-accumulation-training]\index{Gradient Accumulation!memory efficiency} forms a larger effective batch from sequential micro-batches, while checkpointing discards and recomputes selected activations. These techniques exploit the efficiency principles formalized by the iron law in @sec-introduction-iron-law-ml-systems-c32a and become standard tools when memory is the binding constraint.
 
 #### Gradient accumulation and checkpointing mechanics {#sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09}
 
@@ -5028,7 +5028,7 @@ optimizer.step()  # Update with effective batch=512
 
 #### Practical considerations {#sec-model-training-gradient-accumulation-practical-considerations-a5a4}
 
-Gradient accumulation is most valuable when optimal batch sizes exceed GPU memory capacity. Transformer language models often use effective batches of hundreds of thousands to millions of tokens; if memory only permits a smaller number of sequences per device, accumulation bridges the gap without requiring additional hardware. Activation checkpointing complements this by enabling deeper architectures: models like GPT-3 and T5 rely on checkpointing to fit within accelerator memory budgets, as do dual-network configurations such as generative adversarial networks.
+Gradient accumulation is most valuable when optimal batch sizes exceed GPU memory capacity. Transformer language models often use effective batches of hundreds of thousands to millions of tokens; if memory only permits a smaller number of sequences per device, accumulation bridges the gap without requiring additional hardware. Activation checkpointing complements this by enabling deeper architectures and is commonly used in transformer-scale training, as well as in activation-heavy dual-network configurations such as generative adversarial networks.
 
 Both techniques introduce explicit trade-offs. Activation checkpointing recomputes discarded activations during backward propagation; with ordinary segment checkpointing, each discarded activation is typically reconstructed once, while recursive schedules may behave differently. Gradient accumulation reduces parameter-update frequency because each update follows $k$ micro-batches. When each micro-batch loss is divided by $k$, the accumulated gradient follows the effective-batch mean convention. If losses are summed instead, the gradients must be rescaled before the optimizer step or the learning-rate convention changed accordingly. Framework and codebase conventions differ, making normalization a common source of subtle bugs.
 
@@ -5048,7 +5048,7 @@ These techniques target different constraints. Prefetching addresses data starva
 | **Hardware Requirements**     | Benefits from fast storage and multi-core CPUs                     | Supported lower-precision accelerator paths                              | Works on standard hardware                                               |
 | **Implementation Complexity** | Moderate (requires tuning of prefetch parameters)                  | Low to moderate (with framework support)                                 | Moderate (requires careful segmentation and accumulation)                |
 | **Main Benefits**             | Reduces training time, improves hardware utilization               | Faster training, larger models, reduced memory usage                     | Enables larger batch sizes and deeper models                             |
-| **Primary Challenges**        | Tuning buffer sizes, increased memory usage                        | Potential numerical instability, loss scaling needed                     | Increased computational overhead, slower parameter updates               |
+| **Primary Challenges**        | Tuning buffer sizes, increased memory usage                        | Potential numerical instability; FP16 may require loss scaling           | Increased computational overhead, slower parameter updates               |
 | **Ideal Use Cases**           | Large datasets, complex preprocessing                              | Large-scale models, especially in NLP and computer vision                | Memory-constrained batches or activation-heavy models                    |
 
 : **Optimization Strategies**: The table compares prefetching, mixed precision, and the combined use of gradient accumulation and checkpointing. The first targets input stalls, the second changes storage and eligible arithmetic, and the third trades smaller resident activation sets for micro-batch or recomputation overhead. {#tbl-optimization}
