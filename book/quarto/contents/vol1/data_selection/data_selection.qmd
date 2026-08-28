@@ -2794,10 +2794,10 @@ class SelectionBottleneckAnchor:
 
 Dynamic data selection introduces a new bottleneck: selection latency\index{Latency!selection, dynamic selection bottleneck}. A conventional loader follows a predetermined sampling plan, whereas active learning or adaptive curricula may evaluate a selection function $f(x)$ over a large candidate pool before forming later batches. Concretely, scoring a `{python} SelectionBottleneckAnchor.dataset_size_str` dataset with a large model can take `{python} SelectionBottleneckAnchor.scoring_time_hours_str`, potentially negating the savings from a `{python} SelectionBottleneckAnchor.coreset_pct_str` coreset if not performed with a smaller proxy model. The systems trade-off requires that selection cost remain below the training work the subset saves; otherwise, sample counts fall while end-to-end cost rises.
 
-For a selection strategy to be systems-efficient, selection plus subset training must cost less than training on the full dataset. Let $T_{\text{selection}}$ be wall-clock time spent scoring the pool, $T_{\text{train}}(D)$ be wall-clock training time for a dataset of size $D$, and $D_{\text{subset}}$ and $D_{\text{total}}$ be the retained and full sample counts. @Eq-selection-inequality expresses this break-even condition, the **Selection Inequality**\index{Selection Inequality!definition}.
+At a fixed target metric, selection plus subset training must cost less than full-data training. Let $T_{\text{selection}}$ be wall-clock time spent scoring the pool, $T_{\text{train}}(D)$ be wall-clock training time for a dataset of size $D$, and $D_{\text{subset}}$ and $D_{\text{total}}$ be the retained and full sample counts. @Eq-selection-inequality expresses this break-even condition, the **Selection Inequality**\index{Selection Inequality!definition}.
 $$ T_{\text{selection}} + T_{\text{train}}(D_{\text{subset}}) < T_{\text{train}}(D_{\text{total}}) $$ {#eq-selection-inequality}
 
-Both training terms must reach the same target metric under comparable schedules, and $T_{\text{selection}}$ must include recurring rescoring and coordination. If $f(x)$ repeatedly scores the pool with a large model, selection can consume the training savings and produce negative ROI. A concrete scenario illustrates this trade-off.
+If $f(x)$ repeatedly scores the pool with a large model, recurring rescoring and coordination can consume the training savings and produce negative ROI. A concrete scenario illustrates this trade-off.
 
 Equivalently, we can isolate the allowable selection overhead: $T_{\text{selection}} < T_{\text{train}}(D_{\text{total}}) - T_{\text{train}}(D_{\text{subset}})$. The allowable overhead therefore depends on how much training work the subset saves; no fixed percentage applies across workloads.
 
@@ -3440,7 +3440,7 @@ Suppose labeling costs `{python} BreakevenCalc.cost_label_str`, active learning 
 \text{ROI} = \frac{\text{`{python} BreakevenCalc.cost_random_total_str`} - \text{`{python} BreakevenCalc.cost_active_total_str`}}{\text{`{python} BreakevenCalc.cost_active_total_str`}}= \text{`{python} BreakevenCalc.roi_pct_math`}
 \end{gather*}
 
-Break-even occurs when the cost of the labels avoided equals the selection overhead. If active learning reduces labeling by only 20 percent while scoring and retraining remain expensive, ROI may be negative.
+Break-even occurs when avoided-label cost equals selection overhead. A 20 percent labeling reduction may still yield negative ROI if scoring and retraining are expensive.
 
 ### Amortization across training runs {#sec-data-selection-amortization-across-training-runs-f6b8}
 
@@ -3536,13 +3536,15 @@ These ROI calculations all assume a single machine. Production ML training distr
 
 ## Distributed Selection {#sec-data-selection-distributed-selection-d03e}
 
-The earlier sections in this chapter assumed centralized access to the full dataset: a single-machine view where one process can see the entire dataset, compute global statistics, and make coordinated selection decisions. This assumption simplifies algorithm design: coreset selection can rank all samples globally, curriculum learning can establish a universal difficulty ordering, and active learning can query the single most uncertain example. Production distributed training\index{Distributed Training!data selection challenges} breaks this assumption. When data is sharded across hundreds of workers, each seeing only a local slice, two difficult problems arise: computing a global coreset when no single node sees all samples, and maintaining consistent curriculum difficulty rankings when the model updates asynchronously across workers.
+The earlier sections in this chapter used a centralized view in which one process can see the full dataset, compute global statistics, and coordinate selection. That abstraction lets coreset methods rank all samples, curricula establish a shared ordering, and active learning compare a common candidate pool. Distributed training\index{Distributed Training!data selection challenges} breaks the abstraction when data is sharded and scores are refreshed at different model states. Two difficult problems arise: approximating a global selection from local views and keeping training-time rankings comparable as the model evolves.
 
 Whether distributed selection stays faithful to the global dataset or collapses into local shard heuristics depends on how much cross-worker coordination each technique requires against the bandwidth available to sustain it. The selection problem therefore has to be evaluated at the boundary where statistical value meets sharding and locality.
 
+These are independent requirements. A coreset can remain representative yet cost too much to coordinate, while a cheap shard-local method can scale but systematically miss rare groups visible only in the global corpus. A distributed design therefore needs two acceptance tests: compare selected-data quality with a centralized or otherwise auditable reference, and compare selection overhead with the end-to-end training time it saves. Passing only one test is insufficient.
+
 ### Strategies for distributed selection {#sec-data-selection-strategies-distributed-selection-6119}
 
-In standard distributed training, data parallelism is straightforward: shard the dataset across workers, each processes its shard independently. Data selection techniques, however, introduce selection dependencies\index{Selection Dependency!distributed training} (@tbl-selection-dependencies).
+In a basic data-parallel layout, each worker processes a distinct shard and model synchronization is handled separately. Data selection can add dependencies across those shards\index{Selection Dependency!distributed training} (@tbl-selection-dependencies).
 
 The selection dependencies admit several architectural solutions, each navigating a different point in the consistency-scalability trade-off space. The most straightforward approach centralizes selection while distributing training. A coordinator node performs selection on the full dataset, then distributes selected indices to workers. This preserves selection quality but introduces a single bottleneck:
 
@@ -3559,9 +3561,9 @@ Workers: train on subset(local_shard, selected_indices)
 | **Curriculum Learning** | Global difficulty ordering      | Workers may have different "hardest" samples |
 | **Deduplication**       | Hash table fits in memory       | Distributed hash tables add latency          |
 
-: **Selection Dependencies in Distributed Training**: Each data selection technique assumes centralized data access that distributed training violates. The distributed challenge column identifies the specific coordination problem that must be solved. {#tbl-selection-dependencies .striped .hover}
+: **Selection Dependencies in Distributed Training**: The table starts from a common centralized formulation of each technique and identifies the coordination problem introduced by sharding. Distributed variants may relax rather than reproduce the centralized result exactly. {#tbl-selection-dependencies .striped .hover}
 
-The semantics remain clean, but the coordinator becomes a single point of failure and a bandwidth bottleneck for large selections. For modest cluster sizes, this overhead is acceptable; for thousand-node deployments, it becomes prohibitive.
+The semantics remain clean, but the coordinator becomes a single point of failure and a possible bandwidth bottleneck. Whether that overhead is acceptable depends on the selection payload, refresh rate, network path, and cluster size.
 
 Hierarchical selection\index{Hierarchical Selection!distributed coreset} addresses this scalability limitation by distributing the selection computation itself. Each worker performs local selection on its shard, then a coordinator merges results:
 
@@ -3571,7 +3573,7 @@ Coordinator: global_selected = merge_and_rerank(all local_selected)
 Broadcast: final_indices → all workers
 ```
 
-Shard-local selection reduces coordinator load substantially but introduces a quality trade-off: the system may miss globally important samples that appear unimportant within their local shard. A sample that is only moderately difficult on one worker might be the hardest example in the entire dataset when considered globally.
+Shard-local selection reduces coordinator load but introduces a quality trade-off: local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
 
 When even hierarchical approaches prove too expensive, approximate global selection offers a fallback. These methods trade exactness for scalability through distributed approximate algorithms. Distributed MinHash\index{MinHash!distributed, cross-shard deduplication} enables deduplication by having each worker compute MinHash signatures independently; signatures are then aggregated to find near-duplicates across shards without requiring any single node to see all the data. Similarly, distributed uncertainty sampling allows workers to compute local uncertainty scores, with a global threshold determined by score distribution statistics rather than exact ranking.
 
@@ -3579,13 +3581,15 @@ When even hierarchical approaches prove too expensive, approximate global select
 
 The approximate selection strategies assume static selection criteria, but active learning introduces an additional complication: the model changes during selection. Consider what happens when Worker A scores samples using the model at step $t$ while Worker B simultaneously updates the model to step $t+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
 
+The scoring schedule therefore defines the meaning of a query, not merely its cost. A reproducible system versions the model checkpoint, candidate-pool snapshot, scoring rule, and selected indices together. It can then measure how much ranking agreement decays with checkpoint age and choose a refresh interval from that evidence rather than from an arbitrary number of steps.
+
 Several strategies mitigate this staleness problem, each with distinct overhead characteristics:
 
 - **Synchronous Scoring**\index{Synchronous Scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization.
 - **Periodic Score Refresh**\index{Periodic Score Refresh!active learning}: Workers re-score every $k$ epochs rather than every batch, trading freshness for reduced overhead.
 - **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, keeping selection decisions valid as the model evolves.
 
-Evaluating distributed coreset selection on an 8-node GPU cluster demonstrates how these refresh strategies interact with storage bandwidth and compute efficiency.
+An illustrative 8-node GPU-cluster scenario demonstrates how these refresh strategies interact with storage bandwidth and compute efficiency.
 
 ```{python}
 #| echo: false
@@ -3643,11 +3647,11 @@ class DistributedOverheadCalc:
 
 **Diagnosis**: Centralized coreset scoring on a single node creates memory and compute bottlenecks. Distributed pipeline staging (shard-local embedding $\to$ parallel deduplication $\to$ local EL2N scoring $\to$ centralized top-$k$ merge) processes dataset selection in `{python} DistributedOverheadCalc.t_total_overhead_min_str`.
 
-**Systems lesson**: Distributed coreset selection decouples dataset pruning scale from single-node memory capacity, as illustrated in the selection pipeline architecture (@fig-distributed-coreset-architecture). Sharding embedding and scoring phases across GPU workers amortizes selection overhead over parallel cluster bandwidth.
+**Systems lesson**: Distributed coreset selection can remove single-node memory as the scoring limit, as illustrated in @fig-distributed-coreset-architecture. Sharding embedding and scoring spreads work across the cluster, while the centralized merge remains a coordination cost that must satisfy the selection inequality.
 
 :::
 
-::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Decoupling parallel shard-local scoring (workers) from centralized rank merging (coordinator) minimizes inter-node communication overhead. Workers send shard-local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices, keeping coordination overhead lower than the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator lists a global FAISS embedding index, merged local selections, and broadcast final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
+::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator lists a global FAISS embedding index, merged local selections, and broadcast final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
 
 ```{.tikz}
 \scalebox{0.85}{%
@@ -3700,7 +3704,7 @@ fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
 
 :::
 
-The positive ROI can erode quickly when workers must coordinate frequently during training. Distributed data selection always incurs a coordination tax\index{Coordination Tax!distributed data selection}, the overhead of maintaining consistent selection across workers. The coordination tax must be smaller than the training time saved, or distributed selection yields negative ROI. If it approaches that limit, simplify the selection strategy or increase the selection interval.
+Positive ROI can erode quickly when workers coordinate frequently during training. Distributed selection introduces a coordination tax\index{Coordination Tax!distributed data selection} whose size depends on what is synchronized and how often. That tax must remain smaller than the training time saved; if it approaches the limit, simplify the strategy or increase the refresh interval.
 
 A further constraint arises from cluster network topology\index{Distributed Selection!network topology constraints}. Gradient synchronization may use accelerator collectives over dedicated links, while embedding vectors, score arrays, and coreset indices may follow host or storage paths instead. The actual route depends on system architecture. Selection traffic can therefore expose CPU, network interface card, storage, or collective-network bottlenecks that the training profile alone does not reveal.
 
