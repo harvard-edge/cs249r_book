@@ -170,7 +170,10 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         x0, y0, x1, y1 = bbox
         if not bottom_only and y0 < TRIM_TOP - EDGE_TOL and y1 > TRIM_TOP + EDGE_TOL:
             candidates["top"].append((TRIM_TOP - y0, kind, bbox, snippet))
-        if y0 < TRIM_BOTTOM - EDGE_TOL and y1 > TRIM_BOTTOM + EDGE_TOL:
+        # Bottom overflow can be either a crossing object or content placed
+        # wholly below trim. The latter is especially dangerous because it is
+        # absent from the visible page while TeX may continue with later prose.
+        if y1 > TRIM_BOTTOM + EDGE_TOL and x1 > TRIM_LEFT and x0 < TRIM_RIGHT:
             candidates["bottom"].append((y1 - TRIM_BOTTOM, kind, bbox, snippet))
         if bottom_only:
             return

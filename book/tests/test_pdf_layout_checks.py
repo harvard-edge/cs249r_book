@@ -777,6 +777,17 @@ def test_native_margin_geometry_flags_body_text_crossing_trim():
     assert "section prose beyond trim" in findings[0].snippet
 
 
+def test_native_margin_geometry_flags_body_text_wholly_below_trim():
+    page = _FakePage(
+        blocks=[_text_block(90, 748, 468, 761, "paragraph hidden below trim")],
+    )
+
+    findings = scan_margin_geometry_page(page, 248)
+
+    assert [f.issue for f in findings] == ["trim-overflow-bottom"]
+    assert "paragraph hidden below trim" in findings[0].snippet
+
+
 def test_margin_geometry_summary_separates_trim_crossing_from_text_box_overflow(tmp_path):
     summary = MarginGeometrySummary(
         pdf_path=tmp_path / "book.pdf",
