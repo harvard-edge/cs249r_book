@@ -164,6 +164,26 @@ def test_pdf_text_scan_flags_layout_offset_leaks(monkeypatch, tmp_path):
     assert "[-25mm]" in leaked_offsets[0].message
 
 
+def test_pdf_text_scan_flags_numeric_appendix_callout_prefix(monkeypatch, tmp_path):
+    pdf = tmp_path / "Machine-Learning-Systems-Vol1.pdf"
+    pdf.write_bytes(b"%PDF placeholder")
+    monkeypatch.setattr(
+        "book.cli.commands._pdf_checks._pdftotext",
+        lambda _: (
+            "napkin math 16.1: valid final chapter\n"
+            "Systems Perspective 18.1: invalid appendix prefix\n"
+            "napkin math B.1: valid appendix prefix\n"
+        ),
+    )
+
+    issues = scan_pdf_text(pdf)
+
+    appendix_numbers = [i for i in issues if i.code == "appendix-callout-number"]
+    assert len(appendix_numbers) == 1
+    assert appendix_numbers[0].count == 1
+    assert "Systems Perspective 18.1" in appendix_numbers[0].message
+
+
 # --------------------------------------------------------------------------
 # margin-overflow geometry (A2) — pure, no PDF needed
 # --------------------------------------------------------------------------

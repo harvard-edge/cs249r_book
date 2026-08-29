@@ -217,6 +217,41 @@ local function appendix_index(book, fname)
   return nil
 end
 
+-- Build a lookup from appendix H1 identifiers to their letter prefixes.
+--
+-- A full-PDF render runs this filter once for the combined document, so
+-- PANDOC_STATE.output_file names the volume PDF rather than the source QMD.
+-- appendix_index() therefore cannot identify the active appendix in that
+-- path. The combined AST does preserve each source H1 identifier, however,
+-- which lets Pandoc_prefix_count() switch prefixes exactly when it reaches an
+-- appendix. Chapter-only renders continue to use appendix_index() above.
+local function appendix_header_index(book)
+  local headers = {}
+  if not book or not book.render then return headers end
+  local ano = 0
+  for _, v in ipairs(book.render) do
+    if str(v.type) == "chapter" then
+      local fpath = str(v.file)
+      local stem = pandoc.path.split_extension(fpath)
+      if pandoc.path.filename(stem):find("^appendix_") then
+        ano = ano + 1
+        local fh = io.open(fpath, "r")
+        if fh then
+          for line in fh:lines() do
+            local identifier = line:match("^#%s+.-%s+{#([^}%s]+)")
+            if identifier then
+              headers[identifier] = to_letter(ano)
+              break
+            end
+          end
+          fh:close()
+        end
+      end
+    end
+  end
+  return headers
+end
+
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
@@ -244,6 +279,7 @@ local function Meta_findChapterNumber(meta)
     -- as prefix so numbering is Part I → I.1, I.2; Part II → II.1, II.2; etc.
     local partno = part_principles_index(meta.book, processedfile)
     local appno = appendix_index(meta.book, processedfile)
+    fbx.appendix_headers = appendix_header_index(meta.book)
     fbx.in_part_principles = (partno ~= nil)
     if partno ~= nil then
       fbx.chapno = to_roman(partno)
@@ -576,11 +612,14 @@ local function Pandoc_prefix_count(doc)
     if blk.t=="Header" and not fbx.ishtmlbook then
       if (blk.level == 1) then -- increase prefix
          local header_text = str(blk.content):gsub("^%s+", ""):gsub("%s+$", "")
+         local appendix_prefix = fbx.appendix_headers and fbx.appendix_headers[blk.identifier]
          -- Quarto's full-PDF book render can emit an empty index wrapper as
          -- `\chapter{}\label{section}` before the real numbered chapters.
          -- It is not a reader-facing chapter, so it must not advance custom
          -- callout counters (Example, Lighthouse, Systems Perspective, etc.).
-         if header_text == "" then
+         if appendix_prefix then
+           prefix = appendix_prefix
+         elseif header_text == "" then
            -- keep the current prefix and counters unchanged
          elseif  blk.classes:includes("unnumbered")
          then

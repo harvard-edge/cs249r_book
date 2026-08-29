@@ -33,10 +33,16 @@ MALFORMED_OBJECT_NUMBER = re.compile(
     r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|Case Study|"
     r"Systems Perspective)(?:[ \t]|\n(?!\s*\n))+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
 )
+CUSTOM_CALLOUT_NUMBER = re.compile(
+    r"\b(?:Definition|Example|Lighthouse|Systems Perspective|napkin math|"
+    r"Theorem|Checkpoint|Case Study|War Story)\s+(\d+)\.\d+\b",
+    re.I,
+)
 TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")
 NUMBERING_ISSUE_CODES = {
     "malformed-object-number",
     "duplicate-table-number",
+    "appendix-callout-number",
 }
 TABLE_PROSE_MIN_GAP_PT = 6.0
 PYTHON_LEAK = re.compile(
@@ -331,6 +337,32 @@ def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
                 count=count,
             )
         )
+
+    # Volume chapters are numbered 1--16 (Volume I) or 1--17 (Volume II).
+    # Numeric custom-callout prefixes above those ranges mean an appendix was
+    # counted as another chapter instead of taking its visible letter prefix.
+    # This catches the combined-render regression that produced labels such as
+    # "napkin math 18.1" beside an Appendix B section heading.
+    volume_match = re.search(r"Vol(?:ume)?[-_ ]?([12])", pdf_path.name, re.I)
+    max_chapter = {"1": 16, "2": 17}.get(volume_match.group(1)) if volume_match else None
+    if max_chapter is not None:
+        leaked_callouts = [
+            match.group(0)
+            for match in CUSTOM_CALLOUT_NUMBER.finditer(body)
+            if int(match.group(1)) > max_chapter
+        ]
+        if leaked_callouts:
+            examples = "; ".join(dict.fromkeys(leaked_callouts[:3]))
+            issues.append(
+                PdfIssue(
+                    code="appendix-callout-number",
+                    message=(
+                        "Appendix custom callouts use numeric chapter prefixes instead "
+                        f"of appendix letters. Examples: {examples}"
+                    ),
+                    count=len(leaked_callouts),
+                )
+            )
 
     # A renderer/counter regression can make several distinct in-callout tables
     # reuse one number. Repeated occurrences of the same number are fine when the
@@ -782,6 +814,11 @@ def verify_volume_pdf(
             "duplicate-table-number",
             "No duplicate table numbers with different captions",
             not any(i.code == "duplicate-table-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "appendix-callout-number",
+            "Appendix custom callouts use letter prefixes",
+            not any(i.code == "appendix-callout-number" for i in issues),
         ),
         PdfCheckItem(
             "table-prose-crowding",
