@@ -3502,7 +3502,17 @@ Compute estimation:
 - MACs to FLOPs: Multiply by 2
 - Compute utilization proxy: $\text{achieved FLOP/s} / R_{\text{peak}}$
 
-@Tbl-nn-computation-napkin-math-checks distills three of the most common feasibility questions into one-line formulas an engineer can apply before reaching for a profiler.
+**Example**: *"Can I train a `{python} MentalMathCalc.mm_params_m_str` parameter model on a `{python} MentalMathCalc.mm_gpu_gb_str` GPU?"*
+
+Mental math: `{python} MentalMathCalc.mm_params_m_str` parameters at `{python} MentalMathCalc.mm_bytes_str` bytes each, with `{python} MentalMathCalc.mm_overhead_str` training-memory copies, require `{python} MentalMathCalc.mm_model_gb_str` for persistent model state. That leaves about `{python} MentalMathCalc.mm_remaining_gb_str` for activations, temporary workspace, and framework overhead. Answer: the parameters fit, but the training configuration is not yet proven; batch size, activation shape, and kernel workspace determine whether the complete step fits.
+
+**Systems insight**: A rough persistent-state estimate can reject impossible configurations quickly, but batch size still depends on activation and workspace headroom.
+
+Beyond this model-fit example, @tbl-nn-computation-napkin-math-checks distills three common feasibility questions into one-line formulas an engineer can apply before reaching for a profiler.
+
+```{=latex}
+\tcbbreak
+```
 
 ```{=latex}
 \begingroup
@@ -3520,12 +3530,6 @@ Compute estimation:
 ```{=latex}
 \endgroup
 ```
-
-**Example**: *"Can I train a `{python} MentalMathCalc.mm_params_m_str` parameter model on a `{python} MentalMathCalc.mm_gpu_gb_str` GPU?"*
-
-Mental math: `{python} MentalMathCalc.mm_params_m_str` parameters at `{python} MentalMathCalc.mm_bytes_str` bytes each, with `{python} MentalMathCalc.mm_overhead_str` training-memory copies, require `{python} MentalMathCalc.mm_model_gb_str` for persistent model state. That leaves about `{python} MentalMathCalc.mm_remaining_gb_str` for activations, temporary workspace, and framework overhead. Answer: the parameters fit, but the training configuration is not yet proven; batch size, activation shape, and kernel workspace determine whether the complete step fits.
-
-**Systems insight**: A rough persistent-state estimate can reject impossible configurations quickly, but batch size still depends on activation and workspace headroom.
 
 :::
 
@@ -3790,8 +3794,6 @@ In the MNIST example, the operation dimensions for a batch of $B$ images are as 
 * Hidden layer weights $\mathbf{W}^{(\ell)}$: $n_{\ell-1}{\times}n_\ell$
 * Output layer weights $\mathbf{W}^{(N_L)}$: $n_{N_L-1}{\times}10$
 
-::: {#psp-nn-computation-why-matrix-multiplication-dominates-ai .callout-perspective title="Why matrix multiplication dominates AI"}
-
 Arithmetic intensity determines whether a kernel is compute or memory bound. Tiled dense matrix multiplication reuses values, whereas an unfused element-wise operation does little work per byte. @Tbl-nn-computation-arith-intensity-gap compares their idealized intensities.
 
 | **Operation**                 | **Operation Count ($O$)** | **Minimum Data Movement** | **Idealized Intensity** | **Typical Optimization** |
@@ -3804,6 +3806,9 @@ Arithmetic intensity determines whether a kernel is compute or memory bound. Til
 ```{=latex}
 \vspace*{-1ex}
 ```
+
+::: {#psp-nn-computation-why-matrix-multiplication-dominates-ai .callout-perspective title="Why matrix multiplication dominates AI"}
+
 Modern accelerators have large compute arrays relative to off-chip memory bandwidth. They approach peak arithmetic throughput only when operations expose enough reuse and parallel work. Dense and convolutional layers map well to optimized kernels; custom element-wise sequences are often fused so that their intermediate values remain on chip.
 
 For one sample, the expression $\mathbf{x}\mathbf{W}$ is a **General Matrix-Vector Multiply (GEMV)**; batching samples turns the same computation into $\mathbf{X}\mathbf{W}$, a **GEMM**\index{Matrix multiplication!GEMM optimization}. Multidimensional operations like 2D/3D convolutions map onto this same GEMM core through lowering transformations (such as `im2col`), which expand overlapping sliding receptive fields into 2D matrix columns so optimized vendor Basic Linear Algebra Subprograms (BLAS) libraries can execute them at peak hardware efficiency. Matrix operations account for over 90 percent of the floating-point operations in this chapter's dense-network example and dominate many important neural workloads, although the fraction depends on architecture and execution regime. To improve performance, engineers use techniques like blocking and tiling to increase cache or on-chip-memory reuse. This hardware-software co-design principle, designing model architectures around operations that specialized hardware can execute efficiently, is central to modern deep learning. @Sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d provides the detailed treatment of GEMM arithmetic intensity, sparse matrix formats, and the computational complexity of common layer types needed to optimize these operations in practice.
@@ -4600,7 +4605,7 @@ The transition from training to inference limits how a fixed deployed model can 
 
 #### Operational phase differences {#sec-neural-computation-operational-phase-differences-3f95}
 
-Neural network operation divides into two distinct phases\index{Training vs. inference!operational differences}\index{Inference!forward pass only} with markedly different computational requirements. @Fig-training-vs-inference contrasts these phases visually. Inference performs only the forward pass, processing inputs through learned parameters with batch sizes that vary according to demand. Training adds the backward pass for gradient computation and parameter updates, uses batches chosen for optimization and throughput, and must store activations, gradients, and optimizer state simultaneously, consuming significantly more memory. The learned model may be the same, but execution mode, retained state, and sometimes the deployed graph differ because training-only operations can be removed and inference operations fused or quantized.
+Neural network operation divides into two distinct phases\index{Training vs. inference!operational differences}\index{Inference!forward pass only} with markedly different computational requirements. @Fig-training-vs-inference contrasts these phases visually. Inference performs only the forward pass, processing inputs through learned parameters with batch sizes that vary according to demand. Training adds the backward pass for gradient computation and parameter updates, uses batches chosen for optimization and throughput, and must store activations, gradients, and optimizer state simultaneously, consuming significantly more memory.[^fn-training-gpu-power] The learned model may be the same, but execution mode, retained state, and sometimes the deployed graph differ because training-only operations can be removed and inference operations fused or quantized.
 
 ::: {#fig-training-vs-inference fig-env="figure" fig-pos="htb" fig-cap="**Inference vs. Training Flow**: During inference, neural networks use learned weights for forward pass computation only, simplifying the data flow and reducing computational cost compared to training, which requires both forward and backward passes for weight updates. This streamlined process enables efficient deployment of trained models for real-time predictions." fig-alt="Two parallel diagrams comparing inference and training. Both show stacked rectangles representing batches feeding into network layers and output nodes. Inference section shows smaller varied batch sizes with dashed outlines. Training section shows larger fixed batches with solid outlines. Network architecture identical in both with fully connected layers."}
 
@@ -4795,7 +4800,7 @@ minimum height=13mm,minimum width=22mm,\ifboxdashed dashed\fi](\picname){};
 
 :::
 
-These computational differences manifest directly in hardware requirements and deployment strategies. Training environments typically employ high-memory accelerators[^fn-training-gpu-power] with substantial cooling infrastructure. Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize latency and energy efficiency across diverse platforms: mobile devices use low-power neural processors (typically 2–4 W), edge servers use specialized inference accelerators,[^fn-edge-tpu-efficiency] and cloud services often use reduced numerical precision for increased throughput.[^fn-inference-quantization-precision] Production inference systems serving millions of requests daily require infrastructure concerns, such as request routing and failure handling, that are usually absent from a single training run. At the memory level, training preserves activations for backpropagation, while inference releases layer buffers as soon as possible; @tbl-forward-pass-comparison turns that difference into a resource profile.
+These computational differences manifest directly in hardware requirements and deployment strategies. Training environments typically employ high-memory accelerators with substantial cooling infrastructure. Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize latency and energy efficiency across diverse platforms: mobile devices use low-power neural processors (typically 2–4 W), edge servers use specialized inference accelerators,[^fn-edge-tpu-efficiency] and cloud services often use reduced numerical precision for increased throughput.[^fn-inference-quantization-precision] Production inference systems serving millions of requests daily require infrastructure concerns, such as request routing and failure handling, that are usually absent from a single training run. At the memory level, training preserves activations for backpropagation, while inference releases layer buffers as soon as possible; @tbl-forward-pass-comparison turns that difference into a resource profile.
 
 ```{python}
 #| echo: false
@@ -4944,7 +4949,7 @@ class MnistInferenceResourceLocal:
 
 Neural networks consume computational resources differently during inference than during training. Inference has two memory obligations. The first is persistent: the trained weights and biases must remain available for every request. The second is transient: each layer produces an activation buffer that is needed only until the next layer consumes it. This distinction is the reason inference can be much leaner than training, even though the arithmetic in the forward pass is the same.
 
-For the canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arch_str`), the persistent parameter block contains `{python} MnistInferenceResourceLocal.total_params_str`, or about `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision\index{Floating point!FP32 precision}.[^fn-fp32-precision-format] The layer-level counts in @tbl-mnist-inference-resource-by-layer show why: each fully connected layer performs one multiply-add for each weight, so parameter memory and arithmetic scale together.
+For the canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arch_str`), the persistent parameter block contains `{python} MnistInferenceResourceLocal.total_params_str`, or about `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision\index{Floating point!FP32 precision}. The layer-level counts in @tbl-mnist-inference-resource-by-layer show why: each fully connected layer performs one multiply-add for each weight, so parameter memory and arithmetic scale together.
 
 [^fn-fp32-precision-format]: **FP32 (single precision)**\index{FP32!numerical precision}: The IEEE 754 binary32 format uses 32 bits: 1 sign bit, 8 exponent bits, and 23 explicitly stored fraction bits. It remains a common numerical baseline for neural-network computation because its exponent range accommodates values that narrower formats may overflow or underflow. Moving stored tensors from FP32 to FP16 or BF16\index{BF16!reduced-precision format} halves their byte footprint, while INT8 quarters it. Throughput improves only when the hardware and kernels execute the narrower format efficiently, and integer inference generally requires calibration or quantization-aware training to preserve task quality. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs.
 
@@ -4965,13 +4970,7 @@ For the canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arc
 \endgroup
 ```
 
-::: {.content-visible when-format="pdf"}
-```{=latex}
-\newpage
-```
-:::
-
-This persistent-plus-rolling-buffer model also explains the deployment optimizations that follow. Batching can increase arithmetic reuse and hardware occupancy but expands activation storage. Lower numerical precision can shrink the persistent parameter block and activation buffers, but only if task quality survives the smaller representation. Hardware-specific layouts can improve cache reuse by keeping working data close to the compute units. Inference makes these optimizations easier to plan because parameters are fixed and many activations have short lifetimes.
+This persistent-plus-rolling-buffer model also explains the deployment optimizations that follow. Batching can increase arithmetic reuse and hardware occupancy but expands activation storage. Lower numerical precision can shrink the persistent parameter block and activation buffers,[^fn-fp32-precision-format] but only if task quality survives the smaller representation. Hardware-specific layouts can improve cache reuse by keeping working data close to the compute units. Inference makes these optimizations easier to plan because parameters are fixed and many activations have short lifetimes.
 
 #### Performance enhancement techniques {#sec-neural-computation-performance-enhancement-techniques-692f}
 
