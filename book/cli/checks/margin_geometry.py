@@ -15,25 +15,33 @@ from typing import Any
 IN = 72.0
 
 # Production PDF geometry from book/quarto/tex/header-includes.tex.
+# The rendered sheet includes a 0.25-inch printer-mark border around the
+# 8 x 10 inch trim. PyMuPDF reports sheet coordinates, so every trim-relative
+# coordinate must include that offset.
 PAPER_W, PAPER_H = 8 * IN, 10 * IN
+TRIM_OFFSET = 0.25 * IN
+TRIM_LEFT, TRIM_TOP = TRIM_OFFSET, TRIM_OFFSET
+TRIM_RIGHT = TRIM_LEFT + PAPER_W
+TRIM_BOTTOM = TRIM_TOP + PAPER_H
 TOP, BOTTOM = 0.5 * IN, 0.625 * IN
 INNER, OUTER = 0.875 * IN, 1.75 * IN
 HEADHEIGHT, HEADSEP = 14.0, 18.0
 MARGINSEP, MARGINW = 0.25 * IN, 1.25 * IN
 
 TEXT_W = PAPER_W - INNER - OUTER
-TEXT_TOP = TOP + HEADHEIGHT + HEADSEP
-TEXT_BOTTOM = PAPER_H - BOTTOM
+TEXT_TOP = TRIM_TOP + TOP + HEADHEIGHT + HEADSEP
+TEXT_BOTTOM = TRIM_BOTTOM - BOTTOM
 
-RIGHT_TEXT_EDGE = INNER + TEXT_W
-RIGHT_BAND = (RIGHT_TEXT_EDGE + 2, PAPER_W)
-LEFT_TEXT_EDGE = OUTER
-LEFT_BAND = (0, LEFT_TEXT_EDGE - 2)
+RIGHT_TEXT_EDGE = TRIM_LEFT + INNER + TEXT_W
+RIGHT_BAND = (RIGHT_TEXT_EDGE + 2, TRIM_RIGHT)
+LEFT_TEXT_EDGE = TRIM_LEFT + OUTER
+LEFT_BAND = (TRIM_LEFT, LEFT_TEXT_EDGE - 2)
 
 OVERLAP_TOL = 1.5
 MERGE_GAP = 4.0
 CAPTION_GAP = 6.0
 EDGE_TOL = 2.0
+HORIZONTAL_EDGE_TOL = 6.0
 TOP_TOL = 6.0
 
 
@@ -95,11 +103,15 @@ class MarginGeometrySummary:
 
     @property
     def overflow_bottom(self) -> int:
-        return self.counts.get("overflow-bottom", 0)
+        return self.counts.get("overflow-bottom", 0) + self.counts.get(
+            "trim-overflow-bottom", 0
+        )
 
     @property
     def overflow_top(self) -> int:
-        return self.counts.get("overflow-top", 0)
+        return self.counts.get("overflow-top", 0) + self.counts.get(
+            "trim-overflow-top", 0
+        )
 
     @property
     def overflows(self) -> int:
@@ -107,24 +119,11 @@ class MarginGeometrySummary:
 
     @property
     def page_edge_overflows(self) -> list[MarginGeometryFinding]:
-        """Find rendered objects that cross the 8 x 10 inch trim boundary.
-
-        Ordinary ``overflow-*`` findings include objects below the main text
-        box, where folios and intentional margin material can be legitimate.
-        Crossing the physical trim boundary is never legitimate and must be a
-        release-blocking condition.
-        """
+        """Find rendered objects that cross the 8 x 10 inch trim boundary."""
         return [
             finding
             for finding in self.findings
-            if (
-                finding.issue == "overflow-bottom"
-                and finding.bbox[3] > PAPER_H + EDGE_TOL
-            )
-            or (
-                finding.issue == "overflow-top"
-                and finding.bbox[1] < -EDGE_TOL
-            )
+            if finding.issue.startswith("trim-overflow-")
         ]
 
 
@@ -148,6 +147,85 @@ def _text_from_block(block: dict[str, Any]) -> str:
 
 def _rect_tuple(rect) -> tuple[float, float, float, float]:
     return (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+
+
+def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
+    """Return the worst rendered-content crossing for each trim edge.
+
+    This scan covers the full body, not only margin-band elements. Production
+    crop marks intentionally cross the trim at the sheet corners, so short
+    vector marks and the full-sheet white background are excluded.
+    """
+    candidates: dict[str, list[tuple[float, str, tuple[float, float, float, float], str]]] = {
+        side: [] for side in ("top", "bottom", "left", "right")
+    }
+
+    def add(
+        kind: str,
+        bbox: tuple[float, float, float, float],
+        snippet: str = "",
+        *,
+        bottom_only: bool = False,
+    ) -> None:
+        x0, y0, x1, y1 = bbox
+        if not bottom_only and y0 < TRIM_TOP - EDGE_TOL and y1 > TRIM_TOP + EDGE_TOL:
+            candidates["top"].append((TRIM_TOP - y0, kind, bbox, snippet))
+        if y0 < TRIM_BOTTOM - EDGE_TOL and y1 > TRIM_BOTTOM + EDGE_TOL:
+            candidates["bottom"].append((y1 - TRIM_BOTTOM, kind, bbox, snippet))
+        if bottom_only:
+            return
+        if (
+            x0 < TRIM_LEFT - HORIZONTAL_EDGE_TOL
+            and x1 > TRIM_LEFT + HORIZONTAL_EDGE_TOL
+        ):
+            candidates["left"].append((TRIM_LEFT - x0, kind, bbox, snippet))
+        if (
+            x0 < TRIM_RIGHT - HORIZONTAL_EDGE_TOL
+            and x1 > TRIM_RIGHT + HORIZONTAL_EDGE_TOL
+        ):
+            candidates["right"].append((x1 - TRIM_RIGHT, kind, bbox, snippet))
+
+    for block in page.get_text("dict").get("blocks", []):
+        bbox = tuple(float(value) for value in block["bbox"])
+        kind = "image" if block.get("type") == 1 else "text"
+        add(
+            kind,
+            bbox,
+            _text_from_block(block) if kind == "text" else "",
+            bottom_only=kind == "image",
+        )
+
+    for drawing in page.get_drawings():
+        rect = drawing["rect"]
+        if rect.is_empty:
+            continue
+        bbox = _rect_tuple(rect)
+        width, height = rect.width, rect.height
+        # Ignore the full-sheet white background and the 30-point crop marks.
+        if width >= TRIM_RIGHT and height >= TRIM_BOTTOM:
+            continue
+        if width <= 36 and height <= 36:
+            continue
+        add("drawing", bbox, bottom_only=True)
+
+    findings: list[MarginGeometryFinding] = []
+    for side, rows in candidates.items():
+        if not rows:
+            continue
+        amount, kind, bbox, snippet = max(rows, key=lambda row: row[0])
+        findings.append(MarginGeometryFinding(
+            pageno,
+            f"trim-overflow-{side}",
+            side,
+            (
+                f"{kind} crosses the {side} trim edge by {amount:.0f}pt "
+                f"(trim box {TRIM_LEFT:.0f},{TRIM_TOP:.0f}–"
+                f"{TRIM_RIGHT:.0f},{TRIM_BOTTOM:.0f})"
+            ),
+            tuple(round(value) for value in bbox),
+            snippet,
+        ))
+    return findings
 
 
 def _x_overlap(a: MarginGeometryElement, b: MarginGeometryElement) -> float:
@@ -324,7 +402,7 @@ def _cluster(boxes: list[MarginGeometryElement]) -> list[MarginGeometryElement]:
 
 
 def scan_page(page, pageno: int) -> list[MarginGeometryFinding]:
-    findings: list[MarginGeometryFinding] = []
+    findings: list[MarginGeometryFinding] = _trim_boundary_findings(page, pageno)
     elems = _cluster(_raw_margin_boxes(page))
 
     for side in ("left", "right"):

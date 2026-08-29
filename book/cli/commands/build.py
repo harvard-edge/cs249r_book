@@ -274,9 +274,10 @@ class BuildCommand:
         result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
         console.print(format_checklist(result))
 
-        # Warn-only rendered geometry detail. The summary is computed inside
-        # verify_volume_pdf, so this reports the same Binder-native geometry
-        # check instead of running the older pdfplumber margin heuristic.
+        # Rendered geometry detail. Physical trim crossings are release
+        # blockers; text-box overflow and margin crowding remain triage rows.
+        # The summary is computed inside verify_volume_pdf, so this reports the
+        # same Binder-native check instead of the older pdfplumber heuristic.
         geom = getattr(result, "margin_geometry", None)
         if geom is not None and getattr(geom, "findings", None):
             console.print()
@@ -297,7 +298,15 @@ class BuildCommand:
                 f"non-blocking in build validation)[/dim]"
             )
             edge_ids = {id(finding) for finding in edge_overflows}
-            issue_rank = {"overlap": 0, "overflow-bottom": 1, "overflow-top": 2}
+            issue_rank = {
+                "trim-overflow-bottom": 0,
+                "trim-overflow-top": 0,
+                "trim-overflow-left": 0,
+                "trim-overflow-right": 0,
+                "overlap": 1,
+                "overflow-bottom": 2,
+                "overflow-top": 3,
+            }
             for finding in sorted(
                 geom.findings,
                 key=lambda f: (

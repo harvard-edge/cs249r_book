@@ -738,7 +738,7 @@ def test_native_margin_geometry_ignores_body_figure_internals_in_margin_band():
     page = _FakePage(
         blocks=[_text_block(70, 700, 105, 716, "axis label")],
         drawings=[
-            (63, 680, 450, 760),  # full body/table graphic crossing the page edge
+            (63, 680, 450, 730),  # full body/table graphic inside the trim edge
             (74, 704, 82, 714),   # internal icon in the physical margin band
         ],
     )
@@ -748,13 +748,33 @@ def test_native_margin_geometry_ignores_body_figure_internals_in_margin_band():
 
 def test_native_margin_geometry_flags_true_margin_bottom_overflow():
     page = _FakePage(
-        blocks=[_text_block(470, 660, 555, 692, "caption below text box")],
+        blocks=[_text_block(470, 690, 555, 720, "caption below text box")],
     )
 
     findings = scan_margin_geometry_page(page, 12)
 
     assert [f.issue for f in findings] == ["overflow-bottom"]
     assert findings[0].side == "right"
+
+
+def test_native_margin_geometry_flags_body_drawing_crossing_trim():
+    page = _FakePage(drawings=[(80, 676, 468, 907)])
+
+    findings = scan_margin_geometry_page(page, 215)
+
+    assert [f.issue for f in findings] == ["trim-overflow-bottom"]
+    assert findings[0].page == 215
+
+
+def test_native_margin_geometry_flags_body_text_crossing_trim():
+    page = _FakePage(
+        blocks=[_text_block(144, 713, 532, 761, "section prose beyond trim")],
+    )
+
+    findings = scan_margin_geometry_page(page, 248)
+
+    assert [f.issue for f in findings] == ["trim-overflow-bottom"]
+    assert "section prose beyond trim" in findings[0].snippet
 
 
 def test_margin_geometry_summary_separates_trim_crossing_from_text_box_overflow(tmp_path):
@@ -772,8 +792,8 @@ def test_margin_geometry_summary_separates_trim_crossing_from_text_box_overflow(
             ),
             MarginGeometryFinding(
                 2,
-                "overflow-bottom",
-                "right",
+                "trim-overflow-bottom",
+                "bottom",
                 "drawing crosses trim",
                 (80, 664, 468, 907),
             ),
