@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from book.cli.commands.layout_chapter import mapped_source, parse_aux
+from book.cli.commands.layout_chapter import (
+    _correct_custom_callout_tex,
+    mapped_source,
+    parse_aux,
+)
 
 
 def test_parse_aux_extracts_number_page_and_anchor(tmp_path: Path):
@@ -58,3 +62,25 @@ Compare @fig-local with @tbl-not-in-aux.
     assert mapped == source
     assert count == 0
     assert missing == ["tbl-not-in-aux"]
+
+
+def test_correct_custom_callout_tex_updates_heading_and_matching_reference():
+    tex = r"""
+\protect\phantomsection\label{nbk-example-cost}
+\begin{fbxSimple}{callout-notebook}{Napkin Math 1.3:}{Cost estimate}
+\phantomsection\label{nbk-example-cost}
+See napkin math \hyperref[nbk-example-cost]{1.3}.
+"""
+    corrected, headings, references = _correct_custom_callout_tex(tex, 9)
+    assert "{Napkin Math 9.3:}" in corrected
+    assert r"\hyperref[nbk-example-cost]{9.3}" in corrected
+    assert headings == 1
+    assert references == 1
+
+
+def test_correct_custom_callout_tex_leaves_external_reference_unchanged():
+    tex = r"See \hyperref[nbk-other-chapter-cost]{4.2}."
+    corrected, headings, references = _correct_custom_callout_tex(tex, 9)
+    assert corrected == tex
+    assert headings == 0
+    assert references == 0

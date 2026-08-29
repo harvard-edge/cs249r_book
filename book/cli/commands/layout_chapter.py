@@ -34,6 +34,15 @@ FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 CUSTOM_HEADING_RE = re.compile(
     r"(\\begin\{fbxSimple\}\{callout-[^}]+\}\{[^{}\n]*? )\d+(\.\d+:\})"
 )
+CUSTOM_TARGET_RE = re.compile(
+    r"\\label\{(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|cs|ws)-[^}]+)\}"
+    r"\s*\\begin\{fbxSimple\}\{callout-[^}]+\}"
+    r"\{[^{}\n]*? (?P<number>\d+\.\d+):\}"
+)
+CUSTOM_REF_RE = re.compile(
+    r"\\hyperref\[(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|cs|ws)-[^]]+)\]"
+    r"\{(?P<number>[^{}]+)\}"
+)
 
 
 def _braced_fields(payload: str) -> list[str]:
@@ -238,21 +247,46 @@ def _resolve_chapter(quarto_dir: Path, volume: str, spec: str) -> Path:
     return path
 
 
+def _correct_custom_callout_tex(
+    tex: str, chapter_number: int
+) -> tuple[str, int, int]:
+    """Correct local callout headings and references in mapped TeX."""
+    corrected, heading_count = CUSTOM_HEADING_RE.subn(
+        lambda match: f"{match.group(1)}{chapter_number}{match.group(2)}", tex
+    )
+    target_numbers = {
+        match.group("id"): match.group("number")
+        for match in CUSTOM_TARGET_RE.finditer(corrected)
+    }
+    reference_count = 0
+
+    def replace_reference(match: re.Match[str]) -> str:
+        nonlocal reference_count
+        number = target_numbers.get(match.group("id"))
+        if number is None or number == match.group("number"):
+            return match.group(0)
+        reference_count += 1
+        return f"\\hyperref[{match.group('id')}]{{{number}}}"
+
+    corrected = CUSTOM_REF_RE.sub(replace_reference, corrected)
+    return corrected, heading_count, reference_count
+
+
 def _correct_callout_numbers(
     quarto_dir: Path,
     output_dir: Path,
     output_stem: str,
     chapter_number: int,
-) -> int:
+) -> tuple[int, int]:
     """Correct filter-generated callout prefixes and rebuild when necessary."""
     tex_path = quarto_dir / f"{output_stem}.tex"
     if not tex_path.is_file():
         raise RuntimeError(f"Quarto did not retain expected TeX: {tex_path}")
     tex = tex_path.read_text(encoding="utf-8")
-    corrected, count = CUSTOM_HEADING_RE.subn(
-        lambda match: f"{match.group(1)}{chapter_number}{match.group(2)}", tex
+    corrected, heading_count, reference_count = _correct_custom_callout_tex(
+        tex, chapter_number
     )
-    if count:
+    if heading_count or reference_count:
         tex_path.write_text(corrected, encoding="utf-8")
         latex = [
             "lualatex",
@@ -288,7 +322,7 @@ def _correct_callout_numbers(
         ".tex",
     ):
         (quarto_dir / f"{output_stem}{suffix}").unlink(missing_ok=True)
-    return count
+    return heading_count, reference_count
 
 
 def render_mapped_chapter(
@@ -354,6 +388,9 @@ def render_mapped_chapter(
     original_config = os.readlink(active_config)
     original_index = os.readlink(active_index)
     target_index = f"index-{volume}.qmd"
+    xref_path = quarto_dir / "._pdfbook_xref.json"
+    xref_existed = xref_path.is_file()
+    xref_snapshot = xref_path.read_bytes() if xref_existed else None
 
     with _worktree_lock(quarto_dir / "tmp" / "layout-harness" / ".render.lock"):
         mapped_path.write_text(transformed, encoding="utf-8")
@@ -375,8 +412,13 @@ def render_mapped_chapter(
                 active_index.unlink()
             active_index.symlink_to(original_index)
             mapped_path.unlink(missing_ok=True)
+            if xref_existed:
+                assert xref_snapshot is not None
+                xref_path.write_bytes(xref_snapshot)
+            else:
+                xref_path.unlink(missing_ok=True)
 
-    corrected_count = _correct_callout_numbers(
+    corrected_count, corrected_reference_count = _correct_callout_numbers(
         quarto_dir, output_dir, output_stem, chapter_number
     )
     pdf_path = output_dir / f"{output_stem}.pdf"
@@ -389,6 +431,7 @@ def render_mapped_chapter(
         "start_page": start_page,
         "external_references_mapped": replacement_count,
         "custom_callout_prefixes_corrected": corrected_count,
+        "custom_callout_references_corrected": corrected_reference_count,
         "numbering_source": str(aux_path),
         "pdf": str(pdf_path),
         "source_modified": False,
