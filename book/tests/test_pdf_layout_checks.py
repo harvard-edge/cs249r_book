@@ -22,7 +22,7 @@ from book.cli.commands._pdf_checks import (
 from book.cli.commands.layout import LayoutCommand
 from book.cli.commands.layout import PageReport
 from book.cli.commands.layout import CollisionFinding
-from book.cli.checks.margin_geometry import MarginGeometryFinding
+from book.cli.checks.margin_geometry import MarginGeometryFinding, MarginGeometrySummary
 from book.cli.checks.margin_geometry import scan_page as scan_margin_geometry_page
 
 
@@ -755,6 +755,33 @@ def test_native_margin_geometry_flags_true_margin_bottom_overflow():
 
     assert [f.issue for f in findings] == ["overflow-bottom"]
     assert findings[0].side == "right"
+
+
+def test_margin_geometry_summary_separates_trim_crossing_from_text_box_overflow(tmp_path):
+    summary = MarginGeometrySummary(
+        pdf_path=tmp_path / "book.pdf",
+        page_count=2,
+        pages_scanned=2,
+        findings=[
+            MarginGeometryFinding(
+                1,
+                "overflow-bottom",
+                "right",
+                "caption below text box but inside trim",
+                (470, 660, 555, 700),
+            ),
+            MarginGeometryFinding(
+                2,
+                "overflow-bottom",
+                "right",
+                "drawing crosses trim",
+                (80, 664, 468, 907),
+            ),
+        ],
+    )
+
+    assert summary.overflows == 2
+    assert [finding.page for finding in summary.page_edge_overflows] == [2]
 
 
 def test_collision_csv_is_machine_readable(capsys):

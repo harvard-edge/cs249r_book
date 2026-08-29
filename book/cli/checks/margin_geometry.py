@@ -105,6 +105,28 @@ class MarginGeometrySummary:
     def overflows(self) -> int:
         return self.overflow_bottom + self.overflow_top
 
+    @property
+    def page_edge_overflows(self) -> list[MarginGeometryFinding]:
+        """Find rendered objects that cross the 8 x 10 inch trim boundary.
+
+        Ordinary ``overflow-*`` findings include objects below the main text
+        box, where folios and intentional margin material can be legitimate.
+        Crossing the physical trim boundary is never legitimate and must be a
+        release-blocking condition.
+        """
+        return [
+            finding
+            for finding in self.findings
+            if (
+                finding.issue == "overflow-bottom"
+                and finding.bbox[3] > PAPER_H + EDGE_TOL
+            )
+            or (
+                finding.issue == "overflow-top"
+                and finding.bbox[1] < -EDGE_TOL
+            )
+        ]
+
 
 def _band_side(x_center: float) -> str | None:
     if RIGHT_BAND[0] <= x_center <= RIGHT_BAND[1]:

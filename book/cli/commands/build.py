@@ -280,15 +280,31 @@ class BuildCommand:
         geom = getattr(result, "margin_geometry", None)
         if geom is not None and getattr(geom, "findings", None):
             console.print()
+            edge_overflows = list(getattr(geom, "page_edge_overflows", []))
+            if edge_overflows:
+                console.print(
+                    f"  [bold red]✗ RELEASE BLOCKER: {len(edge_overflows)} rendered "
+                    f"object(s) cross the physical trim boundary[/bold red]"
+                )
+                for finding in edge_overflows[:10]:
+                    console.print(
+                        f"    [red]sheet {finding.page}: {finding.issue} "
+                        f"{finding.side} — {finding.detail}[/red]"
+                    )
             console.print(
                 f"  [yellow]⚠ margin geometry[/yellow] [dim]("
                 f"{len(geom.findings)} rendered margin finding(s) — "
                 f"non-blocking in build validation)[/dim]"
             )
+            edge_ids = {id(finding) for finding in edge_overflows}
             issue_rank = {"overlap": 0, "overflow-bottom": 1, "overflow-top": 2}
             for finding in sorted(
                 geom.findings,
-                key=lambda f: (issue_rank.get(f.issue, 9), f.page),
+                key=lambda f: (
+                    0 if id(f) in edge_ids else 1,
+                    issue_rank.get(f.issue, 9),
+                    f.page,
+                ),
             )[:10]:
                 console.print(
                     f"    [dim]sheet {finding.page}: {finding.issue} "

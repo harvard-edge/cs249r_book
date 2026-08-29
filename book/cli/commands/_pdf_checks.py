@@ -744,6 +744,11 @@ def verify_volume_pdf(
         if geom_summary is not None
         else None
     )
+    edge_overflows = (
+        len(geom_summary.page_edge_overflows)
+        if geom_summary is not None
+        else None
+    )
 
     checks = [
         PdfCheckItem("artifact", "PDF artifact exists", pdf_path.is_file()),
@@ -811,6 +816,17 @@ def verify_volume_pdf(
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
             skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "page-edge-overflow",
+            (
+                f"No rendered content crosses the physical trim boundary "
+                f"({edge_overflows} violation(s))"
+                if edge_overflows is not None
+                else "Physical trim-boundary scan (PyMuPDF unavailable)"
+            ),
+            edge_overflows is None or edge_overflows == 0,
+            skipped=edge_overflows is None,
         ),
         PdfCheckItem(
             "margin-geometry",
