@@ -17,9 +17,10 @@ GENERIC_BARE = {
 
 LOWERCASE_ALLOWLIST = {
     "bfloat16", "bitter lesson, The", "cuBLAS", "cuDNN", "cuSPARSE", "gRPC",
-    "im2col", "k-Anonymity", "k-Center", "mmap", "nn.Module", "oneDNN",
-    "p50 Latency", "p95 Latency", "torch.compile", "vLLM", "jax.grad",
-    "tf.data", "tf.function", "autocast", "oneCCL",
+    "i.i.d. assumption", "im2col", "k-anonymity", "k-Anonymity", "k-center", "l-diversity",
+    "mmap", "nn.Module", "oneDNN", "p50 latency", "p95 latency", "pJ/MAC",
+    "t-closeness", "torch.compile", "vLLM", "jax.grad", "tf.data",
+    "tf.function", "autocast", "oneCCL",
 }
 
 PARENTHETICAL_ALLOWLIST = {"Precision (Metric)"}
@@ -101,7 +102,7 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     _add("ampersand_unescaped", [k for k in keys if re.search(r"(?<!\\)&", k)], "unescaped &")
     _add(
         "article_leading",
-        [k for k in keys if re.match(r"^(The|A|An) [A-Z]", k)],
+        [k for k in keys if re.match(r"^(The|A|An) ", k)],
         "article-leading mains",
     )
     plural_dups = [
@@ -122,11 +123,8 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     return issues
 
 
-FIRST_DEF_LC_RE = re.compile(r"\*\*([a-z][^*\n]+?)\*\*\s*\\index\{[^}]*!definition\}")
-
-
 def check_tag_placement(root: Path) -> list[IndexIssue]:
-    """\\index{} inside bold/code/headings and first-definition capitalization."""
+    """Check for ``\\index{}`` inside bold, code, or headings."""
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
         rel = str(f.relative_to(root))
@@ -139,8 +137,6 @@ def check_tag_placement(root: Path) -> list[IndexIssue]:
                 continue
             if in_code_block or "\\index{" not in line:
                 continue
-            for m in FIRST_DEF_LC_RE.finditer(line):
-                issues.append(IndexIssue(rel, i, "V5_lowercase_first_def", f"First-definition bold term '**{m.group(1)}**' must be Title Cased"))
             if stripped.startswith("#") and not stripped.startswith("# │"):
                 issues.append(IndexIssue(rel, i, "V4_heading", "\\index{} on heading line"))
                 continue
@@ -226,4 +222,3 @@ def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
                 f"Term '{c}' has direct \\index on line {terms[c]} and '|see' index on line {see_terms[c][0]} (causes makeindex error)",
             ))
     return issues
-
