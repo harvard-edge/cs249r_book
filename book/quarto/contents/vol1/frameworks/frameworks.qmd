@@ -1497,7 +1497,7 @@ These execution models form a spectrum, and two quantitative principles make the
 The execution problem demands a quantitative principle for when a project should compile. The execution models form a continuum from maximum flexibility to maximum optimization. @Eq-execution-continuum lays out the four positions on that axis, and each labeled arrow names the mechanism that carries a project one step rightward toward hardware.
 
 $$
-\text{Eager} \xrightarrow{\text{tracing}} \text{JIT} \xrightarrow{\text{AOT}} \text{Static Graph} \xrightarrow{\text{synthesis}} \text{Custom Hardware}
+\text{Eager} \xrightarrow{\text{capture}} \text{Graph JIT} \xrightarrow{\text{export}} \text{AOT Runtime} \xrightarrow{\text{specialize}} \text{Hardware}
 $$ {#eq-execution-continuum}
 
 Each step rightward sacrifices flexibility for performance. The practical question is *where* a given project should be placed on this continuum. The optimal compilation strategy depends on production executions, development recompilations, and their respective time costs, combined in @eq-compilation-benefit:
@@ -1828,7 +1828,7 @@ The dispatch tax analysis reveals that small operations become overhead-bound wh
 *   **Hardware time**: $T_{\text{hw}} \approx$ `{python} DispatchTaxSmallLarge.gpt3_hw_time_ms_str` = `{python} DispatchTaxSmallLarge.gpt3_hw_time_us_str`.
 *   **Software overhead**: `{python} DispatchTaxSmallLarge.t_sw_math`.
 *   **Ratio**: `{python} DispatchTaxSmallLarge.gpt3_sw_time_us_str`/`{python} DispatchTaxSmallLarge.gpt3_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_large_str`.
-*   **Large-model outcome**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
+*   **Large-model outcome**: Modeled Python overhead is negligible. Compilation may still improve fusion, layout, or backend specialization; dispatch elimination contributes little.
 
 **Systems insight**: Dispatch overhead is regime-dependent. Compilation can reduce host-side overhead for small-operation workloads by fusing operations into fewer launches, while large models benefit mainly from fused kernels and memory movement reductions.
 
@@ -1838,7 +1838,7 @@ The dispatch tax analysis reveals that small operations become overhead-bound wh
 
 The compilation continuum reaches its extreme at the far edge\index{Edge deployment!TinyML frameworks}. While cloud frameworks like PyTorch and TensorFlow 2.x prioritize flexibility through eager execution, TinyML\index{TinyML!micro-runtimes}[^fn-tinyml-aot-extreme] systems operating on MCUs with kilobytes of memory cannot afford the overhead of a Python interpreter or a fully dynamic runtime.
 
-[^fn-tinyml-aot-extreme]: **TinyML**\index{TinyML!memory planning}: Systems designed for MCUs that cannot afford the memory or processing overhead of a Python interpreter. Instead of flexible eager execution, micro-runtimes use small C/C++ runtimes, fixed memory planning, and model-specific operator registration. In TensorFlow Lite Micro, inference is still interpreter-based: the application supplies a tensor arena, and the interpreter plans and reuses buffers without relying on heap allocation after setup. The hard requirement is predictable memory use, as a single `malloc()` failure on a device with just 256 KB of RAM is unrecoverable.
+[^fn-tinyml-aot-extreme]: **TinyML**\index{TinyML!memory planning}: Systems designed for MCUs cannot afford a Python interpreter. Micro-runtimes instead use small C/C++ runtimes, fixed memory planning, and model-specific operators. TensorFlow Lite Micro remains interpreter-based: the application supplies a tensor arena whose buffers are planned and reused without heap allocation after setup. Predictable memory is mandatory because exceeding a 256 KB device budget can prevent initialization or inference.
 
 ::: {#lhs-frameworks-lighthouse-example-smart-doorbell-tinyml .callout-lighthouse title="Lighthouse example: KWS on TinyML"}
 
@@ -1857,7 +1857,7 @@ Micro-frameworks such as **TensorFlow Lite Micro (TFLM)**\index{TensorFlow Lite 
 
 :::
 
-These micro-runtimes represent the most constrained endpoint of the continuum. By sacrificing most dynamic flexibility, they enable machine learning to run on devices consuming milliwatts of power because they keep data movement local to the chip.
+These micro-runtimes sacrifice dynamic flexibility to reduce footprint and make memory predictable. With compact models, low-power hardware, and duty cycling, that discipline enables milliwatt-scale inference with mostly on-chip data movement.
 
 The spectrum of execution strategies, from dynamic eager execution to static graph compilation and specialized micro-runtimes, requires developers to make deliberate trade-offs. The key execution-mode decisions summarize these architectural choices:
 
@@ -2022,7 +2022,7 @@ The critical observation is that this single backward pass computed $\partial c/
 
 Translating this mathematical elegance into a working system requires solving a concrete engineering problem: the backward pass needs values computed during the forward pass, so the framework must decide what to store, when to store it, and when to free it. Modern frameworks accomplish this through computational graphs and automatic gradient accumulation.[^fn-gradient-accumulation-batch]
 
-[^fn-gradient-accumulation-batch]: **Gradient accumulation**\index{Gradient accumulation!memory trade-off}: A direct answer to the "when to free it" question: the framework breaks a large logical batch into smaller mini-batches processed sequentially, freeing activation memory after each mini-batch's backward pass and accumulating only the small gradient tensors. This lets a system simulate a batch size of 4,096 using the memory footprint of a 64-sample batch, trading sequential compute time for a 64$\times$ reduction in peak activation memory. Without this technique, many production training configurations would exceed accelerator memory on the first batch.
+[^fn-gradient-accumulation-batch]: **Gradient accumulation**\index{Gradient accumulation!memory trade-off}: The framework processes a large logical batch as smaller mini-batches, freeing each mini-batch's saved activations after backward while accumulating parameter-sized gradients. Processing 4,096 samples in 64-sample mini-batches can reduce the batch-dependent activation peak by up to 64$\times$ when activation memory scales linearly with batch size; weights, gradients, optimizer state, and other fixed costs do not shrink. The trade-off is more sequential work before each optimizer update.
 
 @Lst-reverse_simple_nn illustrates this with a two-layer network, showing both the forward computation that stores intermediate values and the backward pass that consumes them to produce gradients for every parameter simultaneously.
 
@@ -2093,7 +2093,7 @@ class GPT3MemoryFootprint:
 
 #### Memory management strategies {#sec-ml-frameworks-memory-management-strategies-b008}
 
-A `{python} GPT3MemoryFootprint.gpt3_params_b_str`-parameter model in FP16 requires `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` just for weights, far exceeding any single GPU's memory. Weights, however, are only the beginning: reverse mode AD also stores every intermediate activation from the forward pass for use during the backward pass. For a 100-layer network processing a batch of 64 images, these stored activations can consume 8--12 GB on top of the model weights, gradients, and optimizer state. Memory, not compute, is the binding constraint on what models a framework can train.
+A `{python} GPT3MemoryFootprint.gpt3_params_b_str`-parameter model in FP16 requires `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` just for weights, beyond a single GPU's memory. Reverse mode AD also saves operation-dependent forward values for backward. In an illustrative 100-layer network with a batch of 64 images, activations alone can add 8--12 GB alongside weights, gradients, and optimizer state. Memory capacity can therefore set the feasibility boundary even when compute is available.
 
 The saved-activation footprint accumulates across layers. @Lst-reverse_memory shows how each added layer can contribute another activation tensor that must persist until the backward pass reaches it.
 
@@ -2321,7 +2321,7 @@ These three principles connect directly to the framework's role as a compiler fo
 
 Mixed precision\index{Mixed-precision training!FP16 vs. FP32 trade-offs} exploits a hardware asymmetry to improve two iron law terms simultaneously: Tensor Cores\index{Tensor Core!mixed-precision acceleration} execute FP16 matrix multiplications at higher throughput than FP32 CUDA cores (raising $R_{\text{peak}}$ and reducing the compute term $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$), while FP16 activations halve the memory footprint (reducing $D_{\text{vol}}$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
 
-Frameworks exploit this through automatic mixed-precision APIs that select reduced precision for compute-intensive operations while maintaining FP32 where numerical stability demands it. Inside these APIs, frameworks automatically apply precision rules: matrix multiplications and convolutions use FP16 for bandwidth efficiency, while numerically sensitive operations like softmax and layer normalization remain in FP32. This selective precision maintains accuracy while achieving speedups on modern GPUs with specialized hardware units. Because FP16 has a narrower dynamic range than FP32, gradients can underflow to zero during backpropagation. Loss scaling\index{Loss Scaling!gradient underflow prevention} addresses this by multiplying the loss by a large factor before the backward pass, then dividing gradients by the same factor afterward.
+Automatic mixed-precision APIs use reduced precision for eligible compute-intensive operations and higher precision where backend policy requires it. Matrix multiplications and convolutions commonly use FP16 on supported GPUs, while sensitive operations may use FP32; exact choices depend on the operation, device, and framework. This can preserve model quality and improve speed on suitable hardware. Because FP16 has a narrower dynamic range than FP32, gradients can underflow during backpropagation. Loss scaling\index{Loss Scaling!gradient underflow prevention} addresses this by multiplying the loss before the backward pass, then dividing gradients by the same factor afterward.
 
 Frameworks also support multiple precision modes including FP16, BF16,[^fn-bf16-dynamic-range] and TF32, NVIDIA's Tensor Core compute mode for FP32 matrix operations that keeps the FP32 exponent range while using lower mantissa precision. Each mode makes a different trade-off between range and precision. BF16 maintains FP32's dynamic range, simplifying training by eliminating most gradient underflow issues and often removing the need for loss scaling. @Sec-model-training-mixedprecision-training-9218 examines the mechanics of mixed-precision training in detail, including loss scaling algorithms, memory savings analysis, and numerical stability considerations. @Lst-autocast-usage demonstrates PyTorch's mixed precision API: the `autocast` context manager automatically selects FP16 for compute-intensive operations while `GradScaler` prevents gradient underflow by dynamically scaling loss values.
 
@@ -4542,7 +4542,7 @@ Under the stated launch-count and per-launch assumptions, the modeled training s
 
 - `torch.compile` can speed favorable small-operation workloads by fusing operations and reducing kernel launches
 - Batch size increases help amortize per-batch overhead
-- Production training uses much larger models where compute dominates
+- Larger, compute-dense operations can amortize dispatch overhead
 
 ### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
 
