@@ -6757,16 +6757,13 @@ Kernel-level tuning is attractive because GPU utilization is easy to inspect, bu
 
 :::
 
-```{=latex}
-\newpage
-```
 ## Summary {#sec-model-training-summary-2d06}
 
-Training is the phase in which mathematical algorithms, memory management, and hardware acceleration combine to transform data into model parameters. Iterative parameter optimization becomes a substantial engineering challenge at scale. Forward and backward propagation require coordinated matrix operations, memory allocations, and gradient computations that must be balanced against hardware constraints and performance requirements.
+Training combines algorithms, memory management, and hardware acceleration to transform data into model parameters. At scale, forward and backward propagation coordinate matrix operations, allocations, and gradients under hardware and performance constraints.
 
-Single-machine techniques such as data prefetching, mixed-precision training, FlashAttention, gradient accumulation, and activation checkpointing address input throughput, memory use, computational throughput, and numerical behavior. Combining them effectively requires matching the technique to the binding constraint. When single-machine limits are reached, data, model, pipeline, and tensor parallelism provide paths to further scaling, with increased system complexity.
+Prefetching, mixed precision, FlashAttention, gradient accumulation, and checkpointing address different throughput, memory, and numerical constraints. Match the technique to the binding constraint; when one machine is exhausted, data, model, pipeline, and tensor parallelism trade greater scale for greater complexity.
 
-This co-design principle, where algorithms, software frameworks, and hardware architectures evolve together, shapes large-scale training infrastructure. Matrix operation patterns drove GPU Tensor Core development, which frameworks exposed through mixed-precision APIs, enabling algorithmic techniques like FP16 training that further influenced next-generation hardware design. The chapter's FLOP and memory accounting provides the quantitative basis for comparing optimizers, estimating training cost at scale, and deciding when more hardware will help rather than merely move the bottleneck.
+This co-design shapes large-scale training: matrix patterns drove GPU Tensor Cores, frameworks exposed them through mixed-precision APIs, and techniques such as FP16 training influenced later hardware. FLOP and memory accounting then support optimizer comparison, cost estimation, and decisions about whether more hardware will help or merely move the bottleneck.
 
 ```{python}
 #| echo: false
@@ -6810,21 +6807,27 @@ class GPT2SummaryChapterRecap:
 ::: {.callout-takeaways title="Why training costs millions"}
 
 * **Training cost is an iron-law budget**: $T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$ makes every optimization accountable: reduce work, raise effective throughput, or improve utilization. A change that misses the dominant term only moves cost around the training loop.
-* **Memory determines whether an optimizer fits**: Standard mixed-precision Adam uses 8$\times$ the FP16 inference-weight memory in the chapter's stated representation before activations enter the budget. Any convergence benefit must be measured for the workload, while optimizer state and batch-dependent activations determine whether training fits at all.
-* **Profiles choose the remedy**: The loop is profile, diagnose, fix, and re-profile. Compute-bound jobs need more efficient arithmetic or algorithms; memory-bound jobs need less resident state or traffic; data- and communication-bound jobs need pipeline or parallelism changes.
+* **Memory determines whether an optimizer fits**: Standard mixed-precision Adam uses 8$\times$ the FP16 inference-weight memory in the stated representation before activations. Measure convergence for the workload; optimizer state and batch-dependent activations determine whether training fits.
+* **Profiles choose the remedy**: Profile, diagnose, fix, and re-profile. Compute-bound jobs need better arithmetic or algorithms; memory-bound jobs need less state or traffic; data- and communication-bound jobs need pipeline or parallelism changes.
 * **Precision and IO-aware kernels shift bottlenecks**: FP16 with FP32 accumulation can improve throughput and memory use, while FlashAttention avoids materializing the full $S{\times}S$ matrix in HBM; realized gains depend on workload and hardware.
 * **Checkpointing buys memory with recompute**: Storing fewer activations and recomputing them during backpropagation cuts activation memory 3--4$\times$ in the walkthrough, from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4. Use it when memory, not compute, binds.
-* **Composed optimizations can postpone scale-out**: Mixed precision and checkpointing turn `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` into a modeled `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` for the batch-4 GPT-2 walkthrough, before temporary workspaces. Evaluate relevant local levers before accepting distributed communication and operational overhead.
+* **Composed optimizations can postpone scale-out**: Mixed precision and checkpointing turn `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` into a modeled `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` for batch-4 GPT-2, before temporary workspaces. Use relevant local levers before accepting distributed communication and operational overhead.
 
 :::
 
-Practitioners can apply the iron law to classify a slow training job: compute-bound (improve arithmetic or algorithms; increase batch only when hardware is underfilled), memory-bound (reduce state or traffic), data-bound (repair the input pipeline), or communication-bound (adjust accumulation or parallelism). This discipline prevents teams from treating symptoms with additional hardware. As training cost and calendar time grow, profiling and targeted optimization determine whether iteration remains practical.
+The iron law classifies a slow job as compute-bound (improve arithmetic or algorithms), memory-bound (reduce state or traffic), data-bound (repair the input pipeline), or communication-bound (adjust accumulation or parallelism). Increase batch only when hardware is underfilled. This discipline prevents treating symptoms with more hardware and keeps iteration practical as cost grows.
 
 Training is where the iron law becomes a daily instrument. Mixed precision changes effective throughput and memory traffic; checkpointing exchanges memory for recomputation; scaling adds communication. The engineering task is to identify the dominant term and apply the least costly intervention that changes it.
 
+```{=latex}
+\newpage
+```
+
 ::: {.callout-chapter-connection title="From training to data selection"}
 
-Training produces the model artifact: billions of learned parameters that encode patterns extracted from data, at a cost paid once but paid steeply. A run that demanded `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` of memory spent compute on every example it ingested, yet not every example earned that price. Before optimizing how the trained model runs, the optimization journey turns upstream, to the workload itself. @Sec-data-selection asks how much of the training data is actually necessary, showing that a carefully chosen subset can match the accuracy of the full dataset while cutting the cost of every training iteration that follows.
+Training produces learned parameters by spending compute on every example; the chapter's optimized run still requires `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` of memory. Once the training loop is efficient, the next question is whether every example earns that cost. Repeated or low-information samples consume the same forward pass, backward pass, optimizer update, and communication as examples that add coverage or correct a weakness.
+
+@Sec-data-selection therefore turns upstream from execution to workload composition. It examines how redundancy, representativeness, uncertainty, and class coverage determine which examples should enter a finite training budget. A useful subset must reduce work without erasing rare cases or shifting the effective training distribution. When that balance holds, a carefully selected subset can approach full-dataset accuracy while lowering the cost of every epoch and making additional experiments affordable. The optimization target is no longer only how efficiently the system processes an example, but which examples the system should process at all.
 
 :::
 
