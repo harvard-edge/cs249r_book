@@ -1025,7 +1025,7 @@ The optimization techniques from Part III operate at different granularities (ke
 
 While end-to-end benchmarks reveal overall system behavior, optimization requires pinpointing exactly which operations consume time and energy. Micro-benchmarks\index{Micro Benchmark!diagnostic purpose} serve this diagnostic purpose by isolating individual tensor operations, the mathematical primitives optimized in @sec-hardware-acceleration.
 
-Consider debugging a slow inference pipeline: macro benchmarks might show unacceptable latency, but only micro-benchmarks reveal whether the bottleneck lies in convolutions, attention mechanisms, or memory copies. This diagnostic precision makes micro-benchmarks essential for the targeted optimization that transforms theoretical hardware capabilities into realized performance gains. These benchmarks isolate individual tasks to provide detailed insights into the computational demands of particular system elements, from neural network layers to optimization techniques to activation functions.
+Consider debugging a slow inference pipeline: macro benchmarks might show unacceptable latency, but only micro-benchmarks reveal whether the bottleneck lies in convolutions, attention mechanisms, memory copies, or activation functions. That isolation connects theoretical hardware capabilities to realized performance by showing which operation owns the cost.
 
 ```{python}
 #| echo: false
@@ -1062,7 +1062,7 @@ class H100SolCheck:
 To avoid measuring hardware artifacts instead of kernel performance, follow the *Systems Detective's Rules*:
 
 1.  The warm-up rule: Do not measure cold-start iterations as steady-state performance. Modern hardware uses DVFS (dynamic voltage and frequency scaling)\index{DVFS!warm-up measurement artifact} and dynamic frequency boosting\index{Frequency Boosting!warm-up measurement artifact}; caches, kernels, and clocks need warm-up before the measured loop represents sustained behavior.
-2.  The variance rule: Report the coefficient of variation (CV) $(\text{CV} = \sigma_{\text{run}} / \mu_{\text{run}})$, where $\sigma_{\text{run}}$ and $\mu_{\text{run}}$ are the standard deviation and mean across repeated benchmark runs. A CV above the protocol's tolerance signals that the result needs investigation; background OS jitter, thermal throttling\index{Thermal Throttling!impact on sustained perf}, and memory contention are possible causes. The tolerance is workload- and decision-dependent rather than a universal 5 percent cutoff.
+2.  The variance rule: Report the coefficient of variation (CV) $(\text{CV} = \sigma_{\text{run}} / \mu_{\text{run}})$, where $\sigma_{\text{run}}$ and $\mu_{\text{run}}$ are the standard deviation and mean across repeated runs. Investigate values above the protocol's workload-specific tolerance; common causes include background OS jitter, thermal throttling\index{Thermal Throttling!impact on sustained perf}, and memory contention, and 5 percent is not a universal cutoff.
 3.  **The "speed of light" (SOL) check**\index{Speed of Light Check!utilization diagnosis}: Compare the achieved throughput against the roofline. If a kernel achieves `{python} H100SolCheck.sol_example_tflop_per_s_str` on an H100 (peak ~`{python} H100SolCheck.h100_fp16_tflop_per_s_str` FP16, or ~`{python} H100SolCheck.h100_fp8_tflop_per_s_str` FP8 dense), the diagnostic step is to identify the cause of low utilization (often kernel launch latency from too many small kernels) before optimizing the code itself.
 4.  **The cache-state rule**: Set cache state to match the claim. Flush or exceed the L2 cache when measuring cold dynamic random-access memory (DRAM) bandwidth; preserve a warmed cache when measuring steady-state reuse. Otherwise a nominal DRAM result may instead reflect cache bandwidth (~`{python} H100SolCheck.cache_bw_low_tb_per_s_str`--`{python} H100SolCheck.cache_bw_high_tb_per_s_str`) rather than DRAM bandwidth (~`{python} H100SolCheck.dram_bw_low_tb_per_s_str`--`{python} H100SolCheck.dram_bw_high_tb_per_s_str`).
 
@@ -2929,12 +2929,6 @@ class EdgeTPUSpeedupCalc:
 
 ::: {#lhs-benchmarking-mobilenet-edgetpu .callout-lighthouse title="MobileNetV2 on EdgeTPU"}
 
-```{=latex}
-\begin{minipage}{1\linewidth}
-\setlength{\parskip}{2pt plus 1pt}%
-\renewcommand{\arraystretch}{1.2}
-```
-
 Completing the MobileNetV2 lighthouse example, the hardware-acceleration claim from @sec-hardware-acceleration is evaluated using an illustrative SingleStream-style edge-inference scenario [@reddi2020; @banbury2021mlperftiny].
 
 **Hardware acceleration claim**: In this illustrative edge-accelerator scenario, assume INT8 MobileNetV2 inference takes ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` on the accelerator, approximately `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` faster than a Cortex-M-class CPU (~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str`). Actual results depend on operator coverage, clock frequency, thermal state, and implementation.
@@ -2949,10 +2943,6 @@ Completing the MobileNetV2 lighthouse example, the hardware-acceleration claim f
 | **Energy per inference** |  ~`{python} EdgeTPUSpeedupCalc.cpu_energy_mj_str` |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_energy_mj_str` |                                —                                | ~`{python} EdgeTPUSpeedupCalc.energy_ratio_mult_str` more efficient |
 
 : **EdgeTPU vs. Cortex-M7 MobileNetV2 Scenario**: Illustrative SingleStream-style inference latency, end-to-end latency, power, and energy values show how preprocessing overhead narrows the headline accelerator speedup; these are not controlled measurements. {#tbl-benchmarking-edgetpu-validation tbl-colwidths="[24,20,18,18,20]"}
-
-```{=latex}
-\end{minipage}
-```
 
 **What this reveals**: Under these assumptions, the `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` inference speedup narrows to ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` end to end because preprocessing runs on the CPU in both cases. EdgeTPU uses more active power but completes faster, yielding lower inference energy; deployment requires controlled measurement.
 
@@ -3199,9 +3189,7 @@ fill=OrangeL!40](RS3)at($(BB6.east)!0.5!(BB7.west)$){Interconnection Fabrics};
 
 @Fig-power-diagram is organized into three categories, Tiny, Inference, and Training examples, each reflecting different measurement scopes based on system architecture and deployment environment. In TinyML systems, the entire low-power SoC, including compute, memory, and basic interconnects, typically falls within the measurement boundary. Inference nodes introduce more complexity, incorporating multiple SoCs, local storage, accelerators, and memory, while often excluding remote storage and off-chip components. Training deployments span multiple racks, where only selected elements, including compute nodes and network switches, are measured, while storage systems, cooling infrastructure, and parts of the interconnect fabric are often excluded.
 
-Where the boundary falls determines what counts as energy, but within any boundary the dominant term is rarely arithmetic. Decomposing inference energy into its physical sources shows why precision, not raw operation count, is the primary energy lever, and why a power benchmark that ignores data movement measures the wrong thing.
-
-System-level power measurement offers a more holistic view than measuring individual components in isolation. While component-level metrics (for example, accelerator or processor power) are valuable for performance tuning, real-world ML workloads involve intricate interactions between compute units, memory systems, and supporting infrastructure. For instance, analysis of Google's TensorFlow Mobile workloads shows that data movement accounts for 57.3 percent of total inference energy consumption [@boroumand2018], highlighting how memory-bound operations can dominate system power usage.
+The measurement boundary determines which energy is counted; workload composition determines where that energy is spent. TensorFlow Mobile measurements attribute 57.3 percent of inference energy to data movement [@boroumand2018], showing why component-only measurements and raw operation counts can miss the dominant system cost. The next example therefore decomposes MobileNetV2 energy into arithmetic and memory access.
 
 ```{python}
 #| echo: false
