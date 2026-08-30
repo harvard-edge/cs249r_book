@@ -4,7 +4,7 @@ engine: jupyter
 
 # Data Foundations {#sec-appdx-data-foundations}
 
-Data problems rarely present as data problems; they surface as a training run that will not speed up, an accelerator sitting idle, or accuracy eroding while dashboards stay green. To keep chapter arguments focused on system design, this appendix gathers the back-of-the-envelope calculations and statistical tools that trace such symptoms back to measurable data bottlenecks: transfer times, batch formation, synthetic data math, and drift diagnostics. The tools here lean on basic probability and on the data term of the iron law.
+Data problems rarely present as data problems; they surface as a training run that will not speed up, an accelerator sitting idle, or accuracy eroding while dashboards stay green. To keep chapter arguments focused on system design, this appendix gathers the back-of-the-envelope calculations and statistical tools that trace such symptoms back to measurable data bottlenecks: transfer times, storage-layout costs, drift diagnostics, and numerical-stability tools. The tools here lean on basic probability and on the data term of the iron law.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -92,7 +92,7 @@ class DataGravity:
     truck_1pb_str = fmt_time(truck_total_seconds / SEC_PER_DAY, day, precision=0, commas=False, style="word")
 ```
 
-With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
+With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
 
 ## Data Engineering Foundations {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
 
@@ -159,7 +159,7 @@ class SerializationCost:
 
 Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization-binary-format] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JavaScript Object Notation (JSON) or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
 
-[^fn-serialization-binary-format]: **Serialization**\index{Serialization!definition}: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering covers pipeline design strategies that minimize this overhead.
+[^fn-serialization-binary-format]: **Serialization**\index{Serialization!definition}: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering-data-ingestion-8efc covers pipeline design strategies that minimize this overhead.
 
 | **Format**   |                **Decoding Speed (MB/s)**                |           **Relative CPU Decode Cost**          | **Suitability**        |
 |:-------------|:-------------------------------------------------------:|:-----------------------------------------------:|:-----------------------|
@@ -410,7 +410,7 @@ class TailLatency:
 
 For $N_{\text{session}} = 100$ independent requests, each with a 0.01 chance of being slow, the probability of at least one P99-tail event is `{python} TailLatency.p_slow_math`.
 
-**Systems insight**: Under this model, a 100-request session is more likely than not to include an event beyond P99. Correlated slowdowns can change this probability [@dean2013; @decandia2007dynamo].
+**Systems insight**: Under this model, a 100-request session is more likely than not to include an event beyond P99. Correlated slowdowns can change this probability [@dean2013].
 
 :::
 
@@ -599,7 +599,7 @@ Both KL divergence and PSI are grounded in a deeper framework—information theo
 
 ### Information theory for systems {#sec-appdx-data-foundations-information-theory-systems-c033}
 
-A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point, the bottleneck is not only compute or bandwidth; it is the amount of information the data pipeline delivers to the learner. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a physical constraint, and information theory provides the units for reasoning about it.
+A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point, the bottleneck is not only compute or bandwidth; it is the amount of information the data pipeline delivers to the learner. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a diagnostic constraint, and information theory provides the units for reasoning about it.
 
 **Entropy ($H$)**\index{Entropy!definition}[^fn-entropy-information-theory] is the average uncertainty in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\mathcal{D}_{\text{KL}}$ measures the excess coding cost of using the wrong distribution.
 
@@ -607,7 +607,7 @@ A training run can consume more examples, run longer, and still stop improving i
 
 **Signal-to-noise ratio (SNR)**\index{Signal-to-noise ratio!definition} is the ratio of signal power to noise power. In ML, the book uses low SNR qualitatively for data in which task-relevant structure is weak relative to noise; adding compute cannot compensate for missing task-relevant signal.
 
-[^fn-entropy-information-theory]: **Entropy**\index{Entropy!appendix refresher}: From Greek *entropia* (transformation), the term was adopted by Shannon\index{Shannon, Claude!information theory} in 1948 to quantify information content [@shannon1948]. In systems terms, Shannon entropy is a lower bound on average lossless code length. Practical prefix codes approach it, and block codes can approach it asymptotically. With $\log_2$, the unit is bits; natural logs give nats. These bounds inform compression ratios and data-pipeline sizing.
+[^fn-entropy-information-theory]: **Entropy**\index{Entropy!appendix refresher}: Shannon\index{Shannon, Claude!information theory} adopted the term in 1948 to quantify information content [@shannon1948]. In systems terms, Shannon entropy is a lower bound on average lossless code length. Practical prefix codes approach it, and block codes can approach it asymptotically. With $\log_2$, the unit is bits; natural logs give nats. These bounds inform compression ratios and data-pipeline sizing.
 
 ### Logits and numerical stability {#sec-appdx-data-foundations-logits-numerical-stability-13e2}
 
@@ -634,7 +634,7 @@ $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
 The problem is that if $z_i$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{z_i}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick\index{Log-sum-exp trick!appendix refresher} allows us to compute $\log\left(\sum e^{z_j}\right)$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp-numerical-stability]
 
-[^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{x_i}\right) = a + \log\left(\sum e^{x_i - a}\right)$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
+[^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{x_i}\right) = a + \log\left(\sum e^{x_i - a}\right)$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
 
 A small worked example shows why this trick matters in practice, even for large but realistic logit values:
 

@@ -13,7 +13,7 @@ This appendix is designed as a reference. Reach for it when translating a profil
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
 - **When general matrix multiply (GEMM) kernels are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
-- **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-mechanics-learning-24f6 and the training memory \mbox{decomposition.}
+- **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e and the training memory \mbox{decomposition.}
 - **When tensor code "should work" but does not**: Use @sec-appdx-algorithm-foundations-shapes-strides-1aea and @sec-appdx-algorithm-foundations-broadcasting-ec16.
 - **When sparsity is proposed as a fix**: Use @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
 - **When proving gradient compute bounds**: Use @sec-appdx-algorithm-baur-strassen for the Baur–Strassen reverse-mode automatic differentiation (AD) complexity theorem.
@@ -30,7 +30,7 @@ Neural networks turn linear algebra into learned behavior: matrices transform ac
 ```
 ## Linear Algebra {#sec-appdx-algorithm-foundations-linear-algebra-c937}
 
-Deep learning systems are, at their core, engines for transforming massive matrices. Frameworks like PyTorch abstract away the raw math, but performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations, this section focuses on how they are manipulated.
+Deep learning systems are, at their core, engines for transforming massive matrices. Frameworks like PyTorch abstract away the raw math, but performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations-numerical-representations-c889, this section focuses on how they are manipulated.
 
 ```{=latex}
 \vspace*{-1ex}
@@ -66,7 +66,7 @@ This geometric interpretation is why dot products appear everywhere in modern ar
 
 GEMM[^fn-gemm-blas-routines] is the computational workhorse of deep learning. For matrices of size $M{\times}K$ and $K{\times}N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-[^fn-gemm-blas-routines]: **General matrix multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
+[^fn-gemm-blas-routines]: **General matrix multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine [@dongarra1988]. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
 ```{python}
 #| echo: false
@@ -434,7 +434,7 @@ Per-layer retained activations for this quick estimate are approximately $12 \ti
 
 While weights are fixed ($\mathcal{O}(P)$), activations grow linearly with batch size and at least linearly with sequence length; implementations that materialize attention scores add an $\mathcal{O}(S^2)$ component. As the worked example shows, activation memory can quickly exceed the room left after model state. Gradient checkpointing[^fn-gradient-checkpointing-memory] reduces this pressure by storing only selected activations and recomputing the rest during backpropagation [@chen2016training]; techniques such as FlashAttention address related attention-memory bottlenecks by tiling attention to reduce memory round-trips [@dao2022].
 
-[^fn-gradient-checkpointing-memory]: **Gradient checkpointing**\index{Gradient checkpointing!appendix refresher}: Trades compute for memory. Instead of storing all activations, only a subset (checkpoints) is kept, and the missing ones are recomputed during the backward pass. This reduces memory usage from storing every layer activation to roughly the square root of the layer count at the cost of ~33 percent more compute.
+[^fn-gradient-checkpointing-memory]: **Gradient checkpointing**\index{Gradient checkpointing!appendix refresher}: Trades compute for memory. Instead of storing all activations, only a subset (checkpoints) is kept, and the missing ones are recomputed during the backward pass. This reduces memory usage from storing every layer activation to roughly the square root of the layer count at the cost of ~33 percent more compute [@chen2016training].
 
 The same decomposition provides a quick feasibility check: sum the per-parameter model state, add the activation term implied by batch size and sequence length, and compare the total against the accelerator's capacity.
 
@@ -609,7 +609,7 @@ For sequence length $N = 4096$:
 * **FlashAttention HBM Transfers**: $2 N d + \frac{2 N^2 d}{B_r} = 2(4096)(128) + \frac{2(4096)^2 (128)}{128} = 1,048,576 + 33,554,432/128 = 1,048,576 + 262,144 = 1.31 \times 10^6$ elements.
 * **Realized Speedup**: $\frac{17.30 \times 10^6}{1.31 \times 10^6} \approx 13.2\times$ reduction in HBM transfers.
 
-By reducing HBM traffic by over $13\times$, FlashAttention converts attention from a memory-bandwidth-bound operation into a compute-bound operation, reaching up to $60\%$ of peak accelerator TFLOPs.
+By reducing HBM traffic by over $13\times$, FlashAttention converts attention from a memory-bandwidth-bound operation into a compute-bound operation, reaching up to $60\%$ of peak accelerator TFLOPs [@dao2022].
 :::
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
@@ -687,7 +687,7 @@ The difference between @kaplan2020scaling and @hoffmann2022chinchilla highlights
 * **@kaplan2020scaling** estimated $\alpha \approx 0.057$ and $\beta \approx 0.28$, predicting $N \propto C^{0.73}$ and $D \propto C^{0.27}$. This led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 175B trained on 300B tokens, giving $D/N = 1.71$).
 * **Methodological difference**: @kaplan2020scaling used a fixed token budget and learning-rate schedule across models. @hoffmann2022chinchilla matched the schedule to each training horizon and found that the earlier setup understated the value of training smaller models on more data.
 * **@hoffmann2022chinchilla** found near-balanced parameter and token scaling: its three approaches report exponent pairs of $(0.50, 0.50)$, $(0.49, 0.51)$, and $(0.46, 0.54)$ rather than one exact universal ratio.
-* **Practical Impact**: Chinchilla (70B parameters trained on 1.4T tokens, $D/N = 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference and $2.5\times$ less GPU VRAM.
+* **Practical Impact**: Chinchilla (70B parameters trained on 1.4T tokens, $D/N = 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference and $2.5\times$ lower weight memory at the same precision [@hoffmann2022chinchilla].
 
 :::
 
