@@ -249,7 +249,7 @@ Modern frameworks use reverse-mode automatic differentiation\index{Automatic dif
 
 Backpropagation[^fn-backprop-chain-rule] implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients. @Fig-backprop-graph illustrates this process for a simple two-layer network, with the forward pass (gray arrows) computing outputs and the backward pass (red dashed arrows) propagating gradients.
 
-[^fn-backprop-chain-rule]: **Backpropagation**\index{Backpropagation!appendix refresher}: Short for "backward propagation of errors." The algorithm was independently discovered multiple times—by @werbos1974beyond and @linnainmaa1970representation for reverse-mode differentiation and by @rumelhart1986 for neural network training. Its key insight is that computing gradients for *all* parameters requires only one backward pass through the graph, making training cost roughly 2--3$\times$ inference rather than $P\times$ (once per parameter).
+[^fn-backprop-chain-rule]: **Backpropagation**\index{Backpropagation!appendix refresher}: Short for "backward propagation of errors." The algorithm was independently discovered multiple times—by @werbos1974beyond and @linnainmaa1970representation for reverse-mode differentiation and by @rumelhart1986 for neural network training. Its key insight is that computing gradients for *all* parameters requires one backward pass through the graph rather than one pass per parameter. @Sec-appdx-algorithm-baur-strassen derives the constant-factor work bound and a representative dense-layer cost.
 
 ::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: Solid gray arrows carry the forward computation from input $x$ to loss $\mathcal{L}$, while dashed red arrows carry gradients backward along the same dependencies." fig-alt="A computational graph with four nodes labeled x, h, y, and a calligraphic L denoting loss, connected left to right. Solid gray arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."}
 ```{.tikz}
@@ -456,7 +456,7 @@ FlashAttention\index{FlashAttention!appendix refresher} is an I/O-aware tiled at
 
 ## Baur–Strassen Reverse-Mode AD Complexity Theorem {#sec-appdx-algorithm-baur-strassen}
 
-Modern deep learning scales to hundreds of billions of parameters because evaluating the full gradient vector $\nabla f(x)$ of a scalar loss function $f: \mathbb{R}^N \to \mathbb{R}$ requires compute proportional to evaluating $f(x)$ itself, completely independent of the input dimension $N$. This fundamental complexity bound was proved by Walter Baur and Volker Strassen in 1983 (Baur & Strassen, 1983).
+Modern deep learning scales to hundreds of billions of parameters because evaluating the full gradient vector $\nabla f(x)$ of a scalar loss function $f: \mathbb{R}^N \to \mathbb{R}$ requires compute proportional to evaluating $f(x)$ itself, with a constant-factor bound independent of the input dimension $N$. Baur and Strassen proved this complexity result in 1983 [@baur1983complexity].
 
 ### Mathematical formulation and theorem statement {#sec-appdx-algorithm-baur-strassen-statement}
 
@@ -516,7 +516,7 @@ The independence of $C \le 5$ from input dimension $N$ is the mathematical reaso
 * **Reverse-Mode Backward Pass**: Computes both weight gradients $\frac{\partial \mathcal{L}}{\partial W} = X^T \frac{\partial \mathcal{L}}{\partial Y}$ ($2P$ FLOPs) and input activation gradients $\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Y} W^T$ ($2P$ FLOPs), totaling $4P$ FLOPs per token.
 * **Total Training Work**: $2P (\text{fwd}) + 4P (\text{bwd}) = 6P$ FLOPs per token. The backward compute factor is exactly $\frac{4P}{2P} = 2$, well within the Baur–Strassen theoretical bound of $C \le 5$.
 
-If we instead used forward-mode AD or finite differences to compute $\nabla f \in \mathbb{R}^P$, evaluating each partial derivative separately would require $P$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla f) = \mathcal{O}(P \cdot W) = \mathcal{O}(P^2)$ FLOPs. For $P = 175 \times 10^9$, computing a single gradient step would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token—making training a single batch take longer than the age of the universe. Reverse-mode AD collapses this $\mathcal{O}(P)$ factor into a constant multiplier of 2.
+If we instead used forward-mode AD or finite differences to compute $\nabla f \in \mathbb{R}^P$, evaluating each partial derivative separately would require $P$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla f) = \mathcal{O}(P \cdot W) = \mathcal{O}(P^2)$ FLOPs. For $P = 175 \times 10^9$, that method would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token—$P$ times the forward-pass work and therefore prohibitive at this scale. Reverse-mode AD collapses this $\mathcal{O}(P)$ factor into a constant multiplier of 2 for the dense-layer accounting above.
 
 :::
 
@@ -655,7 +655,7 @@ $$ \alpha A N^{-\alpha} = \beta B D^{-\beta} $$
 
 This condition proves that at the compute-optimal allocation, the marginal loss reduction per fractional increase in parameter count must equal the marginal loss reduction per fractional increase in dataset tokens.
 
-### Analytical derivation of compute-optimal exponents ($N \propto \sqrt{C}, D \propto \sqrt{C}$) {#sec-appdx-algorithm-chinchilla-exponents}
+### Analytical derivation of compute-optimal exponents {#sec-appdx-algorithm-chinchilla-exponents}
 
 From $\alpha A N^{-\alpha} = \beta B D^{-\beta}$, we solve for $D$ in terms of $N$:
 $$ D^\beta = \left(\frac{\beta B}{\alpha A}\right) N^\alpha \implies D = \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} N^{\alpha/\beta} $$
@@ -671,24 +671,22 @@ $$ D^*(C) = \left( \frac{\beta B}{\alpha A} \right)^{\frac{1}{\alpha + \beta}} \
 
 #### Empirical exponents and the $D/N \approx 20$ rule {.unnumbered}
 
-Fitting the parametric loss surface to over 400 experimental runs, @hoffmann2022chinchilla estimated $\alpha \approx 0.34$ and $\beta \approx 0.28$ (or approximately $\alpha \approx \beta \approx 0.34$).
+Fitting the parametric loss surface to over 400 experimental runs, @hoffmann2022chinchilla estimated $\alpha \approx 0.34$ and $\beta \approx 0.28$. Substituting these values gives exponents close to the paper's parametric-model result:
 
-Plugging $\alpha \approx \beta$ into the exponent formulas:
-$$ \frac{\beta}{\alpha + \beta} \approx 0.5, \qquad \frac{\alpha}{\alpha + \beta} \approx 0.5 $$
+$$ \frac{\beta}{\alpha + \beta} \approx 0.45, \qquad \frac{\alpha}{\alpha + \beta} \approx 0.55 $$
 
-This yields the Chinchilla scaling law:
-$$ N^*(C) \propto C^{0.5} = \sqrt{C}, \qquad D^*(C) \propto C^{0.5} = \sqrt{C} $$
+Thus the parametric model predicts:
+$$ N^*(C) \propto C^{0.45}, \qquad D^*(C) \propto C^{0.55} $$
 
-The optimal ratio of parameters to tokens is therefore constant across compute scales:
-$$ \frac{D^*}{N^*} = \left( \frac{\beta B}{\alpha A} \right)^{\frac{1}{\alpha + \beta}} \approx 20 \text{ tokens per parameter.} $$
+The paper's two direct empirical approaches report near-balanced exponents of $(0.50, 0.50)$ and $(0.49, 0.51)$, which motivate the common square-root shorthand. Under the parametric fit, however, $D^*/N^*$ grows slowly with compute rather than remaining strictly constant. Across the regime studied, roughly 20 training tokens per parameter is a useful Chinchilla heuristic, not a universal invariant.
 
 ::: {#psp-appendix-algorithm-kaplan-vs-chinchilla .callout-perspective title="Kaplan vs. Chinchilla scaling"}
 
 The difference between @kaplan2020scaling and @hoffmann2022chinchilla highlights how hyperparameter choices in empirical benchmarking can alter system design conclusions:
 
 * **@kaplan2020scaling** estimated $\alpha \approx 0.057$ and $\beta \approx 0.28$, predicting $N \propto C^{0.73}$ and $D \propto C^{0.27}$. This led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 175B trained on 300B tokens, giving $D/N = 1.71$).
-* **System Flaw in Kaplan**: @kaplan2020scaling kept the learning rate schedule cosine duration fixed and used sub-optimal batch sizes when scaling data, causing larger models to be significantly under-trained.
-* **@hoffmann2022chinchilla** tuned the learning rate schedule for each training run length, revealing that parameters $N$ and tokens $D$ should scale in equal $1:1$ proportion ($N \propto \sqrt{C}$ and $D \propto \sqrt{C}$).
+* **Methodological difference**: @kaplan2020scaling used a fixed token budget and learning-rate schedule across models. @hoffmann2022chinchilla matched the schedule to each training horizon and found that the earlier setup understated the value of training smaller models on more data.
+* **@hoffmann2022chinchilla** found near-balanced parameter and token scaling: its three approaches report exponent pairs of $(0.50, 0.50)$, $(0.49, 0.51)$, and $(0.46, 0.54)$ rather than one exact universal ratio.
 * **Practical Impact**: Chinchilla (70B parameters trained on 1.4T tokens, $D/N = 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference and $2.5\times$ less GPU VRAM.
 
 :::
