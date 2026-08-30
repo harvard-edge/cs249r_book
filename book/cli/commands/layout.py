@@ -277,7 +277,7 @@ class LayoutCommand:
                 "Optional. Omit the subcommand when using --vol1/--vol2 for "
                 "the high-level auto-layout planner."
             ),
-            metavar="{chapter,collisions,check,margins,overlaps,purpose,tables}",
+            metavar="{chapter,collisions,check,margins,overlaps,release,purpose,tables}",
         )
 
         chapter = sub.add_parser(
@@ -500,6 +500,37 @@ class LayoutCommand:
                  "known residuals are in-callout figures).",
         )
 
+        release = sub.add_parser(
+            "release",
+            help="Gate a release PDF on unsafe rendered layout geometry.",
+            description=(
+                "Scan every rendered page and fail on main-body text outside "
+                "the text frame or content beyond the physical trim edge. "
+                "Margin-column overflow and overlap candidates remain visible "
+                "as advisory findings because diagrams, captions, margin notes, "
+                "and part openers may intentionally share rendered boxes."
+            ),
+            formatter_class=_LayoutHelpFormatter,
+        )
+        release.add_argument("pdf", help="Path to the release PDF to scan.")
+        release.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only scan outline chapters matching this comma-separated filter.",
+        )
+        release.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Only scan the first N pages (0 = all).",
+        )
+        release.add_argument(
+            "--csv",
+            action="store_true",
+            help="Emit machine-readable findings using the margin geometry schema.",
+        )
+
         tables = sub.add_parser(
             "tables",
             help="Render a table-only PDF audit for a volume or chapter.",
@@ -648,6 +679,13 @@ class LayoutCommand:
                 limit=opts.limit,
                 json_out=opts.json_out,
                 strict=opts.strict,
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
+                csv=opts.csv,
+            )
+        if opts.subcommand == "release":
+            return self._release_layout(
+                Path(opts.pdf),
+                limit=opts.limit,
                 chapter_filter=self._parse_chapter_filter(opts.chapter),
                 csv=opts.csv,
             )
@@ -2078,15 +2116,63 @@ class LayoutCommand:
             return False
         return True
 
+    @staticmethod
+    def _release_blocking_issue(issue: str) -> bool:
+        return (
+            issue == "body-overflow-bottom"
+            or issue.startswith("trim-overflow-")
+        )
+
+    def _release_layout(
+        self,
+        pdf_path: Path,
+        limit: int = 0,
+        chapter_filter: Optional[List[str]] = None,
+        csv: bool = False,
+    ) -> bool:
+        """Release gate with strict body/trim checks and advisory margins."""
+        collected = self._collect_margin_geometry_rows(
+            pdf_path,
+            limit=limit,
+            chapter_filter=chapter_filter,
+        )
+        if collected is None:
+            return False
+        rows, pages_scanned, page_count = collected
+        if csv:
+            self._render_margin_geometry_csv(rows)
+        else:
+            self._render_margin_geometry(
+                pdf_path,
+                rows,
+                pages_scanned=pages_scanned,
+                page_count=page_count,
+                release_policy=True,
+            )
+            blocking = sum(
+                self._release_blocking_issue(row["finding"].issue)
+                for row in rows
+            )
+            advisory = len(rows) - blocking
+            console.print(
+                f"BLOCKING release geometry [red]{blocking}[/red]  "
+                f"ADVISORY margin geometry [yellow]{advisory}[/yellow]"
+            )
+        return not any(
+            self._release_blocking_issue(row["finding"].issue) for row in rows
+        )
+
     def _render_margin_geometry(
         self,
         pdf_path: Path,
         rows: List[Dict[str, Any]],
         pages_scanned: int,
         page_count: int,
+        release_policy: bool = False,
     ) -> None:
         by_issue = Counter(row["finding"].issue for row in rows)
         overlaps = by_issue.get("overlap", 0)
+        body_overflows = by_issue.get("body-overflow-bottom", 0)
         ob = by_issue.get("overflow-bottom", 0)
         ot = by_issue.get("overflow-top", 0)
         console.print(
@@ -2105,7 +2191,10 @@ class LayoutCommand:
             table.add_column("fix", overflow="fold")
             for row in rows:
                 f = row["finding"]
-                colour = "red" if f.issue == "overlap" else "yellow"
+                colour = self._margin_geometry_colour(
+                    f.issue,
+                    release_policy=release_policy,
+                )
                 src = row["source_file"]
                 if row["source_line"]:
                     src += f":{row['source_line']}"
@@ -2124,10 +2213,23 @@ class LayoutCommand:
             console.print(table)
         console.print(
             f"overlaps [red]{overlaps}[/red]  "
+            f"body-frame [red]{body_overflows}[/red]  "
             f"overflow-bottom [yellow]{ob}[/yellow]  "
             f"overflow-top [yellow]{ot}[/yellow]  "
             f"[dim](total {len(rows)})[/dim]"
         )
+
+    @classmethod
+    def _margin_geometry_colour(
+        cls,
+        issue: str,
+        *,
+        release_policy: bool = False,
+    ) -> str:
+        """Keep historical margin severity separate from release policy."""
+        if release_policy:
+            return "red" if cls._release_blocking_issue(issue) else "yellow"
+        return "red" if issue == "overlap" else "yellow"
 
     def _render_margin_geometry_csv(self, rows: List[Dict[str, Any]]) -> None:
         import csv as _csv
@@ -2158,6 +2260,8 @@ class LayoutCommand:
 
     def _margin_geometry_strategy(self, row: Dict[str, Any]) -> str:
         f = row["finding"]
+        if f.issue == "body-overflow-bottom":
+            return "main-flow-tighten"
         context = self._source_layout_context(
             row.get("source_file") or "",
             row.get("source_line") or 0,

@@ -777,6 +777,116 @@ def test_native_margin_geometry_flags_true_margin_bottom_overflow():
     assert findings[0].side == "right"
 
 
+def test_native_margin_geometry_flags_body_text_crossing_main_frame():
+    page = _FakePage(
+        blocks=[_text_block(82, 650, 410, 704, "Bitter Lesson prose")],
+    )
+
+    findings = scan_margin_geometry_page(page, 44)
+
+    assert [f.issue for f in findings] == ["body-overflow-bottom"]
+    assert findings[0].side == "body"
+    assert "Bitter Lesson prose" in findings[0].snippet
+
+
+def test_native_margin_geometry_allows_normal_final_line_glyph_depth():
+    page = _FakePage(
+        blocks=[_text_block(82, 650, 410, 696, "ordinary final baseline")],
+    )
+
+    assert scan_margin_geometry_page(page, 43) == []
+
+
+def test_native_margin_geometry_ignores_narrow_margin_note_below_main_frame():
+    page = _FakePage(
+        blocks=[_text_block(470, 650, 555, 710, "intentional margin note")],
+    )
+
+    findings = scan_margin_geometry_page(page, 41)
+
+    assert [f.issue for f in findings] == ["overflow-bottom"]
+
+
+def test_release_gate_blocks_body_and_trim_but_not_margin_advisories():
+    assert LayoutCommand._release_blocking_issue("body-overflow-bottom")
+    assert LayoutCommand._release_blocking_issue("trim-overflow-bottom")
+    assert not LayoutCommand._release_blocking_issue("overlap")
+    assert not LayoutCommand._release_blocking_issue("overflow-bottom")
+    assert not LayoutCommand._release_blocking_issue("overflow-top")
+
+
+def test_margin_geometry_colours_preserve_existing_and_release_policies():
+    assert LayoutCommand._margin_geometry_colour("overlap") == "red"
+    assert LayoutCommand._margin_geometry_colour(
+        "overlap", release_policy=True
+    ) == "yellow"
+    assert LayoutCommand._margin_geometry_colour(
+        "body-overflow-bottom", release_policy=True
+    ) == "red"
+
+
+def test_release_command_executes_reporting_path(monkeypatch, capsys, tmp_path):
+    finding = MarginGeometryFinding(
+        44,
+        "body-overflow-bottom",
+        "body",
+        "body text extends 11pt below main text frame",
+        (144, 572, 532, 704),
+        "Bitter Lesson prose",
+    )
+    row = {
+        "finding": finding,
+        "label": "10",
+        "chapter": "Introduction",
+        "source_file": "",
+        "source_line": 0,
+        "section": "The Bitter Lesson",
+    }
+    command = LayoutCommand(None, None)
+    monkeypatch.setattr(
+        command,
+        "_collect_margin_geometry_rows",
+        lambda *_args, **_kwargs: ([row], 1, 1),
+    )
+
+    assert not command._release_layout(tmp_path / "release.pdf")
+    output = capsys.readouterr().out
+    assert "body-frame" in output
+    assert "BLOCKING release geometry" in output
+
+
+def test_release_command_passes_with_advisory_margin_overlap(
+    monkeypatch, capsys, tmp_path
+):
+    finding = MarginGeometryFinding(
+        18,
+        "overlap",
+        "right",
+        "mixed and text boxes intersect by 4pt",
+        (470, 130, 540, 150),
+        "diagram label",
+    )
+    row = {
+        "finding": finding,
+        "label": "18",
+        "chapter": "Introduction",
+        "source_file": "",
+        "source_line": 0,
+        "section": "",
+    }
+    command = LayoutCommand(None, None)
+    monkeypatch.setattr(
+        command,
+        "_collect_margin_geometry_rows",
+        lambda *_args, **_kwargs: ([row], 1, 1),
+    )
+
+    assert command._release_layout(tmp_path / "release.pdf")
+    output = capsys.readouterr().out
+    assert "BLOCKING release geometry 0" in output
+    assert "ADVISORY margin geometry 1" in output
+
+
 def test_native_margin_geometry_flags_body_drawing_crossing_trim():
     page = _FakePage(drawings=[(80, 676, 468, 907)])
 

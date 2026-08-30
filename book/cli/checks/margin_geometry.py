@@ -43,6 +43,11 @@ CAPTION_GAP = 6.0
 EDGE_TOL = 2.0
 HORIZONTAL_EDGE_TOL = 6.0
 TOP_TOL = 6.0
+BODY_MIN_WIDTH = TEXT_W * 0.45
+# A normal final baseline can put glyph descenders about 3pt below TeX's
+# nominal text frame without representing an additional line of content.
+# Reserve the release failure for ink materially beyond that routine depth.
+BODY_FRAME_TOL = 5.0
 
 
 @dataclass
@@ -231,6 +236,49 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
     return findings
 
 
+def _body_frame_findings(page, pageno: int) -> list[MarginGeometryFinding]:
+    """Find substantial body prose below the main text frame.
+
+    The book alternates its main column horizontally on recto and verso pages,
+    while margin notes occupy narrow outer columns.  A substantial text block
+    with its center in the union of the two possible main-column positions is
+    therefore body prose; narrow margin notes, running heads, folios, and crop
+    labels are deliberately excluded.
+    """
+    body_center_left = TRIM_LEFT + INNER + BODY_MIN_WIDTH / 2
+    body_center_right = TRIM_LEFT + OUTER + TEXT_W - BODY_MIN_WIDTH / 2
+    findings: list[MarginGeometryFinding] = []
+
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        x0, y0, x1, y1 = (float(value) for value in block["bbox"])
+        width = x1 - x0
+        x_center = (x0 + x1) / 2
+        if width < BODY_MIN_WIDTH:
+            continue
+        if not body_center_left <= x_center <= body_center_right:
+            continue
+        if y1 <= TEXT_BOTTOM + BODY_FRAME_TOL:
+            continue
+        # Content beyond the physical trim is already reported by the stronger
+        # trim-edge check; avoid emitting two release failures for one object.
+        if y1 > TRIM_BOTTOM + EDGE_TOL:
+            continue
+        findings.append(MarginGeometryFinding(
+            pageno,
+            "body-overflow-bottom",
+            "body",
+            (
+                f"body text extends to {y1:.0f}pt "
+                f"({(y1 - TEXT_BOTTOM):.0f}pt below main text frame)"
+            ),
+            (round(x0), round(y0), round(x1), round(y1)),
+            _text_from_block(block),
+        ))
+    return findings
+
+
 def _x_overlap(a: MarginGeometryElement, b: MarginGeometryElement) -> float:
     return min(a.x1, b.x1) - max(a.x0, b.x0)
 
@@ -406,6 +454,7 @@ def _cluster(boxes: list[MarginGeometryElement]) -> list[MarginGeometryElement]:
 
 def scan_page(page, pageno: int) -> list[MarginGeometryFinding]:
     findings: list[MarginGeometryFinding] = _trim_boundary_findings(page, pageno)
+    findings.extend(_body_frame_findings(page, pageno))
     elems = _cluster(_raw_margin_boxes(page))
 
     for side in ("left", "right"):
