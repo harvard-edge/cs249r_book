@@ -67,12 +67,12 @@ Compare @fig-local with @tbl-not-in-aux.
 def test_correct_custom_callout_tex_updates_heading_and_matching_reference():
     tex = r"""
 \protect\phantomsection\label{nbk-example-cost}
-\begin{fbxSimple}{callout-notebook}{Napkin Math 1.3:}{Cost estimate}
+\begin{fbxSimple}{callout-notebook}{napkin math 1.3:}{Cost estimate}
 \phantomsection\label{nbk-example-cost}
 See napkin math \hyperref[nbk-example-cost]{1.3}.
 """
     corrected, headings, references = _correct_custom_callout_tex(tex, 9)
-    assert "{Napkin Math 9.3:}" in corrected
+    assert "{napkin math 9.3:}" in corrected
     assert r"\hyperref[nbk-example-cost]{9.3}" in corrected
     assert headings == 1
     assert references == 1

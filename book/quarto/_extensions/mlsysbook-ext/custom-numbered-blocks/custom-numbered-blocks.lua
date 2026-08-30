@@ -193,7 +193,7 @@ end
 -- appendices included, so chapterinfo() hands back 17 for the first appendix of
 -- a 16-chapter volume. The *sections* in that file are lettered by Quarto's own
 -- appendix handling, which produced pages where "B.1 Data Engineering
--- Foundations" sat directly above "Napkin Math 18.1". Numbering callouts by
+-- Foundations" sat directly above "napkin math 18.1". Numbering callouts by
 -- appendix letter puts the two back in agreement.
 --
 -- Appendices are identified by the `appendix_` stem prefix, which matches every
