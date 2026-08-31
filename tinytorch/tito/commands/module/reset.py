@@ -224,7 +224,7 @@ class ModuleResetCommand(BaseCommand):
 
         if progress_file.exists():
             try:
-                with open(progress_file, "r") as f:
+                with open(progress_file, "r", encoding='utf-8') as f:
                     progress = json.load(f)
 
                 # Remove from completed and started modules
@@ -238,7 +238,7 @@ class ModuleResetCommand(BaseCommand):
 
                 progress["last_updated"] = datetime.now().isoformat()
 
-                with open(progress_file, "w") as f:
+                with open(progress_file, "w", encoding='utf-8') as f:
                     json.dump(progress, f, indent=2)
             except Exception as e:
                 console.print(f"[dim]Could not update progress: {e}[/dim]")
@@ -256,7 +256,7 @@ class ModuleResetCommand(BaseCommand):
             "completed_modules": [],
             "last_worked": None,
             "last_updated": datetime.now().isoformat()
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         # Reset milestones
         milestones_file = tito_dir / "milestones.json"
@@ -264,7 +264,7 @@ class ModuleResetCommand(BaseCommand):
             "version": "1.0",
             "completed_milestones": [],
             "completion_dates": {}
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
     def run(self, args: Namespace) -> int:
         """Execute the reset command."""

@@ -162,7 +162,7 @@ def test_milestone_list_uses_actual_history_start_year():
         [sys.executable, "-m", "tito.main", "milestone", "list", "--simple"],
         cwd=TINYTORCH_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace',
         env=env,
     )
 

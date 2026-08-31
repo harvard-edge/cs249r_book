@@ -59,7 +59,7 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
         cmd,
         cwd=TINYTORCH_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace',
         timeout=timeout,
         env=env,
         input="n\nn\nn\n"  # Answer 'n' to any prompts

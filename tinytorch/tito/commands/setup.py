@@ -365,7 +365,7 @@ class SetupCommand(BaseCommand):
 
         if profile_path.exists():
             import json
-            with open(profile_path, 'r') as f:
+            with open(profile_path, 'r', encoding='utf-8') as f:
                 existing_profile = json.load(f)
 
             if not force:
@@ -400,7 +400,7 @@ class SetupCommand(BaseCommand):
 
         # Save profile
         import json
-        with open(profile_path, 'w') as f:
+        with open(profile_path, 'w', encoding='utf-8') as f:
             json.dump(profile, f, indent=2)
 
         _print_file_update(self.console, profile_path)
