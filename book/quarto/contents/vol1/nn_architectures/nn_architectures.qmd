@@ -141,13 +141,13 @@ Machine learning systems face a core engineering trade-off: **representational p
 
 Choosing an architectural backbone sets the primary memory layout and compute pattern for downstream hardware. @Tbl-architecture-families contrasts the five major neural network families across their spatial/temporal inductive biases, tensor operations, and memory access characteristics.
 
-| **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**   |
-|:-----------------|:------------------------------|:-------------------------------|:------------------------|
-| **MLPs**         | Tabular/Unstructured          | Dense connectivity             | Memory bandwidth        |
-| **CNNs**         | Spatial (images)              | Local filters + weight sharing | Compute throughput      |
-| **RNNs**         | Sequential (time series)      | Recurrent state                | Sequential dependencies |
-| **Transformers** | Relational (language)         | Dynamic attention              | Memory capacity $(S^2)$ |
-| **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)   |
+| **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**                           |
+|:-----------------|:------------------------------|:-------------------------------|:------------------------------------------------|
+| **MLPs**         | Tabular/Unstructured          | Dense connectivity             | Memory bandwidth                                |
+| **CNNs**         | Spatial (images)              | Local filters + weight sharing | Compute throughput                              |
+| **RNNs**         | Sequential (time series)      | Recurrent state                | Sequential dependencies                         |
+| **Transformers** | Relational (language)         | Dynamic attention              | Quadratic score compute; optional $S^2$ storage |
+| **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)                           |
 
 : **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput because convolution reuses filters across many pixels, RNNs stress sequential dependencies that prevent parallelism, transformers compute quadratic score interactions and may materialize quadratic score storage, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
 
@@ -455,7 +455,7 @@ These bottlenecks reflect the underlying math, but the calculation here is a wei
 |:---------------------|:--------------:|:------------------------------------------------------:|:---------------------------|
 | **Dense CNN**        |   ResNet-50    |  ~`{python} WorkloadSignatures.resnet_intensity_str`   | Compute-Rich (GPUs/TPUs)   |
 | **Efficient Vision** |  MobileNetV2   | ~`{python} WorkloadSignatures.mobilenet_intensity_str` | Balanced (Mobile NPUs)     |
-| **Transformer**      |  GPT-2 (Inf)   |   ~`{python} WorkloadSignatures.gpt2_intensity_str`    | Bandwidth-Rich (HBM3/H100) |
+| **Transformer**      |  GPT-2 (Inf)   |   ~`{python} WorkloadSignatures.gpt2_intensity_str`    | Bandwidth-rich accelerator |
 
 : **Lighthouse Workload Signatures**: Weight-only FP32 intensity proxies for three model scenarios. These values suggest different compute and bandwidth pressures but do not determine a fixed hardware affinity; realized bottlenecks depend on execution regime and hardware balance. {#tbl-workload-signatures tbl-colwidths="[20,20,20,40]"}
 
@@ -2283,7 +2283,7 @@ The transformer architecture in @sec-network-architectures-transformers-attentio
 
 Dynamic pattern processing addresses scenarios where relationships between elements are not fixed by architecture but instead emerge from content. Language translation exemplifies this challenge: when translating "the bank by the river," understanding "bank" requires attending to "river," but in "the bank approved the loan," the important relationship is with "approved" and "loan." Unlike RNNs that process information sequentially or CNNs that use fixed spatial patterns, an architecture is required that can dynamically determine which relationships matter. The pronoun-resolution schematic in @fig-transformer-attention-visualized makes that dynamic routing visible.
 
-::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Attention Pattern**: A schematic attention pattern for the pronoun \"they.\" Line thickness represents hypothetical attention-weight magnitude, with stronger links to \"student,\" \"finish,\" and \"homework.\" One attention layer connects all positions directly and can compute their dense interactions in parallel." fig-alt="Illustrative self-attention schematic labeled Layer 4 Head 2 for the sentence 'The student did not finish the homework because they were tired.' Tokens are listed vertically in two columns. Cyan lines connect the highlighted pronoun they on the right to all tokens on the left, with thicker example lines to student, finish, and homework."}
+::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Attention Pattern**: A schematic attention pattern for the pronoun \"they.\" Line thickness represents hypothetical attention-weight magnitude, with stronger links to \"student,\" \"finish,\" and \"homework.\" One attention layer connects all positions directly and can compute their dense interactions in parallel." fig-alt="Illustrative self-attention schematic labeled Layer 4 Head 2 for the sentence 'The student did not finish all the homework because they were tired.' Tokens are listed vertically in two columns. Cyan lines connect the highlighted pronoun they on the right to all tokens on the left, with thicker example lines to student, finish, and homework."}
 
 ```{.tikz}
 \scalebox{0.9}{%
@@ -2295,16 +2295,16 @@ Dynamic pattern processing addresses scenarios where relationships between eleme
 }
 % Left
 \foreach \i/\clr/\txt in {
-  1/cyan!50/The\_, 2/cyan!50/student\_, 3/cyan!30/didn\_, 4/cyan!30/'\_, 5/cyan!35/t\_,
-  6/cyan!50/finish\_, 7/cyan!20/the\_, 8/cyan!40/homework\_, 9/cyan!10/because\_,
-  10/cyan!30/they\_, 11/cyan!30/were\_, 12/cyan!20/tired\_
+  1/cyan!50/The\_, 2/cyan!50/student\_, 3/cyan!30/did\_, 4/cyan!35/not\_,
+  5/cyan!50/finish\_, 6/cyan!20/all\_, 7/cyan!20/the\_, 8/cyan!40/homework\_,
+  9/cyan!10/because\_, 10/cyan!30/they\_, 11/cyan!30/were\_, 12/cyan!20/tired\_
 } {
   \node[token,fill=\clr,align=right] (T\i l) at (0,-\i*0.62) {\txt};
 }
 % Right
 \foreach \i/\txt in {
-  1/The\_, 2/student\_, 3/didn\_, 4/'\_, 5/t\_,
-  6/finish\_, 7/the\_, 8/homework\_, 9/because\_,
+  1/The\_, 2/student\_, 3/did\_, 4/not\_,
+  5/finish\_, 6/all\_, 7/the\_, 8/homework\_, 9/because\_,
   10/they\_, 11/were\_, 12/tired\_
 } {
   \node[token,fill=white,align=left] (T\i r) at ($(T\i l) + (6.5cm, 0)$) {\txt};
@@ -2316,13 +2316,13 @@ Dynamic pattern processing addresses scenarios where relationships between eleme
 % Attention with "they"
 \draw[attention] (T10r.west) -- (T2l.east); % student
 \draw[attention,line width=0.5pt, opacity=0.75] (T10r.west) -- (T1l.east); % The
-\draw[attention] (T10r.west) -- (T6l.east); % finish
+\draw[attention] (T10r.west) -- (T5l.east); % finish
 \draw[attention, opacity=0.75] (T10r.west) -- (T8l.east); % homework
-\foreach \i in {3,4,5,7,9,10,11,12}{
+\foreach \i in {3,4,6,7,9,10,11,12}{
 \draw[attention,line width=0.25] (T10r.west) -- (T\i l.east);
 }
 % Title
-\node[above=14pt of current bounding box.north,align=center] (TS){The student didn’t finish the homework because they were tired.};
+\node[above=14pt of current bounding box.north,align=center] (TS){The student did not finish all the homework because they were tired.};
 \node[below=-3pt of TS,anchor=north] {\footnotesize Layer: 4 \quad Head: 2};
 \end{tikzpicture}}
 ```
