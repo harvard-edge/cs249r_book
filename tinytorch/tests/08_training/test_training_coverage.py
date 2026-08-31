@@ -260,6 +260,79 @@ class TestCheckpointing:
             assert os.path.exists(path)
 
 
+class TestSaveCheckpointIsAtomic:
+    """save_checkpoint must never leave a corrupted or partially-written
+    file at the target path, the classic "process killed mid-write" or
+    "disk full during save" failure mode. It writes to a temp file and
+    atomically replaces the target, so the target is always either the
+    old complete checkpoint or the new one, never a partial write."""
+
+    def test_failure_during_write_leaves_previous_checkpoint_intact(self, monkeypatch):
+        """Simulates a crash/disk-full event partway through pickling by
+        making pickle.dump raise. The previous good checkpoint at the
+        target path must be completely unaffected."""
+        import tinytorch.core.training as training_module
+
+        trainer, _ = simple_trainer()
+        trainer.epoch = 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "ckpt.pkl")
+            trainer.save_checkpoint(path)
+            with open(path, "rb") as f:
+                original_bytes = f.read()
+
+            trainer.epoch = 999  # state that must NOT end up on disk
+
+            def failing_dump(obj, f):
+                f.write(b"partial garbage")
+                raise OSError("simulated disk full")
+
+            monkeypatch.setattr(training_module.pickle, "dump", failing_dump)
+
+            with pytest.raises(OSError):
+                trainer.save_checkpoint(path)
+
+            with open(path, "rb") as f:
+                after_bytes = f.read()
+            assert after_bytes == original_bytes, (
+                "A failed save must not corrupt the previous checkpoint"
+            )
+
+    def test_failure_during_write_does_not_leave_temp_file_behind(self, monkeypatch):
+        import tinytorch.core.training as training_module
+
+        trainer, _ = simple_trainer()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "ckpt.pkl")
+
+            def failing_dump(obj, f):
+                raise OSError("simulated disk full")
+
+            monkeypatch.setattr(training_module.pickle, "dump", failing_dump)
+
+            with pytest.raises(OSError):
+                trainer.save_checkpoint(path)
+
+            assert not os.path.exists(path)
+            assert not os.path.exists(path + ".tmp")
+
+    def test_successful_save_still_produces_a_loadable_checkpoint(self):
+        """Regression guard: the atomic-write change must not break the
+        normal, successful save path."""
+        trainer, model = simple_trainer()
+        trainer.epoch = 5
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "ckpt.pkl")
+            trainer.save_checkpoint(path)
+
+            assert os.path.exists(path)
+            assert not os.path.exists(path + ".tmp")
+
+            trainer.epoch = 0
+            trainer.load_checkpoint(path)
+            assert trainer.epoch == 5
+
+
 # ─────────────────────────────────────────────
 # Trainer.evaluate
 # ─────────────────────────────────────────────
