@@ -38,57 +38,155 @@ os.environ['TINYTORCH_QUIET'] = '1'
 # This runs BEFORE any tests to ensure the package is properly built.
 # Without this, tests would silently pass because imports return None.
 
-def _validate_package_exported():
+# ---------------------------------------------------------------------------
+# Module registry: maps each of the 20 TinyTorch modules to
+#   - the file path it exports to  (relative to tinytorch/tinytorch/)
+#   - a key symbol that must be importable and non-None after export
+#   - whether its absence is a hard failure (foundational) or a warning
+#     (progressive — student may not have completed the module yet)
+#
+# Export paths come directly from each src file's
+# `#| default_exp <path>` directive (e.g. 09_convolutions → core.spatial).
+# ---------------------------------------------------------------------------
+_MODULE_REGISTRY = [
+    # (module_num, title,          export_file,              import_path,                    key_symbol,   required)
+    ( 1, "Tensor",          "core/tensor.py",          "tinytorch.core.tensor",         "Tensor",               True),
+    ( 2, "Activations",     "core/activations.py",     "tinytorch.core.activations",    "ReLU",                 True),
+    ( 3, "Layers",          "core/layers.py",          "tinytorch.core.layers",         "Linear",               True),
+    ( 4, "Losses",          "core/losses.py",          "tinytorch.core.losses",         "MSELoss",              True),
+    ( 5, "DataLoader",      "core/dataloader.py",      "tinytorch.core.dataloader",     "DataLoader",           False),
+    ( 6, "Autograd",        "core/autograd.py",        "tinytorch.core.autograd",       "enable_autograd",      False),
+    ( 7, "Optimizers",      "core/optimizers.py",      "tinytorch.core.optimizers",     "SGD",                  False),
+    ( 8, "Training",        "core/training.py",        "tinytorch.core.training",       "Trainer",              False),
+    # Module 09 exports to core.spatial — not core.convolutions
+    ( 9, "Convolutions",    "core/spatial.py",         "tinytorch.core.spatial",        "Conv2d",               False),
+    (10, "Tokenization",    "core/tokenization.py",    "tinytorch.core.tokenization",   "CharTokenizer",        False),
+    (11, "Embeddings",      "core/embeddings.py",      "tinytorch.core.embeddings",     "Embedding",            False),
+    (12, "Attention",       "core/attention.py",       "tinytorch.core.attention",      "MultiHeadAttention",   False),
+    (13, "Transformers",    "core/transformers.py",    "tinytorch.core.transformers",   "TransformerBlock",     False),
+    # Modules 14-19 live in the perf sub-package
+    (14, "Profiling",       "perf/profiling.py",       "tinytorch.perf.profiling",      "Profiler",             False),
+    (15, "Quantization",    "perf/quantization.py",    "tinytorch.perf.quantization",   "Quantizer",            False),
+    (16, "Compression",     "perf/compression.py",     "tinytorch.perf.compression",    "Compressor",           False),
+    (17, "Acceleration",    "perf/acceleration.py",    "tinytorch.perf.acceleration",   "vectorized_matmul",    False),
+    (18, "Memoization",     "perf/memoization.py",     "tinytorch.perf.memoization",    "KVCache",              False),
+    (19, "Benchmarking",    "perf/benchmarking.py",    "tinytorch.perf.benchmarking",   "Benchmark",            False),
+    # Module 20 exports to the top-level olympics package
+    (20, "Capstone",        "olympics/__init__.py",    "tinytorch.olympics",            None,                   False),
+]
+
+
+def _check_module_exported(num, title, export_file, import_path, key_symbol):
     """
-    Validate that tinytorch package is properly exported.
+    Check a single module: file exists + symbol is importable and non-None.
 
-    This prevents a critical bug where tests pass because:
-    1. tinytorch/__init__.py uses try/except for imports
-    2. Missing exports result in Tensor = None (not ImportError)
-    3. Tests import None and may pass vacuously
-
-    Returns tuple: (is_valid, error_message)
+    Returns a list of error strings (empty = all good).
     """
     errors = []
+    pkg_dir = project_root / "tinytorch"
 
-    # Check 1: Core module files exist
-    core_dir = project_root / "tinytorch" / "core"
-    required_modules = [
-        "tensor.py",
-        "activations.py",
-        "layers.py",
-        "losses.py",
-    ]
+    # File-existence check
+    file_path = pkg_dir / export_file
+    if not file_path.exists():
+        errors.append(
+            f"Module {num:02d} ({title}): missing exported file "
+            f"tinytorch/{export_file}"
+        )
+        # No point checking the import if the file isn't there
+        return errors
 
-    for module in required_modules:
-        module_path = core_dir / module
-        if not module_path.exists():
-            errors.append(f"Missing: tinytorch/core/{module}")
+    # Import + non-None symbol check (only when a key symbol is specified)
+    if key_symbol is not None:
+        try:
+            import importlib
+            mod = importlib.import_module(import_path)
+            obj = getattr(mod, key_symbol, None)
+            if obj is None:
+                errors.append(
+                    f"Module {num:02d} ({title}): "
+                    f"{import_path}.{key_symbol} is None "
+                    f"(exported but symbol is missing or failed silently)"
+                )
+        except Exception as exc:
+            errors.append(
+                f"Module {num:02d} ({title}): "
+                f"error importing {import_path} — {type(exc).__name__}: {exc}"
+            )
 
-    # Check 2: Tensor class is actually importable (not None)
+    return errors
+
+
+def _validate_package_exported():
+    """
+    Validate that the tinytorch package is properly exported for all 20 modules.
+
+    Two-tier strategy matching TinyTorch's progressive pedagogy:
+
+    - **Foundational modules (01–04)** — required=True
+        Hard failures: if these are missing, nothing else can run.
+        Students must export at least these before the test suite starts.
+
+    - **Progressive modules (05–20)** — required=False
+        Soft warnings: printed to stderr but do NOT block test execution.
+        A student working on Module 06 should still be able to run the
+        Module 01–05 tests without the later modules being present.
+
+    This prevents the silent-pass bug where tinytorch/__init__.py
+    catches ImportError and sets symbols to None, causing tests to
+    import None and vacuously pass.
+
+    Returns:
+        tuple[bool, list[str]]: (is_valid, hard_error_messages)
+        Soft warnings are printed directly to stderr here.
+    """
+    import sys
+
+    hard_errors = []
+    soft_warnings = []
+
+    for num, title, export_file, import_path, key_symbol, required in _MODULE_REGISTRY:
+        module_errors = _check_module_exported(
+            num, title, export_file, import_path, key_symbol
+        )
+        if module_errors:
+            if required:
+                hard_errors.extend(module_errors)
+            else:
+                soft_warnings.extend(module_errors)
+
+    # Additionally verify that the Tensor class is actually instantiable,
+    # not just importable — guards against empty stub implementations.
     try:
         from tinytorch import Tensor
         if Tensor is None:
-            errors.append("Tensor is None (import failed silently)")
-    except ImportError as e:
-        errors.append(f"Cannot import Tensor: {e}")
-
-    # Check 3: Verify Tensor is actually the class, not a stub
-    try:
-        from tinytorch import Tensor
-        if Tensor is not None:
-            # Try to instantiate - this catches incomplete implementations
+            hard_errors.append(
+                "tinytorch.Tensor is None after import "
+                "(export failed silently — run: tito dev export --all)"
+            )
+        else:
             t = Tensor([1, 2, 3])
-            if not hasattr(t, 'data'):
-                errors.append("Tensor missing 'data' attribute")
-            if not hasattr(t, 'shape'):
-                errors.append("Tensor missing 'shape' attribute")
-    except Exception as e:
-        errors.append(f"Tensor instantiation failed: {e}")
+            for attr in ("data", "shape", "size", "dtype"):
+                if not hasattr(t, attr):
+                    hard_errors.append(
+                        f"Tensor is missing required attribute '{attr}'"
+                    )
+    except ImportError as exc:
+        hard_errors.append(f"Cannot import tinytorch.Tensor: {exc}")
+    except Exception as exc:
+        hard_errors.append(f"Tensor([1, 2, 3]) raised unexpectedly: {exc}")
 
-    if errors:
-        return False, errors
-    return True, []
+    # Print soft warnings so students see what's not yet exported
+    if soft_warnings:
+        print(
+            "\n[tinytorch] Modules not yet exported (OK for progressive "
+            "builds — export when you reach that module):",
+            file=sys.stderr,
+        )
+        for w in soft_warnings:
+            print(f"  ⚠  {w}", file=sys.stderr)
+        print("", file=sys.stderr)
+
+    return (not hard_errors), hard_errors
 
 
 def pytest_configure(config):
