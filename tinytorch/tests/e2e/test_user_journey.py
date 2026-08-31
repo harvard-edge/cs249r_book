@@ -39,7 +39,7 @@ def run_tito(args: list, cwd: Optional[Path] = None, timeout: int = 60) -> Tuple
         cmd,
         cwd=cwd or PROJECT_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace',
         timeout=timeout,
         env=env
     )
@@ -52,7 +52,7 @@ def run_python_script(script_path: Path, timeout: int = 120) -> Tuple[int, str, 
         [sys.executable, str(script_path)],
         cwd=PROJECT_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace',
         timeout=timeout
     )
     return result.returncode, result.stdout, result.stderr
@@ -145,14 +145,14 @@ class TestQuickVerification:
             [sys.executable, "-c", "import tinytorch; print('OK')"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         ).returncode, "", ""
 
         result = subprocess.run(
             [sys.executable, "-c", "import tinytorch; print('OK')"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, f"Cannot import tinytorch: {result.stderr}"
         assert "OK" in result.stdout
@@ -234,7 +234,7 @@ class TestModuleFlow:
 
         # Check progress file still exists and has data
         assert progress_file.exists()
-        data = json.loads(progress_file.read_text())
+        data = json.loads(progress_file.read_text(encoding='utf-8'))
         assert "started_modules" in data
 
     @pytest.mark.module_flow
@@ -333,7 +333,7 @@ class TestFullJourney:
             [sys.executable, "-c", "from tinytorch import Tensor; print('OK')"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         # This tests that the package structure is correct
         # If Tensor is not exported, that's a test failure
@@ -357,7 +357,7 @@ print('OK')
 """],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True,
+            text=True, encoding='utf-8', errors='replace',
             timeout=10
         )
         assert result.returncode == 0, (

@@ -229,7 +229,7 @@ class PreflightCommand(BaseCommand):
     def _save_log(self) -> None:
         """Save the log file."""
         try:
-            self.log_file.write_text("\n".join(self.log_lines))
+            self.log_file.write_text("\n".join(self.log_lines), encoding='utf-8')
         except Exception:
             pass  # Don't fail if we can't write log
 

@@ -236,7 +236,7 @@ def _load_completed_module_numbers() -> set:
         return completed
 
     try:
-        with open(progress_file, 'r') as f:
+        with open(progress_file, 'r', encoding='utf-8') as f:
             progress_data = json.load(f)
     except (json.JSONDecodeError, IOError):
         return completed
@@ -300,7 +300,7 @@ class MilestoneSystem:
         # Try to load main milestones.yml first
         if config_path.exists():
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
 
                 # Convert to expected format
@@ -321,7 +321,7 @@ class MilestoneSystem:
         for era_path in era_paths:
             if era_path.exists():
                 try:
-                    with open(era_path, 'r') as f:
+                    with open(era_path, 'r', encoding='utf-8') as f:
                         era_config = yaml.safe_load(f)
 
                     if 'milestone' in era_config:
@@ -505,7 +505,7 @@ class MilestoneSystem:
         progress_file = Path(".tito") / "progress.json"
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     progress_data = json.load(f)
                     module_num = _module_progress_to_int(module_name)
                     completed_nums = {
@@ -526,7 +526,7 @@ class MilestoneSystem:
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -548,7 +548,7 @@ class MilestoneSystem:
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
@@ -1442,7 +1442,7 @@ class MilestoneCommand(BaseCommand):
                 completed_modules = []
                 if progress_file.exists():
                     try:
-                        with open(progress_file, 'r') as f:
+                        with open(progress_file, 'r', encoding='utf-8') as f:
                             progress_data = json.load(f)
                             for mod in progress_data.get("completed_modules", []):
                                 try:
@@ -1564,7 +1564,7 @@ class MilestoneCommand(BaseCommand):
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -1586,7 +1586,7 @@ class MilestoneCommand(BaseCommand):
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
