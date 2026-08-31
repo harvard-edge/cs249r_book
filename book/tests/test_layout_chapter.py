@@ -6,9 +6,15 @@ from book.cli.commands.layout_chapter import (
     H1_RE,
     _appendix_counter_hook,
     _correct_custom_callout_tex,
+    _fragment_owner,
+    _inject_folio_after_h1,
     _mainmatter_counter_hook,
+    _plain_toc_title,
+    _volume_citekeys,
     mapped_source,
     parse_aux,
+    parse_toc_chapters,
+    roman_to_int,
 )
 
 
@@ -32,6 +38,52 @@ def test_appendix_counter_hook_restores_letter_position_and_folio():
     assert r"\setcounter{chapter}{2}" in text
     assert r"\setcounter{page}{879}" in text
     assert r"\renewcommand{\appendix}" in text
+
+
+def test_roman_folio_conversion():
+    assert roman_to_int("xiii") == 13
+    assert roman_to_int("xxix") == 29
+
+
+def test_parse_toc_chapters_handles_numbered_and_unnumbered(tmp_path: Path):
+    aux = tmp_path / "book.aux"
+    aux.write_text(
+        "\\@writefile{toc}{\\contentsline {chapter}{Foreword}{xiii}{chapter*.2}\\protected@file@percent }\n"
+        "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {11}Hardware Acceleration}{529}{chapter.11}\\protected@file@percent }\n",
+        encoding="utf-8",
+    )
+    records = parse_toc_chapters(aux)
+    assert records[0] == {
+        "title": "Foreword",
+        "page": "xiii",
+        "anchor": "chapter*.2",
+    }
+    assert _plain_toc_title(records[1]["title"]) == "Hardware Acceleration"
+
+
+def test_fragment_owner_routes_include_only_sources(tmp_path: Path):
+    volume_root = tmp_path / "contents" / "vol1"
+    assert _fragment_owner(volume_root / "frontmatter" / "_conventions.qmd", volume_root) == volume_root / "frontmatter" / "about.qmd"
+    assert _fragment_owner(volume_root / "frontmatter" / "_notation_body.qmd", volume_root) == volume_root / "frontmatter" / "notation.qmd"
+    assert _fragment_owner(volume_root / "chapter.qmd", volume_root) is None
+
+
+def test_inject_folio_after_unnumbered_h1():
+    mapped = _inject_folio_after_h1("# Foreword {.unnumbered}\n\nText.\n", 13, roman=True)
+    assert "# Foreword {.unnumbered}\n\n```{=latex}" in mapped
+    assert r"\pagenumbering{roman}" in mapped
+    assert r"\setcounter{page}{13}" in mapped
+
+
+def test_volume_citekeys_follows_includes_and_excludes_xrefs(tmp_path: Path):
+    chapter = tmp_path / "chapter.qmd"
+    fragment = tmp_path / "_fragment.qmd"
+    chapter.write_text(
+        "See [@source] and @sec-local.\n{{< include _fragment.qmd >}}\n",
+        encoding="utf-8",
+    )
+    fragment.write_text("Also [@included].\n", encoding="utf-8")
+    assert _volume_citekeys(tmp_path, ["chapter.qmd"]) == ["included", "source"]
 
 
 def test_parse_aux_extracts_number_page_and_anchor(tmp_path: Path):
@@ -127,6 +179,20 @@ See principle \hyperref[pri-example-cost]{I.2}.
     corrected, headings, references = _correct_custom_callout_tex(tex, "III")
     assert "{principle III.2:}" in corrected
     assert r"\hyperref[pri-example-cost]{III.2}" in corrected
+    assert headings == 1
+    assert references == 1
+
+
+def test_correct_custom_callout_tex_expands_local_part_number():
+    tex = r"""
+\protect\phantomsection\label{pri-example-cost}
+\begin{fbxSimple}{callout-principle}{Principle 1:}{Cost estimate}
+\phantomsection\label{pri-example-cost}
+See principle \hyperref[pri-example-cost]{1}.
+"""
+    corrected, headings, references = _correct_custom_callout_tex(tex, "III")
+    assert "{Principle III.1:}" in corrected
+    assert r"\hyperref[pri-example-cost]{III.1}" in corrected
     assert headings == 1
     assert references == 1
 

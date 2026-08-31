@@ -33,19 +33,22 @@ H1_RE = re.compile(
     r"^#\s+.+?\{[^}\n]*#([A-Za-z][A-Za-z0-9_-]+)(?:\s+[^}\n]*)?\}\s*$",
     re.MULTILINE,
 )
+H1_LINE_RE = re.compile(
+    r"^#\s+(?P<title>.+?)(?:[ \t]+\{(?P<attrs>[^}\n]*)\})?[ \t]*$", re.MULTILINE
+)
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 CUSTOM_HEADING_RE = re.compile(
     r"(\\begin\{fbxSimple\}\{callout-[^}]+\}\{[^{}\n]*? )"
-    r"(?:\d+|[A-Z]|[IVXLCM]+)(\.\d+:\})"
+    r"(?P<number>(?:(?:\d+|[A-Z]|[IVXLCM]+)\.)?\d+)(?P<suffix>:\})"
 )
 CUSTOM_TARGET_RE = re.compile(
     r"\\label\{(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|pri|cs|ws)-[^}]+)\}"
     r"\s*\\begin\{fbxSimple\}\{callout-[^}]+\}"
-    r"\{[^{}\n]*? (?P<number>(?:\d+|[A-Z]|[IVXLCM]+)\.\d+):\}"
+    r"\{[^{}\n]*? (?P<number>(?:(?:\d+|[A-Z]|[IVXLCM]+)\.)?\d+):\}"
 )
 CUSTOM_REF_RE = re.compile(
     r"\\hyperref\[(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|pri|cs|ws)-[^]]+)\]"
-    r"\{(?P<number>(?:\d+|[A-Z]|[IVXLCM]+)\.\d+)\}"
+    r"\{(?P<number>(?:(?:\d+|[A-Z]|[IVXLCM]+)\.)?\d+)\}"
 )
 
 
@@ -95,6 +98,110 @@ def parse_aux(aux_path: Path) -> dict[str, dict[str, str]]:
             number, page, _, anchor = fields[:4]
             labels[label] = {"number": number, "page": page, "anchor": anchor}
     return labels
+
+
+def parse_toc_chapters(aux_path: Path) -> list[dict[str, str]]:
+    """Extract chapter-level title, folio, and anchor records from an AUX file."""
+    records: list[dict[str, str]] = []
+    marker = r"\contentsline {chapter}"
+    for line in aux_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        offset = line.find(marker)
+        if offset < 0:
+            continue
+        fields = _braced_fields(line[offset + len(marker) :])
+        if len(fields) >= 3:
+            records.append(
+                {"title": fields[0], "page": fields[1], "anchor": fields[2]}
+            )
+    return records
+
+
+def roman_to_int(value: str) -> int:
+    """Convert a positive Roman-numeral folio to an integer page counter."""
+    numerals = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    text = value.strip().upper()
+    if not text or any(char not in numerals for char in text):
+        raise ValueError(f"Invalid Roman folio: {value}")
+    total = 0
+    previous = 0
+    for char in reversed(text):
+        current = numerals[char]
+        total += -current if current < previous else current
+        previous = max(previous, current)
+    return total
+
+
+def _inject_folio_after_h1(source: str, start_page: int, *, roman: bool) -> str:
+    """Set the visible folio after Quarto emits an unnumbered chapter heading."""
+    numbering = "roman" if roman else "arabic"
+    block = (
+        "\n\n```{=latex}\n"
+        f"\\pagenumbering{{{numbering}}}\n"
+        f"\\setcounter{{page}}{{{start_page}}}\n"
+        "```"
+    )
+    return H1_LINE_RE.sub(lambda match: match.group(0) + block, source, count=1)
+
+
+def _configured_sources(config: dict[str, Any], key: str) -> list[str]:
+    values = config.get("book", {}).get(key, []) or []
+    return [value for value in values if isinstance(value, str)]
+
+
+def _fragment_owner(source_path: Path, volume_root: Path) -> Path | None:
+    owners = {
+        "_conventions.qmd": volume_root / "frontmatter" / "about.qmd",
+        "_notation_body.qmd": volume_root / "frontmatter" / "notation.qmd",
+        "_notation_distributed.qmd": volume_root / "frontmatter" / "notation.qmd",
+    }
+    return owners.get(source_path.name)
+
+
+def _volume_citekeys(quarto_dir: Path, configured: list[str]) -> list[str]:
+    """Collect bibliography citekeys used by the selected volume's QMD sources."""
+    keys: set[str] = set()
+    visited: set[Path] = set()
+    citation = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z][A-Za-z0-9_:.+-]*)")
+    include = re.compile(r"\{\{<\s*include\s+([^ >]+)\s*>\}\}")
+    xref_prefixes = ("sec-", "fig-", "tbl-", "eq-", "lst-", "alg-", "vid-")
+
+    def collect(path: Path) -> None:
+        path = path.resolve()
+        if path in visited or not path.is_file() or path.suffix != ".qmd":
+            return
+        visited.add(path)
+        text = path.read_text(encoding="utf-8")
+        for key in citation.findall(text):
+            if not key.lower().startswith(xref_prefixes):
+                keys.add(key)
+        for relative in include.findall(text):
+            collect(path.parent / relative)
+
+    for relative in configured:
+        collect(quarto_dir / relative)
+    return sorted(keys)
+
+
+def _plain_toc_title(value: str) -> str:
+    """Remove the numberline wrapper used by numbered AUX chapter titles."""
+    return re.sub(r"^\\numberline\s*\{[^}]+\}", "", value).strip()
+
+
+def _h1_metadata(source: str) -> tuple[str, str]:
+    match = H1_LINE_RE.search(source)
+    if match is None:
+        raise ValueError("Could not find a level-one heading")
+    return match.group("title").strip(), (match.group("attrs") or "")
+
+
+def _toc_record_for_title(
+    records: list[dict[str, str]], title: str
+) -> dict[str, str]:
+    matches = [record for record in records if _plain_toc_title(record["title"]) == title]
+    if len(matches) != 1:
+        detail = "none" if not matches else ", ".join(record["anchor"] for record in matches)
+        raise ValueError(f"Full-build AUX title {title!r} did not resolve uniquely: {detail}")
+    return matches[0]
 
 
 def _display_text(kind_token: str, record: dict[str, str]) -> str:
@@ -275,7 +382,11 @@ def _correct_custom_callout_tex(
 ) -> tuple[str, int, int]:
     """Correct local callout headings and references in mapped TeX."""
     corrected, heading_count = CUSTOM_HEADING_RE.subn(
-        lambda match: f"{match.group(1)}{chapter_number}{match.group(2)}", tex
+        lambda match: (
+            f"{match.group(1)}{chapter_number}."
+            f"{match.group('number').rsplit('.', 1)[-1]}{match.group('suffix')}"
+        ),
+        tex,
     )
     target_numbers = {
         match.group("id"): match.group("number")
@@ -355,41 +466,90 @@ def render_mapped_chapter(
     chapter: str,
     aux_path: Path,
 ) -> dict[str, Any]:
-    """Render an isolated chapter with full-volume numbering and references."""
+    """Render one configured PDF component with full-volume layout context."""
     quarto_dir = Path(config_manager.book_dir).resolve()
-    source_path = _resolve_chapter(quarto_dir, volume, chapter)
+    requested_path = _resolve_chapter(quarto_dir, volume, chapter)
+    volume_root = (quarto_dir / "contents" / volume).resolve()
+    if requested_path == volume_root / "index.qmd":
+        raise ValueError(
+            "The volume index.qmd is an HTML landing page, not a PDF component. "
+            "Use a configured PDF QMD instead."
+        )
+    source_path = _fragment_owner(requested_path, volume_root) or requested_path
     aux_path = aux_path.expanduser().resolve()
     if not aux_path.is_file():
         raise FileNotFoundError(f"Full-build aux file not found: {aux_path}")
 
+    pdf_config = Path(config_manager.get_config_file("pdf", volume)).resolve()
+    config = yaml.safe_load(pdf_config.read_text(encoding="utf-8"))
+    configured_chapters = _configured_sources(config, "chapters")
+    configured_appendices = _configured_sources(config, "appendices")
+    configured = configured_chapters + configured_appendices
+    source_rel = source_path.relative_to(quarto_dir).as_posix()
+    if source_rel not in configured:
+        raise ValueError(
+            f"{requested_path.relative_to(quarto_dir)} is not a configured PDF "
+            "component and has no supported owning wrapper"
+        )
+
     source = source_path.read_text(encoding="utf-8")
     labels = parse_aux(aux_path)
-    h1 = H1_RE.search(source)
-    if h1 is None:
-        raise ValueError(f"Could not find a labeled chapter H1 in {source_path}")
-    chapter_label = h1.group(1)
-    chapter_record = labels.get(chapter_label)
-    if chapter_record is None or not chapter_record["anchor"].startswith(
-        ("chapter.", "appendix.")
-    ):
-        raise ValueError(f"No full-build chapter record for {chapter_label}")
-    is_appendix = chapter_record["anchor"].startswith("appendix.")
-    displayed_number = chapter_record["number"]
-    if is_appendix:
+    title, attrs = _h1_metadata(source)
+    label_match = ID_RE.search(attrs)
+    document_label = label_match.group(1) if label_match else None
+    labeled_record = labels.get(document_label or "")
+    toc_records = parse_toc_chapters(aux_path)
+
+    is_part = "/parts/" in source_rel
+    is_frontmatter = "/frontmatter/" in source_rel
+    is_reference_matter = source_path.name == "references.qmd" or "backmatter/glossary/" in source_rel
+    is_appendix = bool(
+        labeled_record and labeled_record["anchor"].startswith("appendix.")
+    )
+    if is_part:
+        document_kind = "part_opener"
+    elif is_frontmatter:
+        document_kind = "frontmatter"
+    elif is_appendix:
+        document_kind = "appendix"
+    elif is_reference_matter:
+        document_kind = "appendix_backmatter"
+    elif labeled_record and labeled_record["anchor"].startswith("chapter."):
+        document_kind = "mainmatter_chapter"
+    else:
+        raise ValueError(f"Could not classify configured PDF component {source_rel}")
+
+    record = labeled_record or _toc_record_for_title(toc_records, title)
+    displayed_number = record.get("number", "")
+    start_folio = record["page"]
+    start_page = int(start_folio) if start_folio.isdigit() else roman_to_int(start_folio)
+
+    if document_kind == "appendix":
         if len(displayed_number) != 1 or not displayed_number.isalpha():
             raise ValueError(
-                f"Unsupported appendix number for {chapter_label}: {displayed_number}"
+                f"Unsupported appendix number for {document_label}: {displayed_number}"
             )
         counter_number = ord(displayed_number.upper()) - ord("A") + 1
-    else:
+    elif document_kind == "mainmatter_chapter":
         counter_number = int(displayed_number)
-    start_page = int(chapter_record["page"])
+    elif document_kind == "part_opener":
+        parts = [item for item in configured_chapters if "/parts/" in item]
+        counter_number = parts.index(source_rel) + 1
+        displayed_number = ["I", "II", "III", "IV", "V", "VI"][counter_number - 1]
+    else:
+        counter_number = 0
+        displayed_number = ""
 
     transformed, replacement_count, missing = mapped_source(source, labels)
     if missing:
         raise ValueError(
             "Full-build aux is missing external labels: " + ", ".join(missing)
         )
+
+    if document_kind == "frontmatter":
+        transformed = _inject_folio_after_h1(transformed, start_page, roman=True)
+    elif document_kind in {"part_opener", "appendix_backmatter"}:
+        transformed = _inject_folio_after_h1(transformed, start_page, roman=False)
 
     mapped_path = source_path.with_name(f"{source_path.stem}_layoutmapped.qmd")
     if mapped_path.exists():
@@ -401,22 +561,26 @@ def render_mapped_chapter(
     manifest_path = harness_dir / "manifest.json"
     harness_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_config = Path(config_manager.get_config_file("pdf", volume)).resolve()
-    config = yaml.safe_load(pdf_config.read_text(encoding="utf-8"))
     config["project"]["output-dir"] = output_dir.relative_to(quarto_dir).as_posix()
     config["project"]["post-render"] = []
     config["project"]["render"] = ["index.qmd", mapped_rel]
     output_stem = f"Mapped-{source_path.stem}"
     config["book"]["output-file"] = output_stem
     config["book"]["chapters"] = ["index.qmd"]
-    config["book"]["appendices"] = [mapped_rel] if is_appendix else []
-    if not is_appendix:
+    in_appendices = document_kind in {"appendix", "appendix_backmatter"}
+    config["book"]["appendices"] = [mapped_rel] if in_appendices else []
+    if not in_appendices:
         config["book"]["chapters"].append(mapped_rel)
-    config["format"]["titlepage-pdf"].setdefault("include-in-header", []).append(
-        _appendix_counter_hook(counter_number, start_page)
-        if is_appendix
-        else _mainmatter_counter_hook(counter_number, start_page)
-    )
+    headers = config["format"]["titlepage-pdf"].setdefault("include-in-header", [])
+    if document_kind == "appendix":
+        headers.append(_appendix_counter_hook(counter_number, start_page))
+    elif document_kind == "mainmatter_chapter":
+        headers.append(_mainmatter_counter_hook(counter_number, start_page))
+    elif document_kind == "part_opener":
+        headers.append(_mainmatter_counter_hook(1, start_page))
+    if source_path.name == "references.qmd":
+        citekeys = _volume_citekeys(quarto_dir, configured)
+        config["nocite"] = [f"@{key}" for key in citekeys]
     harness_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     active_config = quarto_dir / "_quarto.yml"
@@ -456,17 +620,30 @@ def render_mapped_chapter(
             else:
                 xref_path.unlink(missing_ok=True)
 
-    corrected_count, corrected_reference_count = _correct_callout_numbers(
-        quarto_dir, output_dir, output_stem, displayed_number
-    )
+    corrected_count = 0
+    corrected_reference_count = 0
+    if displayed_number:
+        corrected_count, corrected_reference_count = _correct_callout_numbers(
+            quarto_dir, output_dir, output_stem, displayed_number
+        )
+    else:
+        tex_path = quarto_dir / f"{output_stem}.tex"
+        if tex_path.is_file():
+            shutil.copy2(tex_path, output_dir.parent / f"{output_stem}.tex")
+        for suffix in (".aux", ".idx", ".ilg", ".ind", ".log", ".out", ".pdf", ".toc", ".tex"):
+            (quarto_dir / f"{output_stem}{suffix}").unlink(missing_ok=True)
     pdf_path = output_dir / f"{output_stem}.pdf"
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "volume": volume,
-        "chapter_source": source_path.relative_to(quarto_dir).as_posix(),
-        "chapter_label": chapter_label,
+        "requested_source": requested_path.relative_to(quarto_dir).as_posix(),
+        "rendered_source": source_rel,
+        "chapter_source": source_rel,
+        "chapter_label": document_label,
         "chapter_number": displayed_number,
-        "document_kind": "appendix" if is_appendix else "chapter",
+        "document_kind": document_kind,
+        "display_number": displayed_number,
+        "start_folio": start_folio,
         "start_page": start_page,
         "external_references_mapped": replacement_count,
         "custom_callout_prefixes_corrected": corrected_count,

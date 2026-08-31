@@ -282,12 +282,13 @@ class LayoutCommand:
 
         chapter = sub.add_parser(
             "chapter",
-            help="Render one chapter with full-volume numbering and references.",
+            help="Render one configured PDF QMD with full-volume context.",
             description=(
-                "Build an isolated chapter quickly while preserving its full-book "
-                "chapter number, starting folio, and external cross-reference text. "
-                "The source QMD is never modified; numbering comes from a trusted "
-                "full-volume LaTeX .aux file."
+                "Build a configured chapter, frontmatter item, part opener, appendix, "
+                "glossary, or references file while preserving its full-book number, "
+                "starting folio, and external cross-reference text. Include-only "
+                "fragments route to their owning wrapper. The source QMD is never "
+                "modified; numbering comes from a trusted full-volume LaTeX .aux file."
             ),
             epilog=(
                 "Example:\n"
@@ -300,7 +301,7 @@ class LayoutCommand:
         )
         chapter.add_argument(
             "chapter",
-            help="Chapter stem (for example ml_workflow) or QMD path relative to book/quarto.",
+            help="Configured PDF QMD stem or path relative to book/quarto.",
         )
         cvol = chapter.add_mutually_exclusive_group(required=True)
         cvol.add_argument("--vol1", dest="volume", action="store_const", const="vol1")
