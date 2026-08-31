@@ -430,8 +430,12 @@ class TensorDataset(Dataset):
         - Use generator expression with tuple() for clean syntax
         """
         ### BEGIN SOLUTION
+        original_idx = idx
+        if idx < 0:
+            idx += len(self)
+
         if idx >= len(self) or idx < 0:
-            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+            raise IndexError(f"Index {original_idx} out of range for dataset of size {len(self)}")
 
         # Return tuple of slices from all tensors
         return tuple(Tensor(tensor.data[idx]) for tensor in self.tensors)
