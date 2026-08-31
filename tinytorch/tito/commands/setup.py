@@ -365,16 +365,26 @@ class SetupCommand(BaseCommand):
 
         if profile_path.exists():
             import json
-            with open(profile_path, 'r', encoding='utf-8') as f:
-                existing_profile = json.load(f)
+            existing_profile = None
+            try:
+                with open(profile_path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    existing_profile = loaded
+            except (json.JSONDecodeError, IOError, UnicodeDecodeError):
+                pass
 
-            if not force:
+            if existing_profile is None:
+                # Corrupted or wrong-shape profile (interrupted write, bad
+                # merge, manual edit gone wrong): fall through and create
+                # a fresh one rather than crashing setup entirely.
+                self.console.print("[yellow]⚠️  Existing profile is unreadable, creating a new one[/yellow]")
+            elif not force:
                 # Silently use existing profile
                 self.console.print(f"[green]✅ Using existing profile[/green] [dim]({existing_profile.get('name', 'Unknown')})[/dim]")
                 return existing_profile
-
-            # Force mode - ask before overwriting
-            if not Confirm.ask("[yellow]Update your existing profile?[/yellow]"):
+            elif not Confirm.ask("[yellow]Update your existing profile?[/yellow]"):
+                # Force mode - ask before overwriting
                 self.console.print("[green]✅ Keeping existing profile[/green]")
                 return existing_profile
 
@@ -398,10 +408,22 @@ class SetupCommand(BaseCommand):
             "last_active": datetime.datetime.now().isoformat()
         }
 
-        # Save profile
+        # Save profile. Write to a temp file first and atomically replace
+        # the target so an interrupted write can't leave a corrupted
+        # profile.json in place (the exact failure mode the read-side fix
+        # above has to defend against).
         import json
-        with open(profile_path, 'w', encoding='utf-8') as f:
-            json.dump(profile, f, indent=2)
+        tmp_path = f"{profile_path}.tmp"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(profile, f, indent=2)
+            os.replace(tmp_path, profile_path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
         _print_file_update(self.console, profile_path)
         self.console.print(f"✅ Profile created for {profile['name']}")
