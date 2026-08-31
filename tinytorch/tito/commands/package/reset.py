@@ -22,6 +22,17 @@ class ResetCommand(BaseCommand):
         return "Reset package files or user progress data"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
+        # Lets bare `tito package reset [--force]` (with no SUBCOMMAND token)
+        # reset the package directly, matching the "tito package reset --force"
+        # example in PackageCommand's own help text.
+        # Distinct dest: every subparser below defines its own --force, and a
+        # subparser always writes its default over a shared parent dest. With
+        # one shared dest, `reset --force package` silently dropped the flag
+        # and then blocked on the confirmation prompt, which is an EOFError
+        # under any script or CI run.
+        parser.add_argument("--force", action="store_true", dest="force_before_subcommand",
+                            help="Skip confirmation prompt (resets the package)")
+
         subparsers = parser.add_subparsers(
             dest='reset_command',
             help='Reset subcommands',
@@ -69,20 +80,28 @@ class ResetCommand(BaseCommand):
     def run(self, args: Namespace) -> int:
         console = self.console
 
+        # Normalize --force from either side of the SUBCOMMAND token. The bare
+        # form parses no subparser at all, so args.force may not exist yet.
+        args.force = (getattr(args, "force", False)
+                      or getattr(args, "force_before_subcommand", False))
+
         if not hasattr(args, 'reset_command') or not args.reset_command:
+            # No SUBCOMMAND given: default to resetting the package, matching
+            # PackageCommand's own documented "tito package reset --force"
+            # example and this command's top-level description ("Reset
+            # tinytorch package to clean state"). The other reset types
+            # (all/progress/milestones/config) are still reachable as
+            # tito package reset <type>, listed below for discoverability.
             console.print(Panel(
-                "[bold cyan]Reset Commands[/bold cyan]\n\n"
-                "Available subcommands:\n"
-                "  • [bold]package[/bold]     - Reset tinytorch package (remove exported files)\n"
-                "  • [bold]all[/bold]         - Reset all user progress (modules + milestones + config)\n"
-                "  • [bold]progress[/bold]    - Reset module completion tracking only\n"
-                "  • [bold]milestones[/bold]  - Reset milestone achievements only\n"
-                "  • [bold]config[/bold]      - Reset configuration to defaults\n\n"
-                "[dim]Example: tito reset progress --backup[/dim]",
+                "[dim]Other reset types available:[/dim]\n"
+                "[dim]  • tito package reset all         - Reset all user progress (modules + milestones + config)[/dim]\n"
+                "[dim]  • tito package reset progress    - Reset module completion tracking only[/dim]\n"
+                "[dim]  • tito package reset milestones  - Reset milestone achievements only[/dim]\n"
+                "[dim]  • tito package reset config      - Reset configuration to defaults[/dim]",
                 title="Reset Command Group",
                 border_style="bright_yellow"
             ))
-            return 0
+            return self._reset_package(args)
 
         # Execute the appropriate subcommand
         if args.reset_command == 'package':

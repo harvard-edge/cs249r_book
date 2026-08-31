@@ -163,24 +163,74 @@ jobs:
           fi
 
           # ---- Parse the lychee markdown report for an exact count ----
-          # The action writes a report to ./lychee/out.md by default. The
-          # "Errors per input" section lists each broken URL on its own line
-          # like:  * [ERROR] https://example.com/foo (404 Not Found)
-          # We count those for an honest broken_count, and grab the first
-          # 10 URLs as a triage sample for the issue body.
+          # The action writes a report to ./lychee/out.md by default. It is a
+          # series of top-level sections, one per outcome:
+          #
+          #   ## Errors per input      <- a failure
+          #   ## Timeouts per input    <- a failure
+          #   ## Redirects per input   <- NOT a failure, the link resolved
+          #   ## Ignored per input     <- NOT a failure, excluded on purpose
+          #   ## Suggestions per input <- NOT a failure
+          #
+          # and each entry inside them looks like
+          #   * [404] <https://example.com/foo> (at 12:3) | Not Found
+          # where the "(at line:col)" span is present whenever lychee knows the
+          # source position. Four properties of that shape drive the parsing.
+          #
+          # 1. Collect from Errors AND Timeouts, and only those. They are
+          #    siblings, not nested, so bounding the scan at the first "## "
+          #    after Errors silently drops every timeout, which is the same
+          #    under-count this step exists to fix.
+          #
+          # 2. Do not scan the whole file. Redirect entries have the identical
+          #    "* [<status>] <url>" shape, so a whole-file scan counts every
+          #    followed redirect as broken. Those are usually [200], and can
+          #    even be a status this workflow passed --accept for, which means
+          #    reporting links as broken that lychee was told are fine.
+          #
+          # 3. The bracketed status is not always numeric. A request that never
+          #    produced an HTTP response is reported as [ERROR] or [TIMEOUT]:
+          #    TLS failures, DNS failures, timeouts, and missing local files all
+          #    land there. Matching only digits drops exactly the failures that
+          #    are hardest to diagnose from a URL alone, and a site whose
+          #    failures are all of that kind parses to 0 and then gets reported
+          #    as "?" by the guard below.
+          #
+          # 4. The URL is not always last on the line. Strip the "(at line:col)"
+          #    span before the markdown autolink delimiters (<https://...>), or
+          #    the emitted URL keeps a trailing "> (at 12:3)" and every entry in
+          #    the triage list is corrupt.
           REPORT="./lychee/out.md"
           BROKEN_COUNT=0
           BROKEN_SAMPLE=""
           if [ -f "$REPORT" ]; then
-            # Lines starting with "* [" are per-link error entries in
-            # lychee's markdown output. Be tolerant of leading whitespace.
-            BROKEN_COUNT=$(grep -cE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" || true)
-            # Pull the URL (second whitespace-separated field after the
-            # status code bracket) for the first 10 entries.
-            BROKEN_SAMPLE=$(grep -hE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" \
-              | head -n 10 \
-              | sed -E 's/^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\][[:space:]]+([^[:space:]]+).*/\1/' \
-              || true)
+            BROKEN_URLS=$(awk '
+              # Collect from every section that means "this link failed".
+              # lychee writes each as its own top-level section, so Timeouts is
+              # a SIBLING of Errors, not nested inside it. Stopping at the first
+              # "## " after Errors therefore dropped every timeout, which is the
+              # same silent under-count this step exists to fix. Redirects,
+              # Ignored and Suggestions are siblings too, and are not failures.
+              /^##[[:space:]]+(Errors|Timeouts)[[:space:]]+per input[[:space:]]*$/ { collect = 1; next }
+              /^##[[:space:]]/                                                     { collect = 0 }
+              collect && /^[[:space:]]*\*[[:space:]]+\[[^]]+\][[:space:]]+/ {
+                  url = $0
+                  sub(/^[[:space:]]*\*[[:space:]]+\[[^]]+\][[:space:]]+/, "", url)
+                  sub(/[[:space:]]*\|.*$/, "", url)
+                  # lychee appends the source position as "(at line:col)" whenever
+                  # the link carries a span, so the URL is not always last on the
+                  # line and a bare trailing ">" strip leaves "url> (at 1:1)".
+                  sub(/[[:space:]]*\(at[[:space:]][^)]*\)[[:space:]]*$/, "", url)
+                  sub(/[[:space:]]+$/, "", url)
+                  sub(/^</, "", url)
+                  sub(/>$/, "", url)
+                  if (url != "") print url
+              }
+            ' "$REPORT" || true)
+            if [ -n "$BROKEN_URLS" ]; then
+              BROKEN_COUNT=$(printf '%s\n' "$BROKEN_URLS" | grep -c . || true)
+              BROKEN_SAMPLE=$(printf '%s\n' "$BROKEN_URLS" | head -n 10)
+            fi
           fi
 
           # If lychee said failure but we couldn't parse a count (e.g. report
