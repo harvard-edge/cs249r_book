@@ -265,11 +265,19 @@ class ModuleWorkflowCommand(BaseCommand):
         module_name = module_mapping[normalized]
         module_num = int(normalized)
 
-        # Check if already started
+        # Check if already started. Tracking (started_modules) and the
+        # notebook on disk can desync, e.g. `tito system reset
+        # --keep-progress` clears modules/ but intentionally preserves
+        # started_modules/completed_modules. If that's happened, don't
+        # dead-end the student on "already started"; fall through to the
+        # recreate-from-src/ logic below instead.
         if self.is_module_started(normalized):
-            self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
-            self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
-            return 1
+            if (self.config.project_root / "modules" / module_name).exists():
+                self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
+                self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
+                return 1
+            self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
+            self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
 
         # Check prerequisites - all previous modules must be completed
         progress = self.get_progress_data()
@@ -503,6 +511,21 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print(f"💡 Start with: [bold cyan]tito module start {normalized}[/bold cyan]")
             return 1
 
+        # Tracking says started, but the notebook itself may be missing,
+        # e.g. `tito system reset --keep-progress` clears modules/ while
+        # intentionally preserving started_modules/completed_modules.
+        # Recreate it from src/ instead of dead-ending inside _open_jupyter
+        # with "directory not found" and no way forward.
+        module_dir = self.config.project_root / "modules" / module_name
+        if not module_dir.exists():
+            self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
+            self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
+            if not self._create_module_from_src(module_name):
+                self.console.print(f"[red]❌ Could not recreate module {module_name}[/red]")
+                self.console.print(f"💡 Try: [bold cyan]tito module reset {normalized} --force[/bold cyan]")
+                return 1
+            self.console.print(f"[green]✅ Module {normalized} ready![/green]")
+
         # Update last worked
         self.update_last_worked(normalized)
 
@@ -511,6 +534,85 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print(f"   [bold cyan]tito module complete {normalized}[/bold cyan]")
 
         return self._open_jupyter(module_name)
+
+    def _jupyter_pid_file(self) -> Path:
+        return self.config.project_root / ".tito" / "jupyter.pid"
+
+    def _running_jupyter_pid(self) -> Optional[int]:
+        """Return the PID of a tito-launched Jupyter Lab server still running, if any."""
+        pid_file = self._jupyter_pid_file()
+        if not pid_file.exists():
+            return None
+        try:
+            pid = int(pid_file.read_text().strip())
+        except (ValueError, OSError):
+            return None
+
+        if not self._pid_is_running_jupyter(pid):
+            return None
+        return pid
+
+    @staticmethod
+    def _pid_is_running_jupyter(pid: int) -> bool:
+        """Check whether a PID is alive and looks like a Jupyter process.
+
+        Uses only the standard library (no psutil -- it isn't a project
+        dependency in pyproject.toml/requirements.txt). Windows needs its own
+        path: os.kill(pid, 0) does not implement POSIX signal-0 "probe only"
+        semantics there -- it calls TerminateProcess for any signal value, so
+        using it to "check" liveness would actually kill the process. Query
+        the process via the Win32 API instead, which never touches it.
+        """
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+
+            # HANDLE is pointer-width (64-bit on Win64). Without an explicit
+            # restype, ctypes defaults OpenProcess's return to a 32-bit
+            # signed int and truncates it -- harmless for the small handle
+            # values Windows actually hands out, but not correct per the
+            # Win32 API contract. Declare the real signatures instead of
+            # relying on that truncation happening to be safe.
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+            ]
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            try:
+                buf = ctypes.create_unicode_buffer(260)
+                size = wintypes.DWORD(260)
+                if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    return False
+                return "jupyter" in buf.value.lower()
+            finally:
+                kernel32.CloseHandle(handle)
+
+        # POSIX: signal 0 really is just a liveness probe, no signal is sent.
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+
+        # Best-effort check that it's actually still Jupyter (guards against
+        # the PID being recycled by an unrelated process). /proc is Linux-
+        # specific with no portable stdlib equivalent on macOS/BSD; if it's
+        # not available, being alive is good enough to reuse it.
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmdline = f.read().replace(b"\x00", b" ").decode(errors="replace").lower()
+            return "jupyter" in cmdline
+        except OSError:
+            return True
 
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
@@ -535,6 +637,20 @@ class ModuleWorkflowCommand(BaseCommand):
                 else:
                     notebook_path = None
 
+            # If a tito-launched Jupyter Lab server is already running, reuse it
+            # instead of spawning another one. Without this, every tito module
+            # start/resume/view call launches its own untracked jupyter lab
+            # process that nothing ever stops, and they accumulate for the rest
+            # of the session.
+            existing_pid = self._running_jupyter_pid()
+            if existing_pid is not None:
+                self.console.print(f"\n[cyan]Jupyter Lab is already running (pid {existing_pid}).[/cyan]")
+                if notebook_path:
+                    self.console.print(f"[dim]Open {notebook_path.name} from the existing Jupyter Lab tab in your browser.[/dim]")
+                else:
+                    self.console.print("[dim]Switch to your existing Jupyter Lab browser tab.[/dim]")
+                return 0
+
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
             # Launch Jupyter Lab with the notebook file directly
@@ -551,6 +667,10 @@ class ModuleWorkflowCommand(BaseCommand):
                 encoding="utf-8",
                 errors="replace"
             )
+
+            pid_file = self._jupyter_pid_file()
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(process.pid))
 
             # Give Jupyter a moment to start and capture the URL
             time.sleep(2)
