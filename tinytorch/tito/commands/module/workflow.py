@@ -549,6 +549,12 @@ class ModuleWorkflowCommand(BaseCommand):
             return None
 
         if not self._pid_is_running_jupyter(pid):
+            # The server is gone. Drop the file so later runs do not keep
+            # re-probing a dead or recycled PID.
+            try:
+                pid_file.unlink()
+            except OSError:
+                pass
             return None
         return pid
 
@@ -603,16 +609,32 @@ class ModuleWorkflowCommand(BaseCommand):
         except OSError:
             return False
 
-        # Best-effort check that it's actually still Jupyter (guards against
-        # the PID being recycled by an unrelated process). /proc is Linux-
-        # specific with no portable stdlib equivalent on macOS/BSD; if it's
-        # not available, being alive is good enough to reuse it.
+        # Confirm it is actually still Jupyter, because PIDs get recycled and
+        # the pid file outlives the server it names. /proc is Linux-only, so
+        # fall back to ps, which macOS and the BSDs do provide. Treating "alive"
+        # alone as "is Jupyter" made any live process of the user's own answer
+        # yes on macOS, which permanently blocked launching a new server.
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmdline = f.read().replace(b"\x00", b" ").decode(errors="replace").lower()
             return "jupyter" in cmdline
         except OSError:
-            return True
+            pass
+
+        try:
+            probe = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            # Cannot tell. Say no: the cost is one extra Jupyter process, the
+            # cost of a wrong yes is the student never getting a server at all.
+            return False
+
+        if probe.returncode != 0:
+            return False
+        return "jupyter" in probe.stdout.lower()
 
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
@@ -645,10 +667,10 @@ class ModuleWorkflowCommand(BaseCommand):
             existing_pid = self._running_jupyter_pid()
             if existing_pid is not None:
                 self.console.print(f"\n[cyan]Jupyter Lab is already running (pid {existing_pid}).[/cyan]")
+                self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
                 if notebook_path:
-                    self.console.print(f"[dim]Open {notebook_path.name} from the existing Jupyter Lab tab in your browser.[/dim]")
-                else:
-                    self.console.print("[dim]Switch to your existing Jupyter Lab browser tab.[/dim]")
+                    self.console.print(f"  [dim]then open {notebook_path.name}[/dim]")
+                self.console.print("  [dim]Stop that server first if you want a fresh one.[/dim]")
                 return 0
 
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
