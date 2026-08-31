@@ -4,7 +4,7 @@ engine: jupyter
 
 # Algorithm Foundations {#sec-appdx-algorithm-foundations dropcap="chapter-opening"}
 
-A profile showing low utilization is often misdiagnosed as a hardware limit when the cause is algorithmic: a matrix multiply shape that wastes tensor cores, a layout that breaks contiguity, or activation memory held for backpropagation. This appendix collects the computational complexity models, memory footprint derivations, and quantization error formulas that the book's performance chapters lean on, enabling readers to evaluate algorithmic trade-offs before committing code to accelerators. It assumes familiarity with linear algebra and with the iron law introduced early in the book.
+A profile showing low utilization is often misdiagnosed as a hardware limit when the cause is algorithmic: a matrix multiply shape that wastes tensor cores, a layout that breaks contiguity, or activation memory held for backpropagation. This appendix collects the computational complexity models and memory footprint derivations that the book's performance chapters lean on, enabling readers to evaluate algorithmic trade-offs before committing code to accelerators. It assumes familiarity with linear algebra and with the iron law introduced early in the book.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -572,44 +572,41 @@ $$ \mathbf{O}^{\text{new}} = \frac{d^{(1)} e^{m^{(1)} - m^{\text{new}}}}{d^{\tex
 
 ### Formal HBM access complexity proof {#sec-appdx-algorithm-flash-attention-complexity-proof}
 
-Let $M$ be the fast SRAM capacity (in words). FlashAttention chooses block sizes $B_r, B_c = \Theta\left(\frac{M}{d}\right)$ so that one tile of $\mathbf{Q}_i \in \mathbb{R}^{B_r \times d}$, $\mathbf{K}_j \in \mathbb{R}^{B_c \times d}$, $\mathbf{V}_j \in \mathbb{R}^{B_c \times d}$, and the output tile $\mathbf{O}_i \in \mathbb{R}^{B_r \times d}$ fit inside SRAM simultaneously.
+Let $M$ be the fast SRAM capacity (in words). Following Algorithm 1 of @dao2022, FlashAttention sets $B_c = \lfloor M/(4d) \rfloor$ and $B_r = \min(\lfloor M/(4d) \rfloor,d)$. The proof abstracts constant factors and buffer reuse, using $B_c=\Theta(M/d)$, $B_r=\Theta(\min(M/d,d))$, and $B_rB_c=O(M)$ for the on-chip working set.
 
 The algorithm executes two nested loops:
 
 * Partition $\mathbf{Q}$ into $T_r = \lceil N/B_r \rceil$ blocks of size $B_r \times d$.
 * Partition $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil N/B_c \rceil$ blocks of size $B_c \times d$.
-* **Outer loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$ into SRAM ($B_r d$ reads). Initialize $m_i = -\infty$, $d_i = 0$, $\mathbf{O}_i = \mathbf{0}$.
-* **Inner loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j$, $\mathbf{V}_j$ into SRAM ($2 B_c d$ reads). Compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM, update $m_i$, $d_i$, $\mathbf{O}_i$ via online softmax, then drop $\mathbf{S}_{ij}$.
-* Write completed $\mathbf{O}_i$ to HBM ($B_r d$ writes).
+* **Outer loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j$ and $\mathbf{V}_j$ into SRAM.
+* **Inner loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$, $\mathbf{O}_i$, and its softmax statistics; compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM; then update and write $\mathbf{O}_i$ and the statistics without materializing $\mathbf{S}_{ij}$ in HBM.
+
+This loop order is the source of the I/O reduction. A key-value tile remains resident while the algorithm visits every query tile, so each element of $\mathbf{K}$ and $\mathbf{V}$ crosses the HBM boundary once. The query and output tiles must be revisited for each key-value block, but the $B_r\times B_c$ score tile is consumed on chip and discarded. Standard attention instead writes and rereads the full $N\times N$ score and probability matrices.
 
 #### Total memory access accounting {.unnumbered}
 
-1. **Query Reads**: $T_r \times (B_r d) = \left(\frac{N}{B_r}\right) B_r d = N d$ elements.
-2. **Key and Value Reads**: $T_r \times T_c \times (2 B_c d) = \left(\frac{N}{B_r}\right) \left(\frac{N}{B_c}\right) (2 B_c d) = \frac{2 N^2 d}{B_r}$ elements.
-3. **Output Writes**: $T_r \times (B_r d) = N d$ elements.
+1. **Key and value reads**: Each element of $\mathbf{K}$ and $\mathbf{V}$ is loaded once, contributing $2Nd$ accesses.
+2. **Query, output, and statistics passes**: Each of the $T_c$ column blocks reads all of $\mathbf{Q}$, reads and writes $\mathbf{O}$, and updates $O(N)$ softmax statistics. The matrices dominate the statistics for head dimension $d\geq 1$, so each pass contributes $\Theta(Nd)$ accesses and all passes contribute $\Theta(NdT_c)$.
 
-Summing these terms yields total HBM transfers:
-$$ \text{HBM}_{\text{Flash}} = 2 N d + \frac{2 N^2 d}{B_r} $$
+Because $T_c=\lceil N/B_c\rceil=\Theta(Nd/M)$, the total is
+$$ \text{HBM}_{\text{Flash}} = \Theta\left(Nd + NdT_c\right) = \Theta\left(Nd + \frac{N^2d^2}{M}\right) = \Theta\left(\frac{N^2d^2}{M}\right), $$
+where the final equality follows for $d \leq M \leq Nd$.
 
-Substituting $B_r = \Theta\left(\frac{M}{d}\right)$ gives the formal I/O complexity bound:
-$$ \text{HBM}_{\text{Flash}} = \Theta\left(N d + \frac{N^2 d^2}{M}\right) $$
+The bound counts communication rather than arithmetic. FlashAttention still evaluates the same dense score blocks and may recompute intermediate quantities during backpropagation; its advantage comes from keeping those intermediates out of HBM.
 
 #### I/O reduction ratio {.unnumbered}
 
 Comparing standard attention I/O to FlashAttention I/O:
-$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(N^2 + Nd)}{\Theta\left(Nd + \frac{N^2 d^2}{M}\right)} = \Theta\left(\frac{M}{d^2}\right) \quad \text{for } N \gg \frac{M}{d} $$
+$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(N^2 + Nd)}{\Theta\left(Nd + \frac{N^2 d^2}{M}\right)} = \Theta\left(\frac{M}{d^2}\right) \quad \text{for } N \gg \max\left(d,\frac{M}{d}\right) $$
 
 ::: {#nbk-appendix-algorithm-flash-attention-io-reduction .callout-notebook title="A100 I/O reduction"}
 
-Consider an NVIDIA A100 GPU with SRAM capacity $M = 192 \text{ KB} = 98,304$ FP16 values per SM, and head dimension $d = 128$ ($d^2 = 16,384$). Tile sizes are $B_r = B_c = 128$.
+The asymptotic ratio $M/d^2$ predicts how greater SRAM capacity can reduce HBM traffic, but hidden constants and kernel details prevent it from serving as an exact transfer count. In an NVIDIA A100 measurement, @dao2022 report the effect for a forward-and-backward attention workload with sequence length 1,024, head dimension 64, 16 heads, batch size 64, a key-padding mask, and no dropout:
 
-For sequence length $N = 4096$:
+* **Standard attention**: 35.3 GB of HBM reads and writes; 35.1 ms runtime.
+* **FlashAttention**: 4.4 GB of HBM reads and writes; 11.7 ms runtime.
 
-* **Standard Attention HBM Transfers**: $N^2 + N d = 4096^2 + 4096 \times 128 = 16,777,216 + 524,288 \approx 17.30 \times 10^6$ elements.
-* **FlashAttention HBM Transfers**: $2 N d + \frac{2 N^2 d}{B_r} = 2(4096)(128) + \frac{2(4096)^2 (128)}{128} = 1,048,576 + 33,554,432/128 = 1,048,576 + 262,144 = 1.31 \times 10^6$ elements.
-* **Realized Speedup**: $\frac{17.30 \times 10^6}{1.31 \times 10^6} \approx 13.2\times$ reduction in HBM transfers.
-
-By reducing HBM traffic by over $13\times$, FlashAttention converts attention from a memory-bandwidth-bound operation into a compute-bound operation, reaching up to $60\%$ of peak accelerator TFLOPs [@dao2022].
+The measurements show the systems consequence of the I/O bound: substantially less HBM traffic coincides with lower runtime even though FlashAttention performs additional recomputation. They do not imply that every configuration becomes compute bound; tile size, sequence length, and kernel implementation determine the realized regime.
 :::
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
