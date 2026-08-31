@@ -257,11 +257,14 @@ class Optimizer:
         # Store parameters
         self.params = params
 
-        # Ensure parameters participate in autograd once it is enabled
+        # Ensure parameters participate in autograd once it is enabled.
+        # Only initialize grad if it isn't set yet, a caller may have already
+        # computed and assigned a gradient before constructing the optimizer.
         for param in self.params:
             if isinstance(param, Tensor):
                 param.requires_grad = True
-                param.grad = None
+                if not hasattr(param, 'grad'):
+                    param.grad = None
         self.step_count = 0  # For algorithms that need step counting
         ### END SOLUTION
 
