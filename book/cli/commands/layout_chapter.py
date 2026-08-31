@@ -29,19 +29,23 @@ ID_RE = re.compile(r"#([A-Za-z][A-Za-z0-9_-]+)")
 CELL_LABEL_RE = re.compile(
     r"^\s*#\|\s*label:\s*([A-Za-z][A-Za-z0-9_-]+)\s*$", re.MULTILINE
 )
-H1_RE = re.compile(r"^#\s+.+?\{#([A-Za-z][A-Za-z0-9_-]+)\}\s*$", re.MULTILINE)
+H1_RE = re.compile(
+    r"^#\s+.+?\{[^}\n]*#([A-Za-z][A-Za-z0-9_-]+)(?:\s+[^}\n]*)?\}\s*$",
+    re.MULTILINE,
+)
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 CUSTOM_HEADING_RE = re.compile(
-    r"(\\begin\{fbxSimple\}\{callout-[^}]+\}\{[^{}\n]*? )\d+(\.\d+:\})"
+    r"(\\begin\{fbxSimple\}\{callout-[^}]+\}\{[^{}\n]*? )"
+    r"(?:\d+|[A-Z]|[IVXLCM]+)(\.\d+:\})"
 )
 CUSTOM_TARGET_RE = re.compile(
-    r"\\label\{(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|cs|ws)-[^}]+)\}"
+    r"\\label\{(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|pri|cs|ws)-[^}]+)\}"
     r"\s*\\begin\{fbxSimple\}\{callout-[^}]+\}"
-    r"\{[^{}\n]*? (?P<number>\d+\.\d+):\}"
+    r"\{[^{}\n]*? (?P<number>(?:\d+|[A-Z]|[IVXLCM]+)\.\d+):\}"
 )
 CUSTOM_REF_RE = re.compile(
-    r"\\hyperref\[(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|cs|ws)-[^]]+)\]"
-    r"\{(?P<number>[^{}]+)\}"
+    r"\\hyperref\[(?P<id>(?:dfn|exmp|lhs|psp|nbk|thrm|chk|pri|cs|ws)-[^]]+)\]"
+    r"\{(?P<number>(?:\d+|[A-Z]|[IVXLCM]+)\.\d+)\}"
 )
 
 
@@ -191,7 +195,7 @@ def mapped_source(
     return "".join(output), replaced, sorted(missing)
 
 
-def _counter_hook(chapter_number: int, start_page: int) -> dict[str, str]:
+def _mainmatter_counter_hook(chapter_number: int, start_page: int) -> dict[str, str]:
     return {
         "text": (
             "\\makeatletter\n"
@@ -200,6 +204,25 @@ def _counter_hook(chapter_number: int, start_page: int) -> dict[str, str]:
             "  \\renewcommand{\\mainmatter}{%\n"
             "    \\LayoutMapMainMatter\n"
             f"    \\setcounter{{chapter}}{{{chapter_number - 1}}}%\n"
+            f"    \\setcounter{{page}}{{{start_page}}}%\n"
+            "    \\@firstnumberedfalse% preserve the mapped folio\n"
+            "  }%\n"
+            "}\n"
+            "\\makeatother"
+        )
+    }
+
+
+def _appendix_counter_hook(appendix_number: int, start_page: int) -> dict[str, str]:
+    """Restore an appendix letter and folio after Quarto enters appendix mode."""
+    return {
+        "text": (
+            "\\makeatletter\n"
+            "\\AtBeginDocument{%\n"
+            "  \\let\\LayoutMapAppendix\\appendix\n"
+            "  \\renewcommand{\\appendix}{%\n"
+            "    \\LayoutMapAppendix\n"
+            f"    \\setcounter{{chapter}}{{{appendix_number - 1}}}%\n"
             f"    \\setcounter{{page}}{{{start_page}}}%\n"
             "    \\@firstnumberedfalse% preserve the mapped folio\n"
             "  }%\n"
@@ -248,7 +271,7 @@ def _resolve_chapter(quarto_dir: Path, volume: str, spec: str) -> Path:
 
 
 def _correct_custom_callout_tex(
-    tex: str, chapter_number: int
+    tex: str, chapter_number: int | str
 ) -> tuple[str, int, int]:
     """Correct local callout headings and references in mapped TeX."""
     corrected, heading_count = CUSTOM_HEADING_RE.subn(
@@ -276,7 +299,7 @@ def _correct_callout_numbers(
     quarto_dir: Path,
     output_dir: Path,
     output_stem: str,
-    chapter_number: int,
+    chapter_number: int | str,
 ) -> tuple[int, int]:
     """Correct filter-generated callout prefixes and rebuild when necessary."""
     tex_path = quarto_dir / f"{output_stem}.tex"
@@ -346,9 +369,20 @@ def render_mapped_chapter(
         raise ValueError(f"Could not find a labeled chapter H1 in {source_path}")
     chapter_label = h1.group(1)
     chapter_record = labels.get(chapter_label)
-    if chapter_record is None or not chapter_record["anchor"].startswith("chapter."):
+    if chapter_record is None or not chapter_record["anchor"].startswith(
+        ("chapter.", "appendix.")
+    ):
         raise ValueError(f"No full-build chapter record for {chapter_label}")
-    chapter_number = int(chapter_record["number"])
+    is_appendix = chapter_record["anchor"].startswith("appendix.")
+    displayed_number = chapter_record["number"]
+    if is_appendix:
+        if len(displayed_number) != 1 or not displayed_number.isalpha():
+            raise ValueError(
+                f"Unsupported appendix number for {chapter_label}: {displayed_number}"
+            )
+        counter_number = ord(displayed_number.upper()) - ord("A") + 1
+    else:
+        counter_number = int(displayed_number)
     start_page = int(chapter_record["page"])
 
     transformed, replacement_count, missing = mapped_source(source, labels)
@@ -374,10 +408,14 @@ def render_mapped_chapter(
     config["project"]["render"] = ["index.qmd", mapped_rel]
     output_stem = f"Mapped-{source_path.stem}"
     config["book"]["output-file"] = output_stem
-    config["book"]["chapters"] = ["index.qmd", mapped_rel]
-    config["book"]["appendices"] = []
+    config["book"]["chapters"] = ["index.qmd"]
+    config["book"]["appendices"] = [mapped_rel] if is_appendix else []
+    if not is_appendix:
+        config["book"]["chapters"].append(mapped_rel)
     config["format"]["titlepage-pdf"].setdefault("include-in-header", []).append(
-        _counter_hook(chapter_number, start_page)
+        _appendix_counter_hook(counter_number, start_page)
+        if is_appendix
+        else _mainmatter_counter_hook(counter_number, start_page)
     )
     harness_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -419,7 +457,7 @@ def render_mapped_chapter(
                 xref_path.unlink(missing_ok=True)
 
     corrected_count, corrected_reference_count = _correct_callout_numbers(
-        quarto_dir, output_dir, output_stem, chapter_number
+        quarto_dir, output_dir, output_stem, displayed_number
     )
     pdf_path = output_dir / f"{output_stem}.pdf"
     manifest: dict[str, Any] = {
@@ -427,7 +465,8 @@ def render_mapped_chapter(
         "volume": volume,
         "chapter_source": source_path.relative_to(quarto_dir).as_posix(),
         "chapter_label": chapter_label,
-        "chapter_number": chapter_number,
+        "chapter_number": displayed_number,
+        "document_kind": "appendix" if is_appendix else "chapter",
         "start_page": start_page,
         "external_references_mapped": replacement_count,
         "custom_callout_prefixes_corrected": corrected_count,

@@ -3,10 +3,35 @@
 from pathlib import Path
 
 from book.cli.commands.layout_chapter import (
+    H1_RE,
+    _appendix_counter_hook,
     _correct_custom_callout_tex,
+    _mainmatter_counter_hook,
     mapped_source,
     parse_aux,
 )
+
+
+def test_h1_parser_accepts_attributes_after_identifier():
+    match = H1_RE.search(
+        '# Algorithm Foundations {#sec-appdx-algorithm-foundations dropcap="chapter-opening"}'
+    )
+    assert match is not None
+    assert match.group(1) == "sec-appdx-algorithm-foundations"
+
+
+def test_mainmatter_counter_hook_restores_numeric_chapter_and_folio():
+    text = _mainmatter_counter_hook(11, 543)["text"]
+    assert r"\setcounter{chapter}{10}" in text
+    assert r"\setcounter{page}{543}" in text
+    assert r"\renewcommand{\mainmatter}" in text
+
+
+def test_appendix_counter_hook_restores_letter_position_and_folio():
+    text = _appendix_counter_hook(3, 879)["text"]
+    assert r"\setcounter{chapter}{2}" in text
+    assert r"\setcounter{page}{879}" in text
+    assert r"\renewcommand{\appendix}" in text
 
 
 def test_parse_aux_extracts_number_page_and_anchor(tmp_path: Path):
@@ -74,6 +99,34 @@ See napkin math \hyperref[nbk-example-cost]{1.3}.
     corrected, headings, references = _correct_custom_callout_tex(tex, 9)
     assert "{napkin math 9.3:}" in corrected
     assert r"\hyperref[nbk-example-cost]{9.3}" in corrected
+    assert headings == 1
+    assert references == 1
+
+
+def test_correct_custom_callout_tex_accepts_appendix_letter():
+    tex = r"""
+\protect\phantomsection\label{nbk-example-cost}
+\begin{fbxSimple}{callout-notebook}{notebook A.3:}{Cost estimate}
+\phantomsection\label{nbk-example-cost}
+See notebook \hyperref[nbk-example-cost]{A.3}.
+"""
+    corrected, headings, references = _correct_custom_callout_tex(tex, "C")
+    assert "{notebook C.3:}" in corrected
+    assert r"\hyperref[nbk-example-cost]{C.3}" in corrected
+    assert headings == 1
+    assert references == 1
+
+
+def test_correct_custom_callout_tex_accepts_roman_part_prefix():
+    tex = r"""
+\protect\phantomsection\label{pri-example-cost}
+\begin{fbxSimple}{callout-principle}{principle I.2:}{Cost estimate}
+\phantomsection\label{pri-example-cost}
+See principle \hyperref[pri-example-cost]{I.2}.
+"""
+    corrected, headings, references = _correct_custom_callout_tex(tex, "III")
+    assert "{principle III.2:}" in corrected
+    assert r"\hyperref[pri-example-cost]{III.2}" in corrected
     assert headings == 1
     assert references == 1
 
