@@ -1297,7 +1297,7 @@ output = relu(Z)  # Vector: applies activation to
 
 This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (`{python} WeightMatrixCalc.wm_out_str` total) must process all input features (`{python} WeightMatrixCalc.wm_in_str` total) for every sample in the batch (`{python} WeightMatrixCalc.wm_batch_str` samples). The weight matrix alone contains `{python} WeightMatrixCalc.wm_in_str` $\times$ `{python} WeightMatrixCalc.wm_out_str` = `{python} WeightMatrixCalc.wm_params_str` that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
 
-Neural networks employ matrix operations across diverse architectural patterns beyond simple linear layers. Matrix operations appear consistently across modern neural architectures. Convolution operations\index{Convolution!matrix multiplication equivalence} transform into matrix multiplications through the im2col technique\index{im2col!convolution to matrix},[^fn-im2col-memory-tradeoff] enabling efficient execution on matrix-optimized hardware. @Lst-matrix_patterns illustrates these diverse applications.
+Neural networks employ matrix operations across architectural patterns beyond simple linear layers. Convolution operations\index{Convolution!matrix multiplication equivalence} transform into matrix multiplications through the im2col technique\index{im2col!convolution to matrix},[^fn-im2col-memory-tradeoff] enabling efficient execution on matrix-optimized hardware. @Lst-matrix_patterns illustrates these applications.
 
 [^fn-im2col-memory-tradeoff]: **Im2col (image-to-column)**\index{im2col!memory-compute trade-off}: Transforms convolution into a matrix multiplication by arranging receptive-field values as columns. An explicit materialization can duplicate overlapping values and expand storage by up to roughly the kernel area before edge, stride, and channel effects are considered. Production libraries often use implicit-GEMM or direct-convolution kernels to obtain matrix-friendly execution without materializing the full expanded matrix.
 
@@ -1325,6 +1325,8 @@ output = matmul(kernel, patches)
 
 :::
 
+These examples differ in tensor shape and reuse pattern, which determines how efficiently each multiplication occupies a matrix unit. Linear layers reuse one weight matrix across a batch; attention forms projections and then a token-to-token score matrix; convolution reuses each kernel across many image patches. Expressing all three as matrix multiplication exposes a common interface to hardware, but it does not make their execution costs identical. Batch size, sequence length, channel count, and tiling determine whether operands are reused locally or repeatedly fetched from memory.
+
 #### Matrix operations hardware acceleration {#sec-hardware-acceleration-matrix-operations-hardware-acceleration-514a}
 
 This pervasive pattern of matrix multiplication has direct implications for hardware design\index{Matrix operation!hardware acceleration}: accelerators need specialized units that can handle these computations at scale. @Lst-matrix_unit demonstrates a representative dedicated matrix unit that processes an entire $16{\times}16$ block at once, illustrating why matrix instructions and Tensor Cores can deliver much higher throughput than scalar or vector-only execution paths [@nvidia_tensors_fp16_2017; @intel2021amx].
@@ -1349,7 +1351,7 @@ The illustrative unit operates on matrix tiles rather than individual elements. 
 
 Like vector processing, matrix acceleration has deep historical roots—DSPs and GPUs optimized for matrix computations in the 1980s-1990s for image processing, scientific computing, and 3D rendering [@owens2008; @hwu2011]. Neural networks have made matrix multiplication commercially dominant, driving the development of dedicated Tensor Cores and TPUs that process these operations at unprecedented scale.
 
-Matrix and vector operations together handle the linear algebra of neural networks. Between every linear transformation, however, sits a nonlinear activation function---and these transcendental computations (exponentials, square roots, trigonometric functions) cannot be efficiently expressed through multiply-accumulate alone. @Tbl-matrix contrasts the two primitive types, clarifying which neural network operations map to each.
+Matrix and vector operations together handle the linear algebra of neural networks. Between every linear transformation, however, sits a nonlinear activation function---and these transcendental computations (exponentials, square roots, trigonometric functions) cannot be efficiently expressed through multiply-accumulate alone. @Tbl-matrix summarizes the three execution roles, clarifying which neural network operations map to each.
 
 ```{=latex}
 \begingroup
@@ -1360,8 +1362,9 @@ Matrix and vector operations together handle the linear algebra of neural networ
 |:----------------------------------------------------|:--------------------------|:------------------------------------------------------------------|:------------------------------------------------------------|
 | **Matrix Operations**                               | Many-to-many transforms   | Layer transformations, attention, convolutions                    | Each output depends on multiple inputs                      |
 | **Vector Operations**                               | Vector and reduction work | Activation functions, layer normalization, element-wise gradients | Uses element-wise operations and vector reductions          |
+| **Special-Function Paths**                          | Transcendental arithmetic | Exponential, logarithm, reciprocal square root                    | Uses architecture-specific approximation or dedicated logic |
 
-: **Operation Characteristics**: Matrix operations excel at many-to-many transformations, while vector units handle element-wise operations and reductions such as activation and normalization. The operation structure determines which hardware primitive is appropriate. {#tbl-matrix tbl-colwidths="[18,17,35,30]"}
+: **Operation Characteristics**: Matrix operations excel at many-to-many transformations, while vector units handle element-wise operations and reductions such as activation and normalization. Special-function paths handle transcendental arithmetic through architecture-specific approximation or dedicated logic. The operation structure determines which hardware primitive is appropriate. {#tbl-matrix tbl-colwidths="[18,17,35,30]"}
 
 ```{=latex}
 \endgroup
