@@ -283,5 +283,42 @@ class TestMultipleParameters:
             )
 
 
+class TestOptimizerPreservesExistingGrad:
+    """Test Optimizer construction doesn't discard a gradient set beforehand."""
+
+    def test_pre_existing_grad_survives_optimizer_construction(self):
+        """
+        WHAT: Verify a gradient assigned to a parameter before the optimizer
+        is constructed is not silently wiped by __init__.
+
+        WHY: A caller who computes gradients (e.g. via backward()) before
+        building the optimizer should not have that work discarded just
+        because SGD(params, ...) happened to run afterward. The optimizer
+        should only guarantee params are grad-tracked, not reset state that
+        already exists.
+        """
+        param = Tensor(np.array([1.0, 2.0, 3.0]), requires_grad=True)
+        param.grad = np.array([0.1, 0.2, 0.3])
+
+        SGD([param], lr=0.01)
+
+        assert param.grad is not None
+        assert np.allclose(param.grad, np.array([0.1, 0.2, 0.3]))
+
+    def test_param_without_grad_still_gets_grad_attribute(self):
+        """
+        WHAT: Verify a parameter with no grad attribute yet still ends up
+        with one (set to None) after optimizer construction.
+        """
+        param = Tensor(np.array([1.0, 2.0, 3.0]))
+        if hasattr(param, 'grad'):
+            del param.grad
+
+        SGD([param], lr=0.01)
+
+        assert hasattr(param, 'grad')
+        assert param.grad is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
