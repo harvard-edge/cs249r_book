@@ -612,8 +612,10 @@ class CrossEntropyLoss:
 
         APPROACH:
         1. Compute log-softmax of logits (numerically stable)
-        2. Select log-probabilities for correct classes
-        3. Return negative mean of selected log-probabilities
+        2. Check every target index is a real class, 0 <= t < num_classes,
+           and raise ValueError if any is not
+        3. Select log-probabilities for correct classes
+        4. Return negative mean of selected log-probabilities
 
         EXAMPLE:
         >>> loss_fn = CrossEntropyLoss()
@@ -625,6 +627,9 @@ class CrossEntropyLoss:
         HINTS:
         - Use log_softmax() for numerical stability
         - targets.data.astype(int) ensures integer indices
+        - num_classes is logits.shape[-1]; validate before indexing, because
+          NumPy would let a negative target silently select the wrong class
+          and would raise a bare IndexError for one that is too large
         - Use np.arange(batch_size) for row indexing: log_probs[np.arange(batch_size), targets]
         - Return negative mean: -np.mean(selected_log_probs)
         """

@@ -314,7 +314,10 @@ class TestSaveCheckpointIsAtomic:
                 trainer.save_checkpoint(path)
 
             assert not os.path.exists(path)
-            assert not os.path.exists(path + ".tmp")
+            # The contract is "a failed save leaves nothing behind", not a
+            # particular temp filename, so assert on the directory rather
+            # than on the reference implementation's ".tmp" suffix.
+            assert os.listdir(tmpdir) == []
 
     def test_successful_save_still_produces_a_loadable_checkpoint(self):
         """Regression guard: the atomic-write change must not break the
@@ -326,7 +329,9 @@ class TestSaveCheckpointIsAtomic:
             trainer.save_checkpoint(path)
 
             assert os.path.exists(path)
-            assert not os.path.exists(path + ".tmp")
+            # Same here: only the checkpoint should survive a successful save,
+            # whatever the implementation named its temp file.
+            assert os.listdir(tmpdir) == [os.path.basename(path)]
 
             trainer.epoch = 0
             trainer.load_checkpoint(path)

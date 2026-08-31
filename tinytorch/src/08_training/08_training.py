@@ -1272,13 +1272,23 @@ def trainer_save_checkpoint(self, path: str):
     2. Use self._get_model_state(), self._get_optimizer_state(),
        self._get_scheduler_state() to extract component states
     3. Create parent directory if needed: Path(path).parent.mkdir(parents=True, exist_ok=True)
-    4. Write with pickle.dump()
+    4. Write with pickle.dump(), but write to a temp path beside the target
+       and os.replace() it onto the target once the write has finished
 
     EXAMPLE:
     >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
     >>> # Later: trainer.load_checkpoint('/tmp/checkpoint.pkl')
 
-    HINT: The private _get_*_state() helpers are already provided.
+    HINTS:
+    - The private _get_*_state() helpers are already provided.
+    - Pickling straight into the target path is the tempting version and it is
+      unsafe: a crash, a full disk, or an error partway through pickling leaves
+      a half-written file where a good checkpoint used to be. Training jobs are
+      exactly the workload that gets killed mid-write.
+    - os.replace() is atomic on POSIX and Windows, so the target is always
+      either the old complete checkpoint or the new one, never a partial write.
+    - Clean the temp file up if the write fails, so a failed save leaves nothing
+      behind.
     """
     ### BEGIN SOLUTION
     checkpoint = {
