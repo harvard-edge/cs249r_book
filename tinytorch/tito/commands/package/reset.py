@@ -25,7 +25,13 @@ class ResetCommand(BaseCommand):
         # Lets bare `tito package reset [--force]` (with no SUBCOMMAND token)
         # reset the package directly, matching the "tito package reset --force"
         # example in PackageCommand's own help text.
-        parser.add_argument("--force", action="store_true", help="Skip confirmation prompt (resets the package)")
+        # Distinct dest: every subparser below defines its own --force, and a
+        # subparser always writes its default over a shared parent dest. With
+        # one shared dest, `reset --force package` silently dropped the flag
+        # and then blocked on the confirmation prompt, which is an EOFError
+        # under any script or CI run.
+        parser.add_argument("--force", action="store_true", dest="force_before_subcommand",
+                            help="Skip confirmation prompt (resets the package)")
 
         subparsers = parser.add_subparsers(
             dest='reset_command',
@@ -73,6 +79,11 @@ class ResetCommand(BaseCommand):
 
     def run(self, args: Namespace) -> int:
         console = self.console
+
+        # Normalize --force from either side of the SUBCOMMAND token. The bare
+        # form parses no subparser at all, so args.force may not exist yet.
+        args.force = (getattr(args, "force", False)
+                      or getattr(args, "force_before_subcommand", False))
 
         if not hasattr(args, 'reset_command') or not args.reset_command:
             # No SUBCOMMAND given: default to resetting the package, matching
