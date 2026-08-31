@@ -241,13 +241,19 @@ class Optimizer:
         APPROACH:
         1. Store parameters as a list for iteration
         2. Validate that all parameters require gradients
-        3. Initialize step counter for algorithms that need it
+        3. Give any parameter that has no grad attribute yet one, set to None
+        4. Initialize step counter for algorithms that need it
 
         EXAMPLE:
         >>> linear = Linear(784, 128)
         >>> optimizer = SGD(linear.parameters(), lr=0.01)
 
-        HINT: Store parameters for iteration during optimization steps
+        HINTS:
+        - Store parameters for iteration during optimization steps
+        - Constructing an optimizer must not clear a gradient a parameter is
+          already carrying. Someone may have run backward() before building the
+          optimizer, and PyTorch does not zero gradients at construction either.
+          Only set grad when the attribute is missing.
         """
         ### BEGIN SOLUTION
         # Validate and store parameters
@@ -257,11 +263,14 @@ class Optimizer:
         # Store parameters
         self.params = params
 
-        # Ensure parameters participate in autograd once it is enabled
+        # Ensure parameters participate in autograd once it is enabled.
+        # Only initialize grad if it isn't set yet, a caller may have already
+        # computed and assigned a gradient before constructing the optimizer.
         for param in self.params:
             if isinstance(param, Tensor):
                 param.requires_grad = True
-                param.grad = None
+                if not hasattr(param, 'grad'):
+                    param.grad = None
         self.step_count = 0  # For algorithms that need step counting
         ### END SOLUTION
 

@@ -429,17 +429,19 @@ class Profiler:
             int: FLOP count for one forward pass
         """
         ### BEGIN SOLUTION
-        if not (hasattr(model, 'kernel_size') and hasattr(model, 'in_channels')):
+        if not (hasattr(model, 'kernel_size') and hasattr(model, 'in_channels') and hasattr(model, 'out_channels')):
             return 0
 
         in_channels = model.in_channels
         out_channels = model.out_channels
-        kernel_h = kernel_w = model.kernel_size
+        kernel_h = model.kernel_size if isinstance(model.kernel_size, int) else model.kernel_size[0]
+        kernel_w = model.kernel_size if isinstance(model.kernel_size, int) else model.kernel_size[1]
 
         input_h, input_w = input_shape[-2], input_shape[-1]
         stride = model.stride if hasattr(model, 'stride') else 1
-        output_h = input_h // stride
-        output_w = input_w // stride
+        padding = model.padding if hasattr(model, 'padding') else 0
+        output_h = (input_h + 2 * padding - kernel_h) // stride + 1
+        output_w = (input_w + 2 * padding - kernel_w) // stride + 1
 
         return output_h * output_w * kernel_h * kernel_w * in_channels * out_channels * 2
         ### END SOLUTION
@@ -1296,29 +1298,40 @@ def test_unit_count_conv_flops():
 
     # Create mock Conv2d layer
     class MockConv:
-        def __init__(self, in_c, out_c, k, s=1):
+        def __init__(self, in_c, out_c, k, s=1, p=0):
             self.in_channels = in_c
             self.out_channels = out_c
             self.kernel_size = k
             self.stride = s
+            self.padding = p
             self.__class__.__name__ = 'Conv2d'
 
     # Test 1: Simple 3x3 conv, stride 1
     conv = MockConv(3, 16, 3, 1)
     flops = profiler._count_conv_flops(conv, (1, 3, 32, 32))
-    expected = 32 * 32 * 3 * 3 * 3 * 16 * 2
+    expected = 30 * 30 * 3 * 3 * 3 * 16 * 2
     assert flops == expected, f"Expected {expected}, got {flops}"
     print(f"✅ Conv2d(3, 16, 3): {flops} FLOPs")
 
     # Test 2: Stride 2 halves output spatial dims
     conv_s2 = MockConv(3, 64, 7, 2)
     flops_s2 = profiler._count_conv_flops(conv_s2, (1, 3, 224, 224))
-    out_h, out_w = 224 // 2, 224 // 2
+    out_h = (224 + 2 * 0 - 7) // 2 + 1
+    out_w = (224 + 2 * 0 - 7) // 2 + 1
     expected_s2 = out_h * out_w * 7 * 7 * 3 * 64 * 2
     assert flops_s2 == expected_s2, f"Expected {expected_s2}, got {flops_s2}"
     print(f"✅ Conv2d(3, 64, 7, stride=2): {flops_s2} FLOPs")
 
-    # Test 3: Missing attributes returns 0
+    # Test 3: Padding size 3 for each side
+    conv_p3 = MockConv(3, 10, 3, 1, 3)
+    flops_p3 = profiler._count_conv_flops(conv_p3, (1, 3, 28, 28))
+    out_h_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    out_w_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    expected_p3 = out_h_p3 * out_w_p3 * 3 * 3 * 3 * 10 * 2
+    assert flops_p3 == expected_p3, f"Expected {expected_p3}, got {flops_p3}"
+    print(f"✅ Conv2d(3, 10, 3, stride=1, padding=3): {flops_p3} FLOPs")
+
+    # Test 4: Missing attributes returns 0
     class Incomplete:
         pass
 

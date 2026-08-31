@@ -445,7 +445,7 @@ def test_cifar10_cnn_dimensions():
 if __name__ == "__main__":
     # When run directly, use pytest
     import subprocess
-    result = subprocess.run(["pytest", __file__, "-v"], capture_output=True, text=True)
+    result = subprocess.run(["pytest", __file__, "-v"], capture_output=True, text=True, encoding='utf-8', errors='replace')
     print(result.stdout)
     if result.stderr:
         print(result.stderr)

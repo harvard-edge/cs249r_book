@@ -31,7 +31,7 @@ from tito.core import auth
 def load_local_env():
     env_path = Path(__file__).parent.parent.parent / "local.env"
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if not line or line.startswith('#') or '=' not in line:
                 continue
@@ -49,7 +49,7 @@ def get_supabase_keys():
     if not config_js.exists():
         return None, None
     
-    content = config_js.read_text()
+    content = config_js.read_text(encoding='utf-8')
     import re
     url_match = re.search(r'SUPABASE_PROJECT_URL\s*=\s*["\']([^"\']+)["\']', content)
     key_match = re.search(r'SUPABASE_ANON_KEY\s*=\s*["\']([^"\']+)["\']', content)

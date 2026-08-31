@@ -235,7 +235,7 @@ class ResetCommand(BaseCommand):
             "version": "1.0",
             "completed_modules": [],
             "completion_dates": {}
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         # Reset milestones.json
         milestones_file = tito_dir / "milestones.json"
@@ -243,13 +243,13 @@ class ResetCommand(BaseCommand):
             "version": "1.0",
             "completed_milestones": [],
             "completion_dates": {}
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         # Reset config.json
         config_file = tito_dir / "config.json"
         config_file.write_text(json.dumps({
             "logo_theme": "standard"
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         console.print(Panel(
             "[green]✅ All progress reset![/green]\n\n"
@@ -300,7 +300,7 @@ class ResetCommand(BaseCommand):
             "version": "1.0",
             "completed_modules": [],
             "completion_dates": {}
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         console.print(Panel(
             "[green]✅ Module progress reset![/green]\n\n"
@@ -351,7 +351,7 @@ class ResetCommand(BaseCommand):
             "version": "1.0",
             "completed_milestones": [],
             "completion_dates": {}
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         console.print(Panel(
             "[green]✅ Milestone achievements reset![/green]\n\n"
@@ -395,7 +395,7 @@ class ResetCommand(BaseCommand):
         config_file = tito_dir / "config.json"
         config_file.write_text(json.dumps({
             "logo_theme": "standard"
-        }, indent=2))
+        }, indent=2), encoding='utf-8')
 
         console.print(Panel(
             "[green]✅ Configuration reset to defaults![/green]",

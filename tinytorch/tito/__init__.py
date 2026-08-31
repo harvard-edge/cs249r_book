@@ -12,7 +12,7 @@ def _get_version() -> str:
     try:
         pyproject_path = _Path(__file__).parent.parent / "pyproject.toml"
         if pyproject_path.exists():
-            content = pyproject_path.read_text()
+            content = pyproject_path.read_text(encoding='utf-8')
             for line in content.splitlines():
                 if line.strip().startswith("version"):
                     return line.split("=")[1].strip().strip('"').strip("'")

@@ -49,7 +49,7 @@ class TestPythonEnvironment:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "pip not available"
         print(f"✅ pip available: {result.stdout.strip()}")
@@ -118,7 +118,7 @@ class TestCoreDependencies:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "pytest not available"
         print(f"✅ pytest available: {result.stdout.strip()}")
@@ -171,7 +171,7 @@ class TestJupyterEnvironment:
         result = subprocess.run(
             ["jupyter", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "jupyter command not found"
         print(f"✅ jupyter command available:\n{result.stdout.strip()}")
@@ -181,7 +181,7 @@ class TestJupyterEnvironment:
         result = subprocess.run(
             ["jupyter", "lab", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "jupyter lab command not found"
         print(f"✅ jupyter lab command available: {result.stdout.strip()}")
@@ -191,7 +191,7 @@ class TestJupyterEnvironment:
         result = subprocess.run(
             ["jupyter", "kernelspec", "list"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "Cannot list Jupyter kernels"
         assert "python3" in result.stdout, "Python3 kernel not found"
@@ -328,7 +328,7 @@ class TestSystemResources:
                 result = subprocess.run(
                     ["sysctl", "-n", "machdep.cpu.brand_string"],
                     capture_output=True,
-                    text=True
+                    text=True, encoding='utf-8', errors='replace'
                 )
                 if "Apple" in result.stdout:
                     print("⚠️  Running x86_64 Python on Apple Silicon (Rosetta)")
@@ -345,7 +345,7 @@ class TestGitConfiguration:
         result = subprocess.run(
             ["git", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "git command not found"
         print(f"✅ Git available: {result.stdout.strip()}")
@@ -355,12 +355,12 @@ class TestGitConfiguration:
         name_result = subprocess.run(
             ["git", "config", "user.name"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         email_result = subprocess.run(
             ["git", "config", "user.email"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         if name_result.returncode != 0 or email_result.returncode != 0:
@@ -391,7 +391,7 @@ class TestStudentProtection:
         if module_dirs:
             test_file = list(module_dirs[0].glob("*.py"))
             if test_file:
-                content = test_file[0].read_text()
+                content = test_file[0].read_text(encoding='utf-8')
                 assert len(content) > 0, "Cannot read source files"
                 print(f"✅ Source files readable: {test_file[0]}")
 
