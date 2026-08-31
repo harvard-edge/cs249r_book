@@ -102,5 +102,48 @@ class TestCrossEntropyLoss:
         )
 
 
+class TestCrossEntropyLossOutOfRangeTargets:
+    """Test CrossEntropyLoss raises a clear error for invalid target indices."""
+
+    def test_target_equal_to_num_classes_raises_value_error(self):
+        """
+        WHAT: Verify a target index equal to num_classes (the first invalid
+        value, since valid indices are 0..num_classes-1) raises a clear
+        ValueError naming the problem, not a raw numpy IndexError.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1]])  # 3 classes, valid range [0, 2]
+        target = Tensor([3])
+
+        with pytest.raises(ValueError, match="out of range"):
+            loss_fn(logits, target)
+
+    def test_negative_target_raises_value_error(self):
+        """
+        WHAT: Verify a negative target index raises the same clear
+        ValueError, rather than numpy's negative-indexing silently
+        selecting the wrong class.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1]])
+        target = Tensor([-1])
+
+        with pytest.raises(ValueError, match="out of range"):
+            loss_fn(logits, target)
+
+    def test_valid_targets_still_work(self):
+        """
+        WHAT: Verify targets within the valid range are unaffected by the
+        new bounds check.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1], [0.5, 1.5, 0.8]])
+        target = Tensor([0, 1])
+
+        loss = loss_fn(logits, target)
+
+        assert float(loss.data) > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

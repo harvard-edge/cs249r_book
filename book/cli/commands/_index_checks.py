@@ -17,9 +17,10 @@ GENERIC_BARE = {
 
 LOWERCASE_ALLOWLIST = {
     "bfloat16", "bitter lesson, The", "cuBLAS", "cuDNN", "cuSPARSE", "gRPC",
-    "im2col", "k-Anonymity", "k-Center", "mmap", "nn.Module", "oneDNN",
-    "p50 Latency", "p95 Latency", "torch.compile", "vLLM", "jax.grad",
-    "tf.data", "tf.function", "autocast", "oneCCL",
+    "i.i.d. assumption", "im2col", "k-anonymity", "k-Anonymity", "k-center", "l-diversity",
+    "mmap", "nn.Module", "oneDNN", "p50 latency", "p95 latency", "pJ/MAC",
+    "t-closeness", "torch.compile", "vLLM", "jax.grad", "tf.data",
+    "tf.function", "autocast", "oneCCL",
 }
 
 PARENTHETICAL_ALLOWLIST = {"Precision (Metric)"}
@@ -101,7 +102,7 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     _add("ampersand_unescaped", [k for k in keys if re.search(r"(?<!\\)&", k)], "unescaped &")
     _add(
         "article_leading",
-        [k for k in keys if re.match(r"^(The|A|An) [A-Z]", k)],
+        [k for k in keys if re.match(r"^(The|A|An) ", k)],
         "article-leading mains",
     )
     plural_dups = [
@@ -123,7 +124,7 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
 
 
 def check_tag_placement(root: Path) -> list[IndexIssue]:
-    """\\index{} inside bold/code/headings."""
+    """Check for ``\\index{}`` inside bold, code, or headings."""
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
         rel = str(f.relative_to(root))
@@ -190,5 +191,34 @@ def check_xref_resolves(root: Path) -> list[IndexIssue]:
             issues.append(IndexIssue(
                 rel, line, "xref_unresolved",
                 f"'{src}' -> '{tgt}' (target not found)",
+            ))
+    return issues
+
+
+def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
+    """Check for terms with both direct \\index{X} and \\index{X|see{Y}} in the same QMD file."""
+    issues: list[IndexIssue] = []
+    for f in _iter_qmd_files(root):
+        rel = str(f.relative_to(root))
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        terms: dict[str, int] = {}
+        see_terms: dict[str, tuple[int, str]] = {}
+        for idx, line in enumerate(lines, 1):
+            for m in INDEX_RE.finditer(line):
+                k = m.group(1)
+                sm = SEEREF_RE.match(k)
+                if sm:
+                    term, tgt = sm.group(1).strip(), sm.group(2).strip()
+                    see_terms[term] = (idx, tgt)
+                else:
+                    h = k.split("!", 1)[0]
+                    if "@" in h:
+                        h = h.split("@", 1)[1]
+                    terms[h] = idx
+        conflicts = set(terms.keys()) & set(see_terms.keys())
+        for c in sorted(conflicts):
+            issues.append(IndexIssue(
+                rel, see_terms[c][0], "makeindex_encap_conflict",
+                f"Term '{c}' has direct \\index on line {terms[c]} and '|see' index on line {see_terms[c][0]} (causes makeindex error)",
             ))
     return issues

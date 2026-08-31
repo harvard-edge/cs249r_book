@@ -5,7 +5,10 @@ import sys
 SCRIPTS = Path(__file__).resolve().parents[1] / "quarto" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from epub_postprocess import declare_nav_mathml_property  # noqa: E402
+from epub_postprocess import (  # noqa: E402
+    declare_nav_mathml_property,
+    sanitize_xml_for_epubcheck,
+)
 
 
 def _write_epub_manifest(tmp_path, properties, nav_body):
@@ -56,3 +59,22 @@ def test_declare_nav_mathml_property_keeps_correct_mathml(tmp_path):
 
     assert declare_nav_mathml_property(tmp_path) == 0
     assert 'properties="nav mathml"' in _opf(tmp_path)
+
+
+def test_sanitize_xml_removes_textless_nav_link_only(tmp_path):
+    epub_dir = tmp_path / "EPUB"
+    epub_dir.mkdir()
+    nav_path = epub_dir / "nav.xhtml"
+    nav_path.write_text(
+        '<nav><ol><li id="empty"><a href="text/ch001.xhtml#section" /></li>'
+        '<li id="named"><a href="text/ch002.xhtml#chapter">Chapter</a></li>'
+        '</ol></nav>',
+        encoding="utf-8",
+    )
+
+    counts = sanitize_xml_for_epubcheck(tmp_path)
+    nav = nav_path.read_text(encoding="utf-8")
+
+    assert counts["empty_nav_links"] == 1
+    assert 'id="empty"' not in nav
+    assert '<a href="text/ch002.xhtml#chapter">Chapter</a>' in nav

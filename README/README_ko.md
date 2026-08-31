@@ -211,7 +211,13 @@ AI는 번개처럼 빠르게 변하지만, 이를 작동하게 하는 엔지니�
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
+<a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left">
+    <img src="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left" alt="Star History Chart">
+  </picture>
+</a>
 
 1 학습자 → 10 학습자 → 100 학습자 → 1,000 학습자 → **10,000 학습자** → 100,000 학습자 → **1M 학습자**
 

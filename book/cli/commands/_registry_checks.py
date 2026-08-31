@@ -117,6 +117,37 @@ def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[
     return issues
 
 
+def check_rendered_doubled_words(
+    root: Path, paths: list[Path] | None = None
+) -> list[RegistryIssue]:
+    """Flag doubled back-to-back words visible only AFTER value substitution.
+
+    Complements ``lego_prose_units``: that checker classifies exports by
+    formatter name, this one reads the rendered value, so it also catches
+    label duplication (``1,024 GPUs GPUs``). Executes LEGO cells, so it is
+    slower than a source scan; no Quarto build is required.
+    """
+    from cli.checks import rendered_doubled_words
+
+    if paths is None:
+        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+    issues: list[RegistryIssue] = []
+    for path in paths:
+        p = path if path.is_absolute() else root / path
+        if not p.exists() or p.suffix != ".qmd":
+            continue
+        if "```{python}" not in p.read_text(encoding="utf-8"):
+            continue  # no substitution can occur
+        for lineno, token, context in rendered_doubled_words.check_file(p):
+            issues.append(RegistryIssue(
+                code="rendered_doubled_word",
+                message=f"L{lineno}: doubled '{token}' after substitution — {context}",
+                file=str(p.relative_to(root)),
+                line=lineno,
+            ))
+    return issues
+
+
 def check_lego_load_pint(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
     """Static lint: physical *_value must use ureg/registry."""
     mod = _load_check_module("book_check_lego_load_pint", root)

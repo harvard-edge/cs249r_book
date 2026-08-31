@@ -17,6 +17,7 @@ from ..core.units import (
     GiB,
     KiB,
     MB,
+    MiB,
     GFLOPs,
     MILLION,
     MWh,
@@ -292,10 +293,10 @@ class ServingProfiles(Registry):
     """Reusable serving-shape profiles for performance-engineering examples."""
 
     H100VendorMemoryBudget = sourced_qty(
-        80 * GB,
+        80 * GiB,
         pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
         name="H100 vendor-facing serving memory budget",
-        description="Vendor-facing H100 memory budget used for decimal-GB serving capacity arithmetic.",
+        description="Vendor-facing H100 memory budget used for serving capacity arithmetic.",
     )
     PrecisionDividendTensorParallelDegree = sourced(
         8,
@@ -428,13 +429,13 @@ class EdgeDeviceSpectrum(Registry):
         description="Representative microcontroller SRAM endpoint used in memory-wall examples.",
     )
     MicrocontrollerSramHigh = sourced_qty(
-        2 * MB,
+        2 * MiB,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Microcontroller SRAM upper endpoint",
         description="Upper microcontroller SRAM endpoint used in memory hierarchy examples.",
     )
     ArduinoNano33BleFlash = sourced_qty(
-        1 * MB,
+        1 * MiB,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Arduino Nano 33 BLE Sense flash",
         description="Flash storage anchor used in the Arduino memory-wall example.",
@@ -511,13 +512,13 @@ class EdgeAdaptationTierProfile(Registry):
     """Reusable device-tier assumptions for on-device adaptation examples."""
 
     WearablePersonalizationMemory = sourced_qty(
-        500 * MB,
+        500 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Wearable personalization memory",
         description="Reference wearable memory envelope for impossible-full-finetuning examples.",
     )
     TinyWearableRam = sourced_qty(
-        1 * MB,
+        1 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Tiny wearable RAM",
         description="Severely constrained wearable/sensor RAM envelope for adaptation-strategy selection.",
@@ -553,7 +554,7 @@ class EdgeAdaptationTierProfile(Registry):
         description="Budget-device RAM anchor in the mobile-keyboard heterogeneity example.",
     )
     IotMemoryLow = sourced_qty(
-        64 * MB,
+        64 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="IoT memory envelope low",
         description="Lower memory envelope for IoT embedded systems in edge adaptation examples.",
@@ -637,13 +638,13 @@ class EdgeAdaptationTierProfile(Registry):
         description="Reference LoRA rank for mid-tier-device adaptation.",
     )
     BudgetReplayBuffer = sourced_qty(
-        10 * MB,
+        10 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Budget device replay buffer",
         description="Reference replay-buffer budget for constrained edge devices.",
     )
     FlagshipReplayBuffer = sourced_qty(
-        100 * MB,
+        100 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Flagship device replay buffer",
         description="Reference replay-buffer budget for flagship edge devices.",
@@ -661,7 +662,7 @@ class EdgeAdaptationTierProfile(Registry):
         description="Upper interaction count for few-shot personalization examples.",
     )
     FederatedLoraUpdate = sourced_qty(
-        50 * MB,
+        50 * MiB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Federated LoRA adapter update",
         description="Reference LoRA adapter update payload for mobile federated coordination.",

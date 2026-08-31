@@ -4,19 +4,20 @@ Scripts and generated files for MIT Press submission.
 
 ## Figure List Generator
 
-Extracts figure metadata from QMD source files:
+Extracts figure metadata from QMD source files and combines it with the
+figure-number and page manifest produced by the PDF build:
 
 ```bash
-# From the quarto/ directory:
-python3 scripts/mit_press/figure_list_for_press.py --vol 1 -o scripts/mit_press/FIGURE_LIST_VOL1.txt
-python3 scripts/mit_press/figure_list_for_press.py --vol 1 --format csv -o scripts/mit_press/FIGURE_LIST_VOL1.csv
+# From the quarto/ directory, before rendering:
+python3 scripts/mit_press/generate_figure_list.py --clear
+
+# Post-render runs automatically for the production PDF. To rerun it:
+python3 scripts/mit_press/generate_figure_list.py
 ```
 
-### Output Formats
-
-- **Text** (default): Human-readable, organized by chapter
-- **CSV**: Spreadsheet format with columns: Figure Number, Label, Caption, Alt-Text
-- **Markdown**: Formatted for documentation
+The generator writes `FIGURE_LIST.txt` into the active PDF output directory.
+Run it only after a fresh render so the LaTeX manifest, figure numbers, and
+page numbers correspond to the current manuscript.
 
 ### Output Fields
 
@@ -35,7 +36,22 @@ python3 scripts/mit_press/figure_list_for_press.py --vol 1 --format csv -o scrip
 </tbody>
 </table>
 
-## Generated Files
+## Tracked submission logs
 
-- `FIGURE_LIST_VOL1.txt` - Text format, 152 figures
-- `FIGURE_LIST_VOL1.csv` - CSV format for spreadsheets
+- `PERMISSIONS_FIGURES_VOL1.csv` records source and permission status for
+  every Volume I figure. It is source-based and can be maintained without a
+  render.
+- The generated `FIGURE_LIST.txt` is a build artifact and is intentionally
+  not tracked in this directory.
+
+Validate that the permissions log covers the current QMD figure inventory:
+
+```bash
+python3 scripts/mit_press/check_permissions_log.py
+```
+
+Before final submission, require every permission scope to be resolved:
+
+```bash
+python3 scripts/mit_press/check_permissions_log.py --require-resolved
+```

@@ -79,14 +79,16 @@ take one of:
    template.
 3. **Tracking** — record outcomes in the log. Pending requests must be
    resolved before final manuscript submission.
-4. **Final review** — before submission, run the audit script (TBD) to flag
-   any row where the source requires permission but `permission_print`,
-   `permission_electronic`, or `permission_world_lang` is still `pending` or
-   blank.
+4. **Final review** — before submission, run
+   `python3 scripts/mit_press/check_permissions_log.py --require-resolved`.
+   It verifies complete figure coverage and fails when any permission scope
+   remains `pending` or is explicitly denied.
 
 ## Templates
 
 - `PERMISSIONS_FIGURES_TEMPLATE.csv` — figure log schema with example rows
+- `PERMISSIONS_FIGURES_VOL1.csv` — complete Volume I figure inventory and
+  current permission status
 - `PERMISSIONS_TABLES_TEMPLATE.csv` — table log (same shape, different label
   column)
 - `PERMISSIONS_TEXT_TEMPLATE.csv` — prose / lyrics / poetry log

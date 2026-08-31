@@ -201,7 +201,7 @@ def _strip_allowed_fragments(line: str) -> str:
     out = GPU_SKU_MEMORY.sub("", out)
     out = SCI_NOTATION.sub("", out)
     out = PY_REF.sub("", out)
-    out = re.sub(r"#(?:sec|tbl|fig|eq|lst)-[^\s`]+", "", out)
+    out = re.sub(r"#(?:sec|tbl|fig|eq|lst|algo)-[^\s`]+", "", out)
     out = re.sub(r"@[A-Za-z0-9_-]+", "", out)
     out = re.sub(r"<!--.*?-->", "", out)
     # Drop inline math blocks — often carry fixed scenario dimensions.

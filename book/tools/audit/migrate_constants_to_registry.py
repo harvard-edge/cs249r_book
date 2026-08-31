@@ -30,7 +30,7 @@ INTERCONNECT_MAP = {
     "H100_FLOPS_FP32_CUDA": 'Hardware.Cloud.H100.compute.precision_flops["fp32"]',
     "CPU_FLOPS_FP32": "Hardware.Cloud.ReferenceCPU.compute.peak_flops",
     "H100_L2_CACHE": "Hardware.Cloud.H100.memory.l2_cache",
-    "TPUV5P_L2_SRAM": "Hardware.Cloud.TPUv5p.memory.l2_cache",
+    "TPUV5P_VMEM": "Hardware.Cloud.TPUv5p.memory.sram_capacity",
     "SGX_EPC_CAPACITY": "Hardware.Cloud.IntelSGX.memory.capacity",
     "SGX_BASE_LATENCY": "Hardware.Cloud.IntelSGX.dispatch_tax",
     "SGX_OVERFLOW_LATENCY": "Hardware.Cloud.IntelSGX.dispatch_tax",

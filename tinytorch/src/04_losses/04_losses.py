@@ -89,7 +89,7 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module
 **Import Strategy**:
 This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
 **Assumption**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) have been completed and exported to the package.
-If you see import errors, ensure you've run `tito export` after completing previous modules.
+If you see import errors, make sure you've run `tito module complete` for each previous module.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
@@ -612,8 +612,10 @@ class CrossEntropyLoss:
 
         APPROACH:
         1. Compute log-softmax of logits (numerically stable)
-        2. Select log-probabilities for correct classes
-        3. Return negative mean of selected log-probabilities
+        2. Check every target index is a real class, 0 <= t < num_classes,
+           and raise ValueError if any is not
+        3. Select log-probabilities for correct classes
+        4. Return negative mean of selected log-probabilities
 
         EXAMPLE:
         >>> loss_fn = CrossEntropyLoss()
@@ -625,6 +627,9 @@ class CrossEntropyLoss:
         HINTS:
         - Use log_softmax() for numerical stability
         - targets.data.astype(int) ensures integer indices
+        - num_classes is logits.shape[-1]; validate before indexing, because
+          NumPy would let a negative target silently select the wrong class
+          and would raise a bare IndexError for one that is too large
         - Use np.arange(batch_size) for row indexing: log_probs[np.arange(batch_size), targets]
         - Return negative mean: -np.mean(selected_log_probs)
         """
@@ -634,7 +639,16 @@ class CrossEntropyLoss:
 
         # Step 2: Select log-probabilities for correct classes
         batch_size = logits.shape[0]
+        num_classes = logits.shape[-1]
         target_indices = targets.data.astype(int)
+
+        out_of_range = (target_indices < 0) | (target_indices >= num_classes)
+        if np.any(out_of_range):
+            bad_values = np.unique(target_indices[out_of_range])
+            raise ValueError(
+                f"CrossEntropyLoss target index out of range: {bad_values.tolist()}\n"
+                f"  Valid range for {num_classes} classes is [0, {num_classes - 1}]"
+            )
 
         # Select correct class log-probabilities using advanced indexing
         selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]

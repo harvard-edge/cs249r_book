@@ -1,0 +1,1015 @@
+{
+  "volume": "vol2",
+  "section": "fleet_orchestration_fleet_orchestration",
+  "path": "book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd",
+  "total_terms": 140,
+  "terms": [
+    {
+      "term": "Placement Groups",
+      "index_head": "Placement Group!topology-aware scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 149,
+      "context": "If gang scheduling is the first hard constraint, topology awareness via **Placement Groups**\\index{Placement Group!topology-aware scheduling}[^fn-placement-group-affinity] is the second: to support tensor parallelism, the scheduler must ensure GPUs are placed within the same high-bandwidth NVLink domain rather than scattered across the data center."
+    },
+    {
+      "term": "Gang Scheduling",
+      "index_head": "Gang Scheduling!origins",
+      "type": "bold_indexed_concept",
+      "first_lineno": 151,
+      "context": "[^fn-gang-allor-nothing]: **Gang Scheduling**\\index{Gang Scheduling!origins}: Formalized by @ousterhout1982scheduling for parallel systems, where the \"Ousterhout matrix\" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. Under the chapter's cloud-equivalent \\$2/GPU-hour scenario, a 1,024-GPU job holding 900 idle GPUs while waiting for 124 more burns approximately \\$1,800/hour."
+    },
+    {
+      "term": "Placement Group",
+      "index_head": "Placement Group!topology",
+      "type": "bold_indexed_concept",
+      "first_lineno": 153,
+      "context": "[^fn-placement-group-affinity]: **Placement Group**\\index{Placement Group!topology}: A cloud-native abstraction (AWS, GCP) that requests instances be placed within a single high-bandwidth, low-latency network domain. For the ML Fleet, placement groups act as the topology contract that guarantees the bisection bandwidth $(\\text{BW}_{\\text{bisect}})$ required for AllReduce, preventing the \"topology lottery\" where nodes are scattered across different data center racks."
+    },
+    {
+      "term": "Fairness",
+      "index_head": "Fairness",
+      "type": "bold_indexed_concept",
+      "first_lineno": 212,
+      "context": "- **Fairness**\\index{Fairness}: The equitable distribution of resources across users or teams prevents a single large team from monopolizing the fleet. Dominant resource fairness [@ghodsi2011] equalizes each user's largest normalized share across resources such as GPUs, CPU, and memory."
+    },
+    {
+      "term": "Cost Efficiency",
+      "index_head": "Cost Efficiency",
+      "type": "bold_indexed_concept",
+      "first_lineno": 214,
+      "context": "- **Cost Efficiency**\\index{Cost Efficiency}: Interruptible spot instances, off-peak scheduling, and tight packing reduce budget burn, but often increase failure rates or completion time."
+    },
+    {
+      "term": "Coefficient of Variation",
+      "index_head": "Coefficient of Variation!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 266,
+      "context": "Here, $\\rho = \\lambda_{\\text{job}}/\\mu$ represents cluster utilization, $1/\\mu$ is the average job duration, and $C_s = \\sigma \\mu$ is the **Coefficient of Variation**\\index{Coefficient of Variation!definition} of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration."
+    },
+    {
+      "term": "Bin Packing",
+      "index_head": "Bin Packing!scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 278,
+      "context": "[^fn-bin-packing-scheduling]: **Bin Packing**\\index{Bin Packing!scheduling}: The one-dimensional version is NP-hard; ML scheduling adds four to five dimensions (GPU, CPU, memory, network, topology), making exact solutions intractable for clusters above a few hundred nodes. First-fit-decreasing heuristics achieve within 11/9 of optimal for typical workloads, but the real cost in ML clusters is not suboptimality in packing but fragmentation: stranded GPUs that individually satisfy no pending job yet collectively represent millions of dollars in idle capacity."
+    },
+    {
+      "term": "Fragmentation",
+      "index_head": "Fragmentation!scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 317,
+      "context": "Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmentation.total_gpus_str`. If jobs request 6 GPUs each, each job occupies one full node but wastes 2 GPUs per node, reducing effective capacity to `{python} FleetFragmentation.effective_capacity_pct_str`. The remaining 2 GPUs per node cannot be combined across nodes because GPU workloads require local memory access. This **Fragmentation**\\index{Fragmentation!scheduling} grows worse with heterogeneous job sizes: a mix of 1-GPU, 3-GPU, and 7-GPU jobs creates irregular gaps distributed across many nodes, where no single pending job can fit into any individual gap, yet the total free capacity would be sufficient if the gaps were contiguous."
+    },
+    {
+      "term": "Defragmentation",
+      "index_head": "Defragmentation!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 325,
+      "context": "Periodic **Defragmentation**\\index{Defragmentation!definition} migrates or preempts low-priority jobs to consolidate free resources into contiguous blocks, analogous to memory compaction in operating systems. The scheduler identifies nodes where partial allocations leave stranded resources, preempts the jobs occupying those resources, and re-schedules them on nodes where they can be packed more efficiently. The cost of defragmentation (preempting running work, which wastes compute between the last checkpoint and the preemption event) must be weighed against the benefit (enabling large jobs to start sooner, improving overall throughput). Operators often schedule defragmentation during low-demand periods when the impact of preemption is lower."
+    },
+    {
+      "term": "Over-subscription",
+      "index_head": "Over-Subscription!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 327,
+      "context": "A third strategy, **Over-subscription**\\index{Over-Subscription!definition}, allows more jobs to be admitted than strictly fit, relying on statistical multiplexing to avoid simultaneous peak usage across all resource dimensions. If each job's GPU utilization averages 70 percent (alternating between compute-intensive and data-loading phases), the cluster can support approximately 1.4$\\times$ as many jobs as the strict GPU count would allow. Over-subscription works well when resource utilization is genuinely bursty and jobs' peak usage periods are uncorrelated, but can cause severe performance degradation (thrashing, memory pressure, network congestion) when multiple jobs peak simultaneously. The key to safe over-subscription is monitoring actual utilization in real time and throttling admission when contention is detected. @Fig-fragmentation-problem shows the combined effect: although 19 GPUs (roughly 30 percent of the cluster) sit idle, no single node has a contiguous block of eight, so a full-node job cannot be placed."
+    },
+    {
+      "term": "Hold-and-wait Deadlock",
+      "index_head": "Deadlock!hold-and-wait",
+      "type": "bold_indexed_concept",
+      "first_lineno": 495,
+      "context": "The partial-allocation pattern is a **Hold-and-wait Deadlock**\\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling-cycle] in which two jobs each hold half the cluster and neither can proceed. The implementation guarantee is straightforward: for a job $J$ requesting $N$ GPUs, the scheduler must guarantee that either all $N$ GPUs are allocated atomically, or the job remains in the queue without holding any resources. This binary outcome eliminates deadlock by construction, since a job that holds no resources cannot block other jobs. Implementing this guarantee efficiently, however, is the challenge that defines much of cluster scheduling algorithm design."
+    },
+    {
+      "term": "Lower Utilization",
+      "index_head": "Lower Utilization!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 559,
+      "context": "- **Lower Utilization**\\index{Lower Utilization!definition} (`{python} ClusterEconomicsIdleRecap.util_low_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_low_str` productive, `{python} ClusterEconomicsIdleRecap.idle_low_str` idle = `{python} ClusterEconomicsIdleRecap.waste_low_str`/day wasted"
+    },
+    {
+      "term": "Higher Utilization",
+      "index_head": "Higher Utilization!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 560,
+      "context": "- **Higher Utilization**\\index{Higher Utilization!definition} (`{python} ClusterEconomicsIdleRecap.util_high_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_high_str` productive, `{python} ClusterEconomicsIdleRecap.idle_high_str` idle = `{python} ClusterEconomicsIdleRecap.waste_high_str`/day wasted"
+    },
+    {
+      "term": "Priority inversion",
+      "type": "callout_definition",
+      "first_lineno": 581,
+      "context": "::: {#dfn-fleet-orchestration-priority-inversion .callout-definition title=\"Priority inversion\"}"
+    },
+    {
+      "term": "Lease-based Resource",
+      "index_head": "Lease-Based Resource!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 593,
+      "context": "For large-scale fleets, exact placement search is computationally nontrivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations, making exhaustive allocation search intractable. By contrast, detecting a cycle in an already constructed wait-for graph is linear in the graph's vertices and edges. The practical difficulty is maintaining a complete, current global graph while resource state changes across a distributed control plane. Large-scale schedulers therefore supplement wait-for detection with mechanisms that preserve liveness under incomplete state. A **Lease-based Resource**\\index{Lease-Based Resource!definition} gives every allocation a time-to-live (TTL), allowing the scheduler to reclaim GPUs when a job stops renewing its claim. **Progress Monitoring**\\index{Progress Monitoring!definition} then checks whether the job is actually advancing, using signals such as GPU utilization, step counters, or heartbeat timestamps to identify zombie allocations. When the scheduler must preempt a lower-priority job, **Holistic Preemption**\\index{Holistic Preemption!definition} reserves the CPU, network, and storage bandwidth needed for that job to checkpoint and exit cleanly; otherwise, the victim can be too starved to release the accelerators. These strategies accept a nonzero rate of false positives to preserve cluster liveness."
+    },
+    {
+      "term": "Progress Monitoring",
+      "index_head": "Progress Monitoring!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 593,
+      "context": "For large-scale fleets, exact placement search is computationally nontrivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations, making exhaustive allocation search intractable. By contrast, detecting a cycle in an already constructed wait-for graph is linear in the graph's vertices and edges. The practical difficulty is maintaining a complete, current global graph while resource state changes across a distributed control plane. Large-scale schedulers therefore supplement wait-for detection with mechanisms that preserve liveness under incomplete state. A **Lease-based Resource**\\index{Lease-Based Resource!definition} gives every allocation a time-to-live (TTL), allowing the scheduler to reclaim GPUs when a job stops renewing its claim. **Progress Monitoring**\\index{Progress Monitoring!definition} then checks whether the job is actually advancing, using signals such as GPU utilization, step counters, or heartbeat timestamps to identify zombie allocations. When the scheduler must preempt a lower-priority job, **Holistic Preemption**\\index{Holistic Preemption!definition} reserves the CPU, network, and storage bandwidth needed for that job to checkpoint and exit cleanly; otherwise, the victim can be too starved to release the accelerators. These strategies accept a nonzero rate of false positives to preserve cluster liveness."
+    },
+    {
+      "term": "Holistic Preemption",
+      "index_head": "Holistic Preemption!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 593,
+      "context": "For large-scale fleets, exact placement search is computationally nontrivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations, making exhaustive allocation search intractable. By contrast, detecting a cycle in an already constructed wait-for graph is linear in the graph's vertices and edges. The practical difficulty is maintaining a complete, current global graph while resource state changes across a distributed control plane. Large-scale schedulers therefore supplement wait-for detection with mechanisms that preserve liveness under incomplete state. A **Lease-based Resource**\\index{Lease-Based Resource!definition} gives every allocation a time-to-live (TTL), allowing the scheduler to reclaim GPUs when a job stops renewing its claim. **Progress Monitoring**\\index{Progress Monitoring!definition} then checks whether the job is actually advancing, using signals such as GPU utilization, step counters, or heartbeat timestamps to identify zombie allocations. When the scheduler must preempt a lower-priority job, **Holistic Preemption**\\index{Holistic Preemption!definition} reserves the CPU, network, and storage bandwidth needed for that job to checkpoint and exit cleanly; otherwise, the victim can be too starved to release the accelerators. These strategies accept a nonzero rate of false positives to preserve cluster liveness."
+    },
+    {
+      "abbrev": "TTL",
+      "canonical_expansion": "gives every allocation a time-to-live",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 593,
+      "context": "For large-scale fleets, exact placement search is computationally nontrivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations, making exhaustive allocation search intractable. By contrast, detecting a cycle in an already constructed wait-for graph is linear in the graph's vertices and edges. The practical difficulty is maintaining a complete, current global graph while resource state changes across a distributed control plane. Large-scale schedulers therefore supplement wait-for detection with mechanisms that preserve liveness under incomplete state. A **Lease-based Resource**\\index{Lease-Based Resource!definition} gives every allocation a time-to-live (TTL), allowing the scheduler to reclaim GPUs when a job stops renewing its claim. **Progress Monitoring**\\index{Progress Monitoring!definition} then checks whether the job is actually advancing, using signals such as GPU utilization, step counters, or heartbeat timestamps to identify zombie allocations. When the scheduler must preempt a lower-priority job, **Holistic Preemption**\\index{Holistic Preemption!definition} reserves the CPU, network, and storage bandwidth needed for that job to checkpoint and exit cleanly; otherwise, the victim can be too starved to release the accelerators. These strategies accept a nonzero rate of false positives to preserve cluster liveness."
+    },
+    {
+      "abbrev": "BSP",
+      "canonical_expansion": "assumes a homogeneous Bulk Synchronous Parallel",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 597,
+      "context": "The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Parallel (BSP) workload: $N$ identical workers executing the exact same compute graph. Some training workflows break this assumption because one logical job contains several roles with different resource profiles. In preference-training pipelines such as reinforcement learning from human feedback (RLHF), for example, one component may update the policy while another scores outputs or supplies reference behavior. The scheduler still sees one job, but the gang contains trainers, evaluators, and inference-style workers that need different GPU counts, memory footprints, and lifetimes."
+    },
+    {
+      "abbrev": "RLHF",
+      "canonical_expansion": "as reinforcement learning from human feedback",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 597,
+      "context": "The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Parallel (BSP) workload: $N$ identical workers executing the exact same compute graph. Some training workflows break this assumption because one logical job contains several roles with different resource profiles. In preference-training pipelines such as reinforcement learning from human feedback (RLHF), for example, one component may update the policy while another scores outputs or supplies reference behavior. The scheduler still sees one job, but the gang contains trainers, evaluators, and inference-style workers that need different GPU counts, memory footprints, and lifetimes."
+    },
+    {
+      "term": "Slurm Workload Manager",
+      "index_head": "Slurm!workload manager",
+      "type": "bold_indexed_concept",
+      "first_lineno": 615,
+      "context": "**Slurm Workload Manager**\\index{Slurm!workload manager}[^fn-slurm-hpc-workload] originated at Lawrence Livermore National Laboratory as a scalable, fault-tolerant resource manager for Linux clusters [@yoo2003]. Its batch-oriented design fits the distinctive requirements of scientific computing: long-running jobs, expensive shared hardware, and users who can specify resource needs in advance. In ML infrastructure, the same model maps to GPU training through partitions for heterogeneous accelerator pools and predictable allocations for long-running distributed jobs."
+    },
+    {
+      "term": "Imperative Scheduling Model",
+      "index_head": "Slurm!imperative model",
+      "type": "bold_indexed_concept",
+      "first_lineno": 619,
+      "context": "Slurm uses an **Imperative Scheduling Model**\\index{Slurm!imperative model}: users submit job scripts specifying exact resource requirements, and the scheduler places jobs into partitions based on priority, fairness, and resource availability. This directness makes reasoning about allocation guarantees straightforward. When a user submits `sbatch --gres=gpu:8 --nodes=4`, Slurm guarantees that if the job starts, it will have exactly 32 GPUs across 4 nodes. The user knows precisely what they are getting, and the scheduler knows precisely what it must provide. The cost of this directness is that users must understand their resource needs precisely; requesting more than needed wastes resources, while requesting less causes out-of-memory errors or reduced performance."
+    },
+    {
+      "term": "Fair-share Scheduling",
+      "index_head": "Fair-Share Scheduling!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 638,
+      "context": "The **Fair-share Scheduling**\\index{Fair-Share Scheduling!definition} mechanism prevents any single user or project from monopolizing resources over time. The core insight is that past usage should affect future priority: heavy users should yield to lighter users when the cluster is contended. The effective-priority heuristic combines base priority, the user's target fair share ($F_{\\text{target}}$), the user's recent actual consumption ($F_{\\text{actual}}$), and a small stabilizing constant ($\\epsilon$):"
+    },
+    {
+      "term": "Trackable Resources (TRES)",
+      "index_head": "Trackable Resource!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 662,
+      "context": "Finally, **Trackable Resources (TRES)**\\index{Trackable Resource!definition}\\index{TRES} extend Slurm's accounting beyond simple CPU/memory tracking to assets like GPU-hours, license tokens, or power budget. The capability that matters is economic-weight accounting per accelerator class: each tracked resource carries a billing weight, so fair-share can be driven by actual economic cost rather than raw core counts. This ensures that a team using 100 older GPUs does not deplete its budget as fast as a team using 100 flagship H100s, and it lets organizations implement project billing for expensive resources directly inside the scheduler's fairness calculation."
+    },
+    {
+      "abbrev": "TRES",
+      "canonical_expansion": "Trackable Resources",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 662,
+      "context": "Finally, **Trackable Resources (TRES)**\\index{Trackable Resource!definition}\\index{TRES} extend Slurm's accounting beyond simple CPU/memory tracking to assets like GPU-hours, license tokens, or power budget. The capability that matters is economic-weight accounting per accelerator class: each tracked resource carries a billing weight, so fair-share can be driven by actual economic cost rather than raw core counts. This ensures that a team using 100 older GPUs does not deplete its budget as fast as a team using 100 flagship H100s, and it lets organizations implement project billing for expensive resources directly inside the scheduler's fairness calculation."
+    },
+    {
+      "term": "Declarative Model",
+      "index_head": "Declarative Model!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 668,
+      "context": "Kubernetes is a common platform for ML infrastructure, particularly for organizations requiring unified management of training and serving workloads [@burns2016; @kubernetes_orchestration]. Where Slurm's model is imperative (\"run this job on these resources\"), Kubernetes uses a **Declarative Model**\\index{Declarative Model!definition} (\"ensure this state exists\"), using control loops that continuously reconcile desired state with actual state. This fundamental difference shapes every aspect of ML workload management, from job submission to failure recovery."
+    },
+    {
+      "term": "Controller Pattern",
+      "index_head": "Controller Pattern!Kubernetes",
+      "type": "bold_indexed_concept",
+      "first_lineno": 672,
+      "context": "Kubernetes' control loop architecture is built on the **Controller Pattern**\\index{Controller Pattern!Kubernetes}:[^fn-controller-k8s-reconciliation] a controller watches the cluster's actual state (stored in etcd, Kubernetes' distributed key-value store for API state), compares it to desired state (specified by users through API objects like Deployments, Jobs, and StatefulSets), and takes corrective action to close the gap. This pattern repeats at every level: the Deployment controller ensures the right number of pods exist, the scheduler assigns pods to nodes, the kubelet on each node ensures containers are running, and the node controller detects node failures. Each controller operates independently, communicating only through shared state in etcd, which makes the system resilient to individual controller failures but can create emergent behaviors when multiple controllers interact."
+    },
+    {
+      "term": "Controller Pattern (Reconciliation Loop)",
+      "index_head": "Controller Pattern!Kubernetes",
+      "type": "bold_indexed_concept",
+      "first_lineno": 674,
+      "context": "[^fn-controller-k8s-reconciliation]: **Controller Pattern (Reconciliation Loop)**\\index{Controller Pattern!Kubernetes}: A \"level-triggered\" design where the controller continuously compares desired state to actual state, as opposed to \"edge-triggered\" systems that react to individual events. The distinction matters for ML clusters: if a controller crashes and restarts, it re-reads current state and self-heals without needing an event log. The trade-off is that emergent interactions between multiple independent controllers can create unexpected scheduling behaviors that are difficult to debug sequentially."
+    },
+    {
+      "term": "Device Plugins",
+      "index_head": "Device Plugin!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 676,
+      "context": "Native Kubernetes\\index{Kubernetes!gpu allocation} lacks ML-aware scheduling, but extensions address this gap. GPU scheduling relies on **Device Plugins**\\index{Device Plugin!definition} that expose accelerators as schedulable extended resources. The NVIDIA device plugin registers GPUs with the kubelet (the node-level agent), enabling pod specifications that request GPU resources declaratively through the standard Kubernetes resource model. @Lst-fleet-orchestration-k8s-gpu shows the resulting pod fragment."
+    },
+    {
+      "abbrev": "MIG",
+      "canonical_expansion": "Multi-Instance GPU",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 731,
+      "context": "Multi-Instance GPU (MIG)\\index{MIG!orchestration}[^fn-mig-gpu-isolation] technology addresses this inefficiency by partitioning A100 (`{python} ClusterEconomicsMigRecap.a100_mem_gb_str`) and H100 (`{python} ClusterEconomicsMigRecap.h100_mem_gb_str`) GPUs into hardware-isolated instances. Unlike software-based GPU sharing, MIG dedicates memory, cache, and compute resources to each instance, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The A100 MIG profiles\\index{MIG!A100 profiles} in @tbl-fleet-orchestration-mig-profiles show the scheduling consequence: a single physical A100 becomes several fixed-size resources that the device plugin can expose as independently schedulable accelerators."
+    },
+    {
+      "term": "Multi-Instance GPU (MIG)",
+      "index_head": "MIG!GPU isolation",
+      "type": "bold_indexed_concept",
+      "first_lineno": 733,
+      "context": "[^fn-mig-gpu-isolation]: **Multi-Instance GPU (MIG)**\\index{MIG!GPU isolation}: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units [@NVIDIA2020]. The isolation is enforced at the hardware level, not by time-slicing, reducing noisy-neighbor interference relative to software-only sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes."
+    },
+    {
+      "term": "Noisy Neighbor",
+      "index_head": "Noisy Neighbor!isolation",
+      "type": "bold_indexed_concept",
+      "first_lineno": 735,
+      "context": "[^fn-noisy-neighbor-etymology]: **Noisy Neighbor**\\index{Noisy Neighbor!isolation}: A metaphor from multi-tenant housing where one resident's activity (loud music) disturbs another's peace. In GPU clusters, this occurs when one job's bursty network traffic or memory bus utilization slows down a co-located job on the same node. For distributed training, noisy neighbors are fatal to efficiency because the slowest flow dictates the global AllReduce time."
+    },
+    {
+      "term": "Volcano",
+      "index_head": "Volcano!Kubernetes scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 748,
+      "context": "The **Volcano**\\index{Volcano!Kubernetes scheduling}[^fn-volcano-k8s-scheduler] batch scheduler and **Coscheduling**\\index{Coscheduling!Kubernetes scheduling} scheduler plugin address this gap by implementing gang semantics through **Podgroup**\\index{PodGroup!definition} abstractions. A PodGroup declares that a set of pods must be scheduled together, specifying a minimum member count that must be satisfiable before any pod in the group starts. The scheduler evaluates the entire group atomically: either all minimum members can be placed, and they are placed simultaneously, or none are placed and the group waits in the queue. This transforms Kubernetes' pod-level scheduling into job-level scheduling that respects the all-or-nothing requirements of distributed training."
+    },
+    {
+      "term": "Coscheduling",
+      "index_head": "Coscheduling!Kubernetes scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 748,
+      "context": "The **Volcano**\\index{Volcano!Kubernetes scheduling}[^fn-volcano-k8s-scheduler] batch scheduler and **Coscheduling**\\index{Coscheduling!Kubernetes scheduling} scheduler plugin address this gap by implementing gang semantics through **Podgroup**\\index{PodGroup!definition} abstractions. A PodGroup declares that a set of pods must be scheduled together, specifying a minimum member count that must be satisfiable before any pod in the group starts. The scheduler evaluates the entire group atomically: either all minimum members can be placed, and they are placed simultaneously, or none are placed and the group waits in the queue. This transforms Kubernetes' pod-level scheduling into job-level scheduling that respects the all-or-nothing requirements of distributed training."
+    },
+    {
+      "term": "Podgroup",
+      "index_head": "PodGroup!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 748,
+      "context": "The **Volcano**\\index{Volcano!Kubernetes scheduling}[^fn-volcano-k8s-scheduler] batch scheduler and **Coscheduling**\\index{Coscheduling!Kubernetes scheduling} scheduler plugin address this gap by implementing gang semantics through **Podgroup**\\index{PodGroup!definition} abstractions. A PodGroup declares that a set of pods must be scheduled together, specifying a minimum member count that must be satisfiable before any pod in the group starts. The scheduler evaluates the entire group atomically: either all minimum members can be placed, and they are placed simultaneously, or none are placed and the group waits in the queue. This transforms Kubernetes' pod-level scheduling into job-level scheduling that respects the all-or-nothing requirements of distributed training."
+    },
+    {
+      "abbrev": "CNCF",
+      "canonical_expansion": "now a Cloud Native Computing Foundation",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 750,
+      "context": "[^fn-volcano-k8s-scheduler]: **Volcano**\\index{Volcano!Kubernetes scheduling}: Open-sourced by Huawei and now a Cloud Native Computing Foundation (CNCF) incubating project, Volcano replaces the Kubernetes default scheduler entirely to add gang scheduling via its PodGroup CRD. The replacement approach provides strong atomicity guarantees for multi-pod ML training jobs but carries operational risk: a bug in Volcano affects all scheduling decisions on the cluster, not just batch workloads."
+    },
+    {
+      "term": "Kueue",
+      "index_head": "Kueue!Kubernetes job queueing",
+      "type": "bold_indexed_concept",
+      "first_lineno": 754,
+      "context": "**Kueue**\\index{Kueue!Kubernetes job queueing},[^fn-kueue-k8s-scheduler] a newer Kubernetes-native job queueing system, represents an emerging approach that separates admission control from scheduling. Rather than replacing the Kubernetes scheduler entirely (as Volcano does), Kueue manages when jobs enter the cluster, while the default scheduler (or any compatible scheduler) handles where pods are placed. This separation of concerns has practical advantages: Kueue can be deployed alongside existing Kubernetes infrastructure without disrupting running workloads, and it integrates naturally with the ecosystem of scheduler plugins for topology-aware placement and other features."
+    },
+    {
+      "term": "Training Operator Ecosystem",
+      "index_head": "Training Operator Ecosystem!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 764,
+      "context": "The **Training Operator Ecosystem**\\index{Training Operator Ecosystem!definition} simplifies distributed training by extending Kubernetes with job-specific Custom Resource Definitions (CRDs). The Kubeflow Training Operator provides controllers for `PyTorchJob`, `TFJob`, and `MPIJob` resources, automating the complex lifecycle of distributed workloads. A `PyTorchJob` specification defines the number of workers, the container image, and resource requirements; the operator then creates the necessary pods and configures distributed environment variables such as `MASTER_ADDR`, `MASTER_PORT`, `WORLD_SIZE`, and `RANK`. If a worker pod fails, the operator can detect the deviation and create a replacement pod to restore the desired replica count, but training-state recovery still depends on the framework's checkpoint and rendezvous logic."
+    },
+    {
+      "abbrev": "CRDs",
+      "canonical_expansion": "Kubernetes with job-specific Custom Resource Definitions",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 764,
+      "context": "The **Training Operator Ecosystem**\\index{Training Operator Ecosystem!definition} simplifies distributed training by extending Kubernetes with job-specific Custom Resource Definitions (CRDs). The Kubeflow Training Operator provides controllers for `PyTorchJob`, `TFJob`, and `MPIJob` resources, automating the complex lifecycle of distributed workloads. A `PyTorchJob` specification defines the number of workers, the container image, and resource requirements; the operator then creates the necessary pods and configures distributed environment variables such as `MASTER_ADDR`, `MASTER_PORT`, `WORLD_SIZE`, and `RANK`. If a worker pod fails, the operator can detect the deviation and create a replacement pod to restore the desired replica count, but training-state recovery still depends on the framework's checkpoint and rendezvous logic."
+    },
+    {
+      "term": "Host Networking",
+      "index_head": "Host Networking!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 766,
+      "context": "Achieving high network performance in Kubernetes often requires bypassing networking layers that were designed for ordinary microservices rather than tightly synchronized collectives. Container Network Interface (CNI) configuration, overlay networking, and CPU switching can add latency or reduce effective bandwidth when they sit on the critical gradient-synchronization path. For bandwidth-sensitive training, **Host Networking**\\index{Host Networking!definition} (`hostNetwork: true`) allows pods to bypass the CNI entirely, granting direct access to the host's network namespace and RDMA devices. The NVIDIA Network Operator automates the low-level plumbing required for this performance, managing RDMA device plugins, SR-IOV virtual function assignment, and GPUDirect RDMA configuration. This bypass capability allows containerized workloads to approach bare-metal interconnect performance when the remaining stack is configured correctly."
+    },
+    {
+      "abbrev": "CNI",
+      "canonical_expansion": "Container Network Interface",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 766,
+      "context": "Achieving high network performance in Kubernetes often requires bypassing networking layers that were designed for ordinary microservices rather than tightly synchronized collectives. Container Network Interface (CNI) configuration, overlay networking, and CPU switching can add latency or reduce effective bandwidth when they sit on the critical gradient-synchronization path. For bandwidth-sensitive training, **Host Networking**\\index{Host Networking!definition} (`hostNetwork: true`) allows pods to bypass the CNI entirely, granting direct access to the host's network namespace and RDMA devices. The NVIDIA Network Operator automates the low-level plumbing required for this performance, managing RDMA device plugins, SR-IOV virtual function assignment, and GPUDirect RDMA configuration. This bypass capability allows containerized workloads to approach bare-metal interconnect performance when the remaining stack is configured correctly."
+    },
+    {
+      "abbrev": "PVCs",
+      "canonical_expansion": "Kubernetes PersistentVolumeClaims",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 768,
+      "context": "Storage integration addresses the \"checkpoint storm\" problem where thousands of GPUs simultaneously write terabytes of state. Kubernetes PersistentVolumeClaims (PVCs) abstract the underlying storage fabric, which may be a parallel file system like Lustre or GPFS, or high-performance object storage via Container Storage Interface (CSI) drivers. The critical architectural challenge is preventing these synchronized writes from saturating the storage backend. Storage classes with Quality of Service (QoS) policies and client-side throttling are essential to ensure that a 1,024-GPU training job writing a 2 TB checkpoint does not starve other workloads or crash the storage metadata server."
+    },
+    {
+      "abbrev": "CSI",
+      "canonical_expansion": "object storage via Container Storage Interface",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 768,
+      "context": "Storage integration addresses the \"checkpoint storm\" problem where thousands of GPUs simultaneously write terabytes of state. Kubernetes PersistentVolumeClaims (PVCs) abstract the underlying storage fabric, which may be a parallel file system like Lustre or GPFS, or high-performance object storage via Container Storage Interface (CSI) drivers. The critical architectural challenge is preventing these synchronized writes from saturating the storage backend. Storage classes with Quality of Service (QoS) policies and client-side throttling are essential to ensure that a 1,024-GPU training job writing a 2 TB checkpoint does not starve other workloads or crash the storage metadata server."
+    },
+    {
+      "abbrev": "QoS",
+      "canonical_expansion": "Storage classes with Quality of Service",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 768,
+      "context": "Storage integration addresses the \"checkpoint storm\" problem where thousands of GPUs simultaneously write terabytes of state. Kubernetes PersistentVolumeClaims (PVCs) abstract the underlying storage fabric, which may be a parallel file system like Lustre or GPFS, or high-performance object storage via Container Storage Interface (CSI) drivers. The critical architectural challenge is preventing these synchronized writes from saturating the storage backend. Storage classes with Quality of Service (QoS) policies and client-side throttling are essential to ensure that a 1,024-GPU training job writing a 2 TB checkpoint does not starve other workloads or crash the storage metadata server."
+    },
+    {
+      "term": "Observability Stack",
+      "index_head": "Observability Stack!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 770,
+      "context": "The **Observability Stack**\\index{Observability Stack!definition} for training clusters combines general-purpose cluster monitoring with specialized hardware telemetry. Prometheus and Grafana provide the collection and visualization layer, while the DCGM (Data Center GPU Manager) exporter exposes granular GPU metrics: utilization, memory bandwidth, temperature, and ECC errors. This stack enables the utilization dashboards essential for multi-tenant efficiency, allowing operators to distinguish between true compute saturation and I/O-bound idleness."
+    },
+    {
+      "term": "Hybrid Architectures",
+      "index_head": "Hybrid Architecture!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 802,
+      "context": "While the choice between Slurm and Kubernetes often appears binary, sophisticated engineering organizations increasingly deploy **Hybrid Architectures**\\index{Hybrid Architecture!definition} that use the strengths of both systems. These architectures acknowledge a fundamental reality: training workloads behave like HPC applications (batch, synchronous, monolithic), while serving workloads behave like microservices (continuous, asynchronous, elastic). Forcing both into a single paradigm often results in a \"lowest common denominator\" system that serves neither well."
+    },
+    {
+      "term": "Kubernetes-over-slurm",
+      "index_head": "Kubernetes-over-Slurm!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 804,
+      "context": "The **Kubernetes-over-slurm**\\index{Kubernetes-over-Slurm!definition} pattern wraps the HPC scheduler within a cloud-native control plane. In this architecture, Kubernetes acts as the outer orchestration layer, managing the lifecycle of training jobs through custom operators while delegating the actual pod placement to Slurm. A developer submits a `TrainingJob` CRD to Kubernetes, which the operator translates into a Slurm `sbatch` script. The operator then monitors the job status via Slurm's REST API, streaming logs and metrics back to the Kubernetes control plane. This approach provides the best of both worlds: the unified observability, CI/CD integration, and access control of Kubernetes, combined with the gang scheduling sophistication, topology awareness, and bare-metal performance of Slurm."
+    },
+    {
+      "term": "Slurm-alongside-kubernetes",
+      "index_head": "Slurm-alongside-Kubernetes!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 806,
+      "context": "The **Slurm-alongside-kubernetes**\\index{Slurm-alongside-Kubernetes!definition} pattern takes a coarser-grained approach, maintaining separate clusters for training and serving that draw from a shared pool of physical nodes. A meta-scheduler or capacity broker acts as an arbitrator, dynamically reassigning nodes between the Slurm partition and the Kubernetes cluster based on demand signals. During intensive training campaigns, nodes are drained from Kubernetes and joined to Slurm; during product launches or traffic spikes, the flow reverses. The primary challenge is the mode-switching cost: draining a Kubernetes node, re-imaging or reconfiguring it, and joining it to Slurm (or vice versa) typically requires 5 to 15 minutes. This latency limits the granularity of sharing: the system can adapt to diurnal patterns or weekly cycles but cannot use Slurm capacity to absorb second-by-second inference bursts."
+    },
+    {
+      "term": "Leaf Switch Domain",
+      "index_head": "Leaf Switch Domain!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 900,
+      "context": "Between nodes within the same rack or **Leaf Switch Domain**\\index{Leaf Switch Domain!definition}, communication traverses InfiniBand or RoCE at `{python} FleetTopologyInterconnect.ib_ndr_gbit_per_s_str` (NDR InfiniBand), roughly `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str` per link. This represents an order of magnitude reduction from NVLink bandwidth. Data parallelism, which requires AllReduce of gradients after each training step, operates efficiently at this level because bucketed gradient synchronization can overlap with the remaining backward computation. The latency penalty is modest (microseconds vs. nanoseconds), and the aggregate bandwidth is sufficient for gradient tensors that are typically smaller than the activation tensors exchanged in tensor parallelism."
+    },
+    {
+      "term": "Spine Switches",
+      "index_head": "Spine Switch!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 902,
+      "context": "Between racks connected through **Spine Switches**\\index{Spine Switch!definition}, communication crosses additional switch hops, introducing both higher latency and potentially reduced effective bandwidth due to network congestion. The fat-tree topologies analyzed in @sec-network-fabrics-fat-tree provide full bisection bandwidth in theory, but in practice, congestion from concurrent flows, routing inefficiencies, and switch buffer limitations reduce effective cross-rack bandwidth by 10 to 30 percent compared to intra-rack communication. Cross-rack communication also adds tail latency variability: while median latency may be only slightly higher, P99 latency can spike during congestion events, creating straggler effects in synchronous training where the slowest communicator determines the pace for all workers."
+    },
+    {
+      "abbrev": "Topology-Unaware",
+      "canonical_expansion": "Left",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 910,
+      "context": "::: {#fig-topology-placement-paths fig-env=\"figure\" fig-pos=\"htb\" fig-cap=\"**Topology-Unaware vs. Topology-Aware Placement**: A 4-GPU job placed across two racks (left, topology-unaware) must traverse leaf-spine-leaf hops: 3 switch hops per AllReduce message at about 12 GB/s effective bandwidth. The same 4-GPU job packed within one rack (right, topology-aware) uses a single leaf switch: 1 hop at about 50 GB/s, roughly 4$\\times$ faster. A quantitative summary beneath the figure reports switch-hop counts and effective bandwidth.\" fig-alt=\"Two panels. Left (Topology-Unaware): 4-GPU job split across Rack A and Rack B via a Spine Switch with red dashed paths (3 hops, ~12 GB/s). Right (Topology-Aware): same job packed in one rack under Leaf-A (1 hop, ~50 GB/s).\"}"
+    },
+    {
+      "abbrev": "Topology-Aware",
+      "canonical_expansion": "Right",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 910,
+      "context": "::: {#fig-topology-placement-paths fig-env=\"figure\" fig-pos=\"htb\" fig-cap=\"**Topology-Unaware vs. Topology-Aware Placement**: A 4-GPU job placed across two racks (left, topology-unaware) must traverse leaf-spine-leaf hops: 3 switch hops per AllReduce message at about 12 GB/s effective bandwidth. The same 4-GPU job packed within one rack (right, topology-aware) uses a single leaf switch: 1 hop at about 50 GB/s, roughly 4$\\times$ faster. A quantitative summary beneath the figure reports switch-hop counts and effective bandwidth.\" fig-alt=\"Two panels. Left (Topology-Unaware): 4-GPU job split across Rack A and Rack B via a Spine Switch with red dashed paths (3 hops, ~12 GB/s). Right (Topology-Aware): same job packed in one rack under Leaf-A (1 hop, ~50 GB/s).\"}"
+    },
+    {
+      "term": "Locality Cost",
+      "index_head": "Locality Cost!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 918,
+      "context": "The bandwidth gap shown in @fig-topology-placement-paths is the key constraint: the roughly 4$\\times$ reduction from intra-rack leaf paths to cross-rack leaf-spine-leaf paths means that scattered placement forces tensor parallel groups to spend more time communicating than computing, a penalty that compounds at every transformer layer in the model. Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **Locality Cost**\\index{Locality Cost!definition}, defined in @eq-fleet-orchestration-locality-score, that penalizes allocations spanning multiple topology domains:"
+    },
+    {
+      "term": "Hierarchical Placement",
+      "index_head": "Hierarchical Placement!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1026,
+      "context": "A **Hierarchical Placement**\\index{Hierarchical Placement!definition} algorithm assigns resources in layers that match this parallelism hierarchy. First, it assigns tensor parallel groups to individual nodes, ensuring that all GPUs in a tensor parallel group share NVLink connectivity. Second, it groups those nodes into pipeline stages within racks, placing consecutive pipeline stages on nodes connected through the same leaf switch. Third, it distributes data parallel replicas across racks, ensuring that each data parallel group has access to the cluster's full bisection bandwidth for AllReduce operations. This three-level placement mirrors the three-level topology and the three-level parallelism strategy, creating a natural alignment between logical and physical structure."
+    },
+    {
+      "term": "Good Placement",
+      "index_head": "Good Placement!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1081,
+      "context": "**Good Placement**\\index{Good Placement!definition} (topology-aware):"
+    },
+    {
+      "term": "Bad Placement",
+      "index_head": "Bad Placement!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1087,
+      "context": "**Bad Placement**\\index{Bad Placement!definition} (topology-unaware):"
+    },
+    {
+      "term": "Rail-optimized Topologies",
+      "index_head": "Rail-Optimized Topology!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1101,
+      "context": "Large GPU clusters increasingly use **Rail-optimized Topologies**\\index{Rail-Optimized Topology!definition} where each GPU in a node connects to a different network switch, creating parallel \"rails\" through the network fabric. This design, analyzed in @sec-network-fabrics-rail-optimized, provides balanced bandwidth across all GPUs by distributing traffic across independent switch hierarchies. However, it also creates a scheduling constraint: AllReduce operations are most efficient when communicating GPUs are on the same rail (connected to the same switch chain), because same-rail communication avoids cross-rail traffic that could create congestion at shared switch ports."
+    },
+    {
+      "term": "Topology Discovery",
+      "index_head": "Topology Discovery!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1111,
+      "context": "Static configuration files like Slurm's `topology.conf` or Kubernetes node labels provide a baseline map of the cluster, but they represent the intended state, not the effective state. True **Topology Discovery**\\index{Topology Discovery!definition} requires runtime introspection to validate that the physical hardware matches the architectural diagram. Libraries like NCCL bypass static configurations entirely, parsing the Linux virtual filesystem at `/sys/class/infiniband` to map the PCIe bus hierarchy, enumerate NVLink connections, and verify NIC proximity. This creates a ground-truth graph where edges represent verified, operational links rather than theoretical cables."
+    },
+    {
+      "term": "Taints and Tolerations",
+      "index_head": "Taints and Tolerations!Kubernetes scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1127,
+      "context": "The general scheduling idea is quarantine: when runtime evidence says a node, rack, or link is degraded, the scheduler should stop placing sensitive work there even if the nominal resource count still looks available. Kubernetes implements this pattern through **Taints and Tolerations**\\index{Taints and Tolerations!Kubernetes scheduling},[^fn-taint-toleration-rule] while Slurm clusters commonly use drain states, node features, or partition rules. The complementary problem is how jobs adapt when available resources change dynamically. Rather than treating resource allocation as fixed for a job's lifetime, elastic training allows jobs to grow, shrink, and recover without full restarts."
+    },
+    {
+      "term": "Elastic Range",
+      "index_head": "Elastic Scheduling!elastic range",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1143,
+      "context": "- **Elastic Range**\\index{Elastic Scheduling!elastic range}: $[N_{\\text{min}}, N_{\\text{max}}]$ specifies the worker counts between which the job can operate."
+    },
+    {
+      "term": "Transition Cost",
+      "index_head": "Elastic Scheduling!transition cost",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1144,
+      "context": "- **Transition Cost**\\index{Elastic Scheduling!transition cost}: The rendezvous cycle, typically 10 to 60 seconds, determines how frequently the scheduler can resize without the overhead negating the throughput gain."
+    },
+    {
+      "term": "Scaling Efficiency Curve",
+      "index_head": "Scaling Efficiency!elastic scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1145,
+      "context": "- **Scaling Efficiency Curve**\\index{Scaling Efficiency!elastic scheduling}: The throughput gained from each added worker determines whether assigning idle GPUs to this job is more productive than holding them for a pending gang-scheduled job."
+    },
+    {
+      "term": "Rigid scheduling",
+      "index_head": "Rigid Scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1174,
+      "context": "**Rigid scheduling**\\index{Rigid Scheduling}: Wait 8 hours, then train for 24 hours at full throughput. Total wall-clock: 32 hours."
+    },
+    {
+      "term": "Elastic Scheduling",
+      "index_head": "Elastic Scheduling!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1176,
+      "context": "**Elastic Scheduling**\\index{Elastic Scheduling!definition} (min 32, max 128):"
+    },
+    {
+      "term": "Minimum Viable Scale",
+      "index_head": "Minimum Viable Scale!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1212,
+      "context": "Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\\index{Scaling Efficiency} $\\eta_{\\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically exhibits three distinct phases: a linear phase where compute dominates communication, a sublinear phase where gradient synchronization latency begins to mask compute, and a saturation phase where the AllReduce ring becomes the bottleneck. A scheduler that blindly assigns available GPUs to a job in the saturation phase wastes cluster capacity that could have cleared the queue; conversely, running a job below its **Minimum Viable Scale**\\index{Minimum Viable Scale!definition} forces it to hold onto memory and network leases for disproportionately low progress."
+    },
+    {
+      "abbrev": "ROI",
+      "canonical_expansion": "financial asset whose return on investment",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1321,
+      "context": "The utilization-to-dollars relationship established in @sec-fleet-orchestration-introduction now becomes the orchestrator's objective function. A 10,000-GPU cluster represents a capital investment of roughly \\$300 million and consumes millions more in monthly power and cooling. If poor scheduling leaves 20 percent of those GPUs idling in fragmentation gaps or waiting for data, roughly \\$60 million in deployed capital sits unused, and at cloud-equivalent rates the same idleness burns approximately \\$35 million per year in operating cost. Cost optimization forces the fleet orchestrator to treat the cluster as a massive financial asset whose return on investment (ROI) must be maximized."
+    },
+    {
+      "term": "Spot Instances",
+      "index_head": "Spot Instances!cost optimization",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1450,
+      "context": "Cloud providers offer **Spot Instances**\\index{Spot Instances!cost optimization}[^fn-spot-instances-cloud] (AWS) or **Preemptible VMs**\\index{Preemptible VMs!definition} (GCP) at 60 to 90 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At `{python} FleetSpotPricing.spot_price_str` instead of `{python} FleetSpotPricing.on_demand_price_str`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand."
+    },
+    {
+      "term": "Preemptible VMs",
+      "index_head": "Preemptible VMs!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1450,
+      "context": "Cloud providers offer **Spot Instances**\\index{Spot Instances!cost optimization}[^fn-spot-instances-cloud] (AWS) or **Preemptible VMs**\\index{Preemptible VMs!definition} (GCP) at 60 to 90 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At `{python} FleetSpotPricing.spot_price_str` instead of `{python} FleetSpotPricing.on_demand_price_str`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand."
+    },
+    {
+      "term": "Effective Cost",
+      "index_head": "Effective Cost!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1454,
+      "context": "The viability of spot instances for ML training depends on two factors that determine whether the discount translates into actual savings: the cost of each interruption (checkpoint overhead plus restart time plus lost work since the last checkpoint) and the frequency of interruption (which varies by instance type, region, time of day, and overall cloud demand). @Eq-fleet-orchestration-spot-cost gives the **Effective Cost**\\index{Effective Cost!definition} of spot training:"
+    },
+    {
+      "abbrev": "AZ",
+      "canonical_expansion": "spot pools independently per availability zone",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1466,
+      "context": "To maximize spot instance utility while minimizing disruption, sophisticated schedulers employ diversification and predictive strategies that go beyond simple \"retry on failure\" logic. Availability zone diversification reduces the probability of simultaneous fleet-wide reclamation. Cloud providers typically manage spot pools independently per availability zone (AZ). If a training job requires 1,024 GPUs, allocating them as a single block in one zone exposes the job to a complete stop if that specific zone's spot pool is reclaimed. Spreading the job across multiple AZs ensures that a reclamation event in one zone affects only a fraction of the fleet. The scheduler still must model correlation carefully: independent per-instance interruptions make large simultaneous losses unlikely, but pool-level or AZ-level reclamations can remove hundreds of GPUs at once and must be treated as elastic-shrink or failover events rather than ordinary isolated failures."
+    },
+    {
+      "term": "Two-tier Checkpointing",
+      "index_head": "Two-Tier Checkpointing!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1472,
+      "context": "Checkpoint frequency optimization for spot instances differs from the standard reliability logic. The Young-Daly formula developed in @sec-fault-tolerance-young-daly optimizes for unpredicted hardware failures. Spot interruptions, however, come with a warning: 2 minutes on AWS, 30 seconds on GCP. A **Two-tier Checkpointing**\\index{Two-Tier Checkpointing!definition} approach combines a periodic checkpoint at the Young-Daly interval with a best-effort checkpoint triggered by the termination notice. The notice-triggered checkpoint reduces lost work only if it can finish within the warning window. When a large model's full checkpoint takes longer, the job must rely on an already-running asynchronous or incremental checkpoint and accept rollback to the last durable state."
+    },
+    {
+      "term": "On-demand",
+      "index_head": "On-Demand Capacity",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1572,
+      "context": "**On-demand**\\index{On-Demand Capacity}: `{python} SpotTrainingEconomics.spot_gpus_str` $\\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\\times$ `{python} SpotTrainingEconomics.on_demand_rate_str` = `{python} SpotTrainingEconomics.on_demand_cost_str`"
+    },
+    {
+      "term": "Spot",
+      "index_head": "Spot!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1574,
+      "context": "**Spot**\\index{Spot!definition} (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.interruptions_per_day_str`/day with `{python} SpotTrainingEconomics.restart_min_str` restart):"
+    },
+    {
+      "abbrev": "SLA",
+      "canonical_expansion": "might violate a service level agreement",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1598,
+      "context": "These decisions require the scheduler to model both the time-value of computation (the organizational cost of a 2-hour delay in researcher productivity, product launch schedules, or competitive position) and the financial cost of different resource allocations. The time-value varies enormously by workload type: delaying a production model retrain by 2 hours might violate a service level agreement (SLA) and cost thousands in penalty fees, while delaying an exploratory experiment by 2 hours costs nothing but researcher patience."
+    },
+    {
+      "term": "Cost Policies",
+      "index_head": "Cost Policy!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1600,
+      "context": "Production systems typically define **Cost Policies**\\index{Cost Policy!definition} per workload class that encode these trade-offs as configuration rather than requiring per-decision human judgment. Inference workloads are pinned to reserved capacity for guaranteed availability and predictable latency, since the cost of an inference outage (lost revenue, degraded user experience) far exceeds the premium of reserved pricing. Large training runs use a mix of reserved capacity (for the minimum viable allocation) and spot capacity (for elastic expansion), with automatic fallback to on-demand if spot is reclaimed and the job is within a configurable deadline. Exploratory workloads are restricted to spot to minimize cost, with the understanding that they may be interrupted and must tolerate variable completion times."
+    },
+    {
+      "term": "ML Finops",
+      "index_head": "ML FinOps!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1602,
+      "context": "Technical optimization must be paired with financial accountability through **ML Finops**\\index{ML FinOps!definition}. In many organizations, GPU costs are pooled into a generic \"infrastructure\" bucket, creating a tragedy of the commons where teams lack visibility into their resource consumption and have no incentive to optimize. Effective governance requires granular tagging to implement **Showback**\\index{Showback!definition} (reporting costs to teams) or **Chargeback**\\index{Chargeback!definition} (billing teams' budgets). Metrics must evolve from \"GPU hours\" to business-aligned units: \"Cost per Model Version,\" \"Cost per Experiment,\" and \"Cost per 1M Predictions.\" This shift transforms cost from an opaque infrastructure expense into a measurable input to product decisions, enabling teams to make informed trade-offs between model quality, training speed, and infrastructure cost. @Sec-ml-operations-scale-cost-visibility-attribution-3f3a develops the platform machinery that makes these costs visible and attributable; the concern here is narrower, namely how that price signal reshapes the scheduling and quota behavior of the teams competing for the fleet."
+    },
+    {
+      "term": "Showback",
+      "index_head": "Showback!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1602,
+      "context": "Technical optimization must be paired with financial accountability through **ML Finops**\\index{ML FinOps!definition}. In many organizations, GPU costs are pooled into a generic \"infrastructure\" bucket, creating a tragedy of the commons where teams lack visibility into their resource consumption and have no incentive to optimize. Effective governance requires granular tagging to implement **Showback**\\index{Showback!definition} (reporting costs to teams) or **Chargeback**\\index{Chargeback!definition} (billing teams' budgets). Metrics must evolve from \"GPU hours\" to business-aligned units: \"Cost per Model Version,\" \"Cost per Experiment,\" and \"Cost per 1M Predictions.\" This shift transforms cost from an opaque infrastructure expense into a measurable input to product decisions, enabling teams to make informed trade-offs between model quality, training speed, and infrastructure cost. @Sec-ml-operations-scale-cost-visibility-attribution-3f3a develops the platform machinery that makes these costs visible and attributable; the concern here is narrower, namely how that price signal reshapes the scheduling and quota behavior of the teams competing for the fleet."
+    },
+    {
+      "term": "Chargeback",
+      "index_head": "Chargeback!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1602,
+      "context": "Technical optimization must be paired with financial accountability through **ML Finops**\\index{ML FinOps!definition}. In many organizations, GPU costs are pooled into a generic \"infrastructure\" bucket, creating a tragedy of the commons where teams lack visibility into their resource consumption and have no incentive to optimize. Effective governance requires granular tagging to implement **Showback**\\index{Showback!definition} (reporting costs to teams) or **Chargeback**\\index{Chargeback!definition} (billing teams' budgets). Metrics must evolve from \"GPU hours\" to business-aligned units: \"Cost per Model Version,\" \"Cost per Experiment,\" and \"Cost per 1M Predictions.\" This shift transforms cost from an opaque infrastructure expense into a measurable input to product decisions, enabling teams to make informed trade-offs between model quality, training speed, and infrastructure cost. @Sec-ml-operations-scale-cost-visibility-attribution-3f3a develops the platform machinery that makes these costs visible and attributable; the concern here is narrower, namely how that price signal reshapes the scheduling and quota behavior of the teams competing for the fleet."
+    },
+    {
+      "term": "Tiresias",
+      "index_head": "Tiresias!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1628,
+      "context": "**Tiresias**\\index{Tiresias!definition} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable. Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a **Two-dimensional Attained Service**\\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has already consumed, not what it claims it will consume. Jobs accumulate \"service\" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity."
+    },
+    {
+      "term": "Two-dimensional Attained Service",
+      "index_head": "Attained Service Scheduling!two-dimensional",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1628,
+      "context": "**Tiresias**\\index{Tiresias!definition} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable. Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a **Two-dimensional Attained Service**\\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has already consumed, not what it claims it will consume. Jobs accumulate \"service\" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity."
+    },
+    {
+      "term": "Attained Service Scheduling",
+      "index_head": "Attained Service Scheduling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1630,
+      "context": "[^fn-attained-service-scheduling]: **Attained Service Scheduling**\\index{Attained Service Scheduling}: A discipline from OS queuing theory where priority decreases with cumulative resource consumption, approximating the theoretically optimal Shortest Remaining Processing Time (SRPT) policy without requiring the future knowledge that SRPT demands. In ML clusters, this approximation is particularly effective because job durations are heavy-tailed: the majority of submitted jobs are short experiments, so deprioritizing high-service jobs correctly identifies the long-running outliers without requiring users to provide runtime estimates they cannot accurately compute."
+    },
+    {
+      "abbrev": "SRPT",
+      "canonical_expansion": "theoretically optimal Shortest Remaining Processing Time",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1630,
+      "context": "[^fn-attained-service-scheduling]: **Attained Service Scheduling**\\index{Attained Service Scheduling}: A discipline from OS queuing theory where priority decreases with cumulative resource consumption, approximating the theoretically optimal Shortest Remaining Processing Time (SRPT) policy without requiring the future knowledge that SRPT demands. In ML clusters, this approximation is particularly effective because job durations are heavy-tailed: the majority of submitted jobs are short experiments, so deprioritizing high-service jobs correctly identifies the long-running outliers without requiring users to provide runtime estimates they cannot accurately compute."
+    },
+    {
+      "term": "Gandiva",
+      "index_head": "Gandiva!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1638,
+      "context": "**Gandiva**\\index{Gandiva!definition} [@xiao2018gandiva] exploits iteration-boundary time slicing, enabling higher utilization through controlled oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of its iteration time waiting for data, because the scheduler can interleave data loading from one job with GPU computation from another on the same device. The critical insight that makes this practical is that iteration boundaries provide natural preemption points where GPU state is minimal. Between iterations, only model weights and optimizer state reside on the GPU; the intermediate activations from forward and backward passes have been freed. This minimal state makes context switching cheap (seconds rather than minutes), unlike preempting mid-iteration when the full activation memory is in use."
+    },
+    {
+      "term": "Grow-shrink Elasticity",
+      "index_head": "Grow-Shrink Elasticity!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1640,
+      "context": "Gandiva also implements **Grow-shrink Elasticity**\\index{Grow-Shrink Elasticity!definition} at a finer granularity than the framework-level elastic training discussed in @sec-fleet-orchestration-elastic-training. Gandiva automatically adjusts data parallelism degree based on real-time resource availability, using profiled iteration times to predict the throughput impact of adding or removing workers. When a high-priority job arrives, Gandiva shrinks lower-priority jobs by reducing their worker count rather than killing them entirely, preserving their progress while freeing resources. When resources become available again, it grows jobs back to their preferred parallelism degree. This fine-grained elasticity, informed by actual iteration-level profiling data, enables scheduling decisions that general-purpose systems cannot make because they lack visibility into job internals."
+    },
+    {
+      "term": "Themis",
+      "index_head": "Themis!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1658,
+      "context": "Traditional fair-share scheduling treats all GPU-seconds equally: a job consuming 100 GPU-hours is treated the same whether those hours represent the first 10 percent of a long training run or the last 10 percent of a nearly complete one. From a resource accounting perspective, 100 GPU-hours is 100 GPU-hours regardless of context. **Themis**\\index{Themis!definition} [@mahajan2020themis] argues this resource-centric view is fundamentally unfair because it ignores the sunk cost of work already performed."
+    },
+    {
+      "term": "Finish-time Fairness",
+      "index_head": "Finish-Time Fairness!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1660,
+      "context": "Themis defines a **Finish-time Fairness**\\index{Finish-Time Fairness!definition} metric that allocates resources to minimize the maximum slowdown any job experiences relative to exclusive access (the hypothetical scenario where the job has the entire cluster to itself). Under this metric, a job that is 90 percent complete and needs only 10 more GPU-hours to finish receives higher priority than a job that is 10 percent complete and needs 90 more GPU-hours. The reasoning is economic: delaying the nearly-complete job by an hour wastes the 90 GPU-hours already invested (because those hours only produce value when the job completes), while delaying the early-stage job by an hour has a proportionally smaller impact on the total investment's return."
+    },
+    {
+      "term": "Pollux",
+      "index_head": "Pollux!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1666,
+      "context": "**Pollux**\\index{Pollux!definition} [@qiao2021pollux] takes the most aggressive approach of the four research schedulers by jointly optimizing resource allocation and training hyperparameters. Where Tiresias, Gandiva, and Themis make scheduling decisions about jobs (when to run, how to share), Pollux makes decisions within jobs (how many GPUs and what batch size). The key observation is that the optimal number of GPUs for a training job depends on the current batch size, learning rate, and gradient noise level, all of which change during training as the model moves through different phases of convergence."
+    },
+    {
+      "term": "Cluster-wide Goodput",
+      "index_head": "Goodput!cluster-wide",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1668,
+      "context": "Pollux dynamically adjusts each job's GPU allocation and batch size to maximize **Cluster-wide Goodput**\\index{Goodput!cluster-wide}, defined as the rate of useful training progress across all jobs simultaneously. The goodput metric folds both sides of the trade-off into one number: statistical efficiency (how much each gradient step advances convergence, which depends on batch size) and system throughput (how many gradient steps per second, which depends on GPU count and communication overhead). A job experiencing diminishing returns from its current GPU count (because communication overhead is growing superlinearly) may have GPUs reassigned to a job that would benefit more (because it is in a phase of training where larger batches improve statistical efficiency)."
+    },
+    {
+      "term": "Horizontal Pod Autoscaling (HPA)",
+      "index_head": "Horizontal Pod Autoscaling!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1742,
+      "context": "Kubernetes **Horizontal Pod Autoscaling (HPA)**\\index{Horizontal Pod Autoscaling!definition}\\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization\\index{GPU Utilization} is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: @tbl-fleet-orchestration-autoscaling-metrics lists custom inference metrics that predict user-facing degradation before it occurs."
+    },
+    {
+      "abbrev": "HPA",
+      "canonical_expansion": "Horizontal Pod Autoscaling",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 1742,
+      "context": "Kubernetes **Horizontal Pod Autoscaling (HPA)**\\index{Horizontal Pod Autoscaling!definition}\\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization\\index{GPU Utilization} is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: @tbl-fleet-orchestration-autoscaling-metrics lists custom inference metrics that predict user-facing degradation before it occurs."
+    },
+    {
+      "term": "Vertical Pod Autoscaling (VPA)",
+      "index_head": "Vertical Pod Autoscaling!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1753,
+      "context": "Beyond the HPA-oriented metrics in @tbl-fleet-orchestration-autoscaling-metrics, **Vertical Pod Autoscaling (VPA)**\\index{Vertical Pod Autoscaling!definition}\\index{VPA} operates on a different axis, adjusting resource requests and limits for individual pods. Where HPA changes how many instances run, VPA changes how much resource each instance receives. For inference, VPA can right-size memory allocations based on observed usage patterns, preventing over-provisioning of CPU memory and host resources that reduces the number of inference pods that fit on each node. GPU resources cannot be vertically scaled without pod restart (the CUDA context must be reinitialized), limiting VPA's utility for accelerated workloads where model loading takes minutes. However, VPA is valuable for the CPU components of inference pipelines, such as preprocessing, postprocessing, and tokenization, where resource requirements may differ significantly from initial estimates and can be adjusted with a brief pod restart."
+    },
+    {
+      "abbrev": "VPA",
+      "canonical_expansion": "Vertical Pod Autoscaling",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 1753,
+      "context": "Beyond the HPA-oriented metrics in @tbl-fleet-orchestration-autoscaling-metrics, **Vertical Pod Autoscaling (VPA)**\\index{Vertical Pod Autoscaling!definition}\\index{VPA} operates on a different axis, adjusting resource requests and limits for individual pods. Where HPA changes how many instances run, VPA changes how much resource each instance receives. For inference, VPA can right-size memory allocations based on observed usage patterns, preventing over-provisioning of CPU memory and host resources that reduces the number of inference pods that fit on each node. GPU resources cannot be vertically scaled without pod restart (the CUDA context must be reinitialized), limiting VPA's utility for accelerated workloads where model loading takes minutes. However, VPA is valuable for the CPU components of inference pipelines, such as preprocessing, postprocessing, and tokenization, where resource requirements may differ significantly from initial estimates and can be adjusted with a brief pod restart."
+    },
+    {
+      "term": "Key-value (KV) Cache",
+      "index_head": "KV Cache!inference autoscaling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1755,
+      "context": "Large language model (LLM) inference requires specialized scaling considerations that neither HPA nor VPA fully address, due to the **Key-value (KV) Cache**\\index{KV Cache!inference autoscaling}[^fn-kv-cache-orchestration] memory growth pattern. A 70B parameter model serving long-context requests may require more than 80 GB of GPU memory for KV cache alone, even when the serving engine stores that cache in paged, noncontiguous blocks. The GPU memory bottleneck for LLM serving is therefore not the model weights (which are fixed) but the KV cache (which grows with request count and context length). Scaling decisions must account for both request rate and context length distribution, not just computational load. A sudden increase in requests with long contexts (for example, a shift from short chatbot queries to document summarization workloads) can exhaust GPU memory even at moderate request rates, requiring scale-out despite low GPU compute utilization. Conversely, a burst of many short-context requests may stress compute without threatening memory limits."
+    },
+    {
+      "abbrev": "LLM",
+      "canonical_expansion": "Large language model",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1755,
+      "context": "Large language model (LLM) inference requires specialized scaling considerations that neither HPA nor VPA fully address, due to the **Key-value (KV) Cache**\\index{KV Cache!inference autoscaling}[^fn-kv-cache-orchestration] memory growth pattern. A 70B parameter model serving long-context requests may require more than 80 GB of GPU memory for KV cache alone, even when the serving engine stores that cache in paged, noncontiguous blocks. The GPU memory bottleneck for LLM serving is therefore not the model weights (which are fixed) but the KV cache (which grows with request count and context length). Scaling decisions must account for both request rate and context length distribution, not just computational load. A sudden increase in requests with long contexts (for example, a shift from short chatbot queries to document summarization workloads) can exhaust GPU memory even at moderate request rates, requiring scale-out despite low GPU compute utilization. Conversely, a burst of many short-context requests may stress compute without threatening memory limits."
+    },
+    {
+      "abbrev": "KV",
+      "canonical_expansion": "Key-value",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1755,
+      "context": "Large language model (LLM) inference requires specialized scaling considerations that neither HPA nor VPA fully address, due to the **Key-value (KV) Cache**\\index{KV Cache!inference autoscaling}[^fn-kv-cache-orchestration] memory growth pattern. A 70B parameter model serving long-context requests may require more than 80 GB of GPU memory for KV cache alone, even when the serving engine stores that cache in paged, noncontiguous blocks. The GPU memory bottleneck for LLM serving is therefore not the model weights (which are fixed) but the KV cache (which grows with request count and context length). Scaling decisions must account for both request rate and context length distribution, not just computational load. A sudden increase in requests with long contexts (for example, a shift from short chatbot queries to document summarization workloads) can exhaust GPU memory even at moderate request rates, requiring scale-out despite low GPU compute utilization. Conversely, a burst of many short-context requests may stress compute without threatening memory limits."
+    },
+    {
+      "term": "Cold Start Latency",
+      "index_head": "Cold Start Latency!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1761,
+      "context": "Autoscaling for inference must also handle **Cold Start Latency**\\index{Cold Start Latency!definition}, which creates a tension between cost efficiency and responsiveness that has no simple resolution. The cold-start problem in serving is quantitatively more severe than in standard web services due to the sheer mass of model weights. A 70B-parameter model in FP16 occupies approximately 140 GB, and all of it must reach GPU memory before the first request can be served, a transfer bound by PCIe or NVLink bandwidth. Even at the per-direction PCIe Gen4 x16 speed of 32 GB/s, the raw transfer takes over 4 seconds, and in practice model initialization, graph compilation, and safety checks extend this to 60\u2013120 seconds. Loading from Non-Volatile Memory Express (NVMe) SSDs at 7 GB/s read bandwidth takes roughly 20 seconds; from network storage, it can exceed 2 minutes."
+    },
+    {
+      "abbrev": "NVMe",
+      "canonical_expansion": "Loading from Non-Volatile Memory Express",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 1761,
+      "context": "Autoscaling for inference must also handle **Cold Start Latency**\\index{Cold Start Latency!definition}, which creates a tension between cost efficiency and responsiveness that has no simple resolution. The cold-start problem in serving is quantitatively more severe than in standard web services due to the sheer mass of model weights. A 70B-parameter model in FP16 occupies approximately 140 GB, and all of it must reach GPU memory before the first request can be served, a transfer bound by PCIe or NVLink bandwidth. Even at the per-direction PCIe Gen4 x16 speed of 32 GB/s, the raw transfer takes over 4 seconds, and in practice model initialization, graph compilation, and safety checks extend this to 60\u2013120 seconds. Loading from Non-Volatile Memory Express (NVMe) SSDs at 7 GB/s read bandwidth takes roughly 20 seconds; from network storage, it can exceed 2 minutes."
+    },
+    {
+      "term": "Minimum Replica Count",
+      "index_head": "Minimum Replica Count",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1767,
+      "context": "- **Minimum Replica Count**\\index{Minimum Replica Count}: Keeping at least one warm replica above zero eliminates cold starts for the first burst of traffic but incurs a baseline cost even during truly idle periods."
+    },
+    {
+      "term": "Predictive Scaling",
+      "index_head": "Predictive Scaling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1768,
+      "context": "- **Predictive Scaling**\\index{Predictive Scaling}: Scaling from historical traffic patterns, such as diurnal cycles, day-of-week patterns, and known events, adds capacity before expected peaks rather than reacting after load arrives."
+    },
+    {
+      "term": "Prewarming",
+      "index_head": "Prewarming",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1769,
+      "context": "- **Prewarming**\\index{Prewarming}: Loading model replicas into GPU memory on standby GPUs reduces activation from minutes of model loading to seconds of process initialization, but standby replicas consume GPU memory that cannot serve other workloads."
+    },
+    {
+      "term": "SLO-driven",
+      "index_head": "SLO-Driven Scaling!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1787,
+      "context": "Effective scaling policies must be **SLO-driven**\\index{SLO-Driven Scaling!definition} rather than utilization-driven. Targeting a fixed utilization (for example, \"keep GPU at 70 percent\") is a proxy that often fails: a model might hit its latency SLO at 60 percent utilization due to memory bandwidth contention, or it might safely run at 90 percent utilization if the requests are compute-bound and uniform. An SLO-driven policy explicitly targets the metric that matters: \"Scale up when P99 latency exceeds 400 ms (80 percent of the 500 ms target).\" This approach automatically adapts to changes in workload characteristics. If a new model version is less efficient, the latency metric will rise faster, and the scaler will provision more replicas to maintain the SLO, without requiring manual tuning of utilization thresholds."
+    },
+    {
+      "term": "Oscillation",
+      "index_head": "Oscillation!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1789,
+      "context": "To prevent **Oscillation**\\index{Oscillation!definition}, where the scaler rapidly adds and removes replicas during noisy traffic, production systems implement **Hysteresis**\\index{Hysteresis!definition} and **Cooldown Periods**\\index{Cooldown Period!definition}. A typical policy scales up aggressively (no stabilization window) to protect the SLO, but scales down conservatively (15-minute cooldown) to avoid thrashing. This asymmetry acknowledges that the cost of an unnecessary scale-up (wasted compute for 15 minutes) is far lower than the cost of a missed scale-up (SLO violation and user churn)."
+    },
+    {
+      "term": "Hysteresis",
+      "index_head": "Hysteresis!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1789,
+      "context": "To prevent **Oscillation**\\index{Oscillation!definition}, where the scaler rapidly adds and removes replicas during noisy traffic, production systems implement **Hysteresis**\\index{Hysteresis!definition} and **Cooldown Periods**\\index{Cooldown Period!definition}. A typical policy scales up aggressively (no stabilization window) to protect the SLO, but scales down conservatively (15-minute cooldown) to avoid thrashing. This asymmetry acknowledges that the cost of an unnecessary scale-up (wasted compute for 15 minutes) is far lower than the cost of a missed scale-up (SLO violation and user churn)."
+    },
+    {
+      "term": "Cooldown Periods",
+      "index_head": "Cooldown Period!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1789,
+      "context": "To prevent **Oscillation**\\index{Oscillation!definition}, where the scaler rapidly adds and removes replicas during noisy traffic, production systems implement **Hysteresis**\\index{Hysteresis!definition} and **Cooldown Periods**\\index{Cooldown Period!definition}. A typical policy scales up aggressively (no stabilization window) to protect the SLO, but scales down conservatively (15-minute cooldown) to avoid thrashing. This asymmetry acknowledges that the cost of an unnecessary scale-up (wasted compute for 15 minutes) is far lower than the cost of a missed scale-up (SLO violation and user churn)."
+    },
+    {
+      "term": "Reactive Scaling",
+      "index_head": "Reactive Scaling",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1857,
+      "context": "**Reactive Scaling**\\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_qps_str`). It requests `{python} AutoscalingLag.as_new_replicas_str` new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + `{python} AutoscalingLag.as_load_time_s_str`). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_qps_str`; after the ramp reaches `{python} AutoscalingLag.as_traffic_end_qps_str`, the full `{python} AutoscalingLag.as_excess_qps_str` overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_excess_requests_str` request-equivalents of accumulated excess demand. These requests become backlog or are dropped according to the serving policy; converting this quantity into an SLO-violation count requires a queueing model that tracks request latency and drops."
+    },
+    {
+      "term": "CUDA Time-slicing",
+      "index_head": "CUDA Time-Slicing!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1876,
+      "context": "Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA Time-slicing**\\index{CUDA Time-Slicing!definition} allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10\u201320 ms) and offers no memory isolation. NVIDIA's **Multi-process Service (MPS)**\\index{MPS!GPU sharing}[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference while providing weaker isolation than MIG (Volta and newer give each client a separate GPU address space, but compute and memory bandwidth remain shared)."
+    },
+    {
+      "term": "Multi-process Service (MPS)",
+      "index_head": "MPS!GPU sharing",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1876,
+      "context": "Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA Time-slicing**\\index{CUDA Time-Slicing!definition} allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10\u201320 ms) and offers no memory isolation. NVIDIA's **Multi-process Service (MPS)**\\index{MPS!GPU sharing}[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference while providing weaker isolation than MIG (Volta and newer give each client a separate GPU address space, but compute and memory bandwidth remain shared)."
+    },
+    {
+      "abbrev": "MPS",
+      "canonical_expansion": "Multi-process Service",
+      "category": "proper_noun",
+      "type": "acronym_expansion",
+      "first_lineno": 1876,
+      "context": "Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA Time-slicing**\\index{CUDA Time-Slicing!definition} allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10\u201320 ms) and offers no memory isolation. NVIDIA's **Multi-process Service (MPS)**\\index{MPS!GPU sharing}[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference while providing weaker isolation than MIG (Volta and newer give each client a separate GPU address space, but compute and memory bandwidth remain shared)."
+    },
+    {
+      "term": "CUDA MPS (Multi-Process Service)",
+      "index_head": "MPS!GPU sharing",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1882,
+      "context": "[^fn-mps-gpu-sharing]: **CUDA MPS (Multi-Process Service)**\\index{MPS!GPU sharing}: Enables concurrent kernel execution from multiple processes on a single GPU, eliminating the 10 to 20 ms context-switch penalty of time-slicing. MPS adds approximately 5 to 10 microseconds of overhead per kernel launch but provides no memory isolation: a process that exhausts GPU memory crashes all colocated workloads. This makes MPS suitable for trusted, same-team inference workloads but dangerous for multi-tenant environments where a single misbehaving model can take down its neighbors."
+    },
+    {
+      "term": "NUMA (Non-Uniform Memory Access)",
+      "index_head": "NUMA!inference latency",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1886,
+      "context": "[^fn-numa-node-inference]: **NUMA (Non-Uniform Memory Access)**\\index{NUMA!inference latency}: Local memory access takes approximately 100 ns vs. 150 to 200 ns for remote-socket access, a 50 to 100 percent penalty. For ML inference preprocessing, placing CPU cores on the wrong NUMA domain relative to the GPU's PCIe connection adds this penalty to every host-device transfer, inflating P99 latency by 10 to 30 percent for sub-millisecond inference tasks. The fix is straightforward (CPU pinning and NUMA-aware pod scheduling) but often overlooked in Kubernetes deployments where the default scheduler ignores NUMA topology entirely."
+    },
+    {
+      "term": "Exclusive Access",
+      "index_head": "Exclusive Access!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1892,
+      "context": "The decision to co-locate multiple models on a single GPU defines the efficiency frontier of an inference fleet. This choice operates on a spectrum: at one end, **Exclusive Access**\\index{Exclusive Access!definition} guarantees isolation but strands capacity; at the other, **Aggressive Sharing**\\index{Aggressive Sharing!definition} (via MPS or time-slicing) maximizes utilization but risks latency interference. The physics of this trade-off are dictated by memory fragmentation and compute contention."
+    },
+    {
+      "term": "Aggressive Sharing",
+      "index_head": "Aggressive Sharing!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1892,
+      "context": "The decision to co-locate multiple models on a single GPU defines the efficiency frontier of an inference fleet. This choice operates on a spectrum: at one end, **Exclusive Access**\\index{Exclusive Access!definition} guarantees isolation but strands capacity; at the other, **Aggressive Sharing**\\index{Aggressive Sharing!definition} (via MPS or time-slicing) maximizes utilization but risks latency interference. The physics of this trade-off are dictated by memory fragmentation and compute contention."
+    },
+    {
+      "term": "Interference",
+      "index_head": "Interference!GPU sharing",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1902,
+      "context": "This density comes at the cost of **Interference**\\index{Interference!GPU sharing}. When two workloads share a GPU via MPS, they compete for Streaming Multiprocessors (SMs) and memory bandwidth. The degradation is workload-dependent: two compute-bound models (for example, large batch processing) fighting for ALUs often see 15 to 20 percent throughput degradation each. However, a compute-bound model co-located with a memory-bound model (for example, decoding-heavy generation) often coexist peacefully, seeing only 5 percent degradation because they bottleneck on different hardware resources. The scheduler's job thus becomes a multi-dimensional bin packing problem: finding complementary workloads that maximize density while respecting latency SLOs."
+    },
+    {
+      "abbrev": "SMs",
+      "canonical_expansion": "they compete for Streaming Multiprocessors",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 1902,
+      "context": "This density comes at the cost of **Interference**\\index{Interference!GPU sharing}. When two workloads share a GPU via MPS, they compete for Streaming Multiprocessors (SMs) and memory bandwidth. The degradation is workload-dependent: two compute-bound models (for example, large batch processing) fighting for ALUs often see 15 to 20 percent throughput degradation each. However, a compute-bound model co-located with a memory-bound model (for example, decoding-heavy generation) often coexist peacefully, seeing only 5 percent degradation because they bottleneck on different hardware resources. The scheduler's job thus becomes a multi-dimensional bin packing problem: finding complementary workloads that maximize density while respecting latency SLOs."
+    },
+    {
+      "term": "Tensor Parallel Group",
+      "index_head": "Tensor Parallelism!parallel group",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1989,
+      "context": "Once resources are isolated, the orchestrator faces the challenge of directing inference queries to the correct model replicas. For a monolithic web service, simple round-robin load balancing suffices. For a 175B parameter language model served across thousands of GPUs, routing becomes a complex distributed systems problem where the \"unit of serving\" is no longer a single container but a **Tensor Parallel Group**\\index{Tensor Parallelism!parallel group}, a collection of 8 GPUs that must function as a single logical entity. The load balancer cannot simply route a request to \"GPU 12\"; it must route to \"TP Group 3,\" ensuring the request arrives at the exact moment the group is ready to process it."
+    },
+    {
+      "term": "Round-robin",
+      "index_head": "Round-Robin Routing!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1991,
+      "context": "Request routing strategies determine cluster-wide throughput. Naive **Round-robin**\\index{Round-Robin Routing!definition} distribution fails for generative workloads because request processing times vary by orders of magnitude based on output token length. A round-robin scheduler inevitably sends new requests to replicas backed up with long-generation tasks, causing tail latency to spike. **Least-outstanding-requests**\\index{Routing!least-outstanding-requests} (LOR) routing improves this by directing traffic to the idlest replicas. However, for large language models, **Memory-aware Routing**\\index{Routing!memory-aware} is superior. Tracking the KV cache occupancy of each replica allows the router to send long-context requests to replicas with ample free memory and short requests to those near capacity, preventing fragmentation-induced out-of-memory errors and increasing effective batch sizes by 30 to 40 percent compared to blind routing."
+    },
+    {
+      "term": "Least-outstanding-requests",
+      "index_head": "Routing!least-outstanding-requests",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1991,
+      "context": "Request routing strategies determine cluster-wide throughput. Naive **Round-robin**\\index{Round-Robin Routing!definition} distribution fails for generative workloads because request processing times vary by orders of magnitude based on output token length. A round-robin scheduler inevitably sends new requests to replicas backed up with long-generation tasks, causing tail latency to spike. **Least-outstanding-requests**\\index{Routing!least-outstanding-requests} (LOR) routing improves this by directing traffic to the idlest replicas. However, for large language models, **Memory-aware Routing**\\index{Routing!memory-aware} is superior. Tracking the KV cache occupancy of each replica allows the router to send long-context requests to replicas with ample free memory and short requests to those near capacity, preventing fragmentation-induced out-of-memory errors and increasing effective batch sizes by 30 to 40 percent compared to blind routing."
+    },
+    {
+      "term": "Memory-aware Routing",
+      "index_head": "Routing!memory-aware",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1991,
+      "context": "Request routing strategies determine cluster-wide throughput. Naive **Round-robin**\\index{Round-Robin Routing!definition} distribution fails for generative workloads because request processing times vary by orders of magnitude based on output token length. A round-robin scheduler inevitably sends new requests to replicas backed up with long-generation tasks, causing tail latency to spike. **Least-outstanding-requests**\\index{Routing!least-outstanding-requests} (LOR) routing improves this by directing traffic to the idlest replicas. However, for large language models, **Memory-aware Routing**\\index{Routing!memory-aware} is superior. Tracking the KV cache occupancy of each replica allows the router to send long-context requests to replicas with ample free memory and short requests to those near capacity, preventing fragmentation-induced out-of-memory errors and increasing effective batch sizes by 30 to 40 percent compared to blind routing."
+    },
+    {
+      "term": "Latency-Aware Bin Packing",
+      "index_head": "Bin Packing!latency-aware",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1995,
+      "context": "Multi-model serving complicates this further. A single cluster often hosts diverse models: a product recommendation model (10 ms P99 SLO, high throughput) alongside a coding assistant model (2,000 ms P99 SLO, bursty usage). Placing these on the same node invites interference; placing them on separate clusters strands capacity. The optimal strategy uses **Latency-Aware Bin Packing**\\index{Bin Packing!latency-aware}: the orchestrator co-locates latency-critical models with batch-processing jobs (like embedding generation) that can be throttled instantly, ensuring high utilization without violating strict SLOs."
+    },
+    {
+      "term": "Static Partitioning",
+      "index_head": "Static Partitioning!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1999,
+      "context": "The deepest utilization divide in the ML fleet is the wall between training and serving. Most organizations manage these as separate fiefdoms: a \"Production Serving\" cluster that must handle peak traffic (and sits 50 percent idle at night) and a \"Research Training\" cluster that is perpetually backlogged. This **Static Partitioning**\\index{Static Partitioning!definition} is safe but economically inefficient. **Dynamic Sharing**\\index{Dynamic Sharing!definition} unifies these pools, but it introduces a fundamental friction: the mode-switching cost."
+    },
+    {
+      "term": "Dynamic Sharing",
+      "index_head": "Dynamic Sharing!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 1999,
+      "context": "The deepest utilization divide in the ML fleet is the wall between training and serving. Most organizations manage these as separate fiefdoms: a \"Production Serving\" cluster that must handle peak traffic (and sits 50 percent idle at night) and a \"Research Training\" cluster that is perpetually backlogged. This **Static Partitioning**\\index{Static Partitioning!definition} is safe but economically inefficient. **Dynamic Sharing**\\index{Dynamic Sharing!definition} unifies these pools, but it introduces a fundamental friction: the mode-switching cost."
+    },
+    {
+      "abbrev": "NLP",
+      "canonical_expansion": "week while the natural language processing",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 2075,
+      "context": "When the computer vision team hoards 500 GPUs for a week while the natural language processing (NLP) team sits blocked trying to push a critical bug fix to production, shared clusters devolve into a tragedy of the commons. Teams with the most aggressive job submission rates, the largest jobs, or the most persistent resubmission scripts consume disproportionate resources, while teams with more modest or intermittent needs find the cluster perpetually occupied. This creates organizational friction, political escalation to management, and underinvestment in slower-moving but potentially higher-value projects whose teams lack the engineering effort to compete for resources."
+    },
+    {
+      "term": "Production Serving",
+      "index_head": "Production Serving",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2101,
+      "context": "- **Production Serving**\\index{Production Serving}: Priority 0 workloads are nonpreemptible."
+    },
+    {
+      "term": "Production Training",
+      "index_head": "Production Training",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2102,
+      "context": "- **Production Training**\\index{Production Training}: Priority 1 workloads handle core model updates and are only preemptible by serving outages."
+    },
+    {
+      "term": "Interactive/debug",
+      "index_head": "Interactive/Debug",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2103,
+      "context": "- **Interactive/debug**\\index{Interactive/Debug}: Priority 2 workloads get high scheduling precedence but short time limits."
+    },
+    {
+      "term": "Batch/research",
+      "index_head": "Batch/Research",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2104,
+      "context": "- **Batch/research**\\index{Batch/Research}: Priority 3 workloads are fully preemptible and fault-tolerant."
+    },
+    {
+      "abbrev": "SRE",
+      "canonical_expansion": "run by a site reliability engineer",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 2128,
+      "context": "Attribution in a shared fleet presents a forensic challenge. A single \"training\" job might be a shared experiment between three teams, or a platform test run by a site reliability engineer (SRE). Without granular tagging at the job level, costs default to the \"infrastructure\" bucket, creating a tragedy of the commons where no one owns the bill. Kubernetes labels and Slurm accounts provide the mechanism for attribution, but the organizational discipline to apply them consistently is the harder problem. Mature organizations enforce \"no tag, no schedule\" policies, rejecting untagged jobs at the admission controller level."
+    },
+    {
+      "term": "Fragmentation Index",
+      "index_head": "Fragmentation Index!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2166,
+      "context": "This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **Fragmentation Index**\\index{Fragmentation Index!definition}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the \"cost of chaos\": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A `{python} ChargebackExample.chargeback_gpus_str`-GPU fine-tuning run for our 175B model held for `{python} ChargebackExample.chargeback_hours_h_str` consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (`{python} ChargebackExample.chargeback_gpus_str` GPUs $\\times$ `{python} ChargebackExample.chargeback_hours_h_str` $\\times$ `{python} ChargebackExample.chargeback_rate_str`). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value."
+    },
+    {
+      "term": "Allocated Utilization",
+      "index_head": "Utilization!allocated",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2172,
+      "context": "To debug cluster efficiency, measure utilization at three distinct layers. **Allocated Utilization**\\index{Utilization!allocated} is the percentage of physical GPUs reserved by the scheduler; low values indicate a lack of demand or overly restrictive quotas. **Compute Utilization**\\index{Utilization!compute} is the percentage of time allocated GPUs are executing kernels (reported by `nvidia-smi`); low values indicate inefficient code, I/O bottlenecks, or communication stalls. **Productive Utilization**\\index{Utilization!productive} is the percentage of allocated time spent effectively training (excluding overhead); low values indicate poor distributed scaling, excessive checkpointing, or frequent restarts."
+    },
+    {
+      "term": "Compute Utilization",
+      "index_head": "Utilization!compute",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2172,
+      "context": "To debug cluster efficiency, measure utilization at three distinct layers. **Allocated Utilization**\\index{Utilization!allocated} is the percentage of physical GPUs reserved by the scheduler; low values indicate a lack of demand or overly restrictive quotas. **Compute Utilization**\\index{Utilization!compute} is the percentage of time allocated GPUs are executing kernels (reported by `nvidia-smi`); low values indicate inefficient code, I/O bottlenecks, or communication stalls. **Productive Utilization**\\index{Utilization!productive} is the percentage of allocated time spent effectively training (excluding overhead); low values indicate poor distributed scaling, excessive checkpointing, or frequent restarts."
+    },
+    {
+      "term": "Productive Utilization",
+      "index_head": "Utilization!productive",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2172,
+      "context": "To debug cluster efficiency, measure utilization at three distinct layers. **Allocated Utilization**\\index{Utilization!allocated} is the percentage of physical GPUs reserved by the scheduler; low values indicate a lack of demand or overly restrictive quotas. **Compute Utilization**\\index{Utilization!compute} is the percentage of time allocated GPUs are executing kernels (reported by `nvidia-smi`); low values indicate inefficient code, I/O bottlenecks, or communication stalls. **Productive Utilization**\\index{Utilization!productive} is the percentage of allocated time spent effectively training (excluding overhead); low values indicate poor distributed scaling, excessive checkpointing, or frequent restarts."
+    },
+    {
+      "abbrev": "RBAC",
+      "canonical_expansion": "dedicated namespaces with role-based access control",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 2180,
+      "context": "In Kubernetes environments, namespace separation provides the fundamental isolation boundary. Each team operates within dedicated namespaces with role-based access control (RBAC) limiting visibility to their own resources. RBAC policies control who can submit jobs, view logs, access model artifacts, and modify scheduling policies within each namespace, providing organizational governance over cluster usage."
+    },
+    {
+      "term": "Preemption Cascade",
+      "index_head": "Preemption Cascade!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2207,
+      "context": "When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **Preemption Cascade**\\index{Preemption Cascade!definition}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth."
+    },
+    {
+      "term": "Preemption Tax",
+      "index_head": "Preemption Tax!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2209,
+      "context": "The engineering cost of preemption extends far beyond the scheduling latency. The **Preemption Tax**\\index{Preemption Tax!definition} is the sum of lost computation since the last checkpoint, the overhead of persisting state, and the cold-start penalty upon resumption. For large-scale distributed training, this tax is nonlinear. Consider the 64-GPU fine-tuning run for our 175B parameter model. If preempted, the job loses the work performed since the last snapshot (average 15 minutes). Upon restarting, it requires 20 minutes to reload the massive optimizer state from distributed storage and another 10 minutes of warmup time as data pipelines refill prefetch buffers, just-in-time (JIT) compilers re-optimize kernels, and GPU caches re-populate."
+    },
+    {
+      "abbrev": "JIT",
+      "canonical_expansion": "just-in-time",
+      "category": "generic_concept",
+      "type": "acronym_expansion",
+      "first_lineno": 2209,
+      "context": "The engineering cost of preemption extends far beyond the scheduling latency. The **Preemption Tax**\\index{Preemption Tax!definition} is the sum of lost computation since the last checkpoint, the overhead of persisting state, and the cold-start penalty upon resumption. For large-scale distributed training, this tax is nonlinear. Consider the 64-GPU fine-tuning run for our 175B parameter model. If preempted, the job loses the work performed since the last snapshot (average 15 minutes). Upon restarting, it requires 20 minutes to reload the massive optimizer state from distributed storage and another 10 minutes of warmup time as data pipelines refill prefetch buffers, just-in-time (JIT) compilers re-optimize kernels, and GPU caches re-populate."
+    },
+    {
+      "term": "Preemption Budgets",
+      "index_head": "Preemption Budgets!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2259,
+      "context": "During this `{python} PreemptionTax.recovery_duration_min_attr_str` recovery window, the GPUs are active but effectively unproductive. At `{python} PreemptionTax.gpu_hour_rate_str`, a single preemption event costs `{python} PreemptionTax.cost_per_event_str` in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste `{python} PreemptionTax.wasted_duration_per_day_h_str` per day of that job's allocation, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` per day for this 64-GPU run. To mitigate this, schedulers enforce **Preemption Budgets**\\index{Preemption Budgets!definition}. These rate limits constrain disruption frequency, such as preventing a job from being preempted more than once per hour or capping total cluster preemption churn to 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput."
+    },
+    {
+      "term": "Quota Governance",
+      "index_head": "Quota Governance!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2263,
+      "context": "Schedulers manage the second-by-second allocation of silicon, but **Quota Governance**\\index{Quota Governance!definition} manages the month-by-month allocation of organizational intent. Quotas are the interface between engineering constraints and business priorities. In mature ML organizations, these are rarely static; they are adjusted through periodic **Quota Review Cycles**\\index{Quota Review Cycle!definition} where allocations are recalibrated based on realized utilization rather than forecasted demand. A team that consistently uses only 40 percent of their 128-GPU allocation is effectively blocking other teams from launching experiments, creating a phantom scarcity that drives up queue times despite ample physical capacity."
+    },
+    {
+      "term": "Quota Review Cycles",
+      "index_head": "Quota Review Cycle!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2263,
+      "context": "Schedulers manage the second-by-second allocation of silicon, but **Quota Governance**\\index{Quota Governance!definition} manages the month-by-month allocation of organizational intent. Quotas are the interface between engineering constraints and business priorities. In mature ML organizations, these are rarely static; they are adjusted through periodic **Quota Review Cycles**\\index{Quota Review Cycle!definition} where allocations are recalibrated based on realized utilization rather than forecasted demand. A team that consistently uses only 40 percent of their 128-GPU allocation is effectively blocking other teams from launching experiments, creating a phantom scarcity that drives up queue times despite ample physical capacity."
+    },
+    {
+      "term": "Hoarding Problem",
+      "index_head": "Hoarding Problem!definition",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2265,
+      "context": "The central tension in quota management is the **Hoarding Problem**\\index{Hoarding Problem!definition}. Engineering teams, rational in their desire to minimize wait times, often request maximum capacity \"just in case\" a project accelerates. This leads to low average utilization and high burst demand. Two ML-specific patterns amplify this behavior beyond generic resource anxiety. The first is the reinforcement learning from human feedback (RLHF) evaluation phase, in which the GPU nodes allocated to the policy model sit largely idle while the team awaits scores from human annotators. The team retains the reservation to avoid queuing again once annotation batches arrive, but the actual GPU occupancy during the annotation window can fall below 10 percent. The second pattern occurs when a team reserves a GPU block for a training run whose preprocessing pipeline has not yet completed. CPU-heavy data tokenization and vocabulary normalization for large corpora routinely takes longer than the team estimated; the GPUs sit reserved and idle while the tokenizer processes the dataset, because releasing the reservation risks losing it to a competing team. Both scenarios are rational from the team's perspective but represent systematic waste at the cluster level. To counter this, platform teams implement **Utilization-Based Reclamation**\\index{Utilization!based reclamation}: if a quota pool remains underutilized for a set period, the system automatically reduces the allocation, returning resources to the general pool. This technical enforcement shifts the burden of proof back to the team to justify their reservation."
+    },
+    {
+      "term": "Utilization-Based Reclamation",
+      "index_head": "Utilization!based reclamation",
+      "type": "bold_indexed_concept",
+      "first_lineno": 2265,
+      "context": "The central tension in quota management is the **Hoarding Problem**\\index{Hoarding Problem!definition}. Engineering teams, rational in their desire to minimize wait times, often request maximum capacity \"just in case\" a project accelerates. This leads to low average utilization and high burst demand. Two ML-specific patterns amplify this behavior beyond generic resource anxiety. The first is the reinforcement learning from human feedback (RLHF) evaluation phase, in which the GPU nodes allocated to the policy model sit largely idle while the team awaits scores from human annotators. The team retains the reservation to avoid queuing again once annotation batches arrive, but the actual GPU occupancy during the annotation window can fall below 10 percent. The second pattern occurs when a team reserves a GPU block for a training run whose preprocessing pipeline has not yet completed. CPU-heavy data tokenization and vocabulary normalization for large corpora routinely takes longer than the team estimated; the GPUs sit reserved and idle while the tokenizer processes the dataset, because releasing the reservation risks losing it to a competing team. Both scenarios are rational from the team's perspective but represent systematic waste at the cluster level. To counter this, platform teams implement **Utilization-Based Reclamation**\\index{Utilization!based reclamation}: if a quota pool remains underutilized for a set period, the system automatically reduces the allocation, returning resources to the general pool. This technical enforcement shifts the burden of proof back to the team to justify their reservation."
+    }
+  ]
+}

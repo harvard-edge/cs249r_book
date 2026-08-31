@@ -28,14 +28,14 @@
   function createModalHTML() {
     return `
       <div id="subscribe-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-container">
+        <div class="modal-container" role="dialog" aria-modal="true" aria-labelledby="subscribe-modal-title">
           <button class="modal-close" data-close-modal aria-label="Close">&times;</button>
           <div class="modal-content">
             <div class="modal-header">
               <div class="modal-brand-row">
                 <span class="modal-brand-item">📚 MLSysBook</span>
               </div>
-              <h2 class="modal-title">Stay in the Loop</h2>
+              <h2 class="modal-title" id="subscribe-modal-title">Stay in the Loop</h2>
               <p class="modal-subtitle">Get updates on new chapters, hands-on labs, and ML systems resources.</p>
             </div>
             <form id="subscribe-modal-form" class="subscribe-form" action="https://buttondown.email/api/emails/embed-subscribe/mlsysbook" method="post">
@@ -465,6 +465,14 @@
         color: #60a5fa;
       }
 
+      /* Respect reduced-motion preference */
+      @media (prefers-reduced-motion: reduce) {
+        .modal-overlay,
+        .modal-container {
+          animation: none;
+        }
+      }
+
       /* Responsive */
       @media (max-width: 640px) {
         .modal-content {
@@ -497,8 +505,12 @@
     const form = document.getElementById('subscribe-modal-form');
     const success = document.getElementById('modal-subscribe-success');
 
+    // Element that had focus before the modal opened, restored on close
+    let openerElement = null;
+
     // Open modal function
     window.openModal = function() {
+      openerElement = document.activeElement;
       modal.style.display = 'flex';
       document.body.style.overflow = 'hidden';
 
@@ -514,6 +526,12 @@
       modal.style.display = 'none';
       document.body.style.overflow = '';
 
+      // Return focus to the element that opened the modal
+      if (openerElement && typeof openerElement.focus === 'function') {
+        openerElement.focus();
+      }
+      openerElement = null;
+
       // Reset form after closing
       setTimeout(() => {
         form.style.display = 'flex';
@@ -521,6 +539,28 @@
         success.style.display = 'none';
       }, 300);
     };
+
+    // Trap Tab focus inside the modal while it is open
+    modal.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+
+      const focusable = Array.from(modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )).filter(el => !el.disabled && el.offsetParent !== null);
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && (active === first || !modal.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
 
     // Close on overlay click
     modal.addEventListener('click', (e) => {

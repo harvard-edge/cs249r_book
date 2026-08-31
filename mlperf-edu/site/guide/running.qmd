@@ -1,0 +1,192 @@
+---
+title: "Running Benchmarks"
+---
+
+Three terms describe the core selection. A **suite** is a workload domain such
+as `language` or `vision`. A **workload** is one benchmark ID. A **profile**
+sets the contract depth. Modes, phases, devices, and experiment plans refine a
+selection only when the workload or study needs them.
+
+## Profiles
+
+| **Profile** | **Meaning** | **Use it for** |
+|:---|:---|:---|
+| `min` | Fast functional path | Install check, smoke test, classroom demo, CI |
+| `max` | Authoritative quality contract | Validated assignments, artifact review, baseline candidates |
+| `pro` | Research envelope with controlled variants and knobs | Architecture, backend, quantization, and serving studies |
+
+`min` checks that a path runs, `max` exercises the candidate benchmark scale,
+and `pro` opens the research space. Results from `min` are smoke signals, not
+scores. A `max` result is comparable only when the workload quality contract,
+release validation, and public asset policy all pass.
+
+A profile defines contract depth rather than a universal machine size. Every
+`min` and `max` path runs on local hardware. The MiniGo `max` path runs through
+a PyTorch adapter over the pinned upstream reference, at a self-play budget far
+below the reference contract, so it executes locally but does not yet make a
+quality claim.
+
+## Scenario Labels
+
+Training and inference are execution modes under one workload identity.
+Inference may expose full, prefill, and decode phases. Scenario labels describe
+how requests are issued, while precision, compilation, quantization, batching,
+and scheduling remain reportable configurations rather than workload IDs.
+
+## Selecting What Runs
+
+A bare `--profile` selects that profile's default collection. The `min`
+default is the compact starter collection, `max` covers every registered
+workload, and `pro` selects the research collection. Use `--collection all` to
+run every workload at `min` or `pro`. The `coverage` validation preset runs
+every registered `min` path. `--suite` narrows to one domain, `--workload`
+selects one benchmark, and `--mode` or `--phase` selects an execution boundary
+when the workload exposes one. `mlperf list --profile PROFILE` always shows the
+current resolved selection.
+
+```bash
+uv run mlperf run --profile min                      # four-workload starter path
+uv run mlperf run --profile min --collection all     # every min path
+uv run mlperf run --suite vision --profile max       # one suite
+uv run mlperf run --workload causal-language-modeling --profile max --mode training
+uv run mlperf run --workload causal-language-modeling --profile max \
+    --mode inference --phase decode
+```
+
+Add `--dry-run` to any of these to print the selection without running it.
+Each benchmark page lists its supported modes, phases, profiles, and controlled
+research configurations.
+
+::: {.callout-warning}
+**Select one workload for the first `max` run.** A bare `--profile max` selects
+the full portfolio, which includes long downloads, expensive evaluations, and
+two environment-gated paths. Begin with image classification from the
+[getting started guide](../getting-started.qmd).
+:::
+
+## Versioned Research Plans
+
+A `pro` experiment plan turns a research question into a reviewable input
+artifact. It declares the conditions, controlled settings, device policy,
+outer-run count, power policy, and output location. The default remains one
+outer run per condition for initial quality and workflow review.
+
+```bash
+uv run mlperf run --plan examples/research/pro-collection/plan.yaml --dry-run
+uv run mlperf run --plan examples/research/pro-collection/plan.yaml
+```
+
+`--plan` replaces `--suite`, `--workload`, `--collection`, `--variant`,
+`--mode`, and `--phase`. A CLI `--device` can override the plan for every
+condition, and `--output-dir` can redirect artifacts without editing the plan.
+Every condition receives a separate run directory. The suite aggregate records
+the normalized plan, its source SHA-256, the executed conditions, result
+fingerprints, and any CLI overrides.
+
+A run can declare a `baseline`, `candidate`, or neutral `condition` role. Each
+workload, variant, mode, and phase comparison group can have at most one
+baseline, and every candidate group must have one. This lets a suite plan carry
+separate baselines for multiple benchmarks. When compatible throughput metrics
+exist, the dashboard shows candidate deltas against the matching baseline as
+descriptive evidence. The report still states that one outer run is not a
+stability result.
+
+Plan environment settings are restricted to nonsensitive `MLPERF_EDU_*`
+configuration fields. Device and outer repetitions use dedicated fields. This
+keeps secrets out of result artifacts and makes configuration typos fail before
+execution.
+
+## Fetch Before You Measure
+
+```bash
+uv run mlperf fetch --workload image-classification --profile max
+uv run mlperf fetch --profile max --dry-run     # preview all downloads
+```
+
+`fetch` downloads supported datasets and model weights, verifies available
+hash evidence, and populates the cache so the measured run contains no network
+time. A source checkout uses its existing `data/` directory; an installed wheel
+uses the operating system's per-user cache instead of the notebook's current
+directory. Set `MLPERF_EDU_DATA_DIR` when a course needs a shared or preloaded
+location. `mlperf doctor` prints the resolved path, and `uv run mlperf cache
+list` shows what is on disk.
+
+## Long Runs and Recovery
+
+The CLI does not yet provide a general `run --resume` option. Some
+workload-specific or legacy runners preserve intermediate state, but users
+should not assume that a partially completed suite run can resume. Before a
+long run, fetch assets, use `doctor` for the selected workload and profile, run
+with an explicit output directory, and review the workload page for its current
+recovery boundary.
+
+See [troubleshooting](troubleshooting.qmd) for interruption, cache, device, and
+provenance recovery. The local execution plan tracks suite-wide resume behavior
+as unfinished implementation work.
+
+## Blocked Local Max Runs
+
+MiniGo currently fails closed on an ordinary classroom laptop, but its legacy
+setup is machine-readable. Ask `doctor` for the handoff when reviewing the
+existing reference path.
+
+```bash
+uv run mlperf doctor --workload reinforcement-learning --profile max --format json
+```
+
+The failing workload check includes a `mlperf-edu-environment-handoff/0.1`
+object. The MiniGo handoff declares the NVIDIA GPU interface, immutable
+container digest, four-game review gate, pinned source files,
+workload-specific resumable execution, and final run command. A handoff
+documents the reference path. It is not a quality result and does not satisfy
+the local-execution milestone.
+
+Recommendation used to appear here. Its contract moved from DLRM on Criteo
+Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, which trains locally, so
+it now runs the ordinary `max` path.
+
+Maintainers can independently compare the three converted MLPerf Tiny PyTorch
+graphs with the pinned TFLite models over their complete official accuracy sets.
+The command is strict: any top-1 disagreement returns a nonzero status even when
+both executions pass the inherited quality target.
+
+The committed three-resolver audit classifies the KWS PyTorch conversion as
+quality-preserving but nonidentical. The adapter remains available for
+inspectable educational runs, while promotion stays blocked until an
+exact-source path or authoritative unquantized weights establish exact parity.
+This decision does not create a disagreement tolerance.
+
+```bash
+uv run --extra parity python tools/audit_tflite_adapter_parity.py \
+  --resolver auto --resolver builtin \
+  --output /tmp/mlperf-edu-tflite-adapter-parity.json
+```
+
+## Reports and Output
+
+Runs write JSON, HTML, and CSV reports plus a `.provd.json` provenance artifact.
+Use `--output-dir` to choose the destination. The HTML dashboard opens by
+request only; pass `--open-report` when you want it shown immediately. Reports
+include a lead quality card, exact configuration, normalized
+training-checkpoint-inference lineage, hardware and software fingerprints,
+dataset and model dossiers, and quality-target status. The
+[results guide](results.qmd) covers how to read, verify, and package them.
+
+## Power Telemetry
+
+```bash
+uv run mlperf run --workload keyword-spotting --profile max --power
+```
+
+`--power` adds aggregate estimated watts and joules to the report using
+`powermetrics` on macOS or `nvidia-smi` on CUDA machines, without requiring
+privileged hardware counters. Treat the numbers as coarse energy telemetry
+for systems reasoning, not as calibrated power measurements.
+
+## Reproducibility Basics
+
+Runs declare seeds and deterministic dataset recipes where their registry
+contracts require them. For candidate comparisons across machines, use
+`--profile max`, publish the generated fingerprint block unmodified, and keep
+the `.provd.json` artifact with the result. Score-bearing candidates must also pass
+the quality target and evidence protocol declared on their benchmark page.

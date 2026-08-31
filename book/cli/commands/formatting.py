@@ -6,7 +6,9 @@ list spacing, div spacing, and table formatting.
 
 Usage:
     binder format blanks   — Collapse extra blank lines
-    binder format python   — Format Python code blocks (Black; display 70, LEGO 150)
+    binder format python   — Format hidden executable Python cells (Black; 150)
+    binder format python --include-display
+                           — Also format displayed code (layout-changing opt-in)
     binder format lists    — Fix bullet list spacing
     binder format divs     — Fix div/callout spacing
     binder format tables   — Prettify grid tables
@@ -59,14 +61,19 @@ class FormatCommand:
 
         # Remaining args are file paths or flags
         rest = args[1:]
+        include_display = "--include-display" in rest
         files, check_only = self._parse_rest(rest)
 
         if target == "all":
             return self._run_all(files, check_only)
 
+        if target == "python":
+            return self._run_python(
+                files, check_only, include_display=include_display
+            )
+
         dispatch = {
             "blanks": self._run_blanks,
-            "python": self._run_python,
             "lists": self._run_lists,
             "divs": self._run_divs,
             "percent-tables": self._run_percent_tables,
@@ -120,7 +127,7 @@ class FormatCommand:
         table.add_column("Description", style="white", width=45)
 
         table.add_row("blanks", "Collapse extra blank lines (native)")
-        table.add_row("python", "Format Python via Black (display 70, LEGO cells 150)")
+        table.add_row("python", "Format hidden executable Python cells (Black; 150)")
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
         table.add_row("percent-tables", "Rewrite 'percent' → % inside pipe tables (native)")
@@ -138,6 +145,8 @@ class FormatCommand:
         console.print("  [cyan]./binder format blanks[/cyan]                [dim]# fix all files[/dim]")
         console.print("  [cyan]./binder format tables --check[/cyan]        [dim]# check only, no writes[/dim]")
         console.print("  [cyan]./binder format python path/to/ch.qmd[/cyan] [dim]# single file[/dim]")
+        console.print("  [cyan]./binder format python --include-display path/to/ch.qmd[/cyan]")
+        console.print("                                              [dim]# intentional layout-changing opt-in[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -443,8 +452,13 @@ class FormatCommand:
     # Python  (delegates to format_python_in_qmd.py)
     # ------------------------------------------------------------------
 
-    def _run_python(self, file_args: List[str], check_only: bool) -> bool:
-        """Format Python code blocks using Black."""
+    def _run_python(
+        self,
+        file_args: List[str],
+        check_only: bool,
+        include_display: bool = False,
+    ) -> bool:
+        """Format hidden Python cells, with displayed code as an opt-in."""
         script = _SCRIPT_PATHS["python"]
         if not script.exists():
             console.print(f"[red]python: Script not found: {script}[/red]")
@@ -455,7 +469,10 @@ class FormatCommand:
             console.print("[green]python: No files to process[/green]")
             return True
 
-        cmd = [sys.executable, str(script)] + [str(f) for f in qmd_files]
+        cmd = [sys.executable, str(script)]
+        if include_display:
+            cmd.append("--include-display")
+        cmd.extend(str(f) for f in qmd_files)
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0:

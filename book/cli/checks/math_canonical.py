@@ -146,25 +146,65 @@ FMT_IMPORT_LINE = re.compile(
 MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 
 # Names exported by `from mlsysim import *` that belong to the fmt family.
-MLSYSIM_STAR_FMT_NAMES = frozenset({
-    "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_eur", "fmt_percent", "fmt_pp", "fmt_multiple",
-    "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
-    "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_fps", "fmt_val",
-    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_text",
-    "fmt_frac", "fmt_math", "fmt_display_math", "MarkdownStr", "check",
-    "fmt_percent_range", "fmt_multiple_range",
-    "sci_latex",
-    "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
-    "fmt_latency", "fmt_area", "fmt_heat_flux", "fmt_specific_heat", "fmt_memory_capacity",
-    "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
-    "fmt_flops", "fmt_ops_rate", "fmt_arithmetic_intensity", "fmt_length",
-    "fmt_sci_flops", "fmt_energy_per_flop", "fmt_energy_per_op", "fmt_energy_per_byte",
-    "fmt_energy_per_bit",
-    "fmt_decibel", "fmt_illuminance", "fmt_temperature",
-    "fmt_temperature_rate",
-    "fmt_carbon_intensity", "fmt_water", "fmt_water_rate",
-    "fmt_water_intensity",
+#
+# 2026-08-13: this set is now DERIVED from the package at runtime rather than
+# hand-maintained. The hand-maintained version had drifted: it claimed 64 names,
+# 16 of which mlsysim does not actually export (fmt_memory_capacity, fmt_qty_int,
+# fmt_math, fmt_sci, fmt_val, fmt_unit, fmt_frac, sci_latex, fmt_decibel,
+# fmt_illuminance, fmt_temperature, fmt_temperature_rate, fmt_energy_per_bit,
+# fmt_energy_per_byte, fmt_energy_per_flop, fmt_sci_flops). Because a star import
+# marked all 64 as available, a cell using one of those 16 with only
+# `from mlsysim import *` passed this check and then raised NameError at render.
+# That is exactly how the model_compression fmt_memory_capacity bug shipped.
+# Deriving the set makes the drift impossible.
+#
+# _FALLBACK is used only when mlsysim cannot be imported (so the check still
+# runs in a bare environment); it lists the names verified as really exported.
+_MLSYSIM_STAR_FALLBACK = frozenset({
+    "MarkdownStr", "check", "fmt", "fmt_area", "fmt_arithmetic_intensity",
+    "fmt_bandwidth", "fmt_carbon_intensity", "fmt_compute_efficiency",
+    "fmt_count", "fmt_count_range", "fmt_display_math", "fmt_emissions",
+    "fmt_energy", "fmt_energy_per_op", "fmt_eur", "fmt_flop_rate", "fmt_flops",
+    "fmt_fps", "fmt_heat_flux", "fmt_int", "fmt_latency", "fmt_length",
+    "fmt_magnitude", "fmt_memory", "fmt_multiple", "fmt_multiple_range",
+    "fmt_ops_rate", "fmt_params", "fmt_percent", "fmt_percent_range",
+    "fmt_power", "fmt_pp", "fmt_qty", "fmt_qty_range", "fmt_range", "fmt_rate",
+    "fmt_ratio", "fmt_sci_qty", "fmt_specific_heat", "fmt_text", "fmt_time",
+    "fmt_time_range", "fmt_tokens", "fmt_usd", "fmt_usd_range", "fmt_water",
+    "fmt_water_intensity", "fmt_water_rate",
 })
+
+
+def _derive_mlsysim_star_fmt_names() -> frozenset[str]:
+    """What `from mlsysim import *` really puts in the namespace, fmt-family only.
+
+    Honors __all__ when the package defines one, which is what a star import
+    actually obeys. Falls back to the verified static set if mlsysim is not
+    importable, so the check degrades to "correct as of the last audit" rather
+    than silently excusing every helper.
+    """
+    try:
+        import mlsysim  # noqa: PLC0415
+    except Exception:
+        return _MLSYSIM_STAR_FALLBACK
+    exported = getattr(mlsysim, "__all__", None) or [
+        n for n in dir(mlsysim) if not n.startswith("_")
+    ]
+    derived = frozenset(
+        n for n in exported
+        if n.startswith("fmt") or n in ("sci_latex", "MarkdownStr", "check")
+    )
+    # Sanity gate. From the repo root, `import mlsysim` resolves to the outer
+    # PACKAGE DIRECTORY as an empty namespace package: the import succeeds but
+    # exports nothing. Without this gate the derivation returns an empty set and
+    # the check flags every fmt call in the book as a missing import. Require the
+    # two names that must be present in any real mlsysim before trusting it.
+    if not {"fmt", "check"} <= derived:
+        return _MLSYSIM_STAR_FALLBACK
+    return derived
+
+
+MLSYSIM_STAR_FMT_NAMES = _derive_mlsysim_star_fmt_names()
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.
 # This would raise a TypeError at render time.

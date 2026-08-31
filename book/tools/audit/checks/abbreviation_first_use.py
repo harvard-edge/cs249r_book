@@ -11,7 +11,9 @@ once and for each abbreviation in the §10.5 canonical-forms table:
   1. Finds the first "canonical introduction" — a match for the
      template `<expansion> (<ABBREV>)` where <expansion> matches
      case-insensitively and allows singular/plural inflection
-     (`convolutional neural networks (CNNs)`).
+     (`convolutional neural networks (CNNs)`). Square brackets also
+     count when they avoid nested parentheses in compact prose
+     (`feature extractors (Histogram of Oriented Gradients [HOG])`).
 
   2. Finds the first "bare use" — a word-boundary match of the
      abbreviation that is NOT inside a canonical introduction,
@@ -58,6 +60,11 @@ CATEGORY = "abbreviation-first-use"
 RULE = "abbreviations.md"
 RULE_TEXT = "Abbreviations must follow chapter-level first-use policy"
 
+# Over-expansion is the other half of the policy: once a chapter has taught the
+# abbreviation, later body prose uses the acronym alone.
+CATEGORY_OVER = "abbreviation-over-expansion"
+RULE_TEXT_OVER = "Do not repeat a full expansion after the chapter introduced it"
+
 
 # ── §10.5 canonical forms table ────────────────────────────────────────────
 #
@@ -66,61 +73,28 @@ RULE_TEXT = "Abbreviations must follow chapter-level first-use policy"
 # inflection. The abbreviation itself is matched case-sensitively so that
 # `cnn` in lowercase prose doesn't falsely count as an introduction.
 #
-# Deliberately excluded from first-use checking:
-#   - CUDA, cuDNN: §10.5 explicitly says "no expansion needed"
-#   - i.i.d.: statistical convention, universally understood; has dots
-#     which break standard word-boundary detection
-#   - CI/CD: DevOps term with slash punctuation; commonly understood
-#   - vs.: not an abbreviation in the expansion sense
-#   - Baseline CS/ML abbreviations listed in §10.5's exempt list (Round 2,
-#     2026-04-24). These are universally understood by the book's graduate
-#     CS/ML audience and expanding them on every chapter's first use was
-#     judged pedantic. The exempt list includes: CPU/GPU/TPU/ASIC/FPGA/DSA
-#     hardware baseline; CNN/RNN/LSTM/MLP/LLM/ViT/GAN/VAE/MoE model
-#     baseline; JIT/AOT/IR/ONNX compiler baseline; ReLU/Adam/SGD/AD/BPTT/
-#     GEMM/BLAS numerical baseline; SIMD/RISC/MIPS architecture baseline;
-#     NVMe/HBM/DRAM/SRAM memory baseline; JSON protocol baseline; SLA/ROC/
-#     AUC/TCO operations baseline; GDPR/HIPAA legislation (proper nouns);
-#     MAC/IOPS/NaN numerical baseline. See §10.5 for the full list and
-#     rationale. These terms should be introduced once in the book (in
-#     their canonical chapter) and may be used bare everywhere else.
+# The YAML registry is authoritative. Terms in `canonical_expansions` are
+# checked; terms listed only in `exempt_baselines` are not. This keeps the
+# implementation synchronized with the editorial rule instead of maintaining
+# a second, inevitably stale exemption list in code comments.
+
+import yaml
+
+DATA_FILE = Path(__file__).resolve().parents[3] / "cli" / "data" / "abbreviations.yaml"
+if not DATA_FILE.is_file():
+    raise FileNotFoundError(f"Authoritative abbreviations data file missing: {DATA_FILE}")
+
+with open(DATA_FILE, "r", encoding="utf-8") as _f:
+    _DATA = yaml.safe_load(_f)
+
+if not _DATA or "canonical_expansions" not in _DATA:
+    raise ValueError(f"Invalid abbreviations data in {DATA_FILE}")
 
 _CANONICAL = [
-    # Specialized abbreviations — must be expanded on first use per chapter
-    ("CTM",    "continuous therapeutic monitoring"),
-    ("DAG",    "directed acyclic graph"),
-    ("DCE",    "dead-code elimination"),
-    ("ELT",    "extract, load, transform"),
-    ("ETL",    "extract, transform, load"),
-    ("FFT",    "fast Fourier transform"),
-    ("GELU",   "Gaussian Error Linear Unit"),
-    ("HELM",   "Holistic Evaluation of Language Models"),
-    ("HIS",    "hospital information systems"),
-    ("HOG",    "histogram of oriented gradients"),
-    ("ICR",    "information-compute ratio"),
-    ("ILSVRC", "ImageNet Large Scale Visual Recognition Challenge"),
-    ("KWS",    "keyword spotting"),
-    ("MMLU",   "Massive Multitask Language Understanding"),
-    ("MSWC",   "Multilingual Spoken Words Corpus"),
-    ("OTA",    "over-the-air"),
-    ("PTX",    "Parallel Thread Execution"),
-    ("RBAC",   "role-based access control"),
-    ("RFM",    "recency, frequency, and monetary"),
-    # SIFT is deliberately excluded: the §10.5 expansion is
-    # "scale-invariant feature transform" (computer vision), but the
-    # book also uses SIFT as "software-implemented fault tolerance" in
-    # fault_tolerance.qmd — a different acronym that spells the same.
-    # Homonym handling would require per-context disambiguation; skip
-    # the term to avoid FPs.
-    ("SSA",    "static single-assignment"),
-    ("TFDV",   "TensorFlow Data Validation"),
-    ("UAT",    "universal approximation theorem"),
-    ("V2X",    "vehicle-to-everything"),
-    ("XLA",    "Accelerated Linear Algebra"),
-    # "CAP theorem" — multi-word acronym handled separately (not in this list
-    # because the abbreviation includes a lowercase word "theorem" that
-    # would require custom word-boundary matching).
+    (abbrev, tuple(exp) if isinstance(exp, list) else exp)
+    for abbrev, exp in _DATA["canonical_expansions"].items()
 ]
+_EXEMPT_BASELINES = set(_DATA.get("exempt_baselines", []))
 
 # File-level exclusions. Files listed here are skipped entirely because
 # their purpose is to define terms, not use them in running prose.
@@ -128,25 +102,101 @@ _EXCLUDED_FILES = (
     "glossary.qmd",
 )
 
+# A footnote definition head, e.g. `[^fn-mac]: **MAC (Multiply-Accumulate)**: …`
+# (an optional `[offset=…]` layout directive may follow the colon).
+#
+# Footnote heads are EXEMPT from over-expansion. abbreviations.md currently says
+# a footnote head "should usually use the acronym alone" once body prose has
+# introduced it, but house practice has settled the other way: commit 284977f5
+# (2026-08-17) deliberately restored full expansions across every footnote head
+# in both volumes, treating the head as a self-contained glossary-style
+# definition a reader meets cold in the margin. Practice wins here, so the check
+# does not fight it. If the rule is ever reconciled to match, drop this exemption.
+_FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:")
 
-def _build_canonical_regex(abbrev: str, expansion: str) -> re.Pattern:
-    """Regex for `<expansion> (<ABBREV>)` forward canonical introduction.
+
+def _is_formal_definition_intro(line: str, start: int, end: int) -> bool:
+    r"""Return True for a bold expansion carrying a definition index entry.
+
+    Formal definitions are intentionally self-contained even when running prose
+    introduced the abbreviation earlier.  The house form is:
+
+        **Neural Architecture Search (NAS)**\index{NAS!definition}
+
+    Require both the enclosing bold span and the adjacent ``!definition``
+    index marker so ordinary bold emphasis cannot hide an over-expansion.
+    """
+    open_bold = line.rfind("**", 0, start)
+    if open_bold < 0 or "**" in line[open_bold + 2 : start]:
+        return False
+    close_bold = line.find("**", end)
+    if close_bold < 0 or line[end:close_bold].strip():
+        return False
+    suffix = line[close_bold + 2 :]
+    return bool(
+        re.match(r"\s*\\index\{[^{}]*!definition(?:![^{}]*)?\}", suffix, re.I)
+    )
+
+
+# Markup that may legitimately sit between an expansion and its `(ABBREV)`
+# parenthetical. The house index convention (index.md) places the `\index{}`
+# tag immediately after the term, which lands it in exactly this position:
+#
+#     neural architecture search\index{Neural Architecture Search} (NAS)
+#
+# Bold spans do the same when the term is a first definition (emphasis.md):
+#
+#     **Population Stability Index**\index{...} (PSI)
+#
+# Without this tolerance the checker reports a false "no introduction found"
+# for every term that follows the book's own conventions. Each alternative
+# consumes at least one character, so the group cannot loop on empty input.
+# (Added 2026-08-17 after the probe in the abbreviation tooling audit showed
+# the interposed-index form was silently unrecognized.)
+_INTERPOSED = r"(?:\s|\*{1,3}|\\index\{[^{}]*\})*"
+
+
+def _expansions(expansion) -> tuple:
+    """Normalize an entry's expansion field to a tuple of alternatives."""
+    return expansion if isinstance(expansion, tuple) else (expansion,)
+
+
+def _expansion_body(expansion, anchored: bool) -> str:
+    """Regex alternation matching any canonical expansion for one abbreviation.
+
+    Each alternative allows flexible inter-word whitespace (line wrapping) and
+    an optional trailing `s` for singular/plural inflection. `anchored` adds a
+    leading word boundary, which the forward form needs and the reverse form
+    (already inside parentheses) does not.
+    """
+    parts = []
+    for exp in _expansions(expansion):
+        tokens = re.split(r"\s+", exp)
+        body = r"\s+".join(re.escape(t) for t in tokens) + r"s?"
+        parts.append((r"\b" if anchored else "") + body)
+    return "(?:" + "|".join(parts) + ")"
+
+
+def _build_canonical_regex(abbrev: str, expansion) -> re.Pattern:
+    """Regex for a forward canonical introduction.
 
     The expansion part is case-insensitive and allows a trailing `s` for
     singular/plural inflection. The abbreviation part is case-sensitive
-    and also allows `s?`. Whitespace between words in the expansion is
-    flexible to handle line wrapping.
+    and also allows `s?`. Either parentheses or square brackets may delimit
+    the abbreviation; the bracket form avoids nested parentheses in compact
+    prose. Whitespace between words in the expansion is flexible to handle
+    line wrapping, and `\\index{}` / bold markup may sit between the expansion
+    and the delimiter (see `_INTERPOSED`).
     """
-    # Tokenize the expansion on whitespace, escape each token, join with
-    # `\s+` to allow flexible inter-word whitespace.
-    expansion_tokens = re.split(r"\s+", expansion)
-    expansion_re = r"\b" + r"\s+".join(re.escape(t) for t in expansion_tokens) + r"s?"
     # Case-insensitive expansion, case-sensitive abbreviation.
-    pattern = f"(?i:{expansion_re})" + r"\s*\(" + re.escape(abbrev) + r"s?\)"
+    expansion_re = _expansion_body(expansion, anchored=True)
+    abbrev_re = re.escape(abbrev) + r"s?"
+    delimiter_re = rf"(?:\({abbrev_re}\)|\[{abbrev_re}\])"
+    pattern = f"(?i:{expansion_re})" + _INTERPOSED + delimiter_re
     return re.compile(pattern)
 
 
-def _build_canonical_regex_reverse(abbrev: str, expansion: str) -> re.Pattern:
+def _build_canonical_regex_reverse(abbrev: str, expansion) -> re.Pattern:
     """Regex for `<ABBREV> (<expansion>)` reverse canonical introduction.
 
     Many footnote definitions and glossary entries use the reverse form:
@@ -159,10 +209,9 @@ def _build_canonical_regex_reverse(abbrev: str, expansion: str) -> re.Pattern:
     where "Overhead Bound" is not the canonical expansion "multilayer
     perceptron" — do NOT count as introductions.
     """
-    expansion_tokens = re.split(r"\s+", expansion)
-    expansion_re = r"\s+".join(re.escape(t) for t in expansion_tokens) + r"s?"
+    expansion_re = _expansion_body(expansion, anchored=False)
     pattern = (
-        r"\b" + re.escape(abbrev) + r"s?\s*\(\s*"
+        r"\b" + re.escape(abbrev) + r"s?" + _INTERPOSED + r"\(\s*"
         + f"(?i:{expansion_re})"
         + r"\s*\)"
     )
@@ -170,12 +219,13 @@ def _build_canonical_regex_reverse(abbrev: str, expansion: str) -> re.Pattern:
 
 
 def _build_bare_regex(abbrev: str) -> re.Pattern:
-    """Regex for bare `\\b<ABBREV>s?\\b` word-boundary match.
+    """Regex for bare word-boundary match.
 
     Case-sensitive. Matches both singular and plural (e.g. `CNN` and
-    `CNNs`) as the same logical abbreviation.
+    `CNNs`) as the same logical abbreviation. Excludes hyphenated prefixes
+    and suffixes (e.g., `DP-SGD` is not treated as a bare occurrence of `SGD`).
     """
-    return re.compile(r"\b" + re.escape(abbrev) + r"s?\b")
+    return re.compile(r"(?<![-\w])" + re.escape(abbrev) + r"s?(?![-\w])")
 
 
 # Precompile both regex sets at import time.
@@ -185,6 +235,11 @@ _CANONICAL_REVERSE_RE = {abbrev: _build_canonical_regex_reverse(abbrev, exp)
                          for abbrev, exp in _CANONICAL}
 _BARE_RE = {abbrev: _build_bare_regex(abbrev) for abbrev, _ in _CANONICAL}
 _EXPANSION_FOR = {abbrev: exp for abbrev, exp in _CANONICAL}
+
+
+def _expansion_label(abbrev: str) -> str:
+    """Human-readable expansion for an issue message, joining homonyms with 'or'."""
+    return " or ".join(_expansions(_EXPANSION_FOR[abbrev]))
 
 
 # ── Line-level filter ──────────────────────────────────────────────────────
@@ -215,7 +270,7 @@ def _skip_line_for_bare(line: str, state) -> bool:
     Intro-finding uses a separate, looser filter so that introductions
     appearing inside headings still count as valid.
     """
-    if state.in_yaml or state.in_code_fence or state.in_display_math:
+    if state.in_yaml or state.in_code_fence or state.in_display_math or state.in_tikz:
         return True
     if state.in_html_style_block or state.in_html_comment:
         return True
@@ -244,7 +299,7 @@ def _skip_line_for_intro(line: str, state) -> bool:
     non-prose: YAML frontmatter, code fences, display math, HTML style
     blocks/comments, Python chunk options, and div fences.
     """
-    if state.in_yaml or state.in_code_fence or state.in_display_math:
+    if state.in_yaml or state.in_code_fence or state.in_display_math or state.in_tikz:
         return True
     if state.in_html_style_block or state.in_html_comment:
         return True
@@ -322,6 +377,12 @@ def check(
 
     intro_line: dict[str, int] = {}
     first_bare: dict[str, tuple[int, int, str]] = {}
+    # Body-prose introductions only, in document order, for over-expansion
+    # (abbreviations.md: "the same chapter repeats the full expansion after the
+    # acronym has already been introduced"). Restricting to body prose keeps
+    # headings, table cells, captions, and callout scaffolding out of the count,
+    # since those legitimately carry an expansion of their own.
+    intro_body: dict[str, list[tuple[int, int, str]]] = {}
 
     walker = LineWalker(text)
     for line, state, line_num in walker:
@@ -332,24 +393,49 @@ def check(
         # reads `## Convolutional neural network (CNN) architectures`
         # has seen the expansion.
         intro_spans_by_abbrev: dict[str, list[tuple[int, int]]] = {}
+        is_body_prose = not _skip_line_for_bare(line, state)
+        line_spans = inline_protected_spans(line)
         if not _skip_line_for_intro(line, state):
             for abbrev in _CANONICAL_RE:
                 for pattern in (_CANONICAL_RE[abbrev],
                                 _CANONICAL_REVERSE_RE[abbrev]):
                     for m in pattern.finditer(line):
+                        # The span still suppresses a bare-use flag on this line
+                        # even when it is not a reader-visible introduction.
                         intro_spans_by_abbrev.setdefault(abbrev, []).append(
                             (m.start(), m.end())
                         )
+                        # An expansion that lives only inside an \index{} key,
+                        # inline code, or math never reaches the reader, so it
+                        # does not introduce the term. The house convention puts
+                        # an index tag right after the term (index.md), which
+                        # routinely duplicates the expansion inside the key —
+                        # counting that as a second introduction reported a
+                        # false over-expansion. (2026-08-17)
+                        if is_inside_index_entry(line, m.start()):
+                            continue
+                        if position_in_spans(m.start(), line_spans):
+                            continue
                         if abbrev not in intro_line:
                             intro_line[abbrev] = line_num
+                        if (
+                            is_body_prose
+                            and not _FOOTNOTE_DEF_RE.match(line.lstrip())
+                            and not _is_formal_definition_intro(
+                                line, m.start(), m.end()
+                            )
+                        ):
+                            intro_body.setdefault(abbrev, []).append(
+                                (line_num, m.start(), line)
+                            )
 
         # Phase 2: find bare uses on this line.
         # Bare uses are checked in body prose only: no headings, no
         # table headers, no block-level protected contexts.
-        if _skip_line_for_bare(line, state):
+        if not is_body_prose:
             continue
 
-        spans = inline_protected_spans(line)
+        spans = line_spans
 
         for abbrev, bare_re in _BARE_RE.items():
             # Already found the first bare use for this abbrev in this file.
@@ -375,12 +461,17 @@ def check(
             continue
         reason = (
             f"First use of {abbrev!r} without canonical expansion "
-            f"'{_EXPANSION_FOR[abbrev]} ({abbrev})'"
+            f"'{_expansion_label(abbrev)} ({abbrev})'"
         )
         if intro_ln is None:
             reason += " (no introduction found in this file)"
+            suggested_after = f"Expand at first use: '{_expansion_label(abbrev)} ({abbrev})'"
         else:
             reason += f" (first introduction is later, at line {intro_ln})"
+            suggested_after = (
+                f"Move canonical expansion from line {intro_ln} to first use at line {line_num} "
+                f"(or expand here and use bare '{abbrev}' at line {intro_ln})"
+            )
         issues.append(
             Issue(
                 id=make_issue_id(scope, CATEGORY, counter),
@@ -391,7 +482,7 @@ def check(
                 line=line_num,
                 col=col,
                 before=line,
-                suggested_after="",  # fix requires editorial judgment
+                suggested_after=suggested_after,
                 auto_fixable=False,
                 needs_subagent=True,
                 reason=reason,
@@ -399,136 +490,267 @@ def check(
         )
         counter += 1
 
+    # Phase 4: emit over-expansion issues. abbreviations.md requires the audit
+    # to check BOTH directions; before 2026-08-17 only under-expansion existed,
+    # so a chapter could re-teach the same expansion indefinitely with no gate.
+    # Once a chapter has introduced an abbreviation in body prose, later body
+    # prose uses the acronym alone.
+    for abbrev, occurrences in sorted(intro_body.items()):
+        for line_num, col, line in occurrences[1:]:
+            issues.append(
+                Issue(
+                    id=make_issue_id(scope, CATEGORY_OVER, counter),
+                    category=CATEGORY_OVER,
+                    rule=RULE,
+                    rule_text=RULE_TEXT_OVER,
+                    file=str(file_path),
+                    line=line_num,
+                    col=col,
+                    before=line,
+                    suggested_after=(
+                        f"Replace repeat expansion with bare acronym '{abbrev}' "
+                        f"(already introduced at line {occurrences[0][0]})"
+                    ),
+                    auto_fixable=False,
+                    needs_subagent=True,
+                    reason=(
+                        f"Repeat expansion of {abbrev!r} at line {line_num}; "
+                        f"the chapter already introduced it at line "
+                        f"{occurrences[0][0]}. Use the bare acronym here."
+                    ),
+                )
+            )
+            counter += 1
+
     return issues, counter
 
 
-# ── Adversarial self-test (Pass 16 Item D) ─────────────────────────────────
+# ── Adversarial self-test ──────────────────────────────────────────────────
 #
 # Run with:
 #     PYTHONPATH=book/tools python3 book/tools/audit/checks/abbreviation_first_use.py
 #
-# Each test case is a (name, text, expected_flagged_abbrevs) triple. The
-# driver runs `check` on each text as if it were a single chapter file
-# and compares the set of flagged abbreviations to the expectation.
+# Each case is (name, text, expected) where `expected` is a set of
+# "under:ABBREV" / "over:ABBREV" markers. The driver runs `check` on the text
+# as if it were a single chapter file and compares.
+#
+# Every case uses an abbreviation in the authoritative YAML registry. Avoid
+# hard-coding assumptions about which terms are exempt here; the registry may
+# change as the editorial policy evolves.
 
 _TESTS = [
-    # ---- Positive cases: bare use before canonical introduction ----
+    # ---- Positive: bare use before canonical introduction ----
     (
-        "bare CNN with no introduction",
-        "The CNN achieves state-of-the-art accuracy on ImageNet.\n",
-        {"CNN"},
+        "bare DAG with no introduction",
+        "The DAG is rebuilt on every optimizer step.\n",
+        {"under:DAG"},
     ),
     (
-        "bare DAG with late introduction on a later line",
+        "bare DAG with introduction only on a later line",
         "The DAG is rebuilt on every step.\n"
         "A directed acyclic graph (DAG) represents the computation.\n",
-        {"DAG"},
+        {"under:DAG"},
     ),
     (
-        "bare LLM never introduced",
-        "This chapter discusses LLM serving strategies.\n"
-        "LLM inference is dominated by memory bandwidth.\n",
-        {"LLM"},
+        "bare KWS never introduced",
+        "This chapter discusses KWS wake-word pipelines.\n"
+        "KWS inference is dominated by always-on power budget.\n",
+        {"under:KWS"},
     ),
     (
         "plural bare use without introduction",
-        "Modern CNNs use residual connections extensively.\n",
-        {"CNN"},
+        "Modern DAGs encode operator dependencies explicitly.\n",
+        {"under:DAG"},
     ),
-    # ---- Negative cases: canonical introduction is present and early ----
+    # ---- Negative: canonical introduction is present and early ----
     (
-        "CNN introduced on first appearance",
-        "A convolutional neural network (CNN) is the workhorse.\n"
-        "The CNN is trained via SGD.\n",
+        "DAG introduced on first appearance",
+        "A directed acyclic graph (DAG) is the workhorse representation.\n"
+        "The DAG is then scheduled onto devices.\n",
         set(),
     ),
     (
-        "CNN introduced on the same line as first bare use",
-        "The convolutional neural network (CNN) discussion begins here.\n"
-        "Subsequent CNN details follow.\n",
+        "introduction on the same line as first bare use",
+        "The directed acyclic graph (DAG) discussion begins here.\n"
+        "Subsequent DAG details follow.\n",
         set(),
     ),
     (
         "plural introduction covers plural bare use",
-        "Convolutional neural networks (CNNs) dominate vision.\n"
-        "The CNNs are trained end-to-end.\n",
+        "Directed acyclic graphs (DAGs) dominate graph compilers.\n"
+        "The DAGs are then fused.\n",
+        set(),
+    ),
+    (
+        "square-bracket introduction avoids nested parentheses",
+        "The extractor suite (Histogram of Oriented Gradients [HOG]) "
+        "feeds a classifier.\n"
+        "The HOG features are then normalized.\n",
         set(),
     ),
     (
         "introduction inside a heading counts",
-        "## Convolutional neural network (CNN) architectures\n"
+        "## Directed acyclic graph (DAG) scheduling\n"
         "\n"
-        "The CNN below has three layers.\n",
+        "The DAG below has three stages.\n",
         set(),
+    ),
+    # ---- The \index{} interposition (house convention, index.md) ----
+    (
+        "expansion with an interposed \\index tag still counts",
+        "The compiler builds a directed acyclic graph"
+        "\\index{Directed Acyclic Graph} (DAG) for the model.\n"
+        "The DAG is then optimized.\n",
+        set(),
+    ),
+    (
+        "expansion with bold and an interposed \\index tag still counts",
+        "The **keyword spotting**\\index{Keyword Spotting!definition} (KWS) "
+        "pipeline runs always-on.\n"
+        "Later KWS mentions follow.\n",
+        set(),
+    ),
+    # ---- Homonym: either canonical expansion introduces the term ----
+    (
+        "NAS as neural architecture search",
+        "We apply neural architecture search (NAS) under a latency budget.\n"
+        "The NAS run costs thousands of GPU-hours.\n",
+        set(),
+    ),
+    (
+        "NAS as network-attached storage",
+        "A network-attached storage (NAS) appliance fronts the dataset.\n"
+        "The NAS becomes the bottleneck at scale.\n",
+        set(),
+    ),
+    (
+        "bare NAS with neither expansion is still flagged",
+        "The NAS budget dominates the experiment.\n",
+        {"under:NAS"},
     ),
     # ---- Negative: bare use inside protected contexts ----
     (
-        "bare CNN inside inline code",
-        "The config sets `CNN=True` to enable convolutions.\n"
-        "A convolutional neural network (CNN) is then constructed.\n",
-        set(),
-    ),
-    (
-        "bare CNN inside citation key",
-        "Prior work explores this direction [@krizhevsky2012cnn].\n"
-        "A convolutional neural network (CNN) is constructed below.\n",
+        "bare DAG inside inline code",
+        "The config sets `DAG=True` to enable graph mode.\n"
+        "A directed acyclic graph (DAG) is then constructed.\n",
         set(),
     ),
     (
         "bare abbrev inside an index entry",
-        "\\index{CNN!architecture}A convolutional neural network (CNN) is used.\n",
+        "\\index{DAG!scheduling}A directed acyclic graph (DAG) is used.\n",
         set(),
     ),
-    # ---- Negative: bare use in heading (skipped by bare-use line filter) ----
     (
-        "bare CNN in heading with later introduction",
-        "### The CNN architecture\n"
+        "bare DAG in heading with later introduction",
+        "### The DAG scheduler\n"
         "\n"
-        "A convolutional neural network (CNN) is the workhorse.\n",
+        "A directed acyclic graph (DAG) is the workhorse.\n",
         set(),
     ),
     # ---- Multi-abbreviation cases ----
     (
         "two abbrevs, both missing introduction",
-        "The CNN and the RNN dominate different modalities.\n",
-        {"CNN", "RNN"},
+        "The DAG and the ETL job disagree on ordering.\n",
+        {"under:DAG", "under:ETL"},
     ),
     (
         "two abbrevs, one introduced, one not",
-        "A convolutional neural network (CNN) is paired with an RNN.\n",
-        {"RNN"},
+        "A directed acyclic graph (DAG) is paired with an ETL job.\n",
+        {"under:ETL"},
     ),
     # ---- Reverse canonical form ----
     (
-        "reverse form BLAS (expansion) introduces the abbreviation",
-        "The name comes from the BLAS (Basic Linear Algebra Subprograms) specification.\n"
-        "Modern BLAS implementations include OpenBLAS and MKL.\n",
+        "reverse form ABBREV (expansion) introduces the abbreviation",
+        "Access follows RBAC (role-based access control) semantics.\n"
+        "Modern RBAC policies are declarative.\n",
         set(),
     ),
     (
         "reverse form in footnote-definition style",
-        "[^fn-nvme]: **NVMe (Non-Volatile Memory Express)**: A storage protocol.\n"
-        "The NVMe bandwidth ceiling is 7 GB/s per lane.\n",
+        "[^fn-ptx]: **PTX (Parallel Thread Execution)**: A virtual ISA.\n"
+        "The PTX layer insulates code from silicon revisions.\n",
         set(),
     ),
     (
         "parenthetical that is NOT the canonical expansion must not count",
-        "The MLP (Overhead Bound) struggles on small batch sizes.\n",
-        {"MLP"},
+        "The XLA (Overhead Bound) path struggles on small batches.\n",
+        {"under:XLA"},
+    ),
+    # ---- Over-expansion (the other half of abbreviations.md) ----
+    (
+        "repeating the full expansion in body prose is over-expansion",
+        "A directed acyclic graph (DAG) represents the computation.\n"
+        "Later, the directed acyclic graph (DAG) is scheduled.\n",
+        {"over:DAG"},
+    ),
+    (
+        "single expansion is not over-expansion",
+        "A directed acyclic graph (DAG) represents the computation.\n"
+        "Later, the DAG is scheduled.\n",
+        set(),
+    ),
+    (
+        "expansion in a heading plus one in body prose is not over-expansion",
+        "## Directed acyclic graph (DAG) scheduling\n"
+        "\n"
+        "A directed acyclic graph (DAG) represents the computation.\n",
+        set(),
+    ),
+    (
+        # Regression: the house convention duplicates the expansion inside the
+        # \index{} key, which is not reader-visible. Counting it reported a
+        # false over-expansion on vol2/sustainable_ai:2281. (2026-08-17)
+        "expansion duplicated inside its own \\index key is not over-expansion",
+        "[^fn-nas]: **Neural Architecture Search (NAS) Carbon Cost**"
+        "\\index{Neural Architecture Search (NAS) Carbon Cost!definition}: "
+        "The reported figure is contested.\n",
+        set(),
+    ),
+    (
+        # House practice (commit 284977f5, 2026-08-17) keeps the full expansion
+        # in every footnote definition head, so a head is never over-expansion.
+        "footnote definition head repeating the expansion is exempt",
+        "A directed acyclic graph (DAG) represents the computation.\n"
+        "\n"
+        "[^fn-dag]: **Directed Acyclic Graph (DAG)**: The scheduling structure.\n",
+        set(),
+    ),
+    (
+        "formal bold definition repeating the expansion is exempt",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "**Neural Architecture Search (NAS)**\\index{NAS!definition} "
+        "automates architecture design.\n",
+        set(),
+    ),
+    (
+        "bold emphasis without a definition index is still over-expansion",
+        "Neural architecture search (NAS) explores candidate models.\n"
+        "Later, **neural architecture search (NAS)** narrows the space.\n",
+        {"over:NAS"},
+    ),
+    (
+        "three body expansions flag the second and third",
+        "A directed acyclic graph (DAG) is built.\n"
+        "The directed acyclic graph (DAG) is optimized.\n"
+        "The directed acyclic graph (DAG) is scheduled.\n",
+        {"over:DAG"},
     ),
 ]
 
+_KIND = {CATEGORY: "under", CATEGORY_OVER: "over"}
+
 
 def _self_test() -> int:
-    from audit.ledger import Ledger
-
     passed = 0
     failed = 0
     failures: list[str] = []
 
     for name, text, expected in _TESTS:
         issues, _ = check(Path("<test>"), text, "test", 0)
-        got = {i.reason.split("'")[1] for i in issues}
+        got = {
+            f"{_KIND[i.category]}:{i.reason.split(chr(39))[1]}"
+            for i in issues
+        }
         if got == expected:
             passed += 1
         else:

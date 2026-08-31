@@ -194,7 +194,7 @@ def check(
                     line=line_num,
                     col=start,
                     before=line,
-                    suggested_after="",
+                    suggested_after=f"Replace {latin!r} with {english!r} (e.g. in running text) or enclose in parentheses",
                     auto_fixable=False,
                     needs_subagent=True,
                     reason=f"{latin!r} in running text — prefer {english!r}",

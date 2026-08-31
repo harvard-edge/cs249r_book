@@ -66,9 +66,9 @@ class MilestoneTracker:
     def _load_progress(self) -> Dict:
         if self.progress_file.exists():
             try:
-                with open(self.progress_file, "r") as f:
+                with open(self.progress_file, "r", encoding="utf-8") as f:
                     progress = json.load(f)
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 progress = {}
         else:
             progress = {}
@@ -81,16 +81,16 @@ class MilestoneTracker:
         return progress
 
     def _save_progress(self) -> None:
-        with open(self.progress_file, "w") as f:
+        with open(self.progress_file, "w", encoding="utf-8") as f:
             json.dump(self.progress, f, indent=2)
 
     def _load_completed_modules(self) -> List[str]:
         if not self.module_progress_file.exists():
             return []
         try:
-            with open(self.module_progress_file, "r") as f:
+            with open(self.module_progress_file, "r", encoding="utf-8") as f:
                 progress = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return []
 
         completed = []
@@ -104,12 +104,12 @@ class MilestoneTracker:
         progress = {}
         if self.module_progress_file.exists():
             try:
-                with open(self.module_progress_file, "r") as f:
+                with open(self.module_progress_file, "r", encoding="utf-8") as f:
                     progress = json.load(f)
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 progress = {}
         progress["completed_modules"] = sorted(set(completed_modules))
-        with open(self.module_progress_file, "w") as f:
+        with open(self.module_progress_file, "w", encoding="utf-8") as f:
             json.dump(progress, f, indent=2)
 
     def mark_module_complete(self, module_name: str) -> List[str]:

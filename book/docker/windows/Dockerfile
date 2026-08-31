@@ -103,6 +103,9 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # ------------------------------------------------------------
 COPY book/tools/dependencies/requirements.txt C:/temp/requirements.txt
 COPY book/tools/dependencies/install_packages.R C:/temp/install_packages.R
+# install_packages.R reads the package list from its own directory, so the
+# list has to travel with it or every R install silently resolves to nothing.
+COPY book/tools/dependencies/required_r_packages.R C:/temp/required_r_packages.R
 COPY book/tools/dependencies/tl_packages C:/temp/tl_packages
 COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 COPY book/docker/windows/install_texlive.ps1 C:/temp/install_texlive.ps1
@@ -302,10 +305,22 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
         Write-Host 'No install_packages.R found, installing basic packages...' ; `
         Rscript -e 'install.packages(c(\"rmarkdown\",\"knitr\",\"ggplot2\"))' ; `
     } ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host '❌ R package installation failed' ; `
+        exit 1 ; `
+    } ; `
     Rscript -e 'for (p in c(\"rmarkdown\",\"knitr\")) if (!require(p, character.only=TRUE, quietly=TRUE)) stop(\"missing: \", p)' ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host '❌ R package check failed' ; `
+        exit 1 ; `
+    } ; `
     Write-Host '📦 R packages installed' ; `
     Write-Host 'Verifying R packages...' ; `
     Rscript C:/temp/verify_r_packages.R ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host '❌ R package verification failed' ; `
+        exit 1 ; `
+    } ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
@@ -341,6 +356,7 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host 'Removing temporary files...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue ; `
+    Remove-Item C:/temp/required_r_packages.R -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `

@@ -107,8 +107,10 @@ def clean(ax):
     ax.set_yticks([])
 
 
-def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars", color=None):
+def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars", color=None, figsize=None):
     fig, ax = new_fig("hierarchy-ladder")
+    if figsize is not None:
+        fig.set_size_inches(*figsize, forward=True)
     ladder(ax, tiers, domain=domain, wall=wall, style=style, color=color)
     write(fig, chapter, name)
 
@@ -117,6 +119,30 @@ def make_knee(chapter, name, *, knee_frac=0.72, style="shaded", pct_label=None):
     fig, ax = new_fig("scale-anchor")
     knee(ax, knee_frac=knee_frac, style=style, pct_label=pct_label)
     write(fig, chapter, name)
+
+
+def nn_architectures_attention_quadratic_scaling() -> None:
+    """Show the exact 2x input -> 4x score-interaction relationship."""
+    fig, ax = new_fig("scale-anchor")
+    clean(ax)
+    ax.set_xlim(0, 2.25)
+    ax.set_ylim(-0.35, 5.1)
+
+    ax.annotate("", xy=(2.18, 0), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+    ax.annotate("", xy=(0.10, 4.90), xytext=(0.10, 0), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+
+    x = np.linspace(0.2, 2.08, 160)
+    ax.plot(x, x**2, color=INK, lw=1.35)
+    ax.plot([1, 1], [0, 1], color=GRID, lw=0.6, ls="--")
+    ax.plot([2, 2], [0, 4], color=GRID, lw=0.6, ls="--")
+    ax.scatter([1, 2], [1, 4], s=14, color=[DATA, RED], edgecolors="white", linewidths=0.45, zorder=3)
+
+    ax.text(1, -0.16, "$S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(2, -0.16, "$2S$", ha="center", va="top", color=INK, fontsize=5.3)
+    ax.text(0.86, 1.16, "$1\\times$", ha="right", va="bottom", color=DATA, fontsize=5.1, fontweight="bold")
+    ax.text(1.88, 4.05, "$4\\times$", ha="right", va="bottom", color=RED, fontsize=5.1, fontweight="bold")
+    ax.text(1.35, 2.75, "$S^2$", ha="left", va="center", color=INK, fontsize=5.5)
+    write(fig, "vol1/nn_architectures", "nn_architectures_attention_memory_wall")
 
 
 def make_labeled_knee(
@@ -393,7 +419,7 @@ def pipeline_rows(chapter, name, rows, *, title=None):
             if sw > 0.06 + 0.037 * len(seg_label):
                 ax.text(cur + sw / 2, y + h / 2, seg_label, ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
             cur += sw
-        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f}ms", ha="left", va="center", color="#555555", fontsize=4.7)
+        ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f} ms", ha="left", va="center", color="#555555", fontsize=4.7)
     write(fig, chapter, name)
 
 
@@ -456,6 +482,7 @@ def data_engineering_active_learning_budget():
         [("budget", 50, GRID), ("score all", 100, RED)],
         limit=50,
         limit_label="$50K",
+        limit_label_offset=0.025,
     )
     write(fig, "vol1/data_engineering", "data_engineering_active_learning_budget")
 
@@ -465,8 +492,40 @@ def model_compression_quantization_roofline():
         "vol1/model_compression",
         "model_compression_quantization_roofline",
         ridge=60.0,
-        points=[("mem 2x", 8.0, MEM), ("comp 8x", 180.0, COMP)],
+        # Both points match the chapter's two adjacent worked examples:
+        # bandwidth-bound INT4-vs-FP16 = 2.9x; compute-bound A100 INT8-vs-FP16 = 2x.
+        points=[("mem 2.9x", 8.0, MEM), ("comp 2x", 180.0, COMP)],
     )
+
+
+def model_compression_memory_ladder(candidate=None):
+    """Curated replacement for the generic first-pass vol1-model-compression-margin-001.
+
+    The generic ladder path parsed "175B" out of the top label as 1.75e11 and fell
+    back to powers of ten for the other two rungs, so the drawn bars encoded no
+    real memory magnitudes. Values below are in GB so one log axis spans all three.
+    """
+    make_ladder(
+        "vol1/model_compression",
+        "vol1_model_compression_margin_001",
+        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 512 KB", 0.000524288)],
+        domain="memory",
+        wall=False,
+    )
+
+
+def model_compression_sparsity_break_even(candidate=None):
+    """Show that sparse-kernel payoff has no universal density threshold."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.18, 0.72))
+    x = np.linspace(0.0, 1.0, 160)
+    y = 0.20 + 0.04 * x + 0.56 * np.clip((x - 0.56) / 0.44, 0.0, None) ** 2
+    ax.axvspan(0.52, 0.78, color=REDFILL, alpha=0.40)
+    ax.plot(x, y, color=MEM, lw=1.45)
+    ax.text(0.20, 0.42, "overhead\nbound", ha="center", va="center", color=INK, fontsize=4.7)
+    ax.text(0.65, 0.82, "kernel-dependent\nbreak-even", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.86, 0.20, "speedup", ha="center", va="center", color=MEM, fontsize=4.6, fontweight="bold")
+    ax.text(0.50, 0.07, "sparsity", ha="center", va="center", color=INK, fontsize=4.8)
+    write(fig, "vol1/model_compression", "vol1_model_compression_margin_003")
 
 
 def fault_tolerance_kv_live_state_ladder():
@@ -592,10 +651,10 @@ def data_engineering_debt_compounding():
     ax.fill_between(x, y_low, y_high, color=REDFILL, alpha=0.28)
     ax.plot(x[-1], y_high[-1], "o", color=RED, ms=3.3)
     ax.plot(x[-1], y_low[-1], "o", color=TIME, ms=3.0)
-    ax.text(0.60, 0.76, "30%", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
-    ax.text(0.69, 0.33, "10%", ha="center", va="center", color=TIME, fontsize=5.0, fontweight="bold")
-    ax.text(0.20, 0.08, "Debt0", ha="center", va="center", color=INK, fontsize=4.8)
-    ax.text(0.76, 0.08, "n periods", ha="center", va="center", color=INK, fontsize=4.8)
+    ax.text(0.60, 0.58, "30%", ha="center", va="center", color=RED, fontsize=5.0)
+    ax.text(0.69, 0.33, "10%", ha="center", va="center", color=TIME, fontsize=5.0)
+    ax.text(0.20, 0.04, r"Debt$_0$", ha="center", va="center", color=INK, fontsize=4.8)
+    ax.text(0.76, 0.04, "n periods", ha="center", va="center", color=INK, fontsize=4.8)
     write(fig, "vol1/data_engineering", "data_engineering_debt_compounding")
 
 
@@ -629,7 +688,7 @@ def benchmarking_component_speedup_bars(candidate=None):
             ("before", [("other", other, GRID), ("model", model_latency, COMP)], 0.58),
             ("after", [("other", other, GRID), ("model", optimized_model, COMP)], 0.28),
         ],
-        title="3x -> 1.2x",
+        title="3× → 1.2×",
     )
 
 
@@ -653,7 +712,7 @@ def ml_systems_camera_pipeline_amdahl(candidate=None):
             ("before", [("ISP", 100, GRID), ("ML", 60, COMP), ("post", 40, GRID)], 0.58),
             ("after", [("ISP", 100, GRID), ("ML", 6, COMP), ("post", 40, GRID)], 0.28),
         ],
-        title="10x -> 1.37x",
+        title="10× → 1.37×",
     )
 
 
@@ -711,12 +770,19 @@ def training_bandwidth_path_ladder(candidate=None):
     from mlsysim import Hardware
 
     v100_bw = Hardware.Cloud.V100.memory.bandwidth.m_as("GB/s")
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
+    system_memory_bw = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as("GB/s")
     make_ladder(
         "vol1/training",
         "vol1_training_margin_002",
-        [("HBM %.0f GB/s" % v100_bw, v100_bw), ("DRAM 75 GB/s", 75), ("Storage 1.5 GB/s", 1.5)],
+        [
+            ("HBM %.0f GB/s" % v100_bw, v100_bw),
+            ("DRAM %.0f GB/s" % system_memory_bw, system_memory_bw),
+            ("NVMe %.0f GB/s" % nvme_bw, nvme_bw),
+        ],
         domain="bandwidth",
         wall=False,
+        figsize=(1.209881, 1.75),
     )
 
 
@@ -724,7 +790,7 @@ def training_flash_attention_tile_ladder(candidate=None):
     make_ladder(
         "vol1/training",
         "vol1_training_margin_003",
-        [("Full 64 MB", 64), ("Tile 64 KB", 0.064)],
+        [("Full 67.1 MB", 67.1), ("Tile 65.5 KB", 0.0655)],
         domain="memory",
         wall=False,
     )
@@ -962,8 +1028,8 @@ def sustainable_ai_carbon_frontier(candidate=None):
     ratio_annotation_ladder(
         "vol2/sustainable_ai",
         "vol2_sustainable_ai_margin_001",
-        [("Poland 80 tCO2", 80), ("Quebec 2 tCO2", 2)],
-        ratio_label="40x",
+        [("Poland 8,200 t CO2", 8_200), ("Quebec 200 t CO2", 200)],
+        ratio_label="41x",
         domain="energy",
     )
 
@@ -1094,11 +1160,13 @@ def frameworks_training_memory_ladder(candidate=None):
     from mlsysim.core.units import BYTES_FP32, GB
 
     infer_gb = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32).m_as(GB)
-    training_mid_gb = 12.5
+    # Matches ResNetMemory in frameworks.qmd: 8-12 GB of saved activations plus
+    # weights, gradients, and Adam state gives an 8.4-12.4 GB peak.
+    training_mid_gb = 10.4
     make_ladder(
         "vol1/frameworks",
         "vol1_frameworks_margin_001",
-        [("train 10-15 GB", training_mid_gb), ("infer %.0f MB" % (infer_gb * 1000), infer_gb)],
+        [("train 8-12 GB", training_mid_gb), ("weights %.0f MB" % (infer_gb * 1000), infer_gb)],
         domain="memory",
         wall=False,
     )
@@ -1137,21 +1205,36 @@ def data_selection_compute_data_gap():
     write(fig, "vol1/data_selection", "data_selection_scaling_saturation")
 
 
-def data_selection_quality_multiplier(candidate=None):
-    make_ladder(
-        "vol1/data_selection",
-        "vol1_data_selection_margin_001",
-        [("noisy 10K", 10_000), ("clean 100", 100)],
-        domain="data",
-        wall=False,
-    )
-
-
 def data_selection_echo_threshold(candidate=None):
-    fig, ax = new_fig("scale-anchor")
-    knee(ax, knee_frac=0.63, style="dashed", pct_label="e=R")
-    ax.text(82, 23.5, "over", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    """Show useful echoing up to the pipeline-ratio threshold, then saturation."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.30, 0.82))
+    threshold = 0.63
+    x = np.linspace(0.08, 0.94, 180)
+    progress = (x - 0.08) / (0.94 - 0.08)
+    utilization = 0.18 + 0.56 * np.minimum(progress / threshold, 1.0)
+    threshold_x = 0.08 + threshold * (0.94 - 0.08)
+    ax.plot(x, utilization, color=INK, lw=1.35)
+    ax.axvspan(threshold_x, 0.94, color=REDFILL, alpha=0.34)
+    ax.plot([threshold_x, threshold_x], [0.12, 0.80], color=RED, lw=0.65, ls="--")
+    ax.plot(threshold_x, 0.74, "o", color=RED, ms=3.2)
+    ax.text(threshold_x - 0.025, 0.84, "e=R", ha="right", va="center", color=RED, fontsize=5.3, fontweight="bold")
+    ax.text(0.80, 0.58, "e > R", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    ax.text(0.47, 0.08, "echo factor", ha="center", va="center", color=INK, fontsize=4.5)
     write(fig, "vol1/data_selection", "vol1_data_selection_margin_003")
+
+
+def data_selection_synthetic_collapse(candidate=None):
+    """Plot the chapter's stated generation-1 to generation-5 accuracy loss."""
+    fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
+    generations = np.arange(1, 6)
+    accuracy = np.array([95.0, 92.0, 88.0, 83.0, 78.0])
+    x = 0.10 + 0.78 * (generations - 1) / 4
+    y = 0.22 + 0.56 * (accuracy - 75.0) / 22.0
+    ax.plot(x, y, color=RED, lw=1.45, marker="o", ms=2.4)
+    ax.text(x[0], y[0] + 0.12, "Gen 1  95%", ha="left", va="center", color=INK, fontsize=4.6)
+    ax.text(x[-1], y[-1] - 0.12, "Gen 5  78%", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.70, 0.84, "−17 pp", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    write(fig, "vol1/data_selection", "vol1_data_selection_margin_004")
 
 
 def model_serving_model_load_slo(candidate=None):
@@ -1177,15 +1260,26 @@ def model_serving_model_load_slo(candidate=None):
 
 def model_serving_paged_attention_waste(candidate=None):
     fig, ax = margin_axes("iron-law-bar", figsize=(1.20, 0.66))
-    x, w, h = 0.25, 0.60, 0.15
-    rows = [("contig", 0.55, 0.58), ("paged", 0.96, 0.28)]
-    for label, used, y in rows:
-        ax.text(0.07, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.9)
+    x, w, h = 0.38, 0.48, 0.15
+    # The adjacent prose states 60--80% waste for static contiguous
+    # reservation and below 4% for PagedAttention. Use the midpoint of the
+    # first range and the stated upper bound of the second as usable shares.
+    rows = [("contiguous", 0.30, 0.58, "~30%"), ("paged", 0.96, 0.28, ">96%")]
+    for label, used, y, value_label in rows:
+        ax.text(x - 0.025, y + h / 2, label, ha="right", va="center", color=INK, fontsize=4.4)
         rect(ax, x, y, w * used, h, MEM, ec="white", lw=0.35)
         rect(ax, x + w * used, y, w * (1 - used), h, RED, ec="white", lw=0.35)
-        ax.text(x + w * used / 2, y + h / 2, f"{int(round(used * 100))}%", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
-    ax.text(0.54, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0)
-    ax.text(0.91, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8)
+        ax.text(
+            x + w * used / 2,
+            y + h / 2,
+            value_label,
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=3.5,
+        )
+    ax.text(x + w / 2, 0.88, "usable KV", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(x + w, 0.18, "waste", ha="right", va="center", color=RED, fontsize=4.8)
     write(fig, "vol1/model_serving", "vol1_model_serving_margin_002")
 
 
@@ -1198,10 +1292,53 @@ def model_serving_traffic_adaptive(candidate=None):
     ax.plot(t, batch, color=COMP, lw=1.45)
     ax.plot([1], [window[-1]], "o", color=TIME, ms=3.2)
     ax.plot([1], [batch[-1]], "o", color=COMP, ms=3.2)
-    ax.text(0.20, 0.77, "window", ha="center", va="center", color=TIME, fontsize=4.9, fontweight="bold")
-    ax.text(0.76, 0.76, "batch", ha="center", va="center", color=COMP, fontsize=4.9, fontweight="bold")
+    ax.set_xlim(0, 1.04)
+    ax.text(0.20, 0.77, "window", ha="center", va="center", color=TIME, fontsize=4.9)
+    ax.text(0.76, 0.76, "batch", ha="center", va="center", color=COMP, fontsize=4.9)
     ax.text(0.82, 0.13, "QPS", ha="center", va="center", color=INK, fontsize=4.9)
     write(fig, "vol1/model_serving", "vol1_model_serving_margin_003")
+
+
+def ml_workflow_sensitivity_gate(candidate=None):
+    """Place the 78% field result on the same scale as the 90% gate."""
+    fig, ax = margin_axes("scale-anchor", figsize=(1.590487, 1.049952))
+    x0, w, y = 0.10, 0.80, 0.48
+    field_x = x0 + w * 0.78
+    gate_x = x0 + w * 0.90
+    ax.plot([x0, x0 + w], [y, y], color=GRID, lw=0.8)
+    ax.plot([gate_x, gate_x], [0.30, 0.72], color=RED, lw=0.8, ls="--")
+    ax.plot(field_x, y, "o", color=RED, ms=4.0)
+    ax.text(field_x - 0.015, 0.25, "78% field", ha="right", va="center", color=RED, fontsize=4.7)
+    ax.text(gate_x, 0.82, "90% floor", ha="center", va="center", color=RED, fontsize=4.7)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    clean(ax)
+    write(fig, "vol1/ml_workflow", "vol1_ml_workflow_margin_003")
+
+
+def hw_acceleration_bandwidth_taper(candidate=None):
+    """Render the H100 bandwidth taper from the same MLSysIM constants as the prose."""
+    from mlsysim import Hardware, Systems
+    from mlsysim.core.units import GB, second
+
+    tiers = [
+        ("HBM 3350 GB/s", Hardware.Cloud.H100.memory.bandwidth.m_as(GB / second)),
+        ("NVLink\n900 GB/s", Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB / second)),
+        ("PCIe 64 GB/s", Hardware.Cloud.H100.interconnect.bandwidth.m_as(GB / second)),
+        ("Network 50 GB/s", Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB / second)),
+    ]
+    make_ladder("vol1/hw_acceleration", "vol1_hw_acceleration_margin_002", tiers, domain="bandwidth", wall=False)
+
+
+def conclusion_tail_latency_ladder(candidate=None):
+    """Show the explicit 2,000 ms versus 50 ms values without label parsing."""
+    make_ladder(
+        "vol1/conclusion",
+        "vol1_conclusion_margin_003",
+        [("P99 2 s", 2_000), ("mean 50 ms", 50)],
+        domain="time",
+        wall=False,
+    )
 
 
 def data_engineering_locality_ladder(candidate=None):
@@ -1828,7 +1965,7 @@ def _generic_sparkline(candidate):
     falling = any(tok in text for tok in ("decay", "drop", "drops", "fall", "falls", "degrad", "collapse", "lower"))
     saturating = any(tok in text for tok in ("saturat", "plateau", "diminishing"))
     positive = any(tok in text for tok in ("feedback", "throughput", "iteration", "payback", "accuracy rises", "capacity", "streaming"))
-    if "rises while" in text or "paired with" in text or "gain" in text and ("decay" in text or "falls" in text):
+    if "rises while" in text or "rising while" in text or "paired with" in text or "gain" in text and ("decay" in text or "falls" in text):
         make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.18, 0.82), (0.72, 0.30)])
     elif falling:
         make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.84, 0.32), (0.28, 0.28)])
@@ -1924,7 +2061,7 @@ def _nested_ml_system(candidate):
     rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
     rect(ax, 0.36, 0.39, 0.28, 0.16, COMP, ec="white", lw=0.8)
     ax.text(0.50, 0.47, "ML code", ha="center", va="center", color="white", fontsize=4.0, fontweight="bold")
-    ax.text(0.50, 0.72, "System 95%", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(0.50, 0.72, "System", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -1942,7 +2079,8 @@ def _pareto(candidate):
     ax.scatter(x, y, s=12, color=DATA)
     ax.scatter([0.50], [0.33], s=20, color=RED)
     ax.text(0.50, 0.22, "dominated", ha="center", va="center", color=RED, fontsize=4.7)
-    ax.plot([0.10, 0.10, 0.90], [0.15, 0.82, 0.15], color=GRID, lw=0.8)
+    ax.plot([0.07, 0.07], [0.15, 0.82], color=GRID, lw=0.8)
+    ax.plot([0.07, 0.90], [0.15, 0.15], color=GRID, lw=0.8)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -1990,10 +2128,10 @@ def _other_new(candidate):
         data_engineering_locality_ladder(candidate)
     elif cid == "vol1-data-engineering-margin-004":
         data_engineering_segmentation_ladder(candidate)
-    elif cid == "vol1-data-selection-margin-001":
-        data_selection_quality_multiplier(candidate)
     elif cid == "vol1-data-selection-margin-003":
         data_selection_echo_threshold(candidate)
+    elif cid == "vol1-data-selection-margin-004":
+        data_selection_synthetic_collapse(candidate)
     elif cid == "vol1-nn-computation-margin-001":
         nn_computation_paradigm_ops_ladder(candidate)
     elif cid == "vol1-nn-computation-margin-002":
@@ -2002,6 +2140,10 @@ def _other_new(candidate):
         nn_computation_activation_logic_ladder(candidate)
     elif cid == "vol1-nn-computation-margin-004":
         nn_computation_mnist_roofline(candidate)
+    elif cid == "vol1-model-compression-margin-001":
+        model_compression_memory_ladder(candidate)
+    elif cid == "vol1-model-compression-margin-003":
+        model_compression_sparsity_break_even(candidate)
     elif cid == "vol1-frameworks-margin-001":
         frameworks_training_memory_ladder(candidate)
     elif cid == "vol1-frameworks-margin-002":
@@ -2012,6 +2154,12 @@ def _other_new(candidate):
         model_serving_paged_attention_waste(candidate)
     elif cid == "vol1-model-serving-margin-003":
         model_serving_traffic_adaptive(candidate)
+    elif cid == "vol1-ml-workflow-margin-003":
+        ml_workflow_sensitivity_gate(candidate)
+    elif cid == "vol1-hw-acceleration-margin-002":
+        hw_acceleration_bandwidth_taper(candidate)
+    elif cid == "vol1-conclusion-margin-003":
+        conclusion_tail_latency_ladder(candidate)
     elif cid == "vol1-training-margin-001":
         training_activation_memory_ladder(candidate)
     elif cid == "vol1-training-margin-002":
@@ -2125,8 +2273,10 @@ def generate_curated_margin_figures() -> None:
             "vol1-ml-systems-margin-004",
             "vol1-data-engineering-margin-003",
             "vol1-data-engineering-margin-004",
-            "vol1-data-selection-margin-001",
             "vol1-data-selection-margin-003",
+            "vol1-data-selection-margin-004",
+            "vol1-model-compression-margin-001",
+            "vol1-model-compression-margin-003",
             "vol1-nn-computation-margin-001",
             "vol1-nn-computation-margin-002",
             "vol1-nn-computation-margin-003",
@@ -2136,6 +2286,9 @@ def generate_curated_margin_figures() -> None:
             "vol1-model-serving-margin-001",
             "vol1-model-serving-margin-002",
             "vol1-model-serving-margin-003",
+            "vol1-ml-workflow-margin-003",
+            "vol1-hw-acceleration-margin-002",
+            "vol1-conclusion-margin-003",
             "vol1-training-margin-001",
             "vol1-training-margin-002",
             "vol1-training-margin-003",
@@ -2251,11 +2404,11 @@ def alpha_beta():
 
 def generate() -> None:
     # Volume I
-    make_ladder("vol1/benchmarking", "benchmarking_power_ladder", [("rack 10 kW", 10000), ("node 400 W", 400), ("edge 80 W", 80), ("RPi4 3.5 W", 3.5), ("MCU 25 mW", 0.025), ("NDP 150 uW", 0.00015)], domain="power")
+    make_ladder("vol1/benchmarking", "benchmarking_power_ladder", [("rack 10 kW", 10000), ("node 400 W", 400), ("edge 80 W", 80), ("RPi4 3.5 W", 3.5), ("MCU 25 mW", 0.025), ("NDP 150 µW", 0.00015)], domain="power")
     benchmarking_confidence_detectability()
     benchmarking_tail_latency_gap()
     taxonomy_quadrant("vol1/data_engineering", "data_engineering_data_gravity_entropy", selected=(0, 1), xlabel="data gravity", ylabel="info entropy", labels={(0, 1): "high\ngain"})
-    make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("Internet 100 ms", 0.1), ("Network 500 us", 5e-4), ("SSD 100 us", 1e-4), ("DRAM 100 ns", 1e-7), ("L1 0.5 ns", 5e-10)], domain="time", wall=False)
+    make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("Internet 100 ms", 0.1), ("Network 500 µs", 5e-4), ("SSD 100 µs", 1e-4), ("DRAM 100 ns", 1e-7), ("L1 0.5 ns", 5e-10)], domain="time", wall=False)
     data_engineering_debt_compounding()
     data_engineering_active_learning_budget()
     data_selection_compute_data_gap()
@@ -2263,14 +2416,14 @@ def generate() -> None:
     make_ladder("vol1/frameworks", "frameworks_bandwidth_hierarchy", [("HBM 2039", 2039), ("NVLink 600", 600), ("PCIe 32", 32)], domain="bandwidth")
     make_sparkline("vol1/frameworks", "frameworks_dispatch_tax_divergence", threat=False, steep=1.9)
     make_dam("vol1/hw_acceleration", "hw_acceleration_dam_locator", focus=2, vol="vol1")
-    make_ladder("vol1/hw_acceleration", "hw_acceleration_energy_ladder", [("DRAM 640 pJ", 640), ("MAC 3.7 pJ", 3.7), ("SRAM 0.5 pJ", 0.5)], domain="energy")
+    make_ladder("vol1/hw_acceleration", "hw_acceleration_energy_ladder", [("DRAM 640 pJ", 640), ("FP32 mul 3.7 pJ", 3.7), ("SRAM 0.5 pJ", 0.5)], domain="energy")
     make_roofline("vol1/hw_acceleration", "hw_acceleration_roofline_elbow")
     make_ladder("vol1/introduction", "introduction_energy_hierarchy", [("DRAM 160 pJ", 160), ("FP16 1.1 pJ", 1.1), ("INT8 0.2 pJ", 0.2)], domain="energy")
     make_ironbar("vol1/introduction", "introduction_iron_law_bars", [("D", 0.58, MEM), ("C", 0.20, COMP), ("L", 0.22, NET)], dom=0)
-    make_ladder("vol1/ml_ops", "ml_ops_drift_threshold_knee", [("low traffic 10d", 14_400), ("1 QPS 17m", 17)], domain="time", wall=False)
+    make_ladder("vol1/ml_ops", "ml_ops_drift_threshold_knee", [("100 labels/day\n10 d", 14_400), ("1 label/s\n17 min", 17)], domain="time", wall=False)
     make_ladder("vol1/ml_systems", "ml_systems_deployment_span", [("Cloud 3 MW", 3_000_000), ("Edge 200 W", 200), ("Mobile 5 W", 5), ("Tiny 50 mW", 0.05)], domain="power")
     make_sparkline("vol1/ml_systems", "ml_systems_memory_wall_divergence", threat=True, steep=1.9)
-    make_dam("vol1/ml_systems", "ml_systems_dam_locator", focus="all", vol="vol1")
+    make_dam("vol1/ml_systems", "ml_systems_dam_locator", focus=2, vol="vol1")
     escalation_curve()
     make_ladder("vol1/ml_workflow", "ml_workflow_feedback_timescales", [("quarter", 90), ("month", 30), ("week", 7), ("day", 1), ("hour", 1 / 24), ("minute", 1 / 1440)], domain="time")
     make_dam("vol1/model_compression", "model_compression_dam_locator", focus=2, vol="vol1", style="boxes")
@@ -2280,8 +2433,8 @@ def generate() -> None:
     latency_budget()
     list_dots("vol1/nn_architectures", "nn_architectures_inductive_bias", [("CNN", INK), ("Transformer", "#888888"), ("MLP", GRID)])
     make_dam("vol1/nn_architectures", "nn_architectures_algorithm_axis", focus=1, vol="vol1", style="boxes")
-    make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 40", 40), ("MobileNet 21", 21), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop")
-    make_knee("vol1/nn_architectures", "nn_architectures_attention_memory_wall", knee_frac=0.72)
+    make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 80", 80), ("MobileNet 43", 43), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop", figsize=(1.242246906, 1.75))
+    nn_architectures_attention_quadratic_scaling()
     labeled_memory_bars("vol1/nn_architectures", "nn_architectures_capacity_wall", [("Item+User 102", 102), ("A100 80", 80), ("Item 51", 51)])
     labeled_memory_bars("vol1/nn_computation", "nn_computation_memory_explosion", [("GPT-2 6 GB", 6000), ("MNIST 438 KB", 0.438)], title="model memory")
     simple_bar("vol1/nn_computation", "nn_computation_matmul_dominance", [("MatMul", 0.92, COMP, "white"), ("", 0.08, GRID, INK)])
@@ -2293,7 +2446,6 @@ def generate() -> None:
     make_ironbar("vol1/training", "training_iron_law_bars", [("D", 0.16, MEM), ("C", 0.66, COMP), ("L", 0.18, NET)], dom=1)
     make_ironbar("vol1/training", "training_optimizer_memory", [("P", 0.25, GRID), ("G", 0.25, GRID), ("Adam", 0.50, MEM)], dom=2)
     vol1_conclusion_fleet_mtbf_ladder()
-
     # Volume II
     make_ironbar("vol2/collective_communication", "collective_communication_comm_dominance", [("compute", 0.30, GRID), ("comm", 0.70, NET)], dom=1, style="trio")
     alpha_beta()
@@ -2303,7 +2455,7 @@ def generate() -> None:
     conclusion_tail_latency_fanout()
     make_dam("vol2/data_storage", "data_storage_dai_locator", focus=2, vol="vol2", style="pills")
     make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 7.56 PB", 7560), ("Data 6 TB", 6)], domain="memory")
-    make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200", 200), ("NVMe 7", 7)], domain="bandwidth")
+    make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200 GB/s", 200), ("NVMe 7 GB/s", 7)], domain="bandwidth")
     data_storage_checkpoint_storm_write_time()
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")
     distributed_training_pipeline_bubble_tax()

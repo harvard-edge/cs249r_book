@@ -433,6 +433,81 @@ def get_principle_numbers() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Principle box titles (the target side of a `\ref{pri-X}`)
+#
+# The box's own rendered title — "Principle 1: The Iron Law of ML Systems" — is
+# produced by the custom-numbered-blocks Lua filter. That filter honours the
+# `scope: global` declared for the principle group in
+# config/shared/base/custom-numbered-blocks.yml by seeding its counter from
+# `book.render` (see seed_global_counters in custom-numbered-blocks.lua, which
+# returns early when `book.render` is absent). `book.render` only exists for a
+# `project.type: book` render — the PDF. The HTML build is a website, so the
+# seed no-ops and every parts file restarts the counter at 1.
+#
+# The consequence is a target/reference mismatch that exists only on the web:
+# the conclusion's `\ref{pri-iron-law}` resolves correctly to 3 (Pattern 4
+# below, which replays the same global count), but the box it links to is
+# titled "Principle 1". Verified against the built Vol 1 PDF, print is correct
+# and must not be touched — so this is fixed on the HTML side only, here,
+# rather than by renumbering the part openers or rewording the conclusion.
+# ---------------------------------------------------------------------------
+
+# A principle box renders as:
+#   <div id="pri-iron-law" class="callout callout-principle" title="...">
+#   <p></p><details ...><summary><strong>Principle 1: The Iron Law…</strong></summary>
+# The title sits a short, bounded distance after the div's opening tag; the
+# window keeps a rewrite from ever reaching into the next box.
+_PRINCIPLE_DIV_RE = re.compile(r'<div id="(pri-[a-zA-Z0-9-]+)"')
+_PRINCIPLE_TITLE_RE = re.compile(r'(<strong>Principle\s+)(\d+)(\s*:)')
+_PRINCIPLE_TITLE_WINDOW = 600
+
+
+def renumber_principle_boxes(html_content: str) -> tuple[str, int, list[str]]:
+    """
+    Rewrite each principle callout's own title to its book-wide global number.
+
+    Idempotent: a box already carrying the right number is left untouched, so
+    this is safe to run over an already-processed tree. A box whose title does
+    not match the expected shape — an `.unnumbered` chapter-local principle, for
+    instance — is skipped rather than guessed at.
+    """
+    numbers = get_principle_numbers()
+    if not numbers:
+        return html_content, 0, []
+
+    unmapped: list[str] = []
+    pieces: list[str] = []
+    pos = 0
+    fixed = 0
+
+    for div in _PRINCIPLE_DIV_RE.finditer(html_content):
+        window_start = div.end()
+        window = html_content[window_start:window_start + _PRINCIPLE_TITLE_WINDOW]
+        title = _PRINCIPLE_TITLE_RE.search(window)
+        if not title:
+            # Unnumbered principle, or a shape we do not recognise. Leave it.
+            continue
+
+        number = numbers.get(div.group(1))
+        if not number:
+            unmapped.append(div.group(1))
+            continue
+        if title.group(2) == number:
+            continue  # already correct
+
+        pieces.append(html_content[pos:window_start + title.start(2)])
+        pieces.append(number)
+        pos = window_start + title.end(2)
+        fixed += 1
+
+    if not fixed:
+        return html_content, 0, unmapped
+
+    pieces.append(html_content[pos:])
+    return "".join(pieces), fixed, unmapped
+
+
+# ---------------------------------------------------------------------------
 # EPUB support
 # ---------------------------------------------------------------------------
 
@@ -661,6 +736,14 @@ def resolve_cross_references(
             return match.group(0)
 
     fixed_content = re.sub(pattern4, fix_principle_reference, fixed_content)
+
+    # Pattern 5 — the target side of Pattern 4: the principle box's own title.
+    # HTML-only defect; see renumber_principle_boxes for why.
+    fixed_content, principle_box_fixes, principle_box_unmapped = renumber_principle_boxes(
+        fixed_content
+    )
+    total_matches += principle_box_fixes
+    unmapped_refs.extend(principle_box_unmapped)
 
     remaining1 = re.findall(pattern1, fixed_content)
     remaining2 = re.findall(pattern2, fixed_content)

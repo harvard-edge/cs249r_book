@@ -134,7 +134,7 @@ def replace_digits_in_line(line: str) -> tuple[str, int]:
         protected_spans.append((m.start(), m.end()))
 
     # Cross-references: @sec-..., @fig-..., @tbl-..., @eq-..., @lst-...
-    for m in re.finditer(r'@(?:sec|fig|tbl|eq|lst)-[\w-]+', line):
+    for m in re.finditer(r'@(?:sec|fig|tbl|eq|lst|algo)-[\w-]+', line):
         protected_spans.append((m.start(), m.end()))
 
     # Citation keys: [@...] or @key

@@ -51,7 +51,8 @@ def test_flatten_vol_urls_rewrites_generated_volume_links(tmp_path: Path) -> Non
 
     subprocess.run(["bash", str(SCRIPT), str(site), "vol1"], check=True)
 
-    assert not (site / "contents" / "vol1").exists()
+    redirect_html = (site / "contents" / "vol1" / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
+    assert "http-equiv=\"refresh\"" in redirect_html
     assert (site / "data_engineering" / "data_engineering.html").exists()
     assert (site / "frontmatter" / "about.html").exists()
 

@@ -120,7 +120,7 @@ class SetupCommand(BaseCommand):
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "show", package_name],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             return result.returncode == 0
         except Exception:
@@ -178,7 +178,7 @@ class SetupCommand(BaseCommand):
                     try:
                         result = subprocess.run([
                             sys.executable, "-m", "pip", "install", "-q", pkg_spec
-                        ], capture_output=True, text=True, timeout=120)
+                        ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
                         if result.returncode == 0:
                             progress.update(task, description=f"[green]✅ {pkg_name}[/green]")
@@ -215,7 +215,7 @@ class SetupCommand(BaseCommand):
                 try:
                     result = subprocess.run([
                         sys.executable, "-m", "pip", "install", "-q", "-e", "."
-                    ], cwd=self.config.project_root, capture_output=True, text=True, timeout=120)
+                    ], cwd=self.config.project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
                     if result.returncode == 0:
                         progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
@@ -238,7 +238,7 @@ class SetupCommand(BaseCommand):
                 "--user",
                 "--name", "tinytorch",
                 "--display-name", "TinyTorch (Python 3)"
-            ], capture_output=True, text=True, timeout=60)
+            ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
 
             if result.returncode == 0:
                 self.console.print("[green]✅ Jupyter kernel 'tinytorch' registered[/green]")
@@ -304,7 +304,7 @@ class SetupCommand(BaseCommand):
                     # Check actual hardware
                     hw_check = sp.run(
                         ["sysctl", "-n", "machdep.cpu.brand_string"],
-                        capture_output=True, text=True
+                        capture_output=True, text=True, encoding="utf-8", errors="replace"
                     )
                     if "Apple" in hw_check.stdout:
                         self.console.print("[yellow]⚠️  Detected Apple Silicon but Python is running in Rosetta (x86_64)[/yellow]")
@@ -319,12 +319,12 @@ class SetupCommand(BaseCommand):
                 result = subprocess.run(
                     f'{python_exe} -m venv {venv_path}',
                     shell=True,
-                    capture_output=True, text=True
+                    capture_output=True, text=True, encoding="utf-8", errors="replace"
                 )
             else:
                 result = subprocess.run([
                     python_exe, "-m", "venv", str(venv_path)
-                ], capture_output=True, text=True)
+                ], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
             if result.returncode != 0:
                 self.console.print(f"[red]Failed to create virtual environment: {result.stderr}[/red]")
@@ -339,7 +339,7 @@ class SetupCommand(BaseCommand):
             if venv_python.exists():
                 arch_check = subprocess.run(
                     [str(venv_python), "-c", "import platform; print(platform.machine())"],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, encoding="utf-8", errors="replace"
                 )
                 if arch_check.returncode == 0:
                     venv_arch = arch_check.stdout.strip()
@@ -365,16 +365,26 @@ class SetupCommand(BaseCommand):
 
         if profile_path.exists():
             import json
-            with open(profile_path, 'r') as f:
-                existing_profile = json.load(f)
+            existing_profile = None
+            try:
+                with open(profile_path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    existing_profile = loaded
+            except (json.JSONDecodeError, IOError, UnicodeDecodeError):
+                pass
 
-            if not force:
+            if existing_profile is None:
+                # Corrupted or wrong-shape profile (interrupted write, bad
+                # merge, manual edit gone wrong): fall through and create
+                # a fresh one rather than crashing setup entirely.
+                self.console.print("[yellow]⚠️  Existing profile is unreadable, creating a new one[/yellow]")
+            elif not force:
                 # Silently use existing profile
                 self.console.print(f"[green]✅ Using existing profile[/green] [dim]({existing_profile.get('name', 'Unknown')})[/dim]")
                 return existing_profile
-
-            # Force mode - ask before overwriting
-            if not Confirm.ask("[yellow]Update your existing profile?[/yellow]"):
+            elif not Confirm.ask("[yellow]Update your existing profile?[/yellow]"):
+                # Force mode - ask before overwriting
                 self.console.print("[green]✅ Keeping existing profile[/green]")
                 return existing_profile
 
@@ -398,10 +408,22 @@ class SetupCommand(BaseCommand):
             "last_active": datetime.datetime.now().isoformat()
         }
 
-        # Save profile
+        # Save profile. Write to a temp file first and atomically replace
+        # the target so an interrupted write can't leave a corrupted
+        # profile.json in place (the exact failure mode the read-side fix
+        # above has to defend against).
         import json
-        with open(profile_path, 'w') as f:
-            json.dump(profile, f, indent=2)
+        tmp_path = f"{profile_path}.tmp"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(profile, f, indent=2)
+            os.replace(tmp_path, profile_path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
         _print_file_update(self.console, profile_path)
         self.console.print(f"✅ Profile created for {profile['name']}")
@@ -476,7 +498,7 @@ class SetupCommand(BaseCommand):
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "jupyter", "kernelspec", "list"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             return result.returncode == 0 and "tinytorch" in result.stdout
         except Exception:
@@ -528,6 +550,16 @@ class SetupCommand(BaseCommand):
         if is_logged_in():
              self.console.print("\n[green]✅ You are already connected to the TinyTorch community.[/green]")
              return
+
+        # Unlike install.sh (which honors this for its own prompts), tito setup
+        # never checked this env var, so a fully unattended run (CI, scripted
+        # setup, no stdin) crashed here with "EOF when reading a line" instead
+        # of skipping the prompt like every other TINYTORCH_NON_INTERACTIVE=1
+        # invocation is supposed to.
+        if os.environ.get("TINYTORCH_NON_INTERACTIVE"):
+            self.console.print("\n[dim]Skipping community prompt (TINYTORCH_NON_INTERACTIVE set). "
+                                "You can join anytime with: tito community login[/dim]")
+            return
 
         self.console.print()
         self.console.print(Panel.fit(
@@ -658,8 +690,9 @@ class SetupCommand(BaseCommand):
                 self.console.print("[green]✅ Setup completed successfully![/green]")
                 self.console.print("💡 Try: [bold]tito module start 01[/bold]")
 
-            # Prompt to join community
-            self.prompt_community_registration()
+            # Prompt to join community only if skip_profile wasn't passed
+            if not args.skip_profile:
+                self.prompt_community_registration()
 
             return 0
 

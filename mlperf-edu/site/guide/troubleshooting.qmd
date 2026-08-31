@@ -1,0 +1,133 @@
+---
+title: "Troubleshooting"
+---
+
+Start with the narrowest command that reproduces the problem. `doctor` inspects
+the environment without running a benchmark, while `health` runs every
+functional path. Most setup problems should begin with `doctor`.
+
+```bash
+uv run mlperf doctor
+uv run mlperf doctor --workload image-classification --profile max
+```
+
+## The Command Is Missing or Uses the Wrong Python
+
+Run commands from the `mlperf-edu` directory through the locked environment.
+
+```bash
+cd cs249r_book/mlperf-edu
+uv sync --locked
+uv run --project . python -c 'import sys; print(sys.executable)'
+uv run --project . mlperf doctor
+```
+
+Avoid invoking a system-wide `pytest`, `python`, or `mlperf` executable for this
+checkout. Contributors should use `uv run python -m pytest` after installing
+the development extra.
+
+## A Download Is Missing or Incomplete
+
+Preview the assets before downloading, then inspect the cache.
+
+```bash
+uv run mlperf fetch --workload WORKLOAD --profile max --dry-run
+uv run mlperf fetch --workload WORKLOAD --profile max
+uv run mlperf cache list
+uv run mlperf info --dataset DATASET
+```
+
+The fetcher verifies pinned evidence when the source provides it. Terms-gated
+datasets may require a manual download and an environment-specific handoff.
+Never replace a declared quality dataset with synthetic data. The runner fails
+closed because a synthetic substitute cannot support the same claim.
+
+## CUDA or MPS Is Unavailable
+
+The default `--device auto` policy selects CUDA, then MPS, then CPU. An explicit
+unavailable device fails before execution. Inspect the environment and retry on
+CPU when the workload supports it.
+
+```bash
+uv run mlperf doctor --workload WORKLOAD --profile PROFILE
+uv run mlperf run --workload WORKLOAD --profile PROFILE --device cpu
+```
+
+The report records both the requested and executed device. A CPU fallback may
+change runtime, but it does not silently change the workload quality contract.
+
+## The Target Was Missed
+
+A target miss is not the same as a failed run. Check that the report shows
+completed execution, the declared evaluation set, the expected metric and
+target, and verified provenance. If those conditions hold, preserve the miss
+as evidence. Do not tune the threshold to match the result.
+
+The [readiness page](../readiness.qmd) lists four current target gaps that are
+being investigated without changing their published reproduction points.
+
+## Provenance Verification Failed
+
+Verify the manifest from the unchanged result directory.
+
+```bash
+uv run mlperf verify path/to/result.provd.json
+```
+
+A changed model, dataset, report, or referenced file invalidates the recorded
+hash. Restore the exact bytes or rerun the benchmark. Do not edit a manifest to
+make verification pass.
+
+## Packaging Was Refused
+
+`mlperf package` intentionally refuses an archive when it would include
+fetch-only, terms-gated, or release-review dataset bytes. Submit the verified
+result directory or manifest under the course policy instead. The portable
+packaging exercise uses the dataset-free `image-classification_min` artifact in
+[Lab 5](../labs/05-assignment-package.qmd) and makes no quality claim.
+
+## A Long Run Was Interrupted
+
+The CLI does not yet provide a general `run --resume` option. Some legacy or
+workload-specific runners preserve their own intermediate state, but that does
+not create suite-wide recovery semantics. Before a long run, use `fetch`, run a
+workload-specific `doctor` preflight, choose an explicit output directory, and
+read the benchmark page for its current recovery boundary.
+
+Do not add `--resume` to a command unless `uv run mlperf run --help` lists it.
+The [local execution plan](https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu/docs/internal/STATUS.md)
+tracks general resumability as unfinished implementation work.
+
+## MiniGo Cannot Start Locally
+
+Reinforcement learning is a known local-execution blocker. Its functional `min`
+path runs, but the quality-bearing `max` path needs a reviewed CUDA and
+TensorFlow 1.x runtime on an NVIDIA system, which no laptop supplies. Inspect
+the machine-readable handoff instead of treating an ordinary laptop failure as
+a new regression.
+
+```bash
+uv run mlperf doctor --workload reinforcement-learning --profile max --format json
+```
+
+Recommendation is no longer in this category. It moved from DLRM on Criteo
+Terabyte to the MLPerf Training v0.5 NCF contract on MovieLens-20M and now
+trains locally in roughly half an hour. If it fails to start, treat that as a
+genuine problem rather than an expected blocker.
+
+## Collect a Diagnostic Bundle for a TA
+
+Preserve the failing command, its terminal output, the selected workload, and
+the environment summary. Do not include private credentials or manually
+licensed dataset bytes.
+
+```bash
+uv run mlperf doctor --workload WORKLOAD --profile PROFILE --format json \
+  > doctor.json
+uv run mlperf run --workload WORKLOAD --profile PROFILE --dry-run \
+  > selection.txt
+```
+
+Include the generated report and `.provd.json` manifest if execution reached
+the artifact stage. These files usually contain enough detail to distinguish an
+environment failure from a quality miss.

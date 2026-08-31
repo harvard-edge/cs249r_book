@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 
 
-RAW_REF_RE = re.compile(r"\?\?|@(?:fig|sec|tbl|eq)-[A-Za-z0-9_:-]+|\[@[^\]]+\]")
+RAW_REF_RE = re.compile(r"\?\?|@(?:fig|sec|tbl|eq|lst|algo)-[A-Za-z0-9_:-]+|\[@[^\]]+\]")
 RAW_CITE_RE = re.compile(r"\\cite[a-z]*\{|\(\?\?\)|\[\?\]")
 BROKEN_XREF_RE = re.compile(r"\?\?+|\b(?:Figure|Table|Section|Equation)\s+\?\?+", re.I)
 

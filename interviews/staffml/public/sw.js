@@ -242,3 +242,185 @@ self.addEventListener("message", (event) => {
   self.__VAULT_API_ORIGIN = origin;
   idbSet("vault_api_origin", origin);
 });
+
+/* ==========================================================================
+ * App-shell caching — PWA offline support for the site itself.
+ *
+ * Everything above this line is the vault-API cache (cross-origin requests
+ * to staffml-vault.*); everything below handles SAME-ORIGIN requests within
+ * this worker's scope, so the two sections never compete for a request:
+ * the vault fetch handler exits early unless the URL starts with the vault
+ * API origin, and this one exits early unless the URL is same-origin and
+ * in-scope.
+ *
+ * Strategy, tuned for a frequently-deployed static export:
+ *   - Navigations: network-first. A deploy is picked up immediately; the
+ *     cache only serves offline revisits, with an inline offline page as
+ *     the last resort.
+ *   - Static assets (script/style/image/font): stale-while-revalidate.
+ *     `_next/static/*` is content-hashed so staleness is impossible there;
+ *     for public/ assets one deploy of staleness is acceptable.
+ *   - Everything else (corpus JSON chunks, XHR/fetch) goes to the network —
+ *     data freshness is owned by the vault section and the app's own
+ *     release-drift handling (VersionDriftToast), not by this cache.
+ *
+ * Cache names are disjoint from CACHE_PREFIX ("staffml-vault-") so the
+ * vault section's release-keyed pruning and this section's version pruning
+ * can never delete each other's caches.
+ * ========================================================================== */
+
+const APP_VERSION = "v1";
+const APP_CACHE_PREFIX = "staffml-app-";
+const APP_PAGE_CACHE = `${APP_CACHE_PREFIX}${APP_VERSION}-pages`;
+const APP_ASSET_CACHE = `${APP_CACHE_PREFIX}${APP_VERSION}-assets`;
+const APP_ASSET_CACHE_LIMIT = 300;
+
+// Scope pathname, e.g. "/" locally or "/staffml/" in production. Same-origin
+// requests OUTSIDE the scope (the surrounding Quarto book's assets) are left
+// alone — controlled pages can still reference them, but caching another
+// site's assets under our quota is not this worker's job.
+const APP_SCOPE_PATH = new URL(self.registration.scope).pathname;
+
+const APP_OFFLINE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline — StaffML</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; margin: 0; background: #ffffff; color: #111117;
+    text-align: center; padding: 1rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111117; color: #e6e6eb; }
+  }
+  svg { width: 72px; height: 72px; }
+  h1 { margin: 0.75rem 0 0.25rem; font-size: 1.4rem; }
+  p { color: #888; max-width: 30rem; }
+  button {
+    margin-top: 1rem; padding: 0.5rem 1.5rem; font-size: 1rem;
+    background: #3b82f6; color: #fff; border: none; border-radius: 8px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 32 32" aria-hidden="true">
+    <rect width="32" height="32" rx="4" fill="#000"/>
+    <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="16" cy="9" r="2.5" fill="#3b82f6"/>
+    <circle cx="16" cy="9" r="1" fill="#000"/>
+  </svg>
+  <h1>You're offline</h1>
+  <p>This StaffML page isn't cached yet. Pages you've visited before are
+  available offline — reconnect to load this one.</p>
+  <button onclick="location.reload()">Try again</button>
+</main>
+</body>
+</html>`;
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(APP_ASSET_CACHE).then((cache) =>
+      cache.addAll([
+        `${APP_SCOPE_PATH}manifest.webmanifest`,
+        `${APP_SCOPE_PATH}icons/icon-192.png`,
+        `${APP_SCOPE_PATH}icons/icon-512.png`,
+      ]),
+    ),
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(
+        names
+          .filter(
+            (n) =>
+              n.startsWith(APP_CACHE_PREFIX) &&
+              n !== APP_PAGE_CACHE &&
+              n !== APP_ASSET_CACHE,
+          )
+          .map((n) => caches.delete(n)),
+      );
+      if (self.registration.navigationPreload) {
+        await self.registration.navigationPreload.enable();
+      }
+    })(),
+  );
+});
+
+async function appTrimCache(name, limit) {
+  const cache = await caches.open(name);
+  const keys = await cache.keys();
+  if (keys.length <= limit) return;
+  // Cache keys are ordered oldest-first; drop from the front.
+  await Promise.all(keys.slice(0, keys.length - limit).map((k) => cache.delete(k)));
+}
+
+async function appNetworkFirstPage(event) {
+  const cache = await caches.open(APP_PAGE_CACHE);
+  try {
+    const res = (await event.preloadResponse) || (await fetch(event.request));
+    // Keep the response promise pending until the page is durably cached.
+    // respondWith() extends the fetch event through this async function.
+    if (res && res.ok) await cache.put(event.request, res.clone());
+    return res;
+  } catch {
+    const cached = await cache.match(event.request);
+    if (cached) return cached;
+    return new Response(APP_OFFLINE_HTML, {
+      status: 503,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+}
+
+async function appStaleWhileRevalidate(event) {
+  const request = event.request;
+  const cache = await caches.open(APP_ASSET_CACHE);
+  const cached = await cache.match(request);
+  const network = fetch(request)
+    .then(async (res) => {
+      if (res && res.ok) {
+        await cache.put(request, res.clone());
+        await appTrimCache(APP_ASSET_CACHE, APP_ASSET_CACHE_LIMIT);
+      }
+      return res;
+    })
+    .catch(() => undefined);
+
+  // A cached response can return immediately, while waitUntil keeps the
+  // worker alive long enough to finish revalidation and cache maintenance.
+  if (cached) {
+    event.waitUntil(network);
+    return cached;
+  }
+
+  return network.then((r) => r || Response.error());
+}
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return; // vault section's turf
+  if (!url.pathname.startsWith(APP_SCOPE_PATH)) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(appNetworkFirstPage(event));
+    return;
+  }
+
+  const dest = request.destination;
+  if (dest === "script" || dest === "style" || dest === "image" || dest === "font") {
+    event.respondWith(appStaleWhileRevalidate(event));
+  }
+});

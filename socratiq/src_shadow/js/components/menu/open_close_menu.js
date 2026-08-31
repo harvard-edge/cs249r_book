@@ -144,9 +144,23 @@ function slideMenuClosed(menu, checkbox, button) {
 }
 
 export function shortcutKeys(shadowEle){
+  const isModifierSlash = (e) =>
+    (e.ctrlKey || e.metaKey) && e.key === '/';
+  const isActiveWidget = () =>
+    shadowEle?.host?.isConnected &&
+    document.querySelector('#widget-chat-container')?.shadowRoot === shadowEle;
+
+  // Quarto handles plain `/` search on keyup without checking modifiers.
+  // Stop that bubble-phase handler only while SocratiQ owns Ctrl/Cmd + `/`.
+  document.addEventListener('keyup', (e) => {
+    if (isActiveWidget() && isModifierSlash(e)) {
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
   document.addEventListener('keydown', (e) => {
     // Check for Ctrl/Cmd + /
-    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    if (isActiveWidget() && isModifierSlash(e)) {
       e.preventDefault(); // Prevent default browser behavior
       menu_slide(shadowEle);
       

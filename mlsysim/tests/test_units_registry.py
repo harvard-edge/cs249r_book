@@ -15,6 +15,7 @@ from mlsysim.core.units import (
     Kparam,
     L,
     MB,
+    MiB,
     Mparam,
     MJ,
     MS,
@@ -221,7 +222,7 @@ def test_serving_profile_anchors():
 
     profile = ReferenceStats.ServingProfiles
 
-    assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert profile.H100VendorMemoryBudget.to(GiB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
     assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
     assert not hasattr(profile, "PrecisionDividendGpuMemoryBudget")

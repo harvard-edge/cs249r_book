@@ -167,7 +167,7 @@ class SubmissionHandler:
         """
         token = self.auth_handler.get_token()
         if not token:
-            self.console.print("❌ [bold red]You are not logged in.[/bold red] Please run 'tito login' first.")
+            self.console.print("❌ [bold red]You are not logged in.[/bold red] Please run 'tito community login' first.")
             return SyncResult(ok=False, error="not logged in")
 
         if not is_retry:
@@ -252,20 +252,22 @@ class SubmissionHandler:
                     return self.sync_progress(total_modules=total_modules, is_retry=True)
                 else:
                     self.console.print("❌ [bold red]Token refresh failed.[/bold red]")
-                    self.console.print("   Run 'tito login --force' to refresh.")
+                    self.console.print("   Run 'tito community login --force' to refresh.")
                     return SyncResult(ok=False, error="token refresh failed")
             elif e.code == 401 and is_retry:
                 self.console.print("❌ [bold red]Unauthorized.[/bold red] Your session may have expired.")
-                self.console.print("   Run 'tito login --force' to refresh.")
+                self.console.print("   Run 'tito community login --force' to refresh.")
                 return SyncResult(ok=False, error="unauthorized after refresh")
             else:
                 self.console.print(f"❌ [red]Upload failed (HTTP {e.code}): {e.reason}[/red]")
+                error_body = ""
                 try: # Attempt to read error body if available
                     error_body = e.read().decode('utf-8')
                     error_json = json.loads(error_body)
                     self.console.print(f"   [dim red]Error details: {error_json.get('error', 'No message provided.')}[/dim red]")
                 except (json.JSONDecodeError, Exception):
-                    self.console.print(f"   [dim red]Error details: {error_body[:200]}...[/dim red]")
+                    if error_body:
+                        self.console.print(f"   [dim red]Error details: {error_body[:200]}...[/dim red]")
             return SyncResult(ok=False, error=f"HTTP {e.code}: {e.reason}")
         except urllib.error.URLError as e:
             self.console.print(f"❌ [red]Network error:[/red] Could not connect to the server.")
@@ -326,7 +328,7 @@ def auto_sync_after_completion(config: CLIConfig, console: Console, *,
         return None
 
     if not auth.is_logged_in():
-        console.print("[dim]💡 Run 'tito login' to sync your progress to the TinyTorch website.[/dim]")
+        console.print("[dim]💡 Run 'tito community login' to sync your progress to the TinyTorch website.[/dim]")
         return None
 
     if runtime.is_interactive():

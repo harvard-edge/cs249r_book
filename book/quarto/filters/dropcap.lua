@@ -1,16 +1,23 @@
 -- =============================================================================
 -- DROP CAP FILTER
 -- =============================================================================
--- Automatically applies \lettrine{X}{rest} to the first paragraph of the
--- first numbered section in each chapter. PDF/LaTeX output only.
+-- Automatically applies \lettrine{X}{rest} to a chapter's selected opening
+-- paragraph. PDF/LaTeX output only.
 --
 -- Logic:
 --   1. Process document in order using Pandoc's Blocks filter
---   2. For each chapter (H1), find the first numbered H2, then the next Para
+--   2. For each chapter (H1), select either its opening prose or the first
+--      paragraph of its first numbered H2
 --   3. Apply \lettrine to that paragraph's first word
 --   4. One drop cap per chapter
 --
--- Opt-out: Set `dropcap: false` in a chapter's YAML frontmatter to skip it.
+-- Modes:
+--   dropcap: numbered-section  (default; first numbered H2)
+--   dropcap: chapter-opening   (first eligible paragraph after H1)
+--   dropcap: false             (disabled)
+-- A chapter H1 may override the document default with
+-- `dropcap="chapter-opening"`; unlike per-file YAML, H1 attributes survive
+-- Quarto's full-book assembly.
 --
 -- This keeps QMD files clean — no manual \lettrine calls needed.
 -- =============================================================================
@@ -41,8 +48,7 @@ end
 
 debug("Filter active for format")
 
--- Frontmatter flag: default true, set `dropcap: false` to opt out
-local dropcap_enabled = true
+local dropcap_mode = "numbered-section"
 
 -- Check if a header has the .unnumbered class
 local function is_unnumbered(el)
@@ -54,6 +60,16 @@ local function is_unnumbered(el)
     end
   end
   return false
+end
+
+local function chapter_mode(header)
+  local value = header.attributes and header.attributes.dropcap
+  if value == "chapter-opening" or value == "numbered-section" then
+    return value
+  elseif value == "false" then
+    return "disabled"
+  end
+  return dropcap_mode
 end
 
 -- Apply lettrine to a paragraph, returns modified Para or nil if not applicable
@@ -127,23 +143,27 @@ end
 -- Read frontmatter metadata
 local function read_meta(meta)
   if meta.dropcap ~= nil then
-    if type(meta.dropcap) == "boolean" then
-      dropcap_enabled = meta.dropcap
-    elseif meta.dropcap == false then
-      dropcap_enabled = false
+    local value = pandoc.utils.stringify(meta.dropcap)
+    if value == "false" then
+      dropcap_mode = "disabled"
+    elseif value == "chapter-opening" or value == "numbered-section" then
+      dropcap_mode = value
+    elseif value == "true" then
+      dropcap_mode = "numbered-section"
     else
-      local val = pandoc.utils.stringify(meta.dropcap)
-      dropcap_enabled = val ~= "false"
+      debug("Unknown dropcap mode '" .. value .. "'; using numbered-section")
     end
   end
-  if not dropcap_enabled then
+  if dropcap_mode == "disabled" then
     debug("Dropcap disabled via frontmatter (dropcap: false)")
+  else
+    debug("Dropcap mode: " .. dropcap_mode)
   end
 end
 
 -- Main filter: process all blocks in document order
 local function process_blocks(blocks)
-  if not dropcap_enabled then
+  if dropcap_mode == "disabled" then
     return blocks
   end
   local new_blocks = pandoc.List()
@@ -158,28 +178,41 @@ local function process_blocks(blocks)
         -- New chapter: reset state
         chapter_name = pandoc.utils.stringify(block.content)
         debug("Found chapter: " .. chapter_name)
-        state = "looking_for_numbered_h2"
-
-      elseif block.level == 2 and state == "looking_for_numbered_h2" then
-        local header_text = pandoc.utils.stringify(block.content)
-        if is_unnumbered(block) then
-          debug("Found H2 (unnumbered): " .. header_text .. " - skipping")
-        else
-          debug("Found H2 (numbered): " .. header_text .. " - will apply dropcap to next Para")
+        local mode = chapter_mode(block)
+        debug("Chapter dropcap mode: " .. mode)
+        if mode == "chapter-opening" then
           state = "looking_for_para"
+        elseif mode == "disabled" then
+          state = "done"
+        else
+          state = "looking_for_numbered_h2"
+        end
+
+      elseif block.level == 2 then
+        if state == "looking_for_para" then
+          -- A rejected candidate must not leak into a later section.
+          debug("Reached next H2 before applying dropcap - stopping search")
+          state = "done"
+        elseif state == "looking_for_numbered_h2" then
+          local header_text = pandoc.utils.stringify(block.content)
+          if is_unnumbered(block) then
+            debug("Found H2 (unnumbered): " .. header_text .. " - skipping")
+          else
+            debug("Found H2 (numbered): " .. header_text .. " - will apply dropcap to next Para")
+            state = "looking_for_para"
+          end
         end
       end
 
     elseif block.t == "Para" and state == "looking_for_para" then
-      debug("Found Para after numbered H2, attempting dropcap...")
+      debug("Found candidate Para, attempting dropcap...")
       local result = apply_lettrine(block)
       if result then
         modified_block = result
         state = "done"
         debug("Dropcap applied for chapter: " .. chapter_name)
       else
-        debug("Could not apply dropcap to this Para, trying next...")
-        -- Keep looking for a suitable paragraph
+        debug("Could not apply dropcap to this Para; searching within the same section...")
       end
     end
 

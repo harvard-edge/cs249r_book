@@ -408,9 +408,11 @@ class TensorDataset(Dataset):
         TODO: Return the sample at the given index
 
         APPROACH:
-        1. Validate index is within bounds
-        2. Extract data at index from each tensor
-        3. Wrap each slice in a Tensor and return as tuple
+        1. Normalize a negative index by adding len(self), so dataset[-1]
+           means the last sample, as it would for a list
+        2. Validate the normalized index is within bounds
+        3. Extract data at index from each tensor
+        4. Wrap each slice in a Tensor and return as tuple
 
         Args:
             idx: Sample index
@@ -424,14 +426,22 @@ class TensorDataset(Dataset):
         >>> dataset = TensorDataset(features, labels)
         >>> sample = dataset[1]
         >>> # Returns: (Tensor([3, 4]), Tensor(1))
+        >>> last = dataset[-1]        # negative indices count from the end
+        >>> # Returns: (Tensor([5, 6]), Tensor(0))
 
         HINTS:
-        - Check idx < len(self) to prevent out-of-bounds access
+        - Add len(self) to a negative idx first, then bounds-check the result
+        - Check 0 <= idx < len(self) to prevent out-of-bounds access
+        - Report the index the caller passed in the error, not the normalized one
         - Use generator expression with tuple() for clean syntax
         """
         ### BEGIN SOLUTION
+        original_idx = idx
+        if idx < 0:
+            idx += len(self)
+
         if idx >= len(self) or idx < 0:
-            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+            raise IndexError(f"Index {original_idx} out of range for dataset of size {len(self)}")
 
         # Return tuple of slices from all tensors
         return tuple(Tensor(tensor.data[idx]) for tensor in self.tensors)

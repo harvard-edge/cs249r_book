@@ -145,6 +145,11 @@ def _approx_equal(a: float, b: float) -> bool:
 
 def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
     lines = path.read_text(encoding="utf-8").splitlines()
+    # Most chapters contain no A/B=C prose contract. Avoid executing every
+    # notebook cell (and importing unrelated plotting/data dependencies) when
+    # there is nothing for this narrowly scoped check to validate.
+    if not any(_find_div_equations(line) for line in lines):
+        return []
     try:
         ns = _exec_python_cells(lines)
     except Exception as exc:

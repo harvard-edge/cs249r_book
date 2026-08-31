@@ -248,7 +248,7 @@ class LocalAuthServer(http.server.HTTPServer):
 def _is_wsl() -> bool:
     """Check if running in WSL environment."""
     try:
-        with open('/proc/version', 'r') as f:
+        with open('/proc/version', 'r', encoding='utf-8') as f:
             return 'microsoft' in f.read().lower()
     except:
         return False
@@ -262,7 +262,7 @@ def _get_callback_host() -> str:
             result = subprocess.run(
                 ['hostname', '-I'],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=2
             )
             if result.returncode == 0:

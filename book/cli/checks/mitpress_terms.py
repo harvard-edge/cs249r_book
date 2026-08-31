@@ -75,6 +75,9 @@ def _mask(line: str) -> str:
     """Blank (with equal-length spaces) spans where a term is verbatim."""
     def blank(m):
         return " " * len(m.group())
+    # "Limited data set" is the defined HIPAA term in 45 C.F.R. § 164.514(e),
+    # so it must not be normalized to the general-purpose spelling "dataset."
+    line = re.sub(r"\blimited data sets?\b", blank, line)
     line = re.sub(r"`[^`]*`", blank, line)            # inline code
     line = re.sub(r"\$\$?[^$]*\$\$?", blank, line)    # math
     line = re.sub(r"\]\([^)]*\)", blank, line)        # link/image targets

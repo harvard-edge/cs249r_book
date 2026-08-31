@@ -21,18 +21,28 @@ PDF_BY_VOLUME = {
     "vol2": "Machine-Learning-Systems-Vol2.pdf",
 }
 
-XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|alg)"
+XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"
 RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
+# The separator must not cross a blank line. A real "Table 8.2.1" is a single
+# reference and at worst wraps once; \s+ also spanned paragraph breaks, so a
+# running header ending in "... Case Study" followed by the next subsection
+# number ("9.10.1") was reported as a malformed object number. (2026-08-16)
 MALFORMED_OBJECT_NUMBER = re.compile(
-    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|War Story|"
-    r"Systems Perspective)\s+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
+    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|Case Study|"
+    r"Systems Perspective)(?:[ \t]|\n(?!\s*\n))+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
+)
+CUSTOM_CALLOUT_NUMBER = re.compile(
+    r"\b(?:Definition|Example|Lighthouse|Systems Perspective|napkin math|"
+    r"Theorem|Checkpoint|Case Study|War Story)\s+(\d+)\.\d+\b",
+    re.I,
 )
 TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")
 NUMBERING_ISSUE_CODES = {
     "malformed-object-number",
     "duplicate-table-number",
+    "appendix-callout-number",
 }
 TABLE_PROSE_MIN_GAP_PT = 6.0
 PYTHON_LEAK = re.compile(
@@ -43,7 +53,7 @@ PYTHON_LEAK = re.compile(
 )
 LAYOUT_OFFSET_LEAK = re.compile(r"\[(?:[+-]?\d+(?:\.\d+)?)mm\]")
 QUARTO_XREF_WARN = re.compile(
-    r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst)-[\w.-]+)"
+    r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst|algo)-[\w.-]+)"
 )
 OVERFULL_HBOX = re.compile(
     r"Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\)"
@@ -327,6 +337,32 @@ def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
                 count=count,
             )
         )
+
+    # Volume chapters are numbered 1--16 (Volume I) or 1--17 (Volume II).
+    # Numeric custom-callout prefixes above those ranges mean an appendix was
+    # counted as another chapter instead of taking its visible letter prefix.
+    # This catches the combined-render regression that produced labels such as
+    # "napkin math 18.1" beside an Appendix B section heading.
+    volume_match = re.search(r"Vol(?:ume)?[-_ ]?([12])", pdf_path.name, re.I)
+    max_chapter = {"1": 16, "2": 17}.get(volume_match.group(1)) if volume_match else None
+    if max_chapter is not None:
+        leaked_callouts = [
+            match.group(0)
+            for match in CUSTOM_CALLOUT_NUMBER.finditer(body)
+            if int(match.group(1)) > max_chapter
+        ]
+        if leaked_callouts:
+            examples = "; ".join(dict.fromkeys(leaked_callouts[:3]))
+            issues.append(
+                PdfIssue(
+                    code="appendix-callout-number",
+                    message=(
+                        "Appendix custom callouts use numeric chapter prefixes instead "
+                        f"of appendix letters. Examples: {examples}"
+                    ),
+                    count=len(leaked_callouts),
+                )
+            )
 
     # A renderer/counter regression can make several distinct in-callout tables
     # reuse one number. Repeated occurrences of the same number are fine when the
@@ -617,6 +653,87 @@ def scan_pdf_numbering(pdf_path: Path) -> list[PdfIssue]:
     ]
 
 
+def scan_purpose_overflow(pdf_path: Path, volume: str, repo_root: Path) -> list[PdfIssue]:
+    """Check that every chapter's Purpose fits on its opener page in the built PDF."""
+    if not pdf_path.is_file():
+        return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
+    if shutil.which("pdftotext") is None:
+        return [
+            PdfIssue(
+                code="pdftotext-missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+            )
+        ]
+
+    try:
+        out = subprocess.run(["pdftotext", str(pdf_path), "-"], capture_output=True, text=True, check=True).stdout
+        pages = out.split("\f")
+    except Exception as e:
+        return [PdfIssue(code="pdftotext-error", message=f"Failed to extract PDF text: {e}")]
+
+    def _norm(s: str) -> str:
+        s = re.sub(r'`\{python\}[^`]*`', '', s)
+        s = re.sub(r'[‘’“”`]', "'", s)
+        s = re.sub(r'[\\*_$\[\]{}#@|]', '', s)
+        s = re.sub(r'[—–-]', ' ', s)
+        return re.sub(r'\s+', ' ', s).strip()
+
+    def _purpose_bits(qmd_path: Path):
+        try:
+            t = qmd_path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        m = re.search(r'## Purpose.*?\n(.*?)(?:::: \{\.content-visible|::: \{\.callout-learning|\n## )', t, re.S)
+        if not m:
+            return None
+        paras = [p.strip() for p in m.group(1).split("\n\n") if p.strip()]
+        hook = next((p for p in paras if p.startswith("_") and p.rstrip().endswith("_")), None)
+        prose = [p for p in paras if not p.startswith(("\\", "_", ":"))]
+        if not hook or not prose:
+            return None
+        return _norm(hook).split(), _norm(prose[-1]).split()
+
+    def _find_page(pages_list, words, head=True):
+        def squash(s):
+            return re.sub(r'\s+', ' ', re.sub(r"[‘’“”`—–-]", lambda m: "'" if m.group()[0] in "‘’“”`" else ' ', s)).strip().lower()
+        sp = [squash(pg) for pg in pages_list]
+        for n in (7, 6, 5, 4):
+            anchor = " ".join(words[:n] if head else words[-n:])
+            a = squash(anchor)
+            if not a:
+                continue
+            for i, pg in enumerate(sp):
+                if a in pg:
+                    return i + 1
+        return None
+
+    issues: list[PdfIssue] = []
+    contents_dir = repo_root / "book" / "quarto" / "contents" / volume
+    if not contents_dir.exists():
+        return issues
+
+    for qmd in sorted(contents_dir.glob("*/*.qmd")):
+        if qmd.name.startswith(("appendix_", "_")):
+            continue
+        bits = _purpose_bits(qmd)
+        if not bits:
+            continue
+        hook_words, para_words = bits
+        sp = _find_page(pages, hook_words, head=True)
+        ep = _find_page(pages, para_words, head=False)
+        if sp is None or ep is None:
+            continue
+        if ep > sp:
+            issues.append(
+                PdfIssue(
+                    code="purpose-overflow",
+                    message=f"{qmd.name}: Purpose starts p{sp}, ends p{ep} ({ep - sp} page overflow)",
+                    severity="error",
+                )
+            )
+    return issues
+
+
 def scan_margin_geometry_summary(pdf_path: Path):
     """Return the Binder-native margin geometry summary, or ``None``.
 
@@ -659,6 +776,11 @@ def verify_volume_pdf(
         if geom_summary is not None
         else None
     )
+    edge_overflows = (
+        len(geom_summary.page_edge_overflows)
+        if geom_summary is not None
+        else None
+    )
 
     checks = [
         PdfCheckItem("artifact", "PDF artifact exists", pdf_path.is_file()),
@@ -694,6 +816,11 @@ def verify_volume_pdf(
             not any(i.code == "duplicate-table-number" for i in issues),
         ),
         PdfCheckItem(
+            "appendix-callout-number",
+            "Appendix custom callouts use letter prefixes",
+            not any(i.code == "appendix-callout-number" for i in issues),
+        ),
+        PdfCheckItem(
             "table-prose-crowding",
             "No cramped text immediately after rendered table rules",
             not any(i.code == "table-prose-crowding" for i in issues),
@@ -726,6 +853,17 @@ def verify_volume_pdf(
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
             skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "page-edge-overflow",
+            (
+                f"No rendered content crosses the physical trim boundary "
+                f"({edge_overflows} violation(s))"
+                if edge_overflows is not None
+                else "Physical trim-boundary scan (PyMuPDF unavailable)"
+            ),
+            edge_overflows is None or edge_overflows == 0,
+            skipped=edge_overflows is None,
         ),
         PdfCheckItem(
             "margin-geometry",

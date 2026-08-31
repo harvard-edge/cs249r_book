@@ -1935,7 +1935,15 @@ class GELUBackward(Function):
             # GELU derivative using the sigmoid approximation (matches forward):
             # forward: gelu(x) = x * sigmoid(1.702 * x)
             # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
-            sig = 1.0 / (1.0 + np.exp(-1.702 * x))
+            # Numerically stable sigmoid (matches activations.Sigmoid.forward): each
+            # branch keeps its exponent <= 0, so large |x| never overflows np.exp.
+            z = 1.702 * x
+            with np.errstate(over="ignore", invalid="ignore"):
+                sig = np.where(
+                    z >= 0,
+                    1.0 / (1.0 + np.exp(-z)),
+                    np.exp(z) / (1.0 + np.exp(z)),
+                )
             gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
 
             return (grad_output * gelu_grad,)
@@ -2460,10 +2468,15 @@ def enable_autograd(quiet=False):
     # Store original operations
     # These are guaranteed to exist from Module 01 (Tensor class)
     _original_add = Tensor.__add__
+    _original_radd = Tensor.__radd__
     _original_sub = Tensor.__sub__
+    _original_rsub = Tensor.__rsub__
     _original_mul = Tensor.__mul__
+    _original_rmul = Tensor.__rmul__
     _original_div = Tensor.__truediv__
+    _original_rdiv = Tensor.__rtruediv__
     _original_getitem = Tensor.__getitem__
+    _original_sum = Tensor.sum
 
     # These methods are also guaranteed from Module 01 - trust Single Tensor Class
     _original_matmul = Tensor.matmul
@@ -2500,25 +2513,40 @@ def enable_autograd(quiet=False):
         # Ensure self has gradient attributes
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_add's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_add(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = AddBackward(self, other)
+            result._grad_fn = AddBackward(self, other_tensor)
 
         return result
 
     def tracked_radd(self, other):
-        """Scalar-left addition with gradient tracking."""
-        return tracked_add(self, other)
+        """
+        Scalar-left addition with gradient tracking.
+
+        Delegates to the original __radd__ from Module 01 (which itself
+        calls self.__add__(other)) rather than calling tracked_add
+        directly, so Module 01's own __radd__ source actually executes.
+        Addition is commutative, so this produces the same result either
+        way, self.__add__ resolves to tracked_add regardless, since
+        that's the currently-installed __add__ by the time this runs.
+        """
+        _ensure_grad_attrs(self)
+        return _original_radd(self, other)
 
     def tracked_mul(self, other):
         """
@@ -2546,8 +2574,14 @@ def enable_autograd(quiet=False):
         return result
 
     def tracked_rmul(self, other):
-        """Scalar-left multiplication with gradient tracking."""
-        return tracked_mul(self, other)
+        """
+        Scalar-left multiplication with gradient tracking.
+
+        Delegates to the original __rmul__ from Module 01 (which itself
+        calls self.__mul__(other)), same reasoning as tracked_radd above.
+        """
+        _ensure_grad_attrs(self)
+        return _original_rmul(self, other)
 
     def tracked_matmul(self, other):
         """
@@ -2620,27 +2654,55 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_sub's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_sub(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = SubBackward(self, other)
+            result._grad_fn = SubBackward(self, other_tensor)
 
         return result
 
     def tracked_rsub(self, other):
-        """Scalar-left subtraction with gradient tracking."""
+        """
+        Scalar-left subtraction with gradient tracking.
+
+        Unlike __radd__/__rmul__, __rsub__ computes a genuinely different
+        formula (other - self, not self - other), so it can't just
+        forward to tracked_sub without ever running Module 01's actual
+        __rsub__ body. Calls the original directly (with other in
+        whatever form the caller passed, so both its Tensor and
+        non-Tensor branches stay reachable) to get the value, then
+        attaches gradient tracking the same way tracked_sub(other, self)
+        already did.
+        """
+        _ensure_grad_attrs(self)
+
+        # Call original __rsub__ from Module 01: computes other - self
+        result = _original_rsub(self, other)
+        _ensure_grad_attrs(result)
+
         if not isinstance(other, Tensor):
             other = Tensor(other)
-        return tracked_sub(other, self)
+        _ensure_grad_attrs(other)
+
+        if _get_requires_grad(self) or _get_requires_grad(other):
+            result.requires_grad = True
+            result._grad_fn = SubBackward(other, self)
+
+        return result
 
     def tracked_div(self, other):
         """
@@ -2651,27 +2713,53 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_div's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_div(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = DivBackward(self, other)
+            result._grad_fn = DivBackward(self, other_tensor)
 
         return result
 
     def tracked_rdiv(self, other):
-        """Scalar-left division with gradient tracking."""
+        """
+        Scalar-left division with gradient tracking.
+
+        Same reasoning as tracked_rsub: __rtruediv__ computes a
+        genuinely different formula (other / self, not self / other),
+        so it calls the original directly to get the value (keeping
+        both its Tensor and non-Tensor branches reachable), then
+        attaches gradient tracking the same way tracked_div(other, self)
+        already did.
+        """
+        _ensure_grad_attrs(self)
+
+        # Call original __rtruediv__ from Module 01: computes other / self
+        result = _original_rdiv(self, other)
+        _ensure_grad_attrs(result)
+
         if not isinstance(other, Tensor):
             other = Tensor(other)
-        return tracked_div(other, self)
+        _ensure_grad_attrs(other)
+
+        if _get_requires_grad(self) or _get_requires_grad(other):
+            result.requires_grad = True
+            result._grad_fn = DivBackward(other, self)
+
+        return result
 
     def tracked_getitem(self, key):
         """
@@ -2697,13 +2785,14 @@ def enable_autograd(quiet=False):
         """
         Sum operation with gradient tracking.
 
-        Creates a new sum method that builds computation graphs
-        when requires_grad=True.
+        Delegates to the original .sum() from Module 01 for the actual
+        computation, rather than reimplementing it, so Module 01's own
+        sum() source stays reachable and testable.
         """
         _ensure_grad_attrs(self)
 
-        result_data = np.sum(self.data, axis=axis, keepdims=keepdims)
-        result = Tensor(result_data)
+        result = _original_sum(self, axis=axis, keepdims=keepdims)
+        _ensure_grad_attrs(result)
 
         if _get_requires_grad(self):
             result.requires_grad = True
@@ -2847,8 +2936,11 @@ def enable_autograd(quiet=False):
 
         def tracked_sigmoid_forward(self, x):
             """Sigmoid with gradient tracking."""
-            result_data = 1.0 / (1.0 + np.exp(-x.data))
-            result = Tensor(result_data)
+            # Delegate to the original, numerically stable implementation
+            # (same pattern as tracked_softmax_forward/tracked_gelu_forward
+            # below) rather than reimplementing sigmoid with a formula that
+            # overflows np.exp for large negative x.
+            result = _original_sigmoid_forward(self, x)
 
             if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
@@ -2904,15 +2996,8 @@ def enable_autograd(quiet=False):
 
         def tracked_bce_forward(self, predictions, targets):
             """Binary cross-entropy with gradient tracking."""
-            # Compute BCE loss
-            eps = EPSILON
-            clamped_preds = np.clip(predictions.data, eps, 1 - eps)
-            log_preds = np.log(clamped_preds)
-            log_one_minus_preds = np.log(1 - clamped_preds)
-            bce_per_sample = -(targets.data * log_preds + (1 - targets.data) * log_one_minus_preds)
-            bce_loss = np.mean(bce_per_sample)
-
-            result = Tensor(bce_loss)
+            # Call original forward to get result using the module's own implementation
+            result = _original_bce_forward(self, predictions, targets)
 
             if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
@@ -2922,12 +3007,8 @@ def enable_autograd(quiet=False):
 
         def tracked_mse_forward(self, predictions, targets):
             """MSE loss with gradient tracking."""
-            # Compute MSE loss
-            diff = predictions.data - targets.data
-            squared_diff = diff ** 2
-            mse = np.mean(squared_diff)
-
-            result = Tensor(mse)
+            # Call original forward to get result using the module's own implementation
+            result = _original_mse_forward(self, predictions, targets)
 
             if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
@@ -2937,20 +3018,8 @@ def enable_autograd(quiet=False):
 
         def tracked_ce_forward(self, logits, targets):
             """Cross-entropy loss with gradient tracking."""
-            from tinytorch.core.losses import log_softmax
-
-            # Compute log-softmax for numerical stability
-            log_probs = log_softmax(logits, dim=-1)
-
-            # Select log-probabilities for correct classes
-            batch_size = logits.shape[0]
-            target_indices = targets.data.astype(int)
-            selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
-
-            # Return negative mean
-            ce_loss = -np.mean(selected_log_probs)
-
-            result = Tensor(ce_loss)
+            # Call original forward to get result using the module's own implementation
+            result = _original_ce_forward(self, logits, targets)
 
             if _GRAD_TRACKING_ENABLED and logits.requires_grad:
                 result.requires_grad = True

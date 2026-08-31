@@ -120,8 +120,8 @@ PDF_TEXT_ERROR_PATTERNS = [
 ]
 
 PDF_TEXT_WARN_PATTERNS = [
-    re.compile(r"\?@(?:fig|sec|tbl|eq)-"),
-    re.compile(r"@(?:fig|sec|tbl|eq)-[A-Za-z0-9_:-]+"),
+    re.compile(r"\?@(?:fig|sec|tbl|eq|lst|algo)-"),
+    re.compile(r"@(?:fig|sec|tbl|eq|lst|algo)-[A-Za-z0-9_:-]+"),
 ]
 
 MATH_ENVS = (

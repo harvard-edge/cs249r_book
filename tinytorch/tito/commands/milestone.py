@@ -152,6 +152,44 @@ MILESTONE_SCRIPTS = {
     }
 }
 
+# "What makes this special" bullets for the achievement panel, tailored to
+# what each milestone's required_modules actually cover. Previously every
+# milestone showed the same 3 lines including "Every gradient: YOUR
+# autograd", which was wrong for 01 and 02 (forward-pass only, no autograd
+# module required at all).
+MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
+    "01": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "Every forward pass: YOUR Layers (no autograd needed yet)",
+    ],
+    "02": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "The exact limitation Minsky & Papert proved in 1969",
+    ],
+    "03": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "Every gradient: YOUR autograd",
+    ],
+    "04": [
+        "Every line of code: YOUR implementations",
+        "Every convolution: YOUR Conv2d",
+        "Every gradient: YOUR autograd",
+    ],
+    "05": [
+        "Every line of code: YOUR implementations",
+        "Every attention weight: YOUR MultiHeadAttention",
+        "Every gradient: YOUR autograd",
+    ],
+    "06": [
+        "Every line of code: YOUR implementations",
+        "Every byte saved: YOUR quantization and compression",
+        "Every gradient: YOUR autograd",
+    ],
+}
+
 
 MODULE_EXPORT_CHECKS = {
     1: [("tinytorch", "Tensor"), ("tinytorch.core.tensor", "Tensor")],
@@ -198,7 +236,7 @@ def _load_completed_module_numbers() -> set:
         return completed
 
     try:
-        with open(progress_file, 'r') as f:
+        with open(progress_file, 'r', encoding='utf-8') as f:
             progress_data = json.load(f)
     except (json.JSONDecodeError, IOError):
         return completed
@@ -262,7 +300,7 @@ class MilestoneSystem:
         # Try to load main milestones.yml first
         if config_path.exists():
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
 
                 # Convert to expected format
@@ -283,7 +321,7 @@ class MilestoneSystem:
         for era_path in era_paths:
             if era_path.exists():
                 try:
-                    with open(era_path, 'r') as f:
+                    with open(era_path, 'r', encoding='utf-8') as f:
                         era_config = yaml.safe_load(f)
 
                     if 'milestone' in era_config:
@@ -308,11 +346,13 @@ class MilestoneSystem:
             "milestones": {},
             "overall_progress": 0,
             "total_unlocked": 0,
+            "total_completed": 0,
             "next_milestone": None
         }
 
         total_milestones = len(self.MILESTONES)
         unlocked_count = 0
+        completed_count = 0
 
         for milestone_id, milestone in self.MILESTONES.items():
             # Check if all required modules are complete (no more checkpoint dependencies)
@@ -322,8 +362,12 @@ class MilestoneSystem:
                 for mod in required_modules
             )
 
-            # Check if milestone is unlocked
+            # Check if milestone is unlocked (ready to run, not the same as actually
+            # run and achieved -- see is_completed below)
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
+
+            # Check if the milestone has actually been run and passed
+            is_completed = milestone_id in milestone_data.get("completed_milestones", [])
 
             # Check if trigger module is completed (if trigger_module exists)
             trigger_module = milestone.get("trigger_module", "")
@@ -346,18 +390,22 @@ class MilestoneSystem:
                 "required_complete": required_complete,
                 "trigger_complete": trigger_complete,
                 "is_unlocked": is_unlocked,
+                "is_completed": is_completed,
                 "can_unlock": required_complete and trigger_complete and not is_unlocked,
                 "unlock_date": milestone_data.get("unlock_dates", {}).get(milestone_id)
             }
 
             status["milestones"][milestone_id] = milestone_status
 
+            if is_completed:
+                completed_count += 1
             if is_unlocked:
                 unlocked_count += 1
             elif milestone_status["can_unlock"] and not status["next_milestone"]:
                 status["next_milestone"] = milestone_id
 
         status["total_unlocked"] = unlocked_count
+        status["total_completed"] = completed_count
         status["overall_progress"] = (unlocked_count / total_milestones) * 100 if total_milestones > 0 else 0
 
         return status
@@ -457,7 +505,7 @@ class MilestoneSystem:
         progress_file = Path(".tito") / "progress.json"
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     progress_data = json.load(f)
                     module_num = _module_progress_to_int(module_name)
                     completed_nums = {
@@ -478,7 +526,7 @@ class MilestoneSystem:
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -500,7 +548,7 @@ class MilestoneSystem:
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
@@ -662,12 +710,19 @@ class MilestoneCommand(BaseCommand):
         milestone_system = MilestoneSystem(self.config)
         status = milestone_system.get_milestone_status()
 
-        # Show header with overall progress
+        # Show header with overall progress. Note: status['overall_progress']
+        # is unlock-based (it also drives the timeline progress bar elsewhere,
+        # where that's the correct meaning), so it isn't used here -- showing
+        # it next to "Milestones Achieved" would be contradictory (e.g. "0/6
+        # achieved" beside "100%"). This header's percentage is achievement-
+        # based instead, to actually match the achieved count shown above it.
         total_milestones = len(milestone_system.MILESTONES)
+        achievement_progress = (status['total_completed'] / total_milestones) * 100 if total_milestones > 0 else 0
         console.print(Panel(
             f"[bold cyan]🎮 TinyTorch Milestone Progress[/bold cyan]\n\n"
             f"[bold]Capabilities Unlocked:[/bold] {status['total_unlocked']}/{total_milestones} milestones\n"
-            f"[bold]Overall Progress:[/bold] {status['overall_progress']:.0f}%\n\n"
+            f"[bold]Milestones Achieved:[/bold] {status['total_completed']}/{total_milestones} milestones\n"
+            f"[bold]Overall Progress:[/bold] {achievement_progress:.0f}%\n\n"
             f"[dim]Transform from student to ML Systems Engineer![/dim]",
             title="🚀 Your Epic Journey",
             border_style="bright_blue"
@@ -690,14 +745,22 @@ class MilestoneCommand(BaseCommand):
                 title="Next Milestone",
                 border_style="bright_green"
             ))
-        elif status["total_unlocked"] == total_milestones:
+        elif status["total_completed"] == total_milestones:
             console.print(Panel(
                 f"[bold green]🏆 QUEST COMPLETE! 🏆[/bold green]\n\n"
-                f"[green]You've unlocked all {total_milestones} epic milestones![/green]\n"
+                f"[green]You've achieved all {total_milestones} epic milestones![/green]\n"
                 f"[bold white]You are now an ML Systems Engineer![/bold white]\n\n"
                 f"[cyan]Share your achievement and inspire others![/cyan]",
                 title="🌟 FULL MASTERY ACHIEVED",
                 border_style="bright_green"
+            ))
+        elif status["total_unlocked"] == total_milestones:
+            console.print(Panel(
+                f"[bold yellow]⚡ All milestones unlocked![/bold yellow]\n\n"
+                f"[yellow]Every milestone is ready to run.[/yellow]\n"
+                f"[dim]Run each with tito milestone run <id> to actually achieve it.[/dim]",
+                title="🔓 All Milestones Ready",
+                border_style="bright_yellow"
             ))
 
         return 0
@@ -707,7 +770,11 @@ class MilestoneCommand(BaseCommand):
         console = self.console
 
         # Status indicator
-        if milestone["is_unlocked"]:
+        if milestone["is_completed"]:
+            status_icon = "✅"
+            status_color = "bold green"
+            status_text = "ACHIEVED"
+        elif milestone["is_unlocked"]:
             status_icon = "🔓"
             status_color = "green"
             status_text = "UNLOCKED"
@@ -1005,7 +1072,7 @@ class MilestoneCommand(BaseCommand):
             result = subprocess.run(
                 [sys.executable, str(demo_path)],
                 capture_output=False,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
 
             if result.returncode == 0:
@@ -1302,7 +1369,7 @@ class MilestoneCommand(BaseCommand):
                 result = subprocess.run(
                     [sys.executable, script_file],
                     capture_output=False,
-                    text=True
+                    text=True, encoding="utf-8", errors="replace"
                 )
 
                 console.print("\n" + "━" * 80)
@@ -1340,14 +1407,20 @@ class MilestoneCommand(BaseCommand):
                     f"  ✅ {name}" for name, _, _ in scripts_to_run
                 )
 
+            default_highlights = [
+                "Every line of code: YOUR implementations",
+                "Every tensor operation: YOUR Tensor class",
+                "Every gradient: YOUR autograd",
+            ]
+            highlights = MILESTONE_ACHIEVEMENT_HIGHLIGHTS.get(milestone_id, default_highlights)
+            highlights_text = "\n".join(f"• {line}" for line in highlights)
+
             console.print(Panel(
                 f"[bold green]🏆 MILESTONE ACHIEVED![/bold green]\n\n"
                 f"[green]You completed Milestone {milestone_id}: {milestone['name']}[/green]\n"
                 f"[yellow]{milestone['title']}[/yellow]{parts_text}\n\n"
                 f"[bold]What makes this special:[/bold]\n"
-                f"• Every line of code: YOUR implementations\n"
-                f"• Every tensor operation: YOUR Tensor class\n"
-                f"• Every gradient: YOUR autograd\n\n"
+                f"{highlights_text}\n\n"
                 f"[cyan]Achievement saved locally![/cyan]",
                 title="✨ Achievement Unlocked ✨",
                 border_style="bright_green",
@@ -1362,14 +1435,14 @@ class MilestoneCommand(BaseCommand):
             if next_id in MILESTONE_SCRIPTS:
                 next_milestone = MILESTONE_SCRIPTS[next_id]
                 console.print(f"\n[bold yellow]🎯 What's Next:[/bold yellow]")
-                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']} ({next_milestone['year']})[/dim]")
+                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']}[/dim]")
 
                 # Get completed modules for checking next milestone
                 progress_file = Path(".tito") / "progress.json"
                 completed_modules = []
                 if progress_file.exists():
                     try:
-                        with open(progress_file, 'r') as f:
+                        with open(progress_file, 'r', encoding='utf-8') as f:
                             progress_data = json.load(f)
                             for mod in progress_data.get("completed_modules", []):
                                 try:
@@ -1420,7 +1493,7 @@ class MilestoneCommand(BaseCommand):
 
         # Display detailed info
         info_text = (
-            f"[bold cyan]{milestone['emoji']} {milestone['name']} ({milestone['year']})[/bold cyan]\n\n"
+            f"[bold cyan]{milestone['emoji']} {milestone['name']}[/bold cyan]\n\n"
             f"[bold]{milestone['title']}[/bold]\n\n"
             f"[yellow]📚 Historical Context:[/yellow]\n"
             f"{milestone['historical_context']}\n\n"
@@ -1491,7 +1564,7 @@ class MilestoneCommand(BaseCommand):
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -1513,7 +1586,7 @@ class MilestoneCommand(BaseCommand):
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass

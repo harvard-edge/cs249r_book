@@ -4,11 +4,7 @@ engine: jupyter
 
 # D·A·M Foundations {#sec-appdx-dam-taxonomy}
 
-## Purpose {.unnumbered .unlisted}
-
-_When a single node fails, which axis is binding first: the data path, the algorithm, or the machine?_
-
-In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). The C³ taxonomy extends these diagnostics to the distributed fleet, but it relies on a firm foundation of single-node performance. Without understanding D·A·M, teams often optimize the wrong thing, buying faster accelerators to fix a slow input pipeline or rewriting kernels when the model is simply too large for the latency budget. This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, and maps single-machine symptoms and measurements to the term of the iron law that dominates. In C³ terms, this single-machine refresher is the node-level base that fleet-scale compute, communication, and coordination build on.
+In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model does unnecessary work (algorithmic overhead), or because the accelerator is saturated (machine-bound). This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, establishing the single-node performance foundation that cluster-scale compute, communication, and coordination build on.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -17,11 +13,11 @@ In production, "it is slow" and "it is wrong" are rarely informative symptoms. A
 ::: {.callout-learning-objectives}
 
 - Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
-- Map optimization techniques to their Data-Algorithm-Machine intersection zone to understand which axes they span
+- Map optimization techniques to their D·A·M intersection zone to understand which axes they span
 - Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
-- Select appropriate profiling tools and optimization strategies for each Data-Algorithm-Machine axis
-- Evaluate system health using Data-Algorithm-Machine scorecard metrics (I/O Overhead, Active Params, MFU)
+- Distinguish between memory-bound and compute-bound workloads using arithmetic intensity
+- Select appropriate profiling tools and optimization strategies for each Data, Algorithm, or Machine axis
+- Evaluate system health using D·A·M scorecard metrics (I/O overhead, active parameters, MFU)
 
 :::
 
@@ -29,7 +25,7 @@ In production, "it is slow" and "it is wrong" are rarely informative symptoms. A
 
 This appendix is designed as a reference for single-node performance. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis.
 
-When training is slow on a single GPU, check utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a latency target, identify whether the regime is latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure that effort targets the dominant term, not a nonbottleneck.
+When training is slow on a single GPU, check utilization, data wait time, and model FLOPs utilization (MFU), then map each to its Data, Algorithm, or Machine axis. When serving misses a latency target, identify whether the regime is latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure that effort targets the dominant term, not a nonbottleneck.
 
 ```{python}
 #| echo: false
@@ -95,9 +91,9 @@ class DAMTaxonomy:
     h100_ridge_str = fmt_arithmetic_intensity(h100_ridge_q, precision=1, commas=False)
 ```
 
-The Data · Algorithm · Machine (D·A·M) taxonomy is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes[^fn-mece-v2], while recognizing that real systems can involve mixed causes or interactions between axes.
+The Data · Algorithm · Machine (D·A·M) taxonomy is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes,[^fn-mece-v2-exclusive] while recognizing that real systems can involve mixed causes or interactions between axes.
 
-[^fn-mece-v2]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice: a kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
+[^fn-mece-v2-exclusive]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice: a kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
 
 ## Diagnostic Summary {#sec-appdx-dam-taxonomy-diagnostic-summary}
 
@@ -117,15 +113,15 @@ With the three axes named, the next step is to connect them to time. The perform
 
 $$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A)/Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
 
-Algorithm and Machine share the compute term and are separated by which variable the engineer controls. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
+Algorithm and Machine share the compute term and are separated by which variable the engineer controls. Reducing the total operations ($O$) is an algorithm lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a machine lever.
 
 ### D·A·M coordination: From sum to max {#sec-appdx-dam-taxonomy-dam-coordination-sum-max}
 
-The additive iron law represents **sequential execution**\index{Sequential execution!D·A·M coordination}—the worst case where Data, Algorithm, and Machine take turns. Skilled systems engineering transforms the sum into a max:
+The additive iron law represents **Sequential Execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
 
-$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{\text{BW}},\; \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
+$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} \geq \max\left(\frac{D_{\text{vol}}}{\text{BW}},\; \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
 
-The systems engineer's job is to make these components run in parallel, not in series. @Tbl-v2-dam-overlap summarizes key D·A·M Coordination techniques:
+The systems engineer's job is to make these components run in parallel, not in series. @Tbl-v2-dam-overlap summarizes key D·A·M coordination techniques:
 
 | **Technique**           |  **D·A·M Axes Overlapped**   | **Implementation**                                                                              |
 |:------------------------|:----------------------------:|:------------------------------------------------------------------------------------------------|
@@ -138,15 +134,15 @@ The systems engineer's job is to make these components run in parallel, not in s
 
 ## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary}
 
-This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by **Arithmetic Intensity**[^fn-intensity-v2] ($I$) of the workload.
+This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by arithmetic intensity[^fn-intensity-v2-ratio] ($I$) of the workload.
 
-[^fn-intensity-v2]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
+[^fn-intensity-v2-ratio]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
 
 The symptoms below are screening signals, not diagnoses. A workload whose arithmetic intensity sits left of $R_{\text{peak}}/\text{BW}$ cannot keep the accelerator fed with enough useful work per byte, but raw utilization must be read alongside memory-bandwidth utilization, data-loader wait, kernel occupancy, and trace gaps.
 
 *   **Low GPU utilization** ($<$ 80 percent): Screen for data, CPU, or launch starvation. Confirm with data-loader wait, host CPU saturation, memory-bandwidth counters, and timeline gaps.
 *   **High GPU utilization** ($>$ 95 percent): Treat this as machine bound only if compute units are busy and memory bandwidth is not saturated. If memory bandwidth is saturated, the bottleneck is still on the Data/Machine boundary.
-*   **If batch size is 1**: Treat this as a warning that latency or launch overhead may matter. For LLM decode, batch-1 execution is often memory-bandwidth bound unless traces show dispatch gaps.
+*   **If batch size is 1**: Treat this as a warning that latency or launch overhead may matter. For large language model (LLM) decode, batch-1 execution is often memory-bandwidth bound unless traces show dispatch gaps.
 *   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` on H100): The workload is likely memory bound (Data/Machine boundary).
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
@@ -156,7 +152,7 @@ Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimi
 | **If the workload is...** |              **Dominant Term**               | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
 |:--------------------------|:--------------------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
 | **Memory-Bound**          |          $D_{\text{vol}}/\text{BW}$          | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
-| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (already saturated)          |
+| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (not binding)                |
 | **Latency-Bound**         |               $L_{\text{lat}}$               | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
 
 : **What Works vs. What Is Wasted**: Optimizing the wrong term yields limited improvement and poor cost efficiency. A memory-bound model will not speed up from more peak FLOP/s alone; it needs higher arithmetic intensity, less data movement, or a faster memory subsystem. {#tbl-v2-bottleneck-actions}
@@ -165,19 +161,19 @@ Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimi
 
 After the action table narrows the likely fix, the tooling map identifies the measurements needed to verify it. Use @tbl-v2-dam-tooling to select the right profiling tool when diagnosing a bottleneck along a particular D·A·M axis:
 
-| **Axis**      |         **Key Metric**        |     **Primary Tool**    |       **Secondary Tool**       |
-|:--------------|:-----------------------------:|:-----------------------:|:------------------------------:|
-| **Data**      |        Batch Load Time        | `tqdm` (iterations/sec) |  `iotop`, `dstat` (Disk I/O)   |
-| **Algorithm** |       FLOPs, Model Depth      |     PyTorch Profiler    |    DeepSpeed Flops Profiler    |
-| **Machine**   | GPU Utilization, SM Occupancy |       `nvidia-smi`      | Nsight Compute, Nsight Systems |
+| **Axis**      |         **Key Metric**        |     **Primary Tool**     |       **Secondary Tool**      |
+|:--------------|:-----------------------------:|:------------------------:|:-----------------------------:|
+| **Data**      |    Batch Load and Wait Time   | Framework profiler trace | `iostat`, `pidstat` (I/O/CPU) |
+| **Algorithm** |       FLOPs, Model Depth      |     PyTorch Profiler     |    DeepSpeed Flops Profiler   |
+| **Machine**   | GPU Utilization, SM Occupancy |      Nsight Compute      |      DCGM, Nsight Systems     |
 
 : **D·A·M Tooling Map**: Profiling utilities for diagnosing bottlenecks along each D·A·M axis. {#tbl-v2-dam-tooling}
 
 ## D·A·M Scorecard {#sec-appdx-dam-taxonomy-dam-scorecard}
 
-The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance against its theoretical limit. This "Report Card" is anchored by **MFU**[^fn-mfu-v2]—the ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s.
+The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance against its theoretical limit. This report card is anchored by MFU,[^fn-mfu-v2-scorecard] the ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s.
 
-[^fn-mfu-v2]: **MFU (Model FLOPs Utilization)**: Measures only *useful* model computation, excluding overhead like gradient synchronization and memory management.
+[^fn-mfu-v2-scorecard]: **MFU (Model FLOPs Utilization)**: Measures only *useful* model computation, excluding overhead like gradient synchronization and memory management.
 
 | **Axis**      |           **Metric**           |                                  **Definition**                                  | **Failing Grade**  | **Passing Grade**  |
 |:--------------|:------------------------------:|:--------------------------------------------------------------------------------:|:------------------:|:------------------:|
@@ -189,33 +185,33 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 ## Scaling the Taxonomy: From Node to Fleet {#sec-appdx-dam-taxonomy-scaling}
 
-These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as we move from a single node to the **Machine Learning Fleet**, each axis undergoes a qualitative transformation. Understanding these "tie-ins" is essential for transitioning from local optimization to fleet-scale engineering.
+These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as systems scale from a single node to the machine learning fleet, each axis undergoes a qualitative transformation. Understanding these connections is essential for transitioning from local optimization to fleet-scale engineering.
 
 ### The evolution of constraints {.unnumbered}
 
 @Tbl-appendix-dam-axis-node-to-fleet maps each axis from its node-level focus to its fleet-scale transformation:
 
-| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                        |
-|:------------------|:----------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------|
-| **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: The bottleneck shifts from local storage to the **Bisection Bandwidth** of the network fabric.            |
-| **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: The logic now includes *how* we partition the math across $N$ devices (3D Parallelism).                 |
-| **Machine (M)**   |      Peak TFLOP/s, HBM       | **The power and reliability wall**: The constraint is no longer just silicon speed, but **Watts per rack** and cluster-wide **MTBF**. |
+| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                |
+|:------------------|:----------------------------:|:------------------------------------------------------------------------------------------------------------------------------|
+| **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: the bottleneck shifts from local storage to the bisection bandwidth of the network fabric.        |
+| **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: the logic now includes how computation is partitioned across $N$ devices (3D parallelism).      |
+| **Machine (M)**   |      Peak TFLOP/s, HBM       | **The power and reliability wall**: the constraint is no longer just silicon speed, but watts per rack and cluster-wide MTBF. |
 
-: **D·A·M Constraints from Node to Fleet**: How each axis of the D·A·M taxonomy shifts when scaling from a single node to a multi-node fleet. The node-level focus (left) gives way to a qualitatively different fleet-scale constraint (right)—the bottleneck migrates from local resource to global coordination cost. {#tbl-appendix-dam-axis-node-to-fleet}
+: **D·A·M Constraints from Node to Fleet**: How each axis of the D·A·M taxonomy shifts when scaling from a single node to a multi-node fleet. The node-level focus (left) gives way to a qualitatively different fleet-scale constraint (right); the bottleneck migrates from local resource to global coordination cost. {#tbl-appendix-dam-axis-node-to-fleet}
 
 ### Bridging to $C^3$ {.unnumbered}
 
-While D·A·M diagnoses the *components* of a single node, the $C^3$ Taxonomy (@sec-appdx-c3-taxonomy) diagnoses the *interactions* of the fleet.
+While D·A·M diagnoses the *components* of a single node, the $C^3$ taxonomy (@sec-appdx-c3-taxonomy) diagnoses the *interactions* of the fleet.
 
 1.  **Compute ($C_1$)** inherits the Algorithm and Machine axes, but adds the loss of scaling efficiency.
-2.  **Communication ($C_2$)** inherits the **Data** axis, but is governed by the speed of light and network topology rather than just local I/O.
-3.  **Coordination ($C_3$)** is the "at scale" tie-in that has no single-node equivalent. It represents the coordination tax—the time spent on synchronization, checkpoints, and failure recovery that only emerges at fleet scale.
+2.  **Communication ($C_2$)** inherits the data axis, but is governed by the speed of light and network topology rather than just local I/O.
+3.  **Coordination ($C_3$)** is the "at scale" tie-in that has no single-node equivalent. It represents the coordination tax, the time spent on synchronization, checkpoints, and failure recovery that only emerges at fleet scale.
 
-This progression ensures that single-node efficiency (high MFU) is never traded off for fleet-scale inefficiency (low scaling efficiency). We optimize the node to serve the fleet.
+This progression ensures that single-node efficiency (high MFU) is never traded off for fleet-scale inefficiency (low scaling efficiency). The node is optimized to serve the fleet.
 
 ## Summary {#sec-appdx-dam-taxonomy-summary}
 
-The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. By isolating the bottleneck to Data, Algorithm, or Machine, practitioners ensure that optimization efforts target the binding constraint. This single-node discipline is the prerequisite for the fleet-scale engineering addressed throughout this volume.
+The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. By isolating the bottleneck to Data, Algorithm, or Machine, practitioners ensure that optimization efforts target the binding constraint. This single-node discipline is the prerequisite for the fleet-scale engineering addressed throughout this book.
 
 ::: {.callout-takeaways title="Single-machine diagnostic heuristics"}
 

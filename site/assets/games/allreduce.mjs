@@ -60,7 +60,9 @@ export async function mountAllreduce(canvas, opts = {}) {
     gpuContainer.position.set(x, y);
 
     const box = new P.Graphics();
-    box.roundRect(-25, -25, 50, 50, 8).fill({ color: COL.gpu });
+    // Fill white and tint down to the base color so a white tint can flash the box on tap
+    box.roundRect(-25, -25, 50, 50, 8).fill({ color: 0xffffff });
+    box.tint = COL.gpu;
     
     const label = new P.Text({
       text: (i + 1).toString(),
@@ -92,15 +94,16 @@ export async function mountAllreduce(canvas, opts = {}) {
 
     const duration = beatInterval * 0.8;
     const cancelTween = tween(
-      [chunk.position, chunk.position],
-      ["x", "y"],
+      chunk,
+      ["position.x", "position.y"],
       [startObj.x, startObj.y],
       [endObj.x, endObj.y],
       duration,
       "linear"
     );
-    
+
     setTimeout(() => {
+      cancelTween();
       chunk.destroy();
       burst(gameLayer, endObj.x, endObj.y, COL.chunk, 10, { speed: 1.5 });
     }, duration);
@@ -115,7 +118,7 @@ export async function mountAllreduce(canvas, opts = {}) {
 
     const box = gpus[idx].box;
     box.tint = 0xffffff;
-    setTimeout(() => { if (!box.destroyed) box.tint = 0xffffff; }, 100);
+    setTimeout(() => { if (!box.destroyed) box.tint = COL.gpu; }, 100);
 
     if (diff <= tolerance) {
       // Perfect
@@ -135,11 +138,12 @@ export async function mountAllreduce(canvas, opts = {}) {
     }
   }
 
-  window.addEventListener('keydown', (e) => {
+  function handleKeydown(e) {
     if (e.key >= '1' && e.key <= '4') {
       handleInput(parseInt(e.key) - 1);
     }
-  });
+  }
+  window.addEventListener('keydown', handleKeydown);
 
   // Pre-game READY overlay
   mountReadyOverlay(stage, {
@@ -168,6 +172,10 @@ export async function mountAllreduce(canvas, opts = {}) {
   return {
     id: "allreduce",
     ahaLabel: "You just experienced",
-    ahaText: "Ring All-Reduce synchronizes gradients across GPUs by passing chunks in a circle. Perfect timing (synchronous steps) ensures maximum bandwidth utilization. When GPUs fall out of sync, collisions and pipeline stalls occur, cratering your training throughput."
+    ahaText: "Ring All-Reduce synchronizes gradients across GPUs by passing chunks in a circle. Perfect timing (synchronous steps) ensures maximum bandwidth utilization. When GPUs fall out of sync, collisions and pipeline stalls occur, cratering your training throughput.",
+    destroy() {
+      window.removeEventListener('keydown', handleKeydown);
+      app.destroy(true, { children: true, texture: true });
+    }
   };
 }

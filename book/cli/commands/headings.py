@@ -44,70 +44,79 @@ console = Console()
 
 # ─── Rule data ───────────────────────────────────────────────────────────────
 
-ACRONYMS = set("""
-AI ML AIOps MLOps DevOps ClinAIOps MLSys
-GPU GPUs CPU CPUs TPU TPUs NPU DSP ASIC FPGA SoC MCU HBM DRAM SRAM ROM EPROM NVRAM VRAM
-NVMe PCIe PCI NVLink NVSwitch GPUDirect DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
-CNN CNNs RNN RNNs LSTM GRU MLP MLPs NN DNN LLM LLMs BLAS cuBLAS cuDNN GEMM MAC MACs SIMD SIMT VLIW RISC CISC BatchNorm LayerNorm GroupNorm ReLU GELU SiLU PReLU LeakyReLU Sigmoid Softmax Tanh
-FLOPs FLOP TFLOPs PFLOPs FLOPS TFLOPS PFLOPS TOPS IOPS MIPS FP32 FP16 FP8 FP4 BF16 INT8 INT4 TF32 FP64
-GB TB KB MB PB EB GiB TiB KiB MiB Gbps Mbps Tbps ns μs ms kHz MHz GHz THz Hz Wh kWh MWh W kW MW
-IO OS RTOS VM JVM JIT AOT RPC REST RESTful HTTP HTTPS TCP UDP IP DNS CDN TLS SSL SSH gRPC IPC UX UI
-API APIs SDK CLI IDE GUI SLA SLAs SLI SLO SLOs RAID SSD HDD EEPROM SRE QA KPI
-US UK EU USA FAA FDA IRB NHTSA DARPA NSF NIH IEEE ACM OSDI NSDI NeurIPS ICML ICLR CVPR ECCV ICCV ACL EMNLP NAACL KDD SIGMOD SIGCOMM SOSP FAST ATC HotOS MICRO ISCA HPCA SC
-ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet GoogLeNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
-PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
-AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
-MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
-TinyML AutoML AutoAugment RandAugment NAS
-NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura Jeep Cherokee Rényi Teton Slurm
-MIT Stanford Berkeley CMU UIUC EPFL ETH Caltech Harvard Princeton Yale Columbia
-Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer Kullback Leibler Kolmogorov Smirnov Shannon Bayes Markov Bellman Boltzmann
-HIPAA GDPR COPPA CCPA FERPA SOX HITRUST ISO SOC NAND NOR SLC MLC TLC QLC NaN Inf
-HBM2 HBM3 HBM3e DDR4 DDR5 GDDR5 GDDR6 GDDR6X LPDDR4 LPDDR5
-V100 A100 H100 H200 B100 B200 GB200 T4 L4 L40 RTX Xeon Epyc Ryzen M1 M2 M3 M4 Grace Hopper Blackwell Ampere Volta Pascal
-TPUv1 TPUv2 TPUv3 TPUv4 TPUv5 TPUv5e TPUv5p
-I II III IV V VI VII VIII IX X XI XII
-Roofline Instinct Xavier Orin Jetson
-Young-Daly Bayes
-Adam AdamW SGD SGDM Adagrad RMSprop Lion Lamb Shampoo Muon
-Clos Fat-Tree Dragonfly Torus Mesh Hypercube Butterfly
-""".split())
+def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], set[str]]:
+    """Load heading case rules from data/heading_rules.yaml with static fallback."""
+    yaml_path = Path(__file__).resolve().parent.parent / "data" / "heading_rules.yaml"
+    if yaml_path.exists():
+        try:
+            import yaml
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            acronyms = set(data.get("acronyms_and_proper_nouns", []))
+            compound_names = {tuple(p) for p in data.get("compound_names", [])}
+            dam_axes = set(data.get("dam_axes", []))
+            concept_terms_lower = set(data.get("concept_terms_lower", []))
+            skip_headings = set(data.get("skip_headings", []))
+            if acronyms:
+                return acronyms, compound_names, dam_axes, concept_terms_lower, skip_headings
+        except Exception:
+            pass
 
-COMPOUND_NAMES = {
-    # Benchmark suites
-    ("MLPerf", "Inference"), ("MLPerf", "Training"), ("MLPerf", "Tiny"),
-    ("MLPerf", "Mobile"), ("MLPerf", "Client"), ("MLPerf", "HPC"),
-    # Products
-    ("Oura", "Ring"), ("Apple", "Watch"), ("Apple", "Silicon"), ("Google", "Glass"),
-    ("Tensor", "Core"), ("Tensor", "Cores"),
-    # Legislation shorthand
-    ("EU", "Act"), ("AI", "Act"),
-    # Geographic and product proper-noun pairs
-    ("Grand", "Teton"), ("Jeep", "Cherokee"), ("Meta", "Grand"),
-    # Cloud / MLOps platform compound product names
-    ("FBLearner", "Flow"), ("Vertex", "AI"), ("Amazon", "SageMaker"),
-}
+    # Fallback if YAML is missing
+    fallback_acronyms = set("""
+    AI ML AIOps MLOps DevOps ClinAIOps MLSys
+    GPU GPUs CPU CPUs TPU TPUs NPU DSP ASIC FPGA SoC MCU HBM DRAM SRAM ROM EPROM NVRAM VRAM
+    NVMe PCIe PCI NVLink NVSwitch GPUDirect DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
+    CNN CNNs RNN RNNs LSTM GRU MLP MLPs NN DNN LLM LLMs BLAS cuBLAS cuDNN GEMM MAC MACs SIMD SIMT VLIW RISC CISC BatchNorm LayerNorm GroupNorm ReLU GELU SiLU PReLU LeakyReLU Sigmoid Softmax Tanh
+    FLOPs FLOP TFLOPs PFLOPs FLOPS TFLOPS PFLOPS TOPS IOPS MIPS FP32 FP16 FP8 FP4 BF16 INT8 INT4 TF32 FP64
+    GB TB KB MB PB EB GiB TiB KiB MiB Gbps Mbps Tbps ns μs ms kHz MHz GHz THz Hz Wh kWh MWh W kW MW
+    IO OS RTOS VM JVM JIT AOT RPC REST RESTful HTTP HTTPS TCP UDP IP DNS CDN TLS SSL SSH gRPC IPC UX UI
+    API APIs SDK CLI IDE GUI SLA SLAs SLI SLO SLOs RAID SSD HDD EEPROM SRE QA KPI
+    US UK EU USA FAA FDA IRB NHTSA DARPA NSF NIH IEEE ACM OSDI NSDI NeurIPS ICML ICLR CVPR ECCV ICCV ACL EMNLP NAACL KDD SIGMOD SIGCOMM SOSP FAST ATC HotOS MICRO ISCA HPCA SC
+    ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet GoogLeNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
+    PyTorch TensorFlow JAX Triton NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
+    AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
+    MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
+    TinyML AutoML AutoAugment RandAugment NAS
+    NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura Jeep Cherokee Rényi Teton Slurm
+    MIT Stanford Berkeley CMU UIUC EPFL ETH Caltech Harvard Princeton Yale Columbia
+    Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer Kullback Leibler Kolmogorov Smirnov Shannon Bayes Markov Bellman Boltzmann Poisson Taylor Young Daly
+    HIPAA GDPR COPPA CCPA FERPA SOX HITRUST ISO SOC NAND NOR SLC MLC TLC QLC NaN Inf
+    HBM2 HBM3 HBM3e DDR4 DDR5 GDDR5 GDDR6 GDDR6X LPDDR4 LPDDR5
+    V100 A100 H100 H200 B100 B200 GB200 T4 L4 L40 RTX Xeon Epyc Ryzen M1 M2 M3 M4 Grace Hopper Blackwell Ampere Volta Pascal
+    TPUv1 TPUv2 TPUv3 TPUv4 TPUv5 TPUv5e TPUv5p
+    I II III IV V VI VII VIII IX X XI XII
+    Roofline Instinct Xavier Orin Jetson
+    Young-Daly Bayes
+    Adam AdamW SGD SGDM Adagrad RMSprop Lion Lamb Shampoo Muon
+    Clos Fat-Tree Dragonfly Torus Mesh Hypercube Butterfly Go-Back-N
+    """.split())
 
-# Exact-match headings to skip entirely. For paper-title conventions that
-# intentionally diverge from strict sentence case (e.g. "1-bit Adam" — "bit"
-# stays lowercase per the paper, "Adam" stays capitalized as a proper noun).
-SKIP_HEADINGS = {
-    "1-bit Adam: Compression-aware optimization",
-}
+    fallback_compounds = {
+        ("MLPerf", "Inference"), ("MLPerf", "Training"), ("MLPerf", "Tiny"),
+        ("MLPerf", "Mobile"), ("MLPerf", "Client"), ("MLPerf", "HPC"),
+        ("Oura", "Ring"), ("Apple", "Watch"), ("Apple", "Silicon"), ("Google", "Glass"),
+        ("Tensor", "Core"), ("Tensor", "Cores"),
+        ("EU", "Act"), ("AI", "Act"),
+        ("Grand", "Teton"), ("Jeep", "Cherokee"), ("Meta", "Grand"),
+        ("FBLearner", "Flow"), ("Vertex", "AI"), ("Amazon", "SageMaker"),
+    }
+    fallback_dam = {"Data", "Algorithm", "Machine", "Compute", "Computation", "Communication", "Coordination"}
+    fallback_concept = {
+        "iron law", "degradation equation", "verification gap", "bitter lesson",
+        "ml node", "data wall", "compute wall", "memory wall", "power wall",
+        "energy corollary", "machine learning operations", "transformer",
+        "four pillars framework", "scaling laws", "information roofline",
+        "long tail", "data gravity", "napkin math", "starving accelerator",
+        "latency cliff", "roofline model",
+    }
+    fallback_skip = {
+        "1-bit Adam: Compression-aware optimization",
+        "Empirical validation: 50-layer comparison",
+    }
+    return fallback_acronyms, fallback_compounds, fallback_dam, fallback_concept, fallback_skip
 
-# "Compute" added 2026-06: the C³ first axis was unified from "Computation"
-# to "Compute" (the c3-taxonomy figure / part-principles / prose-triad form).
-DAM_AXES = {"Data", "Algorithm", "Machine", "Compute", "Computation", "Communication", "Coordination"}
-
-# Concept terms from §10.3 that stay lowercase even at heading sentence start.
-CONCEPT_TERMS_LOWER = {
-    "iron law", "degradation equation", "verification gap", "bitter lesson",
-    "ml node", "data wall", "compute wall", "memory wall", "power wall",
-    "energy corollary", "machine learning operations", "transformer",
-    "four pillars framework", "scaling laws", "information roofline",
-    "long tail", "data gravity", "napkin math", "starving accelerator",
-    "latency cliff", "roofline model",
-}
+ACRONYMS, COMPOUND_NAMES, DAM_AXES, CONCEPT_TERMS_LOWER, SKIP_HEADINGS = _load_rules()
 
 
 # ─── Regexes ─────────────────────────────────────────────────────────────────

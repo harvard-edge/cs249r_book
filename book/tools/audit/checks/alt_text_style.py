@@ -138,7 +138,7 @@ def check(
                             line=line_num,
                             col=line_col,
                             before=line,
-                            suggested_after="",  # subagent fills
+                            suggested_after=f"In fig-alt: replace {term!r} with {replacement!r}",
                             auto_fixable=False,
                             needs_subagent=True,
                             reason=f"alt-text: {term} -> {replacement}",
