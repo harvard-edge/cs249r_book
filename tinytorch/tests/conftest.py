@@ -72,7 +72,7 @@ _MODULE_REGISTRY = [
     (18, "Memoization",     "perf/memoization.py",     "tinytorch.perf.memoization",    "KVCache",              False),
     (19, "Benchmarking",    "perf/benchmarking.py",    "tinytorch.perf.benchmarking",   "Benchmark",            False),
     # Module 20 exports to the top-level olympics package
-    (20, "Capstone",        "olympics/__init__.py",    "tinytorch.olympics",            None,                   False),
+    (20, "Capstone",        "olympics.py",             "tinytorch.olympics",            None,                   False),
 ]
 
 

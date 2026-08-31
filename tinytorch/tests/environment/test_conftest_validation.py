@@ -128,7 +128,7 @@ class TestRegistrySchema:
 class TestExportPaths:
     """export_file values must follow the known sub-package layout."""
 
-    VALID_PREFIXES = ("core/", "perf/", "olympics/")
+    VALID_PREFIXES = ("core/", "perf/", "olympics.")
 
     @pytest.mark.parametrize("entry", _MODULE_REGISTRY,
                              ids=[f"module_{e[0]:02d}_{e[1]}" for e in _MODULE_REGISTRY])
@@ -163,10 +163,10 @@ class TestExportPaths:
         )
 
     def test_module_20_exports_to_olympics(self):
-        """Module 20 exports to the top-level olympics package."""
+        """Module 20 exports to olympics.py, a module and not a package."""
         entry = next(e for e in _MODULE_REGISTRY if e[0] == 20)
-        assert entry[2].startswith("olympics/"), (
-            f"Module 20 should export to olympics/, got '{entry[2]}'"
+        assert entry[2] == "olympics.py", (
+            f"Module 20 should export to olympics.py, got '{entry[2]}'"
         )
 
     def test_modules_14_to_19_export_to_perf(self):
@@ -183,6 +183,61 @@ class TestExportPaths:
 # ===========================================================================
 # 4. Required flags
 # ===========================================================================
+
+class TestRegistryMatchesRealPackage:
+    """The registry is a hand-maintained copy of each module's `#| default_exp`
+    directive, so nothing stops it drifting from the tree it describes. Every
+    other test in this file compares the registry against itself and would pass
+    just as happily if every path in it were wrong; these two compare it against
+    what the export actually produces.
+
+    Skips rather than fails when the package is not exported, so a fresh clone
+    or a progressive student build does not see a spurious red."""
+
+    PKG = Path(__file__).parent.parent.parent / "tinytorch"
+
+    @pytest.mark.parametrize("entry", _MODULE_REGISTRY,
+                             ids=[f"module_{e[0]:02d}_{e[1]}" for e in _MODULE_REGISTRY])
+    def test_registry_path_exists_in_exported_package(self, entry):
+        num, title, export_file, *_ = entry
+        if not (self.PKG / "core" / "tensor.py").exists():
+            pytest.skip("package not exported; run `tito dev export --all`")
+        assert (self.PKG / export_file).exists(), (
+            f"Module {num:02d} ({title}): registry points at "
+            f"tinytorch/{export_file}, which does not exist. The registry has "
+            f"drifted from the module's `#| default_exp` target."
+        )
+
+    def test_registry_path_matches_default_exp_directive(self):
+        """Read each module's own `#| default_exp` and compare, so the registry
+        cannot drift even when the package has not been exported."""
+        src_root = Path(__file__).parent.parent.parent / "src"
+        if not src_root.exists():
+            pytest.skip("src/ not present")
+        mismatches = []
+        for num, title, export_file, *_ in _MODULE_REGISTRY:
+            module_dir = next((d for d in sorted(src_root.iterdir())
+                               if d.is_dir() and d.name.startswith(f"{num:02d}_")), None)
+            if module_dir is None:
+                continue
+            py = next((f for f in sorted(module_dir.glob("*.py"))), None)
+            if py is None:
+                continue
+            declared = None
+            for line in py.read_text(encoding="utf-8").splitlines():
+                if line.startswith("#| default_exp"):
+                    declared = line.split("default_exp", 1)[1].strip()
+                    break
+            if declared is None:
+                continue
+            expected = declared.replace(".", "/") + ".py"
+            if expected != export_file:
+                mismatches.append(
+                    f"Module {num:02d} ({title}): registry says '{export_file}', "
+                    f"but `#| default_exp {declared}` means '{expected}'"
+                )
+        assert not mismatches, "\n".join(mismatches)
+
 
 class TestRequiredFlags:
     """Exactly modules 01-04 must be required=True; 05-20 must be False."""
