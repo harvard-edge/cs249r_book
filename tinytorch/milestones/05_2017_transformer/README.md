@@ -91,10 +91,10 @@ tito milestone run 05
 
 ## Further Reading
 
-- **The Paper**: Vaswani et al. (2017). "Attention Is All You Need"
+- **The Paper**: Vaswani et al. (2017). ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762)
 - **Illustrated Transformer**: http://jalammar.github.io/illustrated-transformer/
-- **GPT Evolution**: Radford et al. (2018, 2019, 2020). GPT-1/2/3 papers
-- **BERT**: Devlin et al. (2018). "BERT: Pre-training of Deep Bidirectional Transformers"
+- **GPT Evolution**: Radford et al. [GPT-1 (2018)](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf), [GPT-2 (2019)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), and [GPT-3 (2020)](https://arxiv.org/abs/2005.14165)
+- **BERT**: Devlin et al. (2018). ["BERT: Pre-training of Deep Bidirectional Transformers"](https://arxiv.org/abs/1810.04805) ([read online](https://webeditions.page/works/bert-pre-training/))
 
 ## Achievement Unlocked
 
