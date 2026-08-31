@@ -813,7 +813,7 @@ class Profiler:
             'adamw': gradient_memory_mb * 2,
         }
         ### END SOLUTION
-    
+
     def profile_forward_pass(self, model, input_tensor) -> Dict[str, Any]:
         """
         Comprehensive profiling of a model's forward pass.
