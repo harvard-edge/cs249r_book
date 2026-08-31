@@ -1,0 +1,225 @@
+name: 'MLPerf EDU · Full Benchmark Validation'
+
+# This workflow executes benchmark work. It is the evidence-bearing counterpart
+# to validate-dev and has a five-hour hard limit. A dry run is never reported as
+# max or release validation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'Execute canonical or research validation and all applicable causal inference phases'
+        type: choice
+        options:
+          - release
+          - max
+          - pro
+        default: release
+      keep_going:
+        description: 'Continue through all workloads after an individual failure'
+        type: boolean
+        default: true
+  schedule:
+    - cron: '17 3 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlperf-edu-full-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MLPERF_EDU_ROOT: mlperf-edu
+
+jobs:
+  full-validation:
+    name: "Execute ${{ inputs.preset || 'release' }} Validation"
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Check Evidence Inputs Before Execution
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run pytest
+          uv run python tools/export_flat_registry.py --check
+          uv run python tools/check_selection_ledger.py
+          uv run python tools/sync_verified_baselines.py --check
+          uv run python tools/check_taxonomy.py
+          uv run python tools/check_reference_claims.py --check
+          uv run python tools/generate_review_packets.py --check
+          uv run python tools/generate_docs.py --check
+
+      - name: Execute the Requested Validation Preset
+        id: benchmark
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        env:
+          REQUESTED_PRESET: ${{ inputs.preset }}
+          REQUESTED_KEEP_GOING: ${{ inputs.keep_going }}
+        run: |
+          set -euo pipefail
+          preset=${REQUESTED_PRESET:-release}
+          output_dir="submissions/ci-${preset}"
+          args=(validate "$preset" --output-dir "$output_dir")
+          if [ "${REQUESTED_KEEP_GOING:-true}" = "true" ]; then
+            args+=(--keep-going)
+          fi
+          echo "Executing actual ${preset} validation into ${output_dir}"
+          uv run mlperf "${args[@]}"
+
+          if [ "$preset" = "release" ] || [ "$preset" = "max" ]; then
+            max_output_dir="$output_dir/max-all"
+            for phase in full prefill decode; do
+              uv run mlperf run \
+                --workload causal-language-modeling \
+                --mode inference \
+                --phase "$phase" \
+                --profile max \
+                --output-dir "$max_output_dir"
+            done
+            uv run mlperf grade "$max_output_dir" \
+              --output "$max_output_dir/case-grade.json"
+          fi
+
+      - name: Record the Strict Public-Release Audit
+        if: always()
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set +e
+          uv run mlperf audit --policy public 2>&1 | tee public-audit.txt
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > public-audit-exit-code.txt
+          echo "strict_public_audit_exit_code=$status" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Verify the Full Validation Evidence Boundary
+        if: always()
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        env:
+          EXECUTED_PRESET: ${{ inputs.preset || 'release' }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          set -euo pipefail
+          test -s public-audit.txt
+          test -s public-audit-exit-code.txt
+          grep -Eq '^[0-9]+$' public-audit-exit-code.txt
+          if [ "$BENCHMARK_OUTCOME" != "success" ]; then
+            echo "Benchmark execution outcome was '$BENCHMARK_OUTCOME'."
+            exit 1
+          fi
+
+          output_dir="submissions/ci-${EXECUTED_PRESET}"
+          registry_count=$(uv run python -c \
+            'from mlperf.registry import load_registry; print(len(load_registry()))')
+          research_count=$(uv run python -c \
+            'from mlperf.registry import RESEARCH_WORKLOADS, load_registry; print(len(RESEARCH_WORKLOADS.intersection(load_registry())))')
+          summary=$(find "$output_dir" -maxdepth 1 \
+            -name "mlperf_validate_${EXECUTED_PRESET}_*.json" \
+            -type f -print -quit)
+          test -n "$summary"
+          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" "$research_count" "$output_dir/max-all" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          from tools.import_reference_evidence import case_id, expected_cases
+
+          report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected_preset = sys.argv[2]
+          registry_count = int(sys.argv[3])
+          research_count = int(sys.argv[4])
+          max_output_dir = pathlib.Path(sys.argv[5])
+          expected_validations = 3 if expected_preset == "release" else 1
+          if report.get("preset") != expected_preset:
+              raise SystemExit(f"unexpected preset: {report.get('preset')!r}")
+          if report.get("status") != "passed":
+              raise SystemExit(f"validation did not pass: {report.get('status')!r}")
+          totals = report.get("totals") or {}
+          expected_workloads = {
+              "release": registry_count * 2 + research_count,
+              "max": registry_count,
+              "pro": research_count,
+          }[expected_preset]
+          if int(totals.get("validations", -1)) != expected_validations:
+              raise SystemExit(f"incomplete validation profiles: {totals}")
+          if int(totals.get("workloads", -1)) != expected_workloads:
+              raise SystemExit(f"incomplete workload coverage: {totals}")
+          if int(totals.get("failures", -1)) != 0:
+              raise SystemExit(f"validation recorded failures: {totals}")
+          if int(totals.get("review_contract_failures", -1)) != 0:
+              raise SystemExit(f"review contracts did not pass: {totals}")
+
+          if expected_preset in {"release", "max"}:
+              expected = set(expected_cases())
+              actual = set()
+              for path in max_output_dir.glob("*_max_report.json"):
+                  payload = json.loads(path.read_text())
+                  if payload.get("status") != "passed":
+                      raise SystemExit(f"case report did not pass: {path}")
+                  actual.add(case_id(
+                      str(payload.get("workload")),
+                      str(payload.get("profile")),
+                      str(payload.get("mode")),
+                      payload.get("phase"),
+                  ))
+              if actual != expected:
+                  raise SystemExit(
+                      f"case execution closure mismatch; "
+                      f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+                  )
+              grade = json.loads((max_output_dir / "case-grade.json").read_text())
+              if (
+                  int(grade.get("passed", -1)) != len(expected)
+                  or int(grade.get("failed", -1)) != 0
+              ):
+                  raise SystemExit(f"case grading did not pass: {grade}")
+          PY
+
+      - name: Upload Full Validation Evidence
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-${{ inputs.preset || 'release' }}-evidence-${{ github.run_id }}
+          path: |
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-*/**
+            ${{ env.MLPERF_EDU_ROOT }}/public-audit*.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarize the Evidence Boundary
+        if: always()
+        env:
+          EXECUTED_PRESET: ${{ inputs.preset || 'release' }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          {
+            echo '## MLPerf EDU Full Validation'
+            echo ''
+            echo "- Preset executed: \`$EXECUTED_PRESET\`"
+            echo "- Benchmark step: \`$BENCHMARK_OUTCOME\`"
+            echo "- Strict public audit exit code: \`${strict_public_audit_exit_code:-not-run}\`"
+            echo ''
+            echo 'A green benchmark step proves execution and local grading for this run.'
+            echo 'It does not imply MLCommons endorsement or close external dataset and licensing decisions.'
+          } >> "$GITHUB_STEP_SUMMARY"

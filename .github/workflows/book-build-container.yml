@@ -87,6 +87,11 @@ on:
         required: false
         type: string
         default: 'latest'
+      include_pdf_cover:
+        description: 'Include the designed cover page in public PDF artifacts'
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       build_linux:
@@ -125,6 +130,10 @@ on:
         required: false
         type: string
         default: 'latest'
+      include_pdf_cover:
+        required: false
+        type: boolean
+        default: false
     outputs:
       build_success:
         description: "Whether all builds completed successfully"
@@ -605,6 +614,17 @@ jobs:
           echo "🔨 Building ${{ matrix.format_name }} on Linux container..."
           rm -f _quarto.yml
           cp config/${{ matrix.config }} _quarto.yml
+          # The publisher receives an interior text block without cover art,
+          # while the public downloadable PDF needs the designed cover. Keep
+          # the canonical Volume I PDF config as the publisher-safe default
+          # and alter only this disposable per-job config for public releases.
+          if [[ "${{ inputs.include_pdf_cover }}" == "true" \
+             && "${{ matrix.volume }}" == "vol1" \
+             && "${{ matrix.format_name }}" == "PDF" ]]; then
+            sed -i 's/^    coverpage: false$/    coverpage: true/' _quarto.yml
+            grep -q '^    coverpage: true$' _quarto.yml
+            echo "📘 Enabled the Volume I cover page for the public PDF artifact"
+          fi
           # EPUB and PDF builds use Quarto's `type: book`, which requires a
           # chapter literally named `index.qmd` at the project root. HTML uses
           # `type: website` with no such requirement but tolerates a same-content
@@ -636,6 +656,18 @@ jobs:
           if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
           Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
           Write-Host "📋 Using config: ${{ matrix.config }}"
+
+          if ('${{ inputs.include_pdf_cover }}' -eq 'true' -and
+              '${{ matrix.volume }}' -eq 'vol1' -and
+              '${{ matrix.format_name }}' -eq 'PDF') {
+            $configText = Get-Content '_quarto.yml' -Raw
+            $updatedText = $configText -replace '(?m)^    coverpage: false$', '    coverpage: true'
+            if ($updatedText -eq $configText) {
+              throw 'Could not enable the Volume I public PDF cover page'
+            }
+            Set-Content '_quarto.yml' -Value $updatedText -Encoding UTF8
+            Write-Host '📘 Enabled the Volume I cover page for the public PDF artifact'
+          }
 
           # EPUB/PDF (type: book) need a literal index.qmd; HTML tolerates it.
           # Windows containers don't honor junctions the same way, so copy
