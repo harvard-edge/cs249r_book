@@ -4650,6 +4650,99 @@ The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demons
 
 Beyond resident weights, KV-cache memory is often one of the largest capacity costs in large-language-model serving\index{LLM serving!production case study}, and @fig-kv-cache-growth shows why. Plotted at 70-billion-parameter scale to amplify the effect, the cache grows linearly with context length and batch size until long contexts exhaust the memory left after loading weights and runtime workspace. The 8-billion-parameter Llama 3\index{Llama 3!8-billion-parameter serving case study}\index{LLM serving!8-billion-parameter case study} profile analyzed in the rest of this section obeys the same physics with more headroom, making it a workload an engineer can fit on one GPU and reason about end to end.
 
+```{python}
+#| echo: false
+#| label: llm-case-study-hw-specs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LLM CASE STUDY HARDWARE SPECIFICATIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Workload Profile (~5 lines below: LlmCaseStudyHwSpecs.h100_mem_gb_str),
+# │          "Physics of Token Generation" callout (~50 lines below:
+# │          LlmCaseStudyHwSpecs.a100_bw_tb_per_s_str)
+# │
+# │ Goal: Provide H100 memory capacity and A100 bandwidth for the
+# │       8-billion-parameter Llama 3 case study's workload profile and token
+# │       generation analysis.
+# │ Show: The memory ceiling and bandwidth of H100 and A100 GPUs.
+# │ How: Retrieve constants from Hardware Digital Twins.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
+from mlsysim.fmt import fmt, fmt_qty, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
+from mlsysim.physics import transfer_time
+
+class LlmCaseStudyHwSpecs:
+    """H100 memory and A100 bandwidth for the 8-billion-parameter Llama 3 case study."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    h_a100 = Hardware.Cloud.A100
+    h_h100 = Hardware.Cloud.H100
+    m = Models.Language.Llama3_8B
+    prompt_tokens = 1000
+    decode_tokens = 256
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    a100_bw = h_a100.memory.bandwidth
+    _serving = ServingModel().solve(
+        m,
+        h_h100,
+        seq_len=prompt_tokens,
+        batch_size=1,
+        precision="int4",
+        efficiency=0.4,
+    )
+    case_study_model_weight = _serving.model_weights_size
+    case_study_ttft = _serving.ttft
+    a100_token_time = transfer_time(case_study_model_weight, a100_bw)
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    a100_mem_gb_str = fmt_memory_capacity(h_a100.memory.capacity, unit=GiB, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h_h100.memory.capacity, unit=GiB, commas=False)
+    case_study_model_weight_gb_str = fmt_memory(case_study_model_weight, unit=GB, commas=False)
+    case_study_ttft_ms_str = fmt_time(case_study_ttft, 'millisecond', precision=1, commas=False)
+    a100_token_ms_str = fmt_time(a100_token_time, 'millisecond', precision=2, commas=False)
+```
+
+```{python}
+#| echo: false
+#| label: llm-case-study-h100-bw-recap
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 BANDWIDTH FOR LLAMA 3 CASE STUDY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Workload profile and decode-phase analysis immediately below
+# │
+# │ Goal: Keep H100 bandwidth local to the 8B Llama 3 case study.
+# │ Show: The HBM bandwidth used in workload and token-latency calculations.
+# │ How: Retrieve memory bandwidth from Hardware Digital Twins.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_bandwidth
+
+class LlmCaseStudyH100BwRecap:
+    """Local H100 bandwidth recap for the 8B Llama 3 case study."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    h_h100 = Hardware.Cloud.H100
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    h100_bw = h_h100.memory.bandwidth
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+```
+
+#### Workload profile {#sec-model-serving-workload-profile-a380}
+
+The following fixed workload assumptions define the reference case used throughout the latency, memory, and economics calculations in this section; together, they bound the analyses that follow.
+
+*   **Model**: 8-billion-parameter Llama 3 (quantized to 4-bit using activation-aware weight quantization (AWQ); see @sec-model-compression-quantization-precision-cd46 for quantization techniques) [@dubey2024llama; @lin2023awq].
+*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` HBM3, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
+*   **Request characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
+*   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
+
 ::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled 80 GB GPU, 35 GB of INT4 weights leave 45 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.3k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the 45 GB cache budget remaining after 35 GB of INT4 weights on the modeled 80 GB GPU; batch size 32 crosses it near 4.3k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
@@ -4750,100 +4843,7 @@ plt.close()
 
 :::
 
-The linear growth of the KV cache with sequence length forces a hard trade-off: supporting longer contexts requires reducing concurrent batch size or adding memory capacity, which can reduce throughput efficiency.
-
-```{python}
-#| echo: false
-#| label: llm-case-study-hw-specs
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LLM CASE STUDY HARDWARE SPECIFICATIONS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Workload Profile (~5 lines below: LlmCaseStudyHwSpecs.h100_mem_gb_str),
-# │          "Physics of Token Generation" callout (~50 lines below:
-# │          LlmCaseStudyHwSpecs.a100_bw_tb_per_s_str)
-# │
-# │ Goal: Provide H100 memory capacity and A100 bandwidth for the
-# │       8-billion-parameter Llama 3 case study's workload profile and token
-# │       generation analysis.
-# │ Show: The memory ceiling and bandwidth of H100 and A100 GPUs.
-# │ How: Retrieve constants from Hardware Digital Twins.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.solvers import ServingModel
-from mlsysim.fmt import fmt, fmt_qty, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
-from mlsysim.physics import transfer_time
-
-class LlmCaseStudyHwSpecs:
-    """H100 memory and A100 bandwidth for the 8-billion-parameter Llama 3 case study."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_a100 = Hardware.Cloud.A100
-    h_h100 = Hardware.Cloud.H100
-    m = Models.Language.Llama3_8B
-    prompt_tokens = 1000
-    decode_tokens = 256
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_bw = h_a100.memory.bandwidth
-    _serving = ServingModel().solve(
-        m,
-        h_h100,
-        seq_len=prompt_tokens,
-        batch_size=1,
-        precision="int4",
-        efficiency=0.4,
-    )
-    case_study_model_weight = _serving.model_weights_size
-    case_study_ttft = _serving.ttft
-    a100_token_time = transfer_time(case_study_model_weight, a100_bw)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_memory_capacity(h_a100.memory.capacity, unit=GiB, commas=False)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
-    h100_mem_gb_str = fmt_memory_capacity(h_h100.memory.capacity, unit=GiB, commas=False)
-    case_study_model_weight_gb_str = fmt_memory(case_study_model_weight, unit=GB, commas=False)
-    case_study_ttft_ms_str = fmt_time(case_study_ttft, 'millisecond', precision=1, commas=False)
-    a100_token_ms_str = fmt_time(a100_token_time, 'millisecond', precision=2, commas=False)
-```
-
-```{python}
-#| echo: false
-#| label: llm-case-study-h100-bw-recap
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ H100 BANDWIDTH FOR LLAMA 3 CASE STUDY
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Workload profile and decode-phase analysis immediately below
-# │
-# │ Goal: Keep H100 bandwidth local to the 8B Llama 3 case study.
-# │ Show: The HBM bandwidth used in workload and token-latency calculations.
-# │ How: Retrieve memory bandwidth from Hardware Digital Twins.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.fmt import fmt_bandwidth
-
-class LlmCaseStudyH100BwRecap:
-    """Local H100 bandwidth recap for the 8B Llama 3 case study."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_h100 = Hardware.Cloud.H100
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_bw = h_h100.memory.bandwidth
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-```
-
-#### Workload profile {#sec-model-serving-workload-profile-a380}
-
-The following fixed workload assumptions define the reference case used throughout the latency, memory, and economics calculations in this section; together, they bound the analyses that follow.
-
-*   **Model**: 8-billion-parameter Llama 3 (quantized to 4-bit using activation-aware weight quantization (AWQ); see @sec-model-compression-quantization-precision-cd46 for quantization techniques) [@dubey2024llama; @lin2023awq].
-*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` HBM3, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
-*   **Request characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
-*   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
+Longer contexts therefore require smaller concurrent batches or more memory, reducing throughput efficiency.
 
 These assumptions make the case study narrow enough to calculate while preserving the two serving constraints that matter most: the prefill budget for time to first token and the decode budget for each generated token.
 

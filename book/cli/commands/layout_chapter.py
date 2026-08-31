@@ -578,9 +578,15 @@ def render_mapped_chapter(
         headers.append(_mainmatter_counter_hook(counter_number, start_page))
     elif document_kind == "part_opener":
         headers.append(_mainmatter_counter_hook(1, start_page))
-    if source_path.name == "references.qmd":
-        citekeys = _volume_citekeys(quarto_dir, configured)
-        config["nocite"] = [f"@{key}" for key in citekeys]
+    # Citeproc disambiguates names and year suffixes against the complete set of
+    # citations in a document.  Rendering only one chapter otherwise changes
+    # visible strings (for example, ``A. Chen`` to ``Chen`` or ``2024b`` to
+    # ``2024a``), and those small width changes accumulate into different page
+    # and float breaks.  Preserve the full volume's citation context for every
+    # mapped component; the resulting bibliography falls after the component
+    # and therefore does not affect its internal pagination.
+    citekeys = _volume_citekeys(quarto_dir, configured)
+    config["nocite"] = [f"@{key}" for key in citekeys]
     harness_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     active_config = quarto_dir / "_quarto.yml"
