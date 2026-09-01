@@ -1,0 +1,1163 @@
+# Mathematical and Physical Foundations for Systems Engineers {.unnumbered #sec-appendix-math}
+
+This appendix provides a self-contained, systems-oriented reference for the mathematical and control-theoretic formulations used across this book.
+
+For systems, embedded, and software engineers, mathematical formulas in Physical AI are not abstract analytical exercises; they are the **specifications for real-time silicon execution**. Every equation maps directly into memory access patterns, execution cycle budgets ($\text{WCET}$), numerical precision requirements, and physical safety bounds.
+
+---
+
+## 1. Kinematics and Stopping Envelopes
+
+### The Physical Derivation of Stopping Distance
+When an embodied robot maneuvers at linear velocity $v(t)$, the distance required to bring its physical mass to a complete, controlled stop consists of two decoupled components:
+
+1. **Reaction Drift ($d_{\text{drift}}$):** The distance traversed while sensory signals propagate through transduction, bus serialization, neural inference, and communication queues before the actuators can apply braking torque.
+2. **Kinematic Braking ($d_{\text{brake}}$):** The distance traversed while physical friction or counter-electromotive braking forces decelerate the moving mass at maximum safe deceleration $a_{\text{max}}$.
+
+| Phase | Physical Mechanism | Distance Formulation | Time Horizon |
+|:---|:---|:---|:---|
+| **Phase 1: Reaction Drift** | Sensor exposure, neural inference, network transport, inverter rise | $d_{\text{drift}} = v \cdot \tau_{\text{latency}}$ | $t \in [0, \tau_{\text{latency}}]$ |
+| **Phase 2: Kinematic Braking** | Counter-EMF braking, friction, ground adhesion | $d_{\text{brake}} = \dfrac{v^2}{2 a_{\text{max}}}$ | $t \in [\tau_{\text{latency}}, t_{\text{stop}}]$ |
+: Physical Decomposition of Total Stopping Distance ($d_{\text{stop}} = d_{\text{drift}} + d_{\text{brake}}$). {#tbl-stopping-distance-decomp}
+
+Integrating Newtonian dynamics under constant deceleration $a(t) = -a_{\text{max}}$:
+
+$$v(t) = v_0 - a_{\text{max}} t \implies t_{\text{brake}} = \frac{v_0}{a_{\text{max}}}$$
+
+$$d_{\text{brake}} = \int_0^{t_{\text{brake}}} (v_0 - a_{\text{max}} t) \, dt = v_0 t_{\text{brake}} - \frac{1}{2} a_{\text{max}} t_{\text{brake}}^2 = \frac{v_0^2}{2 a_{\text{max}}}$$
+
+Accounting for total sensorimotor transport latency $\tau_{\text{latency}}$, the **Total Dynamic Stopping Envelope** is:
+
+$$d_{\text{stop}}(v) = \underbrace{v \cdot \tau_{\text{latency}}}_{\text{Reaction Drift}} + \underbrace{\frac{v^2}{2 a_{\text{max}}}}_{\text{Kinematic Braking}}$$
+
+where:
+* $v$: Current operational velocity ($\text{m/s}$).
+* $\tau_{\text{latency}}$: Total end-to-end transport delay ($\text{s}$), encompassing camera exposure, bus serialization (CAN-FD/PCIe), operating system scheduling tail latency, and inverter current rise time.
+* $a_{\text{max}}$: Maximum permissible physical braking deceleration ($\text{m/s}^2$), constrained by tire friction coefficient ($\mu g$), payload tipping limits, or motor peak torque.
+
+### Parabolic Safe Velocity Clamping
+Given a measured physical clearance $d_{\text{clearance}}$ to an obstacle and a safety margin $d_{\text{margin}}$, the maximum safe operational velocity $v_{\text{safe}}$ is derived by solving the quadratic inequality $d_{\text{stop}}(v) \le d_{\text{clearance}} - d_{\text{margin}}$:
+
+$$\frac{1}{2 a_{\text{max}}} v^2 + \tau_{\text{latency}} v - (d_{\text{clearance}} - d_{\text{margin}}) \le 0$$
+
+Applying the quadratic formula and selecting the positive root:
+
+$$v_{\text{safe}} = \sqrt{a_{\text{max}}^2 \tau_{\text{latency}}^2 + 2 a_{\text{max}} (d_{\text{clearance}} - d_{\text{margin}})} - a_{\text{max}} \tau_{\text{latency}}$$
+
+### Microcontroller Execution Complexity and Timing Bounds
+
+In real-time firmware, evaluating $v_{\text{safe}}$ and $d_{\text{stop}}(v)$ executes at $1000\text{ Hz}$ in static SRAM with zero dynamic memory allocation (`malloc = 0`). Because the formulation requires only a single square-root operation and basic floating-point arithmetic, its Worst-Case Execution Time (WCET) on a $480\text{ MHz}$ ARM Cortex-M7 with a hardware Floating Point Unit (FPU) is bounded to $\text{WCET} \le 1.2\,\mu\text{s}$, consuming less than $0.15\%$ of the $1.0\text{ ms}$ control interval.
+
+---
+
+## 2. Spatial Geometry and Lie Algebra
+
+Physical AI agents operate in three-dimensional Euclidean space $\mathbb{R}^3$. To transform sensor observations, object affordances, and robot kinematics across coordinate frames, systems rely on the Special Euclidean Group $SE(3)$.
+
+### Homogeneous Transformation Matrices
+A rigid-body transformation from coordinate frame $A$ to coordinate frame $B$ consists of a 3D rotation $\mathbf{R}_A^B \in SO(3)$ and a 3D translation $\mathbf{p}_A^B \in \mathbb{R}^3$, unified into a $4 \times 4$ homogeneous matrix $\mathbf{T}_A^B \in SE(3)$:
+
+$$\mathbf{T}_A^B = \begin{bmatrix} \mathbf{R}_A^B & \mathbf{p}_A^B \\ \mathbf{0}_{1 \times 3} & 1 \end{bmatrix} \in \mathbb{R}^{4 \times 4}$$
+
+Points in 3D space are transformed using homogeneous coordinates $\tilde{\mathbf{x}} = [\mathbf{x}^T, 1]^T$:
+
+$$\tilde{\mathbf{x}}_B = \mathbf{T}_A^B \tilde{\mathbf{x}}_A \implies \begin{bmatrix} \mathbf{x}_B \\ 1 \end{bmatrix} = \begin{bmatrix} \mathbf{R}_A^B \mathbf{x}_A + \mathbf{p}_A^B \\ 1 \end{bmatrix}$$
+
+Matrix inversion in $SE(3)$ has a closed-form structure that avoids general $4 \times 4$ Gaussian elimination:
+
+$$(\mathbf{T}_A^B)^{-1} = \mathbf{T}_B^A = \begin{bmatrix} (\mathbf{R}_A^B)^T & -(\mathbf{R}_A^B)^T \mathbf{p}_A^B \\ \mathbf{0}_{1 \times 3} & 1 \end{bmatrix}$$
+
+### Quaternions for Singularity-Free Rotations
+While Euler angles (Roll, Pitch, Yaw) suffer from kinematic singularities (**Gimbal Lock** when pitch approaches $\pm 90^\circ$, causing division by zero in coordinate transformations), unit quaternions provide a continuous, computationally robust 4-parameter representation:
+
+$$\mathbf{q} = [w, x, y, z]^T = [\cos(\theta / 2), \mathbf{u}^T \sin(\theta / 2)]^T, \quad \|\mathbf{q}\|_2^2 = w^2 + x^2 + y^2 + z^2 = 1$$
+
+where $\mathbf{u} \in \mathbb{R}^3$ is the unit rotation axis and $\theta$ is the rotation angle.
+
+The **Hamilton Quaternion Product** ($\mathbf{q}_c = \mathbf{q}_a \otimes \mathbf{q}_b$) compounds successive 3D rotations:
+
+$$\mathbf{q}_a \otimes \mathbf{q}_b = \begin{bmatrix}
+w_a w_b - x_a x_b - y_a y_b - z_a z_b \\
+w_a x_b + x_a w_b + y_a z_b - z_a y_b \\
+w_a y_b - x_a z_b + y_a w_b + z_a x_b \\
+w_a z_b + x_a y_b - y_a x_b + z_a w_b
+\end{bmatrix}$$
+
+### Lie Algebra and Tangent Space Integration
+In high-frequency control loops ($1000\text{ Hz}$), velocities are expressed as continuous **spatial twists** $\boldsymbol{\xi} \in \mathbb{R}^6$ combining linear velocity $\mathbf{v} \in \mathbb{R}^3$ and angular velocity $\boldsymbol{\omega} \in \mathbb{R}^3$:
+
+$$\boldsymbol{\xi} = \begin{bmatrix} \mathbf{v} \\ \boldsymbol{\omega} \end{bmatrix} \in \mathbb{R}^6$$
+
+The wedge operator $(\cdot)^\wedge$ maps $\boldsymbol{\xi} \in \mathbb{R}^6$ to the matrix Lie algebra $\mathfrak{se}(3)$:
+
+$$\boldsymbol{\xi}^\wedge = \begin{bmatrix} [\boldsymbol{\omega}]_\times & \mathbf{v} \\ \mathbf{0}_{1 \times 3} & 0 \end{bmatrix} \in \mathbb{R}^{4 \times 4}, \quad \text{where } [\boldsymbol{\omega}]_\times = \begin{bmatrix} 0 & -\omega_z & \omega_y \\ \omega_z & 0 & -\omega_x \\ -\omega_y & \omega_x & 0 \end{bmatrix}$$
+
+Integrating a constant twist $\boldsymbol{\xi}$ over a discrete time step $\Delta t$ updates the robot pose without numerical distortion using the **Exponential Map**:
+
+$$\mathbf{T}(t + \Delta t) = \mathbf{T}(t) \cdot \exp\left( \boldsymbol{\xi}^\wedge \Delta t \right)$$
+
+$$\exp\left( \boldsymbol{\xi}^\wedge \Delta t \right) = \begin{bmatrix} \exp([\boldsymbol{\omega}]_\times \Delta t) & \mathbf{V}\mathbf{v}\Delta t \\ \mathbf{0}_{1 \times 3} & 1 \end{bmatrix}$$
+
+where the left-Jacobian matrix $\mathbf{V}$ and rotation matrix $\exp([\boldsymbol{\omega}]_\times \Delta t)$ are evaluated in closed form via Rodrigues' formula with $\theta = \|\boldsymbol{\omega}\| \Delta t$:
+
+$$\exp([\boldsymbol{\omega}]_\times \Delta t) = \mathbf{I}_{3 \times 3} + \frac{\sin(\theta)}{\theta}[\boldsymbol{\omega}]_\times + \frac{1 - \cos(\theta)}{\theta^2}[\boldsymbol{\omega}]_\times^2$$
+
+$$\mathbf{V} = \mathbf{I}_{3 \times 3} + \frac{1 - \cos(\theta)}{\theta^2}[\boldsymbol{\omega}]_\times + \frac{\theta - \sin(\theta)}{\theta^3}[\boldsymbol{\omega}]_\times^2$$
+
+### Numerical Normalization Invariant
+Under discrete integration, floating-point round-off causes unit quaternions to drift ($\|\mathbf{q}\| \neq 1$), corrupting the $SO(3)$ rotation manifold. In real-time $1000\text{ Hz}$ state estimators, the quaternion is renormalized every cycle ($\mathbf{q} \gets \mathbf{q} / \|\mathbf{q}\|$), falling back to identity $[1, 0, 0, 0]^T$ if $\|\mathbf{q}\|^2 < 10^{-12}$, executing in $< 0.1\,\mu\text{s}$ with zero dynamic memory allocation.
+
+---
+
+## 3. Control Barrier Functions and Quadratic Programs
+
+### Forward Invariance and Nagumo's Theorem
+Consider a control-affine physical dynamical system:
+
+$$\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$$
+
+where $\mathbf{x} \in \mathbb{R}^n$ is the physical state (positions, velocities), $\mathbf{u} \in \mathbb{R}^m$ is the control input (motor torques, phase voltages), and $f: \mathbb{R}^n \to \mathbb{R}^n$ and $g: \mathbb{R}^n \to \mathbb{R}^{n \times m}$ describe the autonomous drift dynamics and control input mapping. Both $f$ and $g$ are assumed to be locally Lipschitz continuous.
+
+A physical safe operating set $\mathcal{C} \subset \mathbb{R}^n$ is defined as the 0-superlevel set of a continuously differentiable scalar barrier certificate function $h(\mathbf{x}): \mathbb{R}^n \to \mathbb{R}$:
+
+$$\mathcal{C} = \{ \mathbf{x} \in \mathbb{R}^n \mid h(\mathbf{x}) \ge 0 \}$$
+
+$$\partial \mathcal{C} = \{ \mathbf{x} \in \mathbb{R}^n \mid h(\mathbf{x}) = 0 \} \quad (\text{Safety Boundary})$$
+
+$$\text{Int}(\mathcal{C}) = \{ \mathbf{x} \in \mathbb{R}^n \mid h(\mathbf{x}) > 0 \} \quad (\text{Safe Interior})$$
+
+The safe set $\mathcal{C}$ is **forward invariant** if for every initial physical state starting within the set ($\mathbf{x}(0) \in \mathcal{C}$), the trajectory remains safe for all future time: $\mathbf{x}(t) \in \mathcal{C}, \forall t \ge 0$.
+
+#### Formal Proof of Forward Invariance via Nagumo's Condition
+Nagumo's theorem for set invariance states that a closed set $\mathcal{C}$ is forward invariant under the vector field $\dot{\mathbf{x}} = F(\mathbf{x})$ if and only if the velocity vector $F(\mathbf{x})$ points into the tangent cone (subtangent vectors) of $\mathcal{C}$ at every boundary point $\mathbf{x} \in \partial \mathcal{C}$:
+
+$$\forall \mathbf{x} \in \partial \mathcal{C}, \quad \nabla h(\mathbf{x}) \cdot F(\mathbf{x}) \ge 0$$
+
+To guarantee asymptotic stability of the safe set and avoid edge chatter, we enforce the generalized Control Barrier Function condition with an extended class-$\mathcal{K}$ function $\alpha(\cdot)$ (where $\alpha(0) = 0$ and $\alpha$ is strictly increasing):
+
+$$\dot{h}(\mathbf{x}, \mathbf{u}) = \nabla h(\mathbf{x}) [f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}] \ge -\alpha(h(\mathbf{x}))$$
+
+Choosing the canonical linear class-$\mathcal{K}$ form $\alpha(h) = \gamma h$ with rate parameter $\gamma > 0$, the differential inequality becomes:
+
+$$\frac{d h(\mathbf{x}(t))}{dt} \ge -\gamma h(\mathbf{x}(t))$$
+
+Applying the Comparison Lemma (Grönwall's Inequality) to this scalar differential inequality yields:
+
+$$h(\mathbf{x}(t)) \ge h(\mathbf{x}(0)) e^{-\gamma t}, \quad \forall t \ge 0$$
+
+Because $h(\mathbf{x}(0)) \ge 0$ for any state starting in $\mathcal{C}$ and the exponential decay term $e^{-\gamma t} > 0$ for all finite $t \in [0, \infty)$, it follows that:
+
+$$h(\mathbf{x}(t)) \ge 0, \quad \forall t \ge 0$$
+
+Thus, the state trajectory $\mathbf{x}(t)$ can never cross the zero boundary $\partial \mathcal{C}$, proving rigorous mathematical forward set invariance.
+
+### Lie Derivatives and Affine Control Invariants
+Expanding $\dot{h}(\mathbf{x}, \mathbf{u})$ via the chain rule:
+
+$$\dot{h}(\mathbf{x}, \mathbf{u}) = \nabla h(\mathbf{x}) \dot{\mathbf{x}} = \nabla h(\mathbf{x}) [f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}] = \underbrace{\nabla h(\mathbf{x}) f(\mathbf{x})}_{L_f h(\mathbf{x})} + \underbrace{\nabla h(\mathbf{x}) g(\mathbf{x})}_{L_g h(\mathbf{x})} \mathbf{u}$$
+
+* **$L_f h(\mathbf{x}) \in \mathbb{R}$:** The *Lie derivative along $f$*, representing the natural physical rate of change of safety clearance under zero actuator power (unforced momentum drift).
+* **$L_g h(\mathbf{x}) \in \mathbb{R}^{1 \times m}$:** The *Lie derivative along $g$*, representing the control authority over safety clearance per unit actuator input.
+
+The Control Barrier Function condition becomes an **affine linear inequality** in the control input vector $\mathbf{u}$:
+
+$$L_f h(\mathbf{x}) + L_g h(\mathbf{x})\mathbf{u} + \gamma h(\mathbf{x}) \ge 0$$
+
+* **The Speed Governor Invariant:** When far inside the safe set ($h(\mathbf{x}) \gg 0$), $-\gamma h(\mathbf{x})$ evaluates to a large negative number, leaving the candidate control input $\mathbf{u}$ unconstrained. As physical clearance collapses toward the boundary ($h(\mathbf{x}) \to 0$), $-\gamma h(\mathbf{x}) \to 0$, forcing the approach speed $\dot{h} \ge 0$. At the exact boundary ($h=0$), any action that produces negative clearance rate is strictly vetoed, rendering the boundary mathematically impenetrable.
+
+### The Minimal-Intervention Quadratic Program (CBF-QP)
+In the Proposal–Permission architecture, upstream neural policies (System 2 / System 1.5) emit unverified candidate action proposals $\mathbf{u}_{\text{cand}} \in \mathbb{R}^m$. The bare-metal microcontroller (System 1) solves the following convex Quadratic Program at $1000\text{ Hz}$:
+
+$$\mathbf{u}^* = \arg\min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2} (\mathbf{u} - \mathbf{u}_{\text{cand}})^T \mathbf{W} (\mathbf{u} - \mathbf{u}_{\text{cand}})$$
+
+$$\begin{aligned}
+\text{subject to:} \quad &L_f h_i(\mathbf{x}) + L_g h_i(\mathbf{x})\mathbf{u} + \gamma_i h_i(\mathbf{x}) \ge 0, \quad i = 1, \dots, M \\
+&\mathbf{u}_{\text{min}} \le \mathbf{u} \le \mathbf{u}_{\text{max}}
+\end{aligned}$$
+
+where $\mathbf{W} \succ 0$ is a positive-definite weighting metric.
+
+* **Minimal Intervention Principle:** When $\mathbf{u}_{\text{cand}}$ satisfies all barrier inequalities, the objective is minimized at $\mathbf{u}^* = \mathbf{u}_{\text{cand}}$ with zero active constraints, passing the AI policy's action unmodified. When $\mathbf{u}_{\text{cand}}$ violates a barrier, the QP executes an orthogonal projection onto the safe half-space boundary $\partial \mathcal{U}_{\text{safe}}$, modifying the command by the minimum Euclidean perturbation required to preserve invariance.
+
+### Multi-Variable KKT Matrix System and Active-Set Derivation
+Writing the CBF-QP in standard matrix inequality form:
+
+$$\min_{\mathbf{u}} \frac{1}{2} \mathbf{u}^T \mathbf{W} \mathbf{u} - \mathbf{u}_{\text{cand}}^T \mathbf{W} \mathbf{u} \quad \text{subject to} \quad \mathbf{A} \mathbf{u} \ge \mathbf{b}$$
+
+where the constraint matrix $\mathbf{A} \in \mathbb{R}^{K \times m}$ and vector $\mathbf{b} \in \mathbb{R}^K$ stack both the $M$ barrier constraints and the $2m$ box limits ($K = M + 2m$):
+
+$$\mathbf{A} = \begin{bmatrix} L_g h_1(\mathbf{x}) \\ \vdots \\ L_g h_M(\mathbf{x}) \\ \mathbf{I}_{m \times m} \\ -\mathbf{I}_{m \times m} \end{bmatrix}, \qquad \mathbf{b} = \begin{bmatrix} -L_f h_1(\mathbf{x}) - \gamma_1 h_1(\mathbf{x}) \\ \vdots \\ -L_f h_M(\mathbf{x}) - \gamma_M h_M(\mathbf{x}) \\ \mathbf{u}_{\text{min}} \\ -\mathbf{u}_{\text{max}} \end{bmatrix}$$
+
+The Lagrangian function for this convex optimization problem is:
+
+$$\mathcal{L}(\mathbf{u}, \boldsymbol{\lambda}) = \frac{1}{2} (\mathbf{u} - \mathbf{u}_{\text{cand}})^T \mathbf{W} (\mathbf{u} - \mathbf{u}_{\text{cand}}) - \boldsymbol{\lambda}^T (\mathbf{A} \mathbf{u} - \mathbf{b})$$
+
+where $\boldsymbol{\lambda} \in \mathbb{R}^K$ is the vector of non-negative Lagrange multipliers. The Karush-Kuhn-Tucker (KKT) optimality conditions are:
+
+1. **Stationarity:** $\nabla_{\mathbf{u}} \mathcal{L} = \mathbf{W} (\mathbf{u}^* - \mathbf{u}_{\text{cand}}) - \mathbf{A}^T \boldsymbol{\lambda}^* = \mathbf{0} \implies \mathbf{u}^* = \mathbf{u}_{\text{cand}} + \mathbf{W}^{-1} \mathbf{A}^T \boldsymbol{\lambda}^*$
+2. **Primal Feasibility:** $\mathbf{A} \mathbf{u}^* - \mathbf{b} \ge \mathbf{0}$
+3. **Dual Feasibility:** $\boldsymbol{\lambda}^* \ge \mathbf{0}$
+4. **Complementary Slackness:** $\lambda_k^* (\mathbf{a}_k^T \mathbf{u}^* - b_k) = 0, \quad \forall k \in \{1, \dots, K\}$
+
+Let $\mathcal{A} \subseteq \{1, \dots, K\}$ denote the active constraint set at the optimal solution (where $\mathbf{a}_k^T \mathbf{u}^* = b_k$ and $\lambda_k^* > 0$). Restricting $\mathbf{A}$ and $\mathbf{b}$ to the active rows $\mathbf{A}_{\mathcal{A}}$:
+
+$$\mathbf{A}_{\mathcal{A}} \mathbf{u}^* = \mathbf{A}_{\mathcal{A}} \left( \mathbf{u}_{\text{cand}} + \mathbf{W}^{-1} \mathbf{A}_{\mathcal{A}}^T \boldsymbol{\lambda}_{\mathcal{A}}^* \right) = \mathbf{b}_{\mathcal{A}}$$
+
+Rearranging yields the symmetric positive-definite active-set linear system for the optimal dual variables:
+
+$$\left( \mathbf{A}_{\mathcal{A}} \mathbf{W}^{-1} \mathbf{A}_{\mathcal{A}}^T \right) \boldsymbol{\lambda}_{\mathcal{A}}^* = \mathbf{b}_{\mathcal{A}} - \mathbf{A}_{\mathcal{A}} \mathbf{u}_{\text{cand}}$$
+
+Solving for $\boldsymbol{\lambda}_{\mathcal{A}}^*$ via Cholesky decomposition $\mathbf{L} \mathbf{L}^T = \mathbf{A}_{\mathcal{A}} \mathbf{W}^{-1} \mathbf{A}_{\mathcal{A}}^T$, the optimal projected control command is:
+
+$$\mathbf{u}^* = \mathbf{u}_{\text{cand}} + \mathbf{W}^{-1} \mathbf{A}_{\mathcal{A}}^T \boldsymbol{\lambda}_{\mathcal{A}}^*$$
+
+### Microcontroller Real-Time Solvers and Complexity Bounds
+
+On safety-critical microcontrollers (such as a dual-core lockstep ARM Cortex-M7 at $480\text{ MHz}$), solving the active-set CBF-QP is executed using static memory allocations in Data Tightly-Coupled Memory (DTCM) with zero heap fragmentation (`malloc = 0`).
+
+For a 6-DoF manipulator with $M=8$ active barrier certificates, the active-set algorithm resolves the optimal projection in $3\text{--}6$ iterations. Each iteration performs a Cholesky factorization of the small active-set Gram matrix $(\mathbf{A}_{\mathcal{A}} \mathbf{W}^{-1} \mathbf{A}_{\mathcal{A}}^T) \in \mathbb{R}^{|\mathcal{A}| \times |\mathcal{A}|}$ (where $|\mathcal{A}| \le 6$). On target silicon, nominal solve time is under $45\,\mu\text{s}$, with a hard worst-case execution time bounded to $\text{WCET} \le 175\,\mu\text{s}$ at maximum iteration count ($k_{\text{max}} = 10$). If the active-set fails to converge within $10$ iterations, the microcontroller deterministically aborts to the Category 1 dynamic stopping trajectory ($a = -a_{\text{max}}$) within the remaining $825\,\mu\text{s}$ of the $1.0\text{ ms}$ control cycle.
+
+---
+
+## 4. Continuous-Discrete Extended Kalman Filtering
+
+Physical AI pipelines fuse high-rate ($1000\text{ Hz}$) noisy proprioceptive inertial measurements with delayed, multi-modal exteroceptive observations ($10\text{--}30\text{ Hz}$) using the **Continuous-Discrete Extended Kalman Filter (EKF)**.
+
+### Continuous Physics Error Dynamics and Riccati ODE Derivation
+
+Between discrete measurement arrivals, the continuous physical state evolves under non-linear dynamics with continuous process noise:
+
+$$\dot{\mathbf{x}}(t) = f(\mathbf{x}(t), \mathbf{u}(t)) + \mathbf{w}(t), \qquad \mathbf{w}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}_c(t))$$
+
+The estimated state mean propagates via the nominal dynamics:
+
+$$\dot{\hat{\mathbf{x}}}(t) = f(\hat{\mathbf{x}}(t), \mathbf{u}(t))$$
+
+Defining estimation error $\mathbf{e}(t) = \mathbf{x}(t) - \hat{\mathbf{x}}(t)$ and linearizing $f(\mathbf{x}, \mathbf{u})$ via Taylor expansion about $\hat{\mathbf{x}}(t)$:
+
+$$f(\mathbf{x}(t), \mathbf{u}(t)) = f(\hat{\mathbf{x}}(t), \mathbf{u}(t)) + \mathbf{F}(t)\mathbf{e}(t) + \mathcal{O}(\|\mathbf{e}\|^2), \qquad \mathbf{F}(t) = \left. \frac{\partial f}{\partial \mathbf{x}} \right|_{\hat{\mathbf{x}}(t), \mathbf{u}(t)}$$
+
+The continuous error dynamics satisfy:
+
+$$\dot{\mathbf{e}}(t) = \dot{\mathbf{x}}(t) - \dot{\hat{\mathbf{x}}}(t) = \mathbf{F}(t)\mathbf{e}(t) + \mathbf{w}(t)$$
+
+The spatial error covariance matrix is defined as the expectation $\mathbf{P}(t) = \mathbb{E}[\mathbf{e}(t)\mathbf{e}(t)^T]$. Applying the product rule for differentiation:
+
+$$\dot{\mathbf{P}}(t) = \frac{d}{dt}\mathbb{E}[\mathbf{e}(t)\mathbf{e}(t)^T] = \mathbb{E}[\dot{\mathbf{e}}(t)\mathbf{e}(t)^T] + \mathbb{E}[\mathbf{e}(t)\dot{\mathbf{e}}(t)^T]$$
+
+Substituting the error differential equation:
+
+$$\mathbb{E}[\dot{\mathbf{e}}(t)\mathbf{e}(t)^T] = \mathbb{E}[(\mathbf{F}(t)\mathbf{e}(t) + \mathbf{w}(t))\mathbf{e}(t)^T] = \mathbf{F}(t)\mathbf{P}(t) + \mathbb{E}[\mathbf{w}(t)\mathbf{e}(t)^T]$$
+
+Because white Gaussian process noise $\mathbf{w}(t)$ is uncorrelated with past estimation errors, $\mathbb{E}[\mathbf{w}(t)\mathbf{e}(t)^T] = \frac{1}{2}\mathbf{Q}_c(t)$. Adding the transpose term yields the **Continuous Matrix Riccati Differential Equation**:
+
+$$\dot{\mathbf{P}}(t) = \mathbf{F}(t)\mathbf{P}(t) + \mathbf{P}(t)\mathbf{F}(t)^T + \mathbf{Q}_c(t)$$
+
+Discretizing across integration time step $\Delta t = 1.0\text{ ms}$:
+
+$$\hat{\mathbf{x}}_{k|k-1} = \hat{\mathbf{x}}_{k-1|k-1} + \int_{t_{k-1}}^{t_k} f(\hat{\mathbf{x}}(\tau), \mathbf{u}_{k-1})\,d\tau \approx \hat{\mathbf{x}}_{k-1|k-1} + f(\hat{\mathbf{x}}_{k-1|k-1}, \mathbf{u}_{k-1})\Delta t$$
+
+$$\mathbf{P}_{k|k-1} = \boldsymbol{\Phi}_k \mathbf{P}_{k-1|k-1} \boldsymbol{\Phi}_k^T + \mathbf{Q}_d$$
+
+where $\boldsymbol{\Phi}_k \approx \mathbf{I} + \mathbf{F}(t_{k-1})\Delta t$ is the state transition matrix and $\mathbf{Q}_d \approx \mathbf{Q}_c \Delta t$ is discrete process noise covariance.
+
+### Optimal Kalman Gain Derivation via Minimum Trace Estimation
+
+When a discrete measurement $\mathbf{z}_k \in \mathbb{R}^m$ arrives at time $t_k$:
+
+$$\mathbf{z}_k = h(\mathbf{x}_k) + \mathbf{v}_k, \qquad \mathbf{v}_k \sim \mathcal{N}(\mathbf{0}, \mathbf{R}_k)$$
+
+The linear estimator updates the state estimate according to:
+
+$$\hat{\mathbf{x}}_{k|k} = \hat{\mathbf{x}}_{k|k-1} + \mathbf{K}_k (\mathbf{z}_k - h(\hat{\mathbf{x}}_{k|k-1}))$$
+
+Linearizing the observation function $h(\mathbf{x}_k) \approx h(\hat{\mathbf{x}}_{k|k-1}) + \mathbf{H}_k \mathbf{e}_{k|k-1}$ with $\mathbf{H}_k = \left. \frac{\partial h}{\partial \mathbf{x}} \right|_{\hat{\mathbf{x}}_{k|k-1}}$, the a posteriori error is:
+
+$$\mathbf{e}_{k|k} = \mathbf{x}_k - \hat{\mathbf{x}}_{k|k} = (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)\mathbf{e}_{k|k-1} - \mathbf{K}_k \mathbf{v}_k$$
+
+Evaluating the a posteriori covariance $\mathbf{P}_{k|k} = \mathbb{E}[\mathbf{e}_{k|k}\mathbf{e}_{k|k}^T]$ under mutually independent state error and sensor noise:
+
+$$\mathbf{P}_{k|k} = (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)\mathbf{P}_{k|k-1}(\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)^T + \mathbf{K}_k \mathbf{R}_k \mathbf{K}_k^T$$
+
+To find the gain $\mathbf{K}_k$ minimizing the mean squared estimation error, we minimize the scalar cost function $J = \text{Tr}(\mathbf{P}_{k|k})$. Expanding the trace:
+
+$$J = \text{Tr}(\mathbf{P}_{k|k-1}) - 2\text{Tr}(\mathbf{K}_k \mathbf{H}_k \mathbf{P}_{k|k-1}) + \text{Tr}\left(\mathbf{K}_k (\mathbf{H}_k \mathbf{P}_{k|k-1} \mathbf{H}_k^T + \mathbf{R}_k)\mathbf{K}_k^T\right)$$
+
+Applying matrix differentiation identities $\frac{\partial \text{Tr}(\mathbf{A}\mathbf{B})}{\partial \mathbf{A}} = \mathbf{B}^T$ and $\frac{\partial \text{Tr}(\mathbf{A}\mathbf{C}\mathbf{A}^T)}{\partial \mathbf{A}} = 2\mathbf{A}\mathbf{C}$ (for symmetric $\mathbf{C}$):
+
+$$\frac{\partial J}{\partial \mathbf{K}_k} = -2 (\mathbf{H}_k \mathbf{P}_{k|k-1})^T + 2 \mathbf{K}_k (\mathbf{H}_k \mathbf{P}_{k|k-1} \mathbf{H}_k^T + \mathbf{R}_k) = \mathbf{0}$$
+
+Defining innovation covariance $\mathbf{S}_k = \mathbf{H}_k \mathbf{P}_{k|k-1} \mathbf{H}_k^T + \mathbf{R}_k$:
+
+$$\mathbf{K}_k \mathbf{S}_k = \mathbf{P}_{k|k-1} \mathbf{H}_k^T \implies \mathbf{K}_k = \mathbf{P}_{k|k-1} \mathbf{H}_k^T \mathbf{S}_k^{-1}$$
+
+### Structural Proof of the Joseph Stabilized Covariance Form
+
+On 32-bit embedded architectures (FP32), the simplified covariance update $\mathbf{P} = (\mathbf{I} - \mathbf{K}\mathbf{H})\mathbf{P}$ causes catastrophic divergence due to numerical asymmetry and lost positive definiteness.
+
+The **Joseph stabilized form** guarantees positive semi-definiteness:
+
+$$\mathbf{P}_{k|k} = (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k) \mathbf{P}_{k|k-1} (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)^T + \mathbf{K}_k \mathbf{R}_k \mathbf{K}_k^T$$
+
+**Mathematical Proof of Global Stability:**
+Let $\mathbf{y} \in \mathbb{R}^n$ be an arbitrary non-zero test vector. The quadratic form evaluates to:
+
+$$\mathbf{y}^T \mathbf{P}_{k|k} \mathbf{y} = \mathbf{y}^T (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k) \mathbf{P}_{k|k-1} (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)^T \mathbf{y} + \mathbf{y}^T \mathbf{K}_k \mathbf{R}_k \mathbf{K}_k^T \mathbf{y}$$
+
+Defining transformed vectors $\mathbf{u}_1 = (\mathbf{I} - \mathbf{K}_k \mathbf{H}_k)^T \mathbf{y}$ and $\mathbf{u}_2 = \mathbf{K}_k^T \mathbf{y}$:
+
+$$\mathbf{y}^T \mathbf{P}_{k|k} \mathbf{y} = \mathbf{u}_1^T \mathbf{P}_{k|k-1} \mathbf{u}_1 + \mathbf{u}_2^T \mathbf{R}_k \mathbf{u}_2$$
+
+Because $\mathbf{P}_{k|k-1} \succeq 0$ and $\mathbf{R}_k \succ 0$:
+
+$$\mathbf{u}_1^T \mathbf{P}_{k|k-1} \mathbf{u}_1 \ge 0, \qquad \mathbf{u}_2^T \mathbf{R}_k \mathbf{u}_2 \ge 0 \implies \mathbf{y}^T \mathbf{P}_{k|k} \mathbf{y} \ge 0 \quad \forall \mathbf{y} \in \mathbb{R}^n$$
+
+Thus, $\mathbf{P}_{k|k}$ is strictly positive semi-definite ($\mathbf{P}_{k|k} \succeq 0$) regardless of floating-point truncation errors or suboptimal gain matrices.
+
+### Mahalanobis Innovation Gating
+
+The measurement innovation $\tilde{\mathbf{y}}_k = \mathbf{z}_k - h(\hat{\mathbf{x}}_{k|k-1})$ represents the new information introduced by the sensor. Under Gaussian assumptions, $\tilde{\mathbf{y}}_k \sim \mathcal{N}(\mathbf{0}, \mathbf{S}_k)$.
+
+The squared Mahalanobis distance scales the innovation residual by its expected uncertainty:
+
+$$d_M^2 = \tilde{\mathbf{y}}_k^T \mathbf{S}_k^{-1} \tilde{\mathbf{y}}_k \sim \chi_m^2$$
+
+where $m = \dim(\mathbf{z}_k)$. The gating threshold is evaluated against the cumulative Chi-Square distribution:
+
+$$\text{Decision} = \begin{cases} \text{Accept Measurement and Apply Update}, & d_M^2 \le \chi_{m, 1-\alpha}^2 \\\\ \text{Reject Outlier and Propagate Open-Loop}, & d_M^2 > \chi_{m, 1-\alpha}^2 \end{cases}$$
+
+### Real-Time Kalman Filter Determinism and Complexity
+
+In embedded state estimation pipelines, the Continuous-Discrete EKF executes on dedicated microcontroller hardware or real-time DSPs in static DTCM SRAM with zero dynamic memory allocation (`malloc = 0`).
+
+For a 6-dimensional kinematic state ($n=6$) with 3-dimensional position observations ($m=3$), the propagation step requires $O(n^3)$ operations ($216$ multiply-accumulates), and the Joseph-form measurement update requires matrix inversion of the $3 \times 3$ innovation covariance $\mathbf{S}_k$, followed by outer product updates $\mathbf{P}_k = (\mathbf{I} - \mathbf{K}_k\mathbf{H}_k)\mathbf{P}_k^-(\mathbf{I} - \mathbf{K}_k\mathbf{H}_k)^T + \mathbf{K}_k\mathbf{R}_k\mathbf{K}_k^T$.
+
+On an ARM Cortex-M7 with hardware SIMD and single-precision FPU, the complete propagation and Joseph update cycle executes in under $18.5\,\mu\text{s}$ ($\text{WCET} \le 25.0\,\mu\text{s}$), ensuring that state estimates and uncertainty bounds are updated with deterministic microsecond precision before feeding downstream Control Barrier Functions.
+
+---
+
+## 5. Field-Oriented Motor Control
+
+To translate high-level torque commands into physical electromagnetic forces, brushless permanent-magnet synchronous motors (PMSM) rely on **Field-Oriented Control (FOC)** executing in dedicated hardware timer peripherals at $20\text{ kHz}$ ($\Delta t = 50\,\mu\text{s}$).
+
+### Clarke Transformation
+Transforms balanced three-phase stator currents $(i_a, i_b, i_c)$ into a stationary two-phase orthogonal coordinate system:
+
+$$\begin{bmatrix} i_\alpha \\ i_\beta \end{bmatrix} = \frac{2}{3} \begin{bmatrix} 1 & -\frac{1}{2} & -\frac{1}{2} \\ 0 & \frac{\sqrt{3}}{2} & -\frac{\sqrt{3}}{2} \end{bmatrix} \begin{bmatrix} i_a \\ i_b \\ i_c \end{bmatrix}$$
+
+Using the zero-sum property $i_a + i_b + i_c = 0$, this simplifies to:
+
+$$i_\alpha = i_a, \quad i_\beta = \frac{1}{\sqrt{3}} (i_a + 2 i_b)$$
+
+### Park Transformation
+Rotates the stationary $(\alpha, \beta)$ currents into the rotor's rotating reference frame using the electrical rotor angle $\theta_e = P \cdot \theta_{\text{mech}}$ (where $P$ is the motor pole-pair count):
+
+$$\begin{bmatrix} i_d \\ i_q \end{bmatrix} = \begin{bmatrix} \cos\theta_e & \sin\theta_e \\ -\sin\theta_e & \cos\theta_e \end{bmatrix} \begin{bmatrix} i_\alpha \\ i_\beta \end{bmatrix}$$
+
+* **Direct-Axis Current ($i_d$):** Aligns parallel with the rotor permanent magnet flux. Setting $i_d^* = 0$ eliminates wasteful radial forces and maximizes electrical efficiency.
+* **Quadrature-Axis Current ($i_q$):** Aligns $90^\circ$ electrical ahead of rotor flux, producing pure orthogonal electromagnetic torque:
+
+$$\tau_{\text{motor}} = \frac{3}{2} P \lambda_{\text{pm}} i_q = K_t \cdot i_q$$
+
+where $\lambda_{\text{pm}}$ is the permanent magnet flux linkage ($\text{Wb}$) and $K_t$ is the motor torque constant ($\text{N}\cdot\text{m/A}$).
+
+### Thermal Energy Accumulator
+To prevent motor stator insulation breakdown ($T > 155^\circ\text{C}$), the motor driver integrates Joulean thermal dissipation in real time:
+
+$$E_{\text{thermal}}(t) = \int_0^t I_{\text{phase}}^2(\tau) R_{\text{stator}} \, d\tau$$
+
+When $E_{\text{thermal}}$ exceeds the continuous thermal rating $E_{\text{continuous}}$, the controller linearly derates peak torque current $i_q^{\text{limit}} \leftarrow i_q^{\text{nominal}} \cdot \left(1 - \frac{T_j - 85^\circ\text{C}}{155^\circ\text{C} - 85^\circ\text{C}}\right)$.
+
+---
+
+## 6. Frequency-Domain Stability and Phase Margin
+
+In classical digital control, converting continuous commands to discrete hardware outputs introduces uncompensated phase lag that erodes the system's stability margin.
+
+### Zero-Order Hold (ZOH) Phase Lag
+A digital-to-analog converter holding a commanded setpoint constant over sample period $T$ is modeled by the Zero-Order Hold transfer function:
+
+$$G_{\text{ZOH}}(s) = \frac{1 - e^{-sT}}{s}$$
+
+Evaluating its frequency response $s = j\omega$:
+
+$$G_{\text{ZOH}}(j\omega) = T \cdot \text{sinc}\left(\frac{\omega T}{2}\right) e^{-j \frac{\omega T}{2}}$$
+
+The magnitude attenuation is $\left| \text{sinc}\left(\frac{\omega T}{2}\right) \right|$, while the **exact phase lag** is:
+
+$$\Delta \phi_{\text{ZOH}} = -\frac{\omega T}{2} \quad (\text{radians}) = -\omega \cdot \frac{T}{2} \cdot \frac{180^\circ}{\pi} \quad (\text{degrees})$$
+
+### The Phase Margin Stability Criterion
+Let $\omega_c$ be the open-loop gain crossover frequency ($\|G(j\omega_c)\| = 1$) of the physical mechanism, and $\text{PM}_{\text{nominal}}$ be the nominal phase margin. Total sensorimotor transport delay $\tau_{\text{delay}} = \tau_{\text{compute}} + \frac{1}{2} T_{\text{sample}}$ introduces phase lag:
+
+$$\Delta \phi = -\omega_c \cdot \tau_{\text{delay}} \cdot \frac{180^\circ}{\pi}$$
+
+The effective closed-loop phase margin is:
+
+$$\text{PM}_{\text{effective}} = \text{PM}_{\text{nominal}} - \omega_c \tau_{\text{delay}} \cdot \frac{180^\circ}{\pi}$$
+
+* **Stability Limit:** If $\tau_{\text{delay}} \ge \frac{\text{PM}_{\text{nominal}}}{\omega_c} \cdot \frac{\pi}{180^\circ}$, then $\text{PM}_{\text{effective}} \le 0^\circ$. Stabilizing negative feedback flips into positive feedback, triggering explosive limit-cycle oscillations. As quantified in @tbl-math-phase-lag, execution frequency directly dictates the preserved phase margin across operational cadences.
+
+| Sample Frequency ($f_s$) | Sample Period ($T$) | ZOH Delay ($\tau_d = T/2$) | Phase Lag at $\omega_c = 25\text{ rad/s}$ ($4\text{ Hz}$) | Impact on $35^\circ$ Phase Margin |
+| :--- | :--- | :--- | :--- | :--- |
+| **$10\text{ Hz}$** (Slow VLM) | $100\text{ ms}$ | $50\text{ ms}$ | **$-71.6^\circ$** | **$-36.6^\circ$ (Destructive Instability / Crash)** |
+| **$50\text{ Hz}$** (Action Chunk) | $20\text{ ms}$ | $10\text{ ms}$ | **$-14.3^\circ$** | **$+20.7^\circ$ (Reduced Damping, Mild Overshoot)** |
+| **$1000\text{ Hz}$** (MCU Reflex) | $1.0\text{ ms}$ | $0.5\text{ ms}$ | **$-0.72^\circ$** | **$+34.3^\circ$ (Robust Closed-Loop Stability)** |
+
+: **Frequency-Domain Phase Lag Impact across Physical AI Cadences.** Demonstrating why high-frequency execution is mathematically mandatory for physical stability. {#tbl-math-phase-lag}
+
+---
+
+## 7. Systems Translation Reference
+
+| Mathematical Concept | Core Equation / Invariant | Systems Meaning | Implementation Standard | Target Silicon |
+| :--- | :--- | :--- | :--- | :--- |
+| **Dynamic Stopping** | $d_{\text{stop}} = v \tau + \frac{v^2}{2a_{\text{max}}}$ | Minimum clearance to prevent impact | Closed-form velocity clamp ($v_{\text{safe}}$) | Real-Time MCU ($1000\text{ Hz}$) |
+| **Spatial Pose** | $\mathbf{T} \in SE(3), \, \mathbf{q} \in \mathbb{S}^3$ | 6-DoF position and rotation | Quaternion Hamilton product + Normalization | All Silicon Tiers |
+| **Twist Integration** | $\mathbf{T}_{k+1} = \mathbf{T}_k \exp(\boldsymbol{\xi}^\wedge \Delta t)$ | Singularity-free motion update | Rodrigues formula in C (`float[4][4]`) | MCU / Host MPU |
+| **Control Barrier** | $\dot{h} + \gamma h \ge 0$ | Forward invariant safe operating set | Affine constraint in microsecond QP | Real-Time MCU (`malloc = 0`) |
+| **CBF-QP Solver** | $\min \frac{1}{2} \|\mathbf{u} - \mathbf{u}_{\text{cand}}\|^2$ | Safety projection of neural proposals | Closed-form Active Set (`qpOASES`/`OSQP`) | Static DTCM SRAM ($<175\,\mu\text{s}$) |
+| **State Estimation** | $\mathbf{P} = (\mathbf{I}-\mathbf{K}\mathbf{H})\mathbf{P}(\mathbf{I}-\mathbf{K}\mathbf{H})^T + \mathbf{K}\mathbf{R}\mathbf{K}^T$ | Fusing noisy IMUs and delayed cameras | Joseph-form continuous-discrete EKF | Real-Time MCU / Edge NPU |
+| **Motor Commutation** | $i_d = 0, \, \tau = K_t i_q$ | Decoupled electromagnetic torque | Clarke/Park + Space Vector PWM | Inverter Timer ($20\text{ kHz}$) |
+| **Phase Margin** | $\Delta \phi = -\omega_c \tau_{\text{delay}}$ | Transport delay eroding control stability | $1000\text{ Hz}$ control loops to bound $\Delta \phi \le 1.5^\circ$ | Bare-Metal MCU |
+| **Camera Unprojection** | $\mathbf{P}_B = \mathbf{R}_C^B(Z \mathbf{K}^{-1}\tilde{\mathbf{x}}) + \mathbf{p}_C^B$ | 2D pixel to metric 3D base coordinate | Closed-form unprojection (`float[3]`) | MCU / Edge NPU |
+| **Epipolar Invariant** | $\mathbf{x}_2^T \mathbf{F} \mathbf{x}_1 = 0, \, \epsilon_{\text{Sampson}}$ | Stereo consistency & extrinsic drift tracking | Online Sampson residual filtering | Real-Time MPU / NPU |
+| **Manipulator Jacobian** | $\boldsymbol{\xi} = \mathbf{J}(\mathbf{q})\dot{\mathbf{q}}, \, \mathbf{J}^\dagger = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T)^{-1}$ | Differential mapping from joint rates to Cartesian twist | Closed-form column cross-products | Real-Time MCU / Host MPU |
+| **Manipulability & Singularity** | $w = \sqrt{\det(\mathbf{J}\mathbf{J}^T)} \ge 0.05, \, \kappa(\mathbf{J}) \le 50.0$ | Dexterity volume and velocity amplification bound | SVD singular value screening in DTCM SRAM | Real-Time MCU (`malloc = 0`) |
+
+---
+
+## 8. Camera Projection and Epipolar Geometry
+
+In physical perception, an optical camera does not produce 3D coordinates directly. It captures a 2D projection of 3D Euclidean space onto a semiconductor photodiode grid. To transform pixel observations into metric affordance tokens in $SE(3)$ that an actuator can reach, systems rely on calibrated projective geometry, depth unprojection, and epipolar multi-view constraints.
+
+### Pinhole Projection and Intrinsic Matrix
+
+Consider a 3D point $\mathbf{P}_C = [X_C, Y_C, Z_C]^T \in \mathbb{R}^3$ in the camera optical reference frame, where the $+Z_C$ axis points forward along the optical axis, $+X_C$ points to the right, and $+Y_C$ points downward. Under ideal perspective projection, light rays pass through the optical center (pinhole aperture) and project onto the image sensor plane at focal distance $f$:
+
+$$\tilde{x} = \frac{X_C}{Z_C}, \quad \tilde{y} = \frac{Y_C}{Z_C}$$
+
+where $(\tilde{x}, \tilde{y})$ are dimensionless normalized image plane coordinates.
+
+To convert normalized coordinates into discrete sensor pixel indices $(u, v)$, the optical projection is parameterized by the **Camera Intrinsic Matrix** $\mathbf{K} \in \mathbb{R}^{3 \times 3}$:
+
+$$\mathbf{K} = \begin{bmatrix} f_x & s & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$$
+
+where:
+* $f_x = \frac{f}{p_w}, \; f_y = \frac{f}{p_h}$: Effective focal lengths expressed in pixel units, where $p_w, p_h$ are the physical horizontal and vertical pixel pitches ($\mu\text{m/pixel}$) on the CMOS silicon die.
+* $(c_x, c_y)$: Pixel coordinates of the **principal point** (the intersection of the optical axis with the sensor array, ideally $(W/2, H/2)$).
+* $s$: Pixel grid skew coefficient (identically zero, $s = 0$, for modern lithographic rectangular silicon sensors).
+
+Under zero skew ($s=0$), the projective mapping from a 3D camera point $\mathbf{P}_C$ to homogeneous pixel coordinates $\tilde{\mathbf{x}} = [u, v, 1]^T$ is:
+
+$$Z_C \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \mathbf{K} \mathbf{P}_C = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix} \begin{bmatrix} X_C \\ Y_C \\ Z_C \end{bmatrix} = \begin{bmatrix} f_x X_C + c_x Z_C \\ f_y Y_C + c_y Z_C \\ Z_C \end{bmatrix}$$
+
+Expanding into inhomogeneous Cartesian pixel coordinates:
+
+$$u = f_x \frac{X_C}{Z_C} + c_x, \qquad v = f_y \frac{Y_C}{Z_C} + c_y$$
+
+### Optical Ray Unprojection and Metric Cartesian Coordinates
+
+Because prospective projection collapses 3D rays onto a 2D plane, a single pixel coordinate $(u, v)$ defines an infinite angular ray rather than a discrete physical location. Recovering the 3D metric coordinate requires unprojecting along the ray using registered orthogonal depth $Z = d(u, v) \in \mathbb{R}^+$ (measured via active stereo, structured light, or time-of-flight).
+
+The upper-triangular intrinsic matrix $\mathbf{K}$ has a direct closed-form inverse:
+
+$$\mathbf{K}^{-1} = \begin{bmatrix} \frac{1}{f_x} & 0 & -\frac{c_x}{f_x} \\ 0 & \frac{1}{f_y} & -\frac{c_y}{f_y} \\ 0 & 0 & 1 \end{bmatrix}$$
+
+Multiplying the homogeneous pixel vector by $\mathbf{K}^{-1}$ reconstructs the normalized unit-depth ray vector $\mathbf{r}_{\text{cam}}$ in the camera optical frame:
+
+$$\mathbf{r}_{\text{cam}} = \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \begin{bmatrix} \frac{u - c_x}{f_x} \\ \frac{v - c_y}{f_y} \\ 1 \end{bmatrix}$$
+
+Scaling this ray vector by the registered depth $Z = d(u, v)$ yields the 3D metric position $\mathbf{P}_C$ in the camera optical frame:
+
+$$\mathbf{P}_C = Z \cdot \mathbf{r}_{\text{cam}} = \begin{bmatrix} X_C \\ Y_C \\ Z_C \end{bmatrix} = \begin{bmatrix} \frac{u - c_x}{f_x} Z \\ \frac{v - c_y}{f_y} Z \\ Z \end{bmatrix}$$
+
+### Rigid Extrinsic Transform to Robot Base Frame
+
+To enable physical manipulation, navigation, or obstacle avoidance, the camera-frame point $\mathbf{P}_C$ must be transformed into the robot's stationary physical base frame $B$. Applying the extrinsic homogeneous transformation matrix $\mathbf{T}_C^B = (\mathbf{R}_C^B, \mathbf{p}_C^B) \in SE(3)$:
+
+$$\mathbf{P}_B = \mathbf{R}_C^B \mathbf{P}_C + \mathbf{p}_C^B = \mathbf{R}_C^B \left( Z \cdot \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} \right) + \mathbf{p}_C^B$$
+
+where $\mathbf{R}_C^B \in SO(3)$ is the $3 \times 3$ rotation matrix aligning the camera optical axes to the robot base coordinate axes, and $\mathbf{p}_C^B \in \mathbb{R}^3$ is the physical lever-arm displacement vector from the base origin to the optical center.
+
+### Surface Normal Estimation from Discrete Depth Gradients
+
+For robotic grasping and contact mechanics, the agent requires the outward unit surface normal vector $\hat{\mathbf{n}} \in \mathbb{S}^2$ at the contact target. Considering unprojected points $\mathbf{P}_B(u, v)$ as a 2D parameterized surface, the tangent vectors spanning the local contact plane are given by spatial partial derivatives:
+
+$$\mathbf{t}_u = \frac{\partial \mathbf{P}_B}{\partial u} \approx \frac{\mathbf{P}_B(u + \Delta u, v) - \mathbf{P}_B(u - \Delta u, v)}{2 \Delta u}$$
+
+$$\mathbf{t}_v = \frac{\partial \mathbf{P}_B}{\partial v} \approx \frac{\mathbf{P}_B(u, v + \Delta v) - \mathbf{P}_B(u, v - \Delta v)}{2 \Delta v}$$
+
+The outward unit normal vector $\hat{\mathbf{n}}$ facing the robot sensor is computed via the normalized vector cross-product:
+
+$$\hat{\mathbf{n}} = \frac{\mathbf{t}_v \times \mathbf{t}_u}{\|\mathbf{t}_v \times \mathbf{t}_u\|_2} \in \mathbb{S}^2$$
+
+### Multi-View Epipolar Geometry and Sampson Residual Metric
+
+When fusing multi-camera observations or tracking stereo visual odometry, corresponding pixel points across two calibrated viewpoints must satisfy geometric coplanarity.
+
+Let $\mathbf{P} \in \mathbb{R}^3$ be a physical 3D scene point observed by Camera 1 as $\mathbf{P}_1$ and by Camera 2 as $\mathbf{P}_2$. The two cameras are related by relative rigid-body rotation $\mathbf{R} \in SO(3)$ and baseline translation $\mathbf{t} \in \mathbb{R}^3$, such that $\mathbf{P}_2 = \mathbf{R} \mathbf{P}_1 + \mathbf{t}$.
+
+The vectors $\mathbf{P}_2$, $\mathbf{t}$, and $\mathbf{R}\mathbf{P}_1$ are coplanar. Expressing this geometric condition as a scalar triple product:
+
+$$\mathbf{P}_2^T \left( \mathbf{t} \times (\mathbf{R} \mathbf{P}_1) \right) = 0 \implies \mathbf{P}_2^T [\mathbf{t}]_\times \mathbf{R} \mathbf{P}_1 = 0$$
+
+Defining the **Essential Matrix** $\mathbf{E} \in \mathbb{R}^{3 \times 3}$:
+
+$$\mathbf{E} = [\mathbf{t}]_\times \mathbf{R}$$
+
+Substituting the normalized image coordinates $\mathbf{x}_1 = \mathbf{K}_1^{-1} \tilde{\mathbf{x}}_1$ and $\mathbf{x}_2 = \mathbf{K}_2^{-1} \tilde{\mathbf{x}}_2$ defines the **Fundamental Matrix** $\mathbf{F} \in \mathbb{R}^{3 \times 3}$:
+
+$$\tilde{\mathbf{x}}_2^T \mathbf{F} \tilde{\mathbf{x}}_1 = 0, \qquad \mathbf{F} = \mathbf{K}_2^{-T} \mathbf{E} \mathbf{K}_1^{-1} = \mathbf{K}_2^{-T} [\mathbf{t}]_\times \mathbf{R} \mathbf{K}_1^{-1}$$
+
+* **Epipolar Line Invariant:** A pixel point $\tilde{\mathbf{x}}_1$ in Camera 1 defines an epipolar line $\mathbf{l}_2 = \mathbf{F} \tilde{\mathbf{x}}_1$ in Camera 2 upon which the corresponding point $\tilde{\mathbf{x}}_2$ must lie: $\tilde{\mathbf{x}}_2^T \mathbf{l}_2 = 0$.
+
+During active robot operation, mechanical shocks and thermal expansion degrade camera extrinsic parameters. To quantify geometric consistency without re-triangulating 3D points, the online calibration filter computes the **Sampson Epipolar Error** $\epsilon_{\text{Sampson}}$ (the first-order geometric distance approximation from the points to their respective epipolar lines):
+
+$$\epsilon_{\text{Sampson}}(\tilde{\mathbf{x}}_1, \tilde{\mathbf{x}}_2) = \frac{(\tilde{\mathbf{x}}_2^T \mathbf{F} \tilde{\mathbf{x}}_1)^2}{(\mathbf{F}\tilde{\mathbf{x}}_1)_1^2 + (\mathbf{F}\tilde{\mathbf{x}}_1)_2^2 + (\mathbf{F}^T\tilde{\mathbf{x}}_2)_1^2 + (\mathbf{F}^T\tilde{\mathbf{x}}_2)_2^2}$$
+
+where $(\mathbf{v})_i$ denotes the $i$-th element of vector $\mathbf{v}$. If $\epsilon_{\text{Sampson}} > \epsilon_{\text{threshold}}$ across tracked feature pairs, the estimator flags extrinsic baseline drift and triggers real-time bundle adjustment.
+
+### Thermal Baseline Expansion and Triangulation Error Sensitivity
+
+In stereo perception, metric depth $Z$ is triangulated from stereo disparity $d = u_1 - u_2$ across physical baseline $b = \|\mathbf{t}\|$:
+
+$$Z = \frac{f \cdot b}{d}$$
+
+Differentiating with respect to disparity $d$ and baseline length $b$:
+
+$$\delta Z = \frac{\partial Z}{\partial d} \delta d + \frac{\partial Z}{\partial b} \delta b = -\frac{f \cdot b}{d^2} \delta d + \frac{f}{d} \delta b = -\frac{Z^2}{f \cdot b} \delta d + \frac{Z}{b} \delta b$$
+
+* **Quadratic Distance Sensitivity:** Triangulation depth uncertainty grows quadratically ($\propto Z^2$) with distance. At short ranges ($Z=0.5\text{ m}$), a $0.5\text{ px}$ disparity noise induces millimeter error; at far ranges ($Z=5.0\text{ m}$), the exact same noise induces tens of centimeters of spatial uncertainty.
+
+Chassis aluminum expands under operational temperature rise $\Delta T$ with thermal coefficient $\alpha_{\text{Al}} \approx 23 \times 10^{-6}\text{ K}^{-1}$:
+
+$$\delta b = b_0 \cdot \alpha_{\text{Al}} \cdot \Delta T$$
+
+Additionally, uneven thermal expansion or motor torque vibration induces an angular baseline tilt $\delta \theta$, shifting feature disparity by $\delta d_{\text{tilt}} = f \cdot \tan(\delta \theta) \approx f \cdot \delta \theta$. The resulting depth error is:
+
+$$\delta Z_{\text{tilt}} \approx -\frac{Z^2}{b} \delta \theta$$
+
+For a stereo camera with baseline $b = 0.20\text{ m}$, an angular deflection of just $\delta \theta = 0.5^\circ = 0.00873\text{ rad}$ produces:
+* At working distance $Z = 1.0\text{ m}$: $\delta Z = \frac{1.0^2}{0.20} \times 0.00873 = 0.0436\text{ m} \approx 4.4\text{ cm}$.
+* At obstacle distance $Z = 5.0\text{ m}$: $\delta Z = \frac{5.0^2}{0.20} \times 0.00873 = 1.091\text{ m} \approx 109.1\text{ cm}$.
+
+This reveals why static calibration matrices fail in physical deployment and mandates continuous online epipolar tracking.
+
+### Real-Time Metric Unprojection Complexity
+
+In embedded perception and spatial affordance engines, metric unprojection from 2D depth arrays into 3D robot base frames ($\mathbf{p}_B = \mathbf{R}_C^B \mathbf{K}^{-1} [u, v, 1]^T Z + \mathbf{p}_C^B$) is implemented using pre-computed inverse focal length constants ($f_x^{-1}, f_y^{-1}$) in static memory (`malloc = 0`).
+
+On an ARM Cortex-M7 at $480\text{ MHz}$, evaluating a single point unprojection requires $9$ multiply-accumulate operations, completing in $< 0.4\,\mu\text{s}$. For local patch surface normal estimation via cross products across a $3 \times 3$ depth kernel, computation is bounded to $< 1.8\,\mu\text{s}$, enabling real-time contact normal extraction directly within high-frequency tactile and grasping reflex loops.
+
+---
+
+## 9. Differential Kinematics and Jacobians
+
+In articulated manipulation, high-level intent proposals specify desired operational-space trajectories for the end-effector ($\mathbf{x}_e \in SE(3)$), while physical motors exert joint torques and velocities ($\mathbf{q}, \dot{\mathbf{q}} \in \mathbb{R}^n$). The fundamental differential mapping between joint velocity space and Cartesian spatial twist is governed by the **Geometric Jacobian**.
+
+### Forward Differential Kinematics and Geometric Jacobian Formulation
+
+Consider an $n$-DoF open kinematic chain composed of revolute joints with generalized joint coordinates $\mathbf{q} = [q_1, q_2, \dots, q_n]^T \in \mathbb{R}^n$. The position and orientation of each link frame $i \in \{1, \dots, n\}$ relative to the stationary base frame $0$ is computed via cumulative homogeneous transformation matrices:
+
+$$\mathbf{T}_i^0(\mathbf{q}) = \mathbf{T}_1^0(q_1) \mathbf{T}_2^1(q_2) \cdots \mathbf{T}_i^{i-1}(q_i) = \begin{bmatrix} \mathbf{R}_i^0(\mathbf{q}) & \mathbf{p}_i^0(\mathbf{q}) \\ \mathbf{0}_{1 \times 3} & 1 \end{bmatrix}$$
+
+where $\mathbf{R}_i^0 \in SO(3)$ represents the rotation matrix and $\mathbf{p}_i^0 \in \mathbb{R}^3$ denotes the origin position of frame $i$.
+
+The instantaneous spatial twist of the end-effector $\boldsymbol{\xi}_e = [\mathbf{v}_e^T, \boldsymbol{\omega}_e^T]^T \in \mathbb{R}^6$ (combining linear velocity $\mathbf{v}_e = \dot{\mathbf{p}}_e \in \mathbb{R}^3$ and angular velocity $\boldsymbol{\omega}_e \in \mathbb{R}^3$) is linearly related to the joint velocity vector $\dot{\mathbf{q}}$:
+
+$$\boldsymbol{\xi}_e = \begin{bmatrix} \mathbf{v}_e \\ \boldsymbol{\omega}_e \end{bmatrix} = \mathbf{J}(\mathbf{q}) \dot{\mathbf{q}}$$
+
+where $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times n}$ is the **Geometric Jacobian Matrix**.
+
+For a kinematic chain consisting entirely of revolute joints, each joint $i$ contributes to the end-effector velocity by rotating about its instantaneous unit axis $\mathbf{z}_{i-1} = \mathbf{R}_{i-1}^0 \hat{\mathbf{z}}$. The $i$-th column $\mathbf{J}_i(\mathbf{q}) \in \mathbb{R}^6$ is computed using the vector cross product:
+
+$$\mathbf{J}_i(\mathbf{q}) = \begin{bmatrix} \mathbf{J}_{v, i} \\ \mathbf{J}_{\omega, i} \end{bmatrix} = \begin{bmatrix} \mathbf{z}_{i-1} \times (\mathbf{p}_e - \mathbf{p}_{i-1}) \\ \mathbf{z}_{i-1} \end{bmatrix}$$
+
+where $\mathbf{p}_e = \mathbf{p}_n^0$ is the current position of the end-effector flange, and $\mathbf{p}_{i-1}$ is the position of the origin of joint frame $i-1$ expressed in the base frame.
+
+### Inverse Differential Kinematics and the Singularity Barrier
+
+To compute the joint velocities required to achieve a commanded end-effector twist $\boldsymbol{\xi}_{\text{cmd}}$, the system inverts the differential kinematic relationship:
+
+$$\dot{\mathbf{q}} = \mathbf{J}^\dagger(\mathbf{q}) \boldsymbol{\xi}_{\text{cmd}}$$
+
+For redundant manipulators with more joint degrees of freedom than task-space dimensions ($n > 6$), the standard minimum-norm solution uses the Moore-Penrose right pseudo-inverse:
+
+$$\mathbf{J}^\dagger(\mathbf{q}) = \mathbf{J}^T (\mathbf{J} \mathbf{J}^T)^{-1} \in \mathbb{R}^{n \times 6}$$
+
+When the manipulator approaches a **Kinematic Singularity** (such as full arm reach extension, shoulder-wrist coaxial alignment, or wrist gimbal lock), the Jacobian matrix loses rank ($\text{rank}(\mathbf{J}) < 6$). As a consequence:
+
+$$\det\left( \mathbf{J}(\mathbf{q}) \mathbf{J}^T(\mathbf{q}) \right) \longrightarrow 0$$
+
+The matrix $(\mathbf{J}\mathbf{J}^T)$ becomes singular, and its smallest singular value collapses ($\sigma_{\text{min}}(\mathbf{J}) \to 0$). Attempting to invert an ill-conditioned Jacobian forces the pseudo-inverse gain toward infinity ($\|\mathbf{J}^\dagger\| \to \infty$). Even an infinitesimal Cartesian tracking error or commanded velocity results in unbounded joint velocity commands ($\|\dot{\mathbf{q}}\| \to \infty$), causing immediate actuator phase current saturation, violent mechanical whiplash, and transmission gear shear.
+
+### Damped Least-Squares (Levenberg-Marquardt) Regularization
+
+To preserve numerical stability near singular configurations, real-time trajectory runtimes replace the unconstrained pseudo-inverse with **Damped Least-Squares (DLS)** inversion:
+
+$$\mathbf{J}^*(\mathbf{q}) = \mathbf{J}^T \left( \mathbf{J} \mathbf{J}^T + \lambda^2 \mathbf{I}_{6 \times 6} \right)^{-1}$$
+
+The damping parameter $\lambda \in \mathbb{R}^+$ regularizes the inversion by reformulating the problem as an unconstrained optimization trading off tracking precision against joint velocity magnitude:
+
+$$\min_{\dot{\mathbf{q}}} \left( \|\boldsymbol{\xi}_{\text{cmd}} - \mathbf{J}\dot{\mathbf{q}}\|_2^2 + \lambda^2 \|\dot{\mathbf{q}}\|_2^2 \right)$$
+
+To maintain exact kinematic tracking in well-conditioned regions while providing robust damping near singularities, the runtime modulates $\lambda$ dynamically based on the instantaneous Yoshikawa manipulability index $w(\mathbf{q})$:
+
+$$\lambda^2 = \begin{cases} 0 & \text{if } w(\mathbf{q}) \ge w_0 \\ \lambda_0^2 \left( 1 - \frac{w(\mathbf{q})}{w_0} \right)^2 & \text{if } w(\mathbf{q}) < w_0 \end{cases}$$
+
+where $w_0$ is the manipulability threshold below which damping engages, and $\lambda_0$ is the maximum damping factor.
+
+### Singular Value Decomposition, Manipulability Ellipsoids, and Condition Numbers
+
+Applying Singular Value Decomposition (SVD) to the Jacobian matrix provides complete geometric insight into the manipulator's instantaneous dexterity:
+
+$$\mathbf{J}(\mathbf{q}) = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^T = \sum_{i=1}^6 \sigma_i \mathbf{u}_i \mathbf{v}_i^T$$
+
+where $\mathbf{U} = [\mathbf{u}_1, \dots, \mathbf{u}_6] \in \mathbb{R}^{6 \times 6}$ and $\mathbf{V} = [\mathbf{v}_1, \dots, \mathbf{v}_n] \in \mathbb{R}^{n \times n}$ are orthonormal matrices spanning Cartesian twist directions and joint velocity directions, respectively, and $\boldsymbol{\Sigma} = [\text{diag}(\sigma_1, \dots, \sigma_6) \mid \mathbf{0}_{6 \times (n-6)}] \in \mathbb{R}^{6 \times n}$ contains the ordered singular values $\sigma_1 \ge \sigma_2 \ge \dots \ge \sigma_6 \ge 0$.
+
+Mapping a unit hypersphere in joint velocity space ($\|\dot{\mathbf{q}}\|_2 \le 1$) into Cartesian space defines the **Manipulability Ellipsoid**:
+
+$$\boldsymbol{\xi}^T (\mathbf{J}\mathbf{J}^T)^{-1} \boldsymbol{\xi} \le 1 \implies \sum_{i=1}^6 \frac{(\mathbf{u}_i^T \boldsymbol{\xi})^2}{\sigma_i^2} \le 1$$
+
+The principal axes of the ellipsoid align with the eigenvectors $\mathbf{u}_i$ of $\mathbf{J}\mathbf{J}^T$, with semi-axis lengths exactly equal to the singular values $\sigma_i$.
+
+We define two fundamental metrics for real-time safety gating:
+
+1. **Yoshikawa Manipulability Index ($w(\mathbf{q})$):** Measures the total volume of the manipulability ellipsoid:
+
+$$w(\mathbf{q}) = \sqrt{\det\left( \mathbf{J}(\mathbf{q}) \mathbf{J}^T(\mathbf{q}) \right)} = \prod_{i=1}^6 \sigma_i(\mathbf{J})$$
+
+When $w(\mathbf{q}) \to 0$, the ellipsoid collapses along at least one axis, indicating a loss of instantaneous mobility along that direction.
+
+2. **Jacobian Condition Number ($\kappa(\mathbf{J})$):** Quantifies the ratio between maximum and minimum dexterity axes:
+
+$$\kappa(\mathbf{J}) = \frac{\sigma_{\text{max}}(\mathbf{J})}{\sigma_{\text{min}}(\mathbf{J})} = \frac{\sigma_1}{\sigma_6} \in [1, \infty)$$
+
+* When $\kappa(\mathbf{J}) = 1.0$, the configuration is **isotropic** (the manipulability ellipsoid is a perfect sphere, providing uniform velocity generation in all directions).
+* When $\kappa(\mathbf{J}) \gg 50.0$, the configuration is severely **anisotropic and ill-conditioned**, meaning small Cartesian velocity commands along the minor axis demand massive joint velocities.
+
+### Real-Time Kinematic Evaluation and Deterministic Bounds
+
+In embedded motion controllers, calculating the $6 \times n$ Geometric Jacobian $\mathbf{J}(\mathbf{q})$, Yoshikawa manipulability $w(\mathbf{q}) = \sqrt{\det(\mathbf{J}\mathbf{J}^T)}$, and condition metric $\kappa(\mathbf{J})$ is performed using static array allocations in SRAM with zero dynamic memory allocation (`malloc = 0`).
+
+On an ARM Cortex-M7 at $480\text{ MHz}$, evaluating forward kinematics, cross-product Jacobian columns ($\mathbf{z}_{i-1} \times (\mathbf{p}_e - \mathbf{p}_{i-1})$), and $6 \times 6$ Gram matrix determinant requires under $4.5\,\mu\text{s}$ for a 7-DoF manipulator. When $w(\mathbf{q}) < 0.05$ or $\kappa(\mathbf{J}) > 50.0$, the microcontroller immediately flags singularity proximity and attenuates Cartesian velocity proposals within the same $1000\text{ Hz}$ control cycle.
+
+---
+
+
+
+
+---
+
+## 10. Trajectory Splines and Variational Planning
+
+In System 1.5 trajectory synthesis, mathematical derivations guarantee physical feasibility and mechanical transmission protection. This section catalogs the closed-form boundary-value matrix algebra for quintic splines, the variational score-matching formulation for diffusion action chunking, and the real-time kinodynamic direct collocation program.
+
+### Closed-Form Quintic Boundary-Value Matrix Inversion
+
+A fifth-order polynomial segment $s(\tau)$ parameterized over local time $\tau \in [0, T]$ is defined by:
+
+$$s(\tau) = \sum_{i=0}^5 a_i \tau^i = a_0 + a_1 \tau + a_2 \tau^2 + a_3 \tau^3 + a_4 \tau^4 + a_5 \tau^5$$
+
+The first three time derivatives correspond to velocity $\dot{s}(\tau)$, acceleration $\ddot{s}(\tau)$, and jerk $\dddot{s}(\tau)$:
+
+$$\dot{s}(\tau) = a_1 + 2 a_2 \tau + 3 a_3 \tau^2 + 4 a_4 \tau^3 + 5 a_5 \tau^4$$
+
+$$\ddot{s}(\tau) = 2 a_2 + 6 a_3 \tau + 12 a_4 \tau^2 + 20 a_5 \tau^3$$
+
+$$\dddot{s}(\tau) = 6 a_3 + 24 a_4 \tau + 60 a_5 \tau^2$$
+
+Matching the six boundary conditions at $\tau = 0$ and $\tau = T$:
+
+$$\mathbf{b} = \begin{bmatrix} s(0) \\ \dot{s}(0) \\ \ddot{s}(0) \\ s(T) \\ \dot{s}(T) \\ \ddot{s}(T) \end{bmatrix} = \begin{bmatrix} s_0 \\ \dot{s}_0 \\ \ddot{s}_0 \\ s_1 \\ \dot{s}_1 \\ \ddot{s}_1 \end{bmatrix} = \mathbf{M}(T) \mathbf{a}$$
+
+where the Vandermonde-like mapping matrix $\mathbf{M}(T) \in \mathbb{R}^{6 \times 6}$ is:
+
+$$\mathbf{M}(T) = \begin{bmatrix}
+1 & 0 & 0 & 0 & 0 & 0 \\
+0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 2 & 0 & 0 & 0 \\
+1 & T & T^2 & T^3 & T^4 & T^5 \\
+0 & 1 & 2T & 3T^2 & 4T^3 & 5T^4 \\
+0 & 0 & 2 & 6T & 12T^2 & 20T^3
+\end{bmatrix}$$
+
+Because $\mathbf{M}(T)$ is triangular in its top block, the lower $3 \times 3$ sub-block can be inverted symbolically without numerical Gaussian elimination. The closed-form algebraic inverse $\mathbf{a} = \mathbf{M}^{-1}(T) \mathbf{b}$ yields:
+
+$$\begin{aligned}
+a_0 &= s_0 \\
+a_1 &= \dot{s}_0 \\
+a_2 &= \frac{1}{2} \ddot{s}_0 \\
+a_3 &= \frac{20(s_1 - s_0) - (8\dot{s}_1 + 12\dot{s}_0)T - (3\ddot{s}_0 - \ddot{s}_1)T^2}{2T^3} \\
+a_4 &= \frac{30(s_0 - s_1) + (14\dot{s}_1 + 16\dot{s}_0)T + (3\ddot{s}_0 - 2\ddot{s}_1)T^2}{2T^4} \\
+a_5 &= \frac{12(s_1 - s_0) - 6(\dot{s}_1 + \dot{s}_0)T - (\ddot{s}_1 - \ddot{s}_0)T^2}{2T^5}
+\end{aligned}$$
+
+Enforcing boundary acceleration matching ($\ddot{s}(0) = \ddot{s}_{\text{prev}}(T)$) guarantees global $\mathcal{C}^2$ continuity across all concatenated trajectory segments, bounding jerk ($\|\dddot{\mathbf{q}}(t)\| \le j_{\text{max}}$) and eliminating Dirac acceleration impulses.
+
+### Stochastic Denoising Diffusion Trajectory Proofs and Score Matching
+
+In Conditional Diffusion Policies, action chunk synthesis is structured as learning the reverse conditional distribution $p_\theta(\mathbf{A}_{0:H} \mid \mathbf{O}_t)$ over trajectory horizons $\mathbf{A} \in \mathbb{R}^{H \times d_a}$.
+
+#### Forward Noising Process
+The forward process corrupts ground-truth demonstration trajectories $\mathbf{A}^0$ with Gaussian noise over discrete diffusion steps $k \in \{1, \dots, K\}$ according to variance schedule $\beta_1, \dots, \beta_K$:
+
+$$q(\mathbf{A}^k \mid \mathbf{A}^{k-1}) = \mathcal{N}\left( \mathbf{A}^k; \sqrt{1 - \beta_k} \mathbf{A}^{k-1}, \beta_k \mathbf{I} \right)$$
+
+Using the substitution $\alpha_k = 1 - \beta_k$ and cumulative product $\bar{\alpha}_k = \prod_{s=1}^k \alpha_s$, marginalizing the intermediate distributions yields the closed-form marginal:
+
+$$q(\mathbf{A}^k \mid \mathbf{A}^0) = \mathcal{N}\left( \mathbf{A}^k; \sqrt{\bar{\alpha}_k} \mathbf{A}^0, (1 - \bar{\alpha}_k) \mathbf{I} \right)$$
+
+$$\mathbf{A}^k = \sqrt{\bar{\alpha}_k} \mathbf{A}^0 + \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}, \quad \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$
+
+#### Variational Lower Bound (ELBO) and Score Matching
+The neural network parameterized by weights $\theta$ is trained by optimizing the variational lower bound on data log-likelihood $\mathbb{E}[\log p_\theta(\mathbf{A}^0 \mid \mathbf{O})]$. Following Ho et al. [-@ho2020denoising], the objective reduces to mean-squared error score matching:
+
+$$\mathcal{L}_{\text{diffusion}}(\theta) = \mathbb{E}_{k, \mathbf{A}^0, \boldsymbol{\epsilon}}\left[ \left\| \boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta\left( \sqrt{\bar{\alpha}_k} \mathbf{A}^0 + \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}, k, \mathbf{O}_t \right) \right\|_2^2 \right]$$
+
+By Tweedie's Formula, the estimated noise vector $\boldsymbol{\epsilon}_\theta$ directly estimates the Stein score function (gradient of the data log-density):
+
+$$\nabla_{\mathbf{A}^k} \log p(\mathbf{A}^k \mid \mathbf{O}_t) = -\frac{\boldsymbol{\epsilon}_\theta(\mathbf{A}^k, k, \mathbf{O}_t)}{\sqrt{1 - \bar{\alpha}_k}}$$
+
+#### DDIM Accelerated Deterministic Sampling
+To execute real-time inference within $20\text{--}50\text{ ms}$, systems deploy Denoising Diffusion Implicit Models (DDIM), skipping steps along a sub-sequence $\tau_1, \dots, \tau_S$ with $S \ll K$:
+
+$$\mathbf{A}^{\tau_{i-1}} = \sqrt{\bar{\alpha}_{\tau_{i-1}}} \left( \frac{\mathbf{A}^{\tau_i} - \sqrt{1 - \bar{\alpha}_{\tau_i}} \boldsymbol{\epsilon}_\theta(\mathbf{A}^{\tau_i}, \tau_i, \mathbf{O}_t)}{\sqrt{\bar{\alpha}_{\tau_i}}} \right) + \sqrt{1 - \bar{\alpha}_{\tau_{i-1}} - \sigma_{\tau_i}^2} \boldsymbol{\epsilon}_\theta(\mathbf{A}^{\tau_i}, \tau_i, \mathbf{O}_t) + \sigma_{\tau_i} \mathbf{z}$$
+
+Setting $\sigma_{\tau_i} = 0$ yields a deterministic implicit ODE solver that reconstructs candidate trajectories in $S = 4\text{--}8$ steps.
+
+### Multi-Variable Kinodynamic Collocation Quadratic Programs
+
+When refining candidate action chunks under non-linear rigid body dynamics and workspace obstacle envelopes, the system solves a discrete-time kinodynamic direct collocation program:
+
+$$\min_{\mathbf{x}_{0:H}, \mathbf{u}_{0:H-1}} \sum_{k=0}^{H-1} \left( \|\mathbf{x}_k - \mathbf{x}_k^{\text{ref}}\|_{\mathbf{Q}}^2 + \|\mathbf{u}_k\|_{\mathbf{R}}^2 + \|\mathbf{u}_k - \mathbf{u}_{k-1}\|_{\mathbf{S}}^2 \right) + \|\mathbf{x}_H - \mathbf{x}_H^{\text{ref}}\|_{\mathbf{Q}_f}^2$$
+
+$$\begin{aligned}
+\text{subject to:} \quad &\mathbf{x}_{k+1} = \mathbf{x}_k + \frac{\Delta t}{2} \left[ f(\mathbf{x}_k, \mathbf{u}_k) + f(\mathbf{x}_{k+1}, \mathbf{u}_{k+1}) \right] \quad &&(\text{Hermite-Simpson Collocation}) \\
+&\mathbf{x}_0 = \hat{\mathbf{x}}(t_{\text{now}}) \quad &&(\text{Initial State Consensus}) \\
+&\mathbf{q}_{\text{min}} \le \mathbf{q}_k \le \mathbf{q}_{\text{max}} \quad &&(\text{Joint Limit Convex Box}) \\
+&\dot{\mathbf{q}}_{\text{min}} \le \dot{\mathbf{q}}_k \le \dot{\mathbf{q}}_{\text{max}} \quad &&(\text{Kinematic Velocity Bound}) \\
+&|\boldsymbol{\tau}_k| \le \boldsymbol{\tau}_{\text{max}} \quad &&(\text{Motor Inverter Torque Saturation}) \\
+&\|\dot{\boldsymbol{\tau}}_k\| \le \dot{\tau}_{\text{max}} \quad &&(\text{Gearbox Transmission Protection}) \\
+&\phi_{\text{SDF}}(\mathbf{p}_{\text{link}}(\mathbf{q}_k)) \ge d_{\text{margin}} \quad &&(\text{Signed Distance Clearance})
+\end{aligned}$$
+Warm-starting this program with the action chunk decoded by ACT or Diffusion Policy allows Sequential Quadratic Programming (SQP) solvers to converge within 2 to 3 iterations, guaranteeing physical safety envelopes before commands enter the shared SRAM execution queue.
+
+---
+
+## 11. Silicon Interconnects and Thermal Dynamics
+
+In Physical AI systems, cognitive stages are partitioned across heterogeneous silicon fabrics based on execution cadence, memory access patterns, and thermal dissipation envelopes. This section establishes the mathematical formulations governing shared interconnect bus arbitration, arithmetic intensity rooflines, and dynamic junction temperature evolution.
+
+### AXI Bus Quality-of-Service Priority Arbitration
+
+In Unified Memory Architecture (UMA) Systems-on-Chip, heterogeneous masters (CPU cores, Neural Processing Units, and direct-memory-access camera peripherals) issue concurrent read and write bursts across a shared AXI interconnect crossbar.
+
+Let $\mathcal{M} = \{1, \dots, M\}$ denote the set of bus masters contending for memory crossbar bandwidth $B_{\text{total}}$ ($\text{GB/s}$). Each transaction from master $m \in \mathcal{M}$ carries a 4-bit Quality-of-Service priority value $q_m \in \{0, 1, \dots, 15\}$, where $q = 15$ designates the highest real-time priority.
+
+The effective service latency $L_m$ for a memory read request of size $S_m$ bytes from master $m$ under weighted priority arbitration is modeled by:
+
+$$L_m = \tau_{\text{arb}} + \frac{S_m}{B_{\text{crossbar}}} + \sum_{k \in \mathcal{M}, q_k > q_m} \frac{S_k}{B_{\text{crossbar}}} + \mathbb{I}(q_m < 15) \cdot \tau_{\text{burst\_in\_flight}}$$
+
+where:
+* $\tau_{\text{arb}}$: Crossbar arbitration switching latency (typically $4\text{--}12\text{ ns}$).
+* $\tau_{\text{burst\_in\_flight}}$: Latency penalty incurred when waiting for an ongoing atomic non-preemptible burst from a lower-priority master to conclude ($S_{\text{burst}} / B_{\text{crossbar}}$).
+
+To guarantee that real-time microcontroller reads ($1000\text{ Hz}$ safety loops) never miss control deadlines, the silicon arbiter enforces hard preemption for $q_{\text{MCU}} = 15$:
+
+$$L_{\text{MCU}} \le \tau_{\text{arb}} + \frac{S_{\text{payload}}}{B_{\text{crossbar}}} + \frac{S_{\text{burst\_max}}}{B_{\text{crossbar}}} \le 50.0\text{ ns}$$
+
+For background camera sensor DMA streams ($q_{\text{cam}} = 4$), transactions are admitted only during bus idle cycles when higher-priority queues ($q \ge 10$) are empty.
+
+### Arithmetic Intensity and the Memory Power Roofline
+
+The computational efficiency of an embedded neural model is governed by its arithmetic intensity $I_{\text{arith}}$, defined as the ratio of floating-point arithmetic operations to off-chip DRAM memory transfers:
+
+$$I_{\text{arith}} = \frac{N_{\text{FLOPs}}}{N_{\text{Bytes\_DRAM}}} \quad \left[ \frac{\text{FLOPs}}{\text{Byte}} \right]$$
+
+Total electrical power dissipated by the compute subsystem $P_{\text{compute}}$ is the sum of dynamic gate switching power, static transistor leakage, and DRAM bus input/output pad driving power:
+
+$$P_{\text{compute}} = P_{\text{dynamic}} + P_{\text{leakage}} + P_{\text{DRAM\_IO}}$$
+
+$$P_{\text{dynamic}} = \alpha \cdot C_{\text{eff}} \cdot V_{\text{core}}^2 \cdot f_{\text{clock}}$$
+
+$$P_{\text{DRAM\_IO}} = E_{\text{DRAM\_byte}} \cdot \text{BW}_{\text{DRAM}} = E_{\text{DRAM\_byte}} \cdot \frac{\text{Throughput}_{\text{FLOPs/s}}}{I_{\text{arith}}}$$
+
+where $E_{\text{DRAM\_byte}} \approx 150\text{ pJ/Byte}$ for off-chip LPDDR5 DRAM, compared to $E_{\text{SRAM\_byte}} \approx 2\text{ pJ/Byte}$ for on-chip static SRAM.
+
+* **SRAM Model Tiling Invariant:** When trajectory decoders are quantized to INT8 and fit entirely within on-chip SRAM ($N_{\text{Bytes\_DRAM}} \to 0$), $I_{\text{arith}} \to \infty$. DRAM power collapses ($P_{\text{DRAM\_IO}} \to 0$), reducing total inference energy consumption by up to $98.5\%$.
+
+### Lumped-Parameter Thermodynamic Junction Differential Equations
+
+The thermal dynamics of a silicon die mounted inside an IP67-sealed, passively cooled enclosure are modeled by a coupled two-node thermal resistance-capacitance (RC) network:
+
+$$\begin{aligned}
+C_{\text{die}} \frac{d T_j(t)}{dt} &= P_{\text{compute}}(t) - \frac{T_j(t) - T_{\text{case}}(t)}{R_{\theta,\text{jc}}} \\
+C_{\text{case}} \frac{d T_{\text{case}}(t)}{dt} &= \frac{T_j(t) - T_{\text{case}}(t)}{R_{\theta,\text{jc}}} - \frac{T_{\text{case}}(t) - T_{\text{ambient}}}{R_{\theta,\text{ca}}}
+\end{aligned}$$
+
+where:
+* $T_j$: Silicon junction temperature ($^\circ\text{C}$).
+* $T_{\text{case}}$: Chassis metal case temperature ($^\circ\text{C}$).
+* $C_{\text{die}}, C_{\text{case}}$: Thermal heat capacities of the silicon package and aluminum chassis ($\text{J/K}$).
+* $R_{\theta,\text{jc}}$: Thermal resistance from junction to case ($\text{K/W}$).
+* $R_{\theta,\text{ca}}$: Thermal resistance from case to ambient air ($\text{K/W}$).
+
+Solving the transient step response under constant high-load neural inference power $P_{\text{step}}$:
+
+$$T_j(t) = T_{\text{ambient}} + P_{\text{step}} (R_{\theta,\text{jc}} + R_{\theta,\text{ca}}) \left[ 1 - \frac{\tau_1 e^{-t/\tau_1} - \tau_2 e^{-t/\tau_2}}{\tau_1 - \tau_2} \right]$$
+
+where $\tau_1, \tau_2$ are the dominant thermal time constants of the silicon package ($1\text{--}5\text{ s}$) and the physical chassis ($60\text{--}300\text{ s}$).
+
+* **Proactive Thermal Derating Boundary:** If $T_j(t) \ge T_{\text{warn}} = 75.0^\circ\text{C}$, the firmware triggers proactive cadence scaling ($50\text{ Hz} \to 20\text{ Hz}$, $H=16 \to 32$), dropping $P_{\text{compute}}$ by $55\%$ before junction temperature reaches the destructive hardware DVFS throttling knee ($T_{\text{trip}} = 85.0^\circ\text{C}$).
+
+---
+
+## 12. Authority Dynamics and Bumpless Transfer
+
+In collaborative and supervisory robotics, physical control authority transfers dynamically between autonomous neural policies and human safety operators. This section formalizes the authority state space, derives $\mathcal{C}^2$ quintic smoothstep blending polynomials, and establishes statistical bounds on policy drift under human intervention.
+
+### The 4-State Authority Machine and Preemption Invariant
+
+The state transition mapping $\delta: \mathcal{S}_{\text{auth}} \times \{0, 1\}^4 \to \mathcal{S}_{\text{auth}}$ enforces strict priority:
+
+$$\delta(s, \mathbf{e}) = \begin{cases}
+\text{ESTOP}, & \text{if } e_{\text{estop}} = 1 \\
+\text{MANUAL}, & \text{if } e_{\text{human}} = 1, \neg e_{\text{estop}} \\
+\text{SHARED}, & \text{if } e_{\text{shared}} = 1, \neg (e_{\text{estop}} \lor e_{\text{human}}) \\
+\text{AUTONOMOUS}, & \text{if } e_{\text{lease}} \land e_{\text{cbf}}, \neg (e_{\text{estop}} \lor e_{\text{human}}) \\
+\text{ESTOP}, & \text{otherwise}
+\end{cases}$$
+
+Hardware Safe Torque Off lines enforce the preemption invariant: if $e_{\text{estop}} = 1$, gate driver power is physically unlatched within $< 5.0\,\mu\text{s}$, regardless of processor state.
+
+### Derivation of the $\mathcal{C}^2$ Quintic Smoothstep Polynomial
+
+When transitioning between autonomous policy command $\mathbf{u}_{\text{policy}}(t)$ and human operator input $\mathbf{u}_{\text{human}}(t)$ over transition window $T_{\text{blend}} \in [100, 200]\text{ ms}$, the blended command is:
+
+$$\mathbf{u}_{\text{cmd}}(t) = (1 - S(\alpha(t))) \mathbf{u}_{\text{policy}}(t) + S(\alpha(t)) \mathbf{u}_{\text{human}}(t), \quad \text{with } \alpha(t) = \frac{t - t_{\text{takeover}}}{T_{\text{blend}}} \in [0, 1]$$
+
+To eliminate torque derivative shocks ($\dot{\mathbf{u}} \to \infty$) and mechanical jerk impulses ($\dddot{\mathbf{q}} \to \infty$), the blending polynomial $S(\alpha) = \sum_{k=0}^5 c_k \alpha^k$ must satisfy six physical boundary conditions:
+
+$$\begin{aligned}
+S(0) &= 0, \quad &S(1) &= 1 \quad &&(\text{Zero and Unity Amplitudes}) \\
+\dot{S}(0) &= 0, \quad &\dot{S}(1) &= 0 \quad &&(\text{Zero Initial and Final Velocities}) \\
+\ddot{S}(0) &= 0, \quad &\ddot{S}(1) &= 0 \quad &&(\text{Zero Initial and Final Accelerations})
+\end{aligned}$$
+
+Setting $S(0) = \dot{S}(0) = \ddot{S}(0) = 0$ directly forces $c_0 = c_1 = c_2 = 0$. The polynomial simplifies to:
+
+$$S(\alpha) = c_3 \alpha^3 + c_4 \alpha^4 + c_5 \alpha^5$$
+
+Applying the remaining three boundary conditions at $\alpha = 1$:
+
+$$\begin{aligned}
+S(1) &= c_3 + c_4 + c_5 = 1 \\
+\dot{S}(1) &= 3 c_3 + 4 c_4 + 5 c_5 = 0 \\
+\ddot{S}(1) &= 6 c_3 + 12 c_4 + 20 c_5 = 0
+\end{aligned}$$
+
+Solving this $3 \times 3$ linear system:
+
+$$\begin{bmatrix} 1 & 1 & 1 \\ 3 & 4 & 5 \\ 6 & 12 & 20 \end{bmatrix} \begin{bmatrix} c_3 \\ c_4 \\ c_5 \end{bmatrix} = \begin{bmatrix} 1 \\ 0 \\ 0 \end{bmatrix} \implies \begin{bmatrix} c_3 \\ c_4 \\ c_5 \end{bmatrix} = \begin{bmatrix} 10 \\ -15 \\ 6 \end{bmatrix}$$
+
+The unique $\mathcal{C}^2$ quintic smoothstep polynomial is:
+
+$$S(\alpha) = 6\alpha^5 - 15\alpha^4 + 10\alpha^3$$
+
+The peak derivative occurs at the midpoint $\alpha = 0.5$:
+
+$$\dot{S}_{\text{max}} = \left. (30\alpha^4 - 60\alpha^3 + 30\alpha^2) \right|_{\alpha=0.5} = 30(0.0625) - 60(0.125) + 30(0.25) = 1.875$$
+
+The maximum commanded torque rate of change during human takeover is strictly bounded:
+
+$$\|\dot{\mathbf{u}}_{\text{cmd}}\| \le \frac{1.875}{T_{\text{blend}}} \|\mathbf{u}_{\text{human}} - \mathbf{u}_{\text{policy}}\| + \|\dot{\mathbf{u}}_{\text{policy}}\|$$
+
+For $T_{\text{blend}} = 150.0\text{ ms}$ and a maximum torque discrepancy of $40.0\text{ N}\cdot\text{m}$, the peak torque rate is bounded to $\le 500.0\text{ N}\cdot\text{m/s}$, well within the continuous capability of brushless motor gearboxes.
+
+### Compounding Covariate Shift Bounds Under Behavioral Cloning
+
+When training a policy $\pi_\theta$ via supervised behavioral cloning on logged human teleoperation data $\mathcal{D} = \{(s_t, a_t^*)\}$, let $\epsilon$ denote the expected single-step error rate under the training distribution:
+
+$$\mathbb{E}_{s \sim d_{\pi^*}} \left[ \ell(\pi_\theta(s), \pi^*(s)) \right] \le \epsilon$$
+
+Under autonomous closed-loop execution, small errors shift the state distribution away from the demonstration support. Following Ross, Gordon, and Bagnell [-@ross2011reduction], the compounding total variation distance between the expert state distribution $d_{\pi^*}$ and the learned policy distribution $d_{\pi_\theta}$ over horizon $T$ is bounded by:
+
+$$D_{\text{TV}}(d_{\pi^*}, d_{\pi_\theta}) \le 2 (1 - (1 - \epsilon)^T) \le 2 \epsilon T$$
+
+The cumulative task loss over horizon $T$ compounds quadratically:
+
+$$J(\pi_\theta) \le J(\pi^*) + \epsilon \cdot T^2$$
+
+* **DAgger Policy Gradient Formulation:** To prevent quadratic error compounding, dataset aggregation (DAgger) samples states from the running policy's own induced distribution $d_{\pi_\theta}$ and queries an expert oracle for corrections $a_t^* = \pi^*(s_t)$. Truncating the pre-takeover drift phase prevents the policy from learning spurious associations between dangerous drift and recovery maneuvers.
+
+---
+
+## 13. STPA Hazard Analysis and Reliability Proofs
+
+In whole-system verification and safety assurance, formal safety cases require connecting top-level system claims to rigorous control-theoretic hazard analyses and statistical extreme-value reliability proofs. This section establishes the mathematical foundations of STPA hazard networks and derives tail probability bounds using the Generalized Pareto Distribution.
+
+### Formal Mathematical Formulation of STPA Hierarchical Control Structures
+
+System-Theoretic Process Analysis (STPA) models safety as a hierarchical dynamic control problem [@leveson2011engineering].
+
+Let $\mathcal{L} = \{L_1, L_2, \dots, L_p\}$ denote the set of unacceptable **System Losses** (such as human injury, structural equipment destruction, or environmental damage).
+
+A **System Hazard** $H_k \in \mathcal{H}$ is defined as a system state or set of conditions that, together with a worst-case set of environmental conditions, leads to a system loss:
+
+$$H_k = \langle \mathcal{S}_k, \mathcal{C}_k \rangle \implies \bigcup_{i} L_i$$
+
+where $\mathcal{S}_k \subset \mathcal{X}$ is the unsafe physical state space and $\mathcal{C}_k$ is the active environmental context.
+
+The multi-rate, heterogeneous Physical AI architecture is modeled as a directed hierarchical control graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$:
+* Vertices $\mathcal{V} = \{\text{Cloud}, \text{Host MPU}, \text{Edge NPU}, \text{Bare-Metal MCU}, \text{Actuators}, \text{Physical Plant}\}$ represent control entities and physical substrates.
+* Directed edges $\mathcal{E} = \mathcal{U}_{\text{ctrl}} \cup \mathcal{Y}_{\text{fb}}$ represent control actions $\mathbf{u} \in \mathcal{U}_{\text{ctrl}}$ descending the hierarchy and feedback measurements $\mathbf{y} \in \mathcal{Y}_{\text{fb}}$ ascending the hierarchy.
+
+Every control action $\mathbf{u}_j$ issued by controller $V_i$ is evaluated across the four canonical classes of **Unsafe Control Actions (UCAs)**:
+
+$$\begin{aligned}
+\text{UCA}_{j,1}(\mathbf{x}, t) &= (\mathbf{u}_j(t) = \emptyset) \land \mathcal{P}_{\text{req}}(\mathbf{x}(t)) &&\text{[Not Provided]} \\
+\text{UCA}_{j,2}(\mathbf{x}, \mathbf{u}, t) &= (\mathbf{u}_j(t) = \mathbf{u}_{\text{unsafe}}) \land \mathcal{P}_{\text{hazard}}(\mathbf{x}(t), \mathbf{u}_j) &&\text{[Unsafe Action]} \\
+\text{UCA}_{j,3}(\mathbf{x}, \mathbf{u}, t) &= (\mathbf{u}_j(t) \neq \emptyset) \land (t < t_{\text{early}} \lor t > t_{\text{late}}) &&\text{[Wrong Timing]} \\
+\text{UCA}_{j,4}(\mathbf{x}, \mathbf{u}, \Delta t) &= (\Delta t < \Delta t_{\text{min}} \lor \Delta t > \Delta t_{\text{max}}) &&\text{[Wrong Duration]}
+\end{aligned}$$
+
+where $\mathcal{P}(\mathbf{x})$ denotes a Boolean predicate over continuous physical state space $\mathcal{X}$.
+
+The STPA safety verification contract dictates that for every identified $\text{UCA}_{j,k}$, the system must incorporate a deterministic, hardware-isolated invariant enforcer:
+
+$$\forall \text{UCA}_{j,k}, \quad \exists \mathcal{C}_{\text{barrier}}: \quad \text{Condition}(\text{UCA}_{j,k}) \implies \text{Trigger}(\text{Fallback Safety Interlock})$$
+
+### Extreme Value Theory (EVT) and Peak-Over-Threshold Reliability Proofs
+
+In safety-critical physical systems, nominal statistical distributions (such as Gaussian or Student-$t$ models) systematically underestimate tail risk. Catastrophic collisions occur at the extreme tail of the latency and tracking error distributions ($P_{99.999}$).
+
+To rigorously prove that the probability of catastrophic hazard occurrence satisfies the top-level safety claim:
+
+$$P(\text{Hazard}) < 10^{-6} \text{ per operating hour}$$
+
+Physical AI applies **Extreme Value Theory (EVT)** using the **Peak-Over-Threshold (POT)** methodology [@coles2001introduction].
+
+Let $X_1, X_2, \dots, X_N$ be a sequence of independent and identically distributed physical error measurements (such as sense-to-actuation latency $\tau_{\text{delay}}$ or spatial clearance violation $\Delta d$) with underlying continuous distribution function $F(x)$.
+
+Given a high threshold $u \in \mathbb{R}$, define the threshold exceedance variable $Y = X - u$ for $X > u$. The conditional excess distribution function $F_u(y)$ is:
+
+$$F_u(y) = P(X - u \le y \mid X > u) = \frac{F(u + y) - F(u)}{1 - F(u)}$$
+
+#### The Pickands-Balkema-de Haan Theorem
+
+The fundamental theorem of Extreme Value Theory states that for a broad class of underlying distributions $F(x)$, as threshold $u$ approaches the upper endpoint $x_F$, the conditional excess distribution $F_u(y)$ converges uniformly to the **Generalized Pareto Distribution (GPD)**:
+
+$$\lim_{u \to x_F} \sup_{0 \le y < x_F - u} \left| F_u(y) - G(y; \sigma, \xi) \right| = 0$$
+
+where the Generalized Pareto cumulative distribution function $G(y; \sigma, \xi)$ is defined by:
+
+$$G(y; \sigma, \xi) = \begin{cases}
+1 - \left( 1 + \frac{\xi y}{\sigma} \right)^{-1/\xi} & \text{for } \xi \neq 0 \\
+1 - \exp\left( -\frac{y}{\sigma} \right) & \text{for } \xi = 0
+\end{cases}$$
+
+parameterized by scale parameter $\sigma > 0$ and shape parameter (tail index) $\xi \in \mathbb{R}$, defined on support $y \ge 0$ for $\xi \ge 0$, and $0 \le y \le -\sigma/\xi$ for $\xi < 0$.
+
+* **$\xi > 0$ (Fréchet / Heavy-Tailed):** Models non-deterministic systems with operating system scheduling stalls and memory bus contention where tail latencies decay polynomially.
+* **$\xi = 0$ (Gumbel / Exponential):** Models memoryless random processes.
+* **$\xi < 0$ (Weibull / Bounded):** Models hard real-time systems with deterministic physical upper limits.
+
+#### Derivation of the Tail Return Level for Safety Assurance
+
+Let $N_u = \sum_{i=1}^N \mathbb{I}(X_i > u)$ denote the number of recorded exceedances above threshold $u$ in a sample of size $N$. The empirical probability of exceeding the threshold is $\hat{\zeta}_u = N_u / N$.
+
+Combining the empirical threshold probability with the Generalized Pareto model yields the cumulative tail distribution for $x > u$:
+
+$$P(X > x) = P(X > u) \cdot P(X - u > x - u \mid X > u) = \frac{N_u}{N} \left( 1 + \frac{\xi (x - u)}{\sigma} \right)^{-1/\xi}$$
+
+Inverting this equation yields the **High-Quantile Safety Return Level** $x_p$ corresponding to extreme target failure probability $p$:
+
+$$x_p = u + \frac{\sigma}{\xi} \left[ \left( \frac{N}{N_u} p \right)^{-\xi} - 1 \right]$$
+
+For an embodied robot operating at control cadence $f_s = 1000\text{ Hz}$, one operating hour contains $N_{\text{hour}} = 3.6 \times 10^6$ execution cycles. A target hazard rate of $10^{-6}\text{ / hour}$ corresponds to a per-cycle failure probability of:
+
+$$p_{\text{cycle}} = \frac{10^{-6}}{3.6 \times 10^6} = 2.78 \times 10^{-13}$$
+
+Evaluating $x_{p_{\text{cycle}}}$ on empirical Hardware-in-the-Loop fault injection datasets provides the exact mathematical upper bound on worst-case latency or stopping distance required to substantiate the Claims-Arguments-Evidence safety case.
+
+### Runtime STPA Monitor Architecture and Tail Estimation Bounds
+
+In whole-system assurance architectures, runtime STPA monitors execute directly on the safety microcontroller in static DTCM SRAM (`malloc = 0`). The monitor evaluates the four Unsafe Control Action (UCA) conditions every $1000\text{ Hz}$ tick:
+1. **Dynamic Clearance Violation (UCA-01):** Verified via $d_{\text{clearance}} \ge d_{\text{stop}}(v, \hat{\mu}, \tau_{\text{lat}})$.
+2. **Heartbeat Loss (UCA-02):** Verified via $\Delta t_{\text{heartbeat}} \le 35.0\text{ ms}$.
+3. **Tail Latency Derate (UCA-03):** Verified via online Peak-Over-Threshold (POT) Generalized Pareto return-level tracking.
+4. **Trajectory Jitter (UCA-04):** Verified via continuous torque derivative bounds $\|\dot{\boldsymbol{\tau}}\| \le \dot{\tau}_{\text{max}}$.
+
+Evaluating all four invariants executes in $< 1.2\,\mu\text{s}$, guaranteeing immediate Category 1 stopping engagement upon any safety invariant violation.
+
+---
+
+## 14. Decentralized Barrier Certificates
+
+This section provides formal proofs and embedded implementations for distributed multi-agent safety certificates and geometric symmetry constraints in physical foundation models.
+
+### Multi-Agent Decentralized Control Barrier Functions (D-CBFs)
+
+Consider a fleet of $N$ autonomous physical agents operating in a shared physical workspace. Each agent $i \in \{1, \dots, N\}$ possesses continuous control-affine dynamics:
+
+$$\dot{\mathbf{x}}_i = f_i(\mathbf{x}_i) + g_i(\mathbf{x}_i)\mathbf{u}_i$$
+
+where $\mathbf{x}_i = [\mathbf{p}_i^T, \mathbf{v}_i^T]^T \in \mathbb{R}^{n_i}$ is the agent state (position $\mathbf{p}_i \in \mathbb{R}^3$ and velocity $\mathbf{v}_i \in \mathbb{R}^3$) and $\mathbf{u}_i \in \mathcal{U}_i \subset \mathbb{R}^{m_i}$ is the control input (acceleration or motor force).
+
+For any pair of agents $(i, j)$ with $i \ne j$, let $r_i$ and $r_j$ denote their respective physical bounding radii, and let $d_{\text{margin}}$ be a safety buffer. The minimum required physical separation is $R_{ij} = r_i + r_j + d_{\text{margin}}$. The pairwise spatial barrier certificate function $h_{ij}(\mathbf{x}_i, \mathbf{x}_j): \mathbb{R}^{n_i} \times \mathbb{R}^{n_j} \to \mathbb{R}$ is defined as:
+
+$$h_{ij}(\mathbf{x}_i, \mathbf{x}_j) = \|\mathbf{p}_i - \mathbf{p}_j\|_2^2 - R_{ij}^2$$
+
+The pairwise collision-free safe set is $\mathcal{C}_{ij} = \{ (\mathbf{x}_i, \mathbf{x}_j) \mid h_{ij}(\mathbf{x}_i, \mathbf{x}_j) \ge 0 \}$. The collective fleet safe operating set $\mathcal{C}_{\text{fleet}}$ is the intersection across all pairs:
+
+$$\mathcal{C}_{\text{fleet}} = \bigcap_{i=1}^N \bigcap_{j > i}^N \mathcal{C}_{ij}$$
+
+### Reciprocating Collision Avoidance and Decentralized Safety Guarantees
+
+Differentiating $h_{ij}(\mathbf{x}_i, \mathbf{x}_j)$ along the joint trajectories yields:
+
+$$\dot{h}_{ij}(\mathbf{x}_i, \mathbf{x}_j, \mathbf{u}_i, \mathbf{u}_j) = 2(\mathbf{p}_i - \mathbf{p}_j)^T (\mathbf{v}_i - \mathbf{v}_j) = \nabla_{\mathbf{x}_i} h_{ij} \left( f_i(\mathbf{x}_i) + g_i(\mathbf{x}_i)\mathbf{u}_i \right) + \nabla_{\mathbf{x}_j} h_{ij} \left( f_j(\mathbf{x}_j) + g_j(\mathbf{x}_j)\mathbf{u}_j \right)$$
+
+Using Lie derivative notation:
+
+$$\dot{h}_{ij} = L_{f_i} h_{ij} + L_{g_i} h_{ij} \mathbf{u}_i + L_{f_j} h_{ij} + L_{g_j} h_{ij} \mathbf{u}_j$$
+
+To maintain forward invariance of $\mathcal{C}_{ij}$, the joint control input $(\mathbf{u}_i, \mathbf{u}_j)$ must satisfy:
+
+$$L_{f_i} h_{ij} + L_{g_i} h_{ij} \mathbf{u}_i + L_{f_j} h_{ij} + L_{g_j} h_{ij} \mathbf{u}_j + \alpha(h_{ij}) \ge 0$$
+
+where $\alpha(\cdot)$ is an extended class-$\mathcal{K}$ function (chosen as linear $\alpha(h) = \gamma h$ with $\gamma > 0$).
+
+#### Reciprocating Responsibility Decomposition
+
+In a decentralized fleet lacking a central coordinator, agent $i$ cannot command agent $j$'s control input $\mathbf{u}_j$. Under the **Reciprocating Collision Avoidance Principle**, each agent assumes equal responsibility for preserving the pairwise safety barrier:
+
+$$\alpha_{ij}(h_{ij}) = \frac{1}{2} \alpha(h_{ij})$$
+
+Agent $i$ enforces its local decentralized barrier constraint:
+
+$$L_{f_i} h_{ij}(\mathbf{x}_i, \hat{\mathbf{x}}_j) + L_{g_i} h_{ij}(\mathbf{x}_i, \hat{\mathbf{x}}_j) \mathbf{u}_i + \frac{1}{2} \gamma h_{ij}(\mathbf{x}_i, \hat{\mathbf{x}}_j) \ge 0$$
+
+Simultaneously, agent $j$ enforces its reciprocal constraint:
+
+$$L_{f_j} h_{ij}(\hat{\mathbf{x}}_i, \mathbf{x}_j) + L_{g_j} h_{ij}(\hat{\mathbf{x}}_i, \mathbf{x}_j) \mathbf{u}_j + \frac{1}{2} \gamma h_{ij}(\hat{\mathbf{x}}_i, \mathbf{x}_j) \ge 0$$
+
+#### Theorem: Collective Forward Set Invariance under Reciprocating D-CBFs
+
+If every agent $i \in \{1, \dots, N\}$ selects its local control action $\mathbf{u}_i$ from its admissible set:
+
+$$\mathcal{U}_i(\mathbf{x}_i) = \left\{ \mathbf{u}_i \in \mathbb{R}^{m_i} \;\middle|\; L_{f_i} h_{ij} + L_{g_i} h_{ij} \mathbf{u}_i + \frac{1}{2}\gamma h_{ij} \ge 0, \quad \forall j \ne i \right\}$$
+
+then the joint system trajectory satisfies:
+
+$$\begin{aligned}
+\dot{h}_{ij} + \gamma h_{ij} &= \left( L_{f_i} h_{ij} + L_{g_i} h_{ij} \mathbf{u}_i + \tfrac{1}{2}\gamma h_{ij} \right) + \left( L_{f_j} h_{ij} + L_{g_j} h_{ij} \mathbf{u}_j + \tfrac{1}{2}\gamma h_{ij} \right) \\
+&\ge 0 + 0 = 0
+\end{aligned}$$
+
+Applying the Comparison Lemma, $h_{ij}(t) \ge h_{ij}(0) e^{-\gamma t} \ge 0$ for all $t \ge 0$. The collective safe operating set $\mathcal{C}_{\text{fleet}}$ is strictly forward invariant, guaranteeing zero inter-agent collisions across the entire fleet without centralized arbitration.
+
+### Asynchronous State Estimation and Network Latency Margin Bounds
+
+In realistic radio-frequency networks, agent $i$ receives position broadcasts from neighbor $j$ with transport delay $\tau_{ij} \in [0, \tau_{\text{max}}]$ and bounded packet drop probability.
+
+Let $\hat{\mathbf{p}}_j(t) = \mathbf{p}_j(t - \tau_{ij}) + \mathbf{v}_j(t - \tau_{ij})\tau_{ij}$ be the dead-reckoned position estimate. Given a known maximum physical acceleration $a_{\text{max}}$, the state estimation error is bounded:
+
+$$\|\mathbf{p}_j(t) - \hat{\mathbf{p}}_j(t)\|_2 \le \frac{1}{2} a_{\text{max}} \tau_{ij}^2 \le \frac{1}{2} a_{\text{max}} \tau_{\text{max}}^2 = \epsilon_{\text{pos}}(\tau_{\text{max}})$$
+
+To guarantee forward invariance under network latency, agent $i$ inflates the effective pairwise collision radius:
+
+$$R_{ij}^{\text{net}}(\tau_{\text{max}}) = r_i + r_j + d_{\text{margin}} + 2 \epsilon_{\text{pos}}(\tau_{\text{max}}) = r_i + r_j + d_{\text{margin}} + a_{\text{max}} \tau_{\text{max}}^2$$
+
+Evaluating the D-CBF against the inflated radius $R_{ij}^{\text{net}}$ mathematically guarantees collision avoidance despite asynchronous communications.
+
+### $SE(3)$ Lie Group Equivariance in Neural Physical Policies
+
+In 3D physical manipulation and locomotion, the underlying laws of Newtonian mechanics are invariant under rigid coordinate transformations. A policy that learns to grasp an object at pose $\mathbf{T}_1 \in SE(3)$ should generalize directly when that same object is rotated and translated to pose $\mathbf{T}_2 = g \cdot \mathbf{T}_1$, where $g \in SE(3)$.
+
+#### Mathematical Group Action on State and Action Spaces
+
+Let $G = SE(3) = SO(3) \ltimes \mathbb{R}^3$ denote the Special Euclidean group. An element $g = (\mathbf{R}, \mathbf{t}) \in G$ consists of a 3D rotation matrix $\mathbf{R} \in SO(3)$ and a translation vector $\mathbf{t} \in \mathbb{R}^3$.
+
+Let $\mathcal{X}$ denote the sensory observation space (point clouds, 3D feature embeddings, or depth tokens) and let $\mathcal{A}$ denote the physical action space (Cartesian end-effector waypoints or spatial wrench vectors). We define the group representations $\rho_{\mathcal{X}}(g): \mathcal{X} \to \mathcal{X}$ and $\rho_{\mathcal{A}}(g): \mathcal{A} \to \mathcal{A}$:
+
+1. **On Observation Points $\mathbf{P} \in \mathbb{R}^{N \times 3}$:** $\rho_{\mathcal{X}}(g) \mathbf{P} = \mathbf{P} \mathbf{R}^T + \mathbf{1}_{N \times 1} \mathbf{t}^T$.
+2. **On Commanded Trajectory Waypoints $\mathbf{p}_k \in \mathbb{R}^3$ and Orientations $\mathbf{R}_k \in SO(3)$:**
+   $$\rho_{\mathcal{A}}(g)(\mathbf{p}_k, \mathbf{R}_k) = (\mathbf{R}\mathbf{p}_k + \mathbf{t}, \mathbf{R}\mathbf{R}_k)$$
+
+#### Formal Definition of $SE(3)$-Equivariance
+
+A neural policy $\pi_\theta: \mathcal{X} \to \mathcal{A}$ is strictly **$SE(3)$-equivariant** if the mapping commutes with the group action:
+
+$$\pi_\theta(\rho_{\mathcal{X}}(g) \cdot \mathbf{O}) = \rho_{\mathcal{A}}(g) \cdot \pi_\theta(\mathbf{O}), \quad \forall g \in SE(3), \quad \forall \mathbf{O} \in \mathcal{X}$$
+
+```
+                rho_X(g)
+       O ──────────────────────> g · O
+       │                           │
+       │                           │
+pi_theta(O)                    pi_theta(g · O)
+       │                           │
+       v                           v
+       A ──────────────────────> g · A
+                rho_A(g)
+```
+
+When an unconstrained transformer or MLP processes physical observations, it must learn the effect of rotations empirically by consuming thousands of data augmentations. An $SE(3)$-equivariant architecture enforces this commutation structurally in its layer weights, guaranteeing that rotating the input scene rotates the predicted action trajectory identically by construction.
+
+### Steerable Tensor Representations and Clebsch-Gordan Decompositions
+
+To build neural layers that respect $SO(3)$ rotational symmetries, feature vectors at each 3D point are decomposed into direct sums of irreducible representations (irreps) of $SO(3)$:
+
+$$V = \bigoplus_{l=0}^{l_{\text{max}}} \mathbb{R}^{2l + 1}$$
+
+where $l$ is the rotation order:
+* **$l = 0$ (Scalars, dimension 1):** Invariant under rotation (temperatures, masses, distances, grasp probabilities). $\rho_0(\mathbf{R}) = 1$.
+* **$l = 1$ (Vectors, dimension 3):** Standard 3D vectors (positions, velocities, forces). $\rho_1(\mathbf{R}) = \mathbf{R}$.
+* **$l = 2$ (Tensors, dimension 5):** Symmetric traceless $3 \times 3$ matrices (stress tensors, quadric surfaces, inertia moments). $\rho_2(\mathbf{R}) = \mathbf{D}^2(\mathbf{R})$, where $\mathbf{D}^l(\mathbf{R})$ is the $(2l+1) \times (2l+1)$ Wigner D-matrix.
+
+When combining geometric features $\mathbf{v}_1 \in V_{l_1}$ and $\mathbf{v}_2 \in V_{l_2}$, the tensor product is projected back into irreducible channels using **Clebsch-Gordan coefficients** $C_{(l_1, m_1)(l_2, m_2)}^{(l, m)}$:
+
+$$(\mathbf{v}_1 \otimes_{\text{CG}} \mathbf{v}_2)_m^l = \sum_{m_1=-l_1}^{l_1} \sum_{m_2=-l_2}^{l_2} C_{(l_1, m_1)(l_2, m_2)}^{(l, m)} v_{1, m_1}^{l_1} v_{2, m_2}^{l_2}$$
+
+for all target orders $|l_1 - l_2| \le l \le l_1 + l_2$.
+
+By constructing neural network layers strictly from Clebsch-Gordan tensor products and radial scalar non-linearities, the entire network satisfies exact $SE(3)$-equivariance at every hidden layer.
+
+### Sample Complexity Scaling Proof in Physical Space
+
+Let $\mathcal{F}$ be the class of $L$-Lipschitz continuous robotic manipulation policies mapping a bounded workspace $\Omega \subset \mathbb{R}^3$ to bounded action trajectories in $[-1, 1]^d$.
+
+#### Non-Equivariant Hypothesis Space Complexity
+
+For a standard unconstrained neural network (such as a Vision Transformer or MLP), the $\epsilon$-covering number of the policy hypothesis space $\mathcal{H}_{\text{standard}}$ under the infinity norm satisfies:
+
+$$\log \mathcal{N}\left(\epsilon, \mathcal{H}_{\text{standard}}, \|\cdot\|_\infty\right) = \mathcal{O}\left( \left(\frac{L}{\epsilon}\right)^{d_{\text{in}}} \right)$$
+
+where $d_{\text{in}} = 3K$ represents the dimensionality of $K$ spatial input points. The number of physical demonstrations $M_{\text{standard}}$ required to achieve generalization error $\le \epsilon$ scales as:
+
+$$M_{\text{standard}} = \Omega\left( \frac{1}{\epsilon^2} \left(\frac{L}{\epsilon}\right)^{3K} \right)$$
+
+#### Equivariant Hypothesis Space Complexity
+
+When the policy space is constrained to the $SE(3)$-equivariant subspace $\mathcal{H}_{\text{equiv}} \subset \mathcal{H}_{\text{standard}}$, any function $f \in \mathcal{H}_{\text{equiv}}$ is uniquely determined by its values on the orbit quotient space $\Omega / SE(3)$.
+
+Because the group $SE(3)$ has dimension $\dim(SE(3)) = 6$ (3 translational and 3 rotational degrees of freedom), the effective input manifold dimensionality is reduced from $3K$ to $3K - 6$ for $K \ge 3$. Furthermore, the volume of the search space is divided by the Haar volume of the compact rotation group $|SO(3)| = 8\pi^2$:
+
+$$\log \mathcal{N}\left(\epsilon, \mathcal{H}_{\text{equiv}}, \|\cdot\|_\infty\right) = \mathcal{O}\left( \frac{1}{|SO(3)|} \left(\frac{L}{\epsilon}\right)^{3K - 6} \right)$$
+
+For 3D robotic grasping where the target object can appear in arbitrary $SE(3)$ poses, the sample complexity ratio evaluates to:
+
+$$\frac{M_{\text{equiv}}}{M_{\text{standard}}} \approx \frac{1}{|SO(3)| \cdot (\text{discretization steps})^{3}} \approx \frac{1}{100} \text{ to } \frac{1}{1000}$$
+
+This mathematical bound explains why $SE(3)$-equivariant foundation policies (such as Equivariant Diffusion Policy and Perceiver-Actor) achieve $95\%$ pick-and-place success rates with only $20\text{--}50$ physical demonstrations, whereas non-equivariant models require $2{,}000\text{--}5{,}000$ trials to learn spatial rotational invariance.
+
+### Distributed Safety Filter Determinism and Complexity Bounds
+
+In multi-agent fleets, each agent's bare-metal microcontroller evaluates reciprocating Decentralized Control Barrier Functions (D-CBFs) across all neighboring peers within its RF sensing radius (e.g. up to $N_{\text{nbr}} = 8$ neighbors) at $1000\text{ Hz}$.
+
+Because pairwise half-space projection calculations are decoupled ($L_f h_{ij} + L_g h_{ij}\mathbf{u}_i + \frac{1}{2}\gamma h_{ij} \ge 0$), filtering candidate 3D acceleration vectors $\mathbf{u}_{\text{cand}} \in \mathbb{R}^3$ requires only $O(N_{\text{nbr}})$ dot products in static memory (`malloc = 0`). On an ARM Cortex-M7 at $480\text{ MHz}$, evaluating 8 neighbor barrier certificates and projecting onto the safe velocity half-space executes in under $2.8\,\mu\text{s}$ ($\text{WCET} \le 5.0\,\mu\text{s}$), providing distributed forward set invariance with minimal compute overhead.
+
+---
