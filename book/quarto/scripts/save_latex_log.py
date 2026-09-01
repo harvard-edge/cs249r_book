@@ -38,6 +38,15 @@ def _find_intermediate(script_dir: Path, stem: str, suffix: str) -> Path | None:
     )
 
 
+def _is_current_for_tex(intermediate: Path | None, tex_path: Path) -> bool:
+    """Return whether an intermediate was produced from the retained TeX."""
+    return bool(
+        intermediate
+        and intermediate.is_file()
+        and intermediate.stat().st_mtime_ns >= tex_path.stat().st_mtime_ns
+    )
+
+
 def _regenerate_auxiliary_files(
     script_dir: Path, stem: str, *, passes: int = 3
 ) -> bool:
@@ -82,10 +91,13 @@ def main():
     out_dir = script_dir / "_build" / f"pdf-{volume}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Quarto 1.10 removes AUX/log files before project post-render hooks even
-    # when keep-tex is enabled. A draft-mode pass over the exact retained TeX
-    # recreates numbering metadata without writing or replacing the book PDF.
-    if _find_intermediate(script_dir, stem, ".aux") is None:
+    # Quarto 1.10 can remove current AUX/log files before project post-render
+    # hooks even when keep-tex is enabled. A stale file from an earlier build
+    # is equally unsafe. Regenerate unless the discovered AUX is at least as
+    # new as the exact retained TeX.
+    tex_path = script_dir / f"{stem}.tex"
+    aux_before = _find_intermediate(script_dir, stem, ".aux")
+    if not _is_current_for_tex(aux_before, tex_path):
         if _regenerate_auxiliary_files(script_dir, stem):
             print(
                 "[latex-build] Regenerated converged AUX/log from retained TeX "

@@ -28,6 +28,19 @@ def test_find_intermediate_accepts_quarto_index_stem(tmp_path: Path) -> None:
     assert save_latex_log._find_intermediate(tmp_path, "Book-Vol2", ".aux") == aux
 
 
+def test_intermediate_must_be_at_least_as_new_as_retained_tex(tmp_path: Path) -> None:
+    tex = tmp_path / "Book-Vol2.tex"
+    aux = tmp_path / "Book-Vol2.aux"
+    tex.write_text("new source", encoding="utf-8")
+    aux.write_text("stale metadata", encoding="utf-8")
+    tex.touch()
+
+    assert not save_latex_log._is_current_for_tex(aux, tex)
+
+    aux.touch()
+    assert save_latex_log._is_current_for_tex(aux, tex)
+
+
 def test_regenerate_auxiliary_files_uses_draft_mode(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "Book-Vol2.tex").write_text("document", encoding="utf-8")
     observed = []
