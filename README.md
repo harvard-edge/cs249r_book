@@ -13,6 +13,7 @@
 <!-- Build Status -->
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Book&logo=githubactions&cacheSeconds=300" alt="Book"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/physical-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/physical-validate-dev.yml?branch=dev&event=push&label=Physical%20AI&logo=robot&cacheSeconds=300" alt="Physical AI"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
@@ -34,6 +35,7 @@
 <p align="center">
   <b><a href="https://mlsysbook.ai">📘 Textbook</a></b> •
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a> + <a href="https://mlsysbook.ai/vol2/">📘 Vol II</a></b> •
+  <b><a href="https://mlsysbook.ai/physical/">🤖 Physical AI</a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
@@ -101,6 +103,12 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td><b>Textbook</b></td>
       <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
       <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II</a></td>
+    </tr>
+    <tr>
+      <td align="center">🤖</td>
+      <td><b>Physical AI</b></td>
+      <td>Systems architecture for embodied intelligence: causal boundaries, real-time safety shields, multi-rate bridges, and physical budgets.</td>
+      <td><a href="https://mlsysbook.ai/physical/">Read online</a> · <a href="physical/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
