@@ -1,27 +1,34 @@
 name: '🤖 Physical AI · 👁️ Preview (Dev)'
 
 # =============================================================================
-# Physical AI — Dev Preview Deploy (Quarto)
+# Physical AI — Dev Preview Deploy
 # =============================================================================
 #
-# Builds the Physical AI Quarto site with PDF & EPUB, then deploys to the
-# dev preview site via SSH. Gated on Validate (Dev) passing.
+# Builds the Physical AI Quarto site with PDF & EPUB, then deploys to the dev
+# preview site via SSH. Gated on Validate (Dev) passing.
 #
 # Flow:
-#   1. BUILD_SITE   — Quarto HTML render + LuaLaTeX PDF + EPUB
-#   2. DEPLOY       — Push to dev preview repo via SSH
+#   1. BUILD_PDF    — Compile Physical AI PDF & EPUB (reusable workflow)
+#   2. BUILD_SITE   — Quarto render + inject PDF/EPUB into site + rewrite URLs
+#   3. DEPLOY       — Push to dev preview repo via SSH
 #
 # Triggers:
-#   - workflow_run: after Validate (Dev) succeeds on dev branch
+#   - push: dev branch, physical/** paths
 #   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_PHYSICAL_PATH}/
+# Secrets:    SSH_DEPLOY_KEY
+# Vars:       PHYSICAL_ROOT, DEV_REPO, DEV_REPO_URL, DEV_PHYSICAL_PATH
 # =============================================================================
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["🤖 Physical AI · ✅ Validate (Dev)"]
-    types: [completed]
+  push:
     branches: [dev]
+    paths:
+      - 'physical/**'
+      - 'shared/**'
+      - '.github/workflows/physical-*'
 
 permissions:
   contents: read
@@ -36,14 +43,28 @@ env:
   PHYSICAL_BOOK_DIR: ${{ vars.PHYSICAL_BOOK_DIR || 'physical/book' }}
   PHYSICAL_BUILD_DIR: ${{ vars.PHYSICAL_BOOK_DIR || 'physical/book' }}/_build
   DEV_PHYSICAL_PATH: ${{ vars.DEV_PHYSICAL_PATH || 'physical' }}
+  BOOK_TOOLS: ${{ vars.BOOK_TOOLS || 'book/tools' }}
+  DEV_REPO: ${{ vars.DEV_REPO || 'cs249r_book_dev' }}
+  DEV_REPO_URL: ${{ vars.DEV_REPO_URL || 'git@github.com:harvard-edge/cs249r_book_dev.git' }}
+  PDF_NAME: Physical-AI.pdf
+  EPUB_NAME: Physical-AI.epub
   PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}
 
 jobs:
-  build-and-preview:
-    name: '🤖 Build & Deploy Physical AI Preview'
+  validate:
+    name: '✅ Validate (Dev)'
+    uses: ./.github/workflows/physical-validate-dev.yml
+
+  build-pdf:
+    name: '📚 Build PDF & EPUB'
+    uses: ./.github/workflows/physical-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
+  build-and-deploy:
+    name: '🤖 Build & Deploy Physical AI (Dev)'
     runs-on: ubuntu-latest
-    if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 20
+    needs: [validate, build-pdf]
 
     steps:
       - name: 📥 Checkout
@@ -61,14 +82,84 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin
 
-      - name: 🔨 Render Physical AI HTML
+      - name: 🔨 Build Physical AI Site
         working-directory: ${{ env.PHYSICAL_BOOK_DIR }}
-        run: quarto render --to html
-
-      - name: 🔍 Verify Preview Output
         run: |
-          if [ ! -f "${{ env.PHYSICAL_BUILD_DIR }}/index.html" ]; then
-            echo "❌ CRITICAL: ${{ env.PHYSICAL_BUILD_DIR }}/index.html missing."
-            exit 1
+          quarto render --to html
+          touch _build/.nojekyll
+
+      - name: 📥 Download PDF & EPUB Artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: Physical-AI-Builds
+          path: ./pdf-artifacts/
+
+      - name: 📁 Inject Downloads into Site
+        run: |
+          echo "📁 Injecting PDF & EPUB into built site..."
+          mkdir -p "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads"
+
+          if [ -f "./pdf-artifacts/${{ env.PDF_NAME }}" ]; then
+            cp "./pdf-artifacts/${{ env.PDF_NAME }}" "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads/"
+            echo "✅ Injected ${{ env.PDF_NAME }}"
           fi
-          echo "✅ Physical AI preview build complete."
+
+          if [ -f "./pdf-artifacts/${{ env.EPUB_NAME }}" ]; then
+            cp "./pdf-artifacts/${{ env.EPUB_NAME }}" "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads/"
+            echo "✅ Injected ${{ env.EPUB_NAME }}"
+          fi
+
+          echo "📦 Downloads folder contents:"
+          ls -la "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads/" || echo "No downloads folder"
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh physical "${{ env.PHYSICAL_BUILD_DIR }}"
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          echo "🔧 Modifying announcement banner for development preview..."
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          if [ -f "${{ env.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py" ]; then
+            python3 "${{ env.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py" \
+              "${{ env.PHYSICAL_BUILD_DIR }}" \
+              --verbose \
+              --commit-hash "${{ github.sha }}" \
+              --commit-short "$COMMIT_SHORT"
+          fi
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        if: env.SSH_DEPLOY_KEY != ''
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository (${{ env.DEV_REPO }})..."
+          git clone --depth=1 "${{ env.DEV_REPO_URL }}" target-repo
+
+          cd target-repo
+
+          echo "🧹 Updating ${{ env.DEV_PHYSICAL_PATH }} directory..."
+          rm -rf "${{ env.DEV_PHYSICAL_PATH }}"
+          mkdir -p "${{ env.DEV_PHYSICAL_PATH }}"
+          cp -r "${{ github.workspace }}/${{ env.PHYSICAL_BUILD_DIR }}"/* "${{ env.DEV_PHYSICAL_PATH }}/"
+
+          git add "${{ env.DEV_PHYSICAL_PATH }}"
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to deploy."
+          else
+            git commit -m "Deploy Physical AI dev preview: ${COMMIT_SHORT}"
+            git push origin main
+            echo "✅ Successfully deployed Physical AI to dev preview."
+          fi

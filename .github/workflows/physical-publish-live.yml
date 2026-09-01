@@ -11,8 +11,15 @@ name: '🤖 Physical AI · 🚀 Publish (Live)'
 #   1. GUARD          — Ensures latest Validate (Dev) is green
 #   2. PREPARE        — Versioning and release manifest
 #   3. BUILD_PDFS     — Reusable build of PDF & EPUB
-#   4. BUILD_AND_DEPLOY — Render HTML, inject PDF/EPUB, push to gh-pages
+#   4. BUILD_AND_DEPLOY — Render HTML, inject stamp, stage downloads, deploy gh-pages
 #   5. CREATE_TAG     — Tag release on GitHub
+#
+# Triggers:
+#   - workflow_dispatch: manual with release knobs
+#   - workflow_call: called from publish-all-live.yml
+#
+# Deploys to: mlsysbook.ai/physical/
+# Secrets:    GITHUB_TOKEN
 # =============================================================================
 
 on:
@@ -23,12 +30,12 @@ on:
         required: false
         default: 'Content updates and improvements'
       site_only:
-        description: 'Website-only deploy? (no version bump, no tag)'
+        description: 'Website-only deploy? (no version bump, no tag — reuses current release_id)'
         required: false
         type: boolean
         default: false
       release_type:
-        description: 'Release type [patch]'
+        description: 'Release type (ignored if site_only OR explicit_version is set) [patch]'
         required: true
         type: choice
         options:
@@ -78,6 +85,9 @@ env:
   PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}
 
 jobs:
+  # ===========================================================================
+  # Stage 1: Validate-Dev Green Gate
+  # ===========================================================================
   guard:
     name: '🛡️ Validate-Dev Green Gate'
     if: inputs.confirm == 'PUBLISH'
@@ -85,6 +95,9 @@ jobs:
     with:
       validate_workflow: physical-validate-dev.yml
 
+  # ===========================================================================
+  # Stage 2: Prepare Release
+  # ===========================================================================
   prepare:
     name: '🏷️ Prepare release'
     uses: ./.github/workflows/_release-prepare.yml
@@ -98,6 +111,9 @@ jobs:
       confirm: ${{ inputs.confirm }}
       site_only: ${{ inputs.site_only }}
 
+  # ===========================================================================
+  # Stage 3: Build PDF & EPUB
+  # ===========================================================================
   build-pdfs:
     name: '📚 Build PDFs & EPUB'
     needs: [guard]
@@ -106,6 +122,9 @@ jobs:
     with:
       ref: ${{ github.ref }}
 
+  # ===========================================================================
+  # Stage 4: Build Site & Deploy
+  # ===========================================================================
   build-and-deploy:
     name: '🔧 Build & Deploy Physical AI'
     runs-on: ubuntu-latest
@@ -147,6 +166,31 @@ jobs:
         run: |
           echo "📋 Artifacts staged for web download:"
           ls -la "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads/"
+          echo ""
+          echo "📊 Artifact file sizes:"
+          du -h "${{ env.PHYSICAL_BUILD_DIR }}/assets/downloads/"*
+
+      - name: 🕐 Inject Build Stamp
+        run: bash shared/scripts/inject-build-stamp.sh "${{ env.PHYSICAL_BUILD_DIR }}" "Physical AI"
+
+      - name: 📦 Emit release manifest
+        env:
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+        run: |
+          set -euo pipefail
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths ${{ env.PHYSICAL_ROOT }} \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '.quarto')
+
+          echo "📦 Release: physical v${NEW_RELEASE_ID} (hash ${RELEASE_HASH:0:12})"
+
+          python3 scripts/version/release.py emit-manifest \
+            --output "${{ env.PHYSICAL_BUILD_DIR }}/release-manifest.json" \
+            --project physical \
+            --tier B \
+            --release-id "$NEW_RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
@@ -158,6 +202,9 @@ jobs:
           keep_files: true
           commit_message: '🔧 Deploy Physical AI ${{ needs.prepare.outputs.new_tag }} - ${{ github.sha }}'
 
+  # ===========================================================================
+  # Stage 5: Tag & GitHub Release
+  # ===========================================================================
   create-tag:
     name: '🏷️ Create Tag & Release'
     needs: [build-and-deploy, prepare]
