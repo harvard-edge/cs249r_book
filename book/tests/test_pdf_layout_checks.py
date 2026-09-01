@@ -896,6 +896,29 @@ def test_native_margin_geometry_flags_body_drawing_crossing_trim():
     assert findings[0].page == 215
 
 
+def test_native_margin_geometry_ignores_clipped_vector_sentinel_bounds():
+    page = _FakePage(drawings=[(105, 299, 333, 60768)])
+
+    assert scan_margin_geometry_page(page, 95) == []
+
+
+def test_native_margin_geometry_ignores_cover_page_label_in_printer_strip():
+    page = _FakePage(
+        blocks=[_text_block(576, 742, 586, 752, "i")],
+    )
+
+    assert scan_margin_geometry_page(page, 1) == []
+
+
+def test_native_margin_geometry_keeps_cover_exemption_out_of_body_pages():
+    page = _FakePage(
+        blocks=[_text_block(576, 742, 586, 752, "i")],
+    )
+
+    findings = scan_margin_geometry_page(page, 5)
+    assert "trim-overflow-bottom" in [f.issue for f in findings]
+
+
 def test_native_margin_geometry_flags_body_text_crossing_trim():
     page = _FakePage(
         blocks=[_text_block(144, 713, 532, 761, "section prose beyond trim")],

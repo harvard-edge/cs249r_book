@@ -154,6 +154,19 @@ def _rect_tuple(rect) -> tuple[float, float, float, float]:
     return (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
 
 
+def _is_cover_printer_strip_label(
+    pageno: int,
+    bbox: tuple[float, float, float, float],
+    snippet: str,
+) -> bool:
+    return (
+        pageno <= 4
+        and len(snippet) <= 2
+        and bbox[0] >= TRIM_RIGHT - 18
+        and bbox[1] >= TRIM_BOTTOM
+    )
+
+
 def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
     """Return the worst rendered-content crossing for each trim edge.
 
@@ -196,10 +209,20 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
     for block in page.get_text("dict").get("blocks", []):
         bbox = tuple(float(value) for value in block["bbox"])
         kind = "image" if block.get("type") == 1 else "text"
+        snippet = _text_from_block(block) if kind == "text" else ""
+        # The imposed cover leaves can contain a one-character page-label
+        # artifact in the lower printer-mark strip. It is outside the 8 x 10
+        # trim, does not render as book content, and must not masquerade as a
+        # clipped paragraph. Keep the exemption deliberately limited to the
+        # four cover sheets and a tiny block at the outer bottom corner.
+        if kind == "text" and _is_cover_printer_strip_label(
+            pageno, bbox, snippet
+        ):
+            continue
         add(
             kind,
             bbox,
-            _text_from_block(block) if kind == "text" else "",
+            snippet,
             bottom_only=kind == "image",
         )
 
@@ -213,6 +236,12 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         if width >= TRIM_RIGHT and height >= TRIM_BOTTOM:
             continue
         if width <= 36 and height <= 36:
+            continue
+        # Some clipped vector figures use a large sentinel coordinate in their
+        # path data. PyMuPDF expands the drawing rectangle to tens of thousands
+        # of points even though the PDF clip path keeps all visible ink on the
+        # page. A plausible un-clipped overflow remains far below this bound.
+        if height > TRIM_BOTTOM * 4:
             continue
         add("drawing", bbox, bottom_only=True)
 
@@ -456,6 +485,18 @@ def scan_page(page, pageno: int) -> list[MarginGeometryFinding]:
     findings: list[MarginGeometryFinding] = _trim_boundary_findings(page, pageno)
     findings.extend(_body_frame_findings(page, pageno))
     elems = _cluster(_raw_margin_boxes(page))
+    elems = [
+        elem
+        for elem in elems
+        if not (
+            elem.kind == "text"
+            and _is_cover_printer_strip_label(
+                pageno,
+                (elem.x0, elem.y0, elem.x1, elem.y1),
+                elem.snippet,
+            )
+        )
+    ]
 
     for side in ("left", "right"):
         col = sorted((e for e in elems if e.side == side), key=lambda e: e.y0)
