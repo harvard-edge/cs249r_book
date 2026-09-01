@@ -221,6 +221,17 @@ def _display_text(kind_token: str, record: dict[str, str]) -> str:
     return f"{noun}\u00a0{record['number']}"
 
 
+def _callout_number_prefix(document_kind: str, displayed_number: str) -> str:
+    """Return the full-book prefix used by numbered callouts, if any.
+
+    Part-opener callouts are locally numbered in the authoritative full PDF;
+    only numbered chapters and appendices carry a document prefix.
+    """
+    if document_kind in {"mainmatter_chapter", "appendix"}:
+        return displayed_number
+    return ""
+
+
 def _replace_prose_segment(
     segment: str,
     internal: set[str],
@@ -302,7 +313,17 @@ def mapped_source(
     return "".join(output), replaced, sorted(missing)
 
 
-def _mainmatter_counter_hook(chapter_number: int, start_page: int) -> dict[str, str]:
+def _mainmatter_counter_hook(
+    chapter_number: int,
+    start_page: int,
+    *,
+    lock_first_numbered: bool = True,
+) -> dict[str, str]:
+    first_numbered = (
+        "    \\@firstnumberedfalse% preserve the mapped folio\n"
+        if lock_first_numbered
+        else ""
+    )
     return {
         "text": (
             "\\makeatletter\n"
@@ -312,7 +333,7 @@ def _mainmatter_counter_hook(chapter_number: int, start_page: int) -> dict[str, 
             "    \\LayoutMapMainMatter\n"
             f"    \\setcounter{{chapter}}{{{chapter_number - 1}}}%\n"
             f"    \\setcounter{{page}}{{{start_page}}}%\n"
-            "    \\@firstnumberedfalse% preserve the mapped folio\n"
+            f"{first_numbered}"
             "  }%\n"
             "}\n"
             "\\makeatother"
@@ -497,7 +518,10 @@ def render_mapped_chapter(
     title, attrs = _h1_metadata(source)
     label_match = ID_RE.search(attrs)
     document_label = label_match.group(1) if label_match else None
-    labeled_record = labels.get(document_label or "")
+    # An unlabeled front-matter item must resolve through its unique TOC title.
+    # Some full-book AUX files contain an empty-string label for an unrelated
+    # float, so looking up ``""`` here can silently borrow that float's folio.
+    labeled_record = labels.get(document_label) if document_label else None
     toc_records = parse_toc_chapters(aux_path)
 
     is_part = "/parts/" in source_rel
@@ -548,6 +572,11 @@ def render_mapped_chapter(
 
     if document_kind == "frontmatter":
         transformed = _inject_folio_after_h1(transformed, start_page, roman=True)
+    elif document_kind == "mainmatter_chapter":
+        # The title template's first unnumbered ``Welcome`` chapter switches
+        # the harness back to Roman numerals. Restore the authoritative Arabic
+        # folio immediately after Quarto emits this numbered chapter heading.
+        transformed = _inject_folio_after_h1(transformed, start_page, roman=False)
     elif document_kind in {"part_opener", "appendix_backmatter"}:
         transformed = _inject_folio_after_h1(transformed, start_page, roman=False)
 
@@ -575,7 +604,11 @@ def render_mapped_chapter(
     if document_kind == "appendix":
         headers.append(_appendix_counter_hook(counter_number, start_page))
     elif document_kind == "mainmatter_chapter":
-        headers.append(_mainmatter_counter_hook(counter_number, start_page))
+        headers.append(
+            _mainmatter_counter_hook(
+                counter_number, start_page, lock_first_numbered=False
+            )
+        )
     elif document_kind == "part_opener":
         headers.append(_mainmatter_counter_hook(1, start_page))
     # Citeproc disambiguates names and year suffixes against the complete set of
@@ -628,9 +661,10 @@ def render_mapped_chapter(
 
     corrected_count = 0
     corrected_reference_count = 0
-    if displayed_number:
+    callout_prefix = _callout_number_prefix(document_kind, displayed_number)
+    if callout_prefix:
         corrected_count, corrected_reference_count = _correct_callout_numbers(
-            quarto_dir, output_dir, output_stem, displayed_number
+            quarto_dir, output_dir, output_stem, callout_prefix
         )
     else:
         tex_path = quarto_dir / f"{output_stem}.tex"

@@ -5,6 +5,7 @@ from pathlib import Path
 from book.cli.commands.layout_chapter import (
     H1_RE,
     _appendix_counter_hook,
+    _callout_number_prefix,
     _correct_custom_callout_tex,
     _fragment_owner,
     _inject_folio_after_h1,
@@ -33,6 +34,11 @@ def test_mainmatter_counter_hook_restores_numeric_chapter_and_folio():
     assert r"\renewcommand{\mainmatter}" in text
 
 
+def test_numbered_chapter_hook_allows_arabic_switch_at_heading():
+    text = _mainmatter_counter_hook(2, 39, lock_first_numbered=False)["text"]
+    assert r"\@firstnumberedfalse" not in text
+
+
 def test_appendix_counter_hook_restores_letter_position_and_folio():
     text = _appendix_counter_hook(3, 879)["text"]
     assert r"\setcounter{chapter}{2}" in text
@@ -59,6 +65,26 @@ def test_parse_toc_chapters_handles_numbered_and_unnumbered(tmp_path: Path):
         "anchor": "chapter*.2",
     }
     assert _plain_toc_title(records[1]["title"]) == "Hardware Acceleration"
+
+
+def test_unlabeled_frontmatter_does_not_use_empty_aux_label(tmp_path: Path):
+    aux = tmp_path / "book.aux"
+    aux.write_text(
+        "\\newlabel{}{{7.12d}{310}{Unrelated figure}{figure.caption.489}{}}\n"
+        "\\@writefile{toc}{\\contentsline {chapter}{Author's Note}{xvii}{chapter*.3}"
+        "\\protected@file@percent }\n",
+        encoding="utf-8",
+    )
+    labels = parse_aux(aux)
+    records = parse_toc_chapters(aux)
+    document_label = None
+
+    labeled_record = labels.get(document_label) if document_label else None
+    record = labeled_record or next(
+        item for item in records if _plain_toc_title(item["title"]) == "Author's Note"
+    )
+
+    assert record["page"] == "xvii"
 
 
 def test_fragment_owner_routes_include_only_sources(tmp_path: Path):
@@ -181,6 +207,12 @@ See principle \hyperref[pri-example-cost]{I.2}.
     assert r"\hyperref[pri-example-cost]{III.2}" in corrected
     assert headings == 1
     assert references == 1
+
+
+def test_part_openers_keep_local_callout_numbers():
+    assert _callout_number_prefix("part_opener", "I") == ""
+    assert _callout_number_prefix("mainmatter_chapter", "7") == "7"
+    assert _callout_number_prefix("appendix", "C") == "C"
 
 
 def test_correct_custom_callout_tex_expands_local_part_number():
