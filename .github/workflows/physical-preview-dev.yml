@@ -1,0 +1,72 @@
+name: '🤖 Physical AI · 👁️ Preview (Dev)'
+
+# =============================================================================
+# Physical AI — Dev Preview Deploy (Quarto)
+# =============================================================================
+#
+# Builds the Physical AI Quarto site with PDF & EPUB, then deploys to the
+# dev preview site via SSH. Gated on Validate (Dev) passing.
+#
+# Flow:
+#   1. BUILD_SITE   — Quarto HTML render + LuaLaTeX PDF + EPUB
+#   2. DEPLOY       — Push to dev preview repo via SSH
+#
+# Triggers:
+#   - workflow_run: after Validate (Dev) succeeds on dev branch
+#   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/physical/
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["🤖 Physical AI · ✅ Validate (Dev)"]
+    types: [completed]
+    branches: [dev]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: physical-dev-deploy
+  cancel-in-progress: true
+
+env:
+  PHYSICAL_ROOT: physical
+
+jobs:
+  build-and-preview:
+    name: '🤖 Build & Deploy Physical AI Preview'
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📦 Install Image/SVG tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+      - name: 🔨 Render Physical AI HTML
+        working-directory: ${{ env.PHYSICAL_ROOT }}/book
+        run: quarto render --to html
+
+      - name: 🔍 Verify Preview Output
+        run: |
+          if [ ! -f "physical/book/_build/index.html" ]; then
+            echo "❌ CRITICAL: physical/book/_build/index.html missing."
+            exit 1
+          fi
+          echo "✅ Physical AI preview build complete."

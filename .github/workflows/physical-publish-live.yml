@@ -1,0 +1,196 @@
+name: '🤖 Physical AI · 🚀 Publish (Live)'
+
+# =============================================================================
+# Physical AI — Production Deploy
+# =============================================================================
+#
+# Builds the Physical AI Quarto HTML website with PDF & EPUB downloads and
+# deploys to the live production site under mlsysbook.ai/physical/.
+#
+# Flow:
+#   1. GUARD          — Ensures latest Validate (Dev) is green
+#   2. PREPARE        — Versioning and release manifest
+#   3. BUILD_PDFS     — Reusable build of PDF & EPUB
+#   4. BUILD_AND_DEPLOY — Render HTML, inject PDF/EPUB, push to gh-pages
+#   5. CREATE_TAG     — Tag release on GitHub
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z (skips bump math). Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        type: boolean
+        required: false
+        default: false
+      release_type:
+        type: string
+        required: false
+        default: 'patch'
+      explicit_version:
+        type: string
+        required: false
+        default: ''
+      confirm:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: physical-validate-dev.yml
+
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: physical
+      tier: B
+      previous_tag_pattern: 'physical-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
+
+  build-pdfs:
+    name: '📚 Build PDFs & EPUB'
+    needs: [guard]
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/physical-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
+  build-and-deploy:
+    name: '🔧 Build & Deploy Physical AI'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    needs: [guard, prepare, build-pdfs]
+    if: inputs.confirm == 'PUBLISH'
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📦 Install Image/SVG tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+      - name: 🔨 Render Physical AI HTML
+        working-directory: physical/book
+        run: |
+          quarto render --to html
+          touch _build/.nojekyll
+
+      - name: 📥 Download PDF & EPUB Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Physical-AI-Builds
+          path: physical/book/_build/assets/downloads/
+
+      - name: 📋 Verify Downloads
+        run: |
+          echo "📋 Artifacts staged for web download:"
+          ls -la physical/book/_build/assets/downloads/
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./physical/book/_build
+          destination_dir: physical
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🔧 Deploy Physical AI ${{ needs.prepare.outputs.new_tag }} - ${{ github.sha }}'
+
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Physical AI $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_TAG" \
+            --title "Physical AI v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}\n\n**Site**: https://mlsysbook.ai/physical/" \
+            --draft \
+            ${PREV_TAG:+--generate-notes --notes-start-tag="$PREV_TAG"} || \
+          gh release create "$NEW_TAG" \
+            --title "Physical AI v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}" \
+            --draft
