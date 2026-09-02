@@ -1069,7 +1069,7 @@ This is the COMPLETE story: Profile → Optimize → Benchmark → Submit
 - How to document techniques for reproducibility
 """
 
-# %% nbgrader={"grade": false, "grade_id": "optimization-workflow", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "optimization-workflow", "solution": false}
 def run_optimization_workflow_example():
     """
     Advanced example showing the complete optimization workflow.
@@ -1166,14 +1166,12 @@ def run_optimization_workflow_example():
     print("STEP 4: Generate Submission with Improvements")
     print("="*70)
 
-    ### BEGIN SOLUTION
     submission = generate_submission(
         baseline_report=baseline_report,
         optimized_report=optimized_report,
         student_name="TinyTorch Optimizer",
-        techniques_applied=["model_sizing", "architecture_search"]  # Students list real techniques
+        techniques_applied=["model_sizing", "architecture_search"]  # replace with what you applied
     )
-    ### END SOLUTION
 
     # Display improvement summary
     if 'improvements' in submission:
