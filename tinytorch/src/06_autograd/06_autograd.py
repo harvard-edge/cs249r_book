@@ -75,6 +75,37 @@ EPSILON = 1e-7  # Small perturbation for numerical gradient computation
 
 # %% [markdown]
 """
+## 📋 Module Dependencies
+
+**Prerequisites**: Module 01 (Tensor) must be complete
+- Module 01: Tensor (the data structure gradients flow through)
+
+Modules 02-05 are not imported here, but their operations are what the
+backward passes in this module differentiate. Autograd is deliberately built
+against the Tensor alone so the gradient engine stays independent of any
+particular layer or loss.
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` - Core tensor operations
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers)
+        ↓                     ↓                      ↓
+   data structure      gradient engine        parameter updates
+```
+
+This module calls `enable_autograd()` to attach gradient tracking onto the
+Tensor class built in Module 01. Everything downstream that trains -- optimizers,
+training loops, transformers -- depends on the graph this module builds.
+"""
+
+# %% [markdown]
+"""
 ## 💡 Introduction: What is Automatic Differentiation?
 
 Automatic differentiation (autograd) is the magic that makes neural networks learn. Instead of manually computing gradients for every parameter, autograd tracks operations and automatically computes gradients via the chain rule.

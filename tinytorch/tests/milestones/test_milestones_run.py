@@ -41,7 +41,11 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
     # Use the bin/tito script directly
     tito_script = TINYTORCH_ROOT / "bin" / "tito"
 
+    # Invoke bin/tito with the interpreter running the tests, not the shebang's
+    # `env python3`. Otherwise the milestone runs under whatever python3 happens
+    # to be first on PATH, which may not be the venv pytest is running in.
     cmd = [
+        sys.executable,
         str(tito_script),
         "milestone", "run", milestone_id,
         "--skip-checks"  # Skip prerequisite checks since we're testing

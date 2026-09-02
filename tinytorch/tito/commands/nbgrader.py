@@ -745,7 +745,10 @@ class NBGraderCommand(BaseCommand):
 
     def _report(self, args: Namespace) -> int:
         """Export grades report."""
-        cmd = ["nbgrader", "export", "--course-dir", str(self.assignments_dir)]
+        # nbgrader's `export` app does not expose the `--course-dir` alias that
+        # generate_assignment/collect/autograde/feedback accept; it only honours
+        # the underlying CourseDirectory.root trait.
+        cmd = ["nbgrader", "export", f"--CourseDirectory.root={self.assignments_dir}"]
         if args.assignment:
             assignment = self._resolve_assignment_name(args.assignment) or args.assignment
             cmd.extend(["--assignment", assignment])
