@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Substitute {{stats.*}} placeholders in the rendered site.
+"""Substitute {{stats.*}} placeholders in a rendered Quarto site.
 
-Runs as the site's Quarto post-render step. Working on the built HTML rather
+Runs as a Quarto post-render step for any site in this repo. Working on the built HTML rather
 than on the .qmd source means one mechanism covers every context a number
 appears in: body prose, attribute values such as iframe title=, and the <text>
 nodes inside inline SVG mockups. A span-and-hydrate approach would reach the
@@ -18,13 +18,23 @@ instead of leaking markup.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
-SITE_DIR = Path(__file__).resolve().parent.parent
-CACHE_PATH = SITE_DIR / "config" / "stats-cache.json"
-BUILD_DIR = SITE_DIR / "_build"
+# Shared across every Quarto site in the repo. The values themselves stay in
+# one place: site/config/stats-cache.json, written by site/scripts/build_stats.py
+# and refreshed on a schedule by .github/workflows/site-refresh-stats.yml. A
+# second cache would mean two numbers for one fact.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+CACHE_PATH = REPO_ROOT / "site" / "config" / "stats-cache.json"
+
+# Quarto runs post-render from the project directory and names the output
+# directory in the environment, so the same script serves any site without
+# knowing which one invoked it.
+_out = os.environ.get("QUARTO_PROJECT_OUTPUT_DIR")
+BUILD_DIR = (Path.cwd() / _out).resolve() if _out else (Path.cwd() / "_build").resolve()
 
 PLACEHOLDER = re.compile(r"\{\{stats\.([A-Za-z0-9_.]+)\}\}")
 
