@@ -2097,7 +2097,7 @@ class BCEBackward(Function):
 
 # %% [markdown]
 """
-### Helper: Numerically Stable Softmax
+### Numerically Stable Softmax
 
 Computing softmax naively as `exp(x) / sum(exp(x))` overflows for large values.
 The fix is to subtract the maximum value first, which is mathematically equivalent
@@ -2195,7 +2195,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Helper: One-Hot Encoding
+### One-Hot Encoding
 
 Converts class indices to one-hot vectors. This is needed by the cross-entropy
 gradient formula: `grad = softmax - one_hot`.
