@@ -1108,3 +1108,66 @@ def test_default_log_path_discovers_sibling_log(tmp_path):
     assert found is not None and found.name == "Machine-Learning-Systems-Vol1.log"
     # vol2 is independent and still absent.
     assert default_log_path(tmp_path, "vol2") is None
+
+
+def test_missing_glyph_survives_wrapped_log_lines(tmp_path):
+    """A wrap that hides 'in font' must not turn a defect into a silent pass."""
+    log = _write_log(
+        tmp_path,
+        # Wrapped mid-codepoint: the regex cannot attribute either warning, but
+        # the marker count still holds, so the gate must still fire.
+        "Missing character: There is no ≤ (U+22\n"
+        "64) in font [LibertinusSerif-Regular]!\n"
+        "Missing character: There is no × (U+00\n"
+        "D7) in font lmroman10-regular!\n",
+    )
+    glyphs = [i for i in scan_build_log(log) if i.code == "missing-glyph"]
+    assert len(glyphs) == 1
+    assert glyphs[0].count == 2
+    assert "detail unavailable" in glyphs[0].message
+    assert "wrapped" in glyphs[0].message
+
+
+def test_missing_glyph_reports_partial_attribution(tmp_path):
+    """One intact warning plus one wrapped: count is 2, detail covers the intact one."""
+    log = _write_log(
+        tmp_path,
+        "Missing character: There is no × (U+00D7) in font lmroman10-regular!\n"
+        "Missing character: There is no ≤ (U+22\n"
+        "64) in font [LibertinusSerif-Regular]!\n",
+    )
+    glyphs = [i for i in scan_build_log(log) if i.code == "missing-glyph"]
+    assert glyphs[0].count == 2
+    assert "lmroman10-regular" in glyphs[0].message
+    assert "1 further warning(s) too wrapped to attribute" in glyphs[0].message
+
+
+def test_stale_log_is_not_auto_discovered(tmp_path):
+    """A log older than the PDF describes a different render; do not trust it."""
+    import os
+    from book.cli.commands._pdf_checks import default_log_path, default_pdf_path
+
+    log = tmp_path / "Machine-Learning-Systems-Vol1.log"
+    log.write_text("ok", encoding="utf-8")
+    pdf = default_pdf_path(tmp_path, "vol1")
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf.write_bytes(b"%PDF-1.7\n")
+
+    # Log an hour older than the PDF -> refused.
+    old = pdf.stat().st_mtime - 3600
+    os.utime(log, (old, old))
+    assert default_log_path(tmp_path, "vol1") is None
+
+    # Log newer than the PDF (normal, and also the failed-build case) -> used.
+    fresh = pdf.stat().st_mtime + 5
+    os.utime(log, (fresh, fresh))
+    assert default_log_path(tmp_path, "vol1") == log
+
+
+def test_log_discovered_when_pdf_absent(tmp_path):
+    """No PDF to compare against: fall back to using the log rather than skipping."""
+    from book.cli.commands._pdf_checks import default_log_path
+
+    log = tmp_path / "Machine-Learning-Systems-Vol1.log"
+    log.write_text("ok", encoding="utf-8")
+    assert default_log_path(tmp_path, "vol1") == log
