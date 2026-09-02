@@ -22,7 +22,7 @@ Welcome to Module 19! You'll build the benchmarking infrastructure for systemati
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
-**You'll Build**: TorchPerf benchmarking system for fair model comparison and performance evaluation
+**You'll Build**: The Benchmark class - a benchmarking system for fair model comparison and performance evaluation
 **You'll Enable**: Systematic optimization combination and competitive performance evaluation
 
 **Connection Map**:
@@ -35,7 +35,7 @@ Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone
 By the end of this module, you will:
 1. Implement professional benchmarking infrastructure with statistical rigor
 2. Learn to combine optimization techniques strategically (order matters!)
-3. Build the TorchPerf class - a standardized performance evaluation framework
+3. Build the Benchmark class - a standardized performance evaluation framework
 4. Understand ablation studies and systematic performance evaluation
 
 Let's get started!

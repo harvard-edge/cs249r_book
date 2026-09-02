@@ -81,6 +81,34 @@ DEFAULT_EPS = 1e-8  # Small epsilon for numerical stability in Adam
 DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 # %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01 and 06 must be complete
+- Module 01: Tensor (parameters to update)
+- Module 06: Autograd (supplies `param.grad`, without which there is nothing to optimize)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` - Core tensor operations
+- `tinytorch.core.autograd.enable_autograd` - Called at import to attach gradient
+  tracking to Tensor
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers) → Module 08 (Training)
+        ↓                     ↓                      ↓                        ↓
+   parameters           gradients            update rule            the training loop
+```
+
+Optimizers are the step that turns gradients into learning. Module 08 wires
+them into a full training loop.
+"""
+
+# %% [markdown]
 r"""
 ## 💡 Introduction: What are Optimizers?
 
@@ -192,7 +220,7 @@ Adam has a subtle bug in how it applies weight decay (regularization). AdamW fix
 Adam (incorrect):               AdamW (correct):
 gradient += weight_decay * param    [compute gradient update]
 update_param_with_gradient()        param -= learning_rate * gradient_update
-                                   param *= (1 - weight_decay)  ← separate!
+                                    param *= (1 - learning_rate * weight_decay)  ← separate!
 
 Why it matters:
 - Adam: Weight decay affected by adaptive learning rates
