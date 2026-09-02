@@ -1459,9 +1459,9 @@ def data_storage_checkpoint_storm_write_time():
     replicas = Systems.Clusters.Training_1K.total_accelerators
     fabric_bw_gbs = Systems.Fabrics.InfiniBand_XDR.bandwidth.m_as(GB / second)
     weights_gb = params_b * BYTES_FP16.m_as(byte)
-    gradients_gb = weights_gb
-    optimizer_state_gb = params_b * BYTES_FP32.m_as(byte) * 3
-    zero3_total_gb = weights_gb + gradients_gb + optimizer_state_gb
+    master_weights_gb = params_b * BYTES_FP32.m_as(byte)
+    adam_moments_gb = params_b * BYTES_FP32.m_as(byte) * 2
+    zero3_total_gb = weights_gb + master_weights_gb + adam_moments_gb
     zero3_write_s = zero3_total_gb / fabric_bw_gbs
     naive_write_s = zero3_total_gb * replicas / fabric_bw_gbs
     ratio_annotation_ladder(
@@ -2454,7 +2454,7 @@ def generate() -> None:
     compute_infrastructure_cxl_bandwidth_gap()
     conclusion_tail_latency_fanout()
     make_dam("vol2/data_storage", "data_storage_dai_locator", focus=2, vol="vol2", style="pills")
-    make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 7.56 PB", 7560), ("Data 6 TB", 6)], domain="memory")
+    make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 10.58 PB", 10584), ("Data 6 TB", 6)], domain="memory")
     make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200 GB/s", 200), ("NVMe 7 GB/s", 7)], domain="bandwidth")
     data_storage_checkpoint_storm_write_time()
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")

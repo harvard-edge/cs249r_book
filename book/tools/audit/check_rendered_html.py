@@ -59,7 +59,11 @@ CHECKS: list[tuple[str, re.Pattern[str]]] = [
 def visible_text(raw: str) -> str:
     t = DROP.sub(" ", raw)
     t = PSEUDO.sub(" ", t)
-    t = MATH.sub(" ", t)
+    # Keep a non-whitespace boundary where math was removed. Replacing an
+    # operator such as ``$\\times$`` with a plain space can accidentally join
+    # the surrounding words into a bogus reader-visible phrase (for example,
+    # ``6 parameters tokens``).
+    t = MATH.sub(" MATH_EXPR ", t)
     t = TAG.sub(" ", t)
     return htmllib.unescape(t)
 

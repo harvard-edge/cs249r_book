@@ -841,7 +841,8 @@ STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
     "Reference 175B-model storage running example",
     notes=(
         "Chapter-level storage scenario anchor: 1.5T training tokens, 3 TB compressed "
-        "source corpus, 4-byte token IDs, and 10 bytes/parameter checkpoint storage."
+        "source corpus, 4-byte token IDs, and 14 bytes/parameter resumable mixed-precision "
+        "Adam checkpoint storage (FP16 weights, FP32 master weights, and two FP32 moments)."
     ),
 )
 

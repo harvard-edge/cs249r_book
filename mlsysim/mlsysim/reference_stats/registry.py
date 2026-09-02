@@ -253,10 +253,10 @@ class StorageTrainingCorpus(Registry):
         description="Reference checkpoint interval for checkpoint-count examples.",
     )
     CheckpointBytesPerParameter = sourced_qty(
-        10 * (byte / param),
+        14 * (byte / param),
         pc.STORAGE_TRAINING_CORPUS_REFERENCE,
         name="Storage running-example checkpoint bytes per parameter",
-        description="Reference checkpoint footprint per model parameter.",
+        description="Resumable mixed-precision Adam checkpoint footprint: FP16 weights, FP32 master weights, and two FP32 moments; gradients excluded.",
     )
 
 

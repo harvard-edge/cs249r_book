@@ -68,6 +68,20 @@ from mlsysim.core.units import *
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import memory_from_params
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_qty, fmt_qty_int, check, fmt_memory, fmt_bandwidth
+
+# Resumable mixed-precision Adam checkpoint contract used throughout this chapter:
+# FP16 model weights + FP32 master weights + two FP32 Adam moments. Gradients are
+# recomputed after restore and are therefore excluded; scheduler/RNG/data-loader
+# metadata is negligible at this scale.
+CHECKPOINT_RESUME_BYTES_PER_PARAM = ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+check(
+    abs(CHECKPOINT_RESUME_BYTES_PER_PARAM.to(byte / param).magnitude - 14) < 1e-9,
+    "Resumable Adam checkpoint contract must remain 14 bytes per parameter",
+)
+check(
+    CHECKPOINT_RESUME_BYTES_PER_PARAM == BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE,
+    "Checkpoint registry value must equal FP16 weights + FP32 master weights + two FP32 Adam moments",
+)
 ```
 
 ```{python}
@@ -82,8 +96,8 @@ from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_qty, fmt_qty_int, check, 
 # │ Goal:    Quantify the ~500x gap between HBM and NVMe, the compressed vs.
 # │          tokenized corpus footprint, and the PB-scale checkpoint volume for
 # │          a 30-day 175B training run.
-# │ Show:    3.35 TB/s HBM, 7 GB/s NVMe, ~479x ratio, ~1,750 GB checkpoint,
-# │          3 TB compressed corpus, 6 TB tokenized corpus, ~7.6 PB total
+# │ Show:    3.35 TB/s HBM, 7 GB/s NVMe, ~479x ratio, ~2,450 GB checkpoint,
+# │          3 TB compressed corpus, 6 TB tokenized corpus, ~10.6 PB total
 # │          checkpoint writes.
 # │ How:     Read H100 HBM BW and NVMe BW from constants; compute checkpoint
 # │          size from GPT-3 params × bytes per param; compute corpus variants
@@ -106,7 +120,7 @@ class StorageFuelLineContext:
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    bytes_per_param_ckpt = ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    bytes_per_param_ckpt = CHECKPOINT_RESUME_BYTES_PER_PARAM
     bw_ratio_val = (h100_bw / nvme_bw_raw).to("").magnitude
     ckpt_total = memory_from_params(gpt3_params * param, bytes_per_param_ckpt)
     checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
@@ -137,7 +151,7 @@ Dense accelerator nodes can pack eight GPUs delivering petaFLOP/s of aggregate c
 *Storage is the Infrastructure axis of the fleet stack.*
 :::
 
-Consider the running example for the storage analysis. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
+Consider the running example for the storage analysis. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. In this full-corpus pretraining scenario, each epoch reads every selected token once in an order determined by the shuffle seed. No small "hot" subset dominates access. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
 The problem is deceptive because storage technology has improved substantially. Non-Volatile Memory Express (NVMe) drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. An H100 moves data internally through high-bandwidth memory (HBM) at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` the sequential bandwidth of a single NVMe drive. This ratio contrasts two tiers; it is not the rate at which storage must supply training inputs, because HBM bandwidth also carries repeated weight, activation, and tensor traffic during computation. The storage feed requirement is instead determined by the input-batch bytes each accelerator needs per iteration. Meeting that requirement still calls for a hierarchy of storage tiers, each matched to a phase of the ML lifecycle and connected by pipelines that hide latency through prefetching and pipelining.
 
@@ -147,18 +161,18 @@ The storage problem joins physics with economics. Physics dictates that data clo
 ```{=latex}
 \vspace*{-34mm}
 ```
-![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes at 7.56 PB towering over a tiny rung for per-epoch training data at 6 TB, showing checkpoints move over a thousand times more bytes than the dataset."}
+![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes towering over a tiny rung for per-epoch training data, showing checkpoints move over a thousand times more bytes than the dataset."}
 
 *Checkpoint writes dwarf training-data reads by about 1,000 times.*
 :::
 
-The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced earlier. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates a roughly 1.75 TB checkpoint (`{python} StorageFuelLineContext.ckpt_total_gb_str` total, comprising 350 GB of weights plus 1.4 TB of Adaptive Moment Estimation (Adam) optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use these figures to make the engineering constraints concrete.
+The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced earlier. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. This chapter adopts one resumable mixed-precision Adaptive Moment Estimation (Adam) checkpoint contract: FP16 model weights, FP32 master weights, and two FP32 Adam moments, for 14 bytes per parameter. Gradients are recomputed after restore, while scheduler, random-number-generator, and data-loader metadata are negligible at this scale. The resulting checkpoint is `{python} StorageFuelLineContext.ckpt_total_gb_str` every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use this same contract for every checkpoint size, duration, retention total, and lifetime-write calculation.
 
 Those numbers force the storage path. ML access patterns first invert the assumptions behind conventional storage systems; that inversion forces a hierarchy from HBM to cold archive; the hierarchy then requires pipeline equations, direct data paths, and economics that decide which bytes belong at each tier. Checkpoints, retrieval indexes, and synthetic-data provenance are variations on the same fuel-line problem: the storage system must place the right representation at the right distance before the accelerator asks for it.
 
 ## How ML Workloads Invert Storage Assumptions {#sec-storage-workload-inversion}
 
-A database administrator moving to an ML infrastructure team would find that ML storage workloads\index{Storage!workload inversion} invert many familiar storage design principles. The 175B running example makes the inversion concrete. Each training epoch reads every token, in shuffled order, exactly once. The next epoch shuffles again and reads them all once more. There is no "hot data" in the traditional sense and no 80/20 rule where a small fraction of data accounts for most accesses. The standard storage optimizations fail precisely because they assume the opposite.
+A database administrator moving to an ML infrastructure team would find that full-corpus pretraining workloads\index{Storage!workload inversion} invert many familiar storage design principles. The 175B running example makes the inversion concrete. Each epoch reads every selected token once, in shuffled order, and the next epoch reshuffles the same corpus. Under this scenario, no small "hot" subset dominates access. Fine-tuning, curriculum learning, hard-example mining, recommendation features, and retrieval do create skewed working sets, so the inversion is a workload property rather than a universal property of ML.
 
 Traditional storage systems evolved to serve transactional databases, workloads characterized by small random accesses, strong consistency, and moderate bandwidth. A database server might issue thousands of 4 KB reads per second to serve user queries. The industry optimized for this pattern over decades, developing sophisticated caching algorithms, write-ahead logs, and redundant array of independent disks (RAID)[^fn-raid-array-redundancy] configurations tuned for small-block random access. Each optimization assumed that the most recently accessed data would likely be accessed again soon.
 
@@ -201,6 +215,10 @@ class ShardContention:
     sc_collision_prob_str = fmt_percent(p_collision, precision=1, commas=False, style='prose')
 ```
 
+```{=latex}
+\Needspace{18\baselineskip}
+```
+
 ::: {#nbk-data-storage-thundering-herd-shard-contention .callout-notebook title="The thundering herd: Shard contention"}
 
 **Problem**: A dataset is split into `{python} ShardContention.sc_n_shards_str` shards on a shared file system. If `{python} ShardContention.sc_n_workers_str` each pick a shard at random to start their next epoch, what is the probability that at least two GPUs "collide" on the same storage server, causing a performance bottleneck?
@@ -211,7 +229,7 @@ This is a variant of the "Birthday Problem" in probability.
 1. **Probability of No Collision**: $\approx e^{-n_{\text{workers}}^2/(2K_{\text{shards}})} = e^{-32^2/2000} \approx 0.60$.
 2. **Probability of Contention**: $1 - 0.60 = 40\%$.
 
-**Systems insight**: Even with a large number of shards, the birthday-problem approximation $1 - e^{-n^2/(2k)}$ yields a `{python} ShardContention.sc_collision_prob_str` chance of storage shard contention\index{Shard Contention!collision probability} with $n = 32$ workers and $k = 1{,}000$ shards. Such a collision creates a "hot spot" where multiple workers land on the same storage server in the same epoch. In a distributed fleet, the resulting tail latency\index{Tail Latency} can leave the cluster waiting for the GPUs that share a disk. Production data loaders reduce this effect through global shuffling and deterministic shard assignment that spread workers across the storage fabric.
+**Systems insight**: With 32 workers and 1,000 shards, the `{python} ShardContention.sc_collision_prob_str` collision probability creates a storage-shard hotspot\index{Shard Contention!collision probability} that can leave the fleet waiting for workers sharing one disk. Global shuffling and deterministic shard assignment reduce this tail latency\index{Tail Latency} by spreading workers across the storage fabric.
 
 :::
 
@@ -347,7 +365,7 @@ plt.close()
 
 The nearly 60$\times$ ratio shown in @fig-storage-compute-chasm between GPU throughput growth (236$\times$) and storage bandwidth growth (4$\times$) demonstrates why the I/O wall dominates fleet architecture. This growth divergence, how fast the gap has widened over the years, is distinct from the static tier-to-tier bandwidth cliffs that @sec-storage-bandwidth-cliffs quantifies, which measure how steep the gap is at a single moment. Without a multi-tier storage hierarchy, prefetching, and format optimization, the expensive accelerators at the top of the stack would spend more time waiting for data than computing on it. Each tier of the storage hierarchy addresses a different facet of this chasm.
 
-The first inversion is **Access Pattern**\index{Access Pattern}. Where database workloads exhibit *random access patterns* that benefit from seek-time optimization, ML training performs massive *sequential scans*. A training epoch reads every sample once, in whatever order the shuffling algorithm produces. This pattern resembles video streaming more than database queries. Storage systems optimized for random IOPS[^fn-iops-throughput-tradeoff] waste their capabilities on ML workloads, while systems optimized for sequential throughput excel. The distinction is quantitatively dramatic: a Gen4/Gen5 NVMe drive delivers roughly 7--14 GB/s for sequential reads, while small 4 KB random reads can fall near 0.5 GB/s, an order-of-magnitude to 30$\times$ penalty for the wrong access pattern. The penalty is even more severe on hard drives, where mechanical seek times impose a 100$\times$ throughput reduction for random access compared to sequential.
+The first inversion is **Access Pattern**\index{Access Pattern}. Where database workloads exhibit *random access patterns* that benefit from seek-time optimization, full-corpus pretraining performs massive *sequential scans*. An epoch in the running example reads each selected sample once, in the order produced by shard and buffer shuffling. This pattern resembles video streaming more than database queries. Storage systems optimized for random IOPS[^fn-iops-throughput-tradeoff] waste capabilities on this workload, while systems optimized for sequential throughput excel. The distinction is quantitatively dramatic: a Gen4/Gen5 NVMe drive delivers roughly 7--14 GB/s for sequential reads, while small 4 KB random reads can fall near 0.5 GB/s, an order-of-magnitude to 30$\times$ penalty for the wrong access pattern. The penalty is even more severe on hard drives, where mechanical seek times impose a 100$\times$ throughput reduction for random access compared to sequential.
 
 [^fn-iops-throughput-tradeoff]: **IOPS (Input/Output Operations Per Second)**\index{IOPS!ML irrelevance}: The metric that dominated storage procurement for decades because database workloads issue millions of small random reads. ML training inverts this priority: a pipeline streaming 256 MB shards sequentially needs sustained GB/s throughput, not per-operation speed. Provisioning storage by IOPS rating for an ML workload over-spends on random-access capability the pipeline never exercises.
 
@@ -367,7 +385,7 @@ class StorageAccessPatternFacts:
     compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     tokenized_text = training_tokens * token_id_bytes
-    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
     ckpt_node_count = Systems.Clusters.Training_1K.count
     ckpt_shard = ckpt_total / ckpt_node_count
     ckpt_burst = ckpt_shard * ckpt_node_count
@@ -383,27 +401,27 @@ class StorageAccessPatternFacts:
     ckpt_shard_gb_str = fmt_qty_int(ckpt_shard, GB, commas=False)
     ckpt_burst_tb_str = fmt_qty(ckpt_burst, TB, precision=1, commas=False)
 ```
-The second inversion is **Working Set Size**\index{Working Set Size}. Traditional applications exhibit temporal locality\index{Locality!temporal}: a web server repeatedly accesses popular pages, and a cache holding the top 10 percent of content serves 90 percent of requests. ML training datasets are accessed uniformly. Our `{python} StorageAccessPatternFacts.tokenized_text_tb_str` serialized corpus has no "popular" tokens; each is consumed once per epoch. A cache of any practical size holds only a tiny fraction of the dataset, and most samples are effectively "cold" when accessed. This lack of temporal locality makes traditional caching strategies much less effective. A least recently used (LRU)[^fn-lru-eviction-failure] cache can approach a 0 percent hit rate for a cyclic scan larger than the cache. With independently reshuffled epochs, cross-epoch hits are low but nonzero and depend on the cache fraction and sample order.
+The second inversion is **Working Set Size**\index{Working Set Size}. Traditional applications exhibit temporal locality\index{Locality!temporal}: a web server repeatedly accesses popular pages, and a cache holding the top 10 percent of content serves 90 percent of requests. In the chapter's full-corpus pretraining scenario, the `{python} StorageAccessPatternFacts.tokenized_text_tb_str` serialized corpus has no "popular" token range; each selected token is consumed once per epoch. A cache of any practical size holds only a small fraction of the corpus, and most samples are effectively "cold" when accessed. This access pattern makes traditional recency caching much less effective. A least recently used (LRU)[^fn-lru-eviction-failure] cache can approach a 0 percent hit rate for a cyclic scan larger than the cache. With independently reshuffled epochs, cross-epoch hits are low but nonzero and depend on the cache fraction and sample order.
 
 [^fn-lru-eviction-failure]: **LRU (Least Recently Used)**\index{LRU!ML failure mode}: LRU is effective when recently accessed data is likely to be accessed again soon; a cyclic full-dataset scan larger than the cache can evict each sample before its next access and drive the hit rate toward zero. Independent reshuffling changes the boundary behavior because some samples retained from the end of one epoch may be reused before eviction in the next, so the hit rate depends on the cache-to-dataset ratio and ordering rather than being universally zero. Teams should measure this reuse before allocating DRAM that could otherwise serve as prefetch buffers.
 
-The exception to this uniformity is multi-task or curriculum learning\index{Curriculum Learning!data locality}, where certain subsets of the dataset are accessed more frequently during specific training phases. In curriculum learning, the trainer begins with "easy" examples and progressively introduces harder ones. This creates a temporary working set that does exhibit locality, and local caching at the NVMe tier can exploit this structure. For the majority of large-scale pretraining workloads, however, the access pattern is effectively uniform, and the storage system must be designed for full-dataset streaming rather than hot-subset caching.
+Other training policies create different locality. Multi-task or curriculum learning\index{Curriculum Learning!data locality}, hard-example mining, and filtered sampling access some subsets more frequently during particular phases. This temporary working set lets the NVMe tier exploit locality. Large-scale pretraining jobs that repeatedly scan a fixed corpus remain the scenario for the hierarchy derived here; systems serving another sampling policy should measure its reuse distribution before adopting the same cache design.
 
 The third inversion is **Write Pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. Together, these bursts form a **Checkpoint Storm**\index{Checkpoint Storm!definition}: a synchronized checkpoint-write event that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume. @Tbl-storage-assumptions consolidates these inversions into the procurement rule: optimize for streaming and bursts, not database-style random IOPS.
 
-| **Workload Pattern** | **Traditional Assumption** |         **ML Reality**         |
-|:---------------------|:--------------------------:|:------------------------------:|
-| **Access pattern**   |       Random access        |      Sequential streaming      |
-| **Working set**      |       Fits in cache        |    Exceeds all cache levels    |
-| **Write pattern**    |  Continuous small writes   |      Bursty large writes       |
-| **Read/write ratio** |          Balanced          | Phase-dependent (100:1 to 1:0) |
-| **Locality**         |  Strong temporal locality  | No locality (uniform sampling) |
+| **Workload Pattern** | **Traditional Assumption** |           **ML Reality**          |
+|:---------------------|:--------------------------:|:---------------------------------:|
+| **Access pattern**   |       Random access        |        Sequential streaming       |
+| **Working set**      |       Fits in cache        |      Exceeds all cache levels     |
+| **Write pattern**    |  Continuous small writes   |        Bursty large writes        |
+| **Read/write ratio** |          Balanced          |   Phase-dependent (100:1 to 1:0)  |
+| **Locality**         |  Strong temporal locality  | Low locality in full-corpus scans |
 
 : **ML Workloads Invert Traditional Storage Assumptions**: Where databases optimize for random IOPS with cacheable working sets, ML training streams sequentially through datasets that exceed all cache levels. {#tbl-storage-assumptions}
 
 These access-pattern inversions introduce a fourth, subtler dimension (@tbl-storage-assumptions): the read/write ratio shifts dramatically by lifecycle phase. During training, reads dominate writes by 100:1 or more, as the system streams through data continuously and saves checkpoints occasionally. During checkpoint-heavy phases in fault-prone clusters, writes can briefly dominate. During data preprocessing, both reads and writes are heavy, and the access pattern more closely resembles a MapReduce job than a training loop: tokenization, deduplication, and shuffling scan the raw corpus once (large sequential reads), write intermediate artifacts (large sequential writes), and then scan those artifacts again for the next stage. A 3 TB compressed text corpus typically expands to 6 TB of tokenized shards before the first training epoch begins, loading each storage tier differently from the read-only training phase that follows. No single storage configuration optimizes for all phases, which is why ML systems require a multi-tier hierarchy rather than a single storage technology.
 
-A fifth inversion emerges when comparing training and inference workloads. *Training* reads datasets sequentially and writes checkpoints in bursts. *Inference*, by contrast, reads model weights once at startup (a large sequential read of potentially hundreds of gigabytes), then performs no further storage I/O during normal operation because the model resides entirely in HBM. The storage challenge for inference is cold-start latency: the time required to load a model from storage to HBM when scaling up or recovering from failure. Because the model is read once and then resident, the binding constraint flips from sustained streaming throughput to a single bulk read whose duration depends entirely on which tier supplies the weights, with a parallel file system taking several times longer than local NVMe. @Sec-storage-inference derives the concrete load times for a 175B model. For serving workloads with strict availability requirements, this cold-start time drives the design toward keeping warm replicas in host DRAM or using model sharding to parallelize the load across multiple storage devices.
+A fifth inversion emerges when comparing training and inference workloads. *Training* reads datasets sequentially and writes checkpoints in bursts. Weight-resident *inference*, by contrast, performs one large model read at startup and then serves requests from HBM. Its storage challenge is cold-start latency: the time required to load a model when scaling up or recovering from failure. The binding constraint flips from sustained dataset throughput to a bulk read whose duration depends on which tier supplies the weights. Retrieval, state offload, and models larger than aggregate HBM create additional serving-time I/O, so this weight-resident case is a baseline rather than a universal inference pattern. @Sec-storage-inference derives the load times and connects that baseline to the retrieval workload that follows.
 
 When scaling from a single user to thousands of concurrent inference requests, the storage challenge shifts from a single-stream throughput problem to a massive fan-out distribution problem. A serving cluster with 100 replicas of our 175B parameter model requires 35 TB of model weights distributed across the cluster. When a new model version is deployed (a **Model Rollout**\index{Model Rollout!storage bandwidth}), all 100 replicas must be updated, triggering a 35 TB data distribution event that must complete within minutes to minimize serving disruption. This is analogous to the checkpoint storm in training but in reverse. Instead of many nodes *writing* to a central location simultaneously, many nodes are *reading* the same data simultaneously. The storage system must sustain this burst read bandwidth for model distribution while continuing to serve inference requests from the existing model version without degradation.
 
@@ -1082,13 +1100,17 @@ The separation between metadata and data paths is what enables the aggregate ban
 
 This separation creates a critical bottleneck: the small file problem. If a dataset consists of millions of 10 KB images stored as individual files, the metadata load overwhelms the MDS long before the data links saturate. Each `open()` system call requires a metadata lookup, lock acquisition, and attribute fetch. With 10,000 workers simultaneously calling `open()` on different files, the MDS becomes the serialization point. The throughput of the storage system collapses to the rate at which the MDS can process metadata operations, typically a few hundred thousand per second, far below what the data path could deliver.
 
+```{=latex}
+\Needspace{15\baselineskip}
+```
+
 ::: {#dfn-data-storage-small-file-problem .callout-definition title="Small file problem"}
 
-***Small File Problem***\index{Small File Problem!definition} is an ML data-loading pathology where millions of individually small files overwhelm the metadata server of a storage system.
+***Small File Problem***\index{Small File Problem!definition} is an ML data-loading pathology in which per-file operations overwhelm a storage system's metadata service.
 
-1.  **Significance**: It reduces effective I/O Bandwidth $(\text{BW}_{\text{io}})$ to a fraction of its theoretical rating because each file requires its own metadata operations (`open`, `stat`, `close`). With 10,000 workers simultaneously accessing small files, the metadata server becomes a serialization point that idles the entire cluster.
-2.  **Distinction**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
-3.  **Common pitfall**: A frequent misconception is that this is "fixed" by buying faster SSDs. In reality, it is a format problem\index{Format Problem}: the fix is to pack samples into large sequential containers (for example, TFRecord\index{TFRecord}, Parquet) to amortize metadata operations across thousands of samples.
+1.  **Significance**: `open`, `stat`, and `close` requests from 10,000 workers can serialize at the metadata service, idle the cluster, and reduce effective I/O bandwidth $(\text{BW}_{\text{io}})$.
+2.  **Distinction**: This is a metadata request-rate and latency $(L_{\text{lat}})$ problem, not a bulk bit-rate problem.
+3.  **Common pitfall**: Faster SSDs do not fix this format problem\index{Format Problem}. Packing samples into sequential containers such as TFRecord\index{TFRecord} or Parquet amortizes metadata operations across many samples.
 
 :::
 
@@ -1394,6 +1416,12 @@ Every training job eventually raises a concrete sizing question: how much storag
 $$\text{BW}_{\text{required}} = N_{\text{GPU}} \times \eta_{\text{target}} \times \frac{D_{\text{vol,batch}}}{T_{\text{iteration}}}$$ {#eq-pipeline-throughput}
 
 where $N_{\text{GPU}}$ is the number of accelerators, $\eta_{\text{target}}$ is the target utilization (typically 0.8 to 0.95), $D_{\text{vol,batch}}$ is the size of one local batch in bytes, and $T_{\text{iteration}}$ is the time for one forward-backward pass.
+
+The demand equation sizes the accelerator-facing endpoint, but bytes must traverse the complete service chain. Let $r_k$ denote the measured service rate of stage $k$, including object-store reads, network transfer, decoding and augmentation, host-memory copies, and host-to-device transfer. With bounded buffers and no sustained backlog, the pipeline can deliver at most
+
+$$r_{\text{pipeline}} = \min_k r_k, \qquad r_{\text{pipeline}} \geq \text{BW}_{\text{required}}.$$ {#eq-storage-service-chain}
+
+Capacity at one tier cannot compensate for a slower downstream stage. Compression may raise the storage-read rate while lowering the decode rate; additional loader workers may raise decoding throughput while saturating the host-memory or PCIe stage. The end-to-end inequality in @eq-storage-service-chain therefore turns the chapter's hierarchy into a testable contract: measure every stage under representative concurrency, then provision or overlap the stage whose service rate is the minimum.
 
 The equation reveals four levers for controlling storage demand:
 
@@ -1932,7 +1960,7 @@ class CompleteDataPathCheckpoint:
     training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
     tokenized_text = training_tokens * token_id_bytes
-    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
     checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
     ckpt_fleet_total = ckpt_total * checkpoint_count_val
     check(checkpoint_count_val == 4320, "30 days at 10-min checkpoint interval should be 4320")
@@ -2392,7 +2420,7 @@ These technologies are not yet broadly deployed at the scale of the largest ML c
 
 ### Storage for inference workloads {#sec-storage-inference}
 
-The storage requirements for inference differ fundamentally from training. Training reads datasets continuously and writes checkpoints in bursts. Inference reads model weights once at startup and performs no further storage I/O during normal operation. For inference serving, the dataset is replaced by a stream of incoming user requests, and the primary storage challenge shifts from sustained throughput for large datasets to latency for loading the model itself.
+The storage requirements for inference differ fundamentally from full-corpus training. Training streams datasets and writes checkpoints in bursts. In the weight-resident serving baseline, inference reads model weights at startup and then serves requests from HBM. The primary storage challenge shifts from sustained dataset throughput to model-loading latency, although retrieval indexes and KV-cache offload add serving-time I/O when those mechanisms are enabled.
 
 The most critical metric for inference storage is **Model Loading Latency**\index{Model Loading!latency}, often called cold-start time: the duration required to load a model from storage into the accelerator's HBM. For the 175B parameter language model, the weights alone occupy 350 GB in FP16 format. Loading this sequentially from a single high-performance NVMe drive at 14 GB/s takes 25 seconds, an unacceptable delay for a user-facing application. Loading from a shared PFS at a per-node rate of 4 GB/s takes nearly 88 seconds. From object storage at 1 GB/s, the delay approaches six minutes.
 
@@ -2400,35 +2428,88 @@ To reduce cold-start time, the model is sharded and loaded in parallel. If the 3
 
 During autoregressive generation, the server keeps a per-request record of the attention keys and values produced by earlier tokens so it can generate the next token without recomputing the entire prefix. This record, called the **Key-Value Cache (KV Cache)**\index{KV Cache}, grows with sequence length and can consume significant HBM. For long sequences (128K tokens or more), KV cache offloading to host DRAM or NVMe extends the effective context window at the cost of increased latency per generated token, because cache blocks must be moved back into HBM before attention can use them. The storage lesson is that inference has its own working set, not just a model-loading problem.
 
-While model serving dictates its own economic calculus, the training phase introduces an entirely different, burst-heavy I/O challenge: the preservation of model state through checkpoint storage.
+Retrieval-augmented inference adds another serving-time working set. Graph-based approximate nearest-neighbor (ANN) indexes replace sequential model loading with random index traversal; flat scans, inverted-file (IVF) indexes, and product-quantized (PQ) indexes instead trade more sequential work or compression for fewer graph hops.
+
+## Retrieval Infrastructure: Vector Indexes {#sec-data-storage-retrieval-infrastructure}
+
+A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. With a graph-based ANN index, the storage system traverses a high-dimensional vector graph instead of streaming sequential blobs via formats such as TFRecord or Parquet. This is one index family, not a universal vector-database layout: exact flat search, IVF partitioning, and PQ-compressed variants impose different bandwidth, capacity, and recall trade-offs.
+
+```{python}
+#| echo: false
+#| label: vector-index-footprint-calc
+from mlsysim.fmt import fmt_int, fmt_memory
+
+class VectorIndexFootprint:
+    """Storage footprint for a billion-entry FP32 vector index."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    embedding_count = 1_000_000_000
+    embedding_dim = 1536
+    bytes_per_element = int(BYTES_FP32.to(byte).magnitude)
+    adjacency_bytes_low = 50
+    adjacency_bytes_high = 100
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    per_vector_storage = embedding_dim * bytes_per_element * byte
+    raw_vector_storage = embedding_count * embedding_dim * bytes_per_element * byte
+    adjacency_overhead_low = embedding_count * adjacency_bytes_low * byte
+    adjacency_overhead_high = embedding_count * adjacency_bytes_high * byte
+    total_low = raw_vector_storage + adjacency_overhead_low
+    total_high = raw_vector_storage + adjacency_overhead_high
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(raw_vector_storage.to(TB).magnitude, 1) == 6.1, "1B 1536-d FP32 vectors should be about 6.1 TB")
+    check(adjacency_overhead_high.to(TB).magnitude < 0.2, "100 bytes/node should add about 0.1 TB, not multiple TB")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    embedding_dim_str = fmt_int(embedding_dim)
+    bytes_per_element_str = fmt_int(bytes_per_element, commas=False)
+    per_vector_kb_str = fmt_memory(per_vector_storage, unit=KB, precision=1, commas=False)
+    raw_vector_tb_str = fmt_memory(raw_vector_storage, unit=TB, precision=1, commas=False)
+    adjacency_bytes_range_str = f"{fmt_int(adjacency_bytes_low, commas=False)} to {fmt_int(adjacency_bytes_high, commas=False)} bytes"
+    adjacency_overhead_range_str = f"{fmt_memory(adjacency_overhead_low, unit=GB, precision=0, commas=False)} to {fmt_memory(adjacency_overhead_high, unit=GB, precision=0, commas=False)}"
+    total_high_str = fmt_memory(total_high, unit=TB, precision=1, commas=False)
+```
+
+::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
+
+For graph-based ANN, this architectural pattern shifts the primary storage bottleneck from **Sequential Read Bandwidth**\index{Sequential Read Bandwidth} to **Random-Access IOPS**\index{Random-Access IOPS}. The search traverses a high-dimensional graph to find approximate nearest neighbors across billions of embeddings. Its performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. A `{python} VectorIndexFootprint.embedding_dim_str`-dimension embedding in FP32 (`{python} VectorIndexFootprint.bytes_per_element_str` bytes per value) consumes approximately `{python} VectorIndexFootprint.per_vector_kb_str`, so a billion-document corpus requires roughly `{python} VectorIndexFootprint.raw_vector_tb_str` before graph adjacency lists. If those lists add `{python} VectorIndexFootprint.adjacency_bytes_range_str` per node, they add `{python} VectorIndexFootprint.adjacency_overhead_range_str`, making raw vectors plus minimal graph metadata about `{python} VectorIndexFootprint.total_high_str` at the high end. Production indexes can be larger once identifiers, graph levels, allocator overhead, deleted-entry slack, and replication are included. In-memory hierarchical navigable small world graph indexes\index{HNSW} make graph navigation fast when the index fits in DRAM [@malkov2020hnsw]. Disk-backed graph indexes such as DiskANN trade DRAM footprint against SSD traversal while targeting high recall and low query latency [@subramanya2019diskann].
+
+:::
+
+Graph-based retrieval therefore spends storage budget on index levels that keep random traversal inside the serving latency service-level objective. A disk-backed graph is economical only if the extra SSD accesses do not erase the quality gain from searching a larger corpus. Flat, IVF, and PQ designs move that budget toward scan bandwidth, partition probes, or decompression and approximation error. The same hierarchy now supports bulk model loading, request-scoped KV state, and retrieval, each with a distinct service-rate contract.
+
+The chapter now returns from serving-time state to training's burst-heavy preservation workload: checkpoint storage.
 
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Checkpoint section intro — model scale and checkpoint size
 from mlsysim import Models, ReferenceStats
-from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, GB
+from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB
 from mlsysim.fmt import check, fmt_memory, fmt_params
 
 class CheckpointModelIntro:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     gpt3_params = Models.Language.GPT3.parameters
     weights_fp16 = gpt3_params * BYTES_FP16
-    optimizer_state = gpt3_params * BYTES_ADAM_STATE
-    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
-    check(weights_fp16 + optimizer_state == ckpt_total, "Checkpoint component bytes must sum to total.")
+    master_weights_fp32 = gpt3_params * BYTES_FP32
+    adam_moments = gpt3_params * BYTES_ADAM_STATE
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
+    check(weights_fp16 + master_weights_fp32 + adam_moments == ckpt_total, "Checkpoint component bytes must sum to total.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
     weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
-    optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=True)
+    master_weights_fp32_gb_str = fmt_memory(master_weights_fp32, unit=GB, precision=0, commas=False)
+    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=True)
 ```
 
 ## Checkpoint Storage {#sec-storage-checkpointing}
 
 After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage\index{Checkpoint!storage architecture} into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. The storage architecture must therefore minimize $T_{\text{write}}$, the time the training pipeline pauses to save a checkpoint.
 
-A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.optimizer_state_gb_str` of FP32 optimizer state for momentum and variance, learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
+A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with mixed-precision Adam\index{Adam Optimizer!state size} generates a resumable checkpoint of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The byte contract comprises `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.master_weights_fp32_gb_str` of FP32 master weights, and `{python} CheckpointModelIntro.adam_moments_gb_str` for the two FP32 Adam moments. Learning-rate-scheduler state, random-number-generator state, and the data-loader cursor add little capacity but remain required for deterministic continuation. Gradients are omitted because the restored job recomputes them. Every rank saves its assigned shard simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {.column-margin}
 ![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing naive replicated checkpoint write time with ZeRO-3 sharded checkpoint write time."}
@@ -2444,7 +2525,7 @@ A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam op
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Quantitative significance bullet in the Checkpoint Storm definition.
 # │ Goal: Make the 70B naive-vs-sharded checkpoint arithmetic explicit.
-# │ How: Compute FP16 weights/gradients, FP32 master weights, Adam moments, and
+# │ How: Compute FP16 weights, FP32 master weights, Adam moments, and
 # │      fabric write time at 100 GB/s.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_params, fmt_count
@@ -2462,11 +2543,10 @@ class CheckpointStormDefinition:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     weights = memory_from_params(params, bytes_fp16 / param)
-    gradients = memory_from_params(params, bytes_fp16 / param)
     master_weights = memory_from_params(params, bytes_fp32 / param)
     adam_moments = memory_from_params(params, 2 * bytes_fp32 / param)
-    optimizer_state = master_weights + adam_moments
-    per_replica_state = weights + gradients + optimizer_state
+    resumable_state = weights + master_weights + adam_moments
+    per_replica_state = resumable_state
     zero3_total = per_replica_state
     zero3_write = zero3_total / fabric_bw
     naive_total = per_replica_state * replicas
@@ -2474,14 +2554,14 @@ class CheckpointStormDefinition:
     naive_write_min = naive_write.to(minute)
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(zero3_total.to(GB).magnitude == 1120, "70B sharded training-state total should be 1,120 GB with master weights")
+    check(abs(zero3_total.to(GB).magnitude - 980) < 1e-6, "70B resumable checkpoint should be 980 GB")
     check(naive_write.to(second).magnitude > 10_000, "Naive full-state write at 100 GB/s should exceed 10,000 s for Training_1K replicas")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
-    optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=False)
+    master_weights_gb_str = fmt_memory(master_weights, unit=GB, precision=0, commas=False)
+    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=False)
     zero3_total_tb_str = fmt_memory(zero3_total, unit=TB, precision=2, commas=False)
     zero3_write_s_str = fmt_time(zero3_write, second, precision=1, commas=False, style='word')
     naive_total_tb_str = fmt_memory(naive_total, unit=TB, precision=1, commas=False)
@@ -2494,7 +2574,7 @@ class CheckpointStormDefinition:
 
 ***Checkpoint Storm***\index{Checkpoint Storm!storage traffic} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
-1.  **Significance**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model, each replica holds `{python} CheckpointStormDefinition.weights_gb_str` FP16 weights, `{python} CheckpointStormDefinition.gradients_gb_str` gradients, and `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, a naive checkpoint of that full per-replica state generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3, an optimizer-state-sharding scheme in which each node stores only its $1/N$ slice of the state rather than a full replica, collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
+1.  **Significance**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. Under the chapter's checkpoint contract, a `{python} CheckpointStormDefinition.params_b_str`-parameter model stores `{python} CheckpointStormDefinition.weights_gb_str` of FP16 weights, `{python} CheckpointStormDefinition.master_weights_gb_str` of FP32 master weights, and `{python} CheckpointStormDefinition.adam_moments_gb_str` of Adam moments. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, naively writing that complete state from every replica generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous traffic. At 100 GB/s fabric bandwidth, the write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall. ZeRO-3 collapses the written state to one sharded logical copy of roughly `{python} CheckpointStormDefinition.zero3_total_tb_str`, bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. Gradients do not appear in either total because recovery recomputes them.
 2.  **Distinction**: Unlike general I/O contention (which is stochastic and unpredictable), a checkpoint storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
 
@@ -2529,7 +2609,7 @@ class CheckpointStormCalc:
     checkpoint_interval = 600 * second  # scenario checkpoint interval assumption
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    total_checkpoint = Models.Language.GPT3.parameters * (10 * (byte / param))
+    total_checkpoint = Models.Language.GPT3.parameters * CHECKPOINT_RESUME_BYTES_PER_PARAM
     per_node_shard = total_checkpoint / nodes
     local_bw = local_drive_count * local_drive_bw
     local_write = per_node_shard / local_bw
@@ -2539,8 +2619,8 @@ class CheckpointStormCalc:
     overhead_pct = (local_write / checkpoint_interval).to("").magnitude * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0.20 < local_write.to(second).magnitude < 0.30, "Local checkpoint pause should be about 0.25 s")
-    check(1.7 < pfs_copy.to(second).magnitude < 1.8, "PFS async copy should be about 1.75 s")
+    check(0.30 < local_write.to(second).magnitude < 0.40, "Local checkpoint pause should be about 0.34 s")
+    check(2.4 < pfs_copy.to(second).magnitude < 2.5, "PFS async copy should be about 2.45 s")
     check(abs((pfs_copy - per_node_pfs_copy).to(second).magnitude) < 1e-9, "Aggregate and per-node PFS views must match")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
@@ -2569,7 +2649,7 @@ from mlsysim import Models
 from mlsysim.fmt import fmt
 
 class CheckpointTotalGbRecap:
-    ckpt_total = Models.Language.GPT3.parameters * (10 * (byte / param))
+    ckpt_total = Models.Language.GPT3.parameters * CHECKPOINT_RESUME_BYTES_PER_PARAM
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
 ```
@@ -2592,6 +2672,8 @@ The **Tiered Staging**\index{Tiered Staging!checkpoint storage} strategy minimiz
 
 In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. This copy can overlap with the next training iteration, so it does not block the pipeline. The risk is that if the node fails before the async copy completes, the local checkpoint is lost. The mitigation is to replicate checkpoints to at least two peer nodes' NVMe drives before declaring the save complete, providing durability even if one node fails.
 
+Durability alone does not make a distributed checkpoint visible safely. Each rank first writes its shard under an immutable generation identifier, computes a checksum over the completed bytes, and acknowledges the shard only after the target tier has persisted it. A coordinator then writes a manifest containing the training step, checkpoint schema, expected shard set, sizes, and checksums. The manifest or commit marker is published last using the target backend's atomic publication primitive: an atomic create or rename on a file system, or an immutable manifest plus conditional creation or a versioned pointer under the object store's consistency guarantees. PyTorch Distributed Checkpoint exposes the ordering directly: storage writers write rank data before the coordinator's `finish()` operation writes metadata and marks the checkpoint successful, while the storage backend supplies the publication semantics [@pytorchDistributedCheckpointDocs]. Restore logic lists only committed generations, verifies every shard against the manifest, and rejects temporary, partial, or mixed-step state. This ordering separates *writing bytes* from *publishing a restorable checkpoint*: a crash can leave garbage to collect, but it cannot make an incomplete generation appear valid.
+
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2601,7 +2683,7 @@ from mlsysim.fmt import fmt, fmt_memory
 
 class CheckpointFleetRetention:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bytes_per_param_ckpt = ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    bytes_per_param_ckpt = CHECKPOINT_RESUME_BYTES_PER_PARAM
     training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
     ckpt_total = Models.Language.GPT3.parameters * bytes_per_param_ckpt
@@ -2671,7 +2753,7 @@ A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a
 
 ### Distributed checkpoint coordination {#sec-storage-distributed-checkpoint}
 
-In a sharded training setup with `{python} CheckpointStorageDesignPrompt.nodes_str`, no single node necessarily holds the complete training state. One node may hold a shard of the optimizer state, while other model-partitioning strategies split the weights themselves across devices. A complete checkpoint therefore requires every node to save its shard, and the checkpoint is only complete when all shards have been durably written. This creates a coordination problem: the system must confirm that all `{python} CheckpointStorageDesignPrompt.nodes_str` have finished writing before training can resume.
+In a sharded training setup with `{python} CheckpointStorageDesignPrompt.nodes_str`, no single node necessarily holds the complete training state. One node may hold a shard of the optimizer state, while other model-partitioning strategies split the weights themselves across devices. A complete checkpoint therefore requires every node to save its shard, and the checkpoint is publishable only after all expected shards have been durably written and verified against one manifest. This creates a coordination problem: the system must confirm that all `{python} CheckpointStorageDesignPrompt.nodes_str` have finished writing before it exposes the generation for restore.
 
 The simplest approach is a synchronous barrier: all nodes pause training, write their shards to local NVMe, then run a cluster-wide acknowledgement operation to confirm completion. Only when every node has acknowledged its write does training resume. This approach minimizes the risk of inconsistent checkpoints, where some shards are from step $i$ and others from step $i+1$, but it maximizes the training pause because the slowest node determines the barrier time.
 
@@ -2699,7 +2781,7 @@ class StorageFootprintTable:
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
     training_nodes = 256
     tokenized_text = training_tokens * token_id_bytes
-    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
     checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
     ckpt_fleet_total = ckpt_total * checkpoint_count_val
     archive_lineage = (checkpoint_count_val // 100) * ckpt_total + compressed_text + tokenized_text
@@ -2727,8 +2809,9 @@ class StorageFootprintTable:
 | Training dataset (compressed source)       | `{python} StorageFootprintTable.compressed_text_tb_str`  | Object Storage                                             |
 | Training dataset (tokenized, per epoch)    |  `{python} StorageFootprintTable.tokenized_text_tb_str`  | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
 | Model weights (FP16)                       |                          350 GB                          | GPU HBM (distributed)                                      |
-| Optimizer state (FP32)                     |                         1,400 GB                         | GPU HBM (ZeRO-partitioned)                                 |
-| Single checkpoint (full)                   |                         1,750 GB                         | NVMe $\to$ PFS $\to$ Object Storage                        |
+| Master weights (FP32)                      |                          700 GB                          | GPU HBM (ZeRO-partitioned)                                 |
+| Adam moments (two FP32 states)             |                         1,400 GB                         | GPU HBM (ZeRO-partitioned)                                 |
+| Single resumable checkpoint                |                         2,450 GB                         | NVMe $\to$ PFS $\to$ Object Storage                        |
 | All checkpoints (30 days, 10-min interval) | `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
 | Archive (retained checkpoints + dataset)   | `{python} StorageFootprintTable.archive_lineage_tb_str`  | Glacier                                                    |
 
@@ -2738,56 +2821,7 @@ The total data moved through the hierarchy\index{Storage!total data movement} is
 
 :::
 
-Feature stores and model registries, the operational systems that manage feature serving and model versioning, are also built on top of this storage hierarchy, depending on the same tiering, durability, and latency boundaries introduced here. Training streams its fuel sequentially and writes checkpoints in bursts; retrieval-augmented inference reverses that access pattern, replacing sequential streaming with random graph traversal, so the same hierarchy must now serve a workload it was not tuned for. Vector databases, specialized storage systems for approximate nearest-neighbor search in embedding spaces, serve the retrieval-augmented generation pipeline by making that reversed access pattern operational.
-
-## Retrieval Infrastructure: Vector Indexes {#sec-data-storage-retrieval-infrastructure}
-
-The storage hierarchy so far has optimized the training fuel line: large shards, sequential reads, and checkpoint bursts. Retrieval-augmented inference adds a storage workload that belongs in the same chapter because it reverses the access pattern again. A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. Instead of streaming sequential blobs via formats like TFRecord or Parquet, the storage system now traverses high-dimensional vector graphs.
-
-```{python}
-#| echo: false
-#| label: vector-index-footprint-calc
-from mlsysim.fmt import fmt_int, fmt_memory
-
-class VectorIndexFootprint:
-    """Storage footprint for a billion-entry FP32 vector index."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    embedding_count = 1_000_000_000
-    embedding_dim = 1536
-    bytes_per_element = int(BYTES_FP32.to(byte).magnitude)
-    adjacency_bytes_low = 50
-    adjacency_bytes_high = 100
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    per_vector_storage = embedding_dim * bytes_per_element * byte
-    raw_vector_storage = embedding_count * embedding_dim * bytes_per_element * byte
-    adjacency_overhead_low = embedding_count * adjacency_bytes_low * byte
-    adjacency_overhead_high = embedding_count * adjacency_bytes_high * byte
-    total_low = raw_vector_storage + adjacency_overhead_low
-    total_high = raw_vector_storage + adjacency_overhead_high
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(round(raw_vector_storage.to(TB).magnitude, 1) == 6.1, "1B 1536-d FP32 vectors should be about 6.1 TB")
-    check(adjacency_overhead_high.to(TB).magnitude < 0.2, "100 bytes/node should add about 0.1 TB, not multiple TB")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    embedding_dim_str = fmt_int(embedding_dim)
-    bytes_per_element_str = fmt_int(bytes_per_element, commas=False)
-    per_vector_kb_str = fmt_memory(per_vector_storage, unit=KB, precision=1, commas=False)
-    raw_vector_tb_str = fmt_memory(raw_vector_storage, unit=TB, precision=1, commas=False)
-    adjacency_bytes_range_str = f"{fmt_int(adjacency_bytes_low, commas=False)} to {fmt_int(adjacency_bytes_high, commas=False)} bytes"
-    adjacency_overhead_range_str = f"{fmt_memory(adjacency_overhead_low, unit=GB, precision=0, commas=False)} to {fmt_memory(adjacency_overhead_high, unit=GB, precision=0, commas=False)}"
-    total_high_str = fmt_memory(total_high, unit=TB, precision=1, commas=False)
-```
-
-::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
-
-This architectural pattern shifts the primary storage bottleneck from **Sequential Read Bandwidth**\index{Sequential Read Bandwidth} to **Random-Access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. The index is large because each embedded document chunk occupies substantial storage: a `{python} VectorIndexFootprint.embedding_dim_str`-dimension embedding in FP32 (`{python} VectorIndexFootprint.bytes_per_element_str` bytes per value) consumes approximately `{python} VectorIndexFootprint.per_vector_kb_str` per vector, so a billion-document corpus requires roughly `{python} VectorIndexFootprint.raw_vector_tb_str` of raw vector storage before the graph adjacency lists that enable fast navigation. If those adjacency lists add `{python} VectorIndexFootprint.adjacency_bytes_range_str` per node, they add roughly `{python} VectorIndexFootprint.adjacency_overhead_range_str`, making raw vectors plus minimal graph metadata about `{python} VectorIndexFootprint.total_high_str` at the high end for a billion-entry corpus. Full production indexes can be larger once identifiers, graph levels, allocator overhead, deleted-entry slack, and replication are included, but those are implementation overheads rather than the raw vector-plus-adjacency footprint. At that scale, the index no longer fits in DRAM\index{HNSW!DRAM footprint}, which is the design pressure that motivates disk-backed alternatives. In-memory hierarchical navigable small world graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM [@malkov2020hnsw], while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
-
-:::
-
-This makes retrieval infrastructure a useful counterexample to the training fuel line. The same hierarchy still applies, but the objective changes: training storage hides sequential bandwidth behind prefetching, whereas vector search spends storage budget on the index levels that keep random graph traversal inside the serving latency service-level objective. A disk-backed index is economical only if the extra SSD traversals do not erase the quality gain from searching a larger corpus. The retrieval workload thus reuses the same physical hierarchy while inverting the objective, which closes the access-pattern contrast that the fuel line opened.
+Feature stores and model registries, the operational systems that manage feature serving and model versioning, also depend on the hierarchy's tiering, durability, and latency boundaries. At fleet scale, their storage consequence is a shared rule rather than another lineage tutorial: immutable content identifiers and manifests let many experiments reuse unchanged artifacts without copying entire datasets or model packages.
 
 ## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 
@@ -2800,7 +2834,7 @@ from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_percent, fmt_r
 from mlsysim.core.units import TB
 
 class SyntheticStorage:
-    """The systems tax of the Synthetic Fuel Line."""
+    """Capacity and traffic contracts for the Synthetic Fuel Line."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
     SYNTHETIC_PROVENANCE_OVERHEAD = 0.4  # pedagogical synthetic-data provenance overhead
@@ -2809,13 +2843,20 @@ class SyntheticStorage:
     provenance_metadata_overhead = SYNTHETIC_PROVENANCE_OVERHEAD
     verification_passes = SYNTHETIC_VERIFICATION_PASSES
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_footprint = data_size * (1 + provenance_metadata_overhead) * verification_passes
-    amplification = (total_footprint / data_size).to("").magnitude
+    stored_footprint = data_size * (1 + provenance_metadata_overhead)
+    verification_read_traffic = data_size * verification_passes
+    pipeline_traffic = data_size + verification_read_traffic + (data_size * provenance_metadata_overhead)
+    capacity_amplification = (stored_footprint / data_size).to("").magnitude
+    traffic_amplification = (pipeline_traffic / data_size).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(round(amplification, 1) == 4.2, f"Amp {amplification} unexpected")
+    check(round(capacity_amplification, 1) == 1.4, f"Capacity amp {capacity_amplification} unexpected")
+    check(round(traffic_amplification, 1) == 4.4, f"Traffic amp {traffic_amplification} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    amplification_factor_mult_str = fmt_multiple(amplification, precision=1, commas=False)
-    total_tb_str = fmt_memory(total_footprint, unit=TB, precision=1, commas=False)
+    capacity_amplification_mult_str = fmt_multiple(capacity_amplification, precision=1, commas=False)
+    traffic_amplification_mult_str = fmt_multiple(traffic_amplification, precision=1, commas=False)
+    stored_footprint_tb_str = fmt_memory(stored_footprint, unit=TB, precision=1, commas=False)
+    verification_read_traffic_tb_str = fmt_memory(verification_read_traffic, unit=TB, precision=0, commas=False)
+    pipeline_traffic_tb_str = fmt_memory(pipeline_traffic, unit=TB, precision=1, commas=False)
     # _str alias for prose; raw verification_passes kept for arithmetic above
     verification_passes_str = fmt(verification_passes, precision=0, commas=False)
     provenance_overhead_pct_str = fmt_percent(provenance_metadata_overhead, precision=0, commas=False, style='prose')
@@ -2830,8 +2871,8 @@ class SyntheticStorage:
         return book_style.bar_compare(
             **{
                 "labels": ["Human (Raw)", "Synthetic (Verified)"],
-                "values": [cls.data_size.to(TB).magnitude, cls.total_footprint.to(TB).magnitude],
-                "title": "Data Wall Storage Amplification",
+                "values": [cls.data_size.to(TB).magnitude, cls.stored_footprint.to(TB).magnitude],
+                "title": "Synthetic Dataset Capacity",
                 "ylabel": "Dataset Footprint (TB)",
             }
         )
@@ -2839,14 +2880,15 @@ class SyntheticStorage:
 
 ::: {#nbk-data-storage-napkin-math-synthetic-tax .callout-notebook title="The synthetic tax"}
 
-**Problem**: Calculate the storage amplification of a `{python} SyntheticStorage.data_size_tb_str` synthetic dataset that requires cryptographic lineage and multi-model verification.
+**Problem**: A `{python} SyntheticStorage.data_size_tb_str` synthetic dataset retains provenance metadata and undergoes three independent verification scans. How much persistent capacity and pipeline traffic does it require if judge outputs are not retained as full dataset copies?
 
 1. **Raw Payload**\index{Synthetic Data!raw payload}: `{python} SyntheticStorage.data_size_tb_str`.
 2. **Provenance Overhead**\index{Synthetic Data!provenance overhead}: `{python} SyntheticStorage.provenance_overhead_pct_str` extra for lineage hashes, generation logs, and reward-model scores.
-3. **Verification Factor**\index{Synthetic Data!verification factor}: To avoid "self-poisoning," each sample is verified by `{python} SyntheticStorage.verification_passes_str` independent "judge" models.
-4. **Result**: Total footprint = `{python} SyntheticStorage.data_size_tb_str` $\times$ `{python} SyntheticStorage.footprint_factor_str` $\times$ `{python} SyntheticStorage.verification_passes_str` = `{python} SyntheticStorage.total_tb_str`.
+3. **Verification Traffic**\index{Synthetic Data!verification factor}: `{python} SyntheticStorage.verification_passes_str` judge passes each read the payload, producing `{python} SyntheticStorage.verification_read_traffic_tb_str` of read traffic. Their scores reside in the provenance metadata rather than in three retained payload copies.
+4. **Capacity Result**: Persistent capacity is `{python} SyntheticStorage.data_size_tb_str` $\times$ `{python} SyntheticStorage.footprint_factor_str` = `{python} SyntheticStorage.stored_footprint_tb_str`, a `{python} SyntheticStorage.capacity_amplification_mult_str` capacity factor.
+5. **Traffic Result**: Writing the payload and metadata once and reading the payload three times moves `{python} SyntheticStorage.pipeline_traffic_tb_str`, a `{python} SyntheticStorage.traffic_amplification_mult_str` traffic factor before generation and judge-model compute are counted.
 
-**Systems insight**: Synthetic data is *verified data*\index{Synthetic Data!verified data}, and verification has a `{python} SyntheticStorage.amplification_factor_mult_str` storage tax. In the Machine Learning Fleet, storage moves from being a simple bit-bucket to a *provenance engine*. A system that cannot store the *why* and *who* behind a synthetic token risks poisoning the future of the fleet with its own past mistakes.
+**Systems insight**: Verification primarily taxes service rate and compute, while retained provenance taxes capacity. The two costs coincide only when the pipeline materializes each judge output as another full dataset. Synthetic storage must therefore budget bytes at rest separately from bytes moved and record which generator, filters, judges, and downstream runs produced each accepted sample.
 
 :::
 

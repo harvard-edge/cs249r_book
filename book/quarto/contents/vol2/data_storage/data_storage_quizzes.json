@@ -18,7 +18,7 @@
         "rationale": {
           "focus_areas": [
             "HBM-to-NVMe bandwidth gap as the central constraint",
-            "checkpoint volume at frontier scale (350 GB weights, 7.6 PB fleet total)",
+            "checkpoint volume at frontier scale (2.45 TB resumable state, 10.6 PB lifetime traffic)",
             "physics-economics tradeoff forcing a tiered hierarchy",
             "compute scaling outpacing storage bandwidth growth"
           ],
@@ -42,7 +42,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A 175B-parameter model trains for 30 days on 256 nodes, writing full-state checkpoints of roughly $1.75\\text{ TB}$ ($350\\text{ GB}$ weights plus $1.4\\text{ TB}$ optimizer state) every 10 minutes. Explain why ML storage design is fundamentally a joint physics-and-economics optimization problem.",
+            "question": "A 175B-parameter model trains for 30 days on 256 nodes, writing resumable mixed-precision Adam checkpoints of roughly $2.45\\text{ TB}$ ($350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Explain why ML storage design is fundamentally a joint physics-and-economics optimization problem.",
             "answer": "Physics dictates that physical proximity governs bandwidth and latency: HBM sits millimeters from compute on a silicon interposer delivering terabytes per second, while remote object storage sits across datacenter networks delivering tens to hundreds of gigabytes per second with millisecond latency. Economics dictates that cost per bit decreases as distance and capacity increase: HBM costs roughly $\\$15/\\text{GB}$ in capital expenditure, whereas cold archive storage costs fractions of a cent per gigabyte-month. Because keeping petabytes of datasets and checkpoints in HBM is economically impossible and keeping them only in remote storage stalls accelerators for seconds per iteration, the storage architecture must tier data so expensive high-bandwidth memory holds only active in-flight tensors while cheaper tiers stage the rest.",
             "learning_objective": "Analyze why ML storage architecture requires tiered placement that simultaneously satisfies bandwidth physics and capacity economics"
           },
@@ -417,12 +417,12 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "checkpoint volume calculations (175B weights + Adam = 1.75 TB)",
+            "checkpoint volume calculations (175B resumable Adam state = 2.45 TB)",
             "tiered checkpoint staging mechanics (local NVMe write vs async PFS copy)",
             "ZeRO-3 sharded checkpointing vs naive full-replica checkpoint storms",
             "checkpoint retention policies and restore verification imperatives"
           ],
-          "question_strategy": "Focus on the write path, $T_{\\text{write}}$ minimization, and fault recovery. Test tiered staging arithmetic ($0.25\\text{ s}$ local vs $1.75\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
+          "question_strategy": "Focus on the write path, $T_{\\text{write}}$ minimization, and fault recovery. Test tiered staging arithmetic ($0.34\\text{ s}$ local vs $2.45\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
           "difficulty_progression": "Start with tiered staging mechanics (MCQ), evaluate restore verification with TF, analyze ZeRO-3 sharding math (SHORT), evaluate retention policies (MCQ), and sequence tiered checkpoint workflow steps (ORDER).",
           "integration": "Builds on Volume 1 training dynamics and Volume 2 compute infrastructure; sets up fault tolerance principles in distributed clusters.",
           "ranking_explanation": "Addresses the single most demanding write workload in ML systems and the mechanics of preventing catastrophic data loss."
@@ -430,14 +430,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 256-node cluster saves a 175B-parameter model checkpoint ($1.75\\text{ TB}$ total: $350\\text{ GB}$ weights, $1.4\\text{ TB}$ Adam optimizer state) every 10 minutes. Under tiered staging, each node writes its $6.84\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.25\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 1.75\\text{ s}$. What is the exposed training pause time ($T_{\\text{write}}$) per checkpoint?",
+            "question": "A 256-node cluster saves a 175B-parameter resumable checkpoint ($2.45\\text{ TB}$ total: $350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Under tiered staging, each node writes its $9.57\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.34\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 2.45\\text{ s}$. What is the exposed training pause time ($T_{\\text{write}}$) per checkpoint?",
             "choices": [
-              "Roughly $2.0\\text{ s}$, because training must remain paused until both the local write and the durable PFS copy complete.",
-              "Roughly $0.25\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background.",
+              "Roughly $2.8\\text{ s}$, because training must remain paused until both the local write and the durable PFS copy complete.",
+              "Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background.",
               "Zero seconds, because modern storage drivers execute zero-copy writes without interrupting GPU tensor execution.",
-              "Roughly $1.75\\text{ s}$, because parallel file system latency determines the minimum barrier synchronization time across nodes."
+              "Roughly $2.45\\text{ s}$, because parallel file system latency determines the minimum barrier synchronization time across nodes."
             ],
-            "answer": "The correct answer is B. Roughly $0.25\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background. Tiered checkpoint staging explicitly decouples training pause time ($T_{\\text{write}}$) from durable shared-storage write time: the synchronous blocking phase is only the time required to flush the shard to high-bandwidth local NVMe ($6.84\\text{ GB} / 28\\text{ GB/s} \\approx 0.244\\text{ s}$), representing less than $0.05\\%$ overhead on a 10-minute interval. The 2.0-second and 1.75-second options incorrectly assume the training loop must block on the slower shared-tier network transfer. The zero-second option is unrealistic because taking a consistent point-in-time state snapshot requires at least a brief memory barrier.",
+            "answer": "The correct answer is B. Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while PFS replication proceeds asynchronously. The synchronous phase is $9.57\\text{ GB} / 28\\text{ GB/s} \\approx 0.342\\text{ s}$, about $0.057\\%$ of a 10-minute interval. The 2.8-second and 2.45-second options incorrectly block training on the shared-tier transfer. Zero seconds is impossible because the job must still capture and persist a consistent local snapshot.",
             "learning_objective": "Explain how tiered checkpoint staging minimizes the exposed training pause time by decoupling local NVMe writes from asynchronous durable replication"
           },
           {
@@ -448,20 +448,20 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A cluster of 1,000 GPUs trains a 70B-parameter model ($140\\text{ GB}$ FP16 weights, $140\\text{ GB}$ gradients, $840\\text{ GB}$ optimizer state = $1.12\\text{ TB}$ per replica state). Contrast the write volume and pause time of naive full-replica checkpointing against ZeRO-3 sharded checkpointing across a $100\\text{ GB/s}$ shared storage fabric.",
-            "answer": "Naive full-replica checkpointing has all 1,000 replicas write their complete state simultaneously, generating a massive checkpoint storm of $1.12\\text{ PB}$ ($1{,}000 \\times 1.12\\text{ TB}$) that takes roughly $11{,}200\\text{ s}$ (over 3 hours) to write across a $100\\text{ GB/s}$ fabric, completely stalling training. ZeRO-3 sharded checkpointing partitions the optimizer, gradient, and weight states across the 1,000 workers such that each rank writes only its $1/1000$ slice, collapsing total cluster write volume to $1.12\\text{ TB}$ total and reducing shared fabric write time to roughly $11.2\\text{ s}$.",
+            "question": "A cluster of 1,024 accelerators trains a 70B-parameter model whose resumable checkpoint contains $140\\text{ GB}$ of FP16 weights, $280\\text{ GB}$ of FP32 master weights, and $560\\text{ GB}$ of Adam moments, or $980\\text{ GB}$ per full replica. Contrast naive full-replica checkpointing with ZeRO-3 sharded checkpointing across a $100\\text{ GB/s}$ shared storage fabric.",
+            "answer": "Naive full-replica checkpointing makes all 1,024 replicas write the same $980\\text{ GB}$ state, generating $1{,}003.52\\text{ TB}$ of traffic and taking roughly $10{,}035\\text{ s}$, or $167.3$ minutes, across a $100\\text{ GB/s}$ fabric. ZeRO-3 writes one logical copy partitioned across the workers, collapsing total write volume to $980\\text{ GB}$ and shared-fabric time to roughly $9.8\\text{ s}$. Gradients are absent from both totals because the restored job recomputes them.",
             "learning_objective": "Analyze how ZeRO-3 state sharding reduces cluster checkpoint write volume and eliminates multi-hour checkpoint storm stalls"
           },
           {
             "question_type": "MCQ",
-            "question": "A 30-day training run of a 175B model generates 4,320 full checkpoints totaling roughly $7.56\\text{ PB}$ of state data. Which retention policy balances rapid failure recovery, long-term auditability, and storage cost without exhausting the parallel file system budget?",
+            "question": "A 30-day training run of a 175B model generates 4,320 resumable checkpoints totaling roughly $10.6\\text{ PB}$ of state data. Which retention policy balances rapid failure recovery, long-term auditability, and storage cost without exhausting the parallel file system budget?",
             "choices": [
               "Retain all 4,320 checkpoints on the parallel file system to provide granular step-by-step rollback capabilities throughout the entire 30-day run.",
               "Delete all intermediate checkpoints immediately after each step and rely exclusively on live memory replication across peer nodes for fault tolerance.",
               "Retain the 3 most recent checkpoints on the parallel file system for fast local recovery, copy every 100th checkpoint to cloud object storage for long-term lineage, and purge older intermediate snapshots.",
               "Compress all checkpoints with gzip and write them directly to cold tape archive without maintaining any copies on NVMe or parallel file systems."
             ],
-            "answer": "The correct answer is C. Retain the 3 most recent checkpoints on the parallel file system for fast local recovery, copy every 100th checkpoint to cloud object storage for long-term lineage, and purge older intermediate snapshots. Keeping only 3 recent checkpoints on the parallel file system bounds active high-performance storage to $\\approx 5.25\\text{ TB}$ ($3 \\times 1.75\\text{ TB}$), providing instant recovery from common hardware preemption, while archiving every 100th checkpoint ($\u0007pprox 43$ snapshots) to cheaper object storage preserves historical lineage for post-training validation at minimal cost. Retaining all 7.56 PB on PFS wastes hundreds of thousands of dollars on high-cost storage. Deleting all checkpoints leaves the run vulnerable to multi-node failures. Tape-only checkpointing imposes prohibitive multi-hour retrieval delays during recovery.",
+            "answer": "The correct answer is C. Keeping the 3 most recent checkpoints on the parallel file system bounds active high-performance storage to $7.35\\text{ TB}$ ($3 \\times 2.45\\text{ TB}$), while archiving every 100th checkpoint preserves 43 historical snapshots in object storage. Retaining all $10.6\\text{ PB}$ on the PFS wastes high-cost capacity; deleting all checkpoints eliminates restart protection; and tape-only retention imposes excessive recovery latency.",
             "learning_objective": "Design a tiered checkpoint retention policy that balances rapid crash recovery against long-term storage capacity costs"
           },
           {
@@ -505,9 +505,9 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: In approximate nearest neighbor (ANN) vector search, increasing target recall from $90\\%$ to $99\\%$ requires exploring more nodes in the graph index, which increases the number of random storage IOPS and elevates query latency.",
-            "answer": "True. Approximate nearest neighbor algorithms face a strict physical trade-off between recall, latency, and capacity. Achieving higher recall requires expanding the search beam (evaluating more candidate nodes and traversing deeper graph levels), which directly increases the number of vector distance computations and random disk/DRAM reads per query, increasing tail latency.",
-            "learning_objective": "Analyze the fundamental recall-latency-IOPS trade-off governing high-dimensional vector search infrastructure"
+            "question": "True or False: In graph-based approximate nearest-neighbor search such as HNSW or DiskANN, increasing target recall from $90\\%$ to $99\\%$ generally requires exploring more graph nodes, increasing random storage accesses and query latency.",
+            "answer": "True for graph-based ANN under otherwise comparable settings. Raising recall generally expands the search beam or visits more candidate nodes, increasing vector-distance computations and random DRAM or SSD accesses and therefore latency. This mechanism is specific to graph traversal; flat scans, IVF indexes, and PQ-based designs expose different controls and bottlenecks.",
+            "learning_objective": "Analyze the recall-latency-IOPS trade-off in graph-based high-dimensional vector search"
           },
           {
             "question_type": "SHORT",
@@ -527,7 +527,7 @@
           "focus_areas": [
             "the Data Wall and the shift from human to synthesized training data",
             "provenance chain requirements (generator, filters, judge models, scores)",
-            "synthetic storage tax and amplification factors ($4.2\\times$ footprint)",
+            "synthetic-data capacity ($1.4\\times$) versus pipeline traffic ($4.4\\times$)",
             "model collapse prevention through verified lineage storage"
           ],
           "question_strategy": "Test the systems consequences of synthetic data generation. Focus on metadata overhead, multi-model verification storage amplification, and model collapse prevention.",
@@ -538,15 +538,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team generates a $1\\text{ TB}$ synthetic text dataset. Storing full cryptographic lineage (generation logs, prompts, reward scores) adds $40\\%$ metadata overhead ($1.4\\text{ TB}$ total), and ensuring data quality requires independent scoring by 3 verifier judge models. What is the total storage footprint resulting from this 'synthetic tax'?",
+            "question": "A team generates a $1\\text{ TB}$ synthetic text dataset. Retained provenance adds $40\\%$ metadata overhead, and 3 verifier models each read the payload once without materializing another full copy. What persistent capacity and total pipeline traffic are required?",
             "choices": [
-              "Roughly $4.2\\text{ TB}$ ($1\\text{ TB} \\times 1.4 \\times 3$), demonstrating that verified synthetic data amplifies physical storage requirements by over $4\\times$ compared to raw human text.",
+              "$1.4\\text{ TB}$ of persistent capacity and $4.4\\text{ TB}$ of traffic: $1\\text{ TB}$ payload write, $0.4\\text{ TB}$ metadata write, and $3\\text{ TB}$ of verifier reads.",
               "Exactly $1.0\\text{ TB}$, because verifier models run entirely in GPU registers without generating persistent storage artifacts.",
               "Roughly $0.4\\text{ TB}$, because synthetic data compresses more efficiently than natural language text.",
               "Roughly $14\\text{ TB}$, because every verifier model stores a full $350\\text{ GB}$ copy of its internal neural activations for every sample."
             ],
-            "answer": "The correct answer is A. Roughly $4.2\\text{ TB}$ ($1\\text{ TB} \\times 1.4 \\times 3$), demonstrating that verified synthetic data amplifies physical storage requirements by over $4\\times$ compared to raw human text. Synthetic data pipelines require storing not just the raw text payload, but the complete provenance record ($+40\\% \\to 1.4\\text{ TB}$) multiplied across the multiple independent verification passes ($1.4\\text{ TB} \\times 3 = 4.2\\text{ TB}$) required to filter low-quality tokens. The 1.0-TB option ignores provenance metadata and verifier logs. The 0.4-TB compression claim is factually false. The 14-TB activation option invents unnecessary persistent storage of transient backward activations.",
-            "learning_objective": "Calculate the storage amplification factor ('synthetic tax') introduced by provenance metadata and multi-judge verification passes"
+            "answer": "The correct answer is A. Persistent capacity is $1.4\\text{ TB}$: the $1\\text{ TB}$ payload plus $0.4\\text{ TB}$ of provenance. Pipeline traffic is $4.4\\text{ TB}$: those $1.4\\text{ TB}$ of writes plus three $1\\text{ TB}$ verifier reads. Verification passes do not multiply capacity unless their outputs are materialized as additional full datasets.",
+            "learning_objective": "Distinguish persistent storage amplification from read and write traffic in a verified synthetic-data pipeline"
           },
           {
             "question_type": "SHORT",

@@ -1,39 +1,43 @@
 function Note(note)
+  local offset = nil
+
+  -- The offset marker is source metadata for print placement, not note text.
+  -- Strip it for every output format so it cannot leak into HTML or EPUB.
+  -- PDF/LaTeX uses the captured value below when constructing the sidenote.
+  if #note.content > 0 then
+    local first_block = note.content[1]
+    if (first_block.t == "Para" or first_block.t == "Plain") and #first_block.content > 0 then
+      local first_inline = first_block.content[1]
+      if first_inline.t == "Str" then
+        local m = first_inline.text:match("^%[offset=([^%]]+)%]")
+        if m then
+          offset = m
+
+          first_inline.text = first_inline.text:gsub("^%[offset=[^%]]+%]", "")
+          if first_inline.text == "" then
+            table.remove(first_block.content, 1)
+          end
+          if #first_block.content > 0 and first_block.content[1].t == "Space" then
+            table.remove(first_block.content, 1)
+          end
+        end
+      end
+    end
+  end
+
   -- Only convert footnotes to sidenotes for PDF/LaTeX output.
   -- ePub is HTML-based: pandoc.RawInline('latex', ...) nodes are ignored by
   -- the EPUB renderer, so the surrounding \sidenote{} delimiters are stripped
   -- while the note body is emitted inline — causing the sidenote text to
   -- appear embedded in the running prose.
-  if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
-    local offset = nil
+  local is_print = false
+  if quarto and quarto.doc and quarto.doc.is_format then
+    is_print = quarto.doc.is_format("latex") or quarto.doc.is_format("pdf")
+  else
+    is_print = FORMAT == "latex" or FORMAT == "beamer"
+  end
 
-    -- Detect optional [offset=...] marker at the start of the first Para/Plain block
-    if #note.content > 0 then
-      local first_block = note.content[1]
-      if (first_block.t == "Para" or first_block.t == "Plain") and #first_block.content > 0 then
-        local first_inline = first_block.content[1]
-        if first_inline.t == "Str" then
-          local m = first_inline.text:match("^%[offset=([^%]]+)%]")
-          if m then
-            offset = m
-
-            -- Remove only the [offset=...] part, keep the rest of the text
-            first_inline.text = first_inline.text:gsub("^%[offset=[^%]]+%]", "")
-
-            -- If the inline becomes empty, remove it
-            if first_inline.text == "" then
-              table.remove(first_block.content, 1)
-            end
-
-            -- Remove following space if present
-            if #first_block.content > 0 and first_block.content[1].t == "Space" then
-              table.remove(first_block.content, 1)
-            end
-          end
-        end
-      end
-    end
-
+  if is_print then
     local out = {}
 
     if offset then
@@ -81,6 +85,7 @@ function Note(note)
     return out
   end
 
-  -- For ePub and all other formats, let Pandoc render footnotes normally.
-  return nil
+  -- For EPUB and all other formats, render the ordinary note after removing
+  -- the print-only placement metadata.
+  return note
 end

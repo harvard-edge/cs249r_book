@@ -52,6 +52,18 @@ CUSTOM_REF_RE = re.compile(
 )
 
 
+def _local_render_env(config_manager: Any) -> dict[str, str]:
+    """Return an environment that imports Python sources from this worktree."""
+    env = os.environ.copy()
+    root_dir = Path(config_manager.root_dir).resolve()
+    local_paths = [str(root_dir), str((root_dir / "mlsysim").resolve())]
+    current_pythonpath = env.get("PYTHONPATH")
+    if current_pythonpath:
+        local_paths.append(current_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(local_paths)
+    return env
+
+
 def _braced_fields(payload: str) -> list[str]:
     """Return top-level braced fields from a LaTeX aux payload."""
     fields: list[str] = []
@@ -632,6 +644,7 @@ def render_mapped_chapter(
     xref_path = quarto_dir / "._pdfbook_xref.json"
     xref_existed = xref_path.is_file()
     xref_snapshot = xref_path.read_bytes() if xref_existed else None
+    render_env = _local_render_env(config_manager)
 
     with _worktree_lock(quarto_dir / "tmp" / "layout-harness" / ".render.lock"):
         mapped_path.write_text(transformed, encoding="utf-8")
@@ -643,6 +656,7 @@ def render_mapped_chapter(
             subprocess.run(
                 ["quarto", "render", "--to=titlepage-pdf"],
                 cwd=quarto_dir,
+                env=render_env,
                 check=True,
             )
         finally:

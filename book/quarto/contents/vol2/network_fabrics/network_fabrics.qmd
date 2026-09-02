@@ -46,7 +46,7 @@ A single accelerator can perform trillions of operations per second, but distrib
 - Compare high-performance transport protocols by latency, lossless guarantees, and operational complexity
 - Analyze network topologies (fat-tree, rail-optimized, dragonfly) by computing $\text{BW}_{\text{bisect}}$ and hop count for ML collective patterns
 - Evaluate congestion-control mechanisms and their impact on tail latency during distributed training
-- Design network virtualization strategies for multi-tenant GPU clusters using device sharing and traffic isolation
+- Design network virtualization strategies for multi-tenant GPU clusters using SR-IOV resource allocation and traffic isolation
 - Diagnose network performance bottlenecks using RDMA counters, link-level telemetry, and bandwidth testing tools
 
 :::
@@ -73,7 +73,7 @@ class NetworkRunningExampleCluster:
     n_gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
     peer_gpus_str = fmt(n_gpus - 1, precision=0, commas=False)
     grad_gb_str = fmt_qty(grad_bytes, GB, precision=0, commas=False)
-    redundant_copy_gb_str = fmt_qty(2 * grad_bytes, GB, precision=0, commas=False)
+    host_staging_traffic_gb_str = fmt_qty(2 * grad_bytes, GB, precision=0, commas=False)
 ```
 
 ## The Synchronization Backbone {#sec-network-fabrics-introduction}
@@ -92,7 +92,7 @@ In the fleet stack (@fig-fleet-stack), the fabric turns isolated accelerator nod
 ![](images/svg/five-level-model.svg)
 :::
 
-At scale, communication cost can dominate computation cost. The fleet law (@eq-fleet-law) makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric influences the layers above it by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
+At scale, communication cost can dominate computation cost. The fleet-law decomposition in @sec-vol2-introduction-fleet-law makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric influences the layers above it by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
 
 The physical network fabric exists to carry three fundamental collective communication patterns:
 
@@ -255,7 +255,7 @@ ML training workloads are the complete opposite: synchronous, periodic, and domi
 | **Loss Tolerance**     | Tolerant (TCP retransmits)             | Intolerant (one dropped packet stalls all) |
 | **Congestion**         | Localized, independent events          | Global, correlated (incast)                |
 
-: **ML Networking Inverts Traditional Data-Center Assumptions**: Where web services require fairness for millions of independent flows, ML training requires a globally synchronized, lossless fabric optimized for a handful of massive collective operations. {#tbl-network-assumptions}
+: **ML Networking Inverts Traditional Data-Center Assumptions**: Where web services require fairness for millions of independent flows, ML training requires globally synchronized communication with predictable completion times for a handful of massive collective operations. {#tbl-network-assumptions}
 
 The synchronicity inversion represents the most fundamental contrast (@tbl-network-assumptions). Web traffic is asynchronous; one user's slow connection does not affect another's. The bulk synchronous parallel (BSP)[^fn-bsp-valiant-routing] model governs distributed training: all 1,024 GPUs in a training job must complete their gradient exchange before any of them can proceed to the next step. The slowest link therefore dictates the performance of the entire cluster. A single congested switch port that delays one GPU's packets by 100 ms effectively wastes 100 ms of compute time for all 1,024 GPUs. *Tail latency is not an outlier; it is the bottleneck.*
 
@@ -265,7 +265,7 @@ The flow inversion compounds this problem. Traditional networks are designed for
 
 [^fn-elephant-flow-collision]: [offset=2mm] **Elephant and Mice Flows**\index{Elephant and Mice Flows!definition}: In network measurement literature, "mice" are many short flows and "elephants" are rare massive flows that dominate bandwidth. In ML clusters, one AllReduce elephant flow\index{Elephant Flows!network traffic} can carry `{python} NetworkRunningExampleCluster.grad_gb_str`, and ECMP's static hash cannot subdivide it across every available path.
 
-The loss inversion completes the picture. TCP/IP was designed for unreliable networks and handles packet loss gracefully through retransmission. Remote direct memory access (RDMA)-based protocols used in ML clusters (InfiniBand, RoCE) assume a lossless fabric. A single dropped packet can trigger Go-Back-N recovery, which restarts transmission from the missing packet rather than only repairing the one lost frame, and can stall the sender for milliseconds, creating a catastrophic straggler that delays the entire synchronous training step. ML fabrics must therefore be engineered for zero packet loss. InfiniBand uses credit-based flow control; Ethernet-based RoCE deployments use carefully tuned priority flow control (PFC), a link-layer backpressure mechanism that pauses senders before buffers overflow and therefore depends on sufficient switch buffering.
+The loss inversion completes the picture. TCP was designed to recover across an unreliable network. Reliable InfiniBand and RoCE transports also detect loss and retransmit, but recovery granularity and tail latency depend on the transport implementation. A dropped packet can be especially costly on an RNIC that uses Go-Back-N-style recovery, which restarts transmission from the missing sequence point rather than repairing only the lost region. Production fabrics therefore aim to make loss rare and recovery bounded. InfiniBand normally suppresses buffer-overflow loss with credit-based flow control. Many Ethernet-based RoCE deployments instead use carefully tuned priority flow control (PFC), a link-layer backpressure mechanism that pauses senders before buffers overflow; PFC-free designs rely more heavily on endpoint congestion control and loss recovery [@mittal2018irn].
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -278,12 +278,23 @@ These inversions explain why running large-scale distributed training over a sta
 Each of these inversions traces back to a specific physical or protocol constraint. A **Five-Level Model**\index{Five-Level Model!definition} specific to high-performance interconnects makes these constraints concrete:
 
 - **Level 1: Wire and Link** (@sec-network-fabrics-wire-link). Signal integrity (PAM4, SerDes) and the speed of light in fiber impose hard constraints on latency and cluster geometry.
-- **Level 2: Transport** (@sec-network-fabrics-transport). InfiniBand and RoCE provide the RDMA primitives; the $\alpha$-$\beta$ model quantifies the latency-vs.-bandwidth trade-off for different message sizes.
+- **Level 2: Transport** (@sec-network-fabrics-transport). InfiniBand and RoCE provide remote direct memory access (RDMA) primitives; the $\alpha$-$\beta$ model quantifies the latency-vs.-bandwidth trade-off for different message sizes.
 - **Level 3: Switch and Topology** (@sec-network-fabrics-topology). Fat-trees, rail-optimized designs, and dragonflies achieve the $\text{BW}_{\text{bisect}}$ needed for global collectives through different structural trade-offs.
 - **Level 4: Fabric Behavior** (@sec-network-fabrics-behavior). Congestion control mechanisms such as DCTCP-style explicit congestion notification (ECN) response, DCQCN, and HPCC determine whether theoretical bandwidth translates to realized throughput; adaptive routing and incast behavior determine whether that throughput survives real collective traffic [@alizadeh2010; @zhu2015; @li2019; @gangidi2024rdma].
 - **Level 5: Cluster Design** (@sec-network-fabrics-cluster). Production supercomputers like the NVIDIA SuperPOD and Meta Grand Teton integrate these layers into a unified gradient bus [@nvidia2023dgxSuperpodH100; @meta2024genaiInfrastructure].
 
 The levels are not an inventory of networking topics; they are the causal chain that turns synchronous ML traffic into infrastructure requirements. Large gradient messages first stress the wire and transport, then force topology choices that preserve bisection bandwidth, then expose congestion behavior that ordinary enterprise networks can hide, and finally determine whether the whole cluster behaves like one training machine.
+
+The traffic pattern determines which fabric metric matters. A global reduction stresses bisection bandwidth and the slowest path; a point-to-point pipeline transfer stresses startup latency and hop count; an expert exchange stresses path diversity and egress balance; and checkpoint or tenant traffic stresses isolation from the synchronization path. @Tbl-network-fabrics-traffic-metrics provides the compact mapping that the remaining levels develop.
+
+| **Traffic pattern**                 | **Fabric pressure**                    | **Metric that predicts performance**                        | **Primary design response**                                       |
+|:------------------------------------|:---------------------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|
+| Global reduction                    | Sustained traffic across a cluster cut | delivered bisection bandwidth; slowest-path completion time | non-blocking capacity, rail alignment, topology-aware collectives |
+| Pipeline point-to-point             | Small or dependency-critical transfers | startup latency ($\alpha$); hop count                       | short paths, direct placement, transport offload                  |
+| Expert AllToAll                     | Many simultaneous rank pairs           | path utilization; egress queue depth; tail latency          | adaptive routing, path diversity, balanced expert placement       |
+| Checkpoint and multi-tenant traffic | Bursts competing with training flows   | per-class bandwidth; pause duration; interference           | virtual lanes, QoS, admission control                             |
+
+: **Traffic Patterns Determine Fabric Metrics**: Workload semantics translate into different physical bottlenecks, so no single link-rate benchmark predicts training performance. {#tbl-network-fabrics-traffic-metrics tbl-colwidths="[20,27,28,25]"}
 
 ## Level 1: Wire and Link {#sec-network-fabrics-wire-link}
 
@@ -369,7 +380,7 @@ The choice of physical medium determines how far a link can reach before latency
 
 For optical links, FEC[^fn-fec-link-latency] is part of the latency budget that makes reach a topology decision rather than a simple cable choice. The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
-[^fn-fec-link-latency]: **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
+[^fn-fec-link-latency]: [offset=-11mm] **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
 
 ```{python}
 #| echo: false
@@ -417,6 +428,10 @@ class SpineOpticsCost:
     total_cost_musd_str = fmt_usd(total_cost, precision=0, commas=False, scale="million")
     total_power_kw_str = fmt_power(total_power, unit=kW, precision=0, commas=False)
     rack_power_range_str = fmt_qty_range(rack_power_low, rack_power_high, kW, precision=0, commas=False)
+```
+
+```{=latex}
+\Needspace{30\baselineskip}
 ```
 
 ::: {#psp-network-fabrics-cost-distance .callout-perspective title="The cost of distance"}
@@ -489,7 +504,7 @@ class NetworkTransportClusterRecap:
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
-Large-scale training requires sustained, synchronized bulk transfers. A single AllReduce operation across 1,024 accelerators may move terabytes of gradient data. This pattern demands networks optimized for RDMA to eliminate CPU overhead and **Lossless Delivery**\index{Lossless Delivery!definition} to ensure predictable performance.
+Large-scale training requires sustained, synchronized bulk transfers. A single AllReduce operation across 1,024 accelerators may move terabytes of gradient data. This pattern favors RDMA transport offload, reliable completion, and bounded loss-recovery time. A physically lossless fabric is one way to make that performance predictable, but it is not the only design.
 
 ### RDMA and GPUDirect {#sec-network-fabrics-rdma}
 
@@ -497,9 +512,9 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 
 ***Remote Direct Memory Access (RDMA)***\index{RDMA!definition}\index{Remote Direct Memory Access|see{RDMA}} is a networking technology used in ML training fabrics that allows one machine to read or write the memory of another machine directly, bypassing the operating system kernel and CPU of both endpoints by offloading transport processing to the network interface card.
 
-1.  **Significance**: RDMA reduces end-to-end message latency from the 50–100 μs typical of kernel TCP to approximately 1–2 μs, cutting the $L_{\text{lat}}$ term in the iron law by 25--50$\times$. For a 175B-parameter model exchanging `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data across `{python} NetworkTransportClusterRecap.n_gpus_str`, RDMA also eliminates `{python} NetworkRunningExampleCluster.redundant_copy_gb_str` of redundant memory copies per step by allowing the NIC to read GPU memory directly without staging through host RAM (GPUDirect RDMA).
-2.  **Distinction**: Unlike traditional TCP/IP, where the CPU processes every packet through the kernel network stack (consuming tens of CPU cores to saturate a 400 Gb/s link), RDMA offloads the entire transport to dedicated NIC hardware, freeing the CPU to orchestrate computation rather than move data.
-3.  **Common pitfall**: A frequent misconception is that RDMA works reliably on any Ethernet network. RDMA lacks TCP's retransmission logic; a single dropped packet can stall an entire 1,024-GPU AllReduce for 100–500 ms as the Go-Back-N recovery retransmits from the loss point. RDMA requires a lossless fabric (InfiniBand or Ethernet with PFC) to operate correctly at scale.
+1.  **Significance**: RDMA can reduce end-to-end message latency from tens of microseconds for a kernel TCP path to low-single-digit microseconds on a tuned fabric, cutting the $L_{\text{lat}}$ term in the iron law. For one participant sending a `{python} NetworkRunningExampleCluster.grad_gb_str` payload, GPUDirect RDMA also avoids about `{python} NetworkRunningExampleCluster.host_staging_traffic_gb_str` of host-memory traffic: one write into host RAM and one NIC read back out.
+2.  **Distinction**: Unlike a conventional kernel TCP path, RDMA offloads transport processing to NIC hardware and permits user-space access to registered memory. The resulting CPU-core and memory-bandwidth savings depend on the host, NIC, I/O path, message size, and software configuration rather than on link rate alone.
+3.  **Common pitfall**: RDMA is an access and offload model, not one loss-recovery algorithm. Reliable InfiniBand and RoCE transports detect loss and retransmit [@infiniband2000spec]. Some RNIC generations use Go-Back-N-style recovery that makes a drop expensive, while other designs support stronger selective recovery or tolerate lossy Ethernet without PFC [@mittal2018irn]. The requirement is reliable completion with a recovery tail that the synchronized workload can tolerate, not PFC or a physically lossless Ethernet fabric in every implementation.
 
 :::
 
@@ -512,13 +527,13 @@ class IbNdrTransportRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-Standard TCP/IP is architecturally unfit for the `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` era. The protocol stack was designed when network speeds were orders of magnitude slower than CPU memory bandwidth, but at these line rates that relationship has inverted. Processing a `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` stream through the Linux kernel imposes a prohibitive interrupt tax: copying payload data between user space and kernel buffers can consume the entire memory bandwidth of a dual-socket server, requiring tens of CPU cores merely to keep the pipe full. The result is a CPU wall where the host processor becomes the bottleneck for network traffic, starving the application logic it is meant to serve.
+Conventional kernel TCP paths become increasingly expensive at `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` link rates. Interrupt processing, protocol work, and payload copies can consume substantial CPU time and memory bandwidth, especially when many streams or network interface cards (NICs) drive a host concurrently. Modern TCP stacks can sustain high throughput with segmentation offload, receive-side scaling, zero-copy interfaces, and careful non-uniform memory access (NUMA) placement, so one stream does not inherently exhaust a dual-socket server's memory bandwidth. The architectural problem is instead that host resources spent moving network data compete with the training process and become harder to provision predictably as aggregate I/O grows.
 
-RDMA bypasses this entire layer. Offloading the transport logic to the network interface card (NIC) hardware allows applications to read and write directly to remote memory. For ML, GPUDirect RDMA\index{GPUDirect RDMA}[^fn-gpudirect-rdma-bypass] extends this zero-copy principle to the accelerators themselves [@nvidia2026gpudirectRdma]. Without GPUDirect, a gradient update follows a tortuous path: GPU memory $\rightarrow$ CPU system RAM $\rightarrow$ kernel buffer $\rightarrow$ NIC. GPUDirect short-circuits this to a single PCIe transaction: GPU $\rightarrow$ NIC, as @fig-gpudirect-data-path contrasts. For the 175B model's `{python} NetworkRunningExampleCluster.grad_gb_str` gradient exchange, the optimization eliminates `{python} NetworkRunningExampleCluster.redundant_copy_gb_str` of redundant memory copies across the cluster per step, reducing latency and freeing the CPU to orchestrate complex pipelining logic rather than acting as a data mover.
+RDMA bypasses the kernel data path. Offloading transport logic to the NIC allows applications to read and write registered remote memory without per-message kernel intervention. For ML, GPUDirect RDMA\index{GPUDirect RDMA}[^fn-gpudirect-rdma-bypass] extends this principle to accelerator memory [@nvidia2026gpudirectRdma]. Without GPUDirect, an outgoing payload must stage through host memory before the NIC transmits it. GPUDirect instead lets the NIC perform direct memory access (DMA) to or from GPU memory over the PCIe peer-memory path, as @fig-gpudirect-data-path contrasts. For one `{python} NetworkRunningExampleCluster.grad_gb_str` payload, avoiding the host bounce removes about `{python} NetworkRunningExampleCluster.host_staging_traffic_gb_str` of host-memory traffic. The network still transfers the payload, and the PCIe path may comprise multiple DMA transactions; the optimization removes staging copies rather than collapsing the transfer into one transaction.
 
 [^fn-gpudirect-rdma-bypass]: **GPUDirect RDMA**\index{GPUDirect RDMA!zero-copy}: Introduced by NVIDIA for Kepler-class GPUs and CUDA 5.0, GPUDirect RDMA enables a direct PCIe path between GPU memory and third-party peer devices such as network interfaces [@nvidia2026gpudirectRdma]. Before GPUDirect, every gradient transfer had to stage through host memory, consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is one reason overlapping communication with backward-pass computation is feasible at scale.
 
-::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA Data Path**: Comparison of traditional vs. GPUDirect data paths. Traditional RDMA (top) requires data to be copied to host RAM before transfer to the NIC. GPUDirect RDMA (bottom) enables the NIC to access GPU memory directly via the PCIe bus, eliminating redundant copies and reducing latency for bulk gradient transfers." fig-alt="Two-panel diagram. Top: Traditional path with GPU to CPU RAM to NIC hops. Bottom: Direct path from GPU to NIC via PCIe."}
+::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA Data Path**: RDMA without GPU peer-memory access (top) stages an accelerator payload in registered host memory before the NIC reads it. GPUDirect RDMA (bottom) lets the NIC DMA directly to or from GPU memory over PCIe, eliminating the host-memory bounce path." fig-alt="Two-panel diagram. Top: RDMA without GPUDirect follows GPU to host RAM to NIC. Bottom: GPUDirect RDMA lets the NIC access GPU memory over PCIe."}
 ![](images/svg/gpudirect-data-path.svg)
 :::
 
@@ -526,10 +541,10 @@ RDMA bypasses this entire layer. Offloading the transport logic to the network i
 
 GPU clusters commonly choose between two RDMA transport stacks, and the decision is a reliability-versus-operations trade-off. @Tbl-network-fabrics-rdma-stacks compares where each stack places the burden of losslessness and congestion control.
 
-| **Stack**                                                      | **Fabric behavior**                                                                                                                 | **Operational burden**                                                                                                                                               | **Typical fit**                                                                                     |
-|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
-| InfiniBand (IB)\index{InfiniBand}                              | Purpose-built HPC switched fabric [@infiniband2000spec] with credit-based flow control, so losslessness is native at the link layer | subnet manager\index{Subnet Manager} and virtual lanes (VLs)\index{Virtual Lane} govern routing and traffic isolation                                                | Dedicated training clusters where predictable tail latency outweighs Ethernet ecosystem flexibility |
-| **RoCE (RDMA over Converged Ethernet)**\index{RoCE!definition} | RoCEv2 carries RDMA semantics by encapsulating InfiniBand transport headers in UDP/IP packets                                       | priority flow control (PFC), ECN, and workload-aware routing or admission control must approximate InfiniBand's native losslessness [@guo2016rdma; @gangidi2024rdma] | Multi-vendor Ethernet fleets that can absorb more congestion-control tuning                         |
+| **Stack**                                                      | **Fabric behavior**                                                                                                                 | **Operational burden**                                                                                                                                                                                                 | **Typical fit**                                                                                     |
+|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
+| InfiniBand (IB)\index{InfiniBand}                              | Purpose-built HPC switched fabric [@infiniband2000spec] with credit-based flow control, so losslessness is native at the link layer | subnet manager\index{Subnet Manager} and virtual lanes (VLs)\index{Virtual Lane} govern routing and traffic isolation                                                                                                  | Dedicated training clusters where predictable tail latency outweighs Ethernet ecosystem flexibility |
+| **RoCE (RDMA over Converged Ethernet)**\index{RoCE!definition} | RoCEv2 carries RDMA semantics by encapsulating InfiniBand transport headers in UDP/IP packets                                       | PFC-based deployments suppress loss with PFC, ECN, and routing policy [@guo2016rdma; @gangidi2024rdma]; PFC-free designs instead place more burden on end-to-end congestion control and loss recovery [@mittal2018irn] | Multi-vendor Ethernet fleets that can absorb more congestion-control tuning                         |
 
 : **RDMA Transport Stack Trade-Offs**: InfiniBand and RoCE expose RDMA semantics through different operational contracts, one built around native losslessness and the other around Ethernet compatibility. {#tbl-network-fabrics-rdma-stacks tbl-colwidths="[20,30,25,25]"}
 
@@ -549,25 +564,25 @@ This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compar
 
 :::
 
-### Losslessness and the Go-Back-N problem {#sec-network-fabrics-losslessness}
+### Reliable delivery and loss recovery {#sec-network-fabrics-losslessness}
 
-The critical takeaway from @fig-ib-roce-stack is that the Verbs API provides a uniform programming model, but the reliability guarantees beneath it differ fundamentally: InfiniBand enforces losslessness in hardware, while RoCE must construct it from Ethernet's best-effort foundations using PFC and ECN. ML collectives assume in-order, lossless delivery, but the hardware implementation of this reliability introduces a critical fragility. TCP handles packet loss gracefully via Selective Acknowledgement, retransmitting only the specific missing segment. RDMA protocols like RoCEv2, by contrast, typically rely on simpler recovery paths such as **Go-Back-N**\index{Go-Back-N!definition} retransmission when rare packet drops occur [@gangidi2024rdma]. The NIC's physical constraints drive this choice: implementing complex reassembly logic for out-of-order packets requires substantial on-chip SRAM, which consumes precious die area needed for SerDes blocks and packet processing engines. The NIC hardware is optimized for throughput, not state management.
+The critical takeaway from @fig-ib-roce-stack is that the Verbs API provides a uniform programming model while the transport and fabric determine how reliable completion is achieved. Reliable connected transports in both InfiniBand and RoCE detect loss and retransmit [@infiniband2000spec]. InfiniBand normally suppresses buffer-overflow loss with link-level credits. Many RoCE deployments suppress it with PFC and ECN [@guo2016rdma; @gangidi2024rdma], but this is a deployment contract rather than a property of RDMA as a family. Designs that operate over lossy Ethernet shift more responsibility to endpoint congestion control, packet reordering, and selective recovery [@mittal2018irn].
 
-The trade-off is a severe penalty upon failure. If a network switch drops a single packet 900 MB into a 1 GB gradient transfer, the receiver discards all subsequent packets, forcing the sender to retransmit the entire tail of the message, potentially 100 MB of data for a single missed frame. At `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str`, this retransmission triggers a latency spike orders of magnitude larger than the wire delay. In a synchronous training loop where thousands of GPUs wait for the slowest member, a single dropped packet idles the entire cluster. The network fabric must therefore behave as a lossless medium, pushing the complexity of flow control into the switches via PFC to ensure buffers never overflow.
+Recovery granularity therefore matters. On an RNIC with **Go-Back-N**\index{Go-Back-N!definition}-style recovery and no out-of-order retention, a drop 900 MB into a 1 GB transfer can invalidate later arrivals and force retransmission from the missing sequence point. An RNIC with selective recovery retransmits a smaller region, so the same physical loss produces a shorter tail [@mittal2018irn]. At `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str`, either delay is much larger than the wire time of one packet, and a synchronous collective exposes the slowest recovery to every waiting rank. Fabric designers can reduce that tail by suppressing drops with PFC, by using a loss-tolerant transport with bounded endpoint recovery, or by combining congestion control and admission policy so queues rarely overflow. Each choice moves state and failure modes between switches and endpoints.
 
 ::: {#chk-network-fabrics-protocol-selection .callout-checkpoint title="Protocol selection"}
 
 Consider a 2,048-GPU training cluster that will run both large language model training (gradient messages of several gigabytes) and reinforcement learning (frequent small control messages).
 
 - [ ] **Protocol fit**: recommend a protocol and justify the choice for both the large gradient messages and the frequent small control messages.
-- [ ] **RoCE requirements**: specify the additional infrastructure RoCE needs compared to InfiniBand.
+- [ ] **RoCE requirements**: compare the infrastructure required by PFC-based and PFC-free RoCE designs with InfiniBand's credit-based fabric.
 - [ ] **Shared fabric**: reevaluate the protocol choice when the cluster also serves inference traffic to external users over the same physical network.
 
 :::
 
 ### The $\alpha$-$\beta$ performance model {#sec-network-fabrics-performance-model}
 
-Protocol choice determines whether the fabric can behave as a lossless medium; performance modeling then asks how fast that medium can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model} decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $\alpha$ is the fixed startup latency and $\beta$ is the sustained bandwidth [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4 later applies the same decomposition to collective algorithms. Topology choice directly shifts both parameters: a fat-tree minimizes $\alpha$ by providing short equal-cost paths, while a ring amplifies $\alpha$ with cluster size because messages traverse a hop count that grows with the number of participants $N$.
+Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model} decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $\alpha$ is the fixed startup latency and $\beta$ is the sustained bandwidth [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4 later applies the same decomposition to collective algorithms. Topology choice directly shifts both parameters: a fat-tree minimizes $\alpha$ by providing short equal-cost paths, while a ring amplifies $\alpha$ with cluster size because messages traverse a hop count that grows with the number of participants $N$.
 
 ```{python}
 #| echo: false
@@ -590,8 +605,10 @@ class NetworkAlphaBeta:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Level 1: Hardware Specs
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    alpha_ib = FABRIC_ALPHA_NDR  # 1.5 us (typical for IB NDR)
-    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth  # ~50 GB/s
+    # Scenario parameters, not universal protocol constants. Measured alpha and
+    # delivered beta vary with NIC, topology, software, and message placement.
+    alpha_ib = FABRIC_ALPHA_NDR
+    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth
     eth_alpha = Systems.SwitchFabric.AlphaRoce
     eth_beta = Systems.Fabrics.Ethernet_100G.bandwidth
 
@@ -658,11 +675,11 @@ class NetworkAlphaBeta:
 
 The model reveals two regimes that lead to different engineering responses. For messages with $n < \alpha\beta$, startup cost $\alpha$ dominates the transfer time; small control messages and pipeline bubbles fall in this latency-bound region. For messages with $n > \alpha\beta$, the $n/\beta$ term dominates; gradient AllReduce falls in this bandwidth-bound region.
 
-For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that the 175B training job generates on every iteration makes this distinction actionable.
+For the modeled NDR InfiniBand path with $\alpha =$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta =$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. These are scenario parameters, not protocol constants: measured startup latency and delivered bandwidth vary with the NIC, switch path, software stack, and contention. Messages smaller than the measured crossover gain little from more bandwidth; messages larger than it gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding delivered path bandwidth to raise $\beta$.
 
 ::: {#nbk-network-fabrics-alpha-beta-crossover .callout-notebook title="The alpha-beta crossover"}
 
-**Problem**: A fabric designer is comparing InfiniBand NDR (`{python} NetworkAlphaBeta.ib_alpha_us_str`, `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`) against a slower Ethernet baseline (`{python} NetworkAlphaBeta.eth_alpha_us_str`, `{python} NetworkAlphaBeta.eth_beta_gb_per_s_str`). For a `{python} NetworkAlphaBeta.n_small_kb_str` control message and a `{python} NetworkAlphaBeta.n_large_mb_str` gradient shard, which part of $T(n)=\alpha+n/\beta$ dominates, and why does the faster fabric help for different reasons in each regime?
+**Problem**: A fabric designer is comparing a modeled InfiniBand NDR path (`{python} NetworkAlphaBeta.ib_alpha_us_str`, `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`) against a modeled RoCE path (`{python} NetworkAlphaBeta.eth_alpha_us_str`, `{python} NetworkAlphaBeta.eth_beta_gb_per_s_str`). For a `{python} NetworkAlphaBeta.n_small_kb_str` control message and a `{python} NetworkAlphaBeta.n_large_mb_str` gradient shard, which part of $T(n)=\alpha+n/\beta$ dominates, and why does the first path help for different reasons in each regime?
 
 **Math**:
 Apply $T(n) = \alpha + n/\beta$ for a `{python} NetworkAlphaBeta.n_small_kb_str` control message and a `{python} NetworkAlphaBeta.n_large_mb_str` gradient shard.
@@ -670,13 +687,13 @@ Apply $T(n) = \alpha + n/\beta$ for a `{python} NetworkAlphaBeta.n_small_kb_str`
 1. **Small message** (`{python} NetworkAlphaBeta.n_small_kb_str`):
    - InfiniBand: `{python} NetworkAlphaBeta.small_ib_eq_math`
    - Ethernet: `{python} NetworkAlphaBeta.small_eth_eq_math`
-   - **Result**: InfiniBand is `{python} NetworkAlphaBeta.small_speedup_mult_str` faster purely due to lower $\alpha$.
+   - **Result**: Under these assumed path parameters, the NDR path is `{python} NetworkAlphaBeta.small_speedup_mult_str` faster because its modeled $\alpha$ is lower.
 2. **Large message** (`{python} NetworkAlphaBeta.n_large_mb_str`):
    - InfiniBand: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_ib_ms_str`
    - Ethernet: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_eth_ms_str`
-   - **Result**: InfiniBand is `{python} NetworkAlphaBeta.large_speedup_mult_str` faster purely due to higher $\beta$.
+   - **Result**: Under these assumed path parameters, the NDR path is `{python} NetworkAlphaBeta.large_speedup_mult_str` faster because its modeled $\beta$ is higher.
 
-**Systems insight**: For large-scale training, the crossover point $(n^* = \alpha\beta)$ is typically around `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Because gradients are megabytes to gigabytes, large-scale training operates almost entirely in the bandwidth-dominated regime. However, pipeline parallelism and distributed coordination rely on small messages in the latency-dominated regime\index{Latency!dominated regime}, where wire-speed upgrades provide zero benefit and only topology and hop-count reductions matter.
+**Systems insight**: This scenario places the crossover $(n^* = \alpha\beta)$ near `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Because gradients are megabytes to gigabytes, their transfers are usually bandwidth dominated, whereas pipeline coordination can remain latency dominated\index{Latency!dominated regime}. A higher line rate produces little benefit for a message whose startup term dominates; transport processing, topology, and hop count then govern the improvement.
 
 :::
 
@@ -684,9 +701,9 @@ To see why this distinction matters in practice, consider two messages that the 
 
 The second message is a `{python} NetworkAlphaBeta.n_large_grad_mb_str` gradient shard for one layer's AllReduce. Now, $T(n) \approx$ `{python} NetworkAlphaBeta.t_large_ib_ms_str`. The latency term is invisible. Doubling bandwidth to `{python} NetworkAlphaBeta.doubled_beta_gb_per_s_str` would halve this transfer time, a direct and proportional gain. These two cases illustrate why network design must address both $\alpha$ and $\beta$ simultaneously: topology and hop count control the latency-dominated regime, while link speed and path diversity control the bandwidth-dominated regime.
 
-@Fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes. For InfiniBand, the crossover occurs at approximately `{python} NetworkAlphaBeta.n_cross_ib_kb_str`: messages smaller than this are latency-dominated (the flat region on the left), while larger messages are bandwidth-dominated (the linear region on the right). Ethernet RoCE crosses slightly earlier, at about `{python} NetworkAlphaBeta.n_cross_eth_kb_str`, because its lower per-link bandwidth makes the transfer term overtake the higher fixed latency at a smaller message size. The 3.4$\times$ latency gap between InfiniBand and Ethernet RoCE dominates for small messages but becomes irrelevant for the multi-megabyte gradient transfers that dominate training communication.
+@Fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes for the two modeled paths. The NDR scenario crosses at approximately `{python} NetworkAlphaBeta.n_cross_ib_kb_str`, while the 100 Gb/s RoCE scenario crosses at about `{python} NetworkAlphaBeta.n_cross_eth_kb_str`. The positions follow from the assumed $\alpha$ and $\beta$ values; they are not universal InfiniBand and RoCE constants. In this comparison, the startup-latency gap dominates small messages but becomes negligible beside the transfer term for multi-megabyte gradients.
 
-::: {#fig-alpha-beta-crossover fig-env="figure" fig-pos="htb" fig-cap="**The $\\alpha$-$\\beta$ Crossover**: Transfer time as a function of message size for InfiniBand NDR and Ethernet RoCE. Small messages are latency-dominated (flat region), while large messages are bandwidth-dominated (linear region). The crossover point marks where investing in bandwidth begins to pay off more than reducing latency." fig-alt="Log-log plot showing transfer time vs. message size for InfiniBand and Ethernet, with latency-dominated and bandwidth-dominated regions labeled."}
+::: {#fig-alpha-beta-crossover fig-env="figure" fig-pos="htb" fig-cap="**The $\\alpha$-$\\beta$ Crossover**: Modeled transfer time as a function of message size for an NDR InfiniBand path and a 100 Gb/s RoCE baseline using the scenario parameters in the text. Small messages are latency dominated (flat region), while large messages are bandwidth dominated (linear region). Measured crossover points vary with the end-to-end path." fig-alt="Log-log modeled transfer time vs. message size for one NDR InfiniBand scenario and one 100 gigabit per second RoCE scenario, with latency-dominated and bandwidth-dominated regions labeled."}
 
 ```{python}
 #| echo: false
@@ -874,9 +891,7 @@ class AllReduceBottleneck:
     check(t_comm_70b > t_comm_small * 40, "70B comm should be >40x GPT-2-scale comm")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    flops_per_sample_math = fmt_math(sci_latex(flops_per_sample_base.to(flop).magnitude))
     compute_phase_ms_str = fmt_time(round(t_comp.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
-    t_comp_ms_value_str = fmt_magnitude(t_comp, unit=ms, precision=None, commas=False)
     t_comm_small_ms_value_str = fmt_magnitude(t_comm_small, unit=ms, precision=None, commas=False)
     t_comm_70b_ms_value_str = fmt_magnitude(t_comm_70b, unit=ms, precision=None, commas=False)
     comm_frac_small_pct_value_str = fmt_percent(comm_frac_small, precision=1, style="number")
@@ -886,22 +901,13 @@ class AllReduceBottleneck:
     # Math strings
     alpha_math = fmt_math(f"\\alpha = {alpha_us_value_str} \\;\\mu\\text{{s}}")
     beta_math = fmt_math(f"\\beta = {beta_gb_per_s_value_str} \\;\\text{{GB/s}}")
-    t_comp_display_math = fmt_display_math(f" T_{{\\text{{compute}}}} = {t_comp_ms_value_str} \\text{{ ms}} ")
     t_ring_small_math = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_ms_value_str} \\text{{ ms}}")
     comm_frac_display_math = fmt_display_math(f" \\text{{Comm. fraction}} = {comm_frac_small_pct_value_str} \\% ")
     t_ring_70b_display_math = fmt_display_math(f" T_{{\\text{{ring}}}} \\approx {t_comm_70b_ms_value_str} \\text{{ ms}} ")
 
     num_gpus_str = fmt_int(num_gpus, commas=False)
-    params_small_billion_str = fmt_params(
-        m_small.parameters,
-        scale="B",
-        precision=1,
-        commas=False,
-        scale_style="word",
-    )
     grad_small_gb_str = fmt_qty(grad_small, GB, precision=0, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOPs / second, precision=0, commas=False)
     params_70b_billion_str = fmt_params(
         m_70b.parameters,
         scale="B",
@@ -917,29 +923,19 @@ Beyond classifying individual transfers, the same model identifies when communic
 
 **Problem**: When does Ring AllReduce become the bottleneck for a `{python} AllReduceBottleneck.num_gpus_str`-GPU H100 cluster training models at GPT-2 scale and beyond?
 
-**Setup**: The baseline cluster trains a GPT-2-scale model with `{python} AllReduceBottleneck.params_small_billion_str` parameters (`{python} AllReduceBottleneck.grad_small_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` FP16/BF16 peak. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
+**Setup**: This scenario assumes a `{python} AllReduceBottleneck.compute_phase_ms_str` compute phase at `{python} AllReduceBottleneck.gpu_util_pct_str` accelerator utilization and an NDR path modeled by `{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math`. For a GPT-2-scale model, each rank contributes `{python} AllReduceBottleneck.grad_small_gb_str` of FP32 gradients.
 
-**Step 1**: Compute time per iteration.
-Assume each GPU processes a synthetic microbatch requiring `{python} AllReduceBottleneck.flops_per_sample_math` FLOPs, chosen to produce a compute phase of about `{python} AllReduceBottleneck.compute_phase_ms_str` for this bottleneck example. At `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` with `{python} AllReduceBottleneck.gpu_util_pct_str` utilization:
+**Math**: Applying the ring cost $T_{\text{ring}} \approx \frac{2(N-1)}{N}\frac{M}{\beta} + 2(N-1)\alpha$ gives `{python} AllReduceBottleneck.t_ring_small_math`. The modeled communication fraction is:
 
-`{python} AllReduceBottleneck.t_comp_display_math`
-
-**Step 2**: Communication time for Ring AllReduce\index{Ring AllReduce}.
-With $N$ = `{python} AllReduceBottleneck.num_gpus_str` and a gradient payload $M$ of about `{python} AllReduceBottleneck.grad_small_gb_str`:
-
-- Ring cost model: $T_{\text{ring}} \approx \frac{2(N-1)}{N}\frac{M}{\beta} + 2(N-1)\alpha$; @sec-collective-communication derives the algorithmic steps behind this expression.
-- Total Communication: `{python} AllReduceBottleneck.t_ring_small_math`
-
-**Step 3**: Communication fraction.
 `{python} AllReduceBottleneck.comm_frac_display_math`
 
-With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced, but the network is already a major contributor to iteration time for this configuration.
+The collective-communication chapter derives the ring phases and cost expression; this chapter uses the result only to test whether the fabric can keep pace.
 
-At `{python} AllReduceBottleneck.params_70b_billion_str` parameters (`{python} AllReduceBottleneck.grad_70b_gb_str` of gradients), the bandwidth term becomes the bottleneck if per-GPU computation stays similar through batch-size scaling:
+**Systems insight**: Increasing the payload to the `{python} AllReduceBottleneck.params_70b_billion_str` case (`{python} AllReduceBottleneck.grad_70b_gb_str`) raises the modeled ring time to:
 
 `{python} AllReduceBottleneck.t_ring_70b_display_math`
 
-Now communication dominates computation under pure data parallelism. The 175B model, far larger than this scale, would be even more severely bottlenecked. Models beyond a few billion parameters therefore require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
+Under the fixed compute assumption, communication dominates pure data parallelism. The conclusion is conditional rather than a universal model-size threshold: parallelism, gradient precision, bucketing, overlap, topology, and delivered bandwidth all move the boundary.
 
 :::
 
@@ -1434,13 +1430,13 @@ The BSP weakest-link property means that even a single dropped packet can trigge
 
 ***Priority Flow Control (PFC)***\index{Priority Flow Control!definition} is a link-layer mechanism used by RoCEv2 ML cluster fabrics to prevent switch buffer overflow by sending PAUSE frames to an upstream sender when a port's queue depth crosses a configured threshold, throttling injection on a per-priority basis without dropping packets.
 
-1.  **Significance**: PFC is the foundation for lossless Ethernet required by RoCEv2 RDMA. A PFC PAUSE frame must reach the upstream sender within one round-trip time (roughly 1–5 μs at switch-to-switch distances) before the buffer overflows. In a 1,000-node cluster, a single slow receiver can trigger PAUSE frames that propagate 3–5 hops upstream within 10–50 ms, halting gradient traffic across thousands of unrelated GPU pairs and collapsing cluster throughput to near zero.
+1.  **Significance**: In PFC-based RoCEv2 deployments, PFC is the foundation for a lossless Ethernet service. A PFC PAUSE frame must reach the upstream sender within one round-trip time (roughly 1–5 μs at switch-to-switch distances) before the buffer overflows. In a 1,000-node cluster, a single slow receiver can trigger PAUSE frames that propagate 3–5 hops upstream within 10–50 ms, halting gradient traffic across thousands of unrelated GPU pairs and collapsing cluster throughput to near zero.
 2.  **Distinction**: Unlike standard IEEE 802.3 flow control, which pauses all traffic classes on a link, PFC operates per priority class, allowing latency-sensitive control messages to continue flowing while only pausing the congested gradient data queue.
 3.  **Common pitfall**: A frequent misconception is that PFC solves congestion. It transforms packet loss into congestion spreading: a backpressure cascade can freeze the entire fabric within 200 ms of a single faulty transceiver, because no mechanism limits how far PAUSE frames propagate across the network.
 
 :::
 
-The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes that switch's buffers to fill, which triggers another PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. This cascading behavior, known as **Congestion Spreading**\index{Congestion Spreading!definition} or **Victim Flows**\index{Victim Flows!definition}, is the primary operational risk of PFC-based lossless Ethernet. The root cause is incast, a many-to-one traffic pattern inherent to distributed synchronization, as illustrated in @fig-congestion-cascade; this deterministic overload is what triggers the PFC backpressure cascades.
+The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which can move congestion into the upstream switch and trigger another PAUSE frame. A slow receiver, routing hot spot, or true fan-in burst can therefore pause links unrelated to the original queue. This behavior, known as **Congestion Spreading**\index{Congestion Spreading!definition} or **Victim Flows**\index{Victim Flows!definition}, is the primary operational risk of PFC-based lossless Ethernet. True incast is one trigger, but it is not intrinsic to every collective: a bandwidth-optimal ring exchanges data point to point. Multiple ring flows can still collide at a shared egress or oversubscribed cut, creating a hot spot without a single logical aggregation receiver. @Fig-congestion-cascade isolates the true fan-in case.
 
 ::: {.column-margin}
 ![](images/svg/network_fabrics_pfc_pause_blast.svg){width="100%" fig-alt="A red source node fans out through arrows to five downstream nodes, showing one pause source affecting many flows."}
@@ -1448,7 +1444,7 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 *One paused receiver can freeze unrelated flows.*
 :::
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**The Incast Problem in Distributed Training**: During AllReduce synchronization, every GPU node sends line-rate traffic to a common aggregation switch port, producing a many-to-one traffic burst. The figure shows 256 GPU nodes each at 50 GB/s converging on a switch port with 400 Gb/s (50 GB/s) capacity and a 32 MB buffer: 12.8 TB/s of offered load against 50 GB/s of capacity oversubscribes the egress port by 256$\times$. This deterministic overload is the root cause of the PFC backpressure cascades described in this section." fig-alt="Eight labeled GPU nodes (with 248 more implied) each at 50 GB/s converge on a central Switch Port with 400 Gb/s capacity and a 32 MB buffer that overflows. Callout notes 256-times egress oversubscription: 256 times 50 GB/s = 12.8 TB/s vs. 50 GB/s port capacity."}
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A True Incast Burst**: This deliberately worst-case fan-in scenario sends 256 sources at 50 GB/s toward one 400 Gb/s (50 GB/s) egress with a 32 MB buffer. The 12.8 TB/s offered load oversubscribes the destination egress by 256$\times$. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Eight labeled GPU nodes, with 248 more implied, each at 50 GB/s converge on one switch egress with 400 Gb/s capacity and a 32 MB buffer. The diagram is a hypothetical true fan-in burst, not a ring AllReduce topology."}
 ![](images/svg/incast-flow.svg)
 :::
 
@@ -1508,9 +1504,9 @@ class TransceiverDegradationRisk:
 
 ::: {#ws-network-fabrics-microsoft-pfc-deadlock .callout-war-story title="Microsoft's PFC deadlock (2016)"}
 
-**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers---a fleet operating at the scale of tens of thousands of servers---to support latency-sensitive services. RoCEv2 requires a lossless fabric, so the network used PFC, and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma].
+**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers---a fleet operating at the scale of tens of thousands of servers---to support latency-sensitive services. Their design provided a lossless fabric with PFC, and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma].
 
-**Mechanism**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. A dead server with an incomplete ARP/multiply-accumulate (MAC) mapping caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, forming a closed loop of paused buffers.
+**Mechanism**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. A dead server with an incomplete mapping between an IP address and a media-access-control address caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, forming a closed loop of paused buffers.
 
 **Impact**: Traffic ground to a complete halt across the cluster, freezing all inter-node communication and rendering the entire fleet unresponsive.
 
@@ -1615,11 +1611,7 @@ class IncastBurst:
     sender_bw_gb_per_s_str = fmt_qty(sender_bw, GB / second, precision=0, commas=False)
     offered_tb_per_s_str = fmt_qty(offered, TB / second, precision=1, commas=False)
     port_gbit_per_s_str = fmt_bandwidth(egress_port, unit=Gbps, precision=0, commas=False)
-    egress_gb_per_s_str = fmt_qty(egress_port, GB / second, precision=0, commas=False)
     buffer_mb_str = fmt_qty(buffer, MB, precision=0, commas=False)
-    buffer_hold_us_str = fmt_time(buffer_hold, microsecond, precision=0, commas=False)
-    oversub_mult_str = fmt_multiple(oversub, precision=0, commas=False)
-    net_fill_tb_per_s_str = fmt_qty(net_fill, TB / second, precision=2, commas=False)
     overflow_us_str = fmt_time(overflow, microsecond, precision=1, commas=False)
 ```
 
@@ -1627,7 +1619,7 @@ class IncastBurst:
 
 ***Incast***\index{Incast}\index{Incast!definition} is a many-to-one ML cluster traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
 
-1.  **Significance**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With `{python} IncastBurst.n_senders_str` senders each at `{python} IncastBurst.sender_bw_gb_per_s_str` targeting one switch port, the instantaneous incast reaches `{python} IncastBurst.offered_tb_per_s_str`, orders of magnitude above a `{python} IncastBurst.port_gbit_per_s_str` port's absorption capacity. A `{python} IncastBurst.buffer_mb_str` switch buffer holds about `{python} IncastBurst.buffer_hold_us_str` of one `{python} IncastBurst.port_gbit_per_s_str` egress stream, but under `{python} IncastBurst.oversub_mult_str` incast the net fill rate is roughly `{python} IncastBurst.net_fill_tb_per_s_str` after subtracting the single `{python} IncastBurst.egress_gb_per_s_str` egress port, so overflow arrives in about `{python} IncastBurst.overflow_us_str`. That sudden overflow triggers either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
+1.  **Significance**: Flat aggregation, synchronized storage reads, or other fan-in phases can direct many senders toward one receiver. In the deliberately worst-case scenario here, `{python} IncastBurst.n_senders_str` senders each transmit at `{python} IncastBurst.sender_bw_gb_per_s_str` toward one switch egress, producing `{python} IncastBurst.offered_tb_per_s_str` of offered load against a `{python} IncastBurst.port_gbit_per_s_str` port. A `{python} IncastBurst.buffer_mb_str` buffer then overflows in about `{python} IncastBurst.overflow_us_str` under the stated assumptions. The example is a stress bound, not the traffic matrix of a ring AllReduce.
 2.  **Distinction**: Unlike general congestion (which occurs on shared internal links when aggregate traffic exceeds link capacity), incast is an endpoint bottleneck: it occurs even if every internal spine and leaf link is completely uncongested, because the bottleneck is the single destination port, not the fabric interior.
 3.  **Common pitfall**: Incast is not necessarily rare or unpredictable. Synchronized training can produce repeated bursts as gradient collectives begin during the backward pass. The severity depends on the collective algorithm, topology, routing, and oversubscription, so it must be measured and mitigated rather than treated as an edge case.
 
@@ -1642,7 +1634,7 @@ class NetworkIncastClusterRecap:
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
-ML training is structurally susceptible to incast because of its synchronized communication patterns. When a layer finishes backward computation, thousands of nodes simultaneously initiate AllReduce, targeting the same switch ports. In the 175B model training across `{python} NetworkIncastClusterRecap.n_gpus_str`, each AllReduce involves every node injecting data simultaneously, creating a burst that can momentarily exceed the fabric's capacity at specific switch ports. Production clusters mitigate this through three complementary techniques:
+Synchronized ML traffic is susceptible to both true fan-in and shared-egress hot spots. When a layer finishes backward computation, many ranks can inject traffic at once. A ring AllReduce distributes point-to-point chunks rather than targeting one logical receiver, but its simultaneous flows can still converge on an oversubscribed switch port because of placement or routing. Flat or hierarchical aggregation phases can create true fan-in. Production clusters mitigate both cases through three complementary techniques:
 
 - **Layer-Staggering**\index{Incast!layer-staggering mitigation}: Trigger each gradient bucket's AllReduce as soon as backpropagation produces it. Final-layer gradients reduce while earlier layers are still computing, so communication is staggered instead of released as one burst.
 - **Algorithm Selection**\index{Incast!algorithm selection mitigation}: Choose collectives that limit the fan-in at any single port. Hierarchical and rail-local reductions aggregate gradients in stages so that no switch port must absorb all senders at once, in contrast to a flat reduction in which every node targets one aggregation point. Bandwidth-optimal ring AllReduce is itself point-to-point and creates no single aggregation hotspot; the incast pressure comes from many such flows converging on oversubscribed ports, which topology-aware placement and rail-optimized wiring relieve.
@@ -1712,7 +1704,7 @@ class IbNdrVirtualizationRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-Cloud providers can deliver near bare-metal RDMA performance to virtualized GPU instances through **Single Root I/O Virtualization (SR-IOV)**\index{SR-IOV!definition}, a standard that allows a physical NIC to present itself as multiple independent **Virtual Functions (VFs)**\index{Virtual Function!definition}. Each VF has its own hardware queues, doorbell registers, and direct memory access (DMA) mappings. Assigning a dedicated VF to each VM or container creates a direct hardware path for DMA operations that bypasses the host kernel and hypervisor completely. The passthrough architecture is critical for ML training because it can reduce virtualization overhead to low levels, often within a few percent of bare metal when the NIC, hypervisor, and placement policy are configured correctly. The cluster-management consequence is immediate: VFs become allocatable network resources, so placement logic must reserve NIC capacity and QoS policy alongside GPUs rather than treating the network as an unbounded shared pool.
+Cloud providers can deliver near bare-metal RDMA performance to virtualized GPU instances through **Single Root I/O Virtualization (SR-IOV)**\index{SR-IOV!definition}, a standard that allows a physical NIC to present itself as multiple independent **Virtual Functions (VFs)**\index{Virtual Function!definition}. Each VF has its own hardware queues, doorbell registers, and DMA mappings. Assigning a dedicated VF to each VM or container creates a direct hardware path for DMA operations that bypasses the host kernel and hypervisor completely. The passthrough architecture is critical for ML training because it can reduce virtualization overhead to low levels, often within a few percent of bare metal when the NIC, hypervisor, and placement policy are configured correctly. The cluster-management consequence is immediate: VFs become allocatable network resources, so placement logic must reserve NIC capacity and QoS policy alongside GPUs rather than treating the network as an unbounded shared pool.
 
 However, hardware-level isolation still needs explicit bandwidth policy. SR-IOV exposes multiple VFs that share the NIC's physical resources; administrators can add per-VF or per-group QoS policies to cap or guarantee bandwidth, such as assigning eight VFs 50 Gb/s each on a `{python} IbNdrVirtualizationRecap.ib_ndr_gbit_per_s_str` NIC. For the 175B-parameter model training on a multi-tenant cluster, that configured partitioning can prevent a neighboring tenant from stealing bandwidth, but it also enforces a hard ceiling on peak throughput. The training job must be architected to operate within this slice, as no amount of software optimization can burst beyond the configured VF limit.
 
@@ -2098,7 +2090,7 @@ Consider a `{python} BandwidthFallacy.msg_kb_str` message (typical for control s
 
 **Pitfall**: *Treating InfiniBand as merely fast Ethernet.*
 
-Procurement teams compare InfiniBand and high-speed Ethernet on link rate alone and conclude they are equivalent at the same Gb/s. InfiniBand and Ethernet differ architecturally, not merely in speed. InfiniBand provides kernel-bypass RDMA, hardware-managed flow control, and credit-based congestion avoidance, all standardized and predictable. Ethernet relies on software-managed TCP/IP stacks with orders-of-magnitude higher latency and requires PFC/ECN approximations to behave losslessly under RDMA. The choice between InfiniBand and Ethernet is a system architecture decision, not a bandwidth selection: it determines whether failure modes are bounded by hardware credits or by software configuration discipline.
+Procurement teams compare InfiniBand and high-speed Ethernet on link rate alone and conclude they are equivalent at the same Gb/s. The relevant comparison is between complete transport stacks, not between InfiniBand and TCP. InfiniBand provides kernel-bypass RDMA over a credit-based fabric; RoCE also provides kernel-bypass RDMA, but carries it over Ethernet and places more of the reliable-delivery, congestion-control, and routing contract in NIC behavior and fabric configuration. PFC and ECN are common parts of that contract, though PFC-free RoCE designs choose a different loss-recovery balance [@mittal2018irn]. Conventional kernel TCP is a third design point with different CPU and recovery costs. The architecture decision therefore determines where flow-control state and operational risk reside, even when nominal link rates match.
 
 :::
 
@@ -2106,7 +2098,7 @@ Procurement teams compare InfiniBand and high-speed Ethernet on link rate alone 
 
 **Fallacy**: *Lossless Ethernet is as reliable as InfiniBand.*
 
-RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but the "lossless" property is an approximation maintained by PFC (@sec-network-fabrics-pfc). A misconfigured switch or a firmware bug can trigger a **PFC Storm**\index{PFC Storm!definition}, where PAUSE frames propagate in a loop, freezing the entire fabric. InfiniBand's credit-based flow control is inherently immune to such cascades because it operates on per-hop buffer availability rather than reactive signals. Teams deploying RoCE must invest substantially more engineering effort in fabric testing and monitoring to avoid multi-day outages caused by "lossless" deadlocks.
+RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but lossless operation depends on the configuration and interaction of PFC, ECN, routing, buffers, and NIC behavior (@sec-network-fabrics-pfc). A forwarding loop, cyclic buffer dependency, or firmware defect can trigger a **PFC Storm**\index{PFC Storm!definition}, where PAUSE frames spread beyond the original queue. InfiniBand's per-hop credit mechanism avoids this specific reactive PAUSE-frame cascade, but the fabric still requires deadlock-free routing, sound virtual-lane configuration, and congestion management [@infiniband2000spec]. Both fabrics require validation and telemetry; RoCE adds particular sensitivity to the configuration of Ethernet losslessness.
 
 ```{python}
 #| echo: false
@@ -2186,7 +2178,7 @@ Equally important, the $\alpha$-$\beta$ cost model provides a quantitative vocab
 
 * **Link speed is not fabric speed**: A global AllReduce is limited by the narrowest bisection cut (principle \ref{pri-bisection-bandwidth}), not the fastest advertised port. Topology decides how much purchased accelerator throughput becomes useful training throughput and how much becomes idle silicon.
 * **Latency and bandwidth bind differently**: The $\alpha$-$\beta$ model separates startup cost from per-byte transfer cost (principle \ref{pri-alpha-beta-model}), with $n^* = \alpha \cdot \beta$ marking the regime change. Message-size distributions, not vendor peak numbers, determine whether to optimize software latency or hardware bandwidth.
-* **Losslessness moves the risk**: RDMA needs a lossless fabric to avoid expensive retransmission stalls. InfiniBand supplies this natively, while RoCE depends on PFC, ECN, DCQCN, and HPCC, trading hardware flexibility for tail-latency and operational complexity.
+* **Reliable delivery moves the risk**: RDMA transports need reliable completion and bounded recovery, not one universal lossless-fabric mechanism. InfiniBand normally suppresses loss with link-level credits; many RoCE deployments use PFC and ECN, while PFC-free designs place more recovery responsibility at the endpoints. Each choice trades hardware flexibility against tail latency and operational complexity.
 * **Topology must match traffic**: Fat-trees buy flexible bisection bandwidth, rail-optimized designs accelerate same-rank AllReduce, and dragonfly or torus designs trade cabling and locality differently. The right fabric depends on whether the workload stresses AllReduce, AllToAll, or multi-tenant sharing.
 * **Telemetry saves GPU-hours**: PFC counters, link error rates, bandwidth baselines, and application throughput must be correlated across layers. Without that observability, a degraded transceiver or congestion storm silently converts a high-end fleet into a queue of waiting accelerators.
 

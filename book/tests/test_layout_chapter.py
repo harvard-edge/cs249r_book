@@ -1,6 +1,8 @@
 """Tests for mapped isolated chapter layout builds."""
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from book.cli.commands.layout_chapter import (
     H1_RE,
@@ -9,6 +11,7 @@ from book.cli.commands.layout_chapter import (
     _correct_custom_callout_tex,
     _fragment_owner,
     _inject_folio_after_h1,
+    _local_render_env,
     _mainmatter_counter_hook,
     _plain_toc_title,
     _volume_citekeys,
@@ -17,6 +20,16 @@ from book.cli.commands.layout_chapter import (
     parse_toc_chapters,
     roman_to_int,
 )
+
+
+def test_local_render_env_prefers_current_worktree(monkeypatch, tmp_path: Path):
+    stale = "/tmp/stale-checkout"
+    monkeypatch.setenv("PYTHONPATH", stale)
+    env = _local_render_env(SimpleNamespace(root_dir=tmp_path))
+
+    paths = env["PYTHONPATH"].split(os.pathsep)
+    assert paths[:2] == [str(tmp_path.resolve()), str((tmp_path / "mlsysim").resolve())]
+    assert paths[2] == stale
 
 
 def test_h1_parser_accepts_attributes_after_identifier():

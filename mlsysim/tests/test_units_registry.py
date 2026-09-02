@@ -201,7 +201,7 @@ def test_storage_training_corpus_anchor():
     assert corpus.TokenizedText.to(TB).magnitude == pytest.approx(6.0)
     assert corpus.TrainingWindow.to(day).magnitude == pytest.approx(30.0)
     assert corpus.CheckpointInterval.to(minute).magnitude == pytest.approx(10.0)
-    assert corpus.CheckpointBytesPerParameter.to(byte / param).magnitude == pytest.approx(10.0)
+    assert corpus.CheckpointBytesPerParameter.to(byte / param).magnitude == pytest.approx(14.0)
     assert corpus.CompressedSource.provenance.ref
 
 
