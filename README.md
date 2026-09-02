@@ -33,7 +33,7 @@
 
 <p align="center">
   <b><a href="https://mlsysbook.ai">📘 Textbook</a></b> •
-  <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a> + <a href="https://mlsysbook.ai/vol2/">📘 Vol II</a></b> •
+  <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a> + <a href="https://mlsysbook.ai/vol2/">📘 Vol II <i>(Summer 2027)</i></a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
