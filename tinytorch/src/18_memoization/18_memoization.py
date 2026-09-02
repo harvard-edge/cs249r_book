@@ -16,7 +16,8 @@
 """
 # Module 18: Memoization - Computational Reuse for Inference
 
-Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching for 10-15x faster text generation.
+Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching, which removes 10-15x of the
+arithmetic in typical text generation.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete transformer architecture (Module 13) and profiling tools (Module 14)
@@ -35,7 +36,7 @@ By the end of this module, you will:
 2. Apply memoization to transformers through KV caching
 3. Implement KVCache with efficient memory management and O(1) updates
 4. Build cache-aware attention that reuses previously computed keys and values
-5. Measure dramatic speedup gains (10-15x) and understand memory trade-offs
+5. Measure the operation-count reduction (10-15x) and understand memory trade-offs
 
 Let's make inference blazingly fast through computational reuse!
 
@@ -191,7 +192,7 @@ def profile_naive_generation():
     print("   • First compute: Calculate and store K,V")
     print("   • Later steps: Reuse stored K,V")
     print("   • Complexity: O(n²) → O(n)")
-    print("   • Speedup: 10-15× for typical generation\n")
+    print("   • Operations saved: 10-15× for typical generation\n")
 
 # Run profiling when module is executed directly
 # NOTE: Commented out to run tests. Profiling requires proper Profiler API usage.
@@ -849,17 +850,22 @@ To use KV caching in your transformer generation:
 ### Performance Expectations
 
 ```
-Expected Speedup by Sequence Length:
-┌───────────┬──────────┬───────────┬──────────┐
-│ Seq Len   │ No Cache │ With Cache│ Speedup  │
-├───────────┼──────────┼───────────┼──────────┤
-│  10 tokens│ ~80 tok/s│ ~600 tok/s│   7.5x   │
-│  25 tokens│ ~40 tok/s│ ~500 tok/s│  12.5x   │
-│  50 tokens│ ~25 tok/s│ ~400 tok/s│  16.0x   │
-│ 100 tokens│ ~12 tok/s│ ~200 tok/s│  16.7x   │
-└───────────┴──────────┴───────────┴──────────┘
+Attention work avoided, by generation length:
+┌───────────┬───────────────┬───────────────┬──────────┐
+│ Seq Len   │ No Cache (ops)│ Cached (ops)  │ Ratio    │
+├───────────┼───────────────┼───────────────┼──────────┤
+│  10 tokens│      O(n²)=55 │      O(n)=10  │   5.5x   │
+│  25 tokens│     O(n²)=325 │      O(n)=25  │  13.0x   │
+│  50 tokens│    O(n²)=1275 │      O(n)=50  │  25.5x   │
+│ 100 tokens│    O(n²)=5050 │      O(n)=100 │  50.5x   │
+└───────────┴───────────────┴───────────────┴──────────┘
 
-Key Insight: Speedup increases with sequence length!
+These are ATTENTION OPERATION COUNTS (n(n+1)/2 vs n), not wall-clock
+measurements. Real end-to-end speedup is lower -- the MLP layers, sampling,
+and memory traffic do not shrink, and cache lookups add their own cost.
+Operation count is the ceiling; measured throughput is always below it.
+
+Key Insight: The ratio grows with sequence length!
 Why? Longer sequences = more redundant computation without cache.
 ```
 
@@ -871,7 +877,7 @@ Why? Longer sequences = more redundant computation without cache.
 - For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~18 GB per sequence
 
 **Trade-off Analysis:**
-- **10x+ speedup** for typical generation lengths (50-200 tokens)
+- **10x+ fewer operations** for typical generation lengths (50-200 tokens)
 - **Modest memory cost** compared to model parameters (often <1% of model size)
 - **Enables real-time interaction** that's impossible without caching
 
@@ -1684,7 +1690,7 @@ def analyze_kvcache_memory():
 
     Key Insight:
         Cache overhead is 10-30% of model parameters, but enables
-        10-15× speedup. Memory is cheap, compute is expensive!
+        10-15× fewer operations. Memory is cheap, compute is expensive!
 
     Production Context:
         GPT-3 (175B params, 2048 context): ~4GB cache per sequence
@@ -1726,7 +1732,7 @@ def analyze_kvcache_memory():
     print()
     print("🚀 Production Context:")
     print("   • GPT-3 (175B params, 2048 context): ~4GB cache memory")
-    print("   • Trade-off: 2× memory enables 10-15× speedup")
+    print("   • Trade-off: 2× memory removes 10-15× of the arithmetic")
     print("   • Worth it for inference-heavy workloads!")
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "locked": false}
@@ -2021,7 +2027,7 @@ Congratulations! You've built the optimization that makes production language mo
 ### Key Accomplishments
 - Built KVCache class with efficient memory management for K,V tensors across layers
 - Implemented non-invasive cache integration using enable_kv_cache()
-- Measured 10-15× speedup through analysis functions showing O(n²)→O(n) improvement
+- Measured a 10-15× reduction in operation count, showing the O(n²)→O(n) improvement
 - Understood memory-compute trade-off (2× memory enables 10× speedup)
 - Discovered why speedup increases with generation length
 - All tests pass ✅ (validated by `test_module()`)

@@ -843,8 +843,15 @@ class QuantizedLinear:
         >>> original_layer.weight = Tensor(rng.standard_normal((128, 64)) * 0.1)
         >>> original_layer.bias = Tensor(rng.standard_normal(64) * 0.01)
         >>> quantized_layer = QuantizedLinear(original_layer)
-        >>> print(quantized_layer.q_weight.data.dtype)
-        int8
+        >>> print(quantized_layer.q_weight.data.min(), quantized_layer.q_weight.data.max())
+        -128.0 127.0
+
+        NOTE: q_weight holds INT8-RANGE values but its dtype is float32, because
+        TinyTorch's Tensor stores everything as float32. This is *simulated*
+        quantization: it reproduces the accuracy effects exactly, but not the
+        memory saving. Real INT8 inference stores these values in an int8 array,
+        which is where the actual 4x reduction comes from. We compute the saving
+        analytically in measure_layer_bytes() rather than reading it off dtype.
 
         HINTS:
         - Use quantize_int8() to convert weight and bias tensors
@@ -1257,8 +1264,11 @@ def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tens
     >>> original = Linear(8, 3)
     >>> original.weight = Tensor(rng.standard_normal((8, 3)) * 0.5)
     >>> quantized = _quantize_single_layer(original)
-    >>> print(quantized.q_weight.data.dtype)
-    int8
+    >>> print(quantized.q_weight.data.min(), quantized.q_weight.data.max())
+    -128.0 127.0
+
+    NOTE: values are INT8-range but stored as float32 (see QuantizedLinear) --
+    simulated quantization, so the memory saving is computed, not measured.
 
     HINT:
     - QuantizedLinear(layer) handles weight/bias quantization

@@ -570,7 +570,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> memory = profiler.measure_memory(linear, (32, 1024))
         >>> print(f"Parameters: {memory['parameter_memory_mb']:.1f} MB")
-        Parameters: 2.1 MB
+        Parameters: 2.0 MB
 
         HINT: tracemalloc.start() / get_traced_memory() / stop() lifecycle
         """
@@ -620,7 +620,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> latency = profiler.measure_latency(linear, input_tensor)
         >>> print(f"Latency: {latency:.2f} ms")
-        Latency: 0.15 ms
+        Latency: 0.03 ms      # machine-dependent -- yours will differ
 
         HINTS:
         - Use time.perf_counter() for high precision
@@ -773,7 +773,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> profile = profiler.profile_forward_pass(model, input_data)
         >>> print(f"Throughput: {profile['gflops_per_second']:.2f} GFLOP/s")
-        Throughput: 2.45 GFLOP/s
+        Throughput: 0.04 GFLOP/s   # machine-dependent -- yours will differ
 
         HINT: Compose helper outputs with ** unpacking into return dict
         """
@@ -869,7 +869,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> profile = profiler.profile_backward_pass(model, input_data)
         >>> print(f"Training iteration: {profile['total_latency_ms']:.2f} ms")
-        Training iteration: 0.45 ms
+        Training iteration: 1.13 ms  # machine-dependent -- yours will differ
 
         HINT: Gradient memory equals parameter memory (one gradient per parameter)
         """

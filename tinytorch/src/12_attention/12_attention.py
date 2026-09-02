@@ -266,7 +266,8 @@ Step-by-Step Attention Computation:
    [0.1,0.8] · [0.2,0.7] = 0.1×0.2 + 0.8×0.7 = 0.58
 
 2. Scaling (÷ √d_k):
-   scaled_scores = scores / √embedding_dim
+   scaled_scores = scores / √d_k
+   (d_k is the per-head dimension: embed_dim // num_heads in multi-head attention)
    (Prevents softmax saturation for large dimensions)
 
 3. Masking (optional):
@@ -352,32 +353,41 @@ if __name__ == "__main__":
 """
 ### Helper: Scaling Scores
 
-Raw dot products grow proportionally with dimension size. For d_model=512,
-scores would be ~500x larger than for d_model=1 -- pushing softmax into extreme
-values where most weight falls on a single token. Dividing by sqrt(d_model) keeps
-scores in a stable range regardless of dimension.
+A dot product sums d_k independent products. For query/key entries with mean 0
+and variance 1, that sum has variance d_k -- so its typical magnitude grows with
+the SQUARE ROOT of the dimension, not linearly. Going from d_k=1 to d_k=512
+inflates scores about sqrt(512) ~= 23x, which is enough to push softmax into
+extreme values where nearly all weight falls on a single token.
+
+That square-root growth is exactly why we divide by sqrt(d_k) and not by d_k:
+the scale factor has to match how the scores actually grow, which keeps them in
+a stable range regardless of dimension.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-scale-scores", "solution": true}
 #| export
-def _scale_scores(scores: Tensor, d_model: int) -> Tensor:
-    """Scale attention scores by 1/sqrt(d_model).
+def _scale_scores(scores: Tensor, d_k: int) -> Tensor:
+    """Scale attention scores by 1/sqrt(d_k).
+
+    d_k is the dimension the dot product was taken over. For single-head
+    attention that equals d_model; for multi-head attention it is the
+    per-head dimension (embed_dim // num_heads).
 
     TODO: Divide scores by the square root of the model dimension
 
     APPROACH:
-    1. Compute scale factor: 1.0 / math.sqrt(d_model)
+    1. Compute scale factor: 1.0 / math.sqrt(d_k)
     2. Multiply scores by scale factor
 
     EXAMPLE:
     >>> scores = Tensor(np.array([[[4.0, 8.0]]]))
-    >>> scaled = _scale_scores(scores, d_model=4)
+    >>> scaled = _scale_scores(scores, d_k=4)
     >>> print(scaled.data)  # [[[ 2.0, 4.0]]] -- divided by sqrt(4)=2
 
     HINT: Use math.sqrt() for the square root
     """
     ### BEGIN SOLUTION
-    scale_factor = 1.0 / math.sqrt(d_model)
+    scale_factor = 1.0 / math.sqrt(d_k)
     return scores * scale_factor
     ### END SOLUTION
 
@@ -385,9 +395,9 @@ def _scale_scores(scores: Tensor, d_model: int) -> Tensor:
 """
 ### 🧪 Unit Test: Score Scaling
 
-**What we're testing**: Scores are divided by sqrt(d_model) correctly
+**What we're testing**: Scores are divided by sqrt(d_k) correctly
 **Why it matters**: Without scaling, softmax saturates for large dimensions
-**Expected**: Scores reduced by factor of sqrt(d_model)
+**Expected**: Scores reduced by factor of sqrt(d_k)
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-attn-scale", "locked": true, "points": 5}
@@ -395,7 +405,7 @@ def test_unit_scale_scores():
     """🧪 Test attention score scaling."""
     print("🧪 Unit Test: Score Scaling...")
     scores = Tensor(np.array([[[4.0, 8.0]]]))
-    scaled = _scale_scores(scores, d_model=4)
+    scaled = _scale_scores(scores, d_k=4)
     assert np.allclose(scaled.data, [[[2.0, 4.0]]]), f"Expected /sqrt(4)=2, got {scaled.data}"
     print("✅ Score scaling works correctly!")
 
