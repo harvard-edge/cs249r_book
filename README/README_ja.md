@@ -32,7 +32,7 @@
 
 <p align="center">
   <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
-  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2027)</i></a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
   <b><a href="https://mlsysbook.org">🌐 エコシステム</a></b>
