@@ -1042,3 +1042,69 @@ def test_static_table_warnings_flag_dense_tables_not_simple_defaults():
     assert "wide-dense-table-without-colwidths" in dense
     assert "many-columns-without-colwidths" in dense
     assert "simple-table-has-colwidths-review-necessity" in simple
+
+
+# --------------------------------------------------------------------------
+# Missing-glyph gate (added 2026-09-02)
+# --------------------------------------------------------------------------
+
+def test_missing_glyph_detected_and_grouped(tmp_path):
+    log = _write_log(
+        tmp_path,
+        "Missing character: There is no × (U+00D7) in font lmroman10-regular!\n"
+        "Missing character: There is no × (U+00D7) in font lmroman10-regular!\n"
+        "Missing character: There is no ≤ (U+2264) in font [LibertinusSerif-Regular]!\n",
+    )
+    glyphs = [i for i in scan_build_log(log) if i.code == "missing-glyph"]
+    assert len(glyphs) == 1
+    # 3 dropped characters across 2 distinct glyph/font pairs.
+    assert glyphs[0].count == 3
+    assert "2 glyph/font pair(s)" in glyphs[0].message
+    # Font name is reported with the surrounding brackets stripped.
+    assert "LibertinusSerif-Regular" in glyphs[0].message
+    assert "[LibertinusSerif-Regular]" not in glyphs[0].message
+
+
+def test_missing_glyph_is_blocking():
+    """Unlike overfull boxes there is no tolerable amount: severity is error."""
+    issue = PdfIssue(code="missing-glyph", message="x", count=1)
+    assert issue.severity == "error"
+    result = PdfValidationResult(volume="vol1", pdf_path=Path("x.pdf"), issues=[issue])
+    assert not result.ok
+
+
+def test_missing_glyph_handles_byte_escape_form(tmp_path):
+    """LuaTeX also emits ^^xx byte escapes rather than a printable character."""
+    log = _write_log(
+        tmp_path,
+        "Missing character: There is no ^^e2 in font [TeXGyreHeros-Regular]!\n",
+    )
+    glyphs = [i for i in scan_build_log(log) if i.code == "missing-glyph"]
+    assert len(glyphs) == 1
+    assert glyphs[0].count == 1
+    assert "^^e2" in glyphs[0].message
+
+
+def test_no_missing_glyph_issue_on_clean_log(tmp_path):
+    log = _write_log(
+        tmp_path,
+        "Overfull \\hbox (35.0pt too wide) in paragraph at lines 100--102\n"
+        "This line mentions Missing character handling but is not a warning.\n",
+    )
+    assert not [i for i in scan_build_log(log) if i.code == "missing-glyph"]
+
+
+def test_missing_glyph_skipped_when_no_log():
+    assert scan_build_log(None) == []
+
+
+def test_default_log_path_discovers_sibling_log(tmp_path):
+    """With latex-clean: false the .log sits beside the .tex in the quarto dir."""
+    from book.cli.commands._pdf_checks import default_log_path
+
+    assert default_log_path(tmp_path, "vol1") is None  # nothing built yet
+    (tmp_path / "Machine-Learning-Systems-Vol1.log").write_text("ok", encoding="utf-8")
+    found = default_log_path(tmp_path, "vol1")
+    assert found is not None and found.name == "Machine-Learning-Systems-Vol1.log"
+    # vol2 is independent and still absent.
+    assert default_log_path(tmp_path, "vol2") is None

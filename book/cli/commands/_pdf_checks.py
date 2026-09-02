@@ -64,6 +64,23 @@ OVERFULL_HBOX = re.compile(
 OVERFULL_VBOX = re.compile(
     r"Overfull \\vbox \((\d+(?:\.\d+)?)pt too high\)[^\n\[]*(?:\[(\d+)\])?"
 )
+# Missing glyph: the font has no outline for this codepoint, so LuaLaTeX drops
+# the character silently — it is simply absent from the printed page, with no
+# visible marker. Unlike an overfull box (which is a judgment about how much
+# overflow is tolerable), every occurrence is a defect: text the author wrote
+# did not reach the reader. Added 2026-09-02 after a camera-ready pass fixed
+# five of these by eye (missing PDF glyphs in Vol I, font-safe Vol II text
+# diagrams and diagnostic tree, PDF-safe pronunciation notation, TikZ font
+# family for LuaLaTeX) that the log had already reported for free.
+#
+# LuaTeX emits either a literal character, a "U+XXXX" form, or a "^^xx" byte
+# escape, followed by the font name:
+#   Missing character: There is no × (U+00D7) in font lmroman10-regular!
+#   Missing character: There is no ^^e2 in font [LibertinusSerif-Regular]!
+MISSING_CHARACTER = re.compile(
+    r"Missing character: There is no (.+?) in font ([^\n!]+?)!?\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -104,6 +121,19 @@ class PdfValidationResult:
 
 def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
     return quarto_dir / "_build" / f"pdf-{volume}" / PDF_BY_VOLUME[volume]
+
+
+def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
+    """Locate the LuaLaTeX log for ``volume``, or None when it was not kept.
+
+    ``keep-tex`` leaves ``Machine-Learning-Systems-VolN.tex`` in the Quarto
+    directory, and with ``latex-clean: false`` the sibling ``.log`` survives
+    alongside it. Auto-discovering it means the log-based gates (crossref
+    warnings, overfull boxes, missing glyphs) run on a normal
+    ``binder check pdf`` without the caller remembering ``--log``.
+    """
+    candidate = quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name
+    return candidate if candidate.is_file() else None
 
 
 def _pdftotext(pdf_path: Path) -> str:
@@ -529,6 +559,38 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
             )
         )
 
+    # Missing glyphs: no threshold and no severity tiering — a dropped character
+    # is always a defect. Group by (character, font) so one bad glyph in a
+    # heavily-used font reports as a single actionable row rather than hundreds.
+    glyph_counts: Counter[tuple[str, str]] = Counter()
+    for m in MISSING_CHARACTER.finditer(text):
+        char = m.group(1).strip()
+        # LuaTeX appends the fontspec feature string after a colon
+        # ("[NimbusRoman-Regular]:mode=node;script=latn;..."). Drop it so every
+        # instance of one face groups together instead of fragmenting by feature.
+        font = m.group(2).split(":", 1)[0].strip().strip("[]")
+        glyph_counts[(char, font)] += 1
+
+    if glyph_counts:
+        total = sum(glyph_counts.values())
+        worst = glyph_counts.most_common(5)
+        details = "; ".join(
+            f"{char!r} missing from {font} (x{count})" for (char, font), count in worst
+        )
+        more = len(glyph_counts) - len(worst)
+        suffix = f"; +{more} more glyph/font pair(s)" if more > 0 else ""
+        issues.append(
+            PdfIssue(
+                code="missing-glyph",
+                message=(
+                    f"{total} dropped character(s) across "
+                    f"{len(glyph_counts)} glyph/font pair(s) — this text is absent "
+                    f"from the printed page. {details}{suffix}"
+                ),
+                count=total,
+            )
+        )
+
     return issues
 
 
@@ -852,6 +914,12 @@ def verify_volume_pdf(
             "overfull-vbox",
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "missing-glyph",
+            "No dropped characters (Missing character in build log)",
+            not any(i.code == "missing-glyph" for i in issues),
             skipped=log_path is None,
         ),
         PdfCheckItem(
