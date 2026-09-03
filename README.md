@@ -33,9 +33,11 @@
 </p>
 
 <p align="center">
-  <b><a href="https://mlsysbook.ai">📘 Textbook</a></b> •
-  <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a> + <a href="https://mlsysbook.ai/vol2/">📘 Vol II</a></b> •
-  <b><a href="https://mlsysbook.ai/physical/">🤖 Physical AI</a></b> •
+  <b><a href="https://mlsysbook.ai">📘 Textbook Series</a></b> •
+  <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
+  <b><a href="https://mlsysbook.ai/vol3/">🟣 Vol III (In Dev)</a></b> •
+  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
@@ -100,15 +102,14 @@ Every component connects. The textbook gives you the mental models. The labs let
   <tbody>
     <tr>
       <td align="center">📖</td>
-      <td><b>Textbook</b></td>
-      <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
-      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II</a></td>
-    </tr>
-    <tr>
-      <td align="center">🤖</td>
-      <td><b>Physical AI</b></td>
-      <td>Systems architecture for embodied intelligence: causal boundaries, real-time safety shields, multi-rate bridges, and physical budgets.</td>
-      <td><a href="https://mlsysbook.ai/physical/">Read online</a> · <a href="physical/README.md">Repo guide</a></td>
+      <td><b>Textbook Series</b></td>
+      <td>Four-volume MIT Press textbook series on Machine Learning Systems Architecture:
+        <br>• <a href="https://mlsysbook.ai/vol1/"><b>Vol I: Introduction to Machine Learning Systems</b></a> <i>(Foundations & Release Edition)</i>
+        <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview / Work in Progress)</i>
+        <br>• <a href="https://mlsysbook.ai/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
+        <br>• <a href="https://mlsysbook.ai/vol4/"><b>Vol IV: Physical AI: Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
+      </td>
+      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="https://mlsysbook.ai/vol3/">Vol III (Draft)</a> · <a href="https://mlsysbook.ai/vol4/">Vol IV (Draft)</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
@@ -413,7 +414,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
       <td><b><code>dev</code></b><br><i>← you are here</i></td>
       <td>
         <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
-        <b>Volume II</b> — At Scale (active development)<br>
+        <b>Volume II</b> — Scaling (active development)<br>
         <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, StaffML
       </td>
       <td>

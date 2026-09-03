@@ -19,6 +19,9 @@ from pathlib import Path
 PDF_BY_VOLUME = {
     "vol1": "Machine-Learning-Systems-Vol1.pdf",
     "vol2": "Machine-Learning-Systems-Vol2.pdf",
+    "vol3": "Machine-Learning-Systems-Vol3.pdf",
+    "vol4": "Machine-Learning-Systems-Vol4.pdf",
+    "tinytorch": "TinyTorch.pdf",
 }
 
 XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"

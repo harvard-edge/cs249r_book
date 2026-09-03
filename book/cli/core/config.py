@@ -106,25 +106,33 @@ class ConfigManager:
         # Volume-specific configuration file paths
         self.html_vol1_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
         self.html_vol2_config = self.book_dir / "config" / "_quarto-html-vol2.yml"
+        self.html_vol3_config = self.book_dir / "config" / "_quarto-html-vol3.yml"
+        self.html_vol4_config = self.book_dir / "config" / "_quarto-html-vol4.yml"
         self.pdf_vol1_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
         self.pdf_vol2_config = self.book_dir / "config" / "_quarto-pdf-vol2.yml"
+        self.pdf_vol3_config = self.book_dir / "config" / "_quarto-pdf-vol3.yml"
+        self.pdf_vol4_config = self.book_dir / "config" / "_quarto-pdf-vol4.yml"
         self.epub_vol1_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
         self.epub_vol2_config = self.book_dir / "config" / "_quarto-epub-vol2.yml"
+        self.epub_vol3_config = self.book_dir / "config" / "_quarto-epub-vol3.yml"
+        self.epub_vol4_config = self.book_dir / "config" / "_quarto-epub-vol4.yml"
 
         self.active_config = self.book_dir / "_quarto.yml"
         self.active_index = self.book_dir / "index.qmd"
 
         # Volume-specific site entry points. Keep this aligned with the
-        # GitHub build matrix, which symlinks index.qmd to index-vol{N}.qmd.
+        # GitHub build matrix, which links index.qmd to index-vol{N}.qmd.
         self.index_vol1 = self.book_dir / "index-vol1.qmd"
         self.index_vol2 = self.book_dir / "index-vol2.qmd"
+        self.index_vol3 = self.book_dir / "index-vol3.qmd"
+        self.index_vol4 = self.book_dir / "index-vol4.qmd"
 
     def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the configuration file for a specific format and optional volume.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
+            volume: Optional volume ('vol1', 'vol2', 'vol3', 'vol4') for volume-specific builds
 
         Returns:
             Path to the configuration file
@@ -137,10 +145,16 @@ class ConfigManager:
             volume_config_map = {
                 ("html", "vol1"): self.html_vol1_config,
                 ("html", "vol2"): self.html_vol2_config,
+                ("html", "vol3"): self.html_vol3_config,
+                ("html", "vol4"): self.html_vol4_config,
                 ("pdf", "vol1"): self.pdf_vol1_config,
                 ("pdf", "vol2"): self.pdf_vol2_config,
+                ("pdf", "vol3"): self.pdf_vol3_config,
+                ("pdf", "vol4"): self.pdf_vol4_config,
                 ("epub", "vol1"): self.epub_vol1_config,
                 ("epub", "vol2"): self.epub_vol2_config,
+                ("epub", "vol3"): self.epub_vol3_config,
+                ("epub", "vol4"): self.epub_vol4_config,
             }
             key = (format_type, volume)
             if key in volume_config_map:
@@ -206,6 +220,8 @@ class ConfigManager:
         index_map = {
             "vol1": self.index_vol1,
             "vol2": self.index_vol2,
+            "vol3": self.index_vol3,
+            "vol4": self.index_vol4,
         }
 
         if volume not in index_map:

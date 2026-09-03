@@ -265,7 +265,14 @@ class BuildCommand:
             console.print("[yellow]⚠ Skipping post-build PDF validation (--skip-validate)[/yellow]")
             return True
 
-        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        vol_names = {
+            "vol1": "Volume I",
+            "vol2": "Volume II",
+            "vol3": "Volume III",
+            "vol4": "Volume IV",
+            "tinytorch": "TinyTorch",
+        }
+        volume_name = vol_names.get(volume, volume)
         console.print(f"[cyan]🔍 Post-build PDF validation ({volume_name})[/cyan]")
 
         from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
@@ -723,7 +730,14 @@ class BuildCommand:
         Returns:
             True if build and post-build validation succeeded, False otherwise
         """
-        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        vol_names = {
+            "vol1": "Volume I: Foundations",
+            "vol2": "Volume II: Scaling",
+            "vol3": "Volume III: Agentic",
+            "vol4": "Volume IV: Physical AI",
+            "tinytorch": "TinyTorch",
+        }
+        volume_name = vol_names.get(volume, volume)
         console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
 
         if format_type == "epub":
