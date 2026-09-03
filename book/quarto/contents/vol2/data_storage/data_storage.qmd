@@ -48,6 +48,7 @@ Accelerators can compute faster than storage can feed them. A high-end accelerat
 - Design prefetching, sharding, caching, and locality strategies that prevent fleet-scale accelerator starvation
 - Evaluate accelerator-direct and CPU-bypass storage paths for latency, augmentation, and locality bottlenecks
 - Select checkpoint staging and replication strategies that balance pause time, recovery risk, and storage cost
+- Specify replay, idempotence, and event-time policies that preserve distributed-pipeline correctness
 - Assess retrieval indexes and synthetic-data pipelines as storage workloads with distinct latency, consistency, and governance constraints
 
 :::
@@ -1844,6 +1845,24 @@ At the 10,000-GPU scale, the dataset is no longer a *static collection of files*
 
 At petabyte scale, the data pipeline has to make every transformation reproducible. Raw documents are cleaned, tokenized, packed into training examples, and sharded across storage tiers. Each stage writes an immutable artifact, and each artifact records the input version, code version, schema, and statistical checks it satisfied. Once those dependencies are explicit, the pipeline forms a directed acyclic graph: later artifacts depend on earlier artifacts, and no stage is allowed to rewrite its own history. When a training job starts, the cluster manager verifies that each worker's local NVMe shards match the data snapshot declared for the run. Treating the data pipeline as a graph of versioned artifacts rather than a simple file transfer eliminates the silent data drift that is a primary source of failure in foundation model training.
 
+#### Execution semantics for distributed transformations {#sec-storage-distributed-transformation-semantics}
+
+Versioned artifacts identify *what* a pipeline produced; execution semantics determine whether failures can change that result. Because a distributed stage completes at the pace of its slowest partition, **partition skew**\index{Partition skew!data pipelines} turns aggregate bandwidth into idle capacity when one key owns disproportionate work. If a downstream stage cannot sustain the arrival rate, **backpressure**\index{Backpressure!data pipelines} propagates its service-rate limit upstream by slowing admission or bounding in-flight data. It is a control response to overload, not another name for slow processing.
+
+Failures create a separate correctness question. **At-most-once processing**\index{Processing semantics!at-most-once} can lose an output because it does not replay uncertain work; **at-least-once processing**\index{Processing semantics!at-least-once} can duplicate an effect because it does. An effectively exactly-once outcome requires replayable inputs and idempotent or transactional output keyed by a stable event or transaction identifier [@akidau2015]. Transport delivery alone cannot provide this application-level guarantee.
+
+::: {#exmp-storage-acknowledgment-gap .callout-example title="The acknowledgment gap"}
+
+**Failure trace**: A worker commits event `e42`, then fails before its acknowledgment. Skipping the uncertain event risks loss; replaying a non-idempotent effect duplicates it. Writing by stable key `(feature_version, e42)` prevents the duplicate.
+
+**Systems lesson**: Exactly-once belongs at the output commit boundary, whose record must bind the input position, transformation version, stable identifier, and commit state.
+
+:::
+
+Streaming adds a time boundary to the contract. **Event time**\index{Event time!data pipelines} records when an event occurred; **processing time**\index{Processing time!data pipelines} records when a worker handled it. A **watermark**\index{Watermark!stream processing} estimates that event time has advanced far enough to close a window; a late-data policy determines whether later arrivals update, retract, quarantine, or drop its result [@akidau2015]. Thus, watermarks trade freshness against completeness rather than prove that no older event remains.
+
+These mechanisms bound an optimization's blast radius. Buffering absorbs skew or a slow sink but increases recovery state and freshness lag; aggressive watermarks reduce delay but exclude more late data; retries help only when writes are safe to repeat. A reproducible training snapshot must therefore record source and code versions alongside partitioning, replay policy, stable identifiers, watermark state, and late-data decisions. Operations uses this contract to keep feature backfills and point-in-time joins from mixing histories.
+
 Beyond pipeline orchestration, a hardware optimization eliminates one of the most common bottlenecks: the CPU's role as intermediary between storage and accelerator.
 
 ```{python}
@@ -3045,6 +3064,7 @@ class EconRatiosRecap:
 * **Pipelining hides average latency, not tail latency**: Prefetch buffers must be sized for P99 I/O latency, not average, to prevent accelerator stalls at scale. Buffer depth of $\lceil T_{\text{I/O,p99}} / T_{\text{compute}} \rceil$ is the minimum.
 * **GPUDirect Storage eliminates CPU bottlenecks**: GDS bypasses the CPU in the data path, reducing per-transfer latency by `{python} GDSLatencyRecap.gds_speedup_mult_str` and freeing CPU cores for augmentation.
 * **Checkpoint staging minimizes $T_{\text{write}}$**: Write to local NVMe first, then replicate asynchronously to shared storage. This decouples checkpoint pause time from parallel file system performance.
+* **Pipeline correctness lives at commit boundaries**: Replay protects availability only when stable identifiers and idempotent or transactional writes prevent duplicate effects. Event-time watermarks then make the separate freshness-completeness trade-off explicit.
 * **Economics drive tiering**: The `{python} EconRatiosRecap.tier_cost_ratio_mult_str` cost difference between local NVMe and object storage (and the >3,000$\times$ span from HBM to archive) mandates a tiering strategy (principle \ref{pri-storage-hierarchy}). Egress fees often exceed storage fees; design for total cost of data delivery, not storage cost alone.
 
 :::
