@@ -161,14 +161,22 @@ jobs:
           echo "🔧 Installing pre-commit hooks..."
           pre-commit install --install-hooks
 
-          echo "🔄 Running pre-commit on all files..."
           echo "Python version: $(python --version)"
-          if pre-commit run --all-files --verbose; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔄 Running pre-commit on PR changes (origin/${{ github.base_ref }}..HEAD)..."
+            CMD="pre-commit run --from-ref origin/${{ github.base_ref }} --to-ref HEAD --verbose"
+          elif [ "${{ github.event_name }}" = "push" ] && git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            echo "🔄 Running pre-commit on push changes (HEAD~1..HEAD)..."
+            CMD="pre-commit run --from-ref HEAD~1 --to-ref HEAD --verbose"
+          else
+            echo "🔄 Running pre-commit on all files..."
+            CMD="pre-commit run --all-files --verbose"
+          fi
+
+          if eval "$CMD"; then
             echo "✅ Pre-commit checks: PASSED"
           else
             echo "❌ Pre-commit checks: FAILED"
-            echo "📋 Showing detailed output:"
-            pre-commit run --all-files --verbose || true
             exit 1
           fi
 
@@ -229,7 +237,11 @@ jobs:
             TARGET="dev"
 
             # Selective auto-detection of modified volume paths
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD 2>/dev/null || echo "")
+            else
+              CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            fi
             echo "📝 Changed files: $CHANGED_FILES"
 
             HAS_VOL1=false
@@ -240,11 +252,11 @@ jobs:
 
             while IFS= read -r file; do
               [ -z "$file" ] && continue
-              if [[ "$file" =~ ^books/vol1/ ]]; then HAS_VOL1=true; fi
-              if [[ "$file" =~ ^books/vol2/ ]]; then HAS_VOL2=true; fi
-              if [[ "$file" =~ ^books/vol3/ ]]; then HAS_VOL3=true; fi
-              if [[ "$file" =~ ^books/vol4/ ]]; then HAS_VOL4=true; fi
-              if [[ "$file" =~ ^publishing/ || "$file" =~ ^shared/ || "$file" =~ ^\.github/ ]]; then HAS_SHARED=true; fi
+              if [[ "$file" =~ ^books/vol1/ ]] || [[ "$file" =~ ^publishing/quarto/contents/vol1/ ]]; then HAS_VOL1=true; fi
+              if [[ "$file" =~ ^books/vol2/ ]] || [[ "$file" =~ ^publishing/quarto/contents/vol2/ ]]; then HAS_VOL2=true; fi
+              if [[ "$file" =~ ^books/vol3/ ]] || [[ "$file" =~ ^publishing/quarto/contents/vol3/ ]]; then HAS_VOL3=true; fi
+              if [[ "$file" =~ ^books/vol4/ ]] || [[ "$file" =~ ^publishing/quarto/contents/vol4/ ]]; then HAS_VOL4=true; fi
+              if [[ "$file" =~ ^publishing/binder ]] || [[ "$file" =~ ^shared/ ]] || [[ "$file" =~ ^\.github/ ]]; then HAS_SHARED=true; fi
             done <<< "$CHANGED_FILES"
 
             if [ "$HAS_SHARED" = true ]; then
