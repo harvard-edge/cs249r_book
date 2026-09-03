@@ -197,13 +197,45 @@ How do we minimize accuracy loss when moving to low-precision integer arithmetic
 
 ---
 
-## Systems Reality: Integer Systolic Arrays
+## Systems Reality: Integer Systolic Arrays and DP4A Instructions
 
-Why is INT8 faster on modern hardware?
+Why do INT8 Tensor Cores achieve up to **4× higher throughput** than FP32 floating-point units?
 
-1. **Hardware Register Packing**: A 512-bit AVX-512 register can hold only $16$ float32 numbers, but can pack **$64$ int8 numbers** in parallel (a 4× SIMD parallelism multiplier).
-2. **NVIDIA Tensor Core Throughput**: On NVIDIA Hopper (H100) and Blackwell (B200) architectures, INT8 Tensor Core throughput is **2× higher** than FP16 and **4× higher** than FP32.
-3. **Memory Bandwidth Saturation**: Autoregressive transformer token generation is strictly memory-bound. Transferring 1 byte per weight instead of 4 bytes delivers an immediate **4× speedup in token generation throughput**.
+1. **Quadratic Silicon Area & Energy Scaling**: Digital multiplier circuit area scales quadratically with bitwidth $O(b^2)$. An 8-bit integer multiplier requires $\sim 16\times$ fewer logic gates and consumes $\sim 20\times$ less dynamic energy ($0.2\text{ pJ}$ vs. $4.0\text{ pJ}$) than a 32-bit floating-point multiplier, allowing chip designers to pack 4× more integer compute units into the same thermal envelope.
+2. **SIMD Vector Packing & DP4A Instructions**: On CPUs, a 512-bit vector register packs **64 INT8 values** compared to only 16 FP32 values. On NVIDIA GPUs, dedicated **DP4A** (Dot Product of 4 8-bit elements with 32-bit Accumulation)[^dp4a-footnote] instructions compute 4-element dot products in a single clock cycle.
+3. **Systolic Tensor Core Matrix Multiplication**: In Tensor Core architectures, INT8 matrix multiply-accumulate (`mma.sync`) instructions execute $16 \times 16 \times 32$ integer matrix tiles per warp per cycle, delivering double the math throughput of FP16 Tensor Cores and 4× the throughput of FP32 ALUs.
+4. **Memory Bandwidth Relief**: In memory-bound regimes (such as batch-1 LLM generation), memory bus throughput is the absolute bottleneck. Transferring 1 byte per weight instead of 4 bytes delivers an immediate **4× speedup in token generation throughput**.[^quant-roofline-footnote]
+
+[^dp4a-footnote]: The NVIDIA `dp4a` hardware instruction computes a 4-element 8-bit integer vector dot product with 32-bit integer accumulation in a single instruction cycle: $\text{acc} \leftarrow \text{acc} + \sum_{i=0}^3 a_i \cdot b_i$. In Tensor Core architectures (Volta through Blackwell), this concept is expanded into Matrix Multiply-Accumulate (`mma.sync`) instructions executing dense integer matrix tiles directly within warp registers.
+
+[^quant-roofline-footnote]: In memory-bandwidth-bound inference regimes (such as batch-1 autoregressive decoding with $I \ll I_{\text{ridge}}$), latency is directly proportional to the total bytes transferred over the memory bus: $T = \text{Bytes} / BW_{\text{peak}}$. By reducing parameter precision from 4 bytes (FP32) to 1 byte (INT8), quantization cuts total HBM3 bus transfers by $75\%$, delivering a theoretical $4\times$ throughput speedup on memory-bound workloads.
+
+---
+
+::: {.callout-note}
+## PyTorch Systems Bridge: `torch.ao.quantization` and NVIDIA TensorRT
+
+In production systems, quantization is automated through compiler frameworks:
+
+```python
+import torch
+import torch.ao.quantization as quantization
+
+# Post-Training Static Quantization in PyTorch
+model.eval()
+model.qconfig = quantization.get_default_qconfig('fbgemm')  # FBGEMM for x86 CPUs
+prepared_model = quantization.prepare(model)
+
+# Calibrate on representative dataset batch
+with torch.no_grad():
+    for data, _ in calibration_loader:
+        prepared_model(data)
+
+quantized_model = quantization.convert(prepared_model)
+```
+
+In high-performance GPU deployments, **NVIDIA TensorRT** and **TensorRT-LLM** perform automated INT8 and FP8 (E4M3/E5M2) calibration using KL-divergence minimization to find the optimal scale factor $S$. TensorRT then compiles the model into fused INT8 Tensor Core execution graphs with zero runtime dequantization overhead.
+:::
 
 ---
 
@@ -211,7 +243,7 @@ Why is INT8 faster on modern hardware?
 
 In this chapter, we constructed the INT8 quantization engine of TinyTorch. We analyzed the numerical distribution of trained weights, proving why 32-bit floats contain significant precision redundancy for inference.
 
-We derived the mathematical equations for Symmetric and Affine quantization, implemented `quantize_symmetric_int8`, and built the `QuantizedLinear` layer to compress model parameter storage by exactly 75%. Finally, we examined Post-Training Quantization calibration and hardware integer acceleration on modern accelerator systolic arrays.
+We derived the mathematical equations for Symmetric and Affine quantization, implemented `quantize_symmetric_int8`, and built the `QuantizedLinear` layer to compress model parameter storage by exactly 75%. Finally, we examined Post-Training Quantization calibration, hardware DP4A instructions, and integer systolic arrays on modern accelerator architectures.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways

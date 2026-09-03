@@ -219,39 +219,89 @@ class MaxPool2d(Layer):
 
 
 ::: {.callout-note}
-## PyTorch Systems Bridge: `torch.nn.Conv2d` and cuDNN Engine Selection
+## PyTorch Systems Bridge: `torch.nn.Conv2d`, `torch.nn.Unfold`, and cuDNN Engine Selection
 
-When you instantiate `torch.nn.Conv2d` in PyTorch, the runtime does not execute nested loops. It delegates to **NVIDIA cuDNN**, which profiles multiple execution algorithms at runtime (`torch.backends.cudnn.benchmark=True`):
-1. **Direct GEMM via `im2col`**: Unrolls patches for moderate image sizes.
-2. **Winograd Convolution**: Uses minimal filtering algorithms to compute $3 	imes 3$ convolutions with 2.25× fewer multiplications.
-3. **FFT-based Convolution**: Transforms large kernels ($7 	imes 7+$) into the frequency domain via Fast Fourier Transforms.
+When you instantiate `torch.nn.Conv2d` in PyTorch, the runtime never executes nested sliding-window loops. Instead, it delegates execution to **NVIDIA cuDNN**, which evaluates and profiles multiple kernel execution engines at runtime (`torch.backends.cudnn.benchmark = True`):[^cudnn-algos]
+
+1. **Direct GEMM via `im2col` (`CUDNN_CONVOLUTION_FWD_ALGO_GEMM`)**: Unrolls receptive field patches into a dense 2D matrix, delegating execution to high-throughput BLAS matrix multiplication routines (CUTLASS / cuBLAS).
+2. **Implicit GEMM (`CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM`)**: Calculates memory offsets dynamically in registers during MMA tile loading, avoiding the physical memory footprint explosion of explicit unrolling.
+3. **Winograd Convolution (`CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD`)**: Applies minimal filtering algorithms to compute $3 \times 3$ convolutions with $2.25\times$ fewer scalar multiplications by transforming inputs and filters into the Winograd polynomial domain.[^winograd-footnote]
+4. **FFT-based Convolution (`CUDNN_CONVOLUTION_FWD_ALGO_FFT`)**: Transforms large spatial kernels ($7 \times 7$ and above) into the frequency domain via Fast Fourier Transforms, turning convolution into point-wise multiplication ($O(N \log N)$ complexity).
+
+PyTorch also exposes the raw `im2col` transform directly through `torch.nn.Unfold`:
+
+```python
+import torch
+import torch.nn as nn
+
+# Input batch: (B=2, C=3, H=32, W=32)
+x = torch.randn(2, 3, 32, 32, device="cuda" if torch.cuda.is_available() else "cpu")
+
+# Unfold extracts sliding local blocks into columns (im2col)
+unfold = nn.Unfold(kernel_size=(3, 3), padding=1, stride=1)
+x_unfolded = unfold(x)  # Shape: (B, C * K * K, L_patches) = (2, 27, 1024)
+
+# Filters matrix: (C_out, C_in * K * K)
+conv_weight = torch.randn(16, 27, device=x.device)
+
+# Convolution executed as a batched matrix multiplication (GEMM)
+# (C_out, C_in * K * K) @ (B, C_in * K * K, L_patches) -> (B, C_out, L_patches)
+out_gemm = torch.matmul(conv_weight, x_unfolded)
+
+# Reshape back to 4D spatial tensor: (B, C_out, H_out, W_out)
+out_spatial = out_gemm.view(2, 16, 32, 32)
+```
 :::
 
-## Systems Reality: The `im2col` GEMM Transformation
+[^cudnn-algos]: NVIDIA cuDNN provides heuristic and autotuning engine selectors (`cudnnGetConvolutionForwardAlgorithm_v7`). When `torch.backends.cudnn.benchmark = True`, cuDNN runs micro-benchmarks on the first iteration across all candidate algorithms and caches the fastest kernel for each unique input tensor geometry.
 
-While nested Python loops illustrate the mathematical definition of convolution, their execution speed is crippled by loop overhead and uncoalesced memory reads.
+[^winograd-footnote]: Winograd convolution for $F(2 \times 2, 3 \times 3)$ computes 4 output values from an input tile of size $4 \times 4$ using a $3 \times 3$ kernel. Naive sliding window requires $2 \times 2 \times 3 \times 3 = 36$ multiplications, whereas Winograd evaluates $\mathbf{Y} = \mathbf{A}^T \left[ (\mathbf{G} \mathbf{g} \mathbf{G}^T) \odot (\mathbf{B}^T \mathbf{d} \mathbf{B}) \right] \mathbf{A}$ using only 16 multiplications—achieving a theoretical $2.25\times$ arithmetic speedup at the cost of additional addition transforms and numerical precision degradation in `float16`.
 
-Production frameworks (PyTorch, cuDNN, TensorRT) lower 2D convolutions into a single **General Matrix Multiplication (GEMM)** using the **`im2col`** (image-to-column) transformation:
+## Systems Reality: Why Spatial Convolutions Exploit Systolic GEMMs via `im2col`
+
+While nested loops illustrate the sliding-window formulation of 2D convolution, executing seven nested loops in software stalls modern processors:
+
+$$\text{Loop Complexity} = O(B \cdot C_{\text{out}} \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot C_{\text{in}} \cdot K_h \cdot K_w)$$
+
+On modern hardware (CPUs with SIMD registers, GPUs with Streaming Multiprocessors), nested loops with non-contiguous strided memory access cause severe instruction latency, branch mispredictions, and cache thrashing. More critically, modern AI accelerators are physically built around **systolic matrix-multiply-accumulate (MMA) arrays** (such as NVIDIA Tensor Cores or Google TPUs). Systolic arrays stream matrix tiles through a 2D grid of interconnected register processing elements, achieving peak computational throughput ($O(N^3)$ multiply-accumulate operations with only $O(N^2)$ memory loads from SRAM).
+
+To harness systolic hardware for spatial convolutions, framework runtimes lower 2D convolutions into a single **General Matrix Multiplication (GEMM)** using the **`im2col` (image-to-column)** transformation:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  The im2col GEMM Pipeline                                   │
-├─────────────────────────────────────────────────────────────┤
-│  1. Unroll Input Patches (im2col):                          │
-│     Input Image (B, C_in, H, W) ──> Matrix (N_patches, C_in*K*K)│
-│                                                             │
-│  2. Reshape Filters:                                        │
-│     Filters (C_out, C_in, K, K) ──> Matrix (C_in*K*K, C_out)│
-│                                                             │
-│  3. Execute High-Speed GEMM:                                │
-│     Output Matrix = Patches @ Filters  (BLAS / Tensor Cores)│
-│                                                             │
-│  4. Reshape to Output Tensor (col2im):                      │
-│     Output Matrix ──> Output Tensor (B, C_out, H_out, W_out)│
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  The im2col GEMM Transformation Pipeline                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. Unroll Spatial Patches (im2col):                                    │
+│     Input Tensor: (B, C_in, H_in, W_in)                                 │
+│          │                                                              │
+│          ▼ [Gather local (C_in, K, K) patches across spatial grid]      │
+│     Matrix X_col: (B * H_out * W_out, C_in * K * K)                     │
+│                                                                         │
+│  2. Reshape Parameter Filters:                                          │
+│     Filter Tensor: (C_out, C_in, K, K)                                  │
+│          │                                                              │
+│          ▼ [Flatten spatial filter weights into rows]                   │
+│     Matrix W_row: (C_out, C_in * K * K)                                 │
+│                                                                         │
+│  3. Execute High-Throughput GEMM on Systolic Hardware:                  │
+│     Y_col = X_col @ W_row^T                                             │
+│     Dimensions: (B * H_out * W_out, C_in * K * K) @ (C_in * K * K, C_out)│
+│     Result: (B * H_out * W_out, C_out)  ──> Near-Peak GPU TFLOPs!       │
+│                                                                         │
+│  4. Reshape to Output Spatial Tensor (col2im):                          │
+│     Matrix Y_col ──> Output Tensor: (B, C_out, H_out, W_out)            │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-By unrolling spatial patches into a dense 2D matrix, convolution is transformed into standard matrix multiplication, enabling hardware systolic arrays (such as NVIDIA Tensor Cores) to execute convolutions at peak hardware TFLOPs.
+### The Memory vs. Compute Trade-off in `im2col`
+
+The `im2col` transformation involves a deliberate systems trade-off: **memory redundancy for arithmetic throughput**.
+
+Because neighboring convolutional patches overlap spatially, unrolling an input image replicates pixel values in memory:
+- For a $3 \times 3$ filter with stride $S = 1$, each input pixel is copied into up to $K_h \times K_w = 9$ different rows of the unfolded matrix $\mathbf{X}_{\text{col}}$.
+- For an input feature map of size $(3, 224, 224)$, explicit unrolling expands the memory footprint from $602\text{ KB}$ to approximately **$5.4\text{ MB}$**.
+
+In modern computer architecture, this trade-off is overwhelmingly beneficial: DRAM and High-Bandwidth Memory (HBM) bandwidth is abundant, whereas systolic GEMM units deliver 10× to 100× higher arithmetic density than scalar sliding-window iteration. In production runtimes, **Implicit GEMM** kernels eliminate even this memory expansion by performing `im2col` index arithmetic on-the-fly directly inside GPU register files during matrix tile loading.
 
 ---
 

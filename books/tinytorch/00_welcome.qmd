@@ -40,12 +40,16 @@ loss = y.sum()
 loss.backward()
 ```
 
-In seven lines of Python, the user triggers:
-1. Virtual GPU page allocations across High Bandwidth Memory (HBM).
-2. Tensor metadata initialization with 2D stride configurations.
-3. CUDA stream dispatch to specialized systolic tensor cores.
-4. Dynamic tape recording into an in-memory Directed Acyclic Graph (DAG).
-5. Vector-Jacobian Product (VJP) backpropagation via a multithreaded C++ topological execution queue.
+In seven lines of Python, the user triggers a massive cascade of low-level systems machinery:
+1. **Virtual Memory Allocation**: GPU page table mappings allocate physical High Bandwidth Memory (HBM) via a specialized caching allocator, avoiding costly operating system kernel context switches.[^caching-allocator]
+2. **Tensor Metadata Initialization**: Metadata structs (`c10::TensorImpl`) configure 2D stride arrays, data pointers, and device target IDs in native C++.
+3. **Hardware Dispatch and Execution**: A C++ dispatcher lowers the matrix multiplication (`x @ w`) into a cuBLAS GEMM kernel, streaming tiled matrix blocks to hardware systolic tensor cores over high-speed on-chip SRAM buses.[^dram-latency]
+4. **Dynamic Autograd Recording**: The runtime constructs an in-memory Directed Acyclic Graph (DAG), capturing function pointers and intermediate activation buffers on an execution tape.
+5. **Reverse-Mode Differentiation**: Calling `loss.backward()` initiates a multithreaded topological execution queue, walking backwards through the DAG and evaluating Vector-Jacobian Products (VJPs) to accumulate gradients into weight storage buffers.
+
+[^caching-allocator]: Production deep learning runtimes avoid invoking system-level `cudaMalloc` calls during training iterations. Doing so causes GPU synchronization stalls and kernel driver overhead. Instead, frameworks manage a user-space memory pool (such as `c10::cuda::CUDACachingAllocator`), subdividing large pre-allocated memory blocks into tensor buffers.
+
+[^dram-latency]: Accessing main DRAM or GPU HBM incurs a latency of 50--100 nanoseconds (~200--400 clock cycles), whereas accessing on-chip L1 cache or SRAM takes only 0.5--1 nanoseconds (~1--4 clock cycles). Systolic arrays and compute engines stall whenever data cannot be streamed from cache fast enough to saturate ALU arithmetic pipelines.
 
 When this pipeline works, it feels like magic. But when it fails—when an out-of-memory (OOM) error strikes, when in-place memory mutation corrupts the autograd graph, or when non-contiguous strides stall memory bandwidth—the abstraction collapses. The engineer cannot fix what they cannot see.
 
@@ -53,7 +57,7 @@ When this pipeline works, it feels like magic. But when it fails—when an out-o
 
 ## The Lineage of Educational Systems
 
-The black-box problem is not unique to machine learning. Every major branch of computer systems engineering has confronted the tension between industrial complexity and pedagogical clarity. In each case, the discipline advanced by creating **minimal, transparent, fully-functional reference systems**:
+The black-box problem is not unique to machine learning. Every major branch of computer systems engineering has confronted the tension between industrial complexity and pedagogical clarity. In each case, the discipline advanced by creating **minimal, transparent, fully functional reference systems**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -103,7 +107,9 @@ Every architectural decision in TinyTorch is governed by the **Data · Algorithm
 
 - **Data ($\mathcal{D}$)**: How numbers are structured in memory. Are tensors contiguous? Are activations stored in `float32` (4 bytes) or quantized to `int8` (1 byte)? How do strides project multidimensional coordinates onto flat memory?
 - **Algorithm ($\mathcal{A}$)**: How computation is represented mathematically. How does reverse-mode automatic differentiation accumulate gradients? How does the attention mechanism compute soft alignment weights?
-- **Machine ($\mathcal{M}$)**: The physical hardware execution constraints. How does arithmetic intensity dictate whether a layer is memory-bandwidth bound or compute bound? How does cache tiling avoid redundant DRAM traffic?
+- **Machine ($\mathcal{M}$)**: The physical hardware execution constraints. How does arithmetic intensity dictate whether a layer is memory-bandwidth bound or compute bound? How does cache tiling avoid redundant DRAM traffic?[^cache-line-info]
+
+[^cache-line-info]: Modern CPUs and GPUs transfer data between memory and execution cores in fixed units called **cache lines** (typically 64 bytes on modern x86/ARM CPUs and 128 bytes on NVIDIA GPUs). Fetching a single isolated 4-byte `float32` value brings in an entire 64-byte block (16 floats). If algorithms access memory with non-contiguous strides, up to 93.75% of the transferred memory bandwidth is wasted.
 
 ```
          ┌────────────────┐
@@ -174,5 +180,5 @@ We deconstructed the modern ML framework into a four-tiered architecture spannin
 ::: {.callout-chapter-connection}
 ## Chapter Connection: Laying the First Brick
 
-Where do we begin? Every neural network begins with numbers arranged in memory. In **Chapter 2 (Tensors and Memory Layout)**, we lay the very first brick of TinyTorch: building the multidimensional `Tensor` container, deriving stride arithmetic equations, and implementing zero-copy memory views.
+Where do we begin? Every neural network begins with numbers arranged in memory. In **Tensors and Memory Layout**, we lay the very first brick of TinyTorch: building the multidimensional `Tensor` container, deriving stride arithmetic equations, and implementing zero-copy memory views.
 :::

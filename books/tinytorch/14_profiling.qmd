@@ -6,7 +6,7 @@ title: "Performance Profiling and Bottleneck Identification"
 
 _Why does optimizing an operator without measuring its arithmetic intensity almost always waste engineering effort?_
 
-In machine learning systems engineering, optimizing code based on intuition is a recipe for wasted effort: accelerating a matrix multiplication that accounts for only 2% of runtime or vectorizing an operator that is strictly memory bandwidth-bound produces zero observable speedup. To make disciplined, high-impact performance optimizations, systems engineers rely on empirical measurement frameworks. Every deep learning operation is physically constrained by one of two hardware ceilings: **Memory Bandwidth** (the rate at which bytes can be transferred from RAM to compute registers) or **Compute Throughput** (the rate at which ALUs can execute arithmetic instructions). By formulating exact parameter counts, theoretical FLOP calculations, memory allocation tracking, and latency profiling into a unified **Roofline Model**, we provide the diagnostic foundation that guides all subsequent compression and acceleration techniques in TinyTorch.
+In machine learning systems engineering, optimizing code based on intuition is a recipe for wasted effort: accelerating a matrix multiplication that accounts for only 2% of runtime or vectorizing an operator that is strictly memory bandwidth-bound produces zero observable speedup. To make disciplined, high-impact performance optimizations, systems engineers rely on empirical measurement frameworks. Every deep learning operation is physically constrained by one of two hardware ceilings: **Memory Bandwidth** (the rate at which bytes can be transferred from RAM/HBM to compute registers) or **Compute Throughput** (the rate at which ALUs and Tensor Cores can execute arithmetic instructions). By formulating exact parameter counts, theoretical FLOP calculations, memory allocation tracking, and latency profiling into a unified **Roofline Model**, we provide the diagnostic foundation that guides all subsequent compression and acceleration techniques in TinyTorch.
 
 ::: {.callout-learning-objectives}
 ## Learning Objectives
@@ -41,7 +41,7 @@ Before modifying a single line of kernel code, we must profile the baseline work
 
 A **FLOP (Floating-Point Operation)** represents a single arithmetic operation (one addition or one multiplication). A fused multiply-accumulate ($y \leftarrow y + a \times b$) counts as **2 FLOPs**.
 
-### 1. Dense Linear Layer
+### Dense Linear Layer
 
 For $\mathbf{Y} = \mathbf{X} \mathbf{W} + \mathbf{b}$ with $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$:
 
@@ -49,7 +49,7 @@ $$\text{Parameters} = D_{\text{in}} \times D_{\text{out}} + D_{\text{out}}$$
 
 $$\text{FLOPs} = 2 \times B \times D_{\text{in}} \times D_{\text{out}}$$
 
-### 2. 2D Convolutional Layer
+### 2D Convolutional Layer
 
 For input $(B, C_{\text{in}}, H_{\text{in}}, W_{\text{in}})$ and filters $(C_{\text{out}}, C_{\text{in}}, K_h, K_w)$:
 
@@ -57,7 +57,7 @@ $$\text{Parameters} = C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w 
 
 $$\text{FLOPs} = 2 \times B \times C_{\text{out}} \times H_{\text{out}} \times W_{\text{out}} \times (C_{\text{in}} \cdot K_h \cdot K_w)$$
 
-### 3. Multi-Head Self-Attention Block
+### Multi-Head Self-Attention Block
 
 For sequence length $S$, model dimension $D$, and $H$ heads ($d_k = D/H$):
 - Q, K, V, O Linear Projections ($4 \times \text{Linear}$): $4 \times (2 B S D^2) = 8 B S D^2\text{ FLOPs}$.
@@ -72,7 +72,7 @@ $$\text{Total Attention FLOPs} = 8 B S D^2 + 4 B S^2 D$$
 
 The **Roofline Model** (Williams et al., 2009) defines the maximum achievable performance of any hardware system as a function of **Arithmetic Intensity ($I$)**:
 
-$$\text{Arithmetic Intensity } I = \frac{\text{Total Arithmetic FLOPs}}{\text{Total DRAM Bytes Transferred}} \quad \left( \frac{\text{FLOPs}}{\text{Byte}} \right)$$
+$$\text{Arithmetic Intensity } I = \frac{\text{Total Arithmetic FLOPs}}{\text{Total DRAM / HBM Bytes Transferred}} \quad \left( \frac{\text{FLOPs}}{\text{Byte}} \right)$$
 
 $$\text{Attainable Performance } P = \min\left( \text{Peak Compute Throughput } P_{\text{peak}}, \quad I \times \text{Peak Memory Bandwidth } BW_{\text{peak}} \right)$$
 
@@ -86,11 +86,21 @@ $$I_{\text{ridge}} = \frac{P_{\text{peak}}\text{ (FLOP/s)}}{BW_{\text{peak}}\tex
 **Figure 14.1: The Roofline Performance Model.** Operators with arithmetic intensity below the ridge point (such as LayerNorm, ReLU, and single-token generation) are memory-bound. Batched GEMMs and large convolutions operate in the compute-bound plateau.
 :::
 
+On modern accelerator hardware, the ridge point is exceptionally high. For example, an NVIDIA H100 SXM5 GPU delivers $\sim 1{,}000\text{ TFLOPS}$ ($10^{15}\text{ FLOP/s}$) of FP16 Tensor Core compute against $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth,[^hbm3-footnote] resulting in a ridge point:
+
+$$I_{\text{ridge}} = \frac{1{,}000 \times 10^{12}\text{ FLOP/s}}{3.35 \times 10^{12}\text{ Bytes/s}} \approx 298.5\text{ FLOPs/Byte}$$
+
+By contrast, on-chip SRAM caches located directly within each Streaming Multiprocessor (SM) deliver over $100\text{ TB/s}$ of aggregate bandwidth at sub-nanosecond latency,[^sram-footnote] demonstrating why keeping intermediate data pinned in registers and L1/SRAM is the central imperative of kernel optimization.
+
+[^hbm3-footnote]: High-Bandwidth Memory (HBM3/HBM3e) achieves multi-terabyte-per-second bandwidth (e.g., 3.35 TB/s on NVIDIA H100 SXM5, 4.8 TB/s on H200, and 8.0 TB/s on Blackwell B200) by vertically stacking DRAM dies with through-silicon vias (TSVs) over an ultra-wide 5120-bit interface, compared to standard dual-channel DDR5 server memory at ~50–100 GB/s across a 128-bit bus.
+
+[^sram-footnote]: Modern GPU Streaming Multiprocessors (SMs) allocate 128 KB to 228 KB of ultra-fast on-chip SRAM configurable as L1 data cache and shared memory. Across 132 SMs on an H100 GPU, this represents ~30 MB of aggregate on-chip SRAM delivering over 100 TB/s of bandwidth with ~1–2 ns latency, compared to off-chip HBM3 access at 3.35 TB/s and ~50–100 ns latency.
+
 ::: {.callout-principle}
 ## The Diagnostic Rule
 
-- **If $I < I_{\text{ridge}}$ (Memory-Bound)**: Optimizing arithmetic instructions (e.g., AVX-512 vectorization) will yield **zero speedup**. You must reduce memory traffic via **Operator Fusion** (Chapter 17) or **Quantization** (Chapter 15).
-- **If $I > I_{\text{ridge}}$ (Compute-Bound)**: Memory transfers are negligible; you must maximize arithmetic throughput via **Cache Tiling** and **Systolic Matrix Multiplication** (Chapter 17).
+- **If $I < I_{\text{ridge}}$ (Memory-Bound)**: Arithmetic pipelines spend the majority of clock cycles stalled waiting for data transfers over the memory bus. Optimizing arithmetic instructions (e.g., vectorization) will yield **zero speedup**. You must reduce memory traffic via **Operator Fusion** (Chapter 17) or **Quantization** (Chapter 15).
+- **If $I > I_{\text{ridge}}$ (Compute-Bound)**: Memory transfers are completely hidden behind compute latency; you must maximize arithmetic throughput via **Cache Tiling** and **Systolic Matrix Multiplication** (Chapter 17).
 :::
 
 ---
@@ -215,6 +225,34 @@ print(f"Peak Dynamic Memory Allocation: {peak_mem:.2f} MB")
 
 ---
 
+::: {.callout-note}
+## PyTorch Systems Bridge: `torch.profiler` and Graph-Level Cost Models
+
+In production PyTorch pipelines, performance diagnostics are performed via `torch.profiler` and the Kineto tracing engine:
+
+```python
+import torch
+from torch.profiler import profile, record_function, ProfilerActivity
+
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    record_shapes=True,
+    profile_memory=True,
+    with_flops=True
+) as prof:
+    with record_function("model_inference"):
+        model(inputs)
+
+# Export visual timeline trace for Chrome / Perfetto inspection
+prof.export_chrome_trace("timeline_trace.json")
+print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+```
+
+Under the hood, modern compilers like **PyTorch 2.0 `torch.compile` (TorchInductor)** evaluate the Roofline arithmetic intensity of captured FX graph subgraphs. When an operator chain has low arithmetic intensity ($I < I_{\text{ridge}}$), TorchInductor automatically fuses the sequence into a unified OpenAI Triton GPU kernel, eliminating intermediate HBM reads and writes.
+:::
+
+---
+
 ## Summary
 
 In this chapter, we constructed the diagnostic profiling engine of TinyTorch. We examined why performance optimization must be grounded in empirical data, deriving exact mathematical formulas for parameter storage and theoretical FLOP counts.
@@ -224,7 +262,7 @@ We formulated the Williams Roofline Model, defining the critical boundary betwee
 ::: {.callout-takeaways}
 ## Chapter Takeaways
 
-- **The Roofline Principle**: Operators are either bounded by DRAM memory bandwidth or ALU compute throughput; arithmetic intensity ($I = \text{FLOPs}/\text{Byte}$) identifies the bottleneck.
+- **The Roofline Principle**: Operators are either bounded by DRAM/HBM memory bandwidth or ALU compute throughput; arithmetic intensity ($I = \text{FLOPs}/\text{Byte}$) identifies the bottleneck.
 - **FLOP Accounting**: Standard Linear projections execute $2 B D_{\text{in}} D_{\text{out}}$ FLOPs; Multi-Head Attention executes $8 B S D^2 + 4 B S^2 D$ FLOPs.
 - **Latency Rigor**: Reliable benchmarking requires cache warmup passes, disabling Python garbage collection during timed runs, and reporting percentile metrics (P50, P90, P99).
 - **Targeted Optimization**: Memory-bound operators require memory traffic reduction (quantization, fusion); compute-bound operators require hardware parallelism and cache tiling.

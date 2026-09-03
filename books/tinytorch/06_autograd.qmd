@@ -51,6 +51,44 @@ Historically, computational mathematics offered two primary approaches to differ
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Why Symbolic Differentiation Collapses: Expression Swell
+
+Consider a composition of $L$ mathematical operations:
+
+$$y = f_L(f_{L-1}(\dots f_1(x)))$$
+
+Applying the product rule and chain rule symbolically without caching intermediate values generates an expression tree whose node count grows exponentially:
+
+$$\text{AST Nodes} = O(2^L)$$
+
+For a standard 50-layer network, the symbolic derivative formula contains over $10^{15}$ terms. Attempting to parse or simplify this algebraic graph exhausts memory before numerical evaluation can even begin.
+
+### The Mathematics of Reverse-Mode Autograd: Vector-Jacobian Products
+
+Reverse-mode autograd bypasses symbolic expansion by operating directly on numerical values. Let a computation be defined as an ordered sequence of intermediate variable tensors $\mathbf{v}_1, \mathbf{v}_2, \dots, \mathbf{v}_K$, where $\mathbf{v}_K = \mathcal{L} \in \mathbb{R}$ is the scalar objective.
+
+We define the **adjoint** (the upstream sensitivity gradient) of variable $\mathbf{v}_i$ as:
+
+$$\overline{\mathbf{v}}_i = \frac{\partial \mathcal{L}}{\partial \mathbf{v}_i}$$
+
+By the multivariate chain rule, the adjoint of $\mathbf{v}_i$ is computed by summing the contributions from all immediate successor nodes $\text{children}(i)$:
+
+$$\overline{\mathbf{v}}_i = \sum_{j \in \text{children}(i)} \overline{\mathbf{v}}_j \frac{\partial \mathbf{v}_j}{\partial \mathbf{v}_i} = \sum_{j \in \text{children}(i)} \overline{\mathbf{v}}_j \mathbf{J}_{j,i}$$
+
+where $\mathbf{J}_{j,i} = \frac{\partial \mathbf{v}_j}{\partial \mathbf{v}_i} \in \mathbb{R}^{\dim(\mathbf{v}_j) \times \dim(\mathbf{v}_i)}$ is the Jacobian matrix.
+
+::: {.callout-principle}
+## The Vector-Jacobian Product (VJP) Invariant
+
+In high-dimensional machine learning, materializing the full Jacobian matrix $\mathbf{J}_{j,i}$ in memory is impossible (e.g., for an activation tensor of size $32 \times 4096$, the Jacobian contains $1.7 \times 10^{10}$ elements, requiring $68\text{ GB}$ of RAM for a single layer).
+
+Reverse-mode autograd **never materializes the Jacobian matrix**. Instead, it computes the **Vector-Jacobian Product (VJP)**:
+
+$$\text{VJP}(\overline{\mathbf{v}}_j) = \overline{\mathbf{v}}_j \mathbf{J}_{j,i}$$
+
+evaluating the vector-matrix contraction directly as a localized operation that scales linearly with input tensor size ($O(D)$ memory).
+:::
+
 ::: {.callout-principle}
 ## The Reverse-Mode Scaling Advantage
 
@@ -70,8 +108,10 @@ In TinyTorch (as in PyTorch), the computation graph is **dynamic** (Define-by-Ru
 ### The Function Contract
 
 Every differentiable operation is represented by a `Function` class that implements a two-phase contract:
-1. **Forward Pass (`__init__`)**: Saves input tensors required for the backward pass (`saved_tensors`).
+1. **Forward Pass (`__init__`)**: Saves input tensors required for the backward pass (`saved_tensors`).[^activation-checkpoint]
 2. **Backward Pass (`apply`)**: Receives the upstream incoming gradient (`grad_output`) and returns the Vector-Jacobian Product for each input.
+
+[^activation-checkpoint]: Retaining `saved_tensors` across all $L$ layers during the forward pass requires $O(L \cdot B \cdot D)$ GPU VRAM, reaching peak memory consumption at the loss node. Techniques like **Activation Checkpointing** (Chen et al., 2016) discard intermediate activations and recompute them on-demand during backpropagation, trading $33\%$ extra compute FLOPs for an $O(\sqrt{L})$ memory footprint.
 
 ```python
 # Listing 6.1: The Function Base Class
@@ -130,13 +170,25 @@ For $\mathbf{z} = \mathbf{x} \odot \mathbf{y}$, the local derivatives scale by t
 
 $$\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \text{grad\_output} \odot \mathbf{y}, \quad \frac{\partial \mathcal{L}}{\partial \mathbf{y}} = \text{grad\_output} \odot \mathbf{x}$$
 
-### 3. Matrix Multiplication (GEMM VJP)
+### 3. Matrix Multiplication (GEMM VJP Derivation)
 
-For a batched linear projection $\mathbf{Z} = \mathbf{X} \mathbf{W}$ where $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$:
+For a batched linear projection $\mathbf{Z} = \mathbf{X} \mathbf{W}$ where $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$, let $\mathbf{G} = \frac{\partial \mathcal{L}}{\partial \mathbf{Z}} \in \mathbb{R}^{B \times D_{\text{out}}}$ denote the incoming upstream gradient (`grad_output`).
 
-$$\frac{\partial \mathcal{L}}{\partial \mathbf{X}} = \text{grad\_output} \cdot \mathbf{W}^T \quad \left( (B \times D_{\text{out}}) \times (D_{\text{out}} \times D_{\text{in}}) \to (B \times D_{\text{in}}) \right)$$
+We derive the exact gradient for input entry $X_{i,k}$ using the scalar chain rule:
 
-$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{X}^T \cdot \text{grad\_output} \quad \left( (D_{\text{in}} \times B) \times (B \times D_{\text{out}}) \to (D_{\text{in}} \times D_{\text{out}}) \right)$$
+$$\frac{\partial \mathcal{L}}{\partial X_{i,k}} = \sum_{j=1}^{D_{\text{out}}} \frac{\partial \mathcal{L}}{\partial Z_{i,j}} \frac{\partial Z_{i,j}}{\partial X_{i,k}} = \sum_{j=1}^{D_{\text{out}}} G_{i,j} W_{k,j} = (\mathbf{G} \mathbf{W}^T)_{i,k}$$
+
+In matrix form:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{X}} = \mathbf{G} \cdot \mathbf{W}^T \quad \left( (B \times D_{\text{out}}) \times (D_{\text{out}} \times D_{\text{in}}) \to (B \times D_{\text{in}}) \right)$$
+
+Similarly, for parameter weight entry $W_{k,j}$:
+
+$$\frac{\partial \mathcal{L}}{\partial W_{k,j}} = \sum_{i=1}^B \frac{\partial \mathcal{L}}{\partial Z_{i,j}} \frac{\partial Z_{i,j}}{\partial W_{k,j}} = \sum_{i=1}^B X_{i,k} G_{i,j} = (\mathbf{X}^T \mathbf{G})_{k,j}$$
+
+In matrix form:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{X}^T \cdot \mathbf{G} \quad \left( (D_{\text{in}} \times B) \times (B \times D_{\text{out}}) \to (D_{\text{in}} \times D_{\text{out}}) \right)$$
 
 ---
 
@@ -379,47 +431,60 @@ print("Graph Node Pointer:", y.grad_fn)  # <torch.autograd.function.CustomSquare
 y.backward()
 print("Computed Gradient:", x.grad)      # tensor([6.])
 ```
-PyTorch's `y.grad_fn` is identical to TinyTorch's `y._ctx`. Both point to the execution tape context that holds saved tensors and the backward VJP method.[^autograd-cpp]
+PyTorch's `y.grad_fn` is identical in function to TinyTorch's `y._ctx`. Both point to the execution tape context that holds saved tensors and the backward VJP method.[^autograd-cpp]
 :::
 
-[^autograd-cpp]: In the PyTorch C++ core (`torch/csrc/autograd/engine.cpp`), the autograd engine allocates a task queue and uses thread worker pools to evaluate graph nodes in parallel across independent DAG branches.
+[^autograd-cpp]: In the PyTorch C++ core (`torch/csrc/autograd/engine.cpp`), the autograd engine allocates a `GraphTask` queue and uses thread worker pools to evaluate graph nodes in parallel across independent DAG branches.
 
 ## Production Reality: PyTorch `autograd::Engine` and In-Place Safety
 
-In production PyTorch, the autograd graph is managed in C++ by the `torch::autograd::Engine`.
+In production PyTorch, the autograd DAG is not evaluated in Python; it is executed entirely in native C++ by `torch::autograd::Engine`.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  PyTorch C++ Autograd Engine Architecture                   │
 ├─────────────────────────────────────────────────────────────┤
 │  • Edge: Represents a directed connection between Nodes.    │
-│  • Node (torch::autograd::Node): Represents an operation.   │
-│  • InputMetadata: Stores tensor shape, dtype, and device.   │
-│  • Version Counter (_version): Incremented on every         │
-│    in-place mutation (e.g., x += 1).                        │
+│  • Node (torch::autograd::Node): Callable backward kernel.  │
+│  • GraphTask: Execution context holding dependencies count. │
+│  • ReadyQueue: Thread-safe queue of Nodes ready to execute. │
+│  • Version Counter (_version): Tracks in-place mutations.   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+When `backward()` is triggered:
+1. An `Engine::execute()` call constructs a `GraphTask` tracking the in-degree dependencies of all nodes in the active DAG subgraph.
+2. Root nodes with zero unresolved dependencies are pushed to a concurrent `ReadyQueue`.
+3. Worker CPU threads pop `Node` instances from the `ReadyQueue`, execute their compiled C++/CUDA VJP kernels (`Node::operator()`), and decrement the dependency counters of predecessor nodes.
+4. As predecessors reach zero remaining dependencies, they are enqueued into the `ReadyQueue`, automatically overlapping execution across parallel graph branches.
+
 ::: {.callout-pitfall}
-## Pitfall: The In-Place Mutation Trap
+## Pitfall: The In-Place Mutation Trap and Version Tracking
 
-If a tensor $\mathbf{x}$ is saved during the forward pass by `save_for_backward()`, and user code subsequently modifies $\mathbf{x}$ in-place before `backward()` runs (`x += 1` or `x[0] = 5.0`), the backward pass will compute completely incorrect gradients using corrupted values. 
+If a tensor $\mathbf{x}$ is cached during the forward pass by `save_for_backward()`, and user code subsequently mutates $\mathbf{x}$ in-place before `backward()` executes (`x += 1` or `x[0] = 5.0`), the backward pass will evaluate incorrect mathematical gradients using corrupted values.
 
-PyTorch protects against this by attaching a `_version` integer counter to every tensor. If `tensor._version` changes between forward caching and backward execution, PyTorch immediately halts with a `RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation`.
+PyTorch protects against silent mathematical corruption by attaching an atomic `_version` counter to every `TensorImpl` storage object:
+- Every in-place operation increments `tensor._version` by 1.
+- `save_for_backward()` records the tensor's version snapshot $V_0$.
+- When the backward kernel runs, the engine verifies that `tensor._version == V_0`.
+- If a mismatch is detected, PyTorch immediately halts execution with a `RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation`.[^version-counter-ref]
 :::
+
+[^version-counter-ref]: In `c10/core/TensorImpl.h`, `version_counter_` is an atomic integer incremented by every mutating view or kernel (`bump_version()`).
 
 ---
 
 ## Summary
 
-In this chapter, we constructed the crown jewel of TinyTorch: the dynamic reverse-mode automatic differentiation engine. We examined why symbolic and numerical differentiation fail to scale to modern neural networks, and proved why reverse-mode autograd computes all parameter gradients in a single $O(1)$ backward traversal.
+In this chapter, we constructed the crown jewel of TinyTorch: the dynamic reverse-mode automatic differentiation engine. We examined why symbolic and numerical differentiation fail to scale to modern neural networks, and proved why reverse-mode autograd computes all parameter gradients in a single $O(1)$ backward traversal via Vector-Jacobian Products.
 
-We built the `Function` abstraction to encapsulate forward tensor caching and backward Vector-Jacobian Products (VJPs) across arithmetic, matrix multiplications, and activations. We solved the broadcasting gradient reduction hazard using `_reduce_broadcast_grad`, implemented the complete `backward()` engine using post-order DFS topological sorting with gradient accumulation, and mathematically verified analytical gradient correctness against finite-difference numerical checks.
+We built the `Function` abstraction to encapsulate forward tensor caching and backward Vector-Jacobian Products across arithmetic, matrix multiplications, and activations. We solved the broadcasting gradient reduction hazard using `_reduce_broadcast_grad`, implemented the complete `backward()` engine using post-order DFS topological sorting with gradient accumulation, and mathematically verified analytical gradient correctness against finite-difference numerical checks.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways
 
 - **Reverse-Mode Scaling**: Reverse-mode automatic differentiation computes gradients for millions of parameters in a single backward pass ($O(1)$ scaling w.r.t. parameter count).
+- **VJP Contraction**: Autograd never materializes dense Jacobian matrices, evaluating localized Vector-Jacobian Products that scale linearly with tensor dimensionality.
 - **Dynamic Tape Construction**: The computational DAG is constructed dynamically at runtime by linking output tensors to `Function` context objects via `_ctx`.
 - **Broadcast Gradient Summation**: When an operation broadcasts inputs across dimensions, the backward pass must sum upstream gradients across those dimensions to match the input's original shape.
 - **Topological Traversal**: The backward engine executes nodes in reverse topological order, accumulating incoming gradients (`grad += ...`) to correctly handle multi-branch fan-out nodes.
@@ -429,5 +494,5 @@ We built the `Function` abstraction to encapsulate forward tensor caching and ba
 ::: {.callout-chapter-connection}
 ## Chapter Connection: Closing the Training Loop
 
-Now that our framework can compute exact gradients automatically, how do we use these gradients to update parameters and train models? In **Chapter 8 (Parameter Optimization and the Training Loop)**, we build optimizers (`SGD`, `Momentum`, `AdamW`), assemble the full training loop, and train our first deep neural network from scratch.
+Now that our framework can compute exact gradients automatically, how do we use these gradients to update parameters and train models? In **Chapter 7 (Parameter Optimization and Momentum)**, we build optimizers (`SGD`, `Momentum`, `AdamW`), analyze the 16-byte memory footprint rule, and conquer ill-conditioned loss landscapes.
 :::
