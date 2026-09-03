@@ -1,0 +1,229 @@
+---
+title: "Low-Precision Integer Arithmetic and Quantization"
+---
+
+## Purpose {.unnumbered}
+
+_Why does storing parameters as 32-bit floating-point numbers represent a 4x waste of memory bandwidth in production inference?_
+
+Deep neural networks require 32-bit floating-point precision (IEEE 754 float32) during training because optimization algorithms must accumulate infinitesimal parameter updates ($\Delta \theta = -\eta \mathbf{g} \approx 10^{-5}$) across millions of steps without underflowing. Once training concludes, however, the model's weight matrices occupy static, bounded dynamic ranges. Running inference in float32 forces memory buses to transfer 4 bytes for every weight, throttling memory-bound workloads (such as autoregressive LLM decoding) at 25% of theoretical memory throughput. **INT8 Quantization** maps continuous 32-bit floating-point numbers to discrete 8-bit signed integers ($[-128, 127]$), reducing model memory footprints by **75% (4× compression)** and enabling integer systolic arrays to execute matrix arithmetic at 2× to 4× higher throughput with negligible accuracy degradation ($<0.5\%$).
+
+::: {.callout-learning-objectives}
+## Learning Objectives
+
+- **Formulate** the mathematical transformations for Symmetric and Affine (Asymmetric) INT8 quantization, deriving the scale factor $S$ and zero-point $Z$.
+- **Implement** `quantize_int8` and `dequantize_int8` in pure Python, enforcing numerical clamping and rounding invariants.
+- **Construct** the `QuantizedLinear` layer, replacing 32-bit float weight storage with 8-bit integer buffers.
+- **Analyze** the memory bandwidth reduction achieved by INT8 quantization across memory-bound inference workloads.
+- **Contrast** Post-Training Quantization (PTQ) calibration methods against Quantization-Aware Training (QAT) using the Straight-Through Estimator (STE).
+:::
+
+---
+
+## 15.1 The Numerical Redundancy of 32-Bit Weights
+
+A standard IEEE 754 single-precision float (`float32`) consumes 32 bits (4 bytes) per value:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  IEEE 754 Float32 Bit Layout (4 Bytes per Parameter)        │
+├─────────────────────────────────────────────────────────────┤
+│  [ Sign: 1 bit ] [ Exponent: 8 bits ] [ Mantissa: 23 bits ] │
+│  • Dynamic Range: ~ 10^(-38) to 10^(+38)                    │
+│  • Resolution: 16.7 Million discrete values per decade      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Trained neural network weights do not span 76 orders of magnitude; they typically occupy a narrow normal distribution bounded between $[-2.0, +2.0]$. Using 32 bits to represent this compact interval wastes substantial memory capacity and bus bandwidth.
+
+By mapping this interval to signed 8-bit integers (`int8`, 1 byte per parameter), we represent values within $[-128, 127]$:
+
+$$\text{Memory Reduction} = \frac{4\text{ bytes (float32)} - 1\text{ byte (int8)}}{4\text{ bytes (float32)}} = 75.0\% \quad (4\times\text{ Compression})$$
+
+---
+
+## 15.2 The Mathematics of Quantization
+
+Quantization is a linear mapping between continuous real numbers $x \in \mathbb{R}$ and discrete integers $q \in [\text{qmin}, \text{qmax}]$:
+
+$$q = \text{clip}\left( \left\lfloor \frac{x}{S} \right\rceil + Z, \quad \text{qmin}, \quad \text{qmax} \right)$$
+
+$$\hat{x} = S \times (q - Z)$$
+
+where:
+- $S \in \mathbb{R}^+$ is the positive floating-point **Scale Factor** (the real value represented by a single integer step).
+- $Z \in \mathbb{Z}$ is the integer **Zero-Point** (the integer value corresponding to real value $0.0$).
+- $\lfloor \cdot \rceil$ represents rounding to the nearest integer.
+
+::: {#fig-quant-mapping}
+![](../../packages/tinytorch/quarto/assets/images/diagrams/15_quantization-diag-1.svg)
+
+**Figure 15.1: INT8 Affine Quantization Mapping.** Continuous floating-point weights spanning $[x_{\min}, x_{\max}]$ are uniformly mapped onto discrete integer bins $[-128, 127]$ with zero-point alignment.
+:::
+
+### Symmetric vs. Asymmetric (Affine) Quantization
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. Symmetric Quantization (Zero-Point Z = 0)               │
+│  • Scale: S = max(|x_min|, |x_max|) / 127.0                 │
+│  • Mapping: q = clip(round(x / S), -128, 127)               │
+│  • Dequantize: x_hat = S * q                                │
+│  • Hardware Benefit: Zero-point cancels in matrix multiply! │
+├─────────────────────────────────────────────────────────────┤
+│  2. Asymmetric / Affine Quantization (Arbitrary Z)          │
+│  • Scale: S = (x_max - x_min) / 255.0                       │
+│  • Zero-Point: Z = round(-x_min / S) - 128                  │
+│  • Mapping: q = clip(round(x / S) + Z, -128, 127)           │
+│  • Benefit: Optimal for non-negative activations (ReLU).    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 15.3 Implementing INT8 Quantization in TinyTorch
+
+```python
+# Listing 15.1: Pure Python INT8 Quantization Functions
+import numpy as np
+from typing import Tuple
+
+def quantize_symmetric_int8(x: np.ndarray) -> Tuple[np.ndarray, float]:
+    """
+    Quantize float32 array to symmetric int8 array with Z = 0.
+    """
+    max_val = np.max(np.abs(x))
+    if max_val < 1e-8:
+        scale = 1.0
+    else:
+        scale = float(max_val / 127.0)
+
+    # Scale, round, and clamp to [-128, 127]
+    q = np.clip(np.round(x / scale), -128, 127).astype(np.int8)
+    return q, scale
+
+def dequantize_symmetric_int8(q: np.ndarray, scale: float) -> np.ndarray:
+    """
+    Dequantize int8 array back to float32 approximation.
+    """
+    return (q.astype(np.float32) * scale).astype(np.float32)
+```
+
+---
+
+## 15.4 The QuantizedLinear Layer: 4x Memory Compression
+
+In TinyTorch, the `QuantizedLinear` layer stores weights exclusively as 8-bit integers (`np.int8`), keeping only a lightweight scalar scale factor in memory:
+
+```python
+# Listing 15.2: The QuantizedLinear Layer in TinyTorch
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Layer, Linear
+from typing import List
+
+class QuantizedLinear(Layer):
+    """
+    Linear layer with INT8 quantized weights (4x memory reduction).
+    """
+
+    def __init__(self, float_layer: Linear) -> None:
+        self.in_features = float_layer.weight.shape[0]
+        self.out_features = float_layer.weight.shape[1]
+
+        # 1. Quantize float32 weights to INT8
+        self.weight_int8, self.weight_scale = quantize_symmetric_int8(float_layer.weight.data)
+        
+        # 2. Keep bias in float32 (bias is tiny: out_features << in_features * out_features)
+        if float_layer.bias is not None:
+            self.bias_data = float_layer.bias.data.copy()
+        else:
+            self.bias_data = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Execute forward pass using dequantized weight matrix.
+        """
+        # Dequantize weights on-the-fly: (D_in, D_out)
+        w_float = dequantize_symmetric_int8(self.weight_int8, self.weight_scale)
+        
+        out = np.matmul(x.data, w_float)
+        if self.bias_data is not None:
+            out += self.bias_data
+
+        return Tensor(out)
+
+    def memory_footprint_bytes(self) -> int:
+        """Return exact memory consumed by layer weights in RAM."""
+        return self.weight_int8.nbytes + (self.bias_data.nbytes if self.bias_data is not None else 0)
+```
+
+### Quantizing an Entire Model
+
+```python
+# Listing 15.3: Model Quantization and Memory Verification
+def quantize_model(model: Sequential) -> Sequential:
+    """Replace all Linear layers in a Sequential model with QuantizedLinear."""
+    quantized_layers = []
+    for layer in model.layers:
+        if isinstance(layer, Linear):
+            quantized_layers.append(QuantizedLinear(layer))
+        else:
+            quantized_layers.append(layer)
+    return Sequential(*quantized_layers)
+```
+
+---
+
+## 15.5 PTQ vs. Quantization-Aware Training (QAT)
+
+How do we minimize accuracy loss when moving to low-precision integer arithmetic?
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. Post-Training Quantization (PTQ)                        │
+│  • Workflow: Train in FP32 ──> Calibrate on data ──> INT8   │
+│  • Overhead: Zero retraining compute.                       │
+│  • Best For: Large models where INT8 causes <0.5% drop.     │
+├─────────────────────────────────────────────────────────────┤
+│  2. Quantization-Aware Training (QAT)                       │
+│  • Workflow: Model simulates INT8 rounding during training! │
+│  • The Non-Differentiable Rounding Problem:                 │
+│    Derivative of round(x) is ZERO everywhere!               │
+│  • The Straight-Through Estimator (STE) Solution:           │
+│    Forward: q = round(x / S) * S                            │
+│    Backward: dL/dx = dL/dq  (Treat rounding as identity I!) │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 15.6 Systems Reality: Integer Systolic Arrays
+
+Why is INT8 faster on modern hardware?
+
+1. **Hardware Register Packing**: A 512-bit AVX-512 register can hold only $16$ float32 numbers, but can pack **$64$ int8 numbers** in parallel (a 4× SIMD parallelism multiplier).
+2. **NVIDIA Tensor Core Throughput**: On NVIDIA Hopper (H100) and Blackwell (B200) architectures, INT8 Tensor Core throughput is **2× higher** than FP16 and **4× higher** than FP32.
+3. **Memory Bandwidth Saturation**: Autoregressive transformer token generation is strictly memory-bound. Transferring 1 byte per weight instead of 4 bytes delivers an immediate **4× speedup in token generation throughput**.
+
+---
+
+## Summary
+
+In this chapter, we constructed the INT8 quantization engine of TinyTorch. We analyzed the numerical distribution of trained weights, proving why 32-bit floats contain significant precision redundancy for inference.
+
+We derived the mathematical equations for Symmetric and Affine quantization, implemented `quantize_symmetric_int8`, and built the `QuantizedLinear` layer to compress model parameter storage by exactly 75%. Finally, we examined Post-Training Quantization calibration and hardware integer acceleration on modern accelerator systolic arrays.
+
+::: {.callout-takeaways}
+## Chapter Takeaways
+
+- **4x Memory Compression**: INT8 quantization reduces parameter storage and memory bus traffic by 75% ($4\text{ bytes} \to 1\text{ byte}$ per weight).
+- **Symmetric vs. Affine**: Symmetric quantization sets $Z = 0$, simplifying hardware matrix arithmetic; Affine quantization handles asymmetric activation distributions.
+- **The Rounding Gradient Barrier**: Rounding has zero derivative; Quantization-Aware Training resolves this using the Straight-Through Estimator (STE).
+- **Inference Speedup**: For memory-bound workloads (such as LLM generation), reducing memory bandwidth consumption by 4× directly translates to a 4× speedup in generation latency.
+:::
+
+::: {.callout-chapter-connection}
+## Chapter Connection: Zeroing Redundant Weights
+
+Quantization shrinks the precision of every weight from 32 bits to 8 bits. Can we go further and eliminate entire weights and neurons altogether? In **Chapter 16 (Model Compression: Pruning and Distillation)**, we explore magnitude weight pruning and student-teacher knowledge distillation.
+:::
