@@ -2056,6 +2056,99 @@ current batch                      consistent inference
 **Why this matters**: During inference, you might process just 1 image. Batch statistics from 1 sample would be meaningless. Running statistics provide stable normalization.
 """
 
+# %% [markdown]
+"""
+### The Backward Pass: Why BatchNorm Needs Its Own Function
+
+Every other layer in this module -- `Conv2d`, `MaxPool2d`, `AvgPool2d` -- pairs
+its forward pass with an explicit `Backward` class. BatchNorm needs one too, and
+its gradient is the most interesting of the four.
+
+The reason is that `μ` and `σ²` are **computed from the batch**. In every layer
+so far, changing one input element changed one region of the output. Here,
+changing a single pixel shifts the mean and the variance, which shifts *every
+other* normalized value in that channel. The gradient has to account for all
+three routes:
+
+```
+                      ┌──────────────► (direct)
+x ──┬─────────────────┤
+    ├──► μ  ──────────┼──────────────► x̂ ──► γx̂+β ──► y
+    └──► σ² ──────────┘
+```
+
+Collapsing those three paths gives the standard form, where sums run over the
+batch and spatial axes and N = batch x height x width:
+
+```
+dx = (1/N) · (1/σ) · [ N·dx̂  -  Σ dx̂  -  x̂ · Σ(dx̂ · x̂) ]
+                        │        │              │
+                    direct   through μ     through σ²
+```
+
+In **eval mode** none of this applies: the statistics are frozen constants read
+from `running_mean` / `running_var`, so no gradient flows through them and the
+whole thing collapses to `dx = dx̂ / σ`. Same layer, two different backward
+passes, decided by a boolean.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-backward", "solution": true}
+#| export
+class BatchNorm2dBackward(Function):
+    """
+    Gradient computation for BatchNorm2d.
+
+    Computes gradients for x, gamma, and beta in one pass.
+    output = gamma * ((x - mean) / sqrt(var + eps)) + beta
+
+    In training mode the batch statistics depend on x, so the gradient for x
+    carries three terms. In eval mode the statistics are frozen constants and
+    only the direct term survives.
+    """
+
+    def __init__(self, x, gamma, beta, normalized_data, inv_std, training):
+        """Initialize with forward pass values needed for gradient computation."""
+        super().__init__(x, gamma, beta)
+        self.normalized_data = normalized_data   # x_hat, shape (N, C, H, W)
+        self.inv_std = inv_std                   # 1/sqrt(var+eps), shape (1, C, 1, 1)
+        self.training = training
+
+    def apply(self, grad_output):
+        """Compute gradients for BatchNorm2d (x, gamma, beta)."""
+        x, gamma, beta = self.saved_tensors
+
+        grad_x = grad_gamma = grad_beta = None
+        normalized = self.normalized_data
+        reduce_axes = (0, 2, 3)   # everything except the channel axis
+
+        # Gradient for beta: it was added to every position, so sum them all back
+        if isinstance(beta, Tensor) and beta.requires_grad:
+            grad_beta = grad_output.sum(axis=reduce_axes)
+
+        # Gradient for gamma: it scaled the normalized values
+        if isinstance(gamma, Tensor) and gamma.requires_grad:
+            grad_gamma = (grad_output * normalized).sum(axis=reduce_axes)
+
+        # Gradient for x
+        if isinstance(x, Tensor) and x.requires_grad:
+            gamma_data = gamma.data if isinstance(gamma, Tensor) else gamma
+            channels = normalized.shape[1]
+            grad_norm = grad_output * np.asarray(gamma_data).reshape(1, channels, 1, 1)
+
+            if self.training:
+                # Batch statistics depend on x, so all three paths contribute.
+                n = normalized.shape[0] * normalized.shape[2] * normalized.shape[3]
+                sum_grad = grad_norm.sum(axis=reduce_axes, keepdims=True)
+                sum_grad_norm = (grad_norm * normalized).sum(axis=reduce_axes, keepdims=True)
+                grad_x = (self.inv_std / n) * (
+                    n * grad_norm - sum_grad - normalized * sum_grad_norm
+                )
+            else:
+                # Frozen statistics are constants: only the direct path survives.
+                grad_x = grad_norm * self.inv_std
+
+        return (grad_x, grad_gamma, grad_beta)
+
 # %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
 #| export
 
@@ -2229,6 +2322,10 @@ class BatchNorm2d:
 
         HINTS:
         - Reshape mean/var/gamma/beta to (1, C, 1, 1) for broadcasting
+        - Attach BatchNorm2dBackward, like Conv2d attaches Conv2dBackward.
+          Setting requires_grad without a _grad_fn is worse than setting
+          neither: the tensor advertises gradients it will never deliver, the
+          optimizer updates nothing, and the network silently does not learn
         """
         ### BEGIN SOLUTION
         self._validate_input(x)
@@ -2238,19 +2335,27 @@ class BatchNorm2d:
 
         # Normalize: (x - mean) / sqrt(var + eps)
         # Reshape mean and var for broadcasting: (C,) -> (1, C, 1, 1)
-        mean_reshaped = mean.reshape(1, channels, 1, 1)
-        var_reshaped = var.reshape(1, channels, 1, 1)
+        mean_reshaped = np.asarray(mean).reshape(1, channels, 1, 1)
+        var_reshaped = np.asarray(var).reshape(1, channels, 1, 1)
 
-        x_normalized = (x.data - mean_reshaped) / np.sqrt(var_reshaped + self.eps)
+        # Keep 1/std: the forward needs it, and so does every term of the backward
+        inv_std = 1.0 / np.sqrt(var_reshaped + self.eps)
+        x_normalized = (np.asarray(x.data) - mean_reshaped) * inv_std
 
         # Apply scale (gamma) and shift (beta)
-        gamma_reshaped = self.gamma.data.reshape(1, channels, 1, 1)
-        beta_reshaped = self.beta.data.reshape(1, channels, 1, 1)
+        gamma_reshaped = np.asarray(self.gamma.data).reshape(1, channels, 1, 1)
+        beta_reshaped = np.asarray(self.beta.data).reshape(1, channels, 1, 1)
 
         output = gamma_reshaped * x_normalized + beta_reshaped
 
-        # Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad or self.gamma.requires_grad)
+        result = Tensor(output)
+
+        # Attach the gradient function so gamma and beta actually train
+        if x.requires_grad or self.gamma.requires_grad or self.beta.requires_grad:
+            result.requires_grad = True
+            result._grad_fn = BatchNorm2dBackward(
+                x, self.gamma, self.beta, x_normalized, inv_std, self.training
+            )
 
         return result
         ### END SOLUTION
@@ -2434,6 +2539,96 @@ def test_unit_batchnorm2d():
 
 if __name__ == "__main__":
     test_unit_batchnorm2d()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: BatchNorm2d Gradients
+
+**What we're testing**: That gamma and beta receive gradients, and that the
+analytic backward matches a numerical estimate
+**Why it matters**: BatchNorm's parameters are handed to the optimizer. If no
+gradient reaches them the layer looks fine, trains fine, and learns nothing --
+the failure is invisible from the forward pass alone
+**Expected**: Non-None gradients of the right shape, matching finite differences
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-grad", "locked": true, "points": 10}
+def test_unit_batchnorm2d_gradients():
+    """🧪 Test BatchNorm2d gradient flow."""
+    print("🧪 Unit Test: BatchNorm2d Gradients...")
+
+    # Test 1: gradients actually arrive
+    print("  Testing gradients reach gamma and beta...")
+    bn = BatchNorm2d(num_features=3)
+    x = Tensor(rng.standard_normal((4, 3, 2, 2)), requires_grad=True)
+    out = bn(x)
+
+    assert out._grad_fn is not None, \
+        "BatchNorm output has no _grad_fn: backward() will silently do nothing"
+
+    out.sum().backward()
+
+    assert bn.gamma.grad is not None, "gamma received no gradient -- it will never train"
+    assert bn.beta.grad is not None, "beta received no gradient -- it will never train"
+    assert x.grad is not None, "no gradient reached the input: the graph is severed here"
+    assert bn.gamma.grad.shape == (3,), f"gamma grad shape {bn.gamma.grad.shape}, expected (3,)"
+    assert bn.beta.grad.shape == (3,), f"beta grad shape {bn.beta.grad.shape}, expected (3,)"
+
+    # beta is added to every position, so its gradient is that position count
+    expected_beta_grad = 4 * 2 * 2
+    assert np.allclose(np.asarray(bn.beta.grad.data), expected_beta_grad), \
+        f"d(sum)/d(beta) should be N*H*W={expected_beta_grad} per channel"
+
+    # Test 2: analytic gradient matches finite differences
+    print("  Testing against numerical gradients...")
+    bn2 = BatchNorm2d(num_features=2)
+    bn2.gamma = Tensor(np.array([1.3, 0.7]), requires_grad=True)
+    bn2.beta = Tensor(np.array([0.2, -0.4]), requires_grad=True)
+
+    x_data = rng.standard_normal((3, 2, 2, 2))
+    weights = rng.standard_normal((3, 2, 2, 2))   # random projection to a scalar
+
+    def scalar_loss():
+        probe = BatchNorm2d(num_features=2)
+        probe.gamma, probe.beta = bn2.gamma, bn2.beta
+        return float((np.asarray(probe(Tensor(x_data)).data) * weights).sum())
+
+    xt = Tensor(x_data, requires_grad=True)
+    (bn2(xt) * Tensor(weights)).sum().backward()
+    analytic = np.asarray(xt.grad.data)
+
+    # h=1e-2: large enough that float32 round-off does not swamp the difference,
+    # small enough that the second-order truncation term stays negligible
+    h = 1e-2
+    numerical = np.zeros_like(x_data)
+    it = np.nditer(x_data, flags=['multi_index'])
+    while not it.finished:
+        idx = it.multi_index
+        original = x_data[idx]
+        x_data[idx] = original + h
+        high = scalar_loss()
+        x_data[idx] = original - h
+        low = scalar_loss()
+        x_data[idx] = original
+        numerical[idx] = (high - low) / (2 * h)
+        it.iternext()
+
+    assert np.allclose(analytic, numerical, atol=1e-3), \
+        f"Analytic and numerical gradients disagree: max diff {np.abs(analytic - numerical).max():.2e}"
+
+    # Test 3: eval mode still delivers gradients, via the simpler path
+    print("  Testing eval mode gradients...")
+    bn3 = BatchNorm2d(num_features=3)
+    bn3.eval()
+    x3 = Tensor(rng.standard_normal((2, 3, 2, 2)), requires_grad=True)
+    bn3(x3).sum().backward()
+    assert bn3.gamma.grad is not None, "gamma should still train when statistics are frozen"
+    assert x3.grad is not None, "gradient should still reach the input in eval mode"
+
+    print("✅ BatchNorm2d gradients work correctly!")
+
+if __name__ == "__main__":
+    test_unit_batchnorm2d_gradients()
 
 # %% [markdown]
 """
@@ -3008,6 +3203,7 @@ def test_module():
 
     # Remaining unit tests
     test_unit_batchnorm2d()
+    test_unit_batchnorm2d_gradients()
     test_unit_pooling()
     test_unit_simple_cnn()
 

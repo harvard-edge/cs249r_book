@@ -640,26 +640,26 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ ┌───────────────────────────────────────────────────────────────────┐ │
 │ │ Training Data: ["hello", "hello", "help"]                         │ │
 │ │                                                                   │ │
-│ │ Initial Tokens (with end-of-word markers):                        │ │
-│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
-│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
+│ │ Initial Tokens (end-of-word marker fuses to the LAST character,   │ │
+│ │ so 'o</w>' is one token, not 'o' followed by '</w>'):             │ │
+│ │   ['h','e','l','l','o</w>']    (hello, seen twice)                │ │
 │ │   ['h','e','l','p</w>']        (help)                             │ │
 │ │                                                                   │ │
-│ │ Starting Vocab: ['h', 'e', 'l', 'o', 'p', '</w>']                 │ │
-│ │                   ↑ All unique characters                         │ │
+│ │ Starting Vocab: ['e', 'h', 'l', 'o</w>', 'p</w>']                 │ │
+│ │                   ↑ every distinct starting token                 │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 2: Count All Adjacent Pairs                                      │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Pair Frequency Analysis:                                          │ │
+│ │ Pair Frequency Analysis (weighted by word frequency):             │ │
 │ │                                                                   │ │
-│ │   ('h', 'e'): ██████  3 occurrences  ← MOST FREQUENT!             │ │
-│ │   ('e', 'l'): ██████  3 occurrences                               │ │
-│ │   ('l', 'l'): ████    2 occurrences                               │ │
-│ │   ('l', 'o'): ████    2 occurrences                               │ │
-│ │   ('o', '<'): ████    2 occurrences                               │ │
-│ │   ('l', 'p'): ██      1 occurrence                                │ │
-│ │   ('p', '<'): ██      1 occurrence                                │ │
+│ │   ('h', 'e')     : ██████  3   ← tied for most frequent           │ │
+│ │   ('e', 'l')     : ██████  3   ← also 3                           │ │
+│ │   ('l', 'l')     : ████    2                                      │ │
+│ │   ('l', 'o</w>') : ████    2                                      │ │
+│ │   ('l', 'p</w>') : ██      1                                      │ │
+│ │                                                                   │ │
+│ │ Ties are broken by first-seen order, so ('h','e') wins here.      │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 3: Merge Most Frequent Pair                                      │
@@ -668,39 +668,49 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │                                                                   │ │
 │ │ BEFORE:                          AFTER:                           │ │
 │ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
-│ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
 │ │   ['h','e','l','p</w>']      →  ['he','l','p</w>']                │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p','</w>', 'he']                 │ │
-│ │                                              ↑ NEW TOKEN!         │ │
+│ │ Updated Vocab: ['e','h','l','o</w>','p</w>', 'he']                │ │
+│ │                                             ↑ NEW TOKEN!          │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 4: Repeat Until Target Vocab Size Reached                        │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Iteration 2: Next most frequent is ('l', 'l')                     │ │
-│ │ Merge ('l','l') → 'll'                                            │ │
+│ │ Re-count from scratch -- merging changed the pairs. Now:          │ │
 │ │                                                                   │ │
-│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
-│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
-│ │   ['he','l','p</w>']         →  ['he','l','p</w>']                │ │
+│ │   ('he', 'l')    : ██████  3   ← the new winner                   │ │
+│ │   ('l', 'l')     : ████    2                                      │ │
+│ │   ('l', 'o</w>') : ████    2                                      │ │
+│ │   ('l', 'p</w>') : ██      1                                      │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p','</w>','he','ll']             │ │
-│ │                                                  ↑ NEW!           │ │
+│ │ Merge ('he','l') → 'hel'   (NOT ('l','l'): 3 beats 2, and the     │ │
+│ │ merge you just made creates the next candidate)                   │ │
+│ │                                                                   │ │
+│ │   ['he','l','l','o</w>']  →  ['hel','l','o</w>']                  │ │
+│ │   ['he','l','p</w>']      →  ['hel','p</w>']                      │ │
 │ │                                                                   │ │
 │ │ Continue merging until vocab_size target...                       │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ FINAL RESULTS:                                                        │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Trained BPE can now encode efficiently:                           │ │
+│ │ Merges learned, in order:                                         │ │
+│ │   ('h','e')→'he'  ('he','l')→'hel'  ('hel','l')→'hell'            │ │
+│ │   ('hell','o</w>')→'hello</w>'      ('hel','p</w>')→'help</w>'    │ │
 │ │                                                                   │ │
-│ │ "hello" → ['he', 'll', 'o</w>']  = 3 tokens (vs 5 chars)          │ │
-│ │ "help"  → ['he', 'l', 'p</w>']   = 3 tokens (vs 4 chars)          │ │
+│ │ "hello" → ['hello</w>']   = 1 token (vs 5 chars)                  │ │
+│ │ "help"  → ['help</w>']    = 1 token (vs 4 chars)                  │ │
 │ │                                                                   │ │
-│ │  Key Insights: BPE automatically discovers:                       │ │
-│ │    - Common prefixes ('he')                                       │ │
-│ │    - Morphological patterns ('ll')                                │ │
-│ │    - Natural word boundaries (</w>)                               │ │
+│ │ Both words collapse to a single token, because a two-word corpus  │ │
+│ │ runs out of pairs long before it runs out of vocab budget. That   │ │
+│ │ IS the algorithm working: BPE spends its budget on whatever is    │ │
+│ │ most frequent, and here whole words are. On a real corpus the     │ │
+│ │ budget is exhausted while the frequent pieces are still SUBwords  │ │
+│ │ -- prefixes, suffixes, stems -- which is where the payoff is.     │ │
+│ │                                                                   │ │
+│ │ Key Insight: BPE discovers structure from frequency alone. No     │ │
+│ │ linguist labels 'he' as a prefix; it is merged because it is      │ │
+│ │ common. Scale is what turns that into morphology.                 │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
@@ -1033,6 +1043,12 @@ class BPETokenizer(Tokenizer):
         This is the composition function: it initializes character vocabulary,
         then runs a greedy merge loop using _count_byte_pairs() to find the
         best pair and _merge_pair() to apply it.
+
+        The corpus is a list of WORDS, one per element, not a list of sentences.
+        Nothing here splits on whitespace: _get_word_tokens("hello world") keeps
+        the space as an ordinary character and treats the whole string as a
+        single word. Pre-split your text (corpus = text.split()) before calling
+        this, or BPE will happily learn merges that straddle word boundaries.
 
         TODO: Implement BPE training using the greedy merge loop
 

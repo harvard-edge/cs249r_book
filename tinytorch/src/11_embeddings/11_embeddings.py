@@ -402,10 +402,14 @@ class Embedding:
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
 
-        # Xavier initialization for better gradient flow
+        # Xavier initialization for better gradient flow.
+        # requires_grad=True is not decoration: forward() only attaches
+        # EmbeddingBackward when the weight requires grad, so without this flag
+        # the entire backward path below is dead code and the table never learns.
         limit = math.sqrt(6.0 / (vocab_size + embed_dim))
         self.weight = Tensor(
-            rng.uniform(-limit, limit, (vocab_size, embed_dim))
+            rng.uniform(-limit, limit, (vocab_size, embed_dim)),
+            requires_grad=True
         )
         ### END SOLUTION
 
@@ -628,9 +632,13 @@ class PositionalEncoding:
 
         # Initialize position embedding matrix
         # Smaller initialization than token embeddings since these are additive
+        # Learned positions are returned by parameters(), so the optimizer will
+        # try to update them -- they have to carry gradients for that to mean
+        # anything. (Sinusoidal encodings are the opposite: fixed by design.)
         limit = math.sqrt(2.0 / embed_dim)
         self.position_embeddings = Tensor(
-            rng.uniform(-limit, limit, (max_seq_len, embed_dim))
+            rng.uniform(-limit, limit, (max_seq_len, embed_dim)),
+            requires_grad=True
         )
         ### END SOLUTION
 
@@ -692,9 +700,12 @@ class PositionalEncoding:
         # Slice position embeddings for this sequence length using Tensor slicing
         pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim)
 
-        # Reshape to add batch dimension: (1, seq_len, embed_dim)
-        pos_data = pos_embeddings.data[np.newaxis, :, :]
-        pos_embeddings_batched = Tensor(pos_data)
+        # Reshape to add batch dimension: (1, seq_len, embed_dim).
+        # Use Tensor.reshape, not Tensor(pos_embeddings.data[np.newaxis]).
+        # Reading .data and re-wrapping it builds a brand new leaf tensor, which
+        # cuts these positions out of the graph -- the forward output looks
+        # identical and the gradient silently never reaches the parameter.
+        pos_embeddings_batched = pos_embeddings.reshape(1, seq_len, embed_dim)
 
         # Add positional information
         result = x + pos_embeddings_batched
@@ -1423,8 +1434,11 @@ def emblayer_forward(self, tokens: Tensor) -> Tensor:
         pos_embeddings = self.pos_encoding[:seq_len]  # Slice using Tensor slicing
 
         # Reshape to add batch dimension
+        # Deliberately a fresh constant tensor: sinusoidal encodings are fixed,
+        # so they take no gradient. The addition below still carries gradients
+        # back through token_embeds, which is the part that learns.
         pos_data = pos_embeddings.data[np.newaxis, :, :]
-        pos_embeddings_batched = Tensor(pos_data)  # Sinusoidal are fixed
+        pos_embeddings_batched = Tensor(pos_data)
 
         output = token_embeds + pos_embeddings_batched
     else:

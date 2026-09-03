@@ -1070,10 +1070,28 @@ def test_unit_transformer_block():
     # Check shape preservation
     assert output.shape == (batch_size, seq_len, embed_dim)
 
-    # Test with causal mask (for autoregressive generation)
-    mask = Tensor(np.triu(np.ones((seq_len, seq_len)) * -np.inf, k=1))
+    # Test with causal mask (for autoregressive generation).
+    # Use create_causal_mask, which follows the convention _apply_mask expects
+    # in Module 12: a BINARY mask where 1 = attend and 0 = block, turned into an
+    # additive (1 - mask) * MASK_VALUE. Handing it a pre-built additive -inf mask
+    # instead flattens every allowed score to the same constant, so attention
+    # stops depending on Q.K at all -- and a shape-only assertion never notices.
+    mask = create_causal_mask(seq_len)
     masked_output = block.forward(x, mask)
     assert masked_output.shape == (batch_size, seq_len, embed_dim)
+
+    # Causality is the whole point of the mask, so assert it: changing the last
+    # token must not move any earlier position's output. The perturbation has to
+    # be non-uniform across the embedding, because LayerNorm subtracts the mean
+    # and would erase a constant shift before attention ever sees it.
+    x_perturbed = np.array(x.data, copy=True)
+    x_perturbed[:, -1, :] = rng.standard_normal(embed_dim) * 5
+    perturbed_output = block.forward(Tensor(x_perturbed), mask)
+    assert np.allclose(
+        np.asarray(masked_output.data)[:, :-1, :],
+        np.asarray(perturbed_output.data)[:, :-1, :],
+        atol=1e-5,
+    ), "Causal mask leaked a future token into an earlier position"
 
     # Test parameter counting
     params = block.parameters()
