@@ -14,8 +14,8 @@
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20I%3A%20Foundations&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20II%3A%20Scaling&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/physical-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/physical-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol3-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol3-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol4-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol4-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
 </p>
 
 <!-- Build Status: Companion Ecosystem & Tools -->
@@ -298,6 +298,14 @@ The textbook series follows a comprehensive systems progression across four core
 </table>
 
 > *Note: Volumes III and IV are currently active research notebooks as these disciplines rapidly evolve. Over time, they may mature into formal textbooks—for now, they are where I explore first principles and separate durable systems foundations from noise. You are welcome to follow along as they take shape.*
+
+#### How the Volumes Connect
+
+Each volume in the series expands the systems boundary, answering the question that the previous level leaves open:
+
+* **From Model to Fleet (Vol I → Vol II)**: *When one machine is not enough.* Volume I masters single-node execution, memory walls, and kernel efficiency. Volume II scales those foundations across thousands of accelerators, collective communication fabrics, fault-tolerant networks, and datacenter orchestration.
+* **From Request to Trajectory (Vol II → Vol III)**: *When a stateless response is not enough.* Volume II scales stateless request-response inference. Volume III introduces stateful, multi-step autonomous loops—managing context memory hierarchies, tool execution protocols (MCP), isolation sandboxes, and non-deterministic recovery.
+* **From Cyberspace to Matter (Vol III → Vol IV)**: *When software acts on the physical world.* Volume III governs digital tools and software environments. Volume IV crosses the causal boundary into physical plants—governing real-time sensor-actuator loops where computational latency becomes uncontrolled distance, reflected inertia dictates motion, and failure has irreversible physical consequences.
 
 ---
 
