@@ -1,0 +1,1064 @@
+"""PDF post-build verification used by `binder build pdf` and `binder check pdf`.
+
+Two evidence sources, because some defects are visible only in one of them.
+
+**Rendered PDF text** (via ``pdftotext``) catches what Quarto/LuaLaTeX emit
+without failing the render: unresolved cross-refs (``?@sec-foo``), literal
+unrendered cross-refs (``@sec-foo``), undefined LaTeX references
+(``Figure ??``), leaked layout-control tokens, leaked Python tracebacks, and
+matplotlib/Python ``UserWarning`` text that escaped into the rendered output.
+
+**The LuaLaTeX build log** (``scan_build_log``) catches what the typesetter
+knew but the PDF cannot show: unresolved-crossref warnings, overfull hbox/vbox
+overflow, and missing glyphs — characters a font could not render, which are
+dropped silently and leave no trace in the finished document. The log is found
+automatically next to the generated ``.tex`` (see ``default_log_path``); the
+PDF-text checks still run when no log is available.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+
+PDF_BY_VOLUME = {
+    "vol1": "Machine-Learning-Systems-Vol1.pdf",
+    "vol2": "Machine-Learning-Systems-Vol2.pdf",
+    "vol3": "Machine-Learning-Systems-Vol3.pdf",
+    "vol4": "Machine-Learning-Systems-Vol4.pdf",
+    "tinytorch": "TinyTorch.pdf",
+}
+
+XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"
+RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
+BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
+LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
+# The separator must not cross a blank line. A real "Table 8.2.1" is a single
+# reference and at worst wraps once; \s+ also spanned paragraph breaks, so a
+# running header ending in "... Case Study" followed by the next subsection
+# number ("9.10.1") was reported as a malformed object number. (2026-08-16)
+MALFORMED_OBJECT_NUMBER = re.compile(
+    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|Case Study|"
+    r"Systems Perspective)(?:[ \t]|\n(?!\s*\n))+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
+)
+CUSTOM_CALLOUT_NUMBER = re.compile(
+    r"\b(?:Definition|Example|Lighthouse|Systems Perspective|napkin math|"
+    r"Theorem|Checkpoint|Case Study|War Story)\s+(\d+)\.\d+\b",
+    re.I,
+)
+TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")
+NUMBERING_ISSUE_CODES = {
+    "malformed-object-number",
+    "duplicate-table-number",
+    "appendix-callout-number",
+}
+TABLE_PROSE_MIN_GAP_PT = 6.0
+PYTHON_LEAK = re.compile(
+    r"(?:Traceback \(most recent call last\)|"
+    r"NameError:|AttributeError:|ModuleNotFoundError:|Error rendering|"
+    r"UserWarning:)",
+    re.I,
+)
+LAYOUT_OFFSET_LEAK = re.compile(r"\[(?:[+-]?\d+(?:\.\d+)?)mm\]")
+QUARTO_XREF_WARN = re.compile(
+    r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst|algo)-[\w.-]+)"
+)
+OVERFULL_HBOX = re.compile(
+    r"Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\)"
+)
+# Vertical overflow: content (tall table/callout, or an overrunning margin note)
+# exceeded the available vertical space. LuaLaTeX emits these during \output, so
+# they carry a shipped-out page number "[N]" rather than a source "lines N--M".
+OVERFULL_VBOX = re.compile(
+    r"Overfull \\vbox \((\d+(?:\.\d+)?)pt too high\)[^\n\[]*(?:\[(\d+)\])?"
+)
+# Missing glyph: the font has no outline for this codepoint, so LuaLaTeX drops
+# the character silently — it is simply absent from the printed page, with no
+# visible marker. Unlike an overfull box (which is a judgment about how much
+# overflow is tolerable), every occurrence is a defect: text the author wrote
+# did not reach the reader. Added 2026-09-02 after a camera-ready pass fixed
+# five of these by eye (missing PDF glyphs in Vol I, font-safe Vol II text
+# diagrams and diagnostic tree, PDF-safe pronunciation notation, TikZ font
+# family for LuaLaTeX) that the log had already reported for free.
+#
+# LuaTeX emits either a literal character, a "U+XXXX" form, or a "^^xx" byte
+# escape, followed by the font name:
+#   Missing character: There is no × (U+00D7) in font lmroman10-regular!
+#   Missing character: There is no ^^e2 in font [LibertinusSerif-Regular]!
+MISSING_CHARACTER = re.compile(
+    r"Missing character: There is no (.+?) in font ([^\n!]+?)!?\s*$",
+    re.MULTILINE,
+)
+# TeX wraps log lines at ``max_print_line`` (79 by default; Quarto's LuaLaTeX
+# runs use a much larger value, but that is environment-dependent and CI may
+# differ). A wrap landing inside the character or font name defeats the regex
+# above. Counting the unwrappable marker prefix separately gives an authoritative
+# total, so a wrapped log degrades to a less detailed report rather than to a
+# silent pass — the one failure mode a gate must never have.
+MISSING_CHARACTER_MARKER = "Missing character: There is no "
+
+# A log written well before the PDF it would vouch for is describing a
+# different render. Allow a small window because LuaLaTeX writes the log moments
+# before the PDF is finalized and copied into _build.
+LOG_STALENESS_TOLERANCE_S = 300.0
+
+
+@dataclass(frozen=True)
+class PdfIssue:
+    code: str
+    message: str
+    count: int = 1
+    # "error" issues fail the build; "warning" issues print but do not (layout
+    # polish — e.g. vertical/margin overflow — should surface without blocking).
+    severity: str = "error"
+
+
+@dataclass
+class PdfCheckItem:
+    check_id: str
+    label: str
+    passed: bool
+    skipped: bool = False
+    detail: str = ""
+    # A warning-level check shows ⚠ when it fails but does NOT flip result.ok.
+    is_warning: bool = False
+
+
+@dataclass
+class PdfValidationResult:
+    volume: str
+    pdf_path: Path
+    issues: list[PdfIssue] = field(default_factory=list)
+    checks: list[PdfCheckItem] = field(default_factory=list)
+    margin_geometry: object | None = None
+
+    @property
+    def ok(self) -> bool:
+        no_errors = not any(i.severity == "error" for i in self.issues)
+        checks_ok = all(c.passed or c.skipped or c.is_warning for c in self.checks)
+        return no_errors and checks_ok
+
+
+def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
+    return quarto_dir / "_build" / f"pdf-{volume}" / PDF_BY_VOLUME[volume]
+
+
+def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
+    """Locate the LuaLaTeX log for ``volume``, or None when it cannot be trusted.
+
+    ``keep-tex`` leaves ``Machine-Learning-Systems-VolN.tex`` in the Quarto
+    directory, and with ``latex-clean: false`` the sibling ``.log`` survives
+    alongside it. Auto-discovering it means the log-based gates (crossref
+    warnings, overfull boxes, missing glyphs) run on a normal
+    ``binder check pdf`` without the caller remembering ``--log``.
+
+    Because ``latex-clean: false`` also means a log *outlives* the run that
+    produced it, a stale one could vouch for a PDF it never described — a clean
+    old log silently passing a bad new build. So the log is only returned when
+    it is at least as new as the PDF; otherwise the caller sees ``None`` and the
+    log-based checks report as skipped, which is honest rather than wrong. An
+    explicit ``--log`` bypasses this and is always trusted.
+    """
+    candidate = quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name
+    if not candidate.is_file():
+        return None
+    pdf_path = default_pdf_path(quarto_dir, volume)
+    if pdf_path.is_file():
+        if candidate.stat().st_mtime < pdf_path.stat().st_mtime - LOG_STALENESS_TOLERANCE_S:
+            return None
+    return candidate
+
+
+def _pdftotext(pdf_path: Path) -> str:
+    proc = subprocess.run(
+        ["pdftotext", "-layout", str(pdf_path), "-"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"pdftotext failed on {pdf_path}: {(proc.stderr or proc.stdout or '').strip()}"
+        )
+    return proc.stdout or ""
+
+
+def _x_overlap(a: dict, b: dict) -> float:
+    return max(0.0, min(a["x1"], b["x1"]) - max(a["x0"], b["x0"]))
+
+
+def _pdf_line_text(chars: list[dict]) -> str:
+    """Reconstruct a line of PDF text with approximate word gaps."""
+    if not chars:
+        return ""
+    parts: list[str] = []
+    prev: dict | None = None
+    for char in chars:
+        if prev is not None:
+            gap = float(char.get("x0", 0.0) or 0.0) - float(prev.get("x1", 0.0) or 0.0)
+            size = max(
+                float(char.get("size", 0.0) or 0.0),
+                float(prev.get("size", 0.0) or 0.0),
+                6.0,
+            )
+            if gap > max(1.2, size * 0.25):
+                parts.append(" ")
+        parts.append(str(char.get("text", "")))
+        prev = char
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def _pdf_main_text_lines(page) -> list[dict]:
+    """Cluster main-flow PDF chars into line boxes."""
+    page_h = float(getattr(page, "height", 0.0) or 0.0)
+    page_w = float(getattr(page, "width", 0.0) or 0.0)
+    if page_h <= 0 or page_w <= 0:
+        return []
+    header_y = page_h * 0.06
+    footer_y = page_h * 0.94
+    main_x = page_w * 0.88
+    groups: list[list[dict]] = []
+    for char in sorted(getattr(page, "chars", []) or [], key=lambda c: (c["top"], c["x0"])):
+        if not (header_y < char.get("top", 0) < footer_y):
+            continue
+        if char.get("x0", 0) > main_x:
+            continue
+        for group in groups:
+            if abs(group[0]["top"] - char["top"]) < 2.0:
+                group.append(char)
+                break
+        else:
+            groups.append([char])
+
+    lines: list[dict] = []
+    for group in groups:
+        group = sorted(group, key=lambda c: c["x0"])
+        text = _pdf_line_text(group)
+        if not text:
+            continue
+        lines.append(
+            {
+                "text": text,
+                "x0": min(c["x0"] for c in group),
+                "x1": max(c["x1"] for c in group),
+                "top": min(c["top"] for c in group),
+                "bottom": max(c["bottom"] for c in group),
+                "size": sum(float(c.get("size", 0.0) or 0.0) for c in group) / len(group),
+            }
+        )
+    return lines
+
+
+def _pdf_horizontal_rules(page) -> list[dict]:
+    """Return rendered horizontal rules in the main text area."""
+    page_h = float(getattr(page, "height", 0.0) or 0.0)
+    page_w = float(getattr(page, "width", 0.0) or 0.0)
+    if page_h <= 0 or page_w <= 0:
+        return []
+    header_y = page_h * 0.06
+    footer_y = page_h * 0.94
+    main_x = page_w * 0.88
+    rules: list[dict] = []
+    for line in getattr(page, "lines", []) or []:
+        x0 = float(line.get("x0", 0.0) or 0.0)
+        x1 = float(line.get("x1", 0.0) or 0.0)
+        top = float(line.get("top", 0.0) or 0.0)
+        height = abs(float(line.get("height", 0.0) or 0.0))
+        width = x1 - x0
+        if width < 120 or height > 1.0:
+            continue
+        if not (header_y < top < footer_y):
+            continue
+        if x0 > main_x:
+            continue
+        rules.append({"x0": x0, "x1": x1, "top": top, "bottom": top, "width": width})
+    return rules
+
+
+def _pdf_table_rule_clusters(page) -> list[list[dict]]:
+    """Return horizontal-rule clusters that look like booktabs tables."""
+    rules = _pdf_horizontal_rules(page)
+    groups: list[list[dict]] = []
+    for rule in sorted(rules, key=lambda r: (r["x0"], r["x1"], r["top"])):
+        for group in groups:
+            if abs(group[0]["x0"] - rule["x0"]) <= 6.0 and abs(group[0]["x1"] - rule["x1"]) <= 6.0:
+                group.append(rule)
+                break
+        else:
+            groups.append([rule])
+
+    return [
+        sorted(group, key=lambda r: r["top"])
+        for group in groups
+        if len(group) >= 3
+    ]
+
+
+def _line_is_between_table_rules(
+    line: dict,
+    bottom_rule: dict,
+    rules: list[dict],
+) -> bool:
+    """Return true when the next line is probably a table row, not prose."""
+    for later in rules:
+        if later["top"] <= bottom_rule["top"] + 1.0:
+            continue
+        overlap = _x_overlap(later, bottom_rule)
+        min_width = min(float(later.get("width", 0.0) or 0.0), float(bottom_rule.get("width", 0.0) or 0.0))
+        if overlap < max(80.0, min_width * 0.55):
+            continue
+        # Header/body rules are often separated by one table row. If the next
+        # text line sits in that band, the rule is internal to the table.
+        if line["top"] < later["top"] and later["top"] - line["top"] <= 90.0:
+            return True
+    return False
+
+
+def _looks_like_post_table_prose(text: str) -> bool:
+    """Filter out tick labels, legends, and table rows from spacing warnings."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return False
+    if re.match(r"^(?:Table|Figure|Listing|Algorithm)\s+\d", normalized):
+        return False
+    if re.match(r"^[\d.,%~$×+−–—<>=/()\\s-]+$", normalized):
+        return False
+    if re.match(r"^\d", normalized):
+        return False
+    label_prefixes = (
+        "Challenge:",
+        "Consequence:",
+        "Context:",
+        "Failure mode:",
+        "Given:",
+        "Insight:",
+        "Lesson:",
+        "Problem:",
+        "Resolution:",
+        "Systems insight:",
+        "Systemsinsight:",
+        "Systems lesson:",
+        "Systemslesson:",
+        "Takeaway:",
+        "Why it matters:",
+    )
+    if normalized.startswith(label_prefixes):
+        return True
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", normalized)
+    if len(words) < 7:
+        return False
+    digit_chars = sum(ch.isdigit() for ch in normalized)
+    if digit_chars > len(normalized) * 0.35:
+        return False
+    return bool(re.search(r"[a-z]", normalized))
+
+
+def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
+    """Return issues found in extracted PDF text."""
+    body = _pdftotext(pdf_path)
+    issues: list[PdfIssue] = []
+
+    xref_counts = Counter(m.group(1) for m in RESIDUAL_XREF.finditer(body))
+    for slug, count in sorted(xref_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="unresolved-crossref",
+                message=f"?@{slug} appears in PDF text (Quarto cross-ref did not resolve)",
+                count=count,
+            )
+        )
+
+    bare_xref_counts = Counter(m.group(1) for m in BARE_XREF.finditer(body))
+    for slug, count in sorted(bare_xref_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="literal-crossref",
+                message=f"@{slug} appears in PDF text (Quarto cross-ref rendered literally)",
+                count=count,
+            )
+        )
+
+    undef_counts = Counter(m.group(0) for m in LATEX_UNDEF.finditer(body))
+    for text, count in sorted(undef_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="undefined-latex-ref",
+                message=f'"{text}" appears in PDF text (LaTeX reference undefined)',
+                count=count,
+            )
+        )
+
+    malformed_counts = Counter(m.group(0) for m in MALFORMED_OBJECT_NUMBER.finditer(body))
+    for text, count in sorted(malformed_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="malformed-object-number",
+                message=(
+                    f'"{text}" appears in PDF text. Numbered objects should use '
+                    "chapter-local numbering such as Table 8.2, not subsection-shaped "
+                    "numbering such as Table 8.2.1."
+                ),
+                count=count,
+            )
+        )
+
+    # Volume chapters are numbered 1--16 (Volume I) or 1--17 (Volume II).
+    # Numeric custom-callout prefixes above those ranges mean an appendix was
+    # counted as another chapter instead of taking its visible letter prefix.
+    # This catches the combined-render regression that produced labels such as
+    # "napkin math 18.1" beside an Appendix B section heading.
+    volume_match = re.search(r"Vol(?:ume)?[-_ ]?([12])", pdf_path.name, re.I)
+    max_chapter = {"1": 16, "2": 17}.get(volume_match.group(1)) if volume_match else None
+    if max_chapter is not None:
+        leaked_callouts = [
+            match.group(0)
+            for match in CUSTOM_CALLOUT_NUMBER.finditer(body)
+            if int(match.group(1)) > max_chapter
+        ]
+        if leaked_callouts:
+            examples = "; ".join(dict.fromkeys(leaked_callouts[:3]))
+            issues.append(
+                PdfIssue(
+                    code="appendix-callout-number",
+                    message=(
+                        "Appendix custom callouts use numeric chapter prefixes instead "
+                        f"of appendix letters. Examples: {examples}"
+                    ),
+                    count=len(leaked_callouts),
+                )
+            )
+
+    # A renderer/counter regression can make several distinct in-callout tables
+    # reuse one number. Repeated occurrences of the same number are fine when the
+    # caption text is identical (for example a longtable continuation or repeated
+    # list entry). The failure is one table number attached to multiple captions.
+    table_captions: dict[str, Counter[str]] = {}
+    for match in TABLE_CAPTION.finditer(body):
+        number = match.group(1)
+        caption = re.sub(r"\s+", " ", match.group(2)).strip()
+        if not caption:
+            continue
+        table_captions.setdefault(number, Counter())[caption] += 1
+    duplicate_numbers = {
+        number: captions
+        for number, captions in table_captions.items()
+        if len(captions) > 1
+    }
+    for number, captions in sorted(duplicate_numbers.items()):
+        examples = "; ".join(list(captions.keys())[:3])
+        issues.append(
+            PdfIssue(
+                code="duplicate-table-number",
+                message=(
+                    f"Table {number} is attached to multiple distinct captions in "
+                    f"the PDF text: {examples}"
+                ),
+                count=sum(captions.values()),
+            )
+        )
+
+    if PYTHON_LEAK.search(body):
+        issues.append(
+            PdfIssue(
+                code="python-traceback",
+                message="Python error/traceback text leaked into PDF output",
+            )
+        )
+
+    layout_offset_counts = Counter(m.group(0) for m in LAYOUT_OFFSET_LEAK.finditer(body))
+    for token, count in sorted(layout_offset_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="layout-offset-leak",
+                message=f"{token} appears in PDF text (margin offset marker rendered literally)",
+                count=count,
+            )
+        )
+
+    return issues
+
+
+def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
+    """Return cross-ref warnings and overfull hbox alerts from a render log."""
+    if log_path is None or not log_path.exists():
+        return []
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [PdfIssue(code="log-read-error", message=str(exc))]
+
+    issues: list[PdfIssue] = []
+    warn_counts = Counter(m.group(1) for m in QUARTO_XREF_WARN.finditer(text))
+    for ref, count in sorted(warn_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="quarto-crossref-warning",
+                message=f"{ref} flagged in build log (Unable to resolve crossref)",
+                count=count,
+            )
+        )
+
+    # Overfull hbox: content overflowed the text block (tables, figures, code).
+    # Map each warning to a chapter via the companion .tex file.
+    SEVERE_THRESHOLD_PT = 20.0
+    overfull_line_re = re.compile(
+        r"Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\).*?lines (\d+)"
+    )
+
+    # Build chapter map from the .tex file (cover images mark chapter starts)
+    chapter_map: list[tuple[int, str]] = []
+    tex_path = None
+    if log_path:
+        # Try the common names for the generated .tex alongside the log
+        for candidate in (
+            log_path.with_suffix(".tex"),
+            log_path.parent / "Machine-Learning-Systems-Vol1.tex",
+            log_path.parent / "Machine-Learning-Systems-Vol2.tex",
+        ):
+            if candidate.is_file():
+                tex_path = candidate
+                break
+    if tex_path and tex_path.is_file():
+        cover_re = re.compile(r"contents/vol[12]/([^/]+)/images/png/cover_")
+        try:
+            for i, line in enumerate(tex_path.read_text(errors="replace").splitlines(), 1):
+                m = cover_re.search(line)
+                if m:
+                    chapter_map.append((i, m.group(1)))
+        except OSError:
+            pass
+
+    def _chapter_for_tex_line(line_num: int) -> str:
+        if not chapter_map:
+            return "unknown"
+        result = chapter_map[0][1]
+        for start, name in chapter_map:
+            if line_num >= start:
+                result = name
+            else:
+                break
+        return result
+
+    severe_items: list[tuple[float, str]] = []
+    for m in overfull_line_re.finditer(text):
+        pts = float(m.group(1))
+        if pts >= SEVERE_THRESHOLD_PT:
+            tex_line = int(m.group(2))
+            chapter = _chapter_for_tex_line(tex_line)
+            severe_items.append((pts, chapter))
+
+    if severe_items:
+        by_chapter: dict[str, list[float]] = {}
+        for pts, ch in severe_items:
+            by_chapter.setdefault(ch, []).append(pts)
+        details = "; ".join(
+            f"{ch}: {len(pts_list)} overflow(s), worst {max(pts_list):.0f}pt"
+            for ch, pts_list in sorted(by_chapter.items(), key=lambda x: -max(x[1]))
+        )
+        worst = max(pts for pts, _ in severe_items)
+        issues.append(
+            PdfIssue(
+                code="overfull-hbox",
+                message=(
+                    f"{len(severe_items)} overfull \\hbox >= {SEVERE_THRESHOLD_PT:.0f}pt "
+                    f"(worst: {worst:.0f}pt). By chapter: {details}"
+                ),
+                count=len(severe_items),
+            )
+        )
+
+    # Overfull vbox: vertical overflow — a tall table/callout, or (the case this
+    # was added for) a margin note/figure that overran its column and pushed off
+    # the page. Severe rows are blocking because they correspond to rendered
+    # content exceeding the available page geometry.
+    vbox_items: list[tuple[float, str]] = []
+    for m in OVERFULL_VBOX.finditer(text):
+        pts = float(m.group(1))
+        if pts >= SEVERE_THRESHOLD_PT:
+            vbox_items.append((pts, m.group(2) or "?"))
+
+    if vbox_items:
+        worst = max(pts for pts, _ in vbox_items)
+        pages = sorted({p for _, p in vbox_items if p != "?"}, key=int)
+        page_note = f" pages: {', '.join(pages)}." if pages else ""
+        issues.append(
+            PdfIssue(
+                code="overfull-vbox",
+                message=(
+                    f"{len(vbox_items)} overfull \\vbox >= {SEVERE_THRESHOLD_PT:.0f}pt "
+                    f"(worst: {worst:.0f}pt).{page_note} "
+                    f"Run `binder layout margins <pdf>` to localize margin overflow."
+                ),
+                count=len(vbox_items),
+            )
+        )
+
+    # Missing glyphs: no threshold and no severity tiering — a dropped character
+    # is always a defect. The marker count is authoritative (wrap-proof); the
+    # regex supplies the actionable detail when lines are intact.
+    total_glyphs = text.count(MISSING_CHARACTER_MARKER)
+    if total_glyphs:
+        # Group by (character, font) so one bad glyph in a heavily used face
+        # reports as a single actionable row rather than hundreds.
+        glyph_counts: Counter[tuple[str, str]] = Counter()
+        for m in MISSING_CHARACTER.finditer(text):
+            char = m.group(1).strip()
+            # LuaTeX appends the fontspec feature string after a colon
+            # ("[NimbusRoman-Regular]:mode=node;script=latn;..."). Drop it so
+            # every instance of one face groups together rather than fragmenting.
+            font = m.group(2).split(":", 1)[0].strip().strip("[]")
+            glyph_counts[(char, font)] += 1
+
+        if glyph_counts:
+            worst = glyph_counts.most_common(5)
+            details = " " + "; ".join(
+                f"{char!r} missing from {font} (x{count})"
+                for (char, font), count in worst
+            )
+            more = len(glyph_counts) - len(worst)
+            if more > 0:
+                details += f"; +{more} more glyph/font pair(s)"
+            pairs = f"across {len(glyph_counts)} glyph/font pair(s)"
+        else:
+            # Every line was wrapped past recognition. Still block: the count is
+            # real even though the per-glyph breakdown is unavailable.
+            details = (
+                " Log lines appear wrapped, so the per-glyph breakdown is "
+                "unavailable; grep the log for 'Missing character'."
+            )
+            pairs = "(detail unavailable)"
+
+        unparsed = total_glyphs - sum(glyph_counts.values())
+        if glyph_counts and unparsed > 0:
+            details += f"; {unparsed} further warning(s) too wrapped to attribute"
+
+        issues.append(
+            PdfIssue(
+                code="missing-glyph",
+                message=(
+                    f"{total_glyphs} dropped character(s) {pairs} — this text is "
+                    f"absent from the printed page.{details}"
+                ),
+                count=total_glyphs,
+            )
+        )
+
+    return issues
+
+
+def scan_table_prose_spacing(
+    pdf_path: Path,
+    *,
+    min_gap_pt: float = TABLE_PROSE_MIN_GAP_PT,
+) -> list[PdfIssue]:
+    """Warn when rendered table bottom rules are jammed against following text."""
+    if not pdf_path.is_file():
+        return []
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError:
+        return []
+
+    findings: list[tuple[int, float, str]] = []
+    try:
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            for page_idx, page in enumerate(pdf.pages, start=1):
+                text_lines = _pdf_main_text_lines(page)
+                if not text_lines:
+                    continue
+                rules = _pdf_horizontal_rules(page)
+                for cluster in _pdf_table_rule_clusters(page):
+                    bottom_rule = cluster[-1]
+                    after = [
+                        line for line in text_lines
+                        if line["top"] > bottom_rule["top"] + 0.5
+                        and _x_overlap(line, bottom_rule) >= 20.0
+                    ]
+                    if not after:
+                        continue
+                    next_line = min(after, key=lambda line: line["top"])
+                    # Plot gridlines can look like table rules to PDF geometry;
+                    # their next "line" is often numeric tick labels. This
+                    # check is for prose/semantic labels jammed after tables.
+                    if float(next_line.get("size", 0.0) or 0.0) < 8.5:
+                        continue
+                    if not _looks_like_post_table_prose(next_line["text"]):
+                        continue
+                    if _line_is_between_table_rules(next_line, bottom_rule, rules):
+                        continue
+                    gap = next_line["top"] - bottom_rule["top"]
+                    if 0 < gap < min_gap_pt:
+                        findings.append((page_idx, gap, next_line["text"][:80]))
+    except Exception as exc:
+        return [
+            PdfIssue(
+                code="table-prose-spacing-scan-error",
+                message=f"Could not scan rendered table/prose spacing: {exc}",
+                severity="warning",
+            )
+        ]
+
+    if not findings:
+        return []
+
+    examples = "; ".join(
+        f"sheet {page}: {gap:.1f}pt before \"{snippet}\""
+        for page, gap, snippet in findings[:3]
+    )
+    return [
+        PdfIssue(
+            code="table-prose-crowding",
+            message=(
+                f"{len(findings)} rendered table bottom rule(s) are followed "
+                f"by text with less than {min_gap_pt:.1f}pt of spacing. "
+                f"Examples: {examples}"
+            ),
+            count=len(findings),
+            severity="warning",
+        )
+    ]
+
+
+def verify_pdf(
+    pdf_path: Path,
+    *,
+    log_path: Path | None = None,
+) -> list[PdfIssue]:
+    """Scan ``pdf_path`` (and optional ``log_path``) and return all issues."""
+    if not pdf_path.is_file():
+        return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
+
+    if shutil.which("pdftotext") is None:
+        return [
+            PdfIssue(
+                code="pdftotext-missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+            )
+        ]
+
+    issues = scan_pdf_text(pdf_path)
+    issues.extend(scan_table_prose_spacing(pdf_path))
+    issues.extend(scan_build_log(log_path))
+    return issues
+
+
+def scan_pdf_numbering(pdf_path: Path) -> list[PdfIssue]:
+    """Return rendered-PDF object-numbering regressions only.
+
+    This narrower scan is useful after chapter-only PDF builds, where ordinary
+    cross-reference checks can fail because other chapters are intentionally
+    absent from the temporary render.
+    """
+    if not pdf_path.is_file():
+        return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
+
+    if shutil.which("pdftotext") is None:
+        return [
+            PdfIssue(
+                code="pdftotext-missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+            )
+        ]
+
+    return [
+        issue
+        for issue in scan_pdf_text(pdf_path)
+        if issue.code in NUMBERING_ISSUE_CODES
+    ]
+
+
+def scan_purpose_overflow(pdf_path: Path, volume: str, repo_root: Path) -> list[PdfIssue]:
+    """Check that every chapter's Purpose fits on its opener page in the built PDF."""
+    if not pdf_path.is_file():
+        return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
+    if shutil.which("pdftotext") is None:
+        return [
+            PdfIssue(
+                code="pdftotext-missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+            )
+        ]
+
+    try:
+        out = subprocess.run(["pdftotext", str(pdf_path), "-"], capture_output=True, text=True, check=True).stdout
+        pages = out.split("\f")
+    except Exception as e:
+        return [PdfIssue(code="pdftotext-error", message=f"Failed to extract PDF text: {e}")]
+
+    def _norm(s: str) -> str:
+        s = re.sub(r'`\{python\}[^`]*`', '', s)
+        s = re.sub(r'[‘’“”`]', "'", s)
+        s = re.sub(r'[\\*_$\[\]{}#@|]', '', s)
+        s = re.sub(r'[—–-]', ' ', s)
+        return re.sub(r'\s+', ' ', s).strip()
+
+    def _purpose_bits(qmd_path: Path):
+        try:
+            t = qmd_path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        m = re.search(r'## Purpose.*?\n(.*?)(?:::: \{\.content-visible|::: \{\.callout-learning|\n## )', t, re.S)
+        if not m:
+            return None
+        paras = [p.strip() for p in m.group(1).split("\n\n") if p.strip()]
+        hook = next((p for p in paras if p.startswith("_") and p.rstrip().endswith("_")), None)
+        prose = [p for p in paras if not p.startswith(("\\", "_", ":"))]
+        if not hook or not prose:
+            return None
+        return _norm(hook).split(), _norm(prose[-1]).split()
+
+    def _find_page(pages_list, words, head=True):
+        def squash(s):
+            return re.sub(r'\s+', ' ', re.sub(r"[‘’“”`—–-]", lambda m: "'" if m.group()[0] in "‘’“”`" else ' ', s)).strip().lower()
+        sp = [squash(pg) for pg in pages_list]
+        for n in (7, 6, 5, 4):
+            anchor = " ".join(words[:n] if head else words[-n:])
+            a = squash(anchor)
+            if not a:
+                continue
+            for i, pg in enumerate(sp):
+                if a in pg:
+                    return i + 1
+        return None
+
+    issues: list[PdfIssue] = []
+    contents_dir = repo_root / "book" / "quarto" / "contents" / volume
+    if not contents_dir.exists():
+        return issues
+
+    for qmd in sorted(contents_dir.glob("*/*.qmd")):
+        if qmd.name.startswith(("appendix_", "_")):
+            continue
+        bits = _purpose_bits(qmd)
+        if not bits:
+            continue
+        hook_words, para_words = bits
+        sp = _find_page(pages, hook_words, head=True)
+        ep = _find_page(pages, para_words, head=False)
+        if sp is None or ep is None:
+            continue
+        if ep > sp:
+            issues.append(
+                PdfIssue(
+                    code="purpose-overflow",
+                    message=f"{qmd.name}: Purpose starts p{sp}, ends p{ep} ({ep - sp} page overflow)",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def scan_margin_geometry_summary(pdf_path: Path):
+    """Return the Binder-native margin geometry summary, or ``None``.
+
+    ``None`` means PyMuPDF is unavailable or the scan failed; callers should
+    treat that as skipped rather than as a clean geometry result.
+    """
+    try:
+        try:
+            from cli.checks.margin_geometry import scan_pdf
+        except ImportError:
+            from book.cli.checks.margin_geometry import scan_pdf
+    except ImportError:
+        return None
+    try:
+        return scan_pdf(pdf_path)
+    except Exception:
+        return None
+
+
+def scan_margin_geometry(pdf_path: Path):
+    """Return ``(overlaps, overflows)`` from rendered margin geometry."""
+    summary = scan_margin_geometry_summary(pdf_path)
+    if summary is None:
+        return None
+    return summary.overlaps, summary.overflows
+
+
+def verify_volume_pdf(
+    quarto_dir: Path,
+    volume: str,
+    *,
+    log_path: Path | None = None,
+) -> PdfValidationResult:
+    """Verify the default built PDF for ``volume`` (``vol1`` or ``vol2``)."""
+    pdf_path = default_pdf_path(quarto_dir, volume)
+    issues = verify_pdf(pdf_path, log_path=log_path)
+    geom_summary = scan_margin_geometry_summary(pdf_path) if pdf_path.is_file() else None
+    geom = (
+        (geom_summary.overlaps, geom_summary.overflows)
+        if geom_summary is not None
+        else None
+    )
+    edge_overflows = (
+        len(geom_summary.page_edge_overflows)
+        if geom_summary is not None
+        else None
+    )
+
+    checks = [
+        PdfCheckItem("artifact", "PDF artifact exists", pdf_path.is_file()),
+        PdfCheckItem(
+            "pdftotext",
+            "pdftotext available",
+            shutil.which("pdftotext") is not None,
+            skipped=shutil.which("pdftotext") is None,
+        ),
+        PdfCheckItem(
+            "unresolved-crossref",
+            "No ?@sec/fig/tbl/eq/lst/alg literals in PDF text",
+            not any(i.code == "unresolved-crossref" for i in issues),
+        ),
+        PdfCheckItem(
+            "literal-crossref",
+            "No bare @sec/fig/tbl/eq/lst/alg literals in PDF text",
+            not any(i.code == "literal-crossref" for i in issues),
+        ),
+        PdfCheckItem(
+            "undefined-latex-ref",
+            "No Figure/Table/Section ?? in PDF text",
+            not any(i.code == "undefined-latex-ref" for i in issues),
+        ),
+        PdfCheckItem(
+            "malformed-object-number",
+            "No subsection-shaped object numbers such as Table 8.2.1",
+            not any(i.code == "malformed-object-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "duplicate-table-number",
+            "No duplicate table numbers with different captions",
+            not any(i.code == "duplicate-table-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "appendix-callout-number",
+            "Appendix custom callouts use letter prefixes",
+            not any(i.code == "appendix-callout-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "table-prose-crowding",
+            "No cramped text immediately after rendered table rules",
+            not any(i.code == "table-prose-crowding" for i in issues),
+            is_warning=True,
+        ),
+        PdfCheckItem(
+            "python-traceback",
+            "No Python tracebacks or UserWarnings in PDF text",
+            not any(i.code == "python-traceback" for i in issues),
+        ),
+        PdfCheckItem(
+            "layout-offset-leak",
+            "No margin offset markers such as [-20mm] in PDF text",
+            not any(i.code == "layout-offset-leak" for i in issues),
+        ),
+        PdfCheckItem(
+            "quarto-crossref-warning",
+            "No Quarto crossref warnings in build log",
+            not any(i.code == "quarto-crossref-warning" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "overfull-hbox",
+            "No severe layout overflow (Overfull hbox >= 20pt)",
+            not any(i.code == "overfull-hbox" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "overfull-vbox",
+            "No vertical/margin overflow (Overfull vbox >= 20pt)",
+            not any(i.code == "overfull-vbox" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "missing-glyph",
+            "No dropped characters (Missing character in build log)",
+            not any(i.code == "missing-glyph" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "page-edge-overflow",
+            (
+                f"No rendered content crosses the physical trim boundary "
+                f"({edge_overflows} violation(s))"
+                if edge_overflows is not None
+                else "Physical trim-boundary scan (PyMuPDF unavailable)"
+            ),
+            edge_overflows is None or edge_overflows == 0,
+            skipped=edge_overflows is None,
+        ),
+        PdfCheckItem(
+            "margin-geometry",
+            (
+                f"Margin geometry: {geom[0]} overlap(s), {geom[1]} overflow "
+                "(PyMuPDF; run `binder layout overlaps` to localize)"
+                if geom is not None
+                else "Margin geometry scan (PyMuPDF unavailable)"
+            ),
+            geom is None or geom[0] == 0,
+            skipped=geom is None,
+            is_warning=True,
+        ),
+    ]
+
+    return PdfValidationResult(
+        volume=volume,
+        pdf_path=pdf_path,
+        issues=issues,
+        checks=checks,
+        margin_geometry=geom_summary,
+    )
+
+
+def format_checklist(result: PdfValidationResult) -> str:
+    """Human-readable checklist for console output."""
+    vol_label = "Volume I" if result.volume == "vol1" else "Volume II"
+    lines = [f"PDF validation ({vol_label}): {result.pdf_path.name}", ""]
+    for item in result.checks:
+        if item.skipped:
+            mark, status = "ⓘ", "skipped"
+        elif item.passed:
+            mark, status = "✓", "pass"
+        elif item.is_warning:
+            mark, status = "⚠", "warn"
+        else:
+            mark, status = "✗", "fail"
+        detail = f" — {item.detail}" if item.detail else ""
+        lines.append(f"  [{mark}] {item.label} ({status}){detail}")
+
+    errors = [i for i in result.issues if i.severity != "warning"]
+    warnings = [i for i in result.issues if i.severity == "warning"]
+
+    if errors:
+        lines.extend(["", "Issues:"])
+        for idx, issue in enumerate(errors, start=1):
+            suffix = f" ({issue.count} occurrence(s))" if issue.count > 1 else ""
+            lines.append(f"  {idx}. [{issue.code}] {issue.message}{suffix}")
+
+    if warnings:
+        lines.extend(["", "Warnings (non-blocking):"])
+        for idx, issue in enumerate(warnings, start=1):
+            suffix = f" ({issue.count} occurrence(s))" if issue.count > 1 else ""
+            lines.append(f"  {idx}. ⚠ [{issue.code}] {issue.message}{suffix}")
+    return "\n".join(lines)
+
+
+def format_failure_report(label: str, pdf_path: Path, issues: list[PdfIssue]) -> str:
+    lines = [
+        f"PDF validation failed for {label}:",
+        f"  artifact: {pdf_path}",
+        "",
+    ]
+    for idx, issue in enumerate(issues, start=1):
+        suffix = f" ({issue.count} occurrence(s))" if issue.count > 1 else ""
+        lines.append(f"  {idx}. [{issue.code}] {issue.message}{suffix}")
+    lines.extend(
+        [
+            "",
+            "Fix the source QMD (missing {#tbl-...} label, broken @ref, blank lines",
+            "inside pipe tables, etc.) and rebuild. Bypass with --skip-validate only",
+            "when you intentionally need a broken artifact.",
+        ]
+    )
+    return "\n".join(lines)

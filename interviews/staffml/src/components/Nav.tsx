@@ -6,14 +6,13 @@ import { usePathname } from "next/navigation";
 import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen,
-  Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
+  Menu, X, Map, Cpu, Server, ChevronDown, Info,
   Star, Bug, Send, Atom, Network, Mic2,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
 import { buildSiteIssueUrl } from "@/lib/issue-url";
 import { getDueCount } from "@/lib/progress";
-import { useTheme } from "@/components/ThemeProvider";
 import { useVisibilityPoll } from "@/lib/hooks/useVisibilityPoll";
 
 const primaryLinks = [
@@ -40,7 +39,6 @@ export default function Nav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [dueCount, setDueCount] = useState(0);
-  const { theme, toggleTheme } = useTheme();
   const toolsRef = useRef<HTMLDivElement>(null);
 
   // Single source of truth for refreshing the due-count badge — used by

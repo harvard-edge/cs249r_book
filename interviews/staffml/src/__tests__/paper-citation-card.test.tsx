@@ -10,7 +10,7 @@
  * mismatch AND, more fundamentally, the wrong anchor for a citation.
  * The year now comes from the required `buildDate` prop (UTC).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import PaperCitationCard from '@/components/PaperCitationCard';
 

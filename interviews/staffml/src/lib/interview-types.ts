@@ -1,4 +1,4 @@
-import type { ChainSummary, ChainMember } from "./corpus";
+import type { ChainSummary } from "./corpus";
 
 // ─── Session configuration ──────────────────────────────────────────────────
 

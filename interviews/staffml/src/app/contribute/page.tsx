@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Send, Terminal, CheckCircle2, Copy, Check } from "lucide-react";
 import { GithubIcon } from "@/components/GithubIcon";
-import clsx from "clsx";
 import { getAreas } from "@/lib/taxonomy";
 import { buildContributeUrl } from "@/lib/issue-url";
 import { track as trackEvent } from "@/lib/analytics";

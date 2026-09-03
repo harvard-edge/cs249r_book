@@ -1,0 +1,194 @@
+% =============================================================================
+% MLSys·im Tutorial — Module 2: Advanced Single-Node Analysis
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../../../materials/slides/assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Tutorial},
+  chapter      = {Module 2},
+  logo         = {../../../../materials/slides/assets/img/logo-mlsysbook.png},
+  instlogo     = {../../../../materials/slides/assets/img/logo-harvard.png},
+  chaptertitle = {Single-Node Performance \& the Memory Wall},
+}
+
+% --- Fonts & Packages ---
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+
+% --- Code listings ---
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{crimson}\bfseries,
+  stringstyle=\color{datastroke},
+  commentstyle=\color{midgray}\itshape,
+  backgroundcolor=\color{computeblue!20},
+  frame=single,
+  rulecolor=\color{computestroke},
+  numbers=none,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  aboveskip=3pt,
+  belowskip=2pt,
+}
+
+\newcommand{\mlsysim}{\texttt{mlsysim}}
+\graphicspath{{images/}}
+
+\title{MLSys·im Tutorial --- Module 2}
+\subtitle{Advanced Single-Node Analysis}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{Conference Tutorial}
+
+\begin{document}
+
+\begin{frame}[plain,shrink=10]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Roadmap: Conference Tutorial}
+\centering\small
+\begin{tabular}{rll}
+\toprule
+\textbf{Module} & \textbf{Topic} & \textbf{Status} \\
+\midrule
+Module 1 & Foundations \& Architecture & \checkmark Done \\
+\rowcolor{crimson!12}
+\textbf{Module 2} & \textbf{Advanced Single-Node Analysis} & \textbf{$\leftarrow$ You are here} \\
+Module 3 & Scale, Dollars, and Carbon & \\
+Module 4 & Design Space Exploration \& Synthesis & \\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+\section{The Data Wall}
+
+\begin{frame}{Beyond FLOPs: The Data Wall}
+GPUs are so fast they often starve waiting for data.
+\begin{itemize}
+  \item \textbf{Ingestion (I/O):} Can the storage sub-system (NVMe, PCIe) push bytes fast enough?
+  \item \textbf{Transformation (CPU):} Can the CPUs decode JPEGs and run augmentations fast enough to keep the GPUs busy?
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,shrink=8]{Live Demo: Uncovering the Data Wall}
+\note{This corresponds to Scenario C in the Code Cookbook}
+\begin{lstlisting}[language=Python]
+from mlsysim.solvers import DataModel, TransformationModel
+from mlsysim.hardware.registry import Hardware
+from mlsysim.core.units import Q_
+
+demand_rate = Q_("40000 1/s") * Q_("150 KB") # ~6 GB/s
+
+# 1. Check if the DGX A100 PCIe bus can handle the bandwidth
+data_result = DataModel().solve(
+    workload_data_rate=demand_rate, hardware=Hardware.Cloud.A100)
+print(f"I/O Stalled: {data_result.is_stalled}") # False
+
+# 2. Check if the CPUs can decode/augment images fast enough
+transform_result = TransformationModel().solve(
+    batch_size=40000,
+    cpu_throughput_per_worker_hz=850, # JPEG decode + crop
+    num_workers=64                    # 8 CPUs per GPU
+)
+print(f"CPU Stalled: {transform_result.is_bottleneck}") # True
+\end{lstlisting}
+\end{frame}
+
+\section{LLM Serving \& Memory Walls}
+
+\begin{frame}{The Two Phases of LLM Serving}
+LLM inference is not a single mathematical operation; it is a stateful process with two distinct physical regimes.
+\vfill
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{1. Pre-fill (Prompt Processing)}
+\begin{itemize}
+  \item Processes all prompt tokens in parallel.
+  \item Matrix-Matrix multiplication.
+  \item High arithmetic intensity $\Rightarrow$ \textbf{Compute Bound}.
+  \item Metric: Time-to-First-Token (TTFT).
+\end{itemize}
+
+\column{0.5\textwidth}
+\textbf{2. Decoding (Token Generation)}
+\begin{itemize}
+  \item Generates one token at a time autoregressively.
+  \item Matrix-Vector multiplication.
+  \item Low arithmetic intensity $\Rightarrow$ \textbf{Memory Bound}.
+  \item Metric: Inter-Token Latency (ITL).
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\section{Algorithmic Optimizations}
+
+\begin{frame}[fragile]{Speculative Decoding}
+\small
+\emph{Use a smaller draft model to propose tokens, then verify with the target model.}
+\begin{lstlisting}[language=Python,basicstyle=\ttfamily\tiny]
+from mlsysim.solvers import ServingModel
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
+
+target = Models.Language.Llama3_70B
+draft = Models.Language.Llama3_8B
+hardware = Hardware.Cloud.H100
+
+solver = ServingModel()
+base = solver.solve(target, hardware, seq_len=2048, batch_size=1)
+
+spec = solver.solve(
+    target, hardware, seq_len=2048, batch_size=1,
+    draft_model=draft, draft_acceptance_rate=0.75)
+print(f"Speedup: {base.itl / spec.itl:.2f}x")
+\end{lstlisting}
+\end{frame}
+
+\section{The Reasoning Wall}
+
+\begin{frame}[fragile,shrink=8]{Wall 12: Inference-Time Compute}
+With models like OpenAI o1, compute scaling shifts from training to inference. The model generates $K$ hidden reasoning steps before answering.
+\begin{lstlisting}[language=Python]
+from mlsysim.solvers import InferenceScalingModel
+
+reasoning_solver = InferenceScalingModel()
+result = reasoning_solver.solve(
+    model=Models.Language.Llama3_8B, hardware=Hardware.Cloud.H100,
+    reasoning_steps=128,  # K hidden CoT steps
+    precision="fp16", efficiency=0.5)
+
+print(f"Reasoning Time: {result.total_reasoning_time.to('s'):.1f}")
+print(f"Energy per Query: {result.energy_per_query.to('J'):.1f}")
+\end{lstlisting}
+\vfill
+\textbf{Impact:} Inference shifts back toward being \emph{compute-bound} as generation length dominates prefill.
+\end{frame}
+
+\begin{frame}{Summary: Module 2}
+\begin{enumerate}
+  \item \textbf{Data Wall:} Real-world throughput is often bottlenecked by CPU transformation, not GPU FLOPs.
+  \item \textbf{Serving:} Pre-fill is Compute-bound; Decoding is Memory-bound.
+  \item \textbf{Algorithmic Optimizations:} We can instantly model the speedup of Speculative Decoding and Quantization.
+  \item \textbf{Reasoning Wall:} Hidden CoT tokens push inference back into the compute-bound regime.
+\end{enumerate}
+\vspace{1em}
+\begin{center}
+\textit{Next up: Module 3 - Scale, Dollars, and Carbon!}
+\end{center}
+\end{frame}
+
+\end{document}

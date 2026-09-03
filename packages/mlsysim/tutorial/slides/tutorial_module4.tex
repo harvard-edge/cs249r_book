@@ -1,0 +1,260 @@
+% =============================================================================
+% MLSys·im Tutorial — Module 4: Design Space Exploration & Synthesis
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../../../materials/slides/assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Tutorial},
+  chapter      = {Module 4},
+  logo         = {../../../../materials/slides/assets/img/logo-mlsysbook.png},
+  instlogo     = {../../../../materials/slides/assets/img/logo-harvard.png},
+  chaptertitle = {MLSys·im: DSE \& Synthesis},
+}
+
+% --- Fonts & Packages ---
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+
+% --- Code listings ---
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{crimson}\bfseries,
+  stringstyle=\color{datastroke},
+  commentstyle=\color{midgray}\itshape,
+  backgroundcolor=\color{computeblue!20},
+  frame=single,
+  rulecolor=\color{computestroke},
+  numbers=none,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  aboveskip=3pt,
+  belowskip=2pt,
+}
+
+\newcommand{\mlsysim}{\texttt{mlsysim}}
+\graphicspath{{images/}}
+
+\title{MLSys·im Tutorial --- Module 4}
+\subtitle{Design Space Exploration \& Synthesis}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{Conference Tutorial}
+
+\begin{document}
+
+\begin{frame}[plain,shrink=10]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Roadmap: Conference Tutorial}
+\centering\small
+\begin{tabular}{rll}
+\toprule
+\textbf{Module} & \textbf{Topic} & \textbf{Status} \\
+\midrule
+Module 1 & Foundations \& Architecture & \checkmark Done \\
+Module 2 & Advanced Single-Node Analysis & \checkmark Done \\
+Module 3 & Scale, Dollars, and Carbon & \checkmark Done \\
+\rowcolor{crimson!12}
+\textbf{Module 4} & \textbf{Design Space Exploration \& Synthesis} & \textbf{$\leftarrow$ You are here} \\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+\section{Rapid Parametric Sweeps}
+
+\begin{frame}{The Combinatorial Explosion}
+Finding the optimal serving configuration requires testing:
+\[
+|\text{hardware}| \times |\text{batch sizes}| \times |\text{precisions}| \times |\text{parallelism configs}|
+\]
+This space easily exceeds $10^4$ configurations. Because \mlsysim{} uses analytical math (not cycle-accurate simulation), each evaluation takes $<1$\,ms. 
+\end{frame}
+
+\begin{frame}[fragile,shrink=8]{Live Demo: Programmatic Sweeps}
+\begin{lstlisting}[language=Python]
+from mlsysim.engine.engine import Engine
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
+import pandas as pd
+
+model = Models.Language.Llama3_8B
+hardware = Hardware.Cloud.H100
+
+results = []
+for batch_size in [1, 8, 32, 128, 256]:
+    perf = Engine.solve(model, hardware, batch_size=batch_size, precision="fp16")
+    results.append({
+        "Batch Size": batch_size,
+        "Throughput (tok/s)": perf.throughput.magnitude,
+        "Bottleneck": perf.bottleneck
+    })
+
+print(pd.DataFrame(results))
+\end{lstlisting}
+\end{frame}
+
+\section{TinyML to Frontier}
+
+\begin{frame}{Same Roofline, 9 Orders of Magnitude}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\centering
+\includegraphics[width=0.85\textwidth]{images/pdf/hardware-spectrum.pdf}
+
+\column{0.45\textwidth}
+\scriptsize
+\begin{tabular}{lrr}
+\toprule
+\textbf{Device} & \textbf{FLOPS} & \textbf{TDP} \\
+\midrule
+nRF52840  & 64\,M  & 15\,mW \\
+ESP32-S3  & 500\,M & 400\,mW \\
+\rowcolor{gray!15}
+H100 SXM  & 989\,T & 700\,W \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\begin{tabular}{lr}
+\textbf{Compute Range} & $\sim 10^{7}\times$ \\
+\textbf{Power Range}   & $\sim 10^{4.7}\times$ \\
+\end{tabular}
+\end{columns}
+\vfill
+\begin{center}
+\alert{The Roofline Model is universal. The physics apply identically to a \$2 Microcontroller and a \$3M GPU Rack.}
+\end{center}
+\end{frame}
+
+\section{Sensitivity Analysis}
+
+\begin{frame}[fragile,shrink=8]{Sensitivity Analysis}
+\note{[3 min] ``Which knob should I turn next?'' The parameter with the largest partial derivative.}
+\begin{lstlisting}
+from mlsysim.solvers import SensitivitySolver
+solver = SensitivitySolver()
+
+result = solver.solve(
+    model=Models.Language.Llama3_8B, hardware=Hardware.Cloud.H100, 
+    precision="fp16", efficiency=0.5)
+
+print(f"Binding Constraint: {result.binding_constraint}")
+for param, sensitivity in result.sensitivities.items():
+    tag = "<<<" if param == result.binding_constraint else ""
+    print(f"  {param:>20}: {sensitivity:+.4f}  {tag}")
+\end{lstlisting}
+
+\vspace{0.3em}
+\small
+\textbf{The Golden Rule:} Invest in the parameter with the \emph{largest} partial derivative. Improving a non-binding parameter yields \textbf{zero} measurable gain.
+\end{frame}
+
+\section{SLA-Driven Synthesis}
+
+\begin{frame}[fragile,shrink=10]{Live Demo: Inverting the Roofline}
+Instead of asking "How fast is this GPU?", what if we ask "What hardware do I need to buy to meet my 30ms latency SLA?"
+\begin{lstlisting}[language=Python]
+from mlsysim.solvers import SynthesisSolver
+from mlsysim.models.registry import Models
+from mlsysim.core.units import Q_
+
+solver = SynthesisSolver()
+requirements = solver.solve(
+    model=Models.Language.Llama3_8B,
+    target_latency=Q_("30 ms"),
+    batch_size=1,
+    precision="fp16"
+)
+
+print(f"Required HBM Bandwidth: {requirements.required_bw.to('GB/s'):.1f}")
+print(f"Required Compute:       {requirements.required_flops.to('TFLOPs/s'):.1f}")
+\end{lstlisting}
+\end{frame}
+
+\section{Capstone \& Wrap-Up}
+
+\begin{frame}[fragile]{Design Challenge: The Capstone}
+\begin{alertblock}{The Problem}
+\textbf{\$5M budget.} Serve Llama-3 70B at \textbf{1{,}000 QPS} with
+\textbf{$<$100\,ms TTFT} in \textbf{two regions} (US-East + EU-West).
+Design the fleet.
+\end{alertblock}
+
+\vspace{0.3em}
+\textbf{You must specify using \mlsysim{}:}
+\begin{enumerate}\footnotesize
+  \item \textbf{Hardware choice:} Which GPU? How many?
+  \item \textbf{Parallelism strategy:} TP $\times$ PP?
+  \item \textbf{Precision:} FP16? FP8? INT4?
+  \item \textbf{Geographic placement:} Carbon impact?
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Resources \& Next Steps}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\textbf{Get Started}
+\begin{itemize}
+  \item \texttt{pip install mlsysim}
+  \item GitHub: \texttt{harvard-edge/mlsysim}
+  \item Full docs: \texttt{mlsysim.readthedocs.io}
+  \item Code cookbook: five interactive scenarios
+\end{itemize}
+
+\column{0.40\textwidth}
+\textbf{The Textbook}
+\begin{itemize}
+  \item \emph{Machine Learning Systems}
+  \item Volume I: Foundations (single node)
+  \item Volume II: Systems at Scale (fleet)
+  \item \texttt{mlsysbook.ai}
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Key Papers}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{itemize}
+  \item Williams et al.\ (2009)\\
+        {\footnotesize Roofline Model}
+  \item Chowdhery et al.\ (2022)\\
+        {\footnotesize PaLM / MFU}
+  \item Hoffmann et al.\ (2022)\\
+        {\footnotesize Chinchilla Scaling}
+\end{itemize}
+
+\column{0.48\textwidth}
+\begin{itemize}
+  \item Patterson et al.\ (2021)\\
+        {\footnotesize Carbon \& Training}
+  \item OpenAI (2024)\\
+        {\footnotesize o1 / Reasoning Scaling}
+\end{itemize}
+\end{columns}
+\vfill
+\begin{center}
+\large Use these papers to validate the assumptions behind each solver family.
+\end{center}
+\end{frame}
+
+\begin{frame}[c]{}
+\centering
+\Large\bfseries Thank you! Questions?
+\end{frame}
+
+\end{document}

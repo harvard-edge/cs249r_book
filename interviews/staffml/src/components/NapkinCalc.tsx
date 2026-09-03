@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import clsx from "clsx";
-import { HARDWARE_SPECS, INTERCONNECTS, FORMULAS, HardwareSpec } from "@/lib/hardware";
+import { HARDWARE_SPECS, INTERCONNECTS, FORMULAS } from "@/lib/hardware";
 
 // AllReduce crosses the interconnect, not the GPU's own HBM. Node size and
 // link choice follow the simulator's convention (8 GPUs/node, NVLink within
@@ -34,7 +34,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
 
   // Inputs
   const [paramsB, setParamsB] = useState('70');
-  const [bytesPerParam, setBytesPerParam] = useState('2');
+  const bytesPerParam = '2';
   const [tokensT, setTokensT] = useState('1');
   const [numGpus, setNumGpus] = useState('64');
   const [mfu, setMfu] = useState('0.4');
@@ -43,7 +43,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
   const [heads, setHeads] = useState('64');
   const [headDim, setHeadDim] = useState('128');
   const [seqLen, setSeqLen] = useState('2048');
-  const [batch, setBatch] = useState('1');
+  const batch = '1';
 
   const hw = HARDWARE_SPECS.filter(h => h.tier === 'cloud')[hwIdx] || HARDWARE_SPECS[0];
   const cloudGpus = HARDWARE_SPECS.filter(h => h.tier === 'cloud');

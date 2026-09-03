@@ -515,7 +515,6 @@ export default function ExplorePage() {
             ) : (
               <ExplorerPanel
                 focus={focus}
-                questions={focusQuestions}
                 visibleQuestions={visibleQuestions}
                 segments={segments}
                 levelBuckets={levelBuckets}
@@ -700,7 +699,6 @@ function FilterSelect({
 
 function ExplorerPanel({
   focus,
-  questions,
   visibleQuestions,
   segments,
   levelBuckets,
@@ -709,7 +707,6 @@ function ExplorerPanel({
   onReset,
 }: {
   focus: Focus;
-  questions: Question[];
   visibleQuestions: Question[];
   segments: Segment[];
   levelBuckets: LevelBucket[];
