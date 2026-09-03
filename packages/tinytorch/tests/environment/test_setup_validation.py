@@ -333,7 +333,9 @@ class TestSystemResources:
                 if "Apple" in result.stdout:
                     print("⚠️  Running x86_64 Python on Apple Silicon (Rosetta)")
                     print("   Consider using native arm64 Python for better performance")
-            except:
+            except (OSError, subprocess.SubprocessError):
+                # sysctl is macOS-only and this is an informational note, not
+                # an assertion -- narrow the catch rather than swallowing all.
                 pass
 
 

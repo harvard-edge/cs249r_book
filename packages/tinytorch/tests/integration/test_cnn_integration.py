@@ -94,7 +94,6 @@ class TestConv2dOperations:
         assert total_params == 448, f"Expected 448 total params, got {total_params}"
 
         print(f"✅ Conv2d parameter count correct: {total_params} params (432 weights + 16 bias)")
-        return True
 
 
 class TestPoolingOperations:
@@ -181,7 +180,6 @@ class TestPoolingOperations:
                 f"AvgPool2d: expected {expected_shape}, got {avg_output.shape}"
 
         print("✅ Pooling shape transformations correct for all configurations")
-        return True
 
 
 class TestCNNGradientFlow:
@@ -268,7 +266,6 @@ class TestCNNGradientFlow:
         print("✅ Complete CNN (Conv→Pool→Conv) forward/backward pass works")
         print(f"   Shape flow: {x.shape} → {out1.shape} → {out2.shape} → {out3.shape}")
         print(f"   All gradients computed and non-zero")
-        return True
 
 
 class TestCNNNumericalStability:
@@ -304,7 +301,6 @@ class TestCNNNumericalStability:
             f"MaxPool2d failed with negatives.\nExpected:\n{expected}\nGot:\n{output.data}"
 
         print("✅ Pooling handles negative values correctly")
-        return True
 
 
 def run_all_tests():

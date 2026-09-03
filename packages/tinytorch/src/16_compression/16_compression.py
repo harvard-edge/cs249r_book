@@ -41,7 +41,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/16_compression/compression_dev.py
+**Learning Side:** You work in modules/16_compression/compression.ipynb
 **Building Side:** Code exports to tinytorch.perf.compression
 
 ```python
@@ -56,7 +56,7 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 - **Integration:** Works seamlessly with models and quantization for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.compression
 #| export
 
@@ -117,7 +117,7 @@ and visible throughout the module.
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Compression Matters
+## 💡 Introduction: Why Compression Matters
 
 Before we learn compression, let's profile a model to analyze its weight
 distribution. We'll discover that many weights are tiny and might not matter much!
@@ -187,7 +187,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 💡 Introduction: Model Compression Concepts
+### Model Compression Concepts
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
@@ -997,9 +997,9 @@ Temperature Effect on Probability Distributions:
 Without Temperature (T=1):           With Temperature (T=3):
 Teacher Logits: [1.0, 2.0, 0.5]    Teacher Logits: [1.0, 2.0, 0.5]
                        ↓                               ↓ ÷ 3
-Softmax: [0.09, 0.67, 0.24]         Logits/T: [0.33, 0.67, 0.17]
+Softmax: [0.23, 0.63, 0.14]         Logits/T: [0.33, 0.67, 0.17]
          ^      ^      ^                       ↓
-      Low   High   Med              Softmax: [0.21, 0.42, 0.17]
+      Med   High   Low              Softmax: [0.31, 0.43, 0.26]
                                              ^      ^      ^
 Sharp decisions (hard to learn)           Soft   decisions (easier to learn)
 
@@ -1406,7 +1406,7 @@ Now let's use the **Profiler** tool from Module 14 to measure the actual paramet
 This is the production workflow: measure → prune → validate → deploy.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": false}
 # Import Profiler from Module 14 (already imported above)
 
 def explore_compression_with_profiler():
@@ -1659,7 +1659,7 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Pruning Works
+## 🔧 Integration: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
 proves pruning actually creates zeros using real zero counting.

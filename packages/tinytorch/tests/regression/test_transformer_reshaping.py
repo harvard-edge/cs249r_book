@@ -87,7 +87,6 @@ def test_transformer_to_linear_3d_to_2d():
         # If Linear can handle 3D, this might work
         if output.shape == (batch_size, seq_length, vocab_size):
             print("✅ Linear handles 3D input (broadcasting)")
-            return True
     except (ValueError, AssertionError) as e:
         print(f"Expected error with 3D input: {e}")
 
@@ -118,7 +117,6 @@ def test_transformer_to_linear_3d_to_2d():
     print("✅ Solution 2 works!")
 
     print("\n🎯 Transformer->Linear reshape test PASSED!")
-    return True
 
 
 def test_full_gpt_architecture_shapes():
@@ -178,7 +176,6 @@ def test_full_gpt_architecture_shapes():
     print(f"Next token logits: {next_token_logits.shape}")
 
     print("✅ Complete GPT architecture shapes flow correctly!")
-    return True
 
 
 def test_attention_kv_cache_shapes():
@@ -236,7 +233,6 @@ def test_embedding_dimension_compatibility():
     assert output.shape == (batch_size, seq_length, embed_dim)
 
     print("✅ Embedding->Transformer dimensions compatible!")
-    return True
 
 
 if __name__ == "__main__":

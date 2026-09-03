@@ -53,12 +53,11 @@ def test_mse_loss_gradients():
     improvement = initial_loss.data - final_loss.data
     console.print(f"  Improvement: {improvement:.4f}")
 
-    if improvement > 0:
-        console.print("  [green]✅ MSELoss works - gradients flow correctly![/green]")
-        return True
-    else:
-        console.print("  [red]❌ MSELoss failed - no learning![/red]")
-        return False
+    assert improvement > 0, (
+        f"MSELoss did not learn: loss went from {initial_loss.data:.4f} to "
+        f"{final_loss.data:.4f} (improvement {improvement:.4f}, expected > 0)"
+    )
+    console.print("  [green]✅ MSELoss works - gradients flow correctly![/green]")
 
 
 def test_bce_loss_gradients():
@@ -68,13 +67,8 @@ def test_bce_loss_gradients():
     # Simple binary classification
     model = Linear(2, 1)
 
-    # Import Sigmoid
-    try:
-        from tinytorch import Sigmoid
-        activation = Sigmoid()
-    except:
-        console.print("  [yellow]⚠️  Sigmoid not available, skipping BCE test[/yellow]")
-        return None
+    from tinytorch.core.activations import Sigmoid
+    activation = Sigmoid()
 
     loss_fn = BinaryCrossEntropyLoss()
     optimizer = SGD([model.weight, model.bias], lr=0.1)
@@ -107,16 +101,16 @@ def test_bce_loss_gradients():
     improvement = initial_loss.data - final_loss.data
     console.print(f"  Improvement: {improvement:.4f}")
 
-    if improvement > 0:
-        console.print("  [green]✅ BinaryCrossEntropyLoss works - gradients flow correctly![/green]")
-        return True
-    else:
-        console.print("  [red]❌ BinaryCrossEntropyLoss failed - no learning![/red]")
-        return False
+    assert improvement > 0, (
+        f"BinaryCrossEntropyLoss did not learn: loss went from "
+        f"{initial_loss.data:.4f} to {final_loss.data:.4f} "
+        f"(improvement {improvement:.4f}, expected > 0)"
+    )
+    console.print("  [green]✅ BinaryCrossEntropyLoss works - gradients flow correctly![/green]")
 
 
 def test_crossentropy_loss_gradients():
-    """Test CrossEntropyLoss with autograd - CURRENTLY BROKEN"""
+    """Test CrossEntropyLoss with autograd."""
     console.print("\n[bold cyan]Test 3: CrossEntropyLoss with Gradients[/bold cyan]")
 
     # Simple multi-class classification
@@ -137,35 +131,32 @@ def test_crossentropy_loss_gradients():
     has_grad_fn = hasattr(initial_loss, '_grad_fn') and initial_loss._grad_fn is not None
     console.print(f"  Has gradient function: {has_grad_fn}")
 
-    # Try to train for 10 steps
-    try:
-        for _ in range(10):
-            logits = model(X)
-            loss = loss_fn(logits, y)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+    assert has_grad_fn, (
+        "CrossEntropyLoss output carries no _grad_fn, so backward() would "
+        "silently do nothing"
+    )
 
-        # Check if loss decreased
+    # Train for 10 steps. Any exception here is a real failure, not something
+    # to swallow -- letting it propagate is what makes this test meaningful.
+    for _ in range(10):
         logits = model(X)
-        final_loss = loss_fn(logits, y)
-        console.print(f"  Final loss: {final_loss.data:.4f}")
+        loss = loss_fn(logits, y)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-        improvement = initial_loss.data - final_loss.data
-        console.print(f"  Improvement: {improvement:.4f}")
+    logits = model(X)
+    final_loss = loss_fn(logits, y)
+    console.print(f"  Final loss: {final_loss.data:.4f}")
 
-        if improvement > 0:
-            console.print("  [green]✅ CrossEntropyLoss works - gradients flow correctly![/green]")
-            return True
-        else:
-            console.print("  [red]❌ CrossEntropyLoss BROKEN - no learning detected![/red]")
-            console.print("  [yellow]💡 Reason: CrossEntropyBackward not implemented in autograd![/yellow]")
-            return False
+    improvement = initial_loss.data - final_loss.data
+    console.print(f"  Improvement: {improvement:.4f}")
 
-    except Exception as e:
-        console.print(f"  [red]❌ CrossEntropyLoss BROKEN - Error: {e}[/red]")
-        console.print("  [yellow]💡 Reason: No gradient computation implemented![/yellow]")
-        return False
+    assert improvement > 0, (
+        f"CrossEntropyLoss did not learn: loss went from {initial_loss.data:.4f} "
+        f"to {final_loss.data:.4f} (improvement {improvement:.4f}, expected > 0)"
+    )
+    console.print("  [green]✅ CrossEntropyLoss works - gradients flow correctly![/green]")
 
 
 def main():

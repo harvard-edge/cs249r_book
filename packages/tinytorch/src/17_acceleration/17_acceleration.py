@@ -49,7 +49,7 @@ Let's optimize for speed!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/17_acceleration/acceleration_dev.py`
+**Learning Side:** You work in `modules/17_acceleration/acceleration.ipynb`
 **Building Side:** Code exports to `tinytorch.perf.acceleration`
 
 ```python
@@ -64,7 +64,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 - **Integration:** Works seamlessly with neural network layers for complete performance optimization
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -170,14 +170,14 @@ Real-world performance wins:
 - **10× scaling improvement** for large models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tensor-import", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "tensor-import", "solution": false}
 #| export
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## 📐 Foundations: Vectorization - From Loops to Lightning
+## 📐 Foundations: Vectorization: From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -229,7 +229,7 @@ For c₁₁: Row₁ · Column₁ = a₁₁×b₁₁ + a₁₂×b₂₁ + a₁₃
 ```
 
 **Why vectorization wins:**
-- **High arithmetic intensity**: 2N³ FLOPs for N³ data
+- **High arithmetic intensity**: 2N³ FLOPs for only 3N² elements of data
 - **Predictable memory access**: Sequential row/column reads
 - **Parallelizable**: Independent dot products
 - **Cache-friendly**: Data reuse in inner loops
@@ -267,8 +267,8 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     >>> b = Tensor([[5, 6], [7, 8]])  # 2×2
     >>> result = vectorized_matmul(a, b)
     >>> print(result.data)
-    [[19 22]    # [1×5+2×7, 1×6+2×8] = [19, 22]
-     [43 50]]   # [3×5+4×7, 3×6+4×8] = [43, 50]
+    [[19. 22.]    # [1×5+2×7, 1×6+2×8] = [19, 22]
+     [43. 50.]]   # [3×5+4×7, 3×6+4×8] = [43, 50]
 
     PERFORMANCE CHARACTERISTICS:
     - Time Complexity: O(N³) but highly optimized
@@ -307,6 +307,19 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
 
     return Tensor(result_data)
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Vectorized Matrix Multiplication
+
+This test validates that replacing explicit loops with a single vectorized call
+produces identical results.
+
+**What we're testing**: Correctness of batched matmul and its shape validation
+**Why it matters**: Vectorization is only a win if the answer is unchanged -- a
+faster wrong answer is worthless
+**Expected**: Matches hand-computed products, rejects mismatched inner dimensions
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-vectorized-matmul", "locked": true, "points": 10}
 def test_unit_vectorized_matmul():
@@ -356,7 +369,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Kernel Fusion - Eliminating Memory Bottlenecks
+## 🏗️ Implementation: Kernel Fusion: Eliminating Memory Bottlenecks
 
 ### The Memory Bandwidth Crisis
 
@@ -374,7 +387,7 @@ Step 3: y = gelu(temp2)        → Read 4GB, Write 4GB
 ```
 Single Step: y = gelu(x * weight + bias)  → Read 8GB, Write 4GB
                                             Total: 12GB memory traffic!
-                                            60% memory bandwidth reduction!
+                                            40% memory bandwidth reduction!
 ```
 
 ### Understanding GELU: The Smooth Activation
@@ -481,6 +494,19 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Fused GELU
+
+This test validates the fused GELU activation against the mathematical
+properties GELU must satisfy.
+
+**What we're testing**: GELU(0) = 0, monotonicity, and the tanh approximation
+**Why it matters**: Fusion collapses several passes over memory into one, so the
+fused version must stay numerically faithful to the unfused definition
+**Expected**: Exact zero at the origin, increasing output, correct tail behavior
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
     """🔬 Test fused GELU activation implementation."""
@@ -585,6 +611,18 @@ def unfused_gelu(x: Tensor) -> Tensor:
     return result
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Kernel Fusion Performance Impact
+
+This test measures the actual speedup from fusion rather than assuming it.
+
+**What we're testing**: Timed comparison of fused vs unfused GELU after warmup
+**Why it matters**: Fusion saves memory traffic, not arithmetic. The only way to
+know whether that mattered on your machine is to measure it
+**Expected**: Fused version is no slower, with warmup excluded from the timing
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-fusion-speedup", "locked": true, "points": 10}
 def test_unit_fusion_speedup():
     """🧪 Measure the performance impact of kernel fusion."""
@@ -672,6 +710,30 @@ Main RAM:   8-64 GB    (slow, 100-300 cycles)
 
 When matrices are larger than cache, we get **cache misses** that slow us down dramatically.
 Tiling keeps working set in cache for maximum reuse.
+
+### Sizing a Tile
+
+Computing one output tile touches three blocks at once: a tile of A, a tile of
+B, and the tile of C being accumulated. So the working set is roughly
+`3 x tile_size^2 x 4 bytes` for float32. Solving for a 32 KB L1 cache:
+
+```
+3 x t^2 x 4 <= 32,768   ->   t <= 52
+```
+
+which is why 32 and 64 are the tile sizes you see in real kernels.
+
+### What You Are and Are Not Building
+
+You are writing the **loop order** -- the three tile loops that decide which
+blocks are in flight together. The multiply inside each block is still a NumPy
+call, because writing scalar loops in Python would be thousands of times slower
+and would teach nothing about cache behavior.
+
+Be honest about the benchmark: your tiled version will be **slower** than
+`vectorized_matmul`, because NumPy already hands the whole matrix to a BLAS
+kernel that does this same blocking in tuned C with prefetching and register
+tiling. The point is to see the mechanism BLAS is using, not to beat it.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tiled-matmul", "solution": true}
@@ -679,50 +741,61 @@ Tiling keeps working set in cache for maximum reuse.
 
 def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     """
-    Cache-aware matrix multiplication using tiling/blocking.
+    Cache-aware matrix multiplication using tiling (also called blocking).
 
-    Demonstrates blocking algorithm for cache optimization by breaking
-    large matrix multiplications into cache-sized chunks.
+    Splits the output into tile_size x tile_size blocks and computes each block
+    from matching strips of A and B, so the working set stays small enough to
+    live in cache while it is being reused.
 
-    TODO: Implement cache-aware tiled matrix multiplication
+    TODO: Implement blocked matrix multiplication.
 
     APPROACH:
-    1. Validate inputs for matrix multiplication compatibility
-    2. Use NumPy's optimized matmul (which already implements tiling internally)
-    3. In production, explicit tiling would use nested loops over blocks
+    1. Validate that both inputs are 2D and that their inner dimensions agree
+    2. Allocate the output C as an (M, N) array of zeros
+    3. Loop over tiles of i (rows of C), then tiles of j (columns of C)
+    4. For each output tile, loop over tiles of k and ACCUMULATE the block
+       products into that tile: C[i, j] += A[i, k] @ B[k, j]
+    5. Wrap the finished array in a Tensor
 
     Args:
-        a: First matrix (M×K)
-        b: Second matrix (K×N)
-        tile_size: Block size for cache efficiency (default: 64)
+        a: First matrix (M x K)
+        b: Second matrix (K x N)
+        tile_size: Block edge length; the working set is three tile_size x
+            tile_size blocks (default: 64)
 
     Returns:
-        Result matrix (M×N)
+        Result matrix (M x N)
 
     EXAMPLE:
-    >>> a = Tensor(rng.standard_normal((256, 256)))
-    >>> b = Tensor(rng.standard_normal((256, 256)))
-    >>> result = tiled_matmul(a, b, tile_size=64)
-    >>> # Same result as vectorized_matmul, but more cache-friendly for large matrices
+    >>> a = Tensor([[1, 2], [3, 4]])
+    >>> b = Tensor([[5, 6], [7, 8]])
+    >>> print(tiled_matmul(a, b, tile_size=1).data)
+    [[19. 22.]
+     [43. 50.]]
 
     PERFORMANCE CHARACTERISTICS:
-    - Reduces cache misses by working on blocks that fit in L1/L2
-    - Especially beneficial for matrices larger than cache size
-    - tile_size should match cache line size (typically 64 bytes)
+    - Same FLOP count as the naive order; only the memory access pattern changes
+    - Three blocks of tile_size^2 floats must fit in cache together, so a good
+      tile_size satisfies 3 * tile_size^2 * 4 bytes < L1/L2 size
+    - The win grows with matrix size: at 128x128 everything already fits in
+      cache and tiling buys nothing
 
     HINTS:
-    - For educational purposes, we use NumPy's optimized BLAS
-    - BLAS libraries (MKL, OpenBLAS) already implement cache blocking
-    - Explicit tiling would use 6 nested loops (3 for tiles, 3 for elements)
+    - Use min(start + tile_size, limit) so the last tile can be a partial one
+    - Accumulate with += into a slice of C; each output tile is touched once
+      per k-tile
+    - The innermost block product is still NumPy's `@`. The lesson here is the
+      LOOP ORDER, not scalar arithmetic -- Python-level scalar loops would be
+      thousands of times slower and teach nothing about cache behavior
     """
     ### BEGIN SOLUTION
     # Input validation
-    if len(a.shape) < 2 or len(b.shape) < 2:
+    if len(a.shape) != 2 or len(b.shape) != 2:
         raise ValueError(
-            f"Tiled matrix multiplication requires 2D+ tensors\n"
+            f"Tiled matrix multiplication requires 2D tensors\n"
             f"  ❌ Got shapes {a.shape} and {b.shape} ({len(a.shape)}D and {len(b.shape)}D tensors)\n"
-            f"  💡 Tiling partitions matrices into cache-sized blocks, which requires 2D structure\n"
-            f"  🔧 Add dimensions with reshape: tensor.reshape(1, -1) for row vector or tensor.reshape(-1, 1) for column"
+            f"  💡 Tiling partitions a matrix into 2D blocks, so there must be exactly two axes\n"
+            f"  🔧 Add dimensions with reshape: tensor.reshape(1, -1) for a row vector or tensor.reshape(-1, 1) for a column"
         )
 
     if a.shape[-1] != b.shape[-2]:
@@ -733,23 +806,42 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
             f"  🔧 Reshape to align: b.reshape({a.shape[-1]}, -1) or transpose if dimensions are swapped"
         )
 
-    # For educational purposes, we use NumPy's matmul which already
-    # implements cache-aware tiling via BLAS libraries (MKL, OpenBLAS)
-    # These libraries automatically partition large matrices into
-    # cache-sized blocks for optimal performance
+    if tile_size < 1:
+        raise ValueError(
+            f"Tile size must be at least 1, got {tile_size}\n"
+            f"  💡 The tile is the block edge length, so it has to be a positive number of rows/columns"
+        )
 
-    # In a full educational implementation, you would write:
-    # for i_tile in range(0, M, tile_size):
-    #     for j_tile in range(0, N, tile_size):
-    #         for k_tile in range(0, K, tile_size):
-    #             # Multiply tile blocks that fit in cache
-    #             C[i_tile:i_tile+tile_size, j_tile:j_tile+tile_size] +=
-    #                 A[i_tile:i_tile+tile_size, k_tile:k_tile+tile_size] @
-    #                 B[k_tile:k_tile+tile_size, j_tile:j_tile+tile_size]
+    A, B = a.data, b.data
+    M, K = A.shape
+    N = B.shape[1]
+    C = np.zeros((M, N), dtype=A.dtype)
 
-    result_data = np.matmul(a.data, b.data)
-    return Tensor(result_data)
+    # Three loops over TILES. The inner block product is one NumPy matmul on
+    # data small enough to stay in cache for the whole (i, j) tile.
+    for i0 in range(0, M, tile_size):
+        i1 = min(i0 + tile_size, M)
+        for j0 in range(0, N, tile_size):
+            j1 = min(j0 + tile_size, N)
+            for k0 in range(0, K, tile_size):
+                k1 = min(k0 + tile_size, K)
+                C[i0:i1, j0:j1] += A[i0:i1, k0:k1] @ B[k0:k1, j0:j1]
+
+    return Tensor(C)
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Tiled Matrix Multiplication
+
+This test validates that blocking the loops preserves the result.
+
+**What we're testing**: Tiled output matches the vectorized reference across
+several tile sizes, plus shape validation
+**Why it matters**: Tiling reorders the accumulation, and float addition is not
+associative, so "close enough" has to be defined rather than assumed
+**Expected**: Agreement within float32 reassociation tolerance at every tile size
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-tiled-matmul", "locked": true, "points": 10}
 def test_unit_tiled_matmul():
@@ -792,7 +884,7 @@ if __name__ == "__main__":
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-vectorization", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-vectorization", "solution": false}
 def analyze_vectorization_scaling():
     """📊 Analyze vectorization performance across different tensor sizes."""
     print("📊 Analyzing vectorization scaling behavior...")
@@ -847,7 +939,7 @@ def analyze_vectorization_scaling():
 if __name__ == "__main__":
     analyze_vectorization_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": false}
 def analyze_arithmetic_intensity():
     """📊 Demonstrate the roofline model with different operations."""
     print("📊 Analyzing arithmetic intensity patterns...")
@@ -997,12 +1089,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Optimization Insights: Production Acceleration Strategy
+## 📊 Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "acceleration-decision-framework", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "acceleration-decision-framework", "solution": false}
 def analyze_acceleration_decision_framework():
     """📊 Decision framework for choosing acceleration techniques."""
     print("📊 Acceleration Technique Decision Framework...")
@@ -1170,7 +1262,7 @@ Now let's use the **Profiler** tool you built in Module 14 to measure the actual
 This is how professional ML engineers work: profile → optimize → measure → repeat.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
 # Import Profiler from Module 14 (Module 17 comes after Module 14)
 from tinytorch.perf.profiling import Profiler
 

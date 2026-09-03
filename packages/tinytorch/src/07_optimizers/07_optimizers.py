@@ -55,7 +55,7 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 - **Integration:** Works seamlessly with gradients from Module 06 for complete training capability
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.optimizers
 #| export
 
@@ -494,7 +494,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🏗️ SGD - Stochastic Gradient Descent
+## 🏗️ SGD: Stochastic Gradient Descent
 
 SGD is the foundation of neural network perf. It implements the simple but powerful idea: "move in the direction opposite to the gradient."
 
@@ -802,7 +802,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Adam - Adaptive Moment Estimation
+## 🏗️ Adam: Adaptive Moment Estimation
 
 Adam solves a fundamental problem with SGD: different parameters often need different learning rates. Think of tuning a complex system where some knobs need gentle adjustments and others need bold changes.
 
@@ -1190,7 +1190,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ AdamW - Adam with Decoupled Weight Decay
+## 🏗️ AdamW: Adam with Decoupled Weight Decay
 
 AdamW fixes a subtle but important bug in Adam's weight decay implementation. The bug affects how regularization interacts with adaptive learning rates.
 
@@ -1636,7 +1636,7 @@ O(n) simple ops         O(n) complex ops
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "optimizer-analysis", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "optimizer-analysis", "solution": false}
 def analyze_optimizer_memory_usage():
     """📊 Analyze memory usage of different optimizers."""
     print("📊 Analyzing Optimizer Memory Usage...")
@@ -1682,7 +1682,12 @@ def analyze_optimizer_memory_usage():
     print("- Memory scales linearly with model size")
     print("- Trade-off: More memory for better convergence")
 
-# %% nbgrader={"grade": false, "grade_id": "optimizer-convergence", "solution": true}
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_optimizer_memory_usage()
+
+# %% nbgrader={"grade": false, "grade_id": "optimizer-convergence", "solution": false}
 def analyze_optimizer_convergence_behavior():
     """📊 Analyze convergence behavior of different optimizers."""
     print("📊 Analyzing Optimizer Convergence Behavior...")
@@ -1747,6 +1752,11 @@ def analyze_optimizer_convergence_behavior():
     print("- SGD+Momentum: Faster convergence, less oscillation")
     print("- Adam: Adaptive rates help with different parameter scales")
     print("- AdamW: Similar to Adam with regularization effects")
+
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_optimizer_convergence_behavior()
 
 # %% [markdown]
 """
