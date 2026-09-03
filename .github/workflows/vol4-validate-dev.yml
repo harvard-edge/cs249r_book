@@ -1,0 +1,242 @@
+name: '🤖 Physical AI · ✅ Validate (Dev)'
+
+# =============================================================================
+# Physical AI — Content & Build Validation
+# =============================================================================
+#
+# Validates Physical AI content integrity and build output (HTML, PDF, EPUB).
+#
+# Flow:
+#   1. VALIDATE_CONTENT — Check image references, cross-references, and layout
+#   2. BUILD_SITE       — Quarto HTML render succeeds
+#   3. BUILD_PDF        — LuaLaTeX PDF compiles successfully
+#   4. BUILD_EPUB       — EPUB compiles successfully
+#
+# Triggers:
+#   - push: dev branch, physical/** paths
+#   - pull_request: physical/** or workflow file changes
+#   - workflow_dispatch: manual
+#   - workflow_call: reusable for publish preflight
+#
+# Deploys to: N/A (validate only)
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'physical/**'
+      - 'books/vol4-physical/**'
+      - 'labs/vol4-physical/**'
+      - 'shared/**'
+      - '.github/workflows/physical-*'
+  push:
+    branches: [dev]
+    paths:
+      - 'physical/**'
+      - 'books/vol4-physical/**'
+      - 'labs/vol4-physical/**'
+      - 'shared/**'
+      - '.github/workflows/physical-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+# Workflow-level environment variables (fork-safe)
+env:
+  PHYSICAL_ROOT: books/vol4
+  PHYSICAL_BOOK_DIR: publishing/quarto
+  PHYSICAL_BUILD_DIR: publishing/quarto/_build/html-vol4
+  PHYSICAL_PDF_NAME: Machine-Learning-Systems-Vol4.pdf
+  PHYSICAL_EPUB_NAME: Machine-Learning-Systems-Vol4.epub
+  GLOBAL_PYTHON_VERSION: '3.12'
+  PYTHONIOENCODING: 'utf-8'
+  PYTHONUTF8: '1'
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Content integrity validation
+  # ===========================================================================
+  validate-content:
+    name: '🔍 Validate Content & Checks'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 📦 Install CLI Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install rich pyyaml pydantic
+
+      - name: 🔍 Check image references exist
+        working-directory: ${{ env.PHYSICAL_ROOT }}
+        run: |
+          echo "🔍 Checking that all referenced images exist..."
+          python3 - <<'PYEOF'
+          import re, os, sys, glob
+
+          pattern = re.compile(r'!\[.*?\]\(([^)]+)\)')
+          fails = []
+
+          for qmd in glob.glob("**/*.qmd", recursive=True):
+              qmd_dir = os.path.dirname(qmd)
+              with open(qmd) as f:
+                  for lineno, line in enumerate(f, 1):
+                      for m in pattern.finditer(line):
+                          img = m.group(1).split("{")[0].strip()
+                          if img.startswith(("http://", "https://", "#", "@")) or not img:
+                              continue
+                          if not os.path.isfile(os.path.join(qmd_dir, img)) and not os.path.isfile(img):
+                              fails.append(f"  {qmd}:{lineno} -> {img}")
+
+          if fails:
+              print(f"❌ {len(fails)} missing image reference(s):")
+              for f in fails:
+                  print(f)
+              sys.exit(1)
+          else:
+              print("✅ All image references are valid")
+          PYEOF
+
+      - name: 📋 Run Physical AI static checks
+        run: |
+          ./publishing/binder check --vol4
+
+  # ===========================================================================
+  # Stage 2: Quarto HTML site build
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build HTML Website'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e packages/mlsysim
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📦 Install SVG/Image tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+      - name: 🔨 Render HTML via Binder
+        run: ./publishing/binder build html --vol4
+
+      - name: 🔍 Validate HTML Output
+        run: |
+          if [ ! -f "${{ env.PHYSICAL_BUILD_DIR }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ env.PHYSICAL_BUILD_DIR }}/index.html missing."
+            exit 1
+          fi
+          echo "✅ HTML build succeeded!"
+
+  # ===========================================================================
+  # Stage 3: LuaLaTeX PDF build
+  # ===========================================================================
+  build-pdf:
+    name: '📄 Build PDF Textbook'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e packages/mlsysim
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📚 Setup TeX Live / LuaLaTeX
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            texlive-latex-base \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-luatex \
+            texlive-plain-generic \
+            librsvg2-bin
+
+      - name: 🔨 Render PDF via Binder
+        run: ./publishing/binder build pdf --vol4
+
+      - name: 🔍 Validate PDF Output
+        run: |
+          if [ ! -f "publishing/quarto/_build/pdf-vol4/${{ env.PHYSICAL_PDF_NAME }}" ] && [ ! -f "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_PDF_NAME }}" ]; then
+            echo "❌ CRITICAL: ${{ env.PHYSICAL_PDF_NAME }} missing from build output."
+            exit 1
+          fi
+          echo "✅ PDF build succeeded!"
+
+  # ===========================================================================
+  # Stage 4: EPUB build
+  # ===========================================================================
+  build-epub:
+    name: '📱 Build EPUB'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e packages/mlsysim
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Render EPUB via Binder
+        run: ./publishing/binder build epub --vol4
+
+      - name: 🔍 Validate EPUB Output
+        run: |
+          if [ ! -f "publishing/quarto/_build/epub-vol4/${{ env.PHYSICAL_EPUB_NAME }}" ] && [ ! -f "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_EPUB_NAME }}" ]; then
+            echo "❌ CRITICAL: ${{ env.PHYSICAL_EPUB_NAME }} missing from build output."
+            exit 1
+          fi
+          echo "✅ EPUB build succeeded!"

@@ -1,0 +1,91 @@
+name: '🤖 Physical AI · 📚 Build PDFs & EPUB'
+
+# =============================================================================
+# Physical AI — Reusable PDF and EPUB Compilation
+# =============================================================================
+#
+# Compiles the Physical AI LuaLaTeX PDF and EPUB book and uploads them as
+# GitHub Actions artifacts for downstream preview/publish workflows.
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to checkout (branch, tag, or SHA)'
+        type: string
+        required: false
+        default: ''
+
+env:
+  PHYSICAL_ROOT: books/vol4
+  PHYSICAL_BOOK_DIR: publishing/quarto
+  PHYSICAL_BUILD_DIR: publishing/quarto/_build/html-vol4
+  PHYSICAL_PDF_NAME: Machine-Learning-Systems-Vol4.pdf
+  PHYSICAL_EPUB_NAME: Machine-Learning-Systems-Vol4.epub
+  PHYSICAL_ARTIFACT_NAME: Physical-AI-Builds
+  GLOBAL_PYTHON_VERSION: '3.12'
+
+jobs:
+  build-pdf-epub:
+    name: '📄 Compile Physical AI PDF & EPUB'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e packages/mlsysim
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📚 Setup TeX Live / LuaLaTeX
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            texlive-latex-base \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-luatex \
+            texlive-plain-generic \
+            librsvg2-bin
+
+      - name: 📄 Render LuaLaTeX PDF via Binder
+        run: ./publishing/binder build pdf --vol4
+
+      - name: 📱 Render EPUB via Binder
+        run: ./publishing/binder build epub --vol4
+
+      - name: 📦 Stage Artifacts for Upload
+        run: |
+          mkdir -p physical-artifacts
+          if [ -f "publishing/quarto/_build/pdf-vol4/${{ env.PHYSICAL_PDF_NAME }}" ]; then
+            cp "publishing/quarto/_build/pdf-vol4/${{ env.PHYSICAL_PDF_NAME }}" physical-artifacts/
+          elif [ -f "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_PDF_NAME }}" ]; then
+            cp "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_PDF_NAME }}" physical-artifacts/
+          fi
+          if [ -f "publishing/quarto/_build/epub-vol4/${{ env.PHYSICAL_EPUB_NAME }}" ]; then
+            cp "publishing/quarto/_build/epub-vol4/${{ env.PHYSICAL_EPUB_NAME }}" physical-artifacts/
+          elif [ -f "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_EPUB_NAME }}" ]; then
+            cp "${{ env.PHYSICAL_BUILD_DIR }}/${{ env.PHYSICAL_EPUB_NAME }}" physical-artifacts/
+          fi
+
+      - name: 📤 Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PHYSICAL_ARTIFACT_NAME }}
+          path: physical-artifacts/
+          if-no-files-found: error

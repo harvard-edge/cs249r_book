@@ -10,26 +10,32 @@
 
 <div align="center">
 
-<!-- Build Status -->
+<!-- Build Status: Core 4-Volume Series -->
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Book&logo=githubactions&cacheSeconds=300" alt="Book"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/physical-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/physical-validate-dev.yml?branch=dev&event=push&label=Physical%20AI&logo=robot&cacheSeconds=300" alt="Physical AI"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a></br>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/sync-newsletter.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/sync-newsletter.yml?branch=dev&event=schedule&label=Newsletter&logo=buttondown&cacheSeconds=300" alt="Newsletter"></a>
-  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?branch=dev&label=Updated&logo=git&cacheSeconds=300" alt="Updated">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20I%3A%20Foundations&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20II%3A%20Scaling&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol3-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol3-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol4-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol4-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
 </p>
 
-<!-- Meta -->
+<!-- Build Status: Companion Ecosystem & Tools -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+</p>
+
+<!-- Meta & Community -->
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md"><img src="https://img.shields.io/badge/License-CC--BY--NC--SA%204.0-blue.svg" alt="License"></a>
   <a href="CITATION.bib"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/sync-newsletter.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/sync-newsletter.yml?branch=dev&event=schedule&label=Newsletter&logo=buttondown&cacheSeconds=300" alt="Newsletter"></a>
+  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?branch=dev&label=Updated&logo=git&cacheSeconds=300" alt="Updated">
 </p>
 
 <p align="center">
@@ -37,10 +43,13 @@
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
   <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
   <b><a href="https://mlsysbook.ai/vol3/">🟣 Vol III (In Dev)</a></b> •
-  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b> •
+  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b>
+  <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
+  <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
   <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b>
 </p>
 
@@ -244,36 +253,76 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-The textbook follows the Hennessy & Patterson pedagogical model across two volumes:
+The textbook series follows a comprehensive systems progression across four core volumes:
 
 <table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
       <th width="15%">Volume</th>
-      <th width="25%">Theme</th>
-      <th width="55%">Scope</th>
+      <th width="20%">Unit of Work</th>
+      <th width="35%">Core Systems Question</th>
+      <th width="25%">Consequence of Failure</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td align="center">📗</td>
-      <td><b>Volume I</b></td>
-      <td>Build, Optimize, Deploy</td>
-      <td>Single-machine ML systems (1–8 GPUs). Foundations, optimization, and deployment on one node.</td>
+      <td><b>Volume I</b><br><i>Foundations</i></td>
+      <td><b>The Model</b></td>
+      <td>How do we make intelligence execute efficiently on a single node?</td>
+      <td>Bad prediction or degraded runtime efficiency.</td>
     </tr>
     <tr>
       <td align="center">📘</td>
-      <td><b>Volume II</b></td>
-      <td>Scale, Distribute, Govern</td>
-      <td>Distributed systems at production scale. Multi-machine infrastructure, fault tolerance, and governance.</td>
+      <td><b>Volume II</b><br><i>Scaling (Preview)</i></td>
+      <td><b>The Fleet</b></td>
+      <td>How do we scale intelligence across distributed clusters and datacenters?</td>
+      <td>Multi-million dollar cluster stall or service outage.</td>
+    </tr>
+    <tr>
+      <td align="center">🟣</td>
+      <td><b>Volume III</b><br><i>Agentic (Notebook)</i></td>
+      <td><b>The Trajectory</b></td>
+      <td>How do we govern intelligence acting autonomously over long horizons?</td>
+      <td>Compounding trajectory drift and unauthorized side-effects.</td>
+    </tr>
+    <tr>
+      <td align="center">🌲</td>
+      <td><b>Volume IV</b><br><i>Physical AI (Notebook)</i></td>
+      <td><b>The Physical Plant</b></td>
+      <td>How do we let intelligence act safely on matter and physical systems?</td>
+      <td>Irreversible physical damage in the real world.</td>
     </tr>
   </tbody>
 </table>
 
+> *Note: Volumes III and IV are currently active research notebooks as these disciplines rapidly evolve. Over time, they may mature into formal textbooks—for now, they are where I explore first principles and separate durable systems foundations from noise. You are welcome to follow along as they take shape.*
+
+#### How the Volumes Connect
+
+Each volume in the series expands the systems boundary, answering the question that the previous level leaves open:
+
+* **From Model to Fleet (Vol I → Vol II)**: *When one machine is not enough.* Volume I masters single-node execution, memory walls, and kernel efficiency. Volume II scales those foundations across thousands of accelerators, collective communication fabrics, fault-tolerant networks, and datacenter orchestration.
+* **From Request to Trajectory (Vol II → Vol III)**: *When a stateless response is not enough.* Volume II scales stateless request-response inference. Volume III introduces stateful, multi-step autonomous loops—managing context memory hierarchies, tool execution protocols (MCP), isolation sandboxes, and non-deterministic recovery.
+* **From Cyberspace to Matter (Vol III → Vol IV)**: *When software acts on the physical world.* Volume III governs digital tools and software environments. Volume IV crosses the causal boundary into physical plants—governing real-time sensor-actuator loops where computational latency becomes uncontrolled distance, reflected inertia dictates motion, and failure has irreversible physical consequences.
+
 ---
 
 ## FAQ
+
+<details>
+<summary><b>Why do you do all this?</b></summary>
+
+<br>
+
+I consider myself a student of my own learning.
+
+Whenever I want to understand an emerging or complex systems discipline, I learn it by trying to teach and build it from first principles. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
+
+This repository—the books, software frameworks, and hardware kits—is not a commercial publishing treadmill. It is my open research instrument. It is how I clarify my own thinking for research, benchmarking programs, and classroom teaching. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
+
+</details>
 
 <details>
 <summary><b>Who is this for, and what should I know first?</b></summary>
