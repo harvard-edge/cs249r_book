@@ -6,10 +6,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-  getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
+  getAreas, getAreaStyle, getAreaForTopic, searchTopics,
   type Topic,
 } from "@/lib/taxonomy";
-import { getTracks, searchQuestions, getTrackCount, type Question } from "@/lib/corpus";
+import { getTracks, searchQuestions, getTrackCount } from "@/lib/corpus";
 import { track as trackAnalytics } from "@/lib/analytics";
 import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
@@ -61,8 +61,6 @@ function HomePage() {
   const [streakCount, setStreakCount] = useState(0);
   const [attemptCount, setAttemptCount] = useState(0);
   const [dailyDone, setDailyDone] = useState(false);
-
-  const stats = getVaultStats();
   const areas = getAreas();
 
   useEffect(() => {

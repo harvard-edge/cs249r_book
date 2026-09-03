@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Cpu } from "lucide-react";
 import clsx from "clsx";
-import { HARDWARE_SPECS, INTERCONNECTS, LATENCY_HIERARCHY, HardwareSpec } from "@/lib/hardware";
+import { HARDWARE_SPECS, INTERCONNECTS, LATENCY_HIERARCHY } from "@/lib/hardware";
 
 export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);

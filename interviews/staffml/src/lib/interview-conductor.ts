@@ -3,9 +3,7 @@ import {
   getChainEntryPoint,
   getChainsByArea,
   getCompetencyAreas,
-  getQuestionFullDetail,
   type ChainSummary,
-  type ChainMember,
   type Question,
 } from "./corpus";
 import type {
@@ -14,7 +12,6 @@ import type {
   InterviewReport,
   InterviewRequestPayload,
   ConductorResponse,
-  ConductorMeta,
   AreaAssessment,
   TranscriptEntry,
   PracticeRecommendation,
@@ -317,7 +314,7 @@ export function generateReport(session: InterviewSession): InterviewReport {
 
   return {
     overallScore,
-    summary: buildSummary(overallScore, strengths, weaknesses),
+    summary: buildSummary(overallScore),
     areaBreakdown: assessed,
     strengths,
     weaknesses,
@@ -327,7 +324,7 @@ export function generateReport(session: InterviewSession): InterviewReport {
   };
 }
 
-function buildSummary(score: number, strengths: string[], weaknesses: string[]): string {
+function buildSummary(score: number): string {
   if (score >= 80) return "Strong performance across assessed areas with clear systems thinking and accurate estimation.";
   if (score >= 60) return "Solid foundation with some areas showing depth. Targeted practice on weaker areas would strengthen the overall profile.";
   if (score >= 40) return "Partial understanding demonstrated. Several core areas need deeper study before a staff-level interview.";

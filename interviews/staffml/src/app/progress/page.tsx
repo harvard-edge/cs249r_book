@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target, AlertTriangle, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
-import { getCompetencyAreas, getTracks, getQuestionsByFilter, getTopics, getQuestions } from "@/lib/corpus";
+import { getCompetencyAreas, getTracks, getTopics, getQuestions } from "@/lib/corpus";
 import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt, getTopicProgressMap, type AreaProgress } from "@/lib/progress";
 import { useToast } from "@/components/Toast";
 import { track } from "@/lib/analytics";

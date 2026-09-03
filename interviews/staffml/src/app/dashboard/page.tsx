@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import {
-  BarChart3, Terminal, Activity, Users, Target, Crosshair,
+  BarChart3, Terminal, Activity, Target, Crosshair,
   Flag, Lightbulb, Calendar, TrendingUp, Trash2, ThumbsUp, ThumbsDown, Gauge,
   Link as LinkIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { computeSummary, getAnalyticsEvents, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
-import { getVaultStats, getAreas, getAreaForTopic } from "@/lib/taxonomy";
+import { computeSummary, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
+import { getVaultStats, getAreaForTopic } from "@/lib/taxonomy";
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
