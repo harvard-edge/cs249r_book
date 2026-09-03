@@ -866,11 +866,152 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### Simulated Accuracy - The Honest Stand-In
+
+Some models handed to a benchmark harness have no `evaluate` method and no
+labeled data behind them. The tempting move is to make up a plausible score.
+Do not. A fabricated number propagates into every table, chart, and comparison
+downstream, and nothing further along can tell it apart from a measurement.
+
+The stand-in below is deliberately modest. It runs the model on a small,
+seeded **proxy task** -- inputs drawn from a fixed generator, labels defined by
+a rule the inputs actually determine -- and reports how often the model's
+output agrees. That is a real score of a fake task, which is a very different
+claim from a fake score of a real task, and the caller marks it `simulated`.
+
+Two properties make it defensible:
+
+- **Deterministic**: the same model and dataset always give the same number.
+- **Output-dependent**: it measures what the model *computes*. It never reads
+  the model's name or its position in the list.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "simulated-accuracy", "solution": true}
+#| export
+def _simulated_accuracy(model: Any, dataset: Any, num_samples: int = 32) -> float:
+    """
+    Score a model on a seeded proxy task when no ground truth is available.
+
+    This is NOT a measurement of the model's accuracy on `dataset`. It is a
+    reproducible, output-dependent stand-in for demos and smoke tests. Callers
+    must mark any result built from it as simulated.
+
+    TODO: Score the model on a small seeded synthetic classification task.
+
+    APPROACH:
+    1. Derive a seed from the dataset so different datasets give different probes
+    2. Draw num_samples probe vectors; the label is 1 when the probe sums positive
+    3. Run the model on each probe and predict 1 when its output sums positive
+    4. Return the fraction of agreements; a model we cannot invoke gets 0.5
+
+    Args:
+        model: Any object with forward(), predict(), or __call__
+        dataset: Used only to vary the probe seed, never as ground truth
+        num_samples: Number of probe vectors (default: 32)
+
+    Returns:
+        float: Agreement rate in [0, 1]; 0.5 means chance
+
+    HINTS:
+    - A model that passes signal through scores near 1.0; one that destroys it
+      lands near 0.5, which is exactly the discrimination we want
+    - Never let the score depend on getattr(model, 'name') or the model's index
+    """
+    ### BEGIN SOLUTION
+    # Vary the probe per dataset, deterministically and without hashing.
+    seed = 7 + sum(repr(dataset).encode()) % 1000
+    probe_rng = np.random.default_rng(seed)
+
+    probes = probe_rng.standard_normal((num_samples, 4)).astype(np.float32)
+    true_labels = (probes.sum(axis=1) > 0).astype(int)
+
+    predicted = []
+    for probe in probes:
+        try:
+            x = Tensor(probe.reshape(1, -1))
+            if hasattr(model, 'forward'):
+                out = model.forward(x)
+            elif hasattr(model, 'predict'):
+                out = model.predict(x)
+            elif callable(model):
+                out = model(x)
+            else:
+                return 0.5  # Cannot invoke the model: chance is the honest answer
+        except Exception:
+            return 0.5
+
+        out_data = out.data if hasattr(out, 'data') else out
+        predicted.append(int(np.asarray(out_data, dtype=np.float64).sum() > 0))
+
+    return float(np.mean(np.asarray(predicted) == true_labels))
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _simulated_accuracy
+
+**What we're testing**: Determinism, output-dependence, and identity-independence
+**Why it matters**: A stand-in score is only defensible if it cannot be gamed by
+renaming a model or reordering the list
+**Expected**: Same input gives the same score; a pass-through model beats a model
+that destroys the signal; renaming changes nothing
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-simulated-accuracy", "locked": true, "points": 5}
+def test_unit_simulated_accuracy():
+    """🧪 Test the simulated-accuracy stand-in."""
+    print("🧪 Unit Test: _simulated_accuracy...")
+
+    class PassThrough:
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return x
+
+    class Deaf:
+        """Destroys the input signal, so it should land near chance."""
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return Tensor(np.zeros_like(x.data) - 1.0)
+
+    dataset = {"d": "1"}
+
+    # Deterministic
+    a = _simulated_accuracy(PassThrough("a"), dataset)
+    assert a == _simulated_accuracy(PassThrough("a"), dataset), "Score must be reproducible"
+
+    # Identity-independent: the name must not move the number
+    assert a == _simulated_accuracy(PassThrough("zzz_accurate_efficient"), dataset), \
+        "Score must not depend on the model's name"
+
+    # Output-dependent: passing signal through beats destroying it
+    deaf = _simulated_accuracy(Deaf("b"), dataset)
+    assert a > deaf, f"Pass-through ({a}) should beat signal-destroying ({deaf})"
+    assert 0.0 <= deaf <= 1.0 and 0.0 <= a <= 1.0
+
+    print("✅ _simulated_accuracy works correctly!")
+
+if __name__ == "__main__":
+    test_unit_simulated_accuracy()
+
+# %% [markdown]
+"""
 ### Benchmark.run_accuracy_benchmark - Measuring Prediction Quality
 
-Accuracy benchmarking evaluates model correctness across datasets. Models with
-an `evaluate` method are tested directly; otherwise, accuracy is simulated for
-demonstration purposes.
+Accuracy benchmarking evaluates model correctness across datasets. A model that
+exposes an `evaluate(dataset)` method is **measured**: whatever score it returns
+is what gets reported.
+
+There is no honest way to measure accuracy without ground truth, so a model that
+has no `evaluate` method cannot be scored. Rather than invent a plausible number,
+this benchmark scores such a model against a **seeded synthetic label set** and
+marks the result `simulated=True` so nobody mistakes it for a measurement. The
+score still depends on what the model actually outputs -- never on its name or
+its position in the list.
+
+> A benchmark that reports a number nobody measured is worse than a benchmark
+> that reports nothing. If you take one habit from this module, take that one.
 
 ```
 Accuracy Measurement:
@@ -891,13 +1032,16 @@ def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
 
     APPROACH:
     1. Iterate over all models and datasets
-    2. Use model.evaluate() if available, otherwise simulate
-    3. Clamp accuracy to [0, 1] range
-    4. Wrap results in BenchmarkResult
+    2. If the model has evaluate(), use its score -- that is a real measurement
+    3. Otherwise score the model's own outputs against a seeded synthetic label
+       set, and flag the result as simulated
+    4. Clamp accuracy to [0, 1] and wrap the scores in a BenchmarkResult
 
     HINTS:
     - Use hasattr(model, 'evaluate') for duck-typing
-    - Different models get different base accuracies for simulation
+    - The simulated path must depend on the model's OUTPUT, never on its name or
+      its index -- a score keyed to identity is a fabricated benchmark
+    - Record simulated=True in metadata so a reader can tell the two apart
     """
     ### BEGIN SOLUTION
     results = {}
@@ -905,29 +1049,32 @@ def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
     for i, model in enumerate(self.models):
         model_name = getattr(model, 'name', f'model_{i}')
         accuracies = []
+        simulated = False
 
         for dataset in self.datasets:
-            # Simulate accuracy measurement
-            # In practice, this would evaluate the model on the dataset
-            try:
-                if hasattr(model, 'evaluate'):
-                    accuracy = model.evaluate(dataset)
-                else:
-                    # Simulate accuracy for demonstration
-                    base_accuracy = 0.85 + i * 0.05  # Different models have different base accuracies
-                    accuracy = base_accuracy + rng.normal(0, 0.02)  # Add noise
-                    accuracy = max(0.0, min(1.0, accuracy))  # Clamp to [0, 1]
-            except Exception:
-                # Fallback simulation
-                accuracy = 0.80 + rng.normal(0, 0.05)
-                accuracy = max(0.0, min(1.0, accuracy))
+            if hasattr(model, 'evaluate'):
+                # Real measurement: the model tells us how it did on this dataset
+                accuracy = float(model.evaluate(dataset))
+            else:
+                # No ground truth available. Score the model's actual outputs
+                # against a seeded reference label set so the number is at least
+                # reproducible and output-dependent -- but flag it as simulated.
+                simulated = True
+                accuracy = _simulated_accuracy(model, dataset)
 
-            accuracies.append(accuracy)
+            accuracies.append(max(0.0, min(1.0, accuracy)))
+
+        if simulated:
+            print(f"   ⚠️  {model_name}: no evaluate() method -- accuracy is SIMULATED, not measured")
 
         results[model_name] = BenchmarkResult(
             f"{model_name}_accuracy",
             accuracies,
-            metadata={'num_datasets': len(self.datasets), **self.system_info}
+            metadata={
+                'num_datasets': len(self.datasets),
+                'simulated': simulated,
+                **self.system_info,
+            }
         )
 
     return results
@@ -2230,16 +2377,19 @@ class MLPerf:
         TODO: Set up standard benchmark configurations with fixed seeds
 
         APPROACH:
-        1. Store random seed and initialize numpy RNG
+        1. Store random_seed and build the RNG that every phase of this run uses
         2. Define benchmark configs with input_shape, target_accuracy, max_latency_ms
 
         HINTS:
         - Each benchmark is a dict with 'input_shape', 'target_accuracy', 'max_latency_ms', 'description'
         - keyword_spotting uses (1, 16000) for 1 second of 16kHz audio
+        - Bind the RNG to self. A generator built from a hardcoded seed and
+          dropped on the floor makes random_seed a lie, and a benchmark whose
+          seed does nothing is not reproducible no matter what it prints
         """
         ### BEGIN SOLUTION
         self.random_seed = random_seed
-        rng = np.random.default_rng(7)
+        self.rng = np.random.default_rng(random_seed)
 
         # Standard MLPerf benchmark configurations
         self.benchmarks = {
@@ -2482,6 +2632,11 @@ def _extract_pred_array(pred) -> np.ndarray:
 
 Use _extract_pred_array to get clean predictions, then compare against
 synthetic ground truth for binary and multi-class tasks.
+
+Expect chance-level numbers here (50% binary, 10% multi-class) when the model
+under test has nothing to do with the synthetic labels. Resist the urge to
+"fix" that by nudging the score toward the compliance target. A benchmark that
+adjusts its output until the result looks plausible has stopped measuring.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
@@ -2491,20 +2646,28 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     """
     Calculate accuracy from predictions against synthetic ground truth.
 
+    The ground truth here is SYNTHETIC. A model with no relationship to these
+    labels scores at chance -- 50% on the binary tasks, 10% on the 10-class
+    task -- and that is the correct, informative result. A real MLPerf
+    submission swaps in the benchmark's own labeled dataset; the protocol
+    around it does not change.
+
     TODO: Implement accuracy calculation using _extract_pred_array helper
 
     APPROACH:
-    1. Generate synthetic ground truth using fixed seed
+    1. Generate synthetic ground truth from self.random_seed so the run repeats
     2. For binary tasks: use _extract_pred_array, compare class scores
     3. For multi-class: use _extract_pred_array, take argmax
-    4. Add realistic noise based on model name
+    4. Return the agreement rate. Nothing else.
 
     HINTS:
     - keyword_spotting, visual_wake_words, and anomaly_detection are binary (2 classes)
     - image_classification has 10 classes
+    - Do not adjust the score by the model's name. A benchmark that rewards a
+      model for calling itself 'efficient' measures marketing, not the model
     """
     ### BEGIN SOLUTION
-    rng = np.random.default_rng(7)
+    rng = np.random.default_rng(self.random_seed)
     if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
         true_labels = rng.integers(0, 2, num_runs)
@@ -2524,16 +2687,10 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
             pred_array = _extract_pred_array(pred)
             predicted_labels.append(np.argmax(pred_array) % num_classes)
 
-    # Calculate accuracy
+    # Calculate accuracy: agreement between predictions and the reference labels.
+    # No bonus, no adjustment, no smoothing. The number is what it is.
     correct_predictions = sum(1 for true, pred in zip(true_labels, predicted_labels) if true == pred)
     accuracy = correct_predictions / num_runs
-
-    # Add realistic noise based on model complexity
-    model_name = getattr(model, 'name', 'unknown_model')
-    if 'efficient' in model_name.lower():
-        accuracy = min(0.95, accuracy + 0.1)
-    elif 'accurate' in model_name.lower():
-        accuracy = min(0.98, accuracy + 0.2)
 
     return accuracy
     ### END SOLUTION
@@ -3840,6 +3997,7 @@ def test_module():
     test_unit_precise_timer()
     test_unit_benchmark_init()
     test_unit_benchmark_latency()
+    test_unit_simulated_accuracy()
     test_unit_benchmark_accuracy()
     test_unit_benchmark_memory()
     test_unit_benchmark()

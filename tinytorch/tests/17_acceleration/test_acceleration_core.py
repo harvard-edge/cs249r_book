@@ -94,8 +94,12 @@ class TestAccelerationBasics:
         # Reference (vectorized)
         result_reference = vectorized_matmul(A, B)
 
-        # Should match
-        assert np.allclose(result_tiled.data, result_reference.data, rtol=1e-5), (
+        # Should match. Not bit-exact: tiling reassociates the sum over K into
+        # per-tile partial sums, and float32 addition is not associative. Real
+        # blocked BLAS kernels differ from the naive order for the same reason.
+        # Observed max abs diff at 128x128 is ~2e-5, so atol=1e-4 has margin.
+        assert np.allclose(result_tiled.data, result_reference.data,
+                           rtol=1e-5, atol=1e-4), (
             "Tiled matmul gives different results!"
         )
 
