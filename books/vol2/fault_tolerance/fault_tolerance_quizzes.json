@@ -1,0 +1,889 @@
+{
+  "metadata": {
+    "source_file": "book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd",
+    "schema_version": 2,
+    "generated_by": "quizzes/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "claude-opus-4-7",
+    "total_sections": 14,
+    "sections_with_quizzes": 14,
+    "sections_without_quizzes": 0,
+    "improved_by": "opus-subagent-phase2"
+  },
+  "sections": [
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b",
+      "section_title": "Failure Analysis at Scale",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "system MTBF scaling with cluster size",
+            "Young-Daly checkpoint interval intuition",
+            "failure taxonomy including fail-stop, Byzantine, and correlated failures",
+            "economic trade-offs of fault tolerance investment",
+            "model-type differences in failure cost"
+          ],
+          "question_strategy": "Use quantitative and scenario-based questions spanning the mathematical inevitability of failure, taxonomy, correlated failure domains, and the economic/model-specific implications of failures at scale.",
+          "difficulty_progression": "Begin with basic MTBF scaling, move to classification and design trade-offs, then end with synthesis connecting failure math to investment and workload-specific strategy.",
+          "integration": "Connects to earlier chapters on distributed training, collective communication, storage bandwidth, and the fleet stack by showing why resilience becomes mandatory at scale.",
+          "ranking_explanation": "This is the chapter's conceptual foundation and introduces the core quantitative and design framework for all later sections, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A cluster grows from 1,000 GPUs to 10,000 GPUs while per-GPU MTBF stays fixed. If any single GPU failure can interrupt synchronous training, what happens to cluster MTBF?",
+            "choices": [
+              "It stays roughly the same because component reliability has not changed.",
+              "It improves because larger clusters can average over more devices.",
+              "It decreases only logarithmically because failures overlap in time.",
+              "It decreases by about 10$\\times$ because system failure rate grows with component count."
+            ],
+            "answer": "The correct answer is D. In a series-like system where any component failure can interrupt progress, system failure rate scales approximately as $N\\lambda$, so MTBF scales as component MTBF divided by $N$; a 10$\\times$ increase in $N$ drops MTBF by roughly 10$\\times$. The 'reliability stays the same' view ignores aggregation entirely, while the 'logarithmic' answer invents a dampening mechanism the series-reliability model does not contain.",
+            "learning_objective": "Apply reliability scaling laws to predict how cluster MTBF changes as component count increases"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a silent data corruption event can be more damaging to ML training than a fail-stop node crash.",
+            "answer": "A fail-stop crash is visible: the system can detect the missing worker, restart, and recover from the last checkpoint. Silent corruption keeps the job running while injecting mathematically wrong gradients or weights, so the bad state propagates into every subsequent step. For example, a bit flip in a gradient exponent can create a huge norm spike that poisons later updates for hours before anyone notices. The practical consequence is that recovery requires validation and possibly rollback to an earlier healthy checkpoint, not a simple restart, which is why fleet-scale training needs checksummed collectives and gradient sanity monitoring.",
+            "learning_objective": "Explain why Byzantine-style faults require different recovery logic than fail-stop failures in distributed training"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team replicates an inference service across three worker nodes placed within the exact same server rack connected to a single Top-of-Rack (ToR) switch and Power Distribution Unit (PDU). How does this placement affect the overall availability against hardware failures compared to placing the three replicas across distinct racks?",
+            "choices": [
+              "It provides equivalent availability because having three compute replicas mathematically triples reliability regardless of physical placement.",
+              "It provides minimal protection against correlated power or network switch outages, because the single ToR switch and PDU form a shared failure domain that can disable all three replicas simultaneously.",
+              "It reduces availability to zero because co-located nodes experience cache thrashing over the local PCIe bus.",
+              "It guarantees four-nines (99.99%) availability because intra-rack network latency is lower than cross-rack latency."
+            ],
+            "answer": "The correct answer is B. Redundancy only improves system availability when replicas reside in independent failure domains. In this scenario, the rack's shared Top-of-Rack (ToR) switch and Power Distribution Unit (PDU) are single points of failure; a fault in either disables all three replicas simultaneously, collapsing effective availability to that of a single device. Tripling compute nodes without diversifying failure domains is a common engineering trap; intra-rack latency does not prevent hardware power/switch faults; and independent nodes do not share PCIe bus caches.",
+            "learning_objective": "Analyze how shared failure domains constrain the effective availability gains of replication"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which situation best justifies investing heavily in automated checkpointing and recovery infrastructure?",
+            "choices": [
+              "A small 4-GPU research job that runs for two hours and can be restarted manually.",
+              "A short CPU preprocessing script whose outputs are cached and recomputed cheaply.",
+              "A 10,000-GPU training run expected to last weeks, where failures occur every few hours and lost progress is expensive.",
+              "A documentation-generation pipeline that runs nightly and is not latency-sensitive."
+            ],
+            "answer": "The correct answer is C. At large scale, expected failure frequency is high and per-failure cost (lost GPU-hours on thousands of accelerators) is enormous, so automation yields positive ROI almost immediately. The small research job can absorb a manual restart cheaper than building automation, and lightweight batch pipelines have neither the cost-per-failure nor the latency pressure to justify the investment.",
+            "learning_objective": "Evaluate when the economics of failure justify substantial fault tolerance investment"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team running a 2,000-GPU synchronous training job places all workers in a single rack for maximum interconnect bandwidth. Explain how this placement changes the effective MTBF compared with a naive independent-component model, and describe one placement change that would restore the assumed reliability math.",
+            "answer": "The naive model assumes 2,000 independent failures, but rack-level dependencies, such as the top-of-rack switch, UPS, and cooling loop, turn many logical failures into a single correlated event that can take all workers down together. For example, a single ToR switch failure eliminates the synchronous job even though only one device technically broke. Restoring the independence assumption requires diversifying failure domains: spread workers across multiple racks, power feeds, and network spines so that no single shared dependency can disable more than a small fraction of the fleet. The practical consequence is that resilience at scale is as much a placement problem as it is a redundancy problem.",
+            "learning_objective": "Analyze how shared failure domains invalidate independent-component MTBF reasoning and prescribe placement strategies that restore it"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A recommendation model and an LLM training run both lose one hour of progress. Explain why the best fault-tolerance response may differ between them.",
+            "answer": "The recommendation system often values freshness more than exact replay, so minimizing recovery time can matter more than minimizing checkpoint overhead. An LLM training run, by contrast, prioritizes preserving expensive accumulated optimization state over long durations. For example, stale embeddings in a ranker hurt revenue within minutes, while losing an hour of frontier-scale LLM training wastes millions of GPU-dollars and shifts the schedule. The system consequence is that recommendation systems favor fast, frequent, freshness-preserving recovery, while LLM training emphasizes efficient large-state checkpointing over many hours of progress.",
+            "learning_objective": "Compare how workload characteristics change the cost model and design priorities of fault tolerance"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-hardware-fault-taxonomy",
+      "section_title": "Hardware Fault Taxonomy",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "transient, permanent, and intermittent faults",
+            "fault rates and ECC bandwidth overhead",
+            "hardware-level detection and mitigation mechanisms",
+            "ML-specific impact of bit flips and hardware unreliability"
+          ],
+          "question_strategy": "Mix classification, quantitative interpretation, and mitigation-design questions across the transient/permanent/intermittent taxonomy and hardware/software protection mechanisms.",
+          "difficulty_progression": "Start with fault categorization, then move to ML impact and mitigation trade-offs, ending with selecting appropriate protection mechanisms.",
+          "integration": "Builds on earlier hardware and accelerator chapters by connecting physical device behavior to ML system correctness and throughput.",
+          "ranking_explanation": "This section introduces core hardware fault classes and their ML implications, which are essential for later recovery and verification sections."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A ResNet-50 training job suddenly shows 1 incorrect layer output in 10 million forward passes, with no repeat at the same address after a memory scrub. No further errors are observed for the next 24 hours on that device. Which hardware fault category best matches this signature?",
+            "choices": [
+              "Transient fault",
+              "Permanent fault",
+              "Intermittent fault",
+              "Wear-out fault"
+            ],
+            "answer": "The correct answer is A. A single non-repeating event at a memory cell, with normal operation resuming afterward, fits the transient-fault profile caused by cosmic rays or electromagnetic interference. A permanent fault would reproduce at the same location until repair, and an intermittent fault would recur sporadically under the same conditions; neither matches a one-off upset with clean 24-hour follow-up.",
+            "learning_objective": "Classify hardware faults by temporal signature using concrete ML-system observations"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A single bit flip in a ResNet-50 weight can drop ImageNet top-1 accuracy from 76 percent to below 10 percent. Explain what about ML workloads amplifies a single-bit hardware fault into this scale of output collapse, drawing on the chapter's IEEE 754 layout argument.",
+            "answer": "A sign-bit flip on a key weight inverts that weight's contribution entirely (for example, 0.5 to -0.5), and an exponent-bit flip can scale a weight by $2^{64}$ or more, pushing activations far outside the range the downstream layers were trained on. Because a deep network composes many layers, that single perturbation is multiplied through every subsequent matrix multiply and nonlinearity, so a tiny physical event becomes a large functional error at the output. The system consequence is that hardware must be treated as an unreliable substrate: algorithmic defenses (checksums, redundancy, periodic consistency checks) are mandatory rather than optional once models and fleets reach scale.",
+            "learning_objective": "Explain how the IEEE 754 bit layout and deep compositional structure together amplify low-level hardware faults into large ML output errors"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why can software-only fault injection overestimate or underestimate real system vulnerability compared with physical hardware fault injection?",
+            "choices": [
+              "Because software tools miss low-level masking and microarchitectural effects that may prevent a hardware fault from reaching the application.",
+              "Because software tools always inject larger faults than hardware produces.",
+              "Because software tools ignore the computational graph and can only modify weights.",
+              "Because hardware faults never affect memory, only logic units."
+            ],
+            "answer": "The correct answer is A. Hardware faults can be masked by ECC, overwritten register state, or microarchitectural behavior (dead instructions, speculative squashing) before software ever sees them, so injecting directly into tensors bypasses those defenses and may overstate vulnerability; it can also understate it by missing low-level propagation patterns. The claim that software tools 'only modify weights' ignores activation and gradient injection paths, and the 'hardware only hits logic units' claim is simply wrong.",
+            "learning_objective": "Analyze how abstraction level changes the interpretation of fault-injection results"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A safety-critical perception accelerator requires continuous real-time fault masking for ALU operations without pausing inference. Which hardware redundancy scheme achieves this, and what is its primary overhead trade-off?",
+            "choices": [
+              "Dual Modular Redundancy (DMR), which masks execution errors at only $2\\times$ hardware overhead by using parity prediction.",
+              "Periodic checkpoint-restart, which masks ALU errors with zero extra hardware area.",
+              "Triple Modular Redundancy (TMR), which masks single-unit execution faults via majority voting across three replicas at roughly $3\\times$ hardware area and power cost.",
+              "Software exception handling, which catches all unmasked arithmetic bit flips at zero runtime overhead."
+            ],
+            "answer": "The correct answer is C. Triple Modular Redundancy (TMR) runs three identical hardware modules in parallel and uses a majority voter circuit to output the consensus result, seamlessly masking an error in any single module in real time at the cost of $\\sim 3\\times$ silicon area and power. Dual Modular Redundancy (DMR) only detects disagreement between two units and cannot determine which unit is correct without additional diagnostics; checkpoint-restart introduces latency unacceptable for real-time safety; and software handlers cannot catch silent ALU bit flips without explicit hardware detection.",
+            "learning_objective": "Compare hardware redundancy mechanisms by relating fault masking capability to hardware overhead"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following protection path from earliest to latest in a typical hardware fault-defense flow: (1) Correct or detect the error with ECC/CRC, (2) A fault occurs in hardware, (3) Trigger higher-level recovery if corruption escapes local protection.",
+            "answer": "The correct order is: (2) A fault occurs in hardware, (1) Correct or detect the error with ECC/CRC, (3) Trigger higher-level recovery if corruption escapes local protection. Physical faults happen first, local protection mechanisms are the first containment layer, and only residual or uncorrectable faults should escalate to software recovery. Swapping the last two would assume recovery can occur before the system has even determined whether hardware-level correction succeeded.",
+            "learning_objective": "Sequence the layered handling of hardware faults from physical event to system-level recovery"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ft-software-faults",
+      "section_title": "Software Faults",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "software fault propagation across ML stacks",
+            "memory leaks, race conditions, and deadlocks",
+            "layered detection and prevention across development lifecycle"
+          ],
+          "question_strategy": "Emphasize realistic failure scenarios and how prevention, testing, and observability interact to catch subtle ML software faults before or during production.",
+          "difficulty_progression": "Begin with core software-fault properties, then move to propagation scenarios and lifecycle mitigations, ending with integrated prevention strategy.",
+          "integration": "Connects to earlier MLOps and workflow chapters by applying CI/CD, monitoring, and environment isolation to reliability problems in ML systems.",
+          "ranking_explanation": "Software faults are a major practical failure source in production ML systems and warrant a full quiz despite being conceptually shorter than some neighboring sections."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which software fault is most likely to halt a distributed training pipeline without crashing the processes, leaving workers waiting on one another indefinitely?",
+            "choices": [
+              "Memory leak",
+              "Deadlock",
+              "Syntax error",
+              "Model drift"
+            ],
+            "answer": "The correct answer is B. A deadlock leaves processes alive but permanently blocked while each waits for a resource or signal from another stage, producing the characteristic hang-with-no-error signature. A memory leak usually builds toward an out-of-memory crash that does terminate the process, and model drift is a data-distribution phenomenon rather than a synchronization bug.",
+            "learning_objective": "Identify software fault patterns that create non-crashing pipeline failures in distributed ML systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a software bug in ML can be harder to detect than a bug in a traditional application that simply crashes.",
+            "answer": "Many ML software faults degrade outputs rather than terminating execution, so the pipeline appears healthy while gradients, features, or predictions become subtly wrong. For example, an off-by-one in a tokenizer or a silently broken data augmentation can still produce plausible tensors that pass every type check, yet model accuracy slowly drifts over weeks. The practical consequence is that ML correctness requires behavioral monitoring, data validation, and training-serving-skew detection, not just crash logs and stack traces.",
+            "learning_objective": "Explain why silent degradation makes software reliability especially difficult in ML systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Two data-loader workers update a shared epoch counter without a lock; after several runs, accuracy silently drifts on the second worker even though no errors are thrown. Explain what is going wrong and describe one synchronization or versioning mechanism that would eliminate the class of bug involved.",
+            "answer": "The bug is a race condition: the final value of the shared counter depends on which worker's update lands last, so reads and writes interleave in ways that occasionally drop updates or reorder epoch boundaries. The effect is silent because the counter still holds a plausible integer; the model just trains on the wrong slice of data for some workers. Introducing a mutex around the counter update, replacing it with an atomic compare-and-swap, or switching to an immutable per-worker epoch state that is reconciled through a coordinator all eliminate the race; any of these turns 'whichever update happens first' into a deterministic order, which is what distributed training state requires to be reproducible.",
+            "learning_objective": "Diagnose race conditions in distributed shared-state updates and prescribe synchronization primitives that eliminate them"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team wants to reduce environment-specific bugs caused by inconsistent library and runtime versions across development, testing, and deployment. Which mitigation from the section is most directly targeted at that problem?",
+            "choices": [
+              "Increasing checkpoint frequency",
+              "Adding more model replicas",
+              "Reducing batch size",
+              "Containerization and environment isolation"
+            ],
+            "answer": "The correct answer is D. Containerization pins dependencies, runtimes, and system libraries to a reproducible image that moves together across stages, directly attacking version-skew bugs. More checkpointing is a recovery mechanism, extra replicas address availability, and smaller batches change memory footprint; none of these three touch the root cause of 'works on my laptop' failures.",
+            "learning_objective": "Select lifecycle controls that prevent environment-specific software regressions"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ft-sdc-verification",
+      "section_title": "Check-and-Verify: Defending Against Silent Data Corruption",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "SDC probability at extreme scale",
+            "verification as a systems problem rather than mere restart",
+            "checksummed collectives and gradient verification"
+          ],
+          "question_strategy": "Use a compact quiz centered on the chapter's key shift from fail-stop thinking to verification-oriented design under fleet-scale SDC risk.",
+          "difficulty_progression": "Start with conceptual framing, then move to quantitative implication, and end with mechanism selection.",
+          "integration": "Builds directly on the earlier Byzantine-failure discussion and connects to distributed collectives from prior chapters.",
+          "ranking_explanation": "This is a focused but important section introducing a specific defense mindset, so it merits a minimal quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In a 100,000-GPU training cluster running synchronous AllReduce, why is relying solely on heartbeat-based node liveness checks insufficient for guaranteeing fault-free training?",
+            "choices": [
+              "Heartbeat packets consume more network bisection bandwidth than gradient AllReduce, causing packet drops.",
+              "Heartbeats only verify process liveness, allowing a live worker with an ALU or HBM bit flip to silently inject mathematically corrupted gradients into the AllReduce collective.",
+              "Heartbeat protocols require cold restarts of the physical switch whenever a packet is delayed.",
+              "Heartbeats cannot run over InfiniBand networks and only function on 1 GbE management links."
+            ],
+            "answer": "The correct answer is B. Traditional distributed systems assume that if a node responds to heartbeats, its computation is valid. However, at the scale of 100,000 GPUs, silent data corruption (SDC) from ALU defects or uncorrected memory errors is a statistical certainty. A node can stay fully alive, passing all heartbeat and watchdog checks, while computing and communicating corrupted gradients that ruin optimization. Heartbeats consume negligible bandwidth, do not trigger switch restarts, and operate independently of the underlying fabric.",
+            "learning_objective": "Evaluate why liveness checks are insufficient under fleet-scale silent data corruption risk"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 100,000-GPU fleet performs a 2-second training step while each GPU has roughly $10^{-6}$ chance of SDC per hour. Explain why checksummed collectives or hash-and-verify gradients become valuable even though each individual device's hourly risk is tiny, and what the practical cadence of corruption looks like at this scale.",
+            "answer": "Per-device risk is low, but fleet-wide exposure multiplies: 100,000 GPUs times 2/3600 hours per step is about 55 GPU-hours of exposure per step, which pushes per-step SDC probability into the $10^{-5}$ range and means roughly one silent error every 18,000 steps, or every 10 hours. At that cadence, unverified AllReduce results silently poison parameters within half a day of training. Checksummed collectives and hash-and-verify gradients convert this from a restart problem into a detection problem: the fleet catches corruption during communication instead of discovering it hours later as divergent loss or dead models.",
+            "learning_objective": "Analyze how low per-device fault rates aggregate into fleet-scale correctness risk and justify verification-oriented collectives"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team is scaling synchronous training to 100,000 GPUs and sees occasional unexplained loss anomalies even though no node crashes. Which design change best matches the section's recommendation?",
+            "choices": [
+              "Add checksummed or redundant verification of collective results so live-but-corrupted workers can be detected.",
+              "Assume the anomalies are harmless because the collectives completed successfully.",
+              "Reduce checkpoint frequency so fewer anomalous states are saved.",
+              "Spread requests across more load balancers so corrupted gradients are less concentrated."
+            ],
+            "answer": "The correct answer is A. The section argues for a Byzantine-style 'trust, but verify' approach once silent corruption becomes a fleet-scale certainty; verifying the reduction itself catches workers that pass heartbeat but contribute bad data. Lowering checkpoint frequency does nothing to validate a corrupted reduction, and load balancers address traffic distribution rather than mathematical integrity.",
+            "learning_objective": "Select verification-oriented defenses for live-but-corrupted participants in distributed collectives"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ft-fault-injection-tools-frameworks",
+      "section_title": "Fault Injection Tools and Frameworks",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "applying the fault-model / error-model decomposition to robustness experiments",
+            "hardware-based versus software-based fault injection",
+            "abstraction gap and masking effects"
+          ],
+          "question_strategy": "Instead of testing definitions of fault model vs. error model, present concrete robustness experiments and ask readers to choose the right tool or interpret what the experiment actually measures.",
+          "difficulty_progression": "Start with a scenario-based application of the fault-model / error-model distinction, move to tool-selection reasoning, and end with abstraction-gap synthesis.",
+          "integration": "Connects hardware reliability concepts to empirical validation methodology and experimental design.",
+          "ranking_explanation": "This section introduces important evaluation methodology, but it is narrower in scope than the chapter's major design sections, so a minimal quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team wants to answer a specific question: 'Does microarchitectural masking reduce the number of faults from cosmic rays that actually reach our deployed image classifier?' Which experimental setup most directly answers that question, and why?",
+            "choices": [
+              "Inject single-bit flips into weight tensors in PyTorch and count prediction changes, because tensor-level injection is the fastest way to measure resilience.",
+              "Compute an analytical bound from ECC coverage rates and skip empirical injection, because masking can be derived from datasheet parameters.",
+              "Use a tool like Fidelity in software-only mode and assume the mapping fully captures masking, because it is designed to bridge the hardware-software gap.",
+              "Run FPGA-based injection or beam testing that targets architectural registers, because this is the only setup where ECC, overwrite, and speculative-squash masking can actually intervene before the fault reaches software."
+            ],
+            "answer": "The correct answer is D. The question is specifically about whether microarchitectural masking absorbs faults; that effect is only measurable when faults enter below the software interface, which is what FPGA bit-targeting and radiation beam testing do. A PyTorch tensor-level injection starts after the masking layers have been bypassed, so it cannot tell you anything about them. Analytical bounds miss workload-dependent masking like dead-instruction squashing. Fidelity improves realism but is itself calibrated from hardware experiments; treating it as a standalone substitute for the hardware-visibility question begs the very question being asked.",
+            "learning_objective": "Apply the fault-model / error-model decomposition by selecting the injection level that can actually observe the mechanism under study"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A researcher wants to study whether ECC and microarchitectural masking reduce the number of faults that actually reach an ML application. Why is beam testing or other hardware-based injection more informative than injecting tensor bit flips in software?",
+            "answer": "Hardware-based injection exposes the system to faults before masking, correction, or overwriting occurs, so it captures effects that may never reach software-visible tensors. Injecting directly into tensors skips those lower-level defenses entirely, measuring what happens only after every intervening mitigation has already succeeded or been bypassed. The practical consequence is that software-only injection typically overestimates vulnerability to real-world faults because it ignores the hardware layers that actually absorb most of them in production silicon.",
+            "learning_objective": "Justify tool choice based on the abstraction level of the resilience question being tested"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why might a tool like Fidelity be useful when studying ML robustness?",
+            "choices": [
+              "It eliminates the need for any physical testing.",
+              "It guarantees that single-bit faults are harmless in neural networks.",
+              "It maps low-level hardware fault behavior into software-visible effects to narrow the abstraction gap.",
+              "It replaces all error models with a single universal model."
+            ],
+            "answer": "The correct answer is C. Fidelity is presented as a bridge from hardware-originated behavior to software-visible fault injection, making higher-level experiments more realistic without requiring a beam facility for every run. It does not eliminate the need for physical validation (its mappings are themselves calibrated from hardware experiments), nor does it guarantee harmlessness or collapse all error models into one.",
+            "learning_objective": "Analyze how bridging tools improve the realism of software-level fault-injection experiments"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2",
+      "section_title": "Checkpointing: Preserving Progress",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Young-Daly checkpoint interval math and scaling intuition",
+            "checkpoint save/load overhead and stop-the-world tax",
+            "coordination patterns (centralized, distributed, sharded)",
+            "asynchronous and hierarchical checkpointing architectures"
+          ],
+          "question_strategy": "Use quantitative reasoning for the interval formula, scenario analysis for stop-the-world and asynchronous designs, and procedural sequencing for distributed coordination.",
+          "difficulty_progression": "Start with the Young-Daly equation, move through storage system trade-offs and asynchronous designs, and finish with distributed commit protocols.",
+          "integration": "Builds on distributed storage bandwidth, collective communication, and memory hierarchy concepts from earlier chapters.",
+          "ranking_explanation": "Checkpointing is the primary progress-preservation mechanism in distributed ML, making this one of the chapter's core sections with full quiz coverage."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team measures checkpoint save time at 2 minutes and cluster MTBF at 3 hours. According to the Young-Daly formula, what should happen to the optimal checkpoint interval if MTBF drops to 45 minutes while save time stays constant?",
+            "choices": [
+              "It should remain unchanged because save time dominates the formula.",
+              "It should double because failures are more frequent.",
+              "It should shrink, but only with square-root sensitivity rather than linearly.",
+              "It should grow because shorter MTBF implies more overhead from writing."
+            ],
+            "answer": "The correct answer is C. Young-Daly gives $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}}$, so changing system MTBF from 3 hours to 45 minutes is a 4$\\times$ reduction and halves the optimal interval. More generally, the interval changes with the square root of system MTBF, not linearly. The 'unchanged' view ignores the MTBF term entirely, doubling the interval goes in the wrong direction, and claiming the interval grows confuses save overhead with failure frequency.",
+            "learning_objective": "Apply the Young-Daly relationship to predict how checkpoint intervals change with reliability"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a large-model checkpoint is described as a storage system stress test rather than 'just writing to disk.'",
+            "answer": "The checkpoint includes parameters, optimizer state, and execution context, often written concurrently by many workers, so it loads the storage network, metadata path, memory buffers, and coordination layer all at once. For example, thousands of GPUs writing shards simultaneously can create a checkpoint storm that saturates shared storage bandwidth, and a 350 GB LLM checkpoint can take minutes to reach persistent media even on fast parallel filesystems. The practical consequence is that I/O architecture and coordination protocol directly shape training throughput, not just total bytes written.",
+            "learning_objective": "Explain why checkpointing performance depends on system-wide I/O coordination rather than simple serialization speed"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team's 70B-model checkpoints are causing long stop-the-world pauses on shared storage. Which change most directly attacks the pause on the training critical path, even if total bytes written eventually stay similar?",
+            "choices": [
+              "Increase heartbeat timeouts so workers are less likely to restart during a checkpoint.",
+              "Have rank 0 gather all state and write a single unified file to simplify recovery.",
+              "Write checkpoints less often but keep the same synchronous all-workers pause.",
+              "Move to asynchronous checkpointing with staging in CPU memory or local NVMe so persistent writes happen in the background."
+            ],
+            "answer": "The correct answer is D. Asynchronous checkpointing shortens the period where GPUs must wait by moving durable I/O off the critical path into CPU or NVMe staging. Gathering on rank 0 creates a serial bottleneck and a huge network fan-in, timeout tuning does nothing about the pause itself, and writing less often reduces frequency but leaves the stop-the-world mechanism unchanged per event.",
+            "learning_objective": "Compare checkpointing architectures by analyzing which one shortens training pauses under storage contention"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following distributed checkpoint protocol steps: (1) Workers confirm shard write completion, (2) Coordinator broadcasts a checkpoint request with an ID, (3) Coordinator writes metadata after all confirmations, (4) Each worker writes its shard.",
+            "answer": "The correct order is: (2) Coordinator broadcasts a checkpoint request with an ID, (4) Each worker writes its shard, (1) Workers confirm shard write completion, (3) Coordinator writes metadata after all confirmations. The coordinator must first initiate a specific checkpoint, workers then produce shards, confirmations establish completeness, and only then can metadata mark the checkpoint as valid. Writing metadata earlier would risk declaring an incomplete checkpoint usable, which is exactly the atomicity failure two-phase commit exists to prevent.",
+            "learning_objective": "Sequence the core steps required for consistent distributed checkpoint creation"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why do production checkpoint systems often add two-phase commit or atomic rename semantics on top of a simple worker-write protocol?",
+            "choices": [
+              "To avoid a state where some shards appear written but no globally valid checkpoint exists after coordinator failure.",
+              "To reduce checkpoint size by compressing optimizer state during commit.",
+              "To ensure the coordinator can safely shuffle worker ranks after every checkpoint.",
+              "To guarantee that recovery always uses the newest checkpoint regardless of corruption."
+            ],
+            "answer": "The correct answer is A. The goal is atomicity: either every shard becomes part of a valid checkpoint or none do, so a coordinator crash mid-write cannot leave an orphaned half-checkpoint that later looks usable. Compression is a size optimization unrelated to consistency, rank shuffling is not the problem being solved, and 'always use the newest' would be dangerous when the newest is precisely the one that might be half-written.",
+            "learning_objective": "Analyze why atomic commit protocols are necessary for correct distributed checkpointing"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team uses the Young-Daly interval but still sees much higher effective overhead than predicted. Explain two assumptions from the section that could be violated and how each would shift the practical optimum.",
+            "answer": "One violated assumption is deterministic save time: if storage contention makes save time vary widely, the observed checkpoint tax rises above the nominal formula value and the optimum drifts toward longer intervals than Young-Daly suggests. Another is that restart cost roughly equals save cost; in practice restart often includes scheduler delay, distributed reload, warmup, and communicator rebuild, so the true per-failure cost can be 3--5$\\times$ the save cost even if the first-order interval formula is unchanged. The practical consequence is that engineers should empirically calibrate checkpoint planning against observed save-time distributions and include recovery time in total-waste and recovery-SLO budgets rather than blindly adding restart time to the per-checkpoint write term.",
+            "learning_objective": "Evaluate how real-system deviations from Young-Daly assumptions alter checkpoint-planning decisions"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-failure-detection-recovery-0f54",
+      "section_title": "Failure Detection and Recovery",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "heartbeat vs. watchdog vs. passive failure detection",
+            "false positives versus detection latency trade-offs",
+            "warm restart versus cold restart mechanics",
+            "straggler diagnosis and management",
+            "semantic validation after checkpoint restore"
+          ],
+          "question_strategy": "Balance detection mechanism trade-offs (timeouts, false positives) with recovery procedures (warm/cold restart, post-restore validation) and straggler handling.",
+          "difficulty_progression": "Start with detection latency and timeout trade-offs, move to restart mechanics and straggler classification, and conclude with end-to-end recovery validation.",
+          "integration": "Connects to collective communication timeouts, fleet orchestration scheduling, and hardware monitoring from other chapters.",
+          "ranking_explanation": "Failure recovery is the active operational half of resilience, requiring rigorous coverage of detection thresholds and restoration paths."
+        },
+        "questions": [
+          {
+            "question_type": "SHORT",
+            "question": "A team measures total recovery time after a training failure as 18 minutes but their checkpoint load takes only 3 minutes. Explain why the remaining 15 minutes is not wasted overhead but a real cost they must budget for, and name the two recovery-time components most likely to dominate it.",
+            "answer": "Recovery time is not just checkpoint load; it includes scheduler delay to acquire replacement nodes, distributed reload, communicator (NCCL) rebuild, and warmup where data pipelines refill and just-in-time kernels recompile. The two components most likely to dominate the 15-minute gap are scheduling delay (minutes to reacquire GPUs in a shared cluster) and warmup (minutes before the job reaches steady-state throughput again). The practical implication is that checkpoint-interval planning must account for $T_{\\text{write}} + T_{\\text{restart}}$ in the total failure-cost budget, not just $T_{\\text{write}}$; otherwise the 'optimal' interval systematically underestimates the true failure cost by 3--5$\\times$.",
+            "learning_objective": "Analyze the full recovery time budget and identify the dominant non-load components"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is setting failure-detection timeouts too aggressively dangerous in distributed training?",
+            "choices": [
+              "It increases checkpoint file size proportionally.",
+              "It causes false positives where healthy but momentarily slow nodes are killed, triggering expensive full-job restarts.",
+              "It prevents silent data corruption from being detected statistically.",
+              "It forces all workers to use warm restart instead of cold restart."
+            ],
+            "answer": "The correct answer is B. Aggressive timeouts reduce detection latency but raise false positives, so healthy but slow workers get killed unnecessarily, triggering restarts whose true cost (reload plus warmup) often exceeds the tail-latency they were avoiding. SDC detection is a statistical problem at a different layer, timeout settings have no effect on checkpoint size, and warm-vs-cold restart is an independent recovery-policy choice.",
+            "learning_objective": "Analyze the trade-off between detection speed and false positives in failure monitoring"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why warm restart can be much faster than cold restart, and why it is still not always the right default.",
+            "answer": "Warm restart preserves valid in-memory state on surviving workers, so most of the cluster avoids full reload and warmup; when one node fails in a 1,000-GPU job, only the replacement node pays the reload cost instead of all 1,000. The downside is much higher software complexity, and if the surviving state is itself suspect (e.g. silent corruption) warm restart can perpetuate a bad computation. Production systems therefore use warm restart as a fast path when health signals are clean and fall back to cold restart for suspected Byzantine or stateful-integrity failures.",
+            "learning_objective": "Compare warm and cold restart by relating recovery speed to implementation and correctness trade-offs"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A single thermally throttled GPU doubles its step time in a 1,000-GPU synchronous job but still returns correct gradients. What is the best interpretation from the section?",
+            "choices": [
+              "It is a fail-stop failure because its throughput dropped.",
+              "It is a Byzantine failure because the cluster is slower.",
+              "It is harmless because only one GPU is affected.",
+              "It is a straggler, and severe cases may be cheaper to replace than to tolerate."
+            ],
+            "answer": "The correct answer is D. A straggler remains correct but slows the entire synchronized cluster because step time is bounded by the slowest rank; in this case one throttled GPU imposes a 2$\\times$ tax on 999 healthy ones. Calling it fail-stop confuses slow execution with no execution, Byzantine requires incorrect output rather than slow output, and 'harmless' ignores the cluster-wide throughput tax.",
+            "learning_objective": "Distinguish stragglers from hard failures and evaluate when replacement is economically justified"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "After restoring from a checkpoint, the model weights and optimizer states load into GPU memory without any shape or dtype mismatches. Why is immediate resumption of production training still unsafe without post-recovery semantic validation?",
+            "choices": [
+              "Because PyTorch tensors automatically reset to all-zeros upon loading unless an explicit assertion is executed.",
+              "Because structural correctness (matching tensor shapes and dtypes) does not guarantee numerical validity; corrupted weights, NaN parameters, or uninitialized optimizer buffers can cause immediate loss divergence.",
+              "Because GPU memory clocks remain halved until a synthetic loss function is evaluated.",
+              "Because distributed checkpointing requires re-running backward passes on the entire previous epoch to recalculate momentum buffers."
+            ],
+            "answer": "The correct answer is B. A checkpoint file can be syntactically and structurally valid (correct tensor shapes, matching float16/bfloat16 dtypes, and valid tensor names) while containing numerical anomalies such as NaN/Inf values, un-updated momentum shards, or poisoned gradients from an undetected SDC event. Semantic validation (evaluating a test forward pass, checking gradient norms, and verifying loss distribution against pre-crash metrics) is essential before committing compute resources. PyTorch does not zero out loaded tensors, GPU clocks are managed by driver power profiles rather than synthetic loss checks, and momentum buffers are restored directly from the checkpoint rather than recomputed from an entire epoch.",
+            "learning_objective": "Evaluate why semantic validation is required after apparently successful checkpoint restoration"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-elastic-training-4f87",
+      "section_title": "Elastic Recovery",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "dynamic cluster resizing and worker reconfiguration",
+            "hyperparameter adaptation (learning rate, batch size scaling)",
+            "framework-level support (TorchElastic, Horovod)",
+            "spot instance economics with elastic recovery"
+          ],
+          "question_strategy": "Test operational trade-offs of continuing with fewer workers, mathematical adaptation of learning rate / batch size, and practical state resharding.",
+          "difficulty_progression": "Start with the concept of dynamic resizing, move to optimization dynamics adjustments, and finish with architecture-specific state migration.",
+          "integration": "Links directly to distributed training parallelism strategies and fleet orchestration autoscaling/preemption mechanics.",
+          "ranking_explanation": "Elasticity represents the frontier of training resilience, converting fatal interruptions into seamless resizing operations."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A 1,024-GPU training job loses one 8-GPU node and no spare is immediately available. What is the defining advantage of elastic training over static training in this situation?",
+            "choices": [
+              "It guarantees the original checkpoint interval remains optimal.",
+              "It eliminates the need to adjust learning rate or batch size.",
+              "It allows training to continue with fewer workers after redistributing state and workload.",
+              "It makes failures impossible as long as enough data parallelism exists."
+            ],
+            "answer": "The correct answer is C. Elastic training treats a worker-count change as a resizing event rather than a fatal stop, so the remaining 1,016 GPUs keep making progress after state redistribution. It does not freeze optimizer hyperparameters (batch size and learning rate may need rescaling), and it certainly does not make failures impossible.",
+            "learning_objective": "Identify the core operational advantage of elastic training under partial hardware loss"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team halves its worker count mid-run using elastic training but leaves learning rate and gradient accumulation untouched. Within hours, validation loss starts diverging. Using the linear scaling rule and the section's discussion of effective batch size, explain what went wrong and describe two alternative adjustments that would have preserved training dynamics.",
+            "answer": "Halving workers halves the global batch size if nothing else changes, and the linear scaling rule says the optimal learning rate scales with batch size, so the unchanged LR is now effectively 2$\\times$ too large for the new batch size, producing instability and divergence. One fix is to halve the learning rate to follow the linear rule (or use $\\sqrt{0.5}$ for square-root scaling if stability is a concern). A second is to double gradient accumulation steps so the effective global batch stays constant at the original size, leaving LR untouched. The system consequence is that elastic resizing is not just a scheduler event; it must preserve the optimizer regime, or optimization dynamics break silently.",
+            "learning_objective": "Analyze how elastic resizing interacts with learning-rate and batch-size choices, and prescribe specific adjustments that preserve training dynamics"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does elastic training make spot or preemptible instances economically attractive?",
+            "choices": [
+              "Because elasticity converts preemption from a fatal job-ending event into a recoverable resizing event.",
+              "Because spot instances have better MTBF than on-demand instances.",
+              "Because spot instances remove the need for checkpointing entirely.",
+              "Because elastic jobs always run faster on smaller clusters."
+            ],
+            "answer": "The correct answer is A. Elastic training absorbs node loss and continues, so a $0.60/hour spot instance preemption becomes a resizing pause rather than a run-killing event; this is what enables the 50-90 percent cost savings cloud vendors advertise. Spot instances are not inherently more reliable, elasticity complements rather than replaces checkpointing, and smaller clusters are not automatically faster.",
+            "learning_objective": "Evaluate how elasticity changes the cost-benefit trade-off of unreliable cloud capacity"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "When an elastic training job using ZeRO-3 or PyTorch FSDP resizes from 64 GPUs to 48 GPUs after a permanent node failure, what structural state migration must the runtime perform before forward computation can resume?",
+            "choices": [
+              "The model parameters, gradients, and optimizer states must be dynamically resharded and remapped across the new 48-rank world size.",
+              "No state migration is needed because data-parallel shards are replicated identically across all GPUs.",
+              "All model parameters must be gathered onto CPU host memory on rank 0 and evaluated sequentially.",
+              "The training script must discard all optimizer momentum and Adam variance buffers, continuing with vanilla SGD."
+            ],
+            "answer": "The correct answer is A. In fully sharded data parallel frameworks (such as ZeRO-3 or FSDP), parameter, gradient, and optimizer states are partitioned across all active ranks ($1/N$ of the model per rank). When the rank count changes from $N=64$ to $N=48$, each surviving rank must hold a larger fraction ($1/48$) of the total state. The runtime must either reload and redistribute partitions from the distributed checkpoint or perform an online collective re-sharding phase across the new communicator. State is not identically replicated in ZeRO-3/FSDP (that would be standard DDP), CPU gather destroys distributed acceleration, and discarding optimizer state ruins optimizer convergence.",
+            "learning_objective": "Explain why elasticity is more complex when model state is sharded across workers"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A recommendation model with giant embedding tables and a vision model with small checkpoints both lose workers. Explain why elastic recovery may be operationally harder for the recommendation model.",
+            "answer": "Large embedding tables make resharding and state movement expensive: hundreds of gigabytes of embedding rows must be rebalanced across surviving workers, and recommendation quality depends on embedding freshness, so interruptions can directly hurt business metrics like click-through rate. A vision model usually has much smaller checkpoints and dense (not sharded-by-key) state, making redistribution and restart cheaper. The practical implication is that recommendation workloads need fast elastic handling of huge, mutable keyed state, while vision workloads often tolerate simpler recovery paths.",
+            "learning_objective": "Compare how model structure changes the operational difficulty of elastic training recovery"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375",
+      "section_title": "Serving Fault Tolerance",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "stateless versus stateful serving fault tolerance",
+            "replication, redundancy, and availability math",
+            "failover mechanisms and health check design",
+            "stateful serving (KV caches, session affinity)"
+          ],
+          "question_strategy": "Contrast serving resilience (millisecond latency budgets, availability SLOs) with batch training checkpointing, focusing on statefulness and health checking.",
+          "difficulty_progression": "Begin with availability math and stateless vs stateful distinctions, move to health check design, and finish with stateful KV-cache failover challenges.",
+          "integration": "Builds on inference serving architectures, KV-cache memory management, and fleet-wide load balancing from earlier chapters.",
+          "ranking_explanation": "Serving has fundamentally different latency and state constraints than training, warranting dedicated, comprehensive quiz coverage."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is fault tolerance usually simpler for stateless serving than for stateful serving?",
+            "choices": [
+              "Stateless services never need load balancers or health checks.",
+              "Stateless models are always smaller than stateful ones.",
+              "Stateless requests can be retried on another healthy replica without reconstructing session-specific state.",
+              "Stateful services cannot use replication at all."
+            ],
+            "answer": "The correct answer is C. Stateless requests do not depend on accumulated session context, so any healthy replica can absorb a retry immediately; a stateful service must transfer KV cache, conversation history, or session data before the new replica can answer correctly. The claims that stateful services cannot replicate or that model size is the defining factor are incorrect.",
+            "learning_objective": "Compare fault-tolerance requirements between stateless and stateful serving systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why placing multiple serving replicas in different failure domains matters as much as having multiple replicas at all.",
+            "answer": "Replication only improves availability if replicas fail independently. Three replicas on one rack share the rack's power, top-of-rack switch, and cooling: a single power supply or switch failure drops all three simultaneously, collapsing availability to that of a single node. Spreading replicas across racks, power zones, or availability zones removes those common-mode hazards so that losing one failure domain leaves the others healthy and able to serve traffic. The practical consequence is that availability engineering is as much about failure-domain placement as it is about replica count.",
+            "learning_objective": "Analyze how failure-domain placement affects the real availability gains of serving replication"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A serving system must detect replicas that are running but producing wrong outputs due to silent corruption. Which health-check style is most appropriate?",
+            "choices": [
+              "A liveness probe that only verifies the process returns HTTP 200",
+              "An inference health check using a known input and expected output pattern",
+              "A readiness probe that only checks whether weights were loaded at startup",
+              "A load balancer policy that rotates traffic every second"
+            ],
+            "answer": "The correct answer is B. An inference health check runs a canary input through the model and compares against an expected output signature, which catches silent corruption that liveness probes miss entirely. HTTP-200 probes only detect process failures, startup-only readiness probes cannot catch runtime weight corruption, and traffic rotation does not test correctness at all.",
+            "learning_objective": "Select serving health checks that can detect correctness failures rather than mere process availability"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A stateful LLM chatbot fails over to a new replica mid-conversation without session affinity, so the new replica has no KV cache for this user. Explain what goes wrong for the user and for the system, and describe one trade-off that session-affine routing introduces compared with round-robin load balancing.",
+            "answer": "Without affinity the new replica must either regenerate the KV cache by replaying the entire conversation history (high latency spike and extra compute), or respond without prior context (degraded coherence, jarring user experience). Either way, the service violates its latency SLO or its quality contract for that session. Session-affine routing preserves cache validity on a single replica, but the trade-off is uneven load distribution: a popular user may pin a replica near capacity while other replicas sit idle, and a replica failure now requires explicit state migration or graceful fallback rather than a simple retry elsewhere. The system consequence is that stateful serving gets faster failover only by accepting harder load-balancing and placement constraints.",
+            "learning_objective": "Evaluate the trade-offs of session-affine routing in stateful serving and its consequences for failover and load balancing"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is LLM serving particularly difficult to fail over compared with most vision inference services?",
+            "choices": [
+              "LLMs cannot be replicated across zones.",
+              "Vision models do not use GPUs and therefore fail less often.",
+              "LLM requests are always batch jobs rather than online requests.",
+              "LLMs maintain large KV caches or conversation context whose loss can force expensive regeneration."
+            ],
+            "answer": "The correct answer is D. Stateful LLM serving accumulates KV-cache state proportional to context length; losing a replica can force replaying thousands of tokens on a fresh replica, which blows the latency budget. Vision services are typically stateless per-request, the claim that vision models do not use GPUs is false, and LLM serving is clearly not batch-only.",
+            "learning_objective": "Explain how model-specific state changes serving failover requirements"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A recommendation service loses access to its real-time feature store. Explain a reasonable fault-tolerance response and why it differs from training recovery logic.",
+            "answer": "A serving system should continue with cached or default features, accepting some quality degradation to preserve request availability and latency. For example, it may fall back to last-known user features or population defaults rather than erroring every request, which preserves revenue even if personalization quality drops a few points. Unlike training, which can pause for minutes to restart from a checkpoint, serving must respond within a sub-second SLO, so fallback quality trade-offs are almost always preferable to hard restarts.",
+            "learning_objective": "Evaluate serving-specific recovery choices under strict latency and availability constraints"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122",
+      "section_title": "Graceful Degradation",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "quality vs. availability trade-offs under partial failure",
+            "model fallback, feature fallback, and load shedding",
+            "circuit breakers to prevent cascade failures",
+            "monitoring degradation rates to prevent silent chronic degradation"
+          ],
+          "question_strategy": "Test the operational calculus of degradation: why degraded service beats failure, how circuit breakers isolate faults, and why fallback rates must be monitored.",
+          "difficulty_progression": "Start with the conceptual objective of graceful degradation, move through fallback patterns and circuit breaker mechanics, and finish with observability.",
+          "integration": "Directly connects to model serving latency budgets and SLA management from previous chapters.",
+          "ranking_explanation": "Graceful degradation is the primary design pattern for keeping ML systems alive under load spikes or dependency outages."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the core systems purpose of graceful degradation?",
+            "choices": [
+              "To maximize model accuracy even if availability drops to zero",
+              "To preserve some level of service by intentionally reducing quality or scope instead of failing completely",
+              "To eliminate the need for redundancy in serving clusters",
+              "To increase checkpoint frequency during serving incidents"
+            ],
+            "answer": "The correct answer is B. Graceful degradation trades quality, freshness, coverage, or latency in a controlled way so the service remains available; an 8 percent CTR reduction on a $1M/day business is far cheaper than a full outage costing about $7K over 10 minutes, or about $694 per minute. Accuracy-above-all ignores the availability side of the trade-off, redundancy is still required, and serving-side checkpoint frequency is not the lever here.",
+            "learning_objective": "Explain the operational goal of graceful degradation in ML systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a system might intentionally serve a smaller fallback model during an outage instead of waiting for the primary model to recover.",
+            "answer": "A smaller fallback model can keep responses within the latency SLO when the primary path is overloaded or unavailable, at the cost of lower personalization or accuracy. For example, a recommendation service may fall back from a 7B-parameter deep ranker to a collaborative-filtering model, sacrificing some click-through rate but avoiding a 100 percent outage. The practical implication is that degraded service is almost always economically preferable to zero service on a revenue-critical path.",
+            "learning_objective": "Justify model fallback as a controlled availability-preserving response to partial failure"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A feature store becomes slow, but the model servers remain healthy. Which degradation strategy best matches the section's recommendation?",
+            "choices": [
+              "Trigger feature fallback to cached or default values",
+              "Immediately terminate all inference replicas and cold restart them",
+              "Force every request through the full primary model anyway",
+              "Disable health checks to avoid false alarms"
+            ],
+            "answer": "The correct answer is A. Feature fallback is designed for dependency failure where inference can proceed with lower-quality inputs, so serving latency is preserved while the slow feature store recovers. Restarting healthy inference replicas does nothing about the dependency bottleneck and adds failures, and disabling health checks only hides the problem while it propagates.",
+            "learning_objective": "Select degradation mechanisms that match a failed dependency in the serving path"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In an ML inference pipeline dependent on multiple upstream microservices (feature store, user embedding service, vector database), why is a circuit breaker pattern essential for maintaining system stability during partial upstream outages?",
+            "choices": [
+              "It automatically re-trains upstream embedding models whenever latency exceeds 50 milliseconds.",
+              "It doubles the connection pool size and retry limit on slow dependencies until the upstream service recovers.",
+              "It re-routes all database writes to local GPU HBM memory without persisting to disk.",
+              "It transitions to an OPEN state after repeated upstream timeouts, failing fast or triggering local fallbacks to prevent worker thread starvation and latency cascades across the serving fleet."
+            ],
+            "answer": "The correct answer is D. When an upstream dependency slows down or fails, incoming requests will block waiting on timeouts, exhausting HTTP connection pools, async worker threads, and memory on the model server. This causes a catastrophic latency cascade where the model server becomes unresponsive even for cached or uncorrupted requests. A circuit breaker detects consecutive failures, opens the circuit, and immediately returns cached or default fallback data (failing fast) without blocking critical resources. Re-training models cannot be done in real time; doubling connection pools and retries amplifies overload (the retry storm antipattern); and routing database writes to GPU HBM is both architecturally impossible and violates persistence guarantees.",
+            "learning_objective": "Explain how circuit breakers limit cascade propagation during dependency failures"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why does a well-engineered graceful degradation plan require monitoring fallback frequency and quality impact, not just whether the service stayed up?",
+            "answer": "Availability alone can hide substantial business or user harm if most requests are being served by weak fallback paths: the service looks 'up' while large fractions of traffic receive default features or the lightweight fallback model, eroding CTR or accuracy unnoticed. For example, a recommendation service may quietly spend a week at 40 percent fallback rate because nobody alerted on the ratio. The operational consequence is that teams need explicit degradation-rate metrics and quality-delta alerts, so overused resilience mechanisms do not mask ongoing failures.",
+            "learning_objective": "Evaluate degraded operation using both availability and quality-impact signals"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-distributed-debugging-observability-1a7f",
+      "section_title": "Distributed Debugging and Observability",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "three pillars of observability (metrics, logs, traces) applied to ML",
+            "ML-specific debugging: NaNs, gradient explosions, data validation",
+            "straggler profiling with fine-grained timing instrumentation",
+            "diagnosing cascading failures across serving microservices"
+          ],
+          "question_strategy": "Present diagnostic scenarios (multi-pillar telemetry correlation, straggler timing breakdown, NaN isolation) requiring students to map symptoms to root causes.",
+          "difficulty_progression": "Start with pillar selection, move through multi-signal correlation and NaN tracking, and finish with straggler isolation in synchronous AllReduce.",
+          "integration": "Builds on distributed execution timelines, telemetry pipelines, and performance profiling from prior chapters.",
+          "ranking_explanation": "Observability is the operational prerequisite for all fault mitigation and recovery, requiring rich scenario-driven quiz questions."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "If an operator needs to determine where a single request spent time across an API gateway, feature service, and inference service, which observability pillar is most directly suited to that task?",
+            "choices": [
+              "Metrics only",
+              "Logs only",
+              "Distributed tracing with propagated context IDs",
+              "Health checks only"
+            ],
+            "answer": "The correct answer is C. Distributed traces follow one request across components and attribute latency to individual spans, which is precisely what pinpoints where in the call graph a request was delayed. Metrics show aggregated totals across requests, logs capture point-in-time events, and health checks test process state; none of the three reconstruct the per-request cross-service timing graph.",
+            "learning_objective": "Select the observability pillar best suited to end-to-end request latency attribution"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A recommendation service shows rising p99 latency. Metrics show the spike at 07:14 UTC, traces show feature-service spans jumping from 20 ms to 700 ms for the same feature_id range, and logs show repeated redis cache timeouts on the feature-store path. Walk through how you would combine these three signals to reach a root-cause diagnosis, and explain why any one signal alone would have been insufficient.",
+            "answer": "Start with metrics to confirm the incident (p99 spike starting at 07:14) and its scope. Traces then localize the problem to the feature-service spans, ruling out the API gateway and inference path, and isolating the affected feature_id range. Logs at that span provide the mechanism: redis timeouts on cache reads, suggesting a feature-store dependency failure cascading into serving latency. Metrics alone would show only that p99 rose; traces alone would not say why the feature-service was slow; logs alone would flag cache timeouts without proving they actually drove the user-visible latency. The practical consequence is that root-cause analysis in distributed ML serving requires correlation across all three pillars, not any single one.",
+            "learning_objective": "Synthesize metrics, traces, and logs to diagnose a cascading serving failure in an ML-specific dependency path"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which symptom most strongly suggests a deadlock or blocked collective rather than numerical instability during training?",
+            "choices": [
+              "A sudden gradient norm spike followed by recovery",
+              "A gradual loss divergence over many steps",
+              "Training throughput flatlines and progress stops without an explicit error",
+              "A feature distribution shift in serving data"
+            ],
+            "answer": "The correct answer is C. A hang with no error is the signature of a deadlock or a worker blocked at a collective barrier; no process crashes and no exception fires, but forward progress stops. A gradient norm spike points to transient numerical or corruption issues, gradual divergence suggests optimization or data problems, and serving distribution shift is a different failure class entirely.",
+            "learning_objective": "Distinguish training failure signatures by mapping symptoms to likely underlying mechanisms"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A training job's gradient norm suddenly becomes NaN and the NaN propagates through every subsequent step. Explain why this behaves operationally differently from a fail-stop worker crash, and describe one monitoring signal that would distinguish a transient hardware-origin NaN (silent corruption) from a persistent data-origin NaN (bad batch).",
+            "answer": "A fail-stop crash kills the process and surfaces a clear error; a NaN propagation keeps the job running but silently poisons weights and gradients because every subsequent multiply and add with a NaN produces a NaN, so there is no crash to trigger detection. The system consequence is that recovery requires rollback to a pre-NaN checkpoint, not just a restart, plus mechanisms to catch NaNs at the step boundary. To distinguish origins: replay the same data batch on a different worker (or the same worker after a memory scrub). If the NaN reproduces on the same batch across workers, it is a persistent data-origin issue (e.g. a bad preprocessing step on that batch); if it does not reproduce, it is most likely a transient hardware-origin bit flip or SDC event that warrants hardware health follow-up rather than a data fix.",
+            "learning_objective": "Compare NaN propagation with fail-stop failures and design a monitoring test that separates hardware-origin from data-origin numerical corruption"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "During a distributed training run with 512 GPUs using synchronous data parallelism, step time suddenly increases from 1.2 seconds to 3.5 seconds across all workers, but GPU utilization remains reported at 98% on every node. Which distributed profiling technique and diagnostic signature would definitively isolate the root cause?",
+            "choices": [
+              "Inspect node CPU load averages; high CPU load on rank 0 proves that dataset sharding failed.",
+              "Analyze aggregate cluster power draw; if total power decreases, the cluster has entered an unrecoverable MPI deadlock.",
+              "Read standard process stdout logs; NCCL will automatically print a warning message whenever any GPU operates below nominal clock frequencies.",
+              "Profile separate CUDA events for local computation (`forward_backward`) versus communication (`nccl_allreduce`); if 511 ranks spend 2.3 seconds waiting inside `nccl_allreduce` while rank 47 spends 2.3 seconds computing due to thermal clock throttling, rank 47 is identified as the straggler."
+            ],
+            "answer": "The correct answer is D. In synchronous distributed training with a bulk-synchronous barrier, step time is dictated by the slowest worker ($T_{\\text{step}} = \\max_i T_i$). Fast workers finish computation quickly and enter `nccl_allreduce` where they block waiting for the slowest worker; standard monitoring tools report high GPU utilization because blocking/polling inside CUDA kernels still shows as active compute. Instrumenting separate CUDA events for compute vs AllReduce reveals that 511 ranks are idling in the collective barrier while one rank is slow due to hardware throttling. Host CPU load does not reflect GPU stragglers; deadlocks halt progress entirely rather than merely slowing down step time; and NCCL does not automatically detect or log hardware-level thermal throttling.",
+            "learning_objective": "Diagnose distributed training stragglers by separating computation time from collective synchronization barriers using fine-grained timing instrumentation"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-case-studies-927f",
+      "section_title": "Case Studies",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Meta OPT-175B asynchronous checkpointing and log analysis",
+            "Google TPUv4 optical circuit switching and topology resilience",
+            "Netflix chaos engineering for serving dependencies",
+            "cross-case synthesis of resilience patterns"
+          ],
+          "question_strategy": "Contrast the systems approaches across Meta, Google, and Netflix to show how workload context shapes fault tolerance investments.",
+          "difficulty_progression": "Start with TPU topology resilience, move to cross-workload comparison (Netflix serving vs Meta training), and finish with matching detection mechanisms to failure modes.",
+          "integration": "Integrates all previous conceptual and architectural sections through empirical industrial deployments.",
+          "ranking_explanation": "Case studies ground theoretical concepts in production reality, warranting targeted synthetic quiz questions."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does Google's TPUv4 fault-tolerance story treat chip, cable, and optical-switch failures as topology problems rather than isolated capacity losses?",
+            "choices": [
+              "Because a failed component can disrupt the tightly coupled communication graph that synchronous training depends on.",
+              "Because TPU failures are always Byzantine rather than fail-stop.",
+              "Because checkpointing is impossible on TPUs.",
+              "Because standby capacity is cheaper than using accelerator slices efficiently."
+            ],
+            "answer": "The correct answer is A. In a 3D toroidal ICI fabric, a failed machine, chip, cable, or optical circuit switch can change the communication graph that collective training operations depend on. The relevant recovery problem is therefore preserving or restoring a usable topology, not merely replacing one unit of capacity. Claiming TPUs cannot checkpoint is wrong, failures are not inherently Byzantine, and the issue is topology coupling rather than standby-cost accounting.",
+            "learning_objective": "Analyze why recovery granularity depends on communication-topology coupling in large training systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Compare Netflix's chaos-engineering approach with Meta's checkpointing-focused training resilience. What different operational goal does each emphasize?",
+            "answer": "Meta's OPT-175B strategy emphasizes preserving expensive long-running training progress and minimizing the restart tax after inevitable interruptions: asynchronous checkpointing cut overhead from 12 percent to under 3 percent, reclaiming hundreds of GPU-hours. Netflix's chaos-engineering approach emphasizes proactively breaking serving systems to verify fallback hierarchies and expose hidden failure modes before real incidents. Training resilience is checkpoint- and rollback-centric because the cost function is lost compute over hours; serving resilience is verification- and degradation-centric because the cost function is user-visible latency over milliseconds. The system consequence is that one unified 'resilience' doctrine would serve neither workload well.",
+            "learning_objective": "Compare how workload context changes the primary objective of resilience engineering across organizations"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Meta, Google, and Netflix all invest in fast failure detection, but the detection target differs in each case. Match the detection target (worker heartbeat, ICI topology fault, service-level dependency failure) to the organization, and explain why each target is appropriate for that workload's cost function.",
+            "answer": "Meta uses a worker heartbeat timeout for OPT-175B because synchronous training can tolerate minute-scale detection latency but not hours of silent hang; the timeout balances detection speed with false-positive cost on slow kernels. Google monitors ICI topology faults because the TPUv4 supercomputer's communication fabric is part of the training system: a failed chip, cable, or optical circuit switch can disrupt collective communication unless the fabric is reconfigured or the job is routed around the fault. Netflix targets service-level dependency failures because serving failures often appear as latency, unavailable dependencies, or broken fallback paths rather than a clean hardware signal. The cross-case principle is that detection speed matters, but the mechanism must match the failure mode the workload is actually vulnerable to.",
+            "learning_objective": "Map detection mechanisms to workload cost functions across Meta, Google, and Netflix case studies"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-fallacies-pitfalls-74b8",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "intuition-based checkpoint intervals versus Young-Daly math",
+            "independence assumption vs correlated failures in MTBF",
+            "dormant failure logic and bitrot in unexercised recovery paths",
+            "ignoring restart costs in total failure-waste calculations"
+          ],
+          "question_strategy": "Test common engineering fallacies around checkpoint tuning, correlated MTBF math, and recovery path bitrot.",
+          "difficulty_progression": "Start with checkpoint scheduling fallacies, move to correlated MTBF analysis, and end with the need for continuous chaos validation.",
+          "integration": "Directly reinforces the quantitative and architectural rules of thumb established across the entire chapter.",
+          "ranking_explanation": "Fallacies and pitfalls provide essential anti-pattern recognition for practicing ML systems engineers."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "An engineering team chooses a checkpoint interval by saying, 'every 15 minutes feels safer than every hour.' Which correction from the section best addresses that reasoning?",
+            "choices": [
+              "Checkpoint as often as storage allows, because lower lost work always dominates I/O cost.",
+              "Set checkpoint intervals from save cost and failure behavior using a quantitative model such as Young-Daly, not intuition alone.",
+              "Ignore restart overhead because reloading is usually cheaper than saving.",
+              "Stop checkpointing once elastic training is enabled."
+            ],
+            "answer": "The correct answer is B. The section's criticism is aimed at intuition-based scheduling: 'safer' intervals can waste more compute than they save because overcheckpointing pays the full save tax at every interval. The 'as often as storage allows' answer makes exactly that mistake; 'ignore restart overhead' contradicts the pitfall about 3--5$\\times$ restart costs; and stopping checkpointing after enabling elasticity ignores that elasticity is complementary, not a replacement.",
+            "learning_objective": "Evaluate checkpoint scheduling decisions using quantitative cost models rather than safety intuition"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why correlated failures make naive MTBF calculations dangerously optimistic.",
+            "answer": "Simple MTBF scaling assumes independent component failures, but shared power, switches, software versions, or cooling can take down many components together. For example, a 1,000-GPU cluster with 10,000-hour per-GPU MTBF looks like a 10-hour system MTBF under independence, but a shared hazard that raises incident frequency by 10$\\times$ drops the effective incident MTBF to about 1 hour. Separately, a correlated incident that takes out 10 GPUs at once increases blast radius and recovery cost even if incident frequency is unchanged. The practical consequence is that reliability engineering must deliberately diversify failure domains (power feeds, network paths, software versions) rather than just adding more components.",
+            "learning_objective": "Explain how correlated failures invalidate independence-based reliability reasoning"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is regular fault injection or chaos testing recommended even when a system's fault tolerance mechanisms have already been implemented?",
+            "choices": [
+              "Because production failures only happen if operators inject them first.",
+              "Because chaos testing removes the need for observability.",
+              "Because it guarantees every failure becomes transient rather than permanent.",
+              "Because rare recovery paths accumulate bugs and stale assumptions if they are never exercised under realistic conditions."
+            ],
+            "answer": "The correct answer is D. Recovery code, fallback logic, and checkpoint restore paths execute rarely in normal operation, so they rot silently (circuit-breaker thresholds drift, fallback models go stale, restore logic develops bugs); intentional failure exercises validate them before a real incident. Chaos testing complements observability rather than replacing it, and it cannot change the physical nature of faults.",
+            "learning_objective": "Evaluate why resilience mechanisms must be continuously exercised rather than merely implemented"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-fault-tolerance-reliability-reliability-summary-48b0",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "synthesis of hardware vs. software incident proportions",
+            "training vs. serving resilience philosophy contrast",
+            "integrating checkpointing, elasticity, and graceful degradation into a holistic architecture"
+          ],
+          "question_strategy": "Synthesize whole-chapter themes: empirical failure breakdowns, contrasting training vs. serving resilience doctrines, and unified fault tolerance design.",
+          "difficulty_progression": "Start with fleet-wide empirical failure attribution, contrast training vs serving architectures, and finish with a holistic resilience design critique.",
+          "integration": "Summarizes and unifies all chapter threads into core enduring principles for ML systems engineers.",
+          "ranking_explanation": "The chapter summary synthesizes the major systems insights and warrants a concluding reflective quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "According to empirical incident analyses of production ML infrastructure, which component category accounts for the overwhelming majority of incidents at scale?",
+            "choices": [
+              "Hardware faults (such as ASIC silicon defects, cosmic ray single-event upsets, and cooling fan failures), accounting for over 85% of incidents.",
+              "Software defects, configuration errors, bad rollouts, and resource exhaustion (OOMs, storage saturation), accounting for 65–85% of total incidents.",
+              "Wide-area fiber optic bisection cuts in data center backbones, accounting for over 90% of total job interruptions.",
+              "Thermal power plant shutdowns causing catastrophic cloud-wide grid failure."
+            ],
+            "answer": "The correct answer is B. Empirical reliability studies across hyperscale ML operations (such as Meta, Google, and Microsoft) show that hardware failures account for only 15–25% of production incidents. Software bugs, configuration drift, bad library rollouts, dependency timeouts, and resource exhaustion account for 65–85% of failures. Reliability engineering that invests exclusively in hardware redundancy while ignoring software testing, configuration validation, and gradual rollouts attacks only a minority of the actual failure surface. Wide-area fiber cuts and power grid collapses are rare catastrophic events that do not dominate everyday failure frequency.",
+            "learning_objective": "Evaluate where the highest marginal resilience ROI lies by integrating incident-breakdown statistics with redundancy-investment reasoning"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Compare the chapter's recommended fault-tolerance emphasis for training and for serving.",
+            "answer": "Training fault tolerance is centered on preserving progress through checkpointing, elastic resizing, and recovery over minutes, because long runs can absorb modest interruption but not lost optimization state; SGD's mathematical tolerance of approximate restarts helps. Serving fault tolerance prioritizes redundancy, failover, and graceful degradation under millisecond constraints, including per-session state like KV caches and conversation histories. For example, training can restart from a 20-minute-old checkpoint, while serving must fail over within a single request budget or fall back to a lighter model. The practical implication is that one unified resilience doctrine cannot satisfy both batch-optimization and user-facing-latency cost functions.",
+            "learning_objective": "Compare the dominant resilience strategies for training workloads versus serving workloads"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team running both a 10,000-GPU LLM training job and a millisecond-SLO LLM serving fleet proposes to use checkpointing as the single unifying resilience mechanism for both. Which critique from the chapter is most decisive?",
+            "choices": [
+              "Reliability problems disappear once hardware MTBF exceeds one year per device, so a single mechanism is fine.",
+              "Checkpointing suffices because it preserves model weights, which is all either workload needs.",
+              "Checkpoint-restart takes minutes and cannot preserve KV-cache or session state, so serving needs redundancy, session affinity, and graceful degradation alongside any training-style checkpointing.",
+              "Observability matters mainly for debugging software faults, so the unified checkpoint strategy is adequate as long as software is tested."
+            ],
+            "answer": "The correct answer is C. Training tolerates minute-scale recovery and benefits from checkpoint rollback, but serving operates under millisecond SLOs and holds per-session KV-cache state that checkpointing cannot reconstruct in time; the chapter consistently argues that training resilience is checkpoint-centric while serving resilience is redundancy- and degradation-centric. Hardware MTBF exceeding a year per device would still imply hourly cluster failures at 10,000 GPUs, model weights are not the only state, and observability does not replace architectural resilience mechanisms.",
+            "learning_objective": "Compare which resilience mechanisms best match training versus low-latency serving under partial failures"
+          }
+        ]
+      }
+    }
+  ]
+}

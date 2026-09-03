@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import clsx from "clsx";
 import GlossaryText from "./GlossaryText";
 import MathText from "./MathText";
 

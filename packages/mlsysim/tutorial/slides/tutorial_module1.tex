@@ -1,0 +1,213 @@
+% =============================================================================
+% MLSys·im Tutorial — Module 1: Foundations & Architecture
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../../../materials/slides/assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Tutorial},
+  chapter      = {Module 1},
+  logo         = {../../../../materials/slides/assets/img/logo-mlsysbook.png},
+  instlogo     = {../../../../materials/slides/assets/img/logo-harvard.png},
+  chaptertitle = {MLSys·im: Foundations \& Architecture},
+}
+
+% --- Fonts & Packages ---
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+
+% --- Code listings ---
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{crimson}\bfseries,
+  stringstyle=\color{datastroke},
+  commentstyle=\color{midgray}\itshape,
+  backgroundcolor=\color{computeblue!20},
+  frame=single,
+  rulecolor=\color{computestroke},
+  numbers=none,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  aboveskip=3pt,
+  belowskip=2pt,
+}
+
+\newcommand{\mlsysim}{\texttt{mlsysim}}
+\graphicspath{{images/}}
+
+\title{MLSys·im Tutorial --- Module 1}
+\subtitle{Foundations \& Architecture}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{Conference Tutorial}
+
+\begin{document}
+
+\begin{frame}[plain,shrink=10]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Roadmap: Conference Tutorial}
+\centering\small
+\begin{tabular}{rll}
+\toprule
+\textbf{Module} & \textbf{Topic} & \textbf{Status} \\
+\midrule
+\rowcolor{crimson!12}
+\textbf{Module 1} & \textbf{Foundations \& Architecture} & \textbf{$\leftarrow$ You are here} \\
+Module 2 & Advanced Single-Node Analysis & \\
+Module 3 & Scale, Dollars, and Carbon & \\
+Module 4 & Design Space Exploration \& Synthesis & \\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+\section{The Problem: Why Analytical Modeling?}
+
+\begin{frame}{The ML Systems Complexity Explosion}
+\begin{itemize}
+  \item \textbf{Scale:} Models are growing 10x per year. Clusters span 100,000+ GPUs.
+  \item \textbf{Heterogeneity:} GPUs, TPUs, LPU, custom ASIC architectures.
+  \item \textbf{Metrics:} Performance is no longer just "latency". It's Throughput, TTFT, ITL, TCO (\$ / token), and Carbon Footprint (tonnes CO$_2$e).
+\end{itemize}
+\vfill
+\begin{alertblock}{The Cycle-Accurate Simulator Trap}
+Detailed cycle-level simulators (e.g., gem5) are too slow to sweep 10,000 distributed cluster configurations. We need tools that provide \textbf{first-principles, analytical insights} instantly.
+\end{alertblock}
+\end{frame}
+
+\section{Architecture \& Registries}
+
+\begin{frame}{The \mlsysim{} Philosophy: Demand vs. Supply}
+\textbf{Strict Separation of Concerns:}
+\begin{itemize}
+  \item \textbf{Demand (Workloads):} How many FLOPs? How many bytes of weights? (Abstract mathematical operations).
+  \item \textbf{Supply (Hardware):} What is the peak TFLOP/s? What is the HBM bandwidth? (Physical silicon constraints).
+\end{itemize}
+\vfill
+\begin{center}
+\textbf{Solvers} sit in the middle, evaluating the intersection to find the \emph{binding constraint}.
+\end{center}
+\end{frame}
+
+\begin{frame}[fragile]{The Type System \& Registries}
+\mlsysim{} uses a strict, typed registry system powered by Pydantic. No magic dictionaries.
+\begin{lstlisting}[language=Python]
+from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
+from mlsysim.core.units import TFLOPs, GB, TB, second, watt
+
+# Defining an accelerator using strict physical quantities
+speculative_gpu = HardwareNode(
+    name="Speculative GPU",
+    release_year=2027,
+    compute=ComputeCore(peak_flops=1200 * TFLOPs / second),
+    memory=MemoryHierarchy(capacity=144 * GB, bandwidth=5.0 * TB / second),
+    tdp=800 * watt
+)
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{Zero Hallucinations: The Provenance Audit}
+Academic tools must be reproducible. Every vetted number in \mlsysim{} is bound to a \textbf{Provenance Record}.
+\begin{itemize}
+  \item \textbf{Provenance is metadata:} It records how we know a number, not where the number lives.
+  \item \textbf{Semantic homes:} Hardware specs live in \texttt{Hardware}; nodes/racks/fleets in \texttt{Systems}; grids/prices in \texttt{Infrastructure}.
+  \item \textbf{Narrative anchors:} Cited scalar results live in \texttt{Literature}; reusable teaching scenarios live in \texttt{Scenarios}.
+\end{itemize}
+\vfill
+\begin{center}
+\texttt{audit\_provenance} verifies every registry value has traceable lineage.
+\end{center}
+\end{frame}
+
+\begin{frame}[fragile]{Dimensional Strictness (\texttt{pint})}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{The Problem:}
+\begin{lstlisting}[language=Python]
+# Is this MB/s or GB/s? 
+# Wait, bits or bytes?
+bandwidth = 400 
+\end{lstlisting}
+
+\column{0.5\textwidth}
+\textbf{The \mlsysim{} Solution:}
+\begin{lstlisting}[language=Python]
+# Will throw runtime error if 
+# divided by seconds instead of bits
+bw = Q_("400 Gbps") 
+speed = bw.to("GB/s") # 50 GB/s
+\end{lstlisting}
+\end{columns}
+\vspace{1em}
+Every API boundary strictly enforces SI units at runtime. This prevents silent mismatches when mixing networking (bits) and memory (bytes).
+\end{frame}
+
+\section{Iron Law \& Roofline (Tier 1)}
+
+\begin{frame}{The ML Iron Law}
+\begin{center}
+\Large
+\[
+\text{Time} = \frac{\text{Operations}}{\text{Peak Performance} \times \text{Utilization}}
+\]
+\end{center}
+\vspace{1em}
+\begin{itemize}
+  \item \textbf{Operations:} From the Model Registry (e.g., Llama 3 8B).
+  \item \textbf{Peak Performance:} From the Hardware Registry (e.g., H100 dense TFLOP/s).
+  \item \textbf{Utilization (MFU):} The fraction of peak actually achieved.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{The Roofline Model}
+\centering
+\includegraphics[height=0.48\textheight]{images/pdf/roofline-model.pdf}
+
+\vspace{0.5em}
+Arithmetic Intensity determines if you are \textbf{Memory Bound} (sloped roof) or \textbf{Compute Bound} (flat roof).
+\end{frame}
+
+\begin{frame}[fragile]{Live Demo: Tier 1 Execution}
+\begin{lstlisting}[language=Python]
+from mlsysim.engine.engine import Engine
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
+
+model = Models.Language.Llama3_8B
+hardware = Hardware.Cloud.H100
+
+# Run the Tier 1 SingleNodeModel solver
+perf = Engine.solve(model, hardware, batch_size=1, precision="fp16")
+
+print(f"Latency: {perf.latency.to('ms'):.1f}")
+print(f"Bottleneck: {perf.bottleneck}")
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{Summary: Module 1}
+\begin{enumerate}
+  \item \mlsysim{} provides \textbf{first-principles, analytical reasoning}.
+  \item \textbf{Strict Separation:} Demand (Workloads) vs Supply (Hardware).
+  \item \textbf{Reproducibility:} Driven by Registries, Provenance, and Dimensional Strictness (\texttt{pint}).
+  \item \textbf{Tier 1 Execution:} Powered by the Iron Law and Roofline Model.
+\end{enumerate}
+\vspace{1em}
+\begin{center}
+\textit{Next up: Module 2 - Advanced Single-Node Analysis!}
+\end{center}
+\end{frame}
+
+\end{document}

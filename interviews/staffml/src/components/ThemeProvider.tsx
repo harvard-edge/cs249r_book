@@ -33,7 +33,7 @@ const QUARTO_KEY = "quarto-color-scheme";
 function safeGet(key: string): string | null {
   try {
     return localStorage.getItem(key);
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -41,7 +41,7 @@ function safeGet(key: string): string | null {
 function safeSet(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
-  } catch (_) {
+  } catch {
     /* storage unavailable; in-memory state still updates. */
   }
 }

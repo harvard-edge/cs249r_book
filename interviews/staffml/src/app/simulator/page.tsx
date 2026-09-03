@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
-import { Server, Terminal, AlertTriangle, Zap, Clock, Cpu } from "lucide-react";
+import { Server, Terminal, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import {
-  HARDWARE_SPECS, INTERCONNECTS, FORMULAS, MODEL_CONFIGS
+  HARDWARE_SPECS, INTERCONNECTS, MODEL_CONFIGS
 } from "@/lib/hardware";
-import { simulate, SimConfig, SimResult } from "@/lib/simulator";
+import { simulate, SimConfig } from "@/lib/simulator";
 
 export default function SimulatorPage() {
   const [mounted, setMounted] = useState(false);

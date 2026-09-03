@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Sliders, Cpu, Network, MemoryStick, HardDrive } from 'lucide-react';
-import clsx from 'clsx';
+import { Sliders, Cpu, Network, HardDrive } from 'lucide-react';
 
 interface HardwareState {
   compute: string;
