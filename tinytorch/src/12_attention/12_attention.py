@@ -289,7 +289,7 @@ Step-by-Step Attention Computation:
 
 # %% [markdown]
 """
-### Helper: Computing Attention Scores
+### Computing Attention Scores
 
 The first step in attention is measuring how similar each query is to each key.
 We do this with matrix multiplication: each element scores[i][j] tells us
@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Helper: Scaling Scores
+### Scaling Scores
 
 A dot product sums d_k independent products. For query/key entries with mean 0
 and variance 1, that sum has variance d_k -- so its typical magnitude grows with
@@ -414,7 +414,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Helper: Applying Causal Mask
+### Applying the Causal Mask
 
 In autoregressive models (like GPT), each token can only attend to tokens
 that came before it -- not future tokens. We enforce this by setting future
@@ -912,7 +912,7 @@ class MultiHeadAttention:
 
 # %% [markdown]
 """
-### Helper: Splitting Heads
+### Splitting Heads
 
 Multi-head attention processes the same data through multiple independent "heads."
 To do this efficiently, we reshape the projected tensor from 3D to 4D, separating
@@ -952,7 +952,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Helper: Merging Heads
+### Merging Heads
 
 After each head computes its own attention independently, we need to recombine
 them back into a single embedding. This is the reverse of splitting: transpose
