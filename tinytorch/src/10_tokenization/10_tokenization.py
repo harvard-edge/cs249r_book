@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/10_tokenization/tokenization_dev.py
+**Learning Side:** You work in modules/10_tokenization/tokenization.ipynb
 **Building Side:** Code exports to tinytorch.core.tokenization
 
 ```python

@@ -41,7 +41,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/16_compression/compression_dev.py
+**Learning Side:** You work in modules/16_compression/compression.ipynb
 **Building Side:** Code exports to tinytorch.perf.compression
 
 ```python
@@ -997,9 +997,9 @@ Temperature Effect on Probability Distributions:
 Without Temperature (T=1):           With Temperature (T=3):
 Teacher Logits: [1.0, 2.0, 0.5]    Teacher Logits: [1.0, 2.0, 0.5]
                        ↓                               ↓ ÷ 3
-Softmax: [0.09, 0.67, 0.24]         Logits/T: [0.33, 0.67, 0.17]
+Softmax: [0.23, 0.63, 0.14]         Logits/T: [0.33, 0.67, 0.17]
          ^      ^      ^                       ↓
-      Low   High   Med              Softmax: [0.21, 0.42, 0.17]
+      Med   High   Low              Softmax: [0.31, 0.43, 0.26]
                                              ^      ^      ^
 Sharp decisions (hard to learn)           Soft   decisions (easier to learn)
 

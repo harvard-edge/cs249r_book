@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/09_convolutions/convolutions_dev.py`
+**Learning Side:** You work in `modules/09_convolutions/convolutions.ipynb`
 **Building Side:** Code exports to `tinytorch.core.spatial`
 
 ```python
@@ -276,7 +276,7 @@ o3 = e×k1 + f×k2 + g×k3 + i×k4 + j×k5 + k×k6 + m×k7 + n×k8 + o×k9
 o4 = f×k1 + g×k2 + h×k3 + j×k4 + k×k5 + l×k6 + n×k7 + o×k8 + p×k9
 ```
 
-### The Six Nested Loops of Convolution
+### The Seven Nested Loops of Convolution
 
 Our implementation will use explicit loops to show exactly where the computational cost comes from:
 
@@ -377,7 +377,7 @@ Our Conv2d uses He initialization, specifically designed for ReLU activations:
 - **Solution**: std = sqrt(2 / fan_in) where fan_in = channels × kernel_height × kernel_width
 - **Why it works**: Maintains variance through ReLU nonlinearity
 
-#### The 6-Loop Implementation Strategy
+#### The 7-Loop Implementation Strategy
 
 We'll implement convolution with explicit loops to show the true computational cost:
 
@@ -1615,7 +1615,7 @@ AvgPool2d computes the average of each spatial window, creating smoother feature
 ```
 Same Input Window (2×2):    MaxPool Output:    AvgPool Output:
 ┌─────┬─────┐
-│ 0.1 │ 0.9 │               0.9              0.425
+│ 0.1 │ 0.9 │               0.9              0.4
 ├─────┼─────┤              (max)             (mean)
 │ 0.3 │ 0.3 │
 └─────┴─────┘

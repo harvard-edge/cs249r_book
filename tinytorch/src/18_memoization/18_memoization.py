@@ -42,8 +42,8 @@ Let's make inference blazingly fast through computational reuse!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/18_memoization/kvcaching_dev.py`
-**Building Side:** Code exports to `tinytorch.generation.kv_cache`
+**Learning Side:** You work in `modules/18_memoization/memoization.ipynb`
+**Building Side:** Code exports to `tinytorch.perf.memoization`
 
 ```python
 # How to use this module:
@@ -53,7 +53,7 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 **Why this matters:**
 - **Learning:** Complete caching system demonstrating production optimization techniques
 - **Production:** Proper organization matching Hugging Face's generation/ module structure
-- **Consistency:** All generation optimizations in generation.kv_cache
+- **Consistency:** All generation optimizations in perf.memoization
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
 
@@ -313,8 +313,8 @@ Cached Approach:
 Memory: O(n × d_k)    (store all K,V pairs)
 Compute: O(n)         (only compute new pairs)
 
-For n=100, d_k=64:
-Memory cost: 6.4 KB per layer
+For n=100, d_k=64 (float32, one attention head):
+Memory cost: 2 x 100 x 64 x 4 bytes = 50 KB
 Compute savings: 50x reduction in K,V computations
 ```
 

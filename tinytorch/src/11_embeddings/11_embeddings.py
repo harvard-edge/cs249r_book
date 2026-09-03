@@ -40,8 +40,8 @@ Let's transform tokens into intelligence!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/11_embeddings/embeddings_dev.py`
-**Building Side:** Code exports to `tinytorch.text.embeddings`
+**Learning Side:** You work in `modules/11_embeddings/embeddings.ipynb`
+**Building Side:** Code exports to `tinytorch.core.embeddings`
 
 ```python
 # How to use this module:
@@ -836,9 +836,9 @@ Mathematical position encoding that creates unique signatures for each position 
 │ │ Function:   sin   cos   sin   cos   sin   cos   sin   cos         │ │
 │ │                                                                   │ │
 │ │ pos=0:    [0.00, 1.00, 0.00, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=1:    [0.84, 0.54, 0.01, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=2:    [0.91,-0.42, 0.02, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=3:    [0.14,-0.99, 0.03, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
+│ │ pos=1:    [0.84, 0.54, 0.10, 1.00, 0.01, 1.00, 0.00, 1.00]        │ │
+│ │ pos=2:    [0.91,-0.42, 0.20, 0.98, 0.02, 1.00, 0.00, 1.00]        │ │
+│ │ pos=3:    [0.14,-0.99, 0.30, 0.96, 0.03, 1.00, 0.00, 1.00]        │ │
 │ │                                                                   │ │
 │ │ Each position gets a unique mathematical "fingerprint"!           │ │
 │ └───────────────────────────────────────────────────────────────────┘ │

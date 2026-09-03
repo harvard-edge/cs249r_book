@@ -49,7 +49,7 @@ Let's optimize for speed!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/17_acceleration/acceleration_dev.py`
+**Learning Side:** You work in `modules/17_acceleration/acceleration.ipynb`
 **Building Side:** Code exports to `tinytorch.perf.acceleration`
 
 ```python
@@ -229,7 +229,7 @@ For c₁₁: Row₁ · Column₁ = a₁₁×b₁₁ + a₁₂×b₂₁ + a₁₃
 ```
 
 **Why vectorization wins:**
-- **High arithmetic intensity**: 2N³ FLOPs for N³ data
+- **High arithmetic intensity**: 2N³ FLOPs for only 3N² elements of data
 - **Predictable memory access**: Sequential row/column reads
 - **Parallelizable**: Independent dot products
 - **Cache-friendly**: Data reuse in inner loops
@@ -267,8 +267,8 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     >>> b = Tensor([[5, 6], [7, 8]])  # 2×2
     >>> result = vectorized_matmul(a, b)
     >>> print(result.data)
-    [[19 22]    # [1×5+2×7, 1×6+2×8] = [19, 22]
-     [43 50]]   # [3×5+4×7, 3×6+4×8] = [43, 50]
+    [[19. 22.]    # [1×5+2×7, 1×6+2×8] = [19, 22]
+     [43. 50.]]   # [3×5+4×7, 3×6+4×8] = [43, 50]
 
     PERFORMANCE CHARACTERISTICS:
     - Time Complexity: O(N³) but highly optimized
@@ -374,7 +374,7 @@ Step 3: y = gelu(temp2)        → Read 4GB, Write 4GB
 ```
 Single Step: y = gelu(x * weight + bias)  → Read 8GB, Write 4GB
                                             Total: 12GB memory traffic!
-                                            60% memory bandwidth reduction!
+                                            40% memory bandwidth reduction!
 ```
 
 ### Understanding GELU: The Smooth Activation

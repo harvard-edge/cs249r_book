@@ -42,7 +42,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/19_benchmarking/benchmarking_dev.py`
+**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
 
 ```python
@@ -322,12 +322,12 @@ Raw measurements: [1.2, 3.1, 1.4, 1.3, 1.5, 1.1, 1.6]
                            ↓
         Statistical Analysis
                            ↓
-Mean: 1.46ms ± 0.25ms (95% confidence interval)
+Mean: 1.60ms ± 0.51ms (95% confidence interval)
 Median: 1.4ms (less sensitive to outliers)
-CV: 17% (coefficient of variation - relative noise)
+CV: 43% (coefficient of variation - relative noise)
 ```
 
-The confidence interval tells us: "We're 95% confident the true mean latency is between 1.21ms and 1.71ms." This guides optimization decisions with statistical backing.
+The confidence interval tells us: "We're 95% confident the true mean latency is between 1.09ms and 2.11ms." This guides optimization decisions with statistical backing.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-dataclass", "solution": true}

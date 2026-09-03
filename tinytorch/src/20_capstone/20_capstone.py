@@ -291,7 +291,7 @@ Measurement 1: 9.2ms    ┐
 Measurement 2: 10.1ms   │ Mean = 10.0ms
 Measurement 3: 9.8ms    │ Std  = 0.5ms
 Measurement 4: 10.5ms   │
-Measurement 5: 9.4ms    ┘
+Measurement 5: 10.4ms   ┘
 
 vs.
 

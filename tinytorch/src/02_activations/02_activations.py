@@ -42,7 +42,7 @@ Let's add intelligence to your tensors!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/02_activations/activations_dev.py
+**Learning Side:** You work in modules/02_activations/activations.ipynb
 **Building Side:** Code exports to tinytorch.core.activations
 
 ```python
@@ -240,7 +240,8 @@ class Sigmoid:
         >>> print(result.data)
         [0.119, 0.5, 0.881]  # All values between 0 and 1
 
-        HINT: Use np.exp(-x.data) for numerical stability
+        HINT: np.exp(-x) overflows for large negative x -- use np.where to pick the
+    branch whose exponent stays <= 0
         """
         ### BEGIN SOLUTION
         # Numerically stable sigmoid. Each branch keeps its exponent <= 0, so the
@@ -571,7 +572,7 @@ and the single constant 1.702 is empirically fitted so that σ(1.702x) ≈ Φ(x)
 ```
 Input:  [-1,  0,  1]
          ↓   ↓   ↓  GELU Function
-Output: [-0.16, 0, 0.84]
+Output: [-0.15, 0, 0.85]
 ```
 
 ### ASCII Visualization

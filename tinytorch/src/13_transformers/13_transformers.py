@@ -44,7 +44,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
+**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
 **Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
@@ -115,7 +115,7 @@ def create_causal_mask(seq_len: int) -> Tensor:
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
+**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
 **Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
@@ -141,8 +141,8 @@ from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, ML
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Module 01: Tensor foundation)
-- `tinytorch.core.activations` (Module 03: GELU activation)
-- `tinytorch.core.layers` (Module 04: Linear layers)
+- `tinytorch.core.activations` (Module 02: GELU activation)
+- `tinytorch.core.layers` (Module 03: Linear layers)
 - `tinytorch.core.embeddings` (Module 11: Embedding layers)
 - `tinytorch.core.attention` (Module 12: MultiHeadAttention)
 
@@ -684,7 +684,7 @@ Parameters:
 - Total MLP: ~2.1M parameters
 
 For comparison:
-- Attention (same embed_dim): ~1.5M parameters
+- Attention (same embed_dim): ~1.05M parameters
 - MLP has MORE parameters → more computational capacity
 ```
 
@@ -1213,7 +1213,7 @@ Probs: [0.09, 0.24, 0.67] → Weighted sampling
 
 Temperature = 2.0 (Creative):
 Scaled: [0.5, 1.0, 1.5] → Flatter distribution
-Probs: [0.18, 0.33, 0.49] → More random
+Probs: [0.19, 0.31, 0.51] → More random
 ```
 
 #### Model Scaling and Parameters
@@ -1222,8 +1222,8 @@ Probs: [0.18, 0.33, 0.49] → More random
 GPT Model Size Scaling:
 
 Tiny GPT (our implementation):
-- embed_dim: 64, layers: 2, heads: 4
-- Parameters: ~50K
+- vocab_size: 100, embed_dim: 64, layers: 2, heads: 4
+- Parameters: ~180K
 - Use case: Learning and experimentation
 
 GPT-2 Small:
@@ -1787,7 +1787,7 @@ def analyze_parameter_scaling():
         print()
 
     print("💡 Parameter scaling is roughly quadratic with embedding dimension")
-    print("🚀 Real GPT-3 has 175B parameters, requiring ~350GB memory!")
+    print("🚀 Real GPT-3 has 175B parameters, requiring ~700GB memory in float32 (~350GB in float16)!")
 
 if __name__ == "__main__":
     analyze_parameter_scaling()

@@ -43,7 +43,7 @@ Let's make models 4x smaller!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/15_quantization/quantization_dev.py
+**Learning Side:** You work in modules/15_quantization/quantization.ipynb
 **Building Side:** Code exports to tinytorch.perf.quantization
 
 ```python

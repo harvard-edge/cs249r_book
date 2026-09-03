@@ -40,12 +40,12 @@ Let's build the measurement foundation for ML systems optimization!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/14_profiling/profiling_dev.py
+**Learning Side:** You work in modules/14_profiling/profiling.ipynb
 **Building Side:** Code exports to tinytorch.perf.profiling
 
 ```python
 # Final package structure:
-from tinytorch.perf.profiling import Profiler, profile_forward_pass, profile_backward_pass
+from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_distribution
 ```
 
 **Why this matters:**
@@ -375,7 +375,7 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
     EXAMPLE:
     >>> conv = MockConv2d(in_channels=3, out_channels=16, kernel_size=3)
     >>> _count_conv_flops(conv, (1, 3, 32, 32))
-    13824000
+    777600
 
     HINTS:
     - The output-shape formula is the same one Module 09 derived

@@ -2120,7 +2120,7 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 - The model sees 30+ batches of only Patient A's data first
 - It might overfit to Patient A's specific characteristics
 - Early batches update weights strongly toward Patient A's patterns
-- This is called "catastrophic learning" of patient-specific features
+- This is ordering bias; in the extreme it produces catastrophic forgetting of earlier patients' features
 
 **Your DataLoader's shuffle prevents this by mixing patients in every batch!**
 
@@ -2243,7 +2243,7 @@ def __iter__(self):
 
 **Memory usage:**
 - Bad shuffle: 50GB (all samples in memory)
-- Your shuffle: 400KB (50M indices × 8 bytes each)
+- Your shuffle: 400MB (50M indices × 8 bytes each)
 
 **Why this matters:** You can shuffle 100 million samples using just 800MB of RAM!
 

@@ -41,7 +41,7 @@ By the end of this module, you will:
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/06_autograd/autograd_dev.py`
+**Learning Side:** You work in `modules/06_autograd/autograd.ipynb`
 **Building Side:** Code exports to `tinytorch.core.autograd`
 
 ```python

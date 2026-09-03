@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/03_layers/layers_dev.py
+**Learning Side:** You work in modules/03_layers/layers.ipynb
 **Building Side:** Code exports to tinytorch.core.layers
 
 ```python
@@ -265,7 +265,7 @@ Input Features     Weight Matrix        Bias Vector      Output Features
 Example: MNIST Digit Recognition
 [32, 784]       @  [784, 10]          + [10]        =  [32, 10]
   ↑                   ↑                    ↑             ↑
-32 images         784 pixels          10 classes    10 probabilities
+32 images         784 pixels          10 classes    10 class scores (logits)
                   to 10 classes       adjustments   per image
 ```
 
@@ -576,7 +576,7 @@ Dropout Memory Usage:
 ┌─────────────────────────────┐
 │ Input Tensor: X MB          │
 ├─────────────────────────────┤
-│ Random Mask: X/4 MB         │  (boolean mask, 1 byte/element)
+│ Random Mask: X MB           │  (float32 mask, 4 bytes/element)
 ├─────────────────────────────┤
 │ Output Tensor: X MB         │
 └─────────────────────────────┘
@@ -1104,7 +1104,7 @@ Layer Memory Components:
 ├─────────────────────────────────────────────────────────────┤
 │                   TEMPORARY MEMORY                          │
 ├─────────────────────────────────────────────────────────────┤
-│ • Dropout masks: batch_size × features × 1 byte             │
+│ • Dropout masks: batch_size × features × 4 bytes (float32)   │
 │ • Computation buffers for matrix operations                 │
 │ • Total: Peak during forward/backward passes                │
 └─────────────────────────────────────────────────────────────┘
