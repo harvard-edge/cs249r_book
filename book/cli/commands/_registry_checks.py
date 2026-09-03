@@ -192,18 +192,19 @@ def check_lego_equations(root: Path, paths: list[Path] | None = None) -> list[Re
 
 def run_registry_pytest(root: Path) -> list[RegistryIssue]:
     """Run MLSysIM registry gates plus book-owned usage checks."""
+    mlsysim_root = (root / "packages" / "mlsysim").resolve()
     tests = [
-        "tests/test_constants_allowlist.py",
-        "tests/test_registry_no_duplicate_specs.py",
-        "tests/test_provenance_audit.py",
-        "../book/tests/test_appendix_constants.py",
-        "../book/tests/test_appendix_lineage.py",
-        "../book/tests/test_no_legacy_constant_refs.py",
-        "../book/tests/test_mlsysim_registry_coverage.py",
+        mlsysim_root / "tests" / "test_constants_allowlist.py",
+        mlsysim_root / "tests" / "test_registry_no_duplicate_specs.py",
+        mlsysim_root / "tests" / "test_provenance_audit.py",
+        root / "book" / "tests" / "test_appendix_constants.py",
+        root / "book" / "tests" / "test_appendix_lineage.py",
+        root / "book" / "tests" / "test_no_legacy_constant_refs.py",
+        root / "book" / "tests" / "test_mlsysim_registry_coverage.py",
     ]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", *tests, "-q", "-o", "addopts="],
-        cwd=root / "mlsysim",
+        [sys.executable, "-m", "pytest", *map(str, tests), "-q", "-o", "addopts="],
+        cwd=mlsysim_root,
         capture_output=True,
         text=True,
     )

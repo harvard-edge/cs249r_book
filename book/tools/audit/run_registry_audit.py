@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-MLSYSIM = REPO / "mlsysim"
+MLSYSIM = (REPO / "packages" / "mlsysim").resolve()
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> int:
@@ -31,14 +31,14 @@ def main() -> int:
                 sys.executable,
                 "-m",
                 "pytest",
-                "tests/test_provenance.py",
-                "tests/test_provenance_audit.py",
-                "tests/test_constants_allowlist.py",
-                "../book/tests/test_appendix_constants.py",
-                "../book/tests/test_appendix_lineage.py",
-                "../book/tests/test_no_legacy_constant_refs.py",
-                "../book/tests/test_registry.py",
-                "../book/tests/test_mlsysim_registry_coverage.py",
+                str(MLSYSIM / "tests" / "test_provenance.py"),
+                str(MLSYSIM / "tests" / "test_provenance_audit.py"),
+                str(MLSYSIM / "tests" / "test_constants_allowlist.py"),
+                str(REPO / "book" / "tests" / "test_appendix_constants.py"),
+                str(REPO / "book" / "tests" / "test_appendix_lineage.py"),
+                str(REPO / "book" / "tests" / "test_no_legacy_constant_refs.py"),
+                str(REPO / "book" / "tests" / "test_registry.py"),
+                str(REPO / "book" / "tests" / "test_mlsysim_registry_coverage.py"),
                 "--no-cov",
                 "-q",
             ],
