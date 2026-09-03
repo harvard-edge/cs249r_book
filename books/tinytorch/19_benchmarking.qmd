@@ -20,7 +20,7 @@ In high-performance machine learning, evaluating an optimization by measuring a 
 
 ---
 
-## 19.1 Benchmarking as a Systems Engineering Discipline
+## Benchmarking as a Systems Engineering Discipline
 
 Benchmarking is not just timing code—it is the disciplined scientific measurement of system behavior under controlled experimental conditions.
 
@@ -39,9 +39,17 @@ A valid benchmarking protocol controls for all four variables:
 
 $$\text{Protocol: } \text{Warmup Runs } (N \ge 5) \longrightarrow \text{GC Disable} \longrightarrow \text{Sample Runs } (N \ge 30) \longrightarrow \text{Statistical Analysis}$$
 
+In GPU environments, benchmarking must also account for asynchronous kernel launch queues. Python code dispatches instructions to the GPU command stream asynchronously; using standard CPU timers (`time.perf_counter()`) without synchronization measures only host kernel enqueue time rather than GPU execution duration.[^cuda-events-footnote]
+
+Furthermore, systems engineers evaluate hardware efficiency using **Model FLOPs Utilization (MFU)**,[^mfu-footnote] measuring the fraction of peak theoretical compute achieved by the runtime.
+
+[^cuda-events-footnote]: Standard CPU timers (`time.perf_counter()`) measure only asynchronous kernel enqueue latency unless explicitly synchronized. In GPU benchmarking, `torch.cuda.Event(enable_timing=True)` inserts hardware timestamps directly into the GPU execution stream, measuring exact silicon execution duration without host-device OS jitter.
+
+[^mfu-footnote]: Model FLOPs Utilization (MFU) measures the ratio of observed model execution throughput to the theoretical peak hardware throughput: $\text{MFU} = \frac{\text{Observed Tokens/s} \times 6 N_{\text{params}}}{P_{\text{peak}}}$. In production LLM training and serving, well-optimized runtimes achieve 35% to 55% MFU, with remaining cycles consumed by memory stalls, communication latency, and pipeline bubbles.
+
 ---
 
-## 19.2 Applied Statistics for Performance Engineering
+## Applied Statistics for Performance Engineering
 
 When measuring $N$ independent latency trials $[t_1, t_2, \dots, t_N]$, the sample mean $\bar{t}$ and sample standard deviation $s$ are:
 
@@ -61,7 +69,7 @@ If the confidence intervals of a baseline model and an optimized model overlap, 
 
 ---
 
-## 19.3 Implementing the Benchmark Suite in TinyTorch
+## Implementing the Benchmark Suite in TinyTorch
 
 ```python
 # Listing 19.1: The Benchmark Evaluation Engine in TinyTorch
@@ -124,9 +132,10 @@ class Benchmark:
 
 ---
 
-## 19.4 Multi-Objective Evaluation: The Pareto Frontier
+## Multi-Objective Evaluation: The Pareto Frontier
 
 In real-world systems, no optimization is free:
+
 - INT8 Quantization: Slashes latency by 3×, but may drop accuracy by $0.3\%$.
 - Structured Pruning: Cuts parameter memory by 50%, but requires fine-tuning.
 - KV Caching: Accelerates decoding by 10×, but consumes gigabytes of VRAM.
@@ -154,12 +163,13 @@ A model is **Pareto Optimal** if no other configuration exists that achieves bot
 
 ---
 
-## 19.5 Systematic Ablation Study in TinyTorch
+## Systematic Ablation Study in TinyTorch
 
 We can now conduct an end-to-end ablation study, tracking the cumulative performance impact of our systems optimizations:
 
 ```python
 # Listing 19.2: Running a Systematic Optimization Ablation Study
+from tinytorch.core.tensor import Tensor
 from tinytorch.core.transformers import GPT
 from tinytorch.perf.quantization import quantize_model
 
@@ -179,6 +189,33 @@ print("-" * 60)
 print(f"{res_base['name']:<20} | {res_base['p50_ms']:>8.2f} ms     | {res_base['throughput_samples_per_sec']:>8.1f} tok/s")
 print(f"{res_int8['name']:<20} | {res_int8['p50_ms']:>8.2f} ms     | {res_int8['throughput_samples_per_sec']:>8.1f} tok/s")
 ```
+
+---
+
+::: {.callout-note}
+## PyTorch Systems Bridge: `torch.utils.benchmark` and MLPerf Scenarios
+
+In production PyTorch benchmarking, `torch.utils.benchmark` provides precision timing with timer sub-interpreters and automated cache clearing:
+
+```python
+import torch
+import torch.utils.benchmark as benchmark
+
+# Benchmark model with PyTorch timer
+t0 = benchmark.Timer(
+    stmt='model(x)',
+    setup='import torch; x = torch.randn(32, 128, device="cuda")',
+    globals={'model': model}
+)
+measurement = t0.timeit(100)
+print(f"Median Execution: {measurement.median * 1000:.2f} ms")
+```
+
+In industry evaluations, the **MLPerf Inference** standard codifies two canonical workloads:
+
+1. **Server Scenario**: Requests arrive following a Poisson process. The metric is maximum throughput (QPS) subject to a strict **P99 latency SLA** (e.g., $99\%$ of requests must finish within $15\text{ ms}$).
+2. **Offline Scenario**: All test samples are loaded into memory simultaneously, measuring raw batch processing saturation (samples/sec).
+:::
 
 ---
 

@@ -20,34 +20,40 @@ Unlike Recurrent Neural Networks (RNNs) that process tokens sequentially step-by
 
 ---
 
-## 11.1 The Discrete Lookup Table
+## The Discrete Lookup Table: Zero-Compute Pointer Indexing
 
 An embedding layer maps discrete token integers $t \in \{0, 1, \dots, V-1\}$ to continuous $D$-dimensional vectors $\mathbf{e}_t \in \mathbb{R}^D$.
 
-Mathematically, an embedding lookup is equivalent to multiplying a one-hot vector $\mathbf{x}_{\text{one-hot}} \in \{0, 1\}^V$ by a weight matrix $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{V \times D}$:
+Mathematically, an embedding lookup is formalized as multiplying a 1-hot row vector $\mathbf{x}_{\text{one-hot}} \in \{0, 1\}^V$ by a weight parameter matrix $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{V \times D}$:
 
 $$\mathbf{e}_t = \mathbf{x}_{\text{one-hot}} \mathbf{W}_{\text{embed}} = \mathbf{W}_{\text{embed}}[t, :]$$
 
+If executed literally as a matrix multiplication, evaluating $\mathbf{x}_{\text{one-hot}} \mathbf{W}_{\text{embed}}$ for a batch of sequences would require $B \cdot S \cdot V \cdot D$ multiply-accumulate operations—where $\frac{V-1}{V} \approx 99.999\%$ of arithmetic operations are multiplying zeros!
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Embedding Lookup Mechanism: Zero-Multiply Gather           │
-├─────────────────────────────────────────────────────────────┤
-│  Token ID: 42                                               │
-│                                                             │
-│  Embedding Table W_embed (Vocab Size V=32000, Dim D=768):   │
-│  Row 0  : [ 0.12, -0.45,  0.88, ... ]                       │
-│  ...                                                        │
-│  Row 42 : [-0.04,  0.72, -0.31, ... ] ──> Output Vector (D) │
-│  ...                                                        │
-│  Row V-1: [ 0.51,  0.19, -0.02, ... ]                       │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Embedding Lookup: Mathematical Formalism vs. Physical Memory Reality   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Mathematical Abstraction (Dense Matrix Multiply):                      │
+│  [0, 0, ..., 1, ..., 0] @ Matrix(V=32000, D=4096) ──> Vector(D)         │
+│  • FLOPs: 2 * 32,000 * 4,096 = 262,144,000 FLOPs (99.997% wasted on 0s)│
+├─────────────────────────────────────────────────────────────────────────┤
+│  Hardware Execution Reality (Zero-Compute Pointer Gather):              │
+│  Index = 42 ──> Pointer: Base_Address + 42 * 4096 * 4 bytes             │
+│  • FLOPs: EXACTLY ZERO!                                                 │
+│  • Memory Operation: Direct DRAM/HBM Strided Cache Line Fetch           │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-In software, frameworks never allocate one-hot vectors or execute matrix multiplications for embeddings; instead, they perform a direct **memory gather** using the token integer as an array index offset: $\text{address} = \text{base} + t \times D \times 4\text{ bytes}$.
+In software and hardware execution, deep learning runtimes never allocate one-hot vectors or execute arithmetic multiplications for embeddings. Instead, the embedding layer is executed as an **$O(1)$ memory gather operation** (pointer indexing arithmetic):
+
+$$\text{Byte Address}(t) = \text{Base\_Pointer} + t \times D \times \text{sizeof}(\text{dtype})$$
+
+This fundamental architectural insight means embedding layers have an **arithmetic intensity of zero FLOPs per byte**: their performance is entirely bounded by DRAM/HBM memory bandwidth and cache latency.
 
 ---
 
-## 11.2 Implementing the Embedding Layer in TinyTorch
+## Implementing the Embedding Layer in TinyTorch
 
 ```python
 # Listing 11.1: The Embedding Layer in TinyTorch
@@ -59,7 +65,7 @@ import numpy as np
 class Embedding(Layer):
     """
     Learnable Embedding lookup table mapping token IDs to dense vectors.
-    
+
     Weights shape: (num_embeddings, embedding_dim)
     """
 
@@ -87,9 +93,10 @@ class Embedding(Layer):
 
 ---
 
-## 11.3 The Permutation Invariance Problem in Attention
+## The Permutation Invariance Problem in Attention
 
 Consider two sentences with identical words in reversed order:
+
 1. *"The dog bit the cat."*
 2. *"The cat bit the dog."*
 
@@ -115,7 +122,7 @@ $$\mathbf{x}_{\text{input}}[b, pos] = \mathbf{e}[b, pos] + \mathbf{p}[pos]$$
 
 ---
 
-## 11.4 Vaswani Sinusoidal Positional Encoding
+## Vaswani Sinusoidal Positional Encoding
 
 In *Attention Is All You Need* (2017), Vaswani et al. introduced **Sinusoidal Positional Encoding**, using sine and cosine waves of varying frequencies across the embedding dimensions:
 
@@ -142,7 +149,7 @@ def create_sinusoidal_embeddings(max_len: int, d_model: int) -> np.ndarray:
     """
     pe = np.zeros((max_len, d_model), dtype=np.float32)
     position = np.arange(0, max_len, dtype=np.float32)[:, np.newaxis]
-    
+
     # Division term: 10000^(2i / d_model)
     div_term = np.exp(np.arange(0, d_model, 2, dtype=np.float32) * -(np.log(10000.0) / d_model))
 
@@ -155,7 +162,7 @@ def create_sinusoidal_embeddings(max_len: int, d_model: int) -> np.ndarray:
 
 ---
 
-## 11.5 Learned Positional Embeddings (GPT-Style)
+## Learned Positional Embeddings (GPT-Style)
 
 While sinusoidal encodings are fixed and non-trainable, autoregressive models (such as GPT-2, GPT-3, and BERT) frequently use **Learned Positional Embeddings**.
 
@@ -175,16 +182,16 @@ class GPTEmbedding(Layer):
 
     def forward(self, input_ids: Tensor) -> Tensor:
         B, S = input_ids.shape
-        
+
         # 1. Lookup token embeddings: (B, S, D)
         tok_vecs = self.token_embed(input_ids)
-        
+
         # 2. Generate position indices: [0, 1, 2, ..., S-1]
         pos_indices = Tensor(np.arange(S, dtype=np.int32)[np.newaxis, :])  # Shape: (1, S)
-        
+
         # 3. Lookup position embeddings: (1, S, D)
         pos_vecs = self.pos_embed(pos_indices)
-        
+
         # 4. Element-wise addition (broadcasting batch dimension)
         return Tensor(tok_vecs.data + pos_vecs.data)
 
@@ -194,40 +201,59 @@ class GPTEmbedding(Layer):
 
 ---
 
-
 ::: {.callout-note}
-## PyTorch Systems Bridge: `torch.nn.Embedding` and `EmbeddingBag`
+## PyTorch Systems Bridge: `torch.nn.Embedding`, Sparse Gradients, and `EmbeddingBag`
 
-In recommendation systems (such as Meta DLRM), embedding tables contain billions of rows spanning hundreds of gigabytes. PyTorch provides `nn.EmbeddingBag`, which fuses the integer table lookup and the sum/mean pooling into a single CUDA kernel:
+In PyTorch, `torch.nn.Embedding` wraps high-performance CUDA memory gather kernels (`aten/src/ATen/native/cuda/Embedding.cu`):
 
 ```python
 import torch
 import torch.nn as nn
 
-# Fused lookup + aggregation without intermediate (B, S, D) tensor allocation
-table = nn.EmbeddingBag(num_embeddings=100000, embedding_dim=128, mode="mean")
+# Dense embedding lookup table
+embed = nn.Embedding(
+    num_embeddings=32000,
+    embedding_dim=4096,
+    padding_idx=0,      # Gradients for padding index are strictly zeroed
+    sparse=False        # If True, backward pass yields sparse torch.sparse_coo gradient
+)
+
+token_ids = torch.tensor([[101, 2054, 2003, 102], [101, 1037, 3899, 102]])
+vectors = embed(token_ids)  # Shape: (2, 4, 4096)
 ```
-This fused design cuts memory bus traffic by over 80%, enabling trillion-parameter recommendation models.[^embedding-bag]
+
+### Dense vs. Sparse Embedding Gradients
+When `sparse=False` (default), the backward pass allocates a full dense $(V, D)$ gradient tensor $\nabla_{\mathbf{W}}$. For $V = 1,000,000$ and $D = 4096$, this allocates $16.38\text{ GB}$ of VRAM just to store mostly zero gradients! Setting `sparse=True` returns a sparse coordinate (`torch.sparse_coo`) tensor that records only the updated row indices, combined with `torch.optim.SparseAdam` to update massive embedding tables in recommendation engines.[^embedding-sparse]
+
+In recommendation systems (such as Meta DLRM), PyTorch provides `nn.EmbeddingBag`, which fuses the integer table lookup and the sum/mean pooling into a single CUDA kernel, cutting DRAM bus roundtrips by over 80%.[^embedding-bag]
 :::
 
-[^embedding-bag]: In the PyTorch C++ source (`aten/src/ATen/native/EmbeddingBag.cpp`), `EmbeddingBag` performs parallel reduction across row indices in GPU shared memory.
+[^embedding-sparse]: In CUDA, the dense backward kernel executes an `atomicAdd` across threads if multiple input tokens reference the same embedding index $t$, preventing race conditions during gradient accumulation.
 
-## 11.6 Systems Reality: Memory Bandwidth in Embedding Tables
+[^embedding-bag]: In the PyTorch C++ source (`aten/src/ATen/native/EmbeddingBag.cpp`), `EmbeddingBag` performs parallel reduction across row indices in GPU shared memory without allocating intermediate $(B, S, D)$ tensor buffers.
 
-Embedding layers exhibit very low arithmetic intensity: they perform **zero floating-point FLOPs per lookup**, executing purely memory bandwidth-bound reads.
+## Systems Reality: Memory Bandwidth and the Backward Scatter-Add Hazard
+
+Embedding layers exhibit an extreme systems imbalance between the forward gather and the backward scatter:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Hardware Memory Access Pattern in Embedding Lookup         │
-├─────────────────────────────────────────────────────────────┤
-│  • Input: Batch of 32 sequences, 512 tokens = 16,384 tokens │
-│  • Weight Table: 32,000 rows x 4,096 cols (524 MB)          │
-│  • Access: Random non-contiguous 16 KB row gathers          │
-│  • Bottleneck: Memory Bus Latency & Cache Misses            │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Embedding Forward Gather vs. Backward Scatter-Add Pipeline             │
+├─────────────────────────────────────────────────────────────────────────┤
+│  FORWARD PASS: Strided Memory Gather (Zero FLOPs)                       │
+│  Indices [42, 108, 42] ──> Fetch Rows [42, 108, 42] into HBM            │
+│  • Latency: DRAM random-access latency (~100-200 ns)                    │
+│  • Memory Bandwidth: Uncoalesced reads across 128-byte cache lines      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  BACKWARD PASS: Atomic Scatter-Add Write Conflict                       │
+│  dL/dOutput ──> Accumulate Gradients into Rows [42, 108, 42]            │
+│  • Write Hazard: Tokens 0 and 2 BOTH write to Row 42!                   │
+│  • Hardware Solution: GPU atomicAdd() locks memory bus lines, causing   │
+│    warp serialization when high-frequency stopwords dominate batches. │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Because token lookups access random memory rows across the table, GPU L2 caches experience high miss rates. High-performance inference engines use **tensor memory layout alignment** and **kernel fusion** to combine embedding lookup with the first transformer layer's LayerNorm kernel.
+Because token lookups access non-contiguous memory rows across the table, GPU L2 caches experience high miss rates. In modern LLM architectures (e.g., LLaMA, Mistral), embedding tables are often tied with the final output linear projection head (`lm_head.weight = embed.weight`) to save hundreds of megabytes of GPU memory, while position representations have evolved from learned lookup tables to arithmetic **Rotary Position Embeddings (RoPE)** that require zero additional memory allocations.
 
 ---
 

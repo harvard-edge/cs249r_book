@@ -20,7 +20,7 @@ Neural networks are continuous mathematical engines operating on vectors of floa
 
 ---
 
-## 10.1 The Discrete-to-Continuous Bridge in NLP
+## The Discrete-to-Continuous Bridge in NLP
 
 To process natural language, a machine learning framework must execute a two-stage translation:
 
@@ -46,7 +46,7 @@ $$\text{Vocabulary: } \mathcal{V} = \{ \text{token}_0: 0, \text{token}_1: 1, \do
 
 ---
 
-## 10.2 The Tokenization Granularity Dilemma
+## The Tokenization Granularity Dilemma
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -72,22 +72,26 @@ $$\text{Vocabulary: } \mathcal{V} = \{ \text{token}_0: 0, \text{token}_1: 1, \do
 ```
 
 ::: {.callout-principle}
-## The Vocabulary vs. Sequence Length Trade-off
+## Information-Theoretic Entropy Maximization in BPE
 
-For a fixed text corpus of $N$ characters:
-- **Embedding Table Memory**: Scales linearly with vocabulary size $V \times D \times 4\text{ bytes}$.
-- **Attention Computation**: Scales quadratically with tokenized sequence length $O(S^2)$.
+From Claude Shannon's Information Theory, the average information content (entropy) per token is defined as:
 
-BPE tokenization allows framework designers to select an exact vocabulary size (typically $V = 32,000$ to $100,000$) that balances embedding memory against sequence length.
+$$H(T) = -\sum_{t \in \mathcal{V}} p(t) \log_2 p(t) \quad \text{bits/token}$$
+
+Natural language is statistically redundant:
+
+- **Character-level tokenization** ($V \approx 256$) produces low entropy per token ($H \approx 2.5\text{ bits}$), requiring 4–5 tokens per word. Because transformer self-attention scales quadratically with sequence length ($O(S^2)$ FLOPs and KV cache memory), character tokenization wastes $16\times$ to $25\times$ more attention compute on low-entropy symbol chunks.
+- **Word-level tokenization** ($V > 1,000,000$) achieves high entropy per token ($H \approx 11\text{ bits}$), but follows a heavy Zipfian long-tail distribution: the embedding table footprint ($V \times D$) explodes beyond $16\text{ GB}$ of VRAM, and unseen words trigger fatal Out-Of-Vocabulary (OOV) failures.
+- **Byte-Pair Encoding (BPE)** acts as an iterative Minimum Description Length (MDL) compression algorithm. By iteratively merging the highest-frequency adjacent symbol pairs, BPE compresses frequent character clusters into single tokens while preserving subword decomposition for rare words. This flattens the token probability distribution $p(t)$, pushing entropy $H(T)$ toward theoretical maximum capacity ($\log_2 V$) and maximizing the semantic information density delivered per unit of transformer context window.
 :::
 
 ---
 
-## 10.3 The Byte-Pair Encoding (BPE) Algorithm
+## The Byte-Pair Encoding (BPE) Algorithm
 
 Byte-Pair Encoding (Sennrich et al., 2015; Radford et al., 2019) is a data-driven compression algorithm that constructs a subword vocabulary from a training text corpus:
 
-1. **Initialize Vocabulary**: Start with all individual base characters (or bytes) present in the training text.
+1. **Initialize Vocabulary**: Start with all individual base characters (or raw UTF-8 bytes) present in the training text.
 2. **Frequency Counting**: Tokenize the text into individual characters and count the frequency of all adjacent symbol pairs.
 3. **Merge Most Frequent Pair**: Identify the most frequent pair $(A, B)$, create a new merged token $AB$, and add it to the vocabulary.
 4. **Repeat**: Iterate steps 2 and 3 until the desired vocabulary size $V$ or target number of merges is reached.
@@ -100,7 +104,7 @@ Byte-Pair Encoding (Sennrich et al., 2015; Radford et al., 2019) is a data-drive
 
 ---
 
-## 10.4 Implementing BPETokenizer in TinyTorch
+## Implementing BPETokenizer in TinyTorch
 
 ```python
 # Listing 10.1: The BPE Tokenizer Engine in TinyTorch
@@ -130,7 +134,7 @@ class BPETokenizer:
         # 1. Initialize with unique base characters
         words = corpus.split()
         splits = [[char for char in word] for word in words]
-        
+
         # Build base vocabulary
         unique_chars = sorted(list(set("".join(corpus.split()))))
         base_vocab = [self.unk_token] + unique_chars
@@ -144,17 +148,17 @@ class BPETokenizer:
             stats = self._get_stats(splits)
             if not stats:
                 break
-                
+
             # Find most frequent pair
             best_pair = stats.most_common(1)[0][0]
             self.merges.append(best_pair)
-            
+
             # Register new merged token
             new_token = "".join(best_pair)
             new_id = len(self.token_to_id)
             self.token_to_id[new_token] = new_id
             self.id_to_token[new_id] = new_token
-            
+
             # Apply merge to active splits
             new_splits = []
             for word in splits:
@@ -174,11 +178,11 @@ class BPETokenizer:
         """Encode string into list of token integer IDs."""
         words = text.split()
         token_ids = []
-        
+
         for word in words:
             # Start with characters
             subwords = [c for c in word]
-            
+
             # Apply learned merges in order of creation
             for pair in self.merges:
                 merged_token = "".join(pair)
@@ -196,7 +200,7 @@ class BPETokenizer:
             # Map to IDs
             for sw in subwords:
                 token_ids.append(self.token_to_id.get(sw, self.token_to_id[self.unk_token]))
-                
+
         return token_ids
 
     def decode(self, token_ids: List[int]) -> str:
@@ -207,7 +211,7 @@ class BPETokenizer:
 
 ---
 
-## 10.5 Vocabulary Management and Special Tokens
+## Vocabulary Management and Special Tokens
 
 In production language models, tokenizers reserve special non-linguistic tokens for framework control flow:
 
@@ -226,33 +230,55 @@ When batching text of different lengths (e.g., Sentence 1 has 12 tokens, Sentenc
 
 ---
 
-
 ::: {.callout-note}
-## Production Systems Bridge: OpenAI `tiktoken` and Rust Tokenizers
+## Production Systems Bridge: OpenAI `tiktoken`, Byte-Level BPE, and Rust Tokenizers
 
-In modern LLM production stacks, tokenizers are implemented in Rust (such as Hugging Face `tokenizers` and OpenAI `tiktoken`) using multi-threaded chunking and byte-level BPE:
+Modern production LLMs (GPT-4, LLaMA-3, Mistral) utilize **Byte-Level Byte-Pair Encoding (BBPE)**. Rather than initializing the vocabulary with Unicode characters, BBPE initializes with the 256 fundamental byte values of UTF-8:
+
+1. **Zero Out-of-Vocabulary (OOV) Fallback**: Any arbitrary string in any human language, source code, or binary payload decomposes into a sequence of bytes. The `<UNK>` token is entirely eliminated.
+2. **Byte-Fallback Mechanism**: Common multi-byte Unicode glyphs (such as emojis or non-Latin scripts) are merged into single tokens if frequent, but fall back gracefully to raw bytes if rare.
+
+In production stacks, tokenizers are implemented as multi-threaded Rust engines (such as OpenAI `tiktoken` and Hugging Face `tokenizers`):[^tiktoken-rust]
 
 ```python
 import tiktoken
 
 # Cl100k_base tokenizer used by GPT-4 (Vocab Size: 100,277)
 enc = tiktoken.get_encoding("cl100k_base")
-tokens = enc.encode("Machine learning systems are fast")
+tokens = enc.encode("Machine learning systems are fast! 🚀")
 print("Token IDs:", tokens)
 print("Decoded:", enc.decode(tokens))
+print("Bytes per token:", [enc.decode_single_token_bytes(t) for t in tokens])
 ```
-These tokenizers process text at over **10 Megabytes/second per CPU core**, guaranteeing that token ingestion never bottlenecks GPU training pipelines.[^tiktoken-rust]
+
+These native tokenizers process text at over **10–20 Megabytes/second per CPU core**, guaranteeing that token ingestion never starves GPU execution engines.
 :::
 
-[^tiktoken-rust]: OpenAI's `tiktoken` uses regex splitting into word chunks followed by parallel hash-table pair lookups, executing in sub-microsecond latency.
+[^tiktoken-rust]: OpenAI's `tiktoken` uses deterministic regex splitting to partition raw text into independent word-level chunks prior to BPE merging. This allows multiple CPU worker threads to execute parallel hash-table pair lookups without global synchronization locks.
 
-## 10.6 Systems Reality: Tokenizer Speed and Memory Footprint
+## Systems Reality: Host Ingestion Pipelines and Tokenizer Throughput
 
-In production inference servers (such as vLLM or Hugging Face Text Generation Inference), tokenization runs on the host CPU while the GPU executes transformer matrix multiplications.
+In high-throughput training and inference clusters (such as vLLM or Hugging Face TGI), tokenization executes on host CPU cores, while matrix multiplications execute on accelerator GPUs.
 
-If an unoptimized Python tokenizer takes $5\text{ ms}$ to tokenize a prompt, but the GPU generates the first token in $2\text{ ms}$, the system is **tokenizer-bound**, leaving expensive accelerator hardware idle.
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Host CPU Ingestion Pipeline vs. GPU Compute Engine                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Host CPU (Rust/C++ Tokenizer)          GPU Accelerator (Matrix Engine) │
+│  ┌───────────────────────────┐          ┌─────────────────────────────┐ │
+│  │ Raw String Stream         │          │ Transformer Forward Pass    │ │
+│  │      │                    │          │                             │ │
+│  │      ▼ [Regex Chunking]   │          │                             │ │
+│  │ Parallel BPE Merge (SRAM) │  PCIe    │ High-Bandwidth Memory (HBM) │ │
+│  │      │                    │ ───────> │ GEMM Matmul on Tensor Cores │ │
+│  │      ▼                    │ DMA      │                             │ │
+│  │ Pinned Host Buffer (int32)│          │                             │ │
+│  └───────────────────────────┘          └─────────────────────────────┘ │
+│  Throughput: >20 MB/s per core          Throughput: TeraFLOPs / PFLOPS  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-For this reason, industrial frameworks implement BPE tokenizers in Rust or C++ (e.g., Hugging Face `tokenizers` library) using Aho-Corasick string matching and multi-threaded parallel chunking.
+If a Python-based tokenizer takes $10\text{ ms}$ to tokenize a prompt batch, but the GPU forward pass executes in $2\text{ ms}$, the training cluster becomes **tokenizer-bound**, leaving expensive accelerator hardware stalled on PCIe transfers. High-performance framework pipelines use asynchronous pinned memory buffers (`torch.utils.data.DataLoader(pin_memory=True, num_workers=8)`) to interleave CPU subword tokenization with GPU kernel execution.
 
 ::: {.callout-checkpoint}
 ## Check Your Understanding: Embedding Memory Calculation

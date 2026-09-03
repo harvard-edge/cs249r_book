@@ -59,6 +59,20 @@ from .statistics import (
     calc_two_proportion_sample_size,
     calc_constraint_propagation_factor,
 )
+from .agents import (
+    calc_trajectory_step_time,
+    calc_trajectory_reliability,
+    calc_radix_cache_effective_latency,
+    calc_test_time_compute_cost,
+    calc_multi_agent_coordination_overhead,
+)
+from .robotics import (
+    calc_sensor_to_actuator_latency,
+    calc_safe_stopping_distance,
+    calc_actuator_thermal_power,
+    calc_action_chunk_cadence,
+    calc_reflected_inertia,
+)
 
 from .quantities import (
     transfer_time,
@@ -116,6 +130,16 @@ __all__ = [
     "calc_population_stability_index",
     "calc_two_proportion_sample_size",
     "calc_constraint_propagation_factor",
+    "calc_trajectory_step_time",
+    "calc_trajectory_reliability",
+    "calc_radix_cache_effective_latency",
+    "calc_test_time_compute_cost",
+    "calc_multi_agent_coordination_overhead",
+    "calc_sensor_to_actuator_latency",
+    "calc_safe_stopping_distance",
+    "calc_actuator_thermal_power",
+    "calc_action_chunk_cadence",
+    "calc_reflected_inertia",
     "transfer_time",
     "compute_time",
     "energy_from_power",
