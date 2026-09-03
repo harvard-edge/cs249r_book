@@ -64,7 +64,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 - **Integration:** Works seamlessly with neural network layers for complete performance optimization
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -170,14 +170,14 @@ Real-world performance wins:
 - **10× scaling improvement** for large models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tensor-import", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "tensor-import", "solution": false}
 #| export
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## 📐 Foundations: Vectorization - From Loops to Lightning
+## 📐 Foundations: Vectorization: From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -308,6 +308,19 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     return Tensor(result_data)
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Vectorized Matrix Multiplication
+
+This test validates that replacing explicit loops with a single vectorized call
+produces identical results.
+
+**What we're testing**: Correctness of batched matmul and its shape validation
+**Why it matters**: Vectorization is only a win if the answer is unchanged -- a
+faster wrong answer is worthless
+**Expected**: Matches hand-computed products, rejects mismatched inner dimensions
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-vectorized-matmul", "locked": true, "points": 10}
 def test_unit_vectorized_matmul():
     """🧪 Test vectorized matrix multiplication implementation."""
@@ -356,7 +369,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Kernel Fusion - Eliminating Memory Bottlenecks
+## 🏗️ Implementation: Kernel Fusion: Eliminating Memory Bottlenecks
 
 ### The Memory Bandwidth Crisis
 
@@ -481,6 +494,19 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Fused GELU
+
+This test validates the fused GELU activation against the mathematical
+properties GELU must satisfy.
+
+**What we're testing**: GELU(0) = 0, monotonicity, and the tanh approximation
+**Why it matters**: Fusion collapses several passes over memory into one, so the
+fused version must stay numerically faithful to the unfused definition
+**Expected**: Exact zero at the origin, increasing output, correct tail behavior
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
     """🔬 Test fused GELU activation implementation."""
@@ -584,6 +610,18 @@ def unfused_gelu(x: Tensor) -> Tensor:
 
     return result
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Kernel Fusion Performance Impact
+
+This test measures the actual speedup from fusion rather than assuming it.
+
+**What we're testing**: Timed comparison of fused vs unfused GELU after warmup
+**Why it matters**: Fusion saves memory traffic, not arithmetic. The only way to
+know whether that mattered on your machine is to measure it
+**Expected**: Fused version is no slower, with warmup excluded from the timing
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-fusion-speedup", "locked": true, "points": 10}
 def test_unit_fusion_speedup():
@@ -792,6 +830,19 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     return Tensor(C)
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### 🧪 Unit Test: Tiled Matrix Multiplication
+
+This test validates that blocking the loops preserves the result.
+
+**What we're testing**: Tiled output matches the vectorized reference across
+several tile sizes, plus shape validation
+**Why it matters**: Tiling reorders the accumulation, and float addition is not
+associative, so "close enough" has to be defined rather than assumed
+**Expected**: Agreement within float32 reassociation tolerance at every tile size
+"""
+
 # %% nbgrader={"grade": true, "grade_id": "test-tiled-matmul", "locked": true, "points": 10}
 def test_unit_tiled_matmul():
     """🧪 Test cache-aware tiled matrix multiplication."""
@@ -833,7 +884,7 @@ if __name__ == "__main__":
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-vectorization", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-vectorization", "solution": false}
 def analyze_vectorization_scaling():
     """📊 Analyze vectorization performance across different tensor sizes."""
     print("📊 Analyzing vectorization scaling behavior...")
@@ -888,7 +939,7 @@ def analyze_vectorization_scaling():
 if __name__ == "__main__":
     analyze_vectorization_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": false}
 def analyze_arithmetic_intensity():
     """📊 Demonstrate the roofline model with different operations."""
     print("📊 Analyzing arithmetic intensity patterns...")
@@ -1038,12 +1089,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Optimization Insights: Production Acceleration Strategy
+## 📊 Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "acceleration-decision-framework", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "acceleration-decision-framework", "solution": false}
 def analyze_acceleration_decision_framework():
     """📊 Decision framework for choosing acceleration techniques."""
     print("📊 Acceleration Technique Decision Framework...")
@@ -1211,7 +1262,7 @@ Now let's use the **Profiler** tool you built in Module 14 to measure the actual
 This is how professional ML engineers work: profile → optimize → measure → repeat.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
 # Import Profiler from Module 14 (Module 17 comes after Module 14)
 from tinytorch.perf.profiling import Profiler
 

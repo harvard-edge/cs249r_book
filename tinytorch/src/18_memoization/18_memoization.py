@@ -57,7 +57,7 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.memoization
 #| export
 
@@ -120,7 +120,7 @@ Memoization Pattern:
 **Key Insight**: For transformers, K and V matrices for previous tokens NEVER change, yet naive generation recomputes them every step. This is the inefficiency we'll eliminate.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "solution": false}
 def profile_naive_generation():
     """
     Profile transformer generation to discover the O(n²) bottleneck.
@@ -1670,7 +1670,7 @@ if __name__ == "__main__":
 Let's analyze the performance characteristics and trade-offs of KV caching. Understanding these trade-offs is essential for making informed decisions about when and how to use caching in production systems.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "solution": false}
 def analyze_kvcache_memory():
     """
     📊 Analyze KV cache memory usage across different configurations.
@@ -1735,7 +1735,7 @@ def analyze_kvcache_memory():
     print("   • Trade-off: 2× memory removes 10-15× of the arithmetic")
     print("   • Worth it for inference-heavy workloads!")
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "solution": false}
 def analyze_kvcache_speedup():
     """
     📊 Measure KV cache speedup vs vanilla attention.
@@ -2032,7 +2032,7 @@ Congratulations! You've built the optimization that makes production language mo
 - Discovered why speedup increases with generation length
 - All tests pass ✅ (validated by `test_module()`)
 
-### Systems Insights Gained
+### Systems Insights Discovered
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
 - **Memory-Speed Trade-off**: Doubling memory enables order-of-magnitude speedup
 - **Scaling Benefits**: Longer generation = better cache return on investment (~50× at 100 tokens)
@@ -2061,7 +2061,8 @@ This optimization is THE technique that transformed language models from researc
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
 
-**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
 Export with: `tito module complete 18`
+
+**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 """

@@ -61,7 +61,7 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 - **Integration:** Works seamlessly with training loops to create complete ML systems
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 # Essential imports for data loading
@@ -105,7 +105,7 @@ infrastructure that powers all training in TinyTorch.
 
 # %% [markdown]
 """
-## 💡 Understanding the Data Pipeline
+## 💡 Introduction: Understanding the Data Pipeline
 
 Before we implement anything, let's understand what happens when neural networks "eat" data. The journey from raw data to trained models follows a specific pipeline that every ML engineer must master.
 
@@ -260,7 +260,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ TensorDataset - When Data Lives in Memory
+## 🏗️ TensorDataset: When Data Lives in Memory
 
 Now let's implement TensorDataset, the most common dataset type for when your data is already loaded into tensors. This is perfect for datasets like MNIST where you can fit everything in memory.
 
@@ -505,7 +505,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ DataLoader - The Batch Factory
+## 🏗️ DataLoader: The Batch Factory
 
 Now we build the DataLoader, the component that transforms individual dataset samples into the batches that neural networks crave. This is where data loading becomes a systems challenge.
 
@@ -741,7 +741,7 @@ class DataLoader:
 
 # %% [markdown]
 """
-## 🏗️ Data Augmentation - Preventing Overfitting Through Variety
+## 🏗️ Data Augmentation: Preventing Overfitting Through Variety
 
 Data augmentation is one of the most effective techniques for improving model generalization. By applying random transformations during training, we artificially expand the dataset and force the model to learn robust, invariant features.
 
@@ -1486,7 +1486,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Working with Real Datasets
+## 🔧 Integration: Working with Real Datasets
 
 Now that you've built the DataLoader abstraction, you're ready to use it with real data!
 
@@ -1590,7 +1590,7 @@ You've built the **data loading infrastructure** that powers all modern ML:
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Data Pipeline Performance
+## 📊 Systems Analysis: Data Pipeline Performance
 
 **Note:** This section provides performance analysis tools for understanding DataLoader behavior. The analysis functions are defined below but not run automatically. To explore performance characteristics, uncomment and run `analyze_dataloader_performance()` or `analyze_memory_usage()` manually.
 
@@ -1937,7 +1937,7 @@ Let's test how our DataLoader integrates with a complete training workflow, simu
 **Expected**: All samples processed correctly with proper batch shapes
 """
 
-# %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": false}
 def test_unit_training_integration():
     """🧪 Test DataLoader integration with training workflow."""
     print("🧪 Integration Test: Training Workflow...")
@@ -2338,16 +2338,6 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 - **Data loading can become a bottleneck without proper optimization**
 - **Memory usage scales linearly with batch size and feature dimensions**
 
-### Ready for Next Steps
-Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
-Export with: `tito module complete 05`
-
-**Apply your knowledge:**
-- Milestone 03: Train MLP on TinyDigits
-- Milestone 04: Train CNN on CIFAR-10 images
-
-**Then continue with:** Module 06 (Autograd) for automatic differentiation!
-
 ### Real-World Connection
 You've implemented the same patterns used in:
 - **PyTorch's DataLoader**: Same interface design for batching and shuffling
@@ -2356,4 +2346,16 @@ You've implemented the same patterns used in:
 - **Research**: Standard foundation for all deep learning experiments
 
 Your data loading pipeline is now ready to power neural network training!
+### Ready for Next Steps
+Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
+Export with: `tito module complete 05`
+
+**Next**: Module 06 will add autograd, so the batches you just built can actually drive learning!
+
+**Apply your knowledge:**
+- Milestone 03: Train MLP on TinyDigits
+- Milestone 04: Train CNN on CIFAR-10 images
+
+Your data pipeline is the input side of every training loop you will write.
+
 """

@@ -55,7 +55,7 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 - **Integration:** Works seamlessly with tokenizers for complete text processing pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.embeddings
 #| export
 

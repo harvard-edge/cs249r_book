@@ -92,7 +92,7 @@ This module imports directly from the TinyTorch package (`from tinytorch.core.*`
 If you see import errors, make sure you've run `tito module complete` for each previous module.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
 #| default_exp core.losses
 #| export
 
@@ -983,7 +983,7 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": false}
 def analyze_loss_behaviors():
     """
     📊 Compare how different loss functions behave with various prediction patterns.
@@ -1027,7 +1027,7 @@ def analyze_loss_behaviors():
     return mse.data, ce.data, bce.data
 
 
-# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": false}
 def analyze_loss_sensitivity():
     """
     📊 Analyze how sensitive each loss function is to prediction errors.
@@ -1155,7 +1155,7 @@ Memory: 3*B*sizeof(float)            │ log + index
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": false}
 def analyze_numerical_stability():
     """
     📊 Demonstrate why numerical stability matters in loss computation.
@@ -1193,7 +1193,7 @@ def analyze_numerical_stability():
     print("   With it: We can handle arbitrarily large logits safely")
 
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": false}
 def analyze_loss_memory():
     """
     📊 Analyze memory usage patterns of different loss functions.
@@ -1298,7 +1298,7 @@ Common Production Optimizations:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": false}
 def analyze_production_patterns():
     """
     📊 Analyze loss function patterns in production ML systems.
@@ -1735,6 +1735,11 @@ Congratulations! You've built the measurement system that enables all machine le
 - **Numerical stability**: Log-sum-exp trick prevents overflow with large logits
 - **Computational cost**: CE is C times more expensive than MSE due to softmax
 - **Production patterns**: Hierarchical softmax and sampled softmax for large vocabularies
+
+### Ready for Next Steps
+Your loss functions turn predictions into a single number to minimize. That
+number is the only signal the optimizer ever sees, so getting it numerically
+right matters more than getting it fast.
 
 Export with: `tito module complete 04`
 

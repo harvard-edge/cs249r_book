@@ -56,7 +56,7 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 - **Integration:** Works seamlessly with models and quantization for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.compression
 #| export
 
@@ -117,7 +117,7 @@ and visible throughout the module.
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Compression Matters
+## 💡 Introduction: Why Compression Matters
 
 Before we learn compression, let's profile a model to analyze its weight
 distribution. We'll discover that many weights are tiny and might not matter much!
@@ -187,7 +187,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 💡 Introduction: Model Compression Concepts
+### Model Compression Concepts
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
@@ -1406,7 +1406,7 @@ Now let's use the **Profiler** tool from Module 14 to measure the actual paramet
 This is the production workflow: measure → prune → validate → deploy.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": false}
 # Import Profiler from Module 14 (already imported above)
 
 def explore_compression_with_profiler():
@@ -1659,7 +1659,7 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Pruning Works
+## 🔧 Integration: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
 proves pruning actually creates zeros using real zero counting.

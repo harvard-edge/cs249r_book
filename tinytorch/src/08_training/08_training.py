@@ -56,7 +56,7 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 - **Integration:** Works seamlessly with optimizers and losses for complete learning pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.training
 #| export
 
@@ -219,7 +219,7 @@ Formula: lr = min_lr + (max_lr - min_lr) * (1 + cos(π * epoch / total_epochs)) 
 This creates a natural learning curve that adapts training speed to the optimization landscape.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "scheduler", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "scheduler", "solution": true}
 #| export
 class CosineSchedule:
     """
@@ -340,7 +340,7 @@ With max_norm=1.0:   [0.43, 0.87, 0.22] → norm = 1.0
 This preserves the relative magnitudes while preventing explosion.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "gradient_clipping", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "gradient_clipping", "solution": true}
 #| export
 
 def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
@@ -498,7 +498,7 @@ You will implement the five public methods. The private serialization helpers
 are provided because they are pickle plumbing, not training concepts.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-class-def", "locked": true, "solution": false}
+# %% nbgrader={"grade": false, "grade_id": "trainer-class-def", "solution": false}
 #| export
 class Trainer:
     """
@@ -591,7 +591,7 @@ Trainer State After __init__:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-init", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-init", "solution": true}
 #| export
 def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
     """
@@ -744,7 +744,7 @@ The inner loop body: run forward pass, compute loss, and run backward pass
 with scaled gradients for accumulation.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "solution": true}
 #| export
 def _trainer_process_batch(self, inputs, targets, accumulation_steps):
     """
@@ -793,7 +793,7 @@ When enough gradients have accumulated, clip them (if configured),
 step the optimizer, and reset gradients for the next accumulation window.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "solution": true}
 #| export
 def _trainer_optimizer_update(self):
     """
@@ -825,7 +825,7 @@ Now combine `_process_batch` and `_optimizer_update` into the complete
 training epoch with accumulation, scheduling, and history tracking.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "solution": true}
 #| export
 def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     """
@@ -1086,7 +1086,7 @@ Key difference from training: no backward pass, no optimizer step,
 no gradient clipping.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "solution": true}
 #| export
 def trainer_evaluate(self, dataloader):
     """
@@ -1255,7 +1255,7 @@ Checkpoint Contents:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "solution": true}
 #| export
 def trainer_save_checkpoint(self, path: str):
     """
@@ -1399,7 +1399,7 @@ checkpoint.pkl ──→ pickle.load() ──→ restore epoch, step
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "solution": true}
 #| export
 def trainer_load_checkpoint(self, path: str):
     """
@@ -1541,7 +1541,7 @@ Evaluation & Checkpointing
 This example brings together everything you've built in Modules 01-07.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "integration_example", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "integration_example", "solution": false}
 def demonstrate_complete_training_pipeline():
     """
     Complete end-to-end training example using all components.
@@ -2067,6 +2067,11 @@ Congratulations! You've built the complete training infrastructure that orchestr
 - **Gradient accumulation**: Trades time for memory, enabling larger effective batch sizes
 - **Checkpoint overhead**: Pickle adds 10-30% overhead, optimizer state doubles size
 - **Scheduling behavior**: Cosine annealing balances aggressive initial learning with fine-tuning
+
+### Ready for Next Steps
+Your training loop closes the circle: data in, gradients out, parameters
+updated, repeat. Everything from here on is about making that loop faster,
+smaller, or applicable to a new kind of data.
 
 Export with: `tito module complete 08`
 

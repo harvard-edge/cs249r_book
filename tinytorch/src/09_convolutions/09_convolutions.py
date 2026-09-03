@@ -55,7 +55,7 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 - **Integration:** Works seamlessly with existing layers for complete CNN architectures
 """
 
-# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": false}
 #| default_exp core.spatial
 #| export
 
@@ -159,7 +159,7 @@ Convolution achieves dramatic parameter reduction (more than 1000×!) while pres
 
 # %% [markdown]
 """
-## 📐 Mathematical Foundations
+## 📐 Foundations
 
 ### Understanding Convolution Step by Step
 
@@ -1109,7 +1109,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Pooling Operations - Spatial Dimension Reduction
+## 🏗️ Pooling Operations: Spatial Dimension Reduction
 
 Pooling operations compress spatial information while keeping the most important features. Think of them as creating "thumbnail summaries" of local regions.
 
@@ -2002,7 +2002,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Batch Normalization - Stabilizing Deep Network Training
+## 🏗️ Batch Normalization: Stabilizing Deep Network Training
 
 Batch Normalization (BatchNorm) is one of the most important techniques for training deep networks. It normalizes activations across the batch dimension, dramatically improving training stability and speed.
 
@@ -2092,7 +2092,7 @@ whole thing collapses to `dx = dx̂ / σ`. Same layer, two different backward
 passes, decided by a boolean.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-backward", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-backward", "solution": false}
 #| export
 class BatchNorm2dBackward(Function):
     """
@@ -2720,7 +2720,7 @@ Let's understand ONE key systems concept: **computational complexity and memory 
 This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
 def analyze_convolution_complexity():
     """📊 Analyze convolution computational complexity across different configurations."""
     print("📊 Analyzing Convolution Complexity...")
@@ -2778,7 +2778,7 @@ def analyze_convolution_complexity():
 if __name__ == "__main__":
     analyze_convolution_complexity()
 
-# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
 def analyze_pooling_effects():
     """📊 Analyze pooling's impact on spatial dimensions and features."""
     print("\n📊 Analyzing Pooling Effects...")
@@ -2826,7 +2826,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🔧 Integration - Building a Complete CNN
+## 🔧 Integration: Building a Complete CNN
 
 Now let's combine convolution and pooling into a complete CNN architecture. You'll see how spatial operations work together to transform raw pixels into meaningful features.
 
@@ -3432,7 +3432,8 @@ Congratulations! You've built the spatial processing foundation that powers comp
 ### Ready for Next Steps
 Your spatial operations enable building complete CNNs for computer vision tasks!
 
-**Next**: Milestone 03 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 
 Export with: `tito module complete 09`
+
+**Next**: Milestone 03 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 """

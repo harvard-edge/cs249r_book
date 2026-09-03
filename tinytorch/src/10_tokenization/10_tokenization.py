@@ -55,7 +55,7 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 - **Integration:** Works seamlessly with embeddings and data loading for complete NLP pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.tokenization
 #| export
 

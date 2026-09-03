@@ -59,7 +59,7 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 - **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -110,25 +110,6 @@ def create_causal_mask(seq_len: int) -> Tensor:
     mask = np.tril(np.ones((seq_len, seq_len), dtype=np.float32))
     return Tensor(mask[np.newaxis, :, :])  # Add batch dimension
 
-
-# %% [markdown]
-"""
-## 📦 Where This Code Lives in the Final Package
-
-**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
-**Building Side:** Code exports to `tinytorch.core.transformers`
-
-```python
-# How to use this module:
-from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, MLP
-```
-
-**Why this matters:**
-- **Learning:** Complete transformer system showcasing how all components work together
-- **Production:** Matches PyTorch's transformer implementation with proper model organization
-- **Consistency:** All transformer components and generation logic in core.transformer
-- **Integration:** Demonstrates the power of modular design by combining all previous modules
-"""
 
 # %% [markdown]
 """
@@ -1627,7 +1608,7 @@ This integration demo will show:
 - **Temperature effects** on creativity
 """
 
-# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": false}
 def demonstrate_transformer_integration():
     """
     Demonstrate complete transformer pipeline.
@@ -1766,7 +1747,7 @@ Memory Scaling by Component:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": false}
 def analyze_parameter_scaling():
     """📊 Analyze how parameter count scales with model dimensions."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
@@ -1810,7 +1791,7 @@ def analyze_parameter_scaling():
 if __name__ == "__main__":
     analyze_parameter_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": false}
 def analyze_attention_memory():
     """📊 Analyze attention memory complexity with sequence length."""
     print("📊 Analyzing Attention Memory Complexity...")
@@ -2043,6 +2024,16 @@ Congratulations! You've built the complete transformer architecture that powers 
 - Built full GPT model with embeddings, positional encoding, and autoregressive generation
 - Discovered attention memory scaling and parameter distribution patterns
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Attention memory scales quadratically**: the score matrix is seq_len^2 per
+  head, which is why context length is expensive and not merely inconvenient
+- **Parameters concentrate in the MLP**: the 4x expansion means the feed-forward
+  block holds roughly two thirds of a transformer block's weights
+- **Pre-norm is a systems decision**: normalizing before each sublayer keeps the
+  residual path clean, so gradients reach early layers without vanishing
+- **Generation is memory-bound, not compute-bound**: each new token re-reads the
+  entire model, which is the problem Module 18 exists to solve
 
 ### Ready for Next Steps
 Your transformer implementation is the capstone of the language modeling pipeline.

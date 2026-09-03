@@ -85,7 +85,7 @@ This module imports directly from the TinyTorch package (`from tinytorch.core.*`
 If you see import errors, ensure you've run `tito module complete 01`.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
 #| default_exp core.activations
 #| export
 
@@ -141,7 +141,7 @@ This is how nonlinearity turns simple math into powerful function approximation.
 
 # %% [markdown]
 """
-## 📐 Mathematical Foundations
+## 📐 Foundations
 
 Each activation function serves a different purpose in computation:
 
@@ -1177,6 +1177,11 @@ Congratulations! You've built the intelligence engine of neural networks!
 - **Numerical stability**: Softmax's max subtraction prevents overflow without changing results
 - **Sparsity benefits**: ReLU's zero outputs create sparse representations
 - **Activation selection**: Different layers need different activations (ReLU for hidden, Softmax for output)
+
+### Ready for Next Steps
+Your activation functions give every layer the nonlinearity it needs. Without
+them a stack of Linear layers collapses into a single Linear layer, no matter
+how deep you make it.
 
 Export with: `tito module complete 02`
 

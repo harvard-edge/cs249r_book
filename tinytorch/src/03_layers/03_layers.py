@@ -57,7 +57,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 - **Integration:** Works seamlessly with tensors and activations for complete neural networks
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.layers
 #| export
 
@@ -189,7 +189,7 @@ Let's build our layer system step by step. We'll implement two essential layer t
 All neural network layers share common functionality: forward pass, parameter management, and callable interface. The base Layer class provides this consistent interface.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": false}
 #| export
 class Layer:
     """
@@ -871,7 +871,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Sequential - Layer Container for Composition
+## 🏗️ Sequential: Layer Container for Composition
 
 `Sequential` chains layers together, calling forward() on each in order.
 
@@ -1131,7 +1131,7 @@ Layer Operation Complexity:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": false}
 def analyze_layer_memory():
     """📊 Analyze memory usage patterns in layer operations."""
     print("📊 Analyzing Layer Memory Usage...")
@@ -1174,7 +1174,7 @@ def analyze_layer_memory():
 if __name__ == "__main__":
     analyze_layer_memory()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": false}
 def analyze_layer_performance():
     """📊 Analyze computational complexity of layer operations."""
     import time
@@ -1457,6 +1457,16 @@ Congratulations! You've built the fundamental building blocks that make neural n
 - Demonstrated manual layer composition for building neural networks
 - Analyzed memory scaling and computational complexity of layer operations
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Parameter memory dominates**: A Linear layer stores in_features x out_features
+  weights; the activations it produces are usually far smaller
+- **Initialization is not cosmetic**: Xavier scaling keeps activation variance
+  stable across depth, which is what makes deep stacks trainable at all
+- **Dropout costs memory, not just compute**: the mask is a full float32 tensor
+  the same shape as the activations it gates
+- **Composition is the whole idea**: layers are interchangeable because they all
+  agree on one contract, forward(x) -> Tensor
 
 ### Ready for Next Steps
 Your layer implementation enables building complete neural networks! The Linear layer provides learnable transformations, manual composition chains them together, and Dropout prevents overfitting.

@@ -65,7 +65,7 @@ submission.save("my_submission.json")
 - **Reproducibility:** Schema-validated submissions ensure results can be verified and trusted
 """
 
-# %% nbgrader={"grade": false, "grade_id": "exports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "exports", "solution": false}
 #| default_exp olympics
 #| export
 
@@ -148,7 +148,7 @@ This module shows you how to:
 Let's build a benchmarking and submission system worthy of production ML!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 import numpy as np
 rng = np.random.default_rng(7)
@@ -730,7 +730,7 @@ The core function that generates a standardized JSON submission from benchmark r
 5. **Extensible** - Easy to add new fields without breaking existing code
 """
 
-# %% nbgrader={"grade": false, "grade_id": "generate-submission", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "generate-submission", "solution": false}
 #| export
 def generate_submission(
     baseline_report: BenchmarkReport,
@@ -961,7 +961,7 @@ Students can modify this to benchmark their own models!
 This is the EXACT workflow used in production ML systems!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "example-workflow", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "example-workflow", "solution": false}
 def run_example_benchmark():
     """
     Complete example showing the full benchmarking workflow.
@@ -1243,7 +1243,7 @@ This tells other engineers EXACTLY what you did, so they can reproduce or build 
 
 # %% [markdown]
 """
-## 🧪 Unit Tests
+## 🧪 Unit Tests: Verifying Each Component
 
 Individual unit tests for each component, following TinyTorch testing patterns.
 
@@ -2139,7 +2139,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🚀 MODULE SUMMARY: Capstone - Benchmarking & Submission
+## 🚀 MODULE SUMMARY: Capstone: Benchmarking & Submission
 
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
 

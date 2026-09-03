@@ -58,7 +58,7 @@ from tinytorch.perf.quantization import quantize_int8, QuantizedLinear, quantize
 - **Integration:** Works seamlessly with existing models for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 import numpy as np
 rng = np.random.default_rng(7)
@@ -115,7 +115,7 @@ quantization system that achieves 4x memory reduction.
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Quantization Matters
+## 💡 Introduction: Why Quantization Matters
 
 Before we learn quantization, let's profile a model to see how much memory
 FP32 weights actually consume. This will show us why reduced precision matters.
@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 💡 Introduction: The Memory Wall Problem
+### The Memory Wall Problem
 
 Imagine trying to fit a library in your backpack. Neural networks face the same challenge - models are getting huge, but devices have limited memory!
 
@@ -414,7 +414,7 @@ Let's start with the fundamental building block!
 
 # %% [markdown]
 """
-## 🏗️ INT8 Quantization - The Foundation
+## 🏗️ INT8 Quantization: The Foundation
 
 This is the core function that converts any FP32 tensor to INT8. Think of it as a smart compression algorithm that preserves the most important information.
 
@@ -612,7 +612,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ INT8 Dequantization - Restoring Precision
+## 🏗️ INT8 Dequantization: Restoring Precision
 
 Dequantization is the inverse process - converting compressed INT8 values back to usable FP32. This is where we "decompress" our quantized data.
 
@@ -728,7 +728,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ QuantizedLinear - The Heart of Efficient Networks
+## 🏗️ QuantizedLinear: The Heart of Efficient Networks
 
 ### Why We Need Quantized Layers
 
@@ -798,7 +798,7 @@ Calibration Process:
 
 # %% [markdown]
 """
-## 🏗️ QuantizedLinear Class - Efficient Neural Network Layer
+## 🏗️ QuantizedLinear Class: Efficient Neural Network Layer
 
 This class replaces regular Linear layers with quantized versions that use 4× less memory while preserving functionality.
 
@@ -1099,7 +1099,7 @@ Now let's implement the functions that make this transformation possible!
 
 # %% [markdown]
 """
-## 🔧 Model Quantization - Scaling to Full Networks
+## 🏗️ Model Quantization: Scaling to Full Networks
 
 Quantizing individual layers is useful, but real applications need to quantize entire neural
 networks. We'll build this capability in two steps:
@@ -1128,7 +1128,7 @@ Input Model:                    Quantized Model:
 
 # %% [markdown]
 """
-## 🏗️ Collecting Layer Inputs - Calibration Data Flow
+## 🏗️ Collecting Layer Inputs: Calibration Data Flow
 
 Before we can calibrate a quantized layer, we need to know what its inputs look like
 at runtime. This helper forwards calibration samples through all preceding layers
@@ -1238,7 +1238,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Quantizing a Single Layer - The Replacement Step
+## 🏗️ Quantizing a Single Layer: The Replacement Step
 
 This helper takes one Linear layer, wraps it in a QuantizedLinear, and optionally
 calibrates it using pre-collected activation samples. This is the atomic operation
@@ -1345,7 +1345,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Model Quantization - The Composition Function
+## 🏗️ Model Quantization: The Composition Function
 
 Now we compose the helpers into the full model quantization function. For each Linear
 layer in the model, we collect its calibration inputs and replace it with a quantized version.
@@ -1486,7 +1486,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Model Size Comparison - Measuring the Impact
+## 🏗️ Model Size Comparison: Measuring the Impact
 
 To compare memory usage between original and quantized models, we need to measure
 bytes at the individual layer level first, then aggregate. We'll build this in two steps:
@@ -1509,7 +1509,7 @@ Per-Layer Measurement:
 
 # %% [markdown]
 """
-## 🏗️ Measuring a Single Layer - Per-Layer Byte Accounting
+## 🏗️ Measuring a Single Layer: Per-Layer Byte Accounting
 
 This helper measures the parameter count and byte usage for one layer. It handles
 the key distinction: FP32 layers store parameters at 4 bytes each, while QuantizedLinear
@@ -1618,7 +1618,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Model Size Analysis - The Composition Function
+## 🏗️ Model Size Analysis: The Composition Function
 
 Now we aggregate per-layer measurements across the full model to produce a comprehensive
 comparison between original and quantized versions.
@@ -1766,7 +1766,7 @@ Now that we've implemented all quantization components, let's create consolidate
 for export to the tinytorch package. This allows milestones to use the complete quantization system.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": false}
 #| export
 class Quantizer:
     """
@@ -1910,7 +1910,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Advanced Quantization Strategies - Production Techniques
+## 📊 Advanced Quantization Strategies: Production Techniques
 
 This analysis compares different quantization approaches used in production systems, revealing the trade-offs between accuracy, complexity, and performance.
 
@@ -2005,7 +2005,7 @@ Now let's use the Profiler tool from Module 14 to measure the actual memory savi
 This is the production workflow: measure -> compress -> validate -> deploy.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-quantization", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-quantization", "solution": false}
 # Import Profiler from Module 14
 from tinytorch.perf.profiling import Profiler
 
@@ -2075,7 +2075,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Quantization Works
+## 🔧 Integration: Prove Quantization Works
 
 Before running the full integration test, let's create a verification function that
 proves quantization actually reduces memory using real `.nbytes` measurements.
@@ -2147,7 +2147,7 @@ def verify_quantization_works(original_model, quantized_model):
 Final validation that everything works together correctly before module completion.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20, "solution": false, "schema_version": 3}
+# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -2262,7 +2262,7 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 15")
 
-# %% [markdown] nbgrader={"grade": false, "grade_id": "quantization-reflection", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "quantization-reflection", "solution": true}
 """
 ## 🤔 ML Systems Reflection Questions
 
@@ -2419,7 +2419,14 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 - Hardware efficiency: Specialized INT8 instructions provide 2-4x speedup
 - Deployment benefits: Smaller models fit on mobile and edge devices
 
+### Ready for Next Steps
+Your quantization pipeline shrinks a trained model without retraining it. That
+makes it the first optimization you would reach for when a model has to fit on
+hardware it was not trained on.
+
 Export with: `tito module complete 15`
+
+**Next**: Module 16 will add compression: pruning, distillation, and low-rank approximation to shrink models further!
 
 Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
 """

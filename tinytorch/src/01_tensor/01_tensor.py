@@ -55,7 +55,7 @@ Let's get started!
 - **Integration:** Foundation that every other module will build upon
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.tensor
 #| export
 

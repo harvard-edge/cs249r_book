@@ -59,7 +59,7 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 - **Integration:** Works seamlessly with embeddings for complete sequence processing pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -110,7 +110,7 @@ that powers GPT, BERT, and all modern transformer architectures.
 
 # %% [markdown]
 """
-## 💡 Introduction - What is Attention?
+## 💡 Introduction: What is Attention?
 
 Attention is the mechanism that allows models to focus on relevant parts of the input when processing sequences. Think of it as a search engine inside your neural network - given a query, attention finds the most relevant keys and retrieves their associated values.
 
@@ -162,7 +162,7 @@ This simple formula powers GPT, BERT, and virtually every modern language model.
 
 # %% [markdown]
 """
-## 📐 Foundations - Attention Mathematics
+## 📐 Foundations: Attention Mathematics
 
 ### The Three Components Visualized
 
@@ -1233,7 +1233,7 @@ The quadratic wall is why long-context AI is an active research frontier, not a 
 
 # %% [markdown]
 """
-## 🔧 Integration - Attention Patterns in Action
+## 🔧 Integration: Attention Patterns in Action
 
 Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
 

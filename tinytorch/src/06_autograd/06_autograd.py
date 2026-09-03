@@ -58,7 +58,7 @@ from tinytorch.core.autograd import Function, enable_autograd
 Let's get started!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.autograd
 #| export
 
@@ -260,7 +260,7 @@ Backward: grad_output → Function.apply() → grad_inputs
 This pattern enables the chain rule to flow gradients through complex computations.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "function-base", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "function-base", "solution": false}
 #| export
 class Function:
     """
@@ -1624,7 +1624,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Enhancing Tensor with Autograd Capabilities
+## 🔧 Integration: Enhancing Tensor with Autograd Capabilities
 
 Now we'll enhance the existing Tensor class to use these gradient functions and build computation graphs automatically.
 
@@ -2373,7 +2373,7 @@ class CrossEntropyBackward(Function):
         ### END SOLUTION
 
 
-# %% nbgrader={"grade": false, "grade_id": "no-grad-context", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "no-grad-context", "solution": false}
 #| export
 # ===== Global Gradient Tracking Flag =====
 # Why this exists: During inference or parameter updates, we don't need to build
@@ -2486,7 +2486,7 @@ walk. Releasing each node as you pass it would drop exactly the second
 contribution the sort exists to collect.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": false}
 #| export
 def enable_autograd(quiet=False):
     """

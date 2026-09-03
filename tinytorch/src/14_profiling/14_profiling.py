@@ -55,7 +55,7 @@ from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_dis
 - **Integration:** Works with any model built using TinyTorch components
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.profiling
 #| export
 
@@ -1173,7 +1173,7 @@ In production ML engineering, you often need quick insights without setting up f
 These functions wrap our core Profiler class with convenience interfaces used in real ML workflows for rapid iteration and debugging.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "helper_quick_profile", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "helper_quick_profile", "solution": false}
 #| export
 def quick_profile(model, input_tensor, profiler=None):
     """
@@ -1212,7 +1212,7 @@ def quick_profile(model, input_tensor, profiler=None):
 
     return profile
 
-# %% nbgrader={"grade": false, "grade_id": "helper_weight_distribution", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "helper_weight_distribution", "solution": false}
 #| export
 def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     """
@@ -2270,7 +2270,7 @@ Insight: This workload is memory-bound -> Optimize data movement, not compute!
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": false}
 def analyze_model_scaling():
     """📊 Analyze how model performance scales with size."""
     print("📊 Analyzing Model Scaling Characteristics...")
@@ -2401,7 +2401,7 @@ Optimization Strategy:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "optimization_insights", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "optimization_insights", "solution": false}
 def benchmark_operation_efficiency():
     """📊 Compare efficiency of different operations for optimization guidance."""
     print("📊 Benchmarking Operation Efficiency...")
@@ -2772,6 +2772,8 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 ### Ready for Next Steps
 Your profiling implementation provides the measurement foundation for all optimization work.
 Export with: `tito module complete 14`
+
+**Next**: Module 15 will add quantization, the first optimization your profiler will let you measure honestly!
 
 You can't optimize what you can't measure — and now you can measure everything.
 """
