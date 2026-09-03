@@ -31,7 +31,7 @@ Substituting the first equation into the second yields:
 
 $$\mathbf{y} = (\mathbf{x} \mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{x}(\mathbf{W}_1 \mathbf{W}_2) + (\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2)$$
 
-Because matrix multiplication is associative and distributive, the product $\mathbf{W}_1 \mathbf{W}_2$ can be precomputed as a single matrix $\mathbf{W}_{\text{comb}} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$, and the combined bias vector $\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2$ as $\mathbf{b}_{\text{comb}} \in \mathbb{R}^{d_{\text{out}}}$. 
+Because matrix multiplication is associative and distributive, the product $\mathbf{W}_1 \mathbf{W}_2$ can be precomputed as a single matrix $\mathbf{W}_{\text{comb}} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$, and the combined bias vector $\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2$ as $\mathbf{b}_{\text{comb}} \in \mathbb{R}^{d_{\text{out}}}$.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -97,10 +97,11 @@ $$\sigma(x) = \frac{1}{1 + e^{-x}}$$
 In standard IEEE 754 single-precision arithmetic (`float32`), numbers are encoded with 1 sign bit, 8 exponent bits (with bias 127), and 23 mantissa bits.[^ieee754-spec] This yields a dynamic range with maximum finite float $\approx (2 - 2^{-23}) \times 2^{127} \approx 3.4028 \times 10^{38}$.
 
 Evaluating $e^{-x}$ on hardware triggers numerical hazards at extreme boundaries:
+
 - If $x < -88.72$, $-x > 88.72$, causing $e^{-x} > 3.4028 \times 10^{38}$, which overflows to `+inf`. Evaluating $1 / (1 + \text{inf})$ can cause floating-point exception traps.
 - If $x > 88.72$, $e^{-x}$ drops below the minimum positive normal float ($2^{-126} \approx 1.1755 \times 10^{-38}$), underflowing to subnormal numbers or `0.0`.
 
-[^ieee754-spec]: IEEE 754 `float32` allocates 8 bits to the exponent ($E \in [0, 255]$). An exponent of $E=255$ is reserved for $\pm \infty$ (when mantissa is 0) and `NaN` (when mantissa is non-zero). An exponent of $E=0$ represents subnormal numbers or zero. When subnormal numbers occur, CPU pipelines may switch to microcode exception handling, slowing execution by up to 100× unless Flush-To-Zero (FTZ) and Denormals-Are-Zero (DAZ) hardware control flags are enabled.
+[^ieee754-spec]: IEEE 754 `float32` allocates 8 bits to the exponent ($E \in [0, 255]$). An exponent of $E=255$ is reserved for $\pm \infty$ (when mantissa is 0) and `NaN` (when mantissa is nonzero). An exponent of $E=0$ represents subnormal numbers or zero. When subnormal numbers occur, CPU pipelines may switch to microcode exception handling, slowing execution by up to 100× unless Flush-To-Zero (FTZ) and Denormals-Are-Zero (DAZ) hardware control flags are enabled.
 
 To guarantee complete numerical stability across the entire real number line without register overflow, TinyTorch uses a branch-stable formulation:
 
@@ -119,14 +120,14 @@ class Sigmoid:
         with np.errstate(over='ignore'):
             positive_mask = (x_data >= 0)
             result = np.zeros_like(x_data, dtype=np.float32)
-            
+
             # x >= 0 branch: no positive exponential overflow
             result[positive_mask] = 1.0 / (1.0 + np.exp(-x_data[positive_mask]))
-            
+
             # x < 0 branch: evaluate exp(x)/(1 + exp(x))
             exp_neg = np.exp(x_data[~positive_mask])
             result[~positive_mask] = exp_neg / (1.0 + exp_neg)
-            
+
         return Tensor(result)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -280,6 +281,7 @@ Because activation layers contain no internal state or learnable weights, they c
 While matrix multiplications ($\mathbf{x} \mathbf{W}$) have high arithmetic intensity ($O(N^3)$ operations on $O(N^2)$ data), activation functions are **strictly memory-bandwidth bound**.
 
 For a tensor of $N$ elements executing ReLU in 32-bit float:
+
 - Read 4 bytes per element from DRAM into CPU/GPU registers.
 - Perform 1 comparison operation in the ALU.
 - Write 4 bytes per element back to the DRAM memory buffer.

@@ -47,6 +47,7 @@ where $\eta > 0$ is the learning rate and $\mathbf{u}(\cdot)$ is the transformed
 In high-dimensional deep learning loss surfaces, the local curvature is characterized by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$ measures the ratio of maximum to minimum curvature eigenvalues.
 
 When $\kappa \gg 1$ (an ill-conditioned ravine):
+
 - The gradient along the steep perpendicular direction ($\mathbf{g}_\perp$) is massive, causing vanilla SGD to oscillate violently between ravine walls.
 - The gradient along the flat parallel valley floor ($\mathbf{g}_\parallel$) is tiny, causing progress toward the minimum to stall.
 
@@ -69,6 +70,7 @@ $$\mathbf{v}_t = \beta \mathbf{v}_{t-1} + (1 - \beta) \mathbf{g}_t, \quad \mathb
 where $\beta \in [0, 1)$ is the momentum decay factor (typically $\beta = 0.9$).
 
 **Two Critical Physical Properties**:
+
 1. **High-Frequency Damping**: Successive gradient vectors along oscillating directions alternate signs ($\mathbf{g}_{\perp, t} \approx -\mathbf{g}_{\perp, t-1}$), canceling out inside the accumulator ($\sum \mathbf{g}_\perp \to \mathbf{0}$).
 2. **Saddle Point Escape**: At strict saddle points or flat plateaus where local gradient $\nabla \mathcal{L} \approx \mathbf{0}$, standard SGD becomes trapped. Momentum retains stored kinetic velocity ($\mathbf{v}_t = \beta \mathbf{v}_{t-1} \ne \mathbf{0}$), rolling the parameter trajectory through flat regions without stopping.
 
@@ -207,24 +209,24 @@ In large-scale training systems, optimizer state buffers are often the single la
 
 For a model with $N$ parameters, let us calculate the exact memory required to store parameters, gradients, and optimizer states:
 
-| Precision Regime | Component | Precision & Type | Bytes / Param | 7B Model Footprint |
-| :--- | :--- | :--- | :---: | :---: |
-| **Pure FP32 Training** | Model Weights ($\mathbf{\theta}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | Gradients ($\mathbf{g}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | AdamW 1st Moment ($\mathbf{m}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | AdamW 2nd Moment ($\mathbf{v}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | **Total Static Footprint** | | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
-| **Mixed Precision (AMP)** | Model Weights ($\mathbf{\theta}$) | `float16` / `bfloat16` | $2\text{ bytes}$ | $14.0\text{ GB}$ |
-| | Gradients ($\mathbf{g}$) | `float16` / `bfloat16` | $2\text{ bytes}$ | $14.0\text{ GB}$ |
-| | Master Weights ($\mathbf{\theta}_{\text{master}}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | AdamW 1st Moment ($\mathbf{m}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | AdamW 2nd Moment ($\mathbf{v}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| | **Total Static Footprint** | | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
+| Precision Regime          | Component                                          | Precision & Type       |     Bytes / Param     |   7B Model Footprint  |
+|:--------------------------|:---------------------------------------------------|:-----------------------|:---------------------:|:---------------------:|
+| **Pure FP32 Training**    | Model Weights ($\mathbf{\theta}$)                  | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | Gradients ($\mathbf{g}$)                           | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | AdamW 1st Moment ($\mathbf{m}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | AdamW 2nd Moment ($\mathbf{v}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | **Total Static Footprint**                         |                        | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
+| **Mixed Precision (AMP)** | Model Weights ($\mathbf{\theta}$)                  | `float16` / `bfloat16` |    $2\text{ bytes}$   |    $14.0\text{ GB}$   |
+|                           | Gradients ($\mathbf{g}$)                           | `float16` / `bfloat16` |    $2\text{ bytes}$   |    $14.0\text{ GB}$   |
+|                           | Master Weights ($\mathbf{\theta}_{\text{master}}$) | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | AdamW 1st Moment ($\mathbf{m}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | AdamW 2nd Moment ($\mathbf{v}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
+|                           | **Total Static Footprint**                         |                        | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
 
 ::: {.callout-principle}
 ## The 16-Byte Invariant of AdamW Training
 
-A common systems misconception is that switching from FP32 to 16-bit Mixed Precision (FP16/BF16) cuts total training memory in half. 
+A common systems misconception is that switching from FP32 to 16-bit Mixed Precision (FP16/BF16) cuts total training memory in half.
 
 In reality, because multiplying 16-bit gradients by small learning rates ($\eta = 10^{-4}$) causes underflow below the dynamic range of FP16 ($2^{-14} \approx 6 \times 10^{-5}$), adaptive optimizers **must maintain master weights and moment accumulators in full 32-bit float**. Consequently, both FP32 and AMP AdamW training require exactly **$16\text{ bytes per parameter}$** of static VRAM—excluding all activation memory.[^zero-mem][^eight-bit-adam]
 :::

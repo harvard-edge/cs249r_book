@@ -69,16 +69,16 @@ def magnitude_prune_layer(layer: Linear, target_sparsity: float) -> np.ndarray:
     Returns the binary sparsity mask.
     """
     assert 0.0 <= target_sparsity < 1.0, "Sparsity must be between 0 and 1"
-    
+
     weights = layer.weight.data
     abs_weights = np.abs(weights)
-    
+
     # Determine magnitude threshold
     threshold = np.percentile(abs_weights, target_sparsity * 100.0)
-    
+
     # Generate binary mask
     mask = (abs_weights >= threshold).astype(np.float32)
-    
+
     # Apply mask in-place
     layer.weight.data *= mask
     return mask
@@ -119,20 +119,20 @@ def structured_prune_linear(layer: Linear, prune_ratio: float) -> Linear:
     """
     in_features, out_features = layer.weight.shape
     num_keep = int(out_features * (1.0 - prune_ratio))
-    
+
     # Compute L2 norm for each output neuron column
     neuron_norms = np.linalg.norm(layer.weight.data, axis=0)
-    
+
     # Find indices of top neurons
     keep_indices = np.argsort(neuron_norms)[-num_keep:]
     keep_indices = np.sort(keep_indices)
-    
+
     # Create physically smaller Linear layer
     new_layer = Linear(in_features, num_keep)
     new_layer.weight.data = layer.weight.data[:, keep_indices].copy()
     if layer.bias is not None:
         new_layer.bias.data = layer.bias.data[keep_indices].copy()
-        
+
     return new_layer
 ```
 
@@ -142,18 +142,18 @@ Because `new_layer` has shape $(D_{\text{in}}, D_{\text{out}}')$, downstream mat
 
 ## Unstructured vs. Structured Hardware Realities
 
-| Dimension | Unstructured Pruning | Structured Pruning |
-| :--- | :---: | :---: |
-| **Pruning Granularity** | Individual scalar weights | Entire rows / channels / layers |
-| **Accuracy Retention** | Exceptional ($>80\%$ sparsity with $<1\%$ drop) | Moderate ($30-50\%$ sparsity before drop) |
-| **Hardware Execution** | Requires sparse CSR/COO index pointers | **Native dense GEMM / Tensor Cores** |
-| **Memory Coalescing** | **Broken** (scattered DRAM line requests)[^warp-coalescing-footnote] | **100% Contiguous & Coalesced** |
-| **Actual Speedup on CPU/GPU** | Often **$0\times$ (or slower!)** on standard hardware | **Direct linear speedup ($1.5\times - 2.5\times$)** |
-| **Hardware Exceptions** | NVIDIA Ampere 2:4 Sparse Tensor Cores[^sparse-tc-footnote] | Universal support |
+| Dimension                     |                         Unstructured Pruning                         |                  Structured Pruning                 |
+|:------------------------------|:--------------------------------------------------------------------:|:---------------------------------------------------:|
+| **Pruning Granularity**       |                      Individual scalar weights                       |           Entire rows / channels / layers           |
+| **Accuracy Retention**        |           Exceptional ($>80\%$ sparsity with $<1\%$ drop)            |      Moderate ($30-50\%$ sparsity before drop)      |
+| **Hardware Execution**        |                Requires sparse CSR/COO index pointers                |         **Native dense GEMM / Tensor Cores**        |
+| **Memory Coalescing**         | **Broken** (scattered DRAM line requests)[^warp-coalescing-footnote] |           **100% Contiguous & Coalesced**           |
+| **Actual Speedup on CPU/GPU** |        Often **$0\times$ (or slower!)** on standard hardware         | **Direct linear speedup ($1.5\times - 2.5\times$)** |
+| **Hardware Exceptions**       |      NVIDIA Ampere 2:4 Sparse Tensor Cores[^sparse-tc-footnote]      |                  Universal support                  |
 
 [^warp-coalescing-footnote]: On modern GPUs, memory controllers service DRAM requests in 32-byte, 64-byte, or 128-byte cache line segments. When 32 threads in a warp request contiguous 4-byte floats, a single 128-byte DRAM transaction satisfies all 32 threads (100% bus utilization). Unstructured random sparsity causes threads to request scattered addresses across different cache lines, triggering up to 32 separate 128-byte DRAM fetches (delivering only 4 bytes of useful payload each, or 3.1% bus efficiency).
 
-[^sparse-tc-footnote]: NVIDIA 2:4 Structured Sparsity (introduced in Ampere GA100) compresses each 4-element FP16/INT8 vector into 2 non-zero elements plus a 2-bit index metadata per pair. Dedicated Sparse Tensor Core hardware decompresses these pairs on-the-fly inside register banks before feeding the systolic multiplier array, delivering an exact $2\times$ theoretical math speedup.
+[^sparse-tc-footnote]: NVIDIA 2:4 Structured Sparsity (introduced in Ampere GA100) compresses each 4-element FP16/INT8 vector into 2 nonzero elements plus a 2-bit index metadata per pair. Dedicated Sparse Tensor Core hardware decompresses these pairs on-the-fly inside register banks before feeding the systolic multiplier array, delivering an exact $2\times$ theoretical math speedup.
 
 ---
 
@@ -200,19 +200,19 @@ def distillation_loss(
     # 1. Soft predictions with temperature scaling
     p_s = np.exp(student_logits.data / temperature)
     p_s /= np.sum(p_s, axis=-1, keepdims=True)
-    
+
     p_t = np.exp(teacher_logits.data / temperature)
     p_t /= np.sum(p_t, axis=-1, keepdims=True)
-    
+
     # 2. KL Divergence: sum(p_t * log(p_t / p_s))
     kl_div = np.sum(p_t * (np.log(np.maximum(p_t, 1e-8)) - np.log(np.maximum(p_s, 1e-8))), axis=-1)
     soft_loss = np.mean(kl_div) * (temperature ** 2)
-    
+
     # 3. Standard cross-entropy on hard targets
     b = targets.data.astype(int)
     log_probs = np.log(np.maximum(p_s, 1e-8))
     hard_loss = -np.mean(log_probs[np.arange(len(b)), b])
-    
+
     total = alpha * soft_loss + (1.0 - alpha) * hard_loss
     return Tensor(np.array(total, dtype=np.float32))
 ```

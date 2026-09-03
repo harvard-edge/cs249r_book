@@ -135,7 +135,7 @@ class FeedForward(Layer):
     def __init__(self, d_model: int, d_ff: Optional[int] = None) -> None:
         if d_ff is None:
             d_ff = 4 * d_model
-            
+
         self.w1 = Linear(d_model, d_ff)
         self.act = GELU()
         self.w2 = Linear(d_ff, d_model)
@@ -222,36 +222,36 @@ class GPT(Layer):
     ) -> None:
         self.d_model = d_model
         self.max_seq_len = max_seq_len
-        
+
         # 1. Embeddings
         self.embedding = GPTEmbedding(vocab_size, max_seq_len, d_model)
-        
+
         # 2. Stack of L Transformer Blocks
         self.blocks = [TransformerBlock(d_model, num_heads) for _ in range(num_layers)]
-        
+
         # 3. Final LayerNorm
         self.ln_f = LayerNorm(d_model)
-        
+
         # 4. Language Modeling Head (Linear projection to vocabulary logits)
         self.lm_head = Linear(d_model, vocab_size)
 
     def forward(self, input_ids: Tensor) -> Tensor:
         B, S = input_ids.shape
-        
+
         # 1. Compute position-aware embeddings: (B, S, D)
         x = self.embedding(input_ids)
-        
+
         # 2. Build causal mask for sequence length S
         mask_data = np.where(np.tril(np.ones((S, S))) == 0, -1e9, 0.0).astype(np.float32)
         mask = Tensor(mask_data[np.newaxis, np.newaxis, :, :])  # Shape: (1, 1, S, S)
-        
+
         # 3. Pass through transformer block stack
         for block in self.blocks:
             x = block(x, mask=mask)
-            
+
         # 4. Final normalization
         x = self.ln_f(x)
-        
+
         # 5. Project to vocabulary logits: (B, S, V)
         logits = self.lm_head(x)
         return logits
@@ -291,7 +291,7 @@ def generate(
 
         # Forward pass to get logits: (1, S, V)
         logits = model(input_tensor)
-        
+
         # Extract logits for the very last token: (V,)
         next_token_logits = logits.data[0, -1, :] / max(temperature, 1e-5)
 
@@ -307,7 +307,6 @@ def generate(
 ```
 
 ---
-
 
 ::: {.callout-note}
 ## PyTorch Systems Bridge: `torch.nn.LayerNorm`, `torch.nn.RMSNorm`, and Kernel Fusion
@@ -348,6 +347,7 @@ In unoptimized execution, computing $\mathbf{x}_{\text{next}} = \mathbf{x} + \te
 [^rmsnorm-paper]: Zhang & Sennrich (2019), *Root Mean Square Layer Normalization*, NeurIPS. RMSNorm enforces $\text{RMS}(\mathbf{x}) = \sqrt{\frac{1}{D}\sum x_i^2 + \epsilon}$, showing that scaling invariance matters more than mean-centering for transformer stability.
 
 [^llama-arch-innovations]: **The LLaMA Foundation Architecture (Touvron et al., 2023)**: Modern foundation models (LLaMA-2/3, Mistral, Gemma) synthesize three major transformer innovations:
+
 1. **Pre-LN with RMSNorm**: Applied at the input of every attention and FFN block, guaranteeing gradient highway stability while eliminating mean calculations.
 2. **SwiGLU Gated Feed-Forward Networks (Shazeer, 2020)**: Replaces standard GELU MLPs with Swish-Gated Linear Units:
 $$\text{SwiGLU}(\mathbf{x}) = \left(\text{SiLU}(\mathbf{x}\mathbf{W}_{\text{gate}}) \odot (\mathbf{x}\mathbf{W}_{\text{up}})\right)\mathbf{W}_{\text{down}}$$
@@ -385,7 +385,8 @@ $$N_{\text{weights}} \approx 12 \times L \times D^2 + V \times D + S_{\text{max}
 ::: {.callout-principle}
 ## The 12 $L D^2$ Scaling Law Rule of Thumb
 
-In any standard decoder-only transformer, the core transformer stack contains exactly **$12 L D^2$ parameter weights**. 
+In any standard decoder-only transformer, the core transformer stack contains exactly **$12 L D^2$ parameter weights**.
+
 - **GPT-2 Small** ($L=12, D=768$): $12 \times 12 \times 768^2 = 84.9\text{M params} + 39.3\text{M vocab} \approx 124\text{M params}$.
 - **GPT-3** ($L=96, D=12288$): $12 \times 96 \times 12288^2 \approx 174.1\text{ Billion parameters}$ ($+ 614\text{M vocab}$).
 - **LLaMA-3 8B** ($L=32, D=4096$, SwiGLU $3 \times \frac{8}{3}D^2 = 8D^2$ FFN): $12 \times 32 \times 4096^2 \approx 6.44\text{B} + 1.05\text{B vocab} \approx 8.0\text{ Billion parameters}$.
