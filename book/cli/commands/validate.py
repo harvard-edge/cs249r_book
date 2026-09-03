@@ -845,6 +845,9 @@ class ValidateCommand:
         parser.add_argument("--path", default=None, help="File or directory path to check")
         parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
         parser.add_argument("--vol2", action="store_true", help="Scope to Volume II")
+        parser.add_argument("--vol3", action="store_true", help="Scope to Volume III")
+        parser.add_argument("--vol4", action="store_true", help="Scope to Volume IV")
+        parser.add_argument("--tinytorch", action="store_true", help="Scope to TinyTorch")
         parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
         parser.add_argument("--verbose", "-v", action="store_true", default=True, help="Show context for each issue (default)")
         parser.add_argument("--quiet", "-q", action="store_true", dest="quiet", help="Suppress verbose output")
@@ -919,7 +922,7 @@ class ValidateCommand:
             self._print_check_help()
             return True
 
-        root_path = self._resolve_path(ns.path, ns.vol1, ns.vol2)
+        root_path = self._resolve_path(ns.path, ns.vol1, ns.vol2, getattr(ns, 'vol3', False), getattr(ns, 'vol4', False), getattr(ns, 'tinytorch', False))
         if not root_path.exists():
             self._emit(ns.json, {"status": "error", "message": f"Path not found: {root_path}"}, failed=True)
             return False
@@ -1041,11 +1044,11 @@ class ValidateCommand:
             elif method_name == "_run_epub_hygiene":
                 results.append(method(root, fix=getattr(ns, 'fix', False)))
             elif method_name == "_run_pdf_verify":
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, log_path=getattr(ns, 'pdf_log', None)))
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False), log_path=getattr(ns, 'pdf_log', None)))
             elif method_name == "_run_pdf_numbering":
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
             elif method_name == "_run_pdf_table_spacing":
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
             else:
                 results.append(method(root))
         return results
@@ -1226,17 +1229,21 @@ class ValidateCommand:
 
     # ------------------------------------------------------------------
 
-    def _resolve_path(self, path_arg: Optional[str], vol1: bool, vol2: bool) -> Path:
+    def _resolve_path(self, path_arg: Optional[str], vol1: bool = False, vol2: bool = False, vol3: bool = False, vol4: bool = False, tinytorch: bool = False) -> Path:
         if path_arg:
             path = Path(path_arg)
             if not path.is_absolute():
                 path = (Path.cwd() / path).resolve()
             return path
         base = self.config_manager.book_dir / "contents"
-        if vol1 and not vol2:
+        if vol1:
             return base / "vol1"
-        if vol2 and not vol1:
+        if vol2:
             return base / "vol2"
+        if vol3:
+            return base / "vol3"
+        if vol4:
+            return base / "vol4"
         return base
 
     def _selected_label_types(self, ns: argparse.Namespace) -> Dict[str, List[re.Pattern[str]]]:
@@ -9320,6 +9327,9 @@ class ValidateCommand:
         *,
         vol1: bool = False,
         vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
         log_path: Optional[str] = None,
     ) -> ValidationRunResult:
         from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
@@ -9334,6 +9344,12 @@ class ValidateCommand:
             volumes.append("vol1")
         if vol2:
             volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
         if not volumes:
             volumes = ["vol1", "vol2"]
 
@@ -9370,6 +9386,9 @@ class ValidateCommand:
         *,
         vol1: bool = False,
         vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
     ) -> ValidationRunResult:
         from cli.commands._pdf_checks import default_pdf_path, scan_pdf_numbering
 
@@ -9382,6 +9401,12 @@ class ValidateCommand:
             volumes.append("vol1")
         if vol2:
             volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
         if not volumes:
             volumes = ["vol1", "vol2"]
 
@@ -9416,6 +9441,9 @@ class ValidateCommand:
         *,
         vol1: bool = False,
         vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
     ) -> ValidationRunResult:
         from cli.commands._pdf_checks import default_pdf_path, scan_table_prose_spacing
 
@@ -9428,6 +9456,12 @@ class ValidateCommand:
             volumes.append("vol1")
         if vol2:
             volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
         if not volumes:
             volumes = ["vol1", "vol2"]
 
@@ -9475,6 +9509,12 @@ class ValidateCommand:
             volumes.append("vol1")
         if vol2:
             volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
         if not volumes:
             volumes = ["vol1", "vol2"]
 
@@ -12550,6 +12590,12 @@ class ValidateCommand:
             volumes.append("vol1")
         if vol2:
             volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
         if not volumes:
             volumes = ["vol1", "vol2"]
 

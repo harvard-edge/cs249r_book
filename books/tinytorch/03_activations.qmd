@@ -1,0 +1,330 @@
+---
+title: "Non-Linearities and Forward Activations"
+---
+
+## Purpose {.unnumbered}
+
+_Why does an element-wise activation function dictate framework memory and numerical safety?_
+
+Without non-linear activations, a neural network of arbitrary depth mathematically collapses into a single matrix multiplication, incapable of learning decision boundaries beyond hyperplanes. Activations provide the warping power that enables universal function approximation, but in a production framework, they represent a delicate systems trade-off between numerical precision and memory bandwidth. Exponential functions such as Sigmoid, Tanh, and Softmax can trigger catastrophic floating-point overflow or underflow unless stabilized through shift-invariant arithmetic invariants. Furthermore, because element-wise activations exhibit very low arithmetic intensity, their execution time is dominated by memory traffic rather than compute, while their intermediate output tensors require dedicated buffer allocations across every layer of the network. In a framework runtime, activation layers are the physical interface where mathematical non-linearity meets the realities of IEEE 754 precision and cache memory bandwidth.
+
+::: {.callout-learning-objectives}
+## Learning Objectives
+
+- **Construct** modular, composable activation classes (`ReLU`, `Sigmoid`, `Tanh`, `GELU`, `Softmax`) operating seamlessly over multidimensional `Tensor` containers.
+- **Derive** and **implement** the shift-invariance property of Softmax to eliminate floating-point overflow ($e^x \to \infty$) and NaN corruption in numerical computation.
+- **Analyze** the mathematical mechanics of Gaussian Error Linear Units (GELU) and evaluate why modern transformers adopted smooth probabilistic gating over hard piecewise rectifiers.
+- **Differentiate** stateless activation functions from stateful parameterized layers through the framework's `parameters()` protocol.
+- **Calculate** the memory overhead of intermediate activation tensors during forward network evaluation.
+:::
+
+---
+
+## 3.1 The Collapse of Linear Hierarchies
+
+A deep neural network consists of alternating transformations arranged in sequence. Suppose we construct a two-layer network using only linear transformations:
+
+$$\mathbf{h} = \mathbf{x} \mathbf{W}_1 + \mathbf{b}_1$$
+$$\mathbf{y} = \mathbf{h} \mathbf{W}_2 + \mathbf{b}_2$$
+
+Substituting the first equation into the second yields:
+
+$$\mathbf{y} = (\mathbf{x} \mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{x}(\mathbf{W}_1 \mathbf{W}_2) + (\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2)$$
+
+Because matrix multiplication is associative and distributive, the product $\mathbf{W}_1 \mathbf{W}_2$ can be precomputed as a single matrix $\mathbf{W}_{\text{comb}} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$, and the combined bias vector $\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2$ as $\mathbf{b}_{\text{comb}} \in \mathbb{R}^{d_{\text{out}}}$. 
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Linear Layer 1: h = xW1 + b1                               │
+├─────────────────────────────────────────────────────────────┤
+│  Linear Layer 2: y = hW2 + b2                               │
+├─────────────────────────────────────────────────────────────┤
+│  Mathematical Equivalence: y = x(W1 W2) + (b1 W2 + b2)      │
+│  => Equivalent to a single Linear Layer with ZERO depth!     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+A deep network of 100 linear layers has exactly the representational capacity of a single linear layer. Stacking linear layers without non-linearities increases parameter count and compute cost without expanding expressive power.
+
+To break this linearity, the framework must insert an element-wise non-linear mapping $\sigma(\cdot)$ after each linear projection:
+
+$$\mathbf{h} = \sigma(\mathbf{x} \mathbf{W}_1 + \mathbf{b}_1)$$
+$$\mathbf{y} = \mathbf{h} \mathbf{W}_2 + \mathbf{b}_2$$
+
+The function $\sigma(\cdot)$ prevents algebraic factorization, enabling multi-layer networks to approximate arbitrary continuous functions (the Universal Approximation Theorem).
+
+---
+
+## 3.2 The Core Activation Suite
+
+In TinyTorch, every activation function is implemented as a self-contained class with a standard `forward(x: Tensor) -> Tensor` method and a `parameters()` method returning an empty list (since activations contain no trainable weights).
+
+### 1. Rectified Linear Unit (ReLU)
+
+ReLU is the simplest and most computationally efficient non-linear activation:
+
+$$\text{ReLU}(x) = \max(0, x)$$
+
+```python
+# Listing 3.1: Rectified Linear Unit (ReLU) Implementation
+from tinytorch.core.tensor import Tensor
+import numpy as np
+
+class ReLU:
+    """Rectified Linear Unit: f(x) = max(0, x)."""
+
+    def parameters(self):
+        """Activations contain no learnable parameters."""
+        return []
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply ReLU element-wise."""
+        return Tensor(np.maximum(0.0, x.data))
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+```
+
+**Systems Trade-off**: ReLU requires only a single comparison instruction per element and no exponential math, making it fast on hardware ALUs. However, if activations become negative, the value drops permanently to 0, which can cause dead units that output zero across all subsequent layers.
+
+---
+
+### 2. Sigmoid (Logistic)
+
+Sigmoid maps any real-valued scalar into the bounded probability interval $(0, 1)$:
+
+$$\sigma(x) = \frac{1}{1 + e^{-x}}$$
+
+When evaluating $\sigma(x)$ on hardware, large negative numbers (e.g., $x = -1000$) cause $e^{-(-1000)} = e^{1000}$ to overflow standard IEEE 754 32-bit floats ($\approx 3.4 \times 10^{38}$), resulting in runtime warnings and `inf` values. To ensure complete numerical stability across the entire real number line, TinyTorch uses a branch-stable formulation:
+
+```python
+# Listing 3.2: Numerically Stable Sigmoid Implementation
+class Sigmoid:
+    """Sigmoid activation: f(x) = 1 / (1 + exp(-x))."""
+
+    def parameters(self):
+        return []
+
+    def forward(self, x: Tensor) -> Tensor:
+        x_data = x.data
+        # Stable formulation: when x >= 0 use 1/(1 + exp(-x))
+        # When x < 0 use exp(x)/(1 + exp(x)) to prevent exp(-x) overflow
+        with np.errstate(over='ignore'):
+            positive_mask = (x_data >= 0)
+            result = np.zeros_like(x_data, dtype=np.float32)
+            
+            # x >= 0: exp(-x) is bounded in (0, 1] -> no overflow
+            result[positive_mask] = 1.0 / (1.0 + np.exp(-x_data[positive_mask]))
+            
+            # x < 0: exp(x) is bounded in (0, 1] -> no overflow
+            exp_neg = np.exp(x_data[~positive_mask])
+            result[~positive_mask] = exp_neg / (1.0 + exp_neg)
+            
+        return Tensor(result)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+```
+
+---
+
+### 3. Hyperbolic Tangent (Tanh)
+
+Tanh is a zero-centered sigmoid variant mapping inputs to $(-1, 1)$:
+
+$$\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} = 2\sigma(2x) - 1$$
+
+```python
+# Listing 3.3: Hyperbolic Tangent (Tanh) Implementation
+class Tanh:
+    """Hyperbolic Tangent activation: f(x) = tanh(x)."""
+
+    def parameters(self):
+        return []
+
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(np.tanh(x.data))
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+```
+
+---
+
+### 4. Gaussian Error Linear Unit (GELU)
+
+Modern transformer models (including GPT-2, GPT-3, GPT-4, and BERT) standardly replace ReLU with GELU. Rather than hard-gating inputs by their sign ($\max(0, x)$), GELU weights inputs by their probability under a standard Gaussian distribution:
+
+$$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot P(X \le x), \quad X \sim \mathcal{N}(0, 1)$$
+
+$$\text{GELU}(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]$$
+
+Because calculating the exact error function $\text{erf}(x)$ requires expensive numerical series integration on GPUs, production frameworks and language models use the fast polynomial tanh approximation introduced by Hendrycks and Gimpel:
+
+$$\text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715 x^3\right)\right)\right)$$
+
+```python
+# Listing 3.4: Gaussian Error Linear Unit (GELU) with Tanh Approximation
+class GELU:
+    """Gaussian Error Linear Unit with Hendrycks fast polynomial approximation."""
+
+    def parameters(self):
+        return []
+
+    def forward(self, x: Tensor) -> Tensor:
+        x_data = x.data
+        # Constant sqrt(2 / pi)
+        sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
+        inner = sqrt_2_over_pi * (x_data + 0.044715 * np.power(x_data, 3))
+        result = 0.5 * x_data * (1.0 + np.tanh(inner))
+        return Tensor(result)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+```
+
+::: {#fig-activation-comparison}
+![](../../packages/tinytorch/quarto/assets/images/diagrams/02_activations-diag-1.svg)
+
+**Figure 3.1: Activation Function Profiles.** Comparison of ReLU, Sigmoid, Tanh, and GELU. Notice that GELU is smooth and non-monotonic for small negative values ($x \approx -0.17$), allowing small negative activations that preserve signal flow through deep layers.
+:::
+
+---
+
+## 3.3 Softmax and the Shift-Invariance Invariant
+
+While element-wise activations transform each scalar independently, multi-class classification and attention mechanisms require normalizing an entire vector of unconstrained logits $\mathbf{z} \in \mathbb{R}^K$ into a valid discrete probability distribution $\mathbf{p} \in \Delta^{K-1}$:
+
+$$\text{Softmax}(\mathbf{z})_i = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}}$$
+
+### The Overflow Hazard in Naive Softmax
+
+Consider a model generating logit predictions for vocabulary tokens: $\mathbf{z} = [800.0, 850.0, 900.0]$.
+
+When an implementation computes $e^{900.0}$, 32-bit floating-point registers overflow to `+inf`. Dividing `inf / inf` yields `NaN` (Not a Number), instantly corrupting model parameters and terminating execution.
+
+::: {.callout-principle}
+## The Shift-Invariance Principle of Softmax
+
+For any arbitrary constant scalar $C \in \mathbb{R}$:
+
+$$\text{Softmax}(\mathbf{z} - C)_i = \frac{e^{z_i - C}}{\sum_{j=1}^K e^{z_j - C}} = \frac{e^{z_i} \cdot e^{-C}}{\sum_{j=1}^K (e^{z_j} \cdot e^{-C})} = \frac{e^{z_i} \cdot e^{-C}}{e^{-C} \sum_{j=1}^K e^{z_j}} = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}} = \text{Softmax}(\mathbf{z})_i$$
+
+Subtracting a constant from all logits leaves the mathematical probability distribution completely unchanged.
+:::
+
+By choosing $C = \max_j(z_j)$, the exponent is guaranteed to satisfy:
+
+$$z_i - \max_j(z_j) \le 0 \quad \forall i$$
+
+Because $e^u \in (0, 1]$ for all $u \le 0$, the exponential term **can never exceed $1.0$**, completely eliminating the possibility of floating-point overflow.
+
+```python
+# Listing 3.5: Numerically Stable Batched Softmax Implementation
+class Softmax:
+    """Numerically stable Softmax activation along specified axis."""
+
+    def __init__(self, axis: int = -1):
+        self.axis = axis
+
+    def parameters(self):
+        return []
+
+    def forward(self, x: Tensor) -> Tensor:
+        x_data = x.data
+        # Shift invariance: subtract max along axis with keepdims=True
+        max_val = np.max(x_data, axis=self.axis, keepdims=True)
+        exp_shifted = np.exp(x_data - max_val)
+        sum_exp = np.sum(exp_shifted, axis=self.axis, keepdims=True)
+        return Tensor(exp_shifted / sum_exp)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+```
+
+::: {.callout-pitfall}
+## Pitfall: Forgetting `keepdims=True` in Multi-Axis Reductions
+
+When computing `np.max(x_data, axis=-1)` on a 2D batch tensor of shape $(B, D)$, omitting `keepdims=True` collapses the array to 1D shape $(B,)$. Subsequent broadcasting subtraction `x_data - max_val` can fail or incorrectly broadcast across the batch dimension instead of feature columns. Always retain dimensional rank during reduction steps.
+:::
+
+---
+
+## 3.4 Framework Mechanics: Stateless Activations vs. Stateful Layers
+
+In TinyTorch, deep learning components adhere to a unified structural protocol:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Component Category   Trainable Parameters?  Example        │
+├─────────────────────────────────────────────────────────────┤
+│  Stateless Layer      No (parameters() -> []) ReLU, GELU    │
+│  Stateful Layer       Yes (weights, biases)  Linear, Conv2d │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Because activation layers contain no internal state or learnable weights, they can be shared or invoked multiple times across a forward pass without side effects. In contrast, parameterized layers (such as `Linear`, which we build in Chapter 4) encapsulate weight matrices and bias vectors that must be registered and tracked by the framework.
+
+---
+
+## 3.5 Systems Reality: Memory Bandwidth and Forward Footprint
+
+### The Memory-Bound Nature of Element-Wise Kernels
+
+While matrix multiplications ($\mathbf{x} \mathbf{W}$) have high arithmetic intensity ($O(N^3)$ operations on $O(N^2)$ data), activation functions are **strictly memory-bandwidth bound**.
+
+For a tensor of $N$ elements executing ReLU in 32-bit float:
+- Read 4 bytes per element from memory into CPU/GPU registers.
+- Perform 1 comparison operation in the ALU.
+- Write 4 bytes per element back to memory buffer.
+
+$$\text{Arithmetic Intensity} = \frac{1\text{ FLOP}}{8\text{ Bytes}} = 0.125\text{ FLOPs/Byte}$$
+
+Because hardware memory bandwidth is finite, executing standalone element-wise activation functions leaves ALUs idle waiting for memory loads and stores.
+
+### Intermediate Forward Activation Allocations
+
+When a batch of inputs flows through a deep network of $L$ layers, each activation function allocates a fresh tensor buffer to store the transformed output:
+
+$$\mathbf{x}_0 \xrightarrow{\text{Linear}_1} \mathbf{z}_1 \xrightarrow{\text{ReLU}} \mathbf{a}_1 \xrightarrow{\text{Linear}_2} \mathbf{z}_2 \xrightarrow{\text{ReLU}} \mathbf{a}_2 \dots \xrightarrow{\text{Linear}_L} \mathbf{y}$$
+
+For a network processing batch size $B$ with hidden dimension $D$, each intermediate activation tensor consumes $B \times D \times 4\text{ bytes}$ of memory.
+
+::: {.callout-checkpoint}
+## Check Your Understanding: Forward Activation Buffer Memory
+
+Suppose we evaluate a 12-layer multi-layer forward network processing a batch of $B = 64$ samples with hidden dimension $D = 1024$ in standard `float32` (4 bytes per element).
+
+1. What is the memory allocated by a single intermediate activation tensor?
+2. What is the total memory allocated across all 12 intermediate layer activations during the forward pass?
+
+*Solution:*
+- Single activation tensor: $64 \times 1024 \times 4\text{ bytes} = 262,144\text{ bytes} = 256\text{ KB}$.
+- Total across 12 layers: $12 \times 256\text{ KB} = 3.072\text{ MB}$.
+
+While modest for single forward passes on small MLPs, this allocation pattern scales directly with batch size and sequence length in large-scale architectures.
+:::
+
+---
+
+## Summary
+
+In this chapter, we laid the second architectural tier of TinyTorch by introducing non-linear activation functions. We mathematically proved why stacking linear transformations without activations collapses into a single layer, establishing the absolute necessity of non-linear mappings for deep neural network representation.
+
+We built five essential activation classes—`ReLU`, `Sigmoid`, `Tanh`, `GELU`, and `Softmax`—and implemented the shift-invariance numerical stabilization property to protect exponential operations against floating-point register overflow. Finally, we analyzed the memory-bandwidth characteristics of element-wise operators and established the framework contract distinguishing stateless activation transformations from stateful parameterized layers.
+
+::: {.callout-takeaways}
+## Chapter Takeaways
+
+- **Breaking Linearity**: Without non-linear activation functions, multi-layer networks collapse into a single composite linear transformation with zero effective depth.
+- **Activation Profiles**: ReLU provides fast computation; Sigmoid and Tanh offer bounded ranges; GELU provides smooth probabilistic gating standard in modern LLMs.
+- **Shift Invariance**: Subtracting $\max(\mathbf{z})$ from logits before computing Softmax prevents exponential overflow without altering the mathematical probability distribution.
+- **Memory-Bandwidth Bound**: Element-wise activations exhibit low arithmetic intensity ($0.125\text{ FLOPs/byte}$), making execution speed dependent on memory transfer rates.
+- **Stateless Framework Contract**: Activation functions contain no internal parameters (`parameters() -> []`), allowing them to be shared and reused across network layers.
+:::
+
+::: {.callout-chapter-connection}
+## Chapter Connection: Encapsulating Weights and Parameters
+
+Now that we have non-linear activation functions, how do we encapsulate learnable weights, biases, and regularization? In **Chapter 4 (Layers, Regularization, and Parameter Management)**, we build the stateful `Linear` layer, implement `Dropout` for regularization, and create the container abstractions that allow complex multi-layer networks to be composed and executed.
+:::

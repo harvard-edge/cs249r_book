@@ -43,6 +43,7 @@ declare -A SUBSITES=(
   [vol1]="vol1"
   [vol2]="vol2"
   [tinytorch]="tinytorch"
+  [physical]="physical"
   [kits]="kits"
   [labs]="labs"
   [mlsysim]="mlsysim"

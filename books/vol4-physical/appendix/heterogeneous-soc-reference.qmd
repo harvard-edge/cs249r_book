@@ -1,0 +1,49 @@
+# Heterogeneous Dual-Brain SoC Reference Architecture {.unnumbered #sec-appendix-heterogeneous-soc}
+
+This appendix defines the canonical reference architecture for heterogeneous dual-brain edge systems in Physical AI. It specifies the hardware topology, core partitioning, inter-processor communication (IPC) protocols, and hardware safety watchdog contracts that separate unprivileged stochastic policy deliberation from deterministic real-time safety enforcement.
+
+## Dual-Brain System Topology
+
+In an embodied machine, cognitive deliberation and mechanical actuation operate in fundamentally incompatible timing and determinism domains. The dual-brain architecture bridges this divide by mapping functional roles onto asymmetric processing domains on a shared System-on-Chip (SoC) or coupled compute module:
+
+| Processor Subsystem                   | Architectural Core and OS                                                                           | Primary Systems Role and Execution Contract                                                                                                                                                                                    |
+|:--------------------------------------|:----------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Application Processor (MPU)**       | Multi-core 64-bit Application CPU<br>Rich OS (Embedded Linux / RT-Linux)                            | **Untrusted Proposal Service:** Runs multimodal perception backbones, foundation models, ROS 2 stacks, and generative trajectory planners; emits timestamped, expiring candidate proposals ($p_t$).                            |
+| **Real-Time Safety Controller (MCU)** | Deterministic Microcontroller (ARM Cortex-M / RISC-V)<br>Bare-Metal / Hard RTOS (Zephyr / FreeRTOS) | **Trusted Permission Authority:** Runs deterministic $1000\text{ Hz}$ control loops, Control Barrier Function safety filters ($h(x) \ge 0$), dynamic stopping enforcers ($d_{\text{stop}}$), and hardware PWM/timer registers. |
+| **Inter-Processor Link (IPC)**        | Shared SRAM Mailbox & Hardware Semaphore<br>RPMSG / OpenAMP Framework                               | Zero-copy lock-free circular ring buffers with atomic sequence counters, cache-coherent headers, and hardware mailbox interrupts.                                                                                              |
+
+## Hardware Resource Partitioning
+
+| Subsystem                  | Application Processor (MPU)                                             | Real-Time Safety Controller (MCU)                                             |
+|:---------------------------|:------------------------------------------------------------------------|:------------------------------------------------------------------------------|
+| **Core Architecture**      | Multi-core Out-of-Order Application CPU + NPU/GPU                       | Deterministic In-Order Microcontroller (Zero-Wait-State)                      |
+| **Operating System**       | Embedded Linux (Preempt-RT / Debian / Yocto)                            | Bare-Metal Firmware / Hard Real-Time OS                                       |
+| **Memory Subsystem**       | 2 GB to 32 GB LPDDR4/LPDDR5 DRAM (Shared)                               | 256 KB to 1 MB On-Chip SRAM (TCM, Zero-Wait-State)                            |
+| **Memory Management**      | Virtual memory, TLB, demand paging                                      | Physical addressing only, zero dynamic allocation (`malloc` prohibited)       |
+| **Execution Determinism**  | Best-effort with tail jitter ($P_{99} \approx 20\text{--}80\text{ ms}$) | Hard real-time cycle predictability (WCET bounded, jitter $< 1\,\mu\text{s}$) |
+| **Physical I/O Authority** | High-speed buses: MIPI CSI-2, USB 3.0, PCIe, GbE                        | Dedicated safety I/O: Timer PWM, Quadrature Encoders, Hardware E-Stop GPIO    |
+
+## Shared Memory RPMSG Message Contract
+
+The application processor transmits timestamped intent proposals to the real-time safety controller over non-blocking shared SRAM mailboxes using the Remote Processor Messaging (RPMSG) protocol. The shared message schema (`PhysicalAgent_IntentProposal_t`) enforces a packed binary layout across cores:
+
+| Field Name              | Type       | Size     | Physical Units & Description                                              |
+|:------------------------|:-----------|:---------|:--------------------------------------------------------------------------|
+| `message_id`            | `uint32_t` | 4 bytes  | Monotonic proposal sequence counter.                                      |
+| `timestamp_us`          | `uint64_t` | 8 bytes  | 64-bit IEEE 1588 PTP synchronized hardware timestamp ($\mu\text{s}$).     |
+| `lease_duration_ms`     | `uint32_t` | 4 bytes  | Maximum validity lease duration before proposal expires ($\text{ms}$).    |
+| `target_pos_[x,y,z]`    | `float[3]` | 12 bytes | 3D Cartesian spatial target coordinates in robot base frame ($\text{m}$). |
+| `max_velocity_m_s`      | `float`    | 4 bytes  | Maximum permissible Cartesian velocity envelope ($\text{m/s}$).           |
+| `max_acceleration_m_s2` | `float`    | 4 bytes  | Maximum permissible Cartesian acceleration bound ($\text{m/s}^2$).        |
+| `model_confidence`      | `float`    | 4 bytes  | Epistemic model confidence score $\gamma_{\text{conf}} \in [0.0, 1.0]$.   |
+| `crc32`                 | `uint32_t` | 4 bytes  | IEEE 802.3 32-bit CRC payload integrity checksum.                         |
+
+: Physical AI Dual-Brain IPC Intent Proposal Schema. Binary layout of the packed shared-memory RPMSG payload. {#tbl-ipc-intent-contract}
+
+## Hardware Safety Watchdog Protocol
+
+The real-time controller monitors the application processor via a dedicated hardware countdown watchdog and heartbeat protocol:
+
+1. **Heartbeat Packet:** The application processor must transmit an authenticated heartbeat packet every $\tau_{\text{ping}} \le 10\text{ ms}$.
+2. **Watchdog Timeout:** If the real-time controller receives no valid heartbeat for $\tau_{\text{timeout}} = 50\text{ ms}$, an independent hardware timer triggers a Non-Maskable Interrupt (NMI).
+3. **Hardware Action:** The real-time controller immediately de-asserts motor gate driver enable lines and transitions inverter power stages into a deterministic safe stop (Category 1 / Safe Torque Off) within $250\,\mu\text{s}$.

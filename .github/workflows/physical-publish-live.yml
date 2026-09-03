@@ -1,0 +1,254 @@
+name: '🤖 Physical AI · 🚀 Publish (Live)'
+
+# =============================================================================
+# Physical AI — Production Deploy
+# =============================================================================
+#
+# Builds the Physical AI Quarto HTML website with PDF & EPUB downloads and
+# deploys to the live production site under mlsysbook.ai/physical/.
+#
+# Flow:
+#   1. GUARD          — Ensures latest Validate (Dev) is green
+#   2. PREPARE        — Versioning and release manifest
+#   3. BUILD_PDFS     — Reusable build of PDF & EPUB
+#   4. BUILD_AND_DEPLOY — Render HTML, inject stamp, stage downloads, deploy gh-pages
+#   5. CREATE_TAG     — Tag release on GitHub
+#
+# Triggers:
+#   - workflow_dispatch: manual with release knobs
+#   - workflow_call: called from publish-all-live.yml
+#
+# Deploys to: mlsysbook.ai/physical/
+# Secrets:    GITHUB_TOKEN
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag — reuses current release_id)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type (ignored if site_only OR explicit_version is set) [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z (skips bump math). Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        type: boolean
+        required: false
+        default: false
+      release_type:
+        type: string
+        required: false
+        default: 'patch'
+      explicit_version:
+        type: string
+        required: false
+        default: ''
+      confirm:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  PHYSICAL_ROOT: ${{ vars.PHYSICAL_ROOT || 'physical' }}
+  PHYSICAL_BOOK_DIR: ${{ vars.PHYSICAL_BOOK_DIR || 'physical/book' }}
+  PHYSICAL_BUILD_DIR: ${{ vars.PHYSICAL_BOOK_DIR || 'physical/book' }}/_build
+  PHYSICAL_DOWNLOADS_DIR: ${{ vars.PHYSICAL_BOOK_DIR || 'physical/book' }}/_build/assets/downloads
+  DEV_PHYSICAL_PATH: ${{ vars.DEV_PHYSICAL_PATH || 'physical' }}
+  PHYSICAL_PDF_NAME: ${{ vars.PHYSICAL_PDF_NAME || 'Physical-AI.pdf' }}
+  PHYSICAL_EPUB_NAME: ${{ vars.PHYSICAL_EPUB_NAME || 'Physical-AI.epub' }}
+  PHYSICAL_ARTIFACT_NAME: ${{ vars.PHYSICAL_ARTIFACT_NAME || 'Physical-AI-Builds' }}
+  GLOBAL_PYTHON_VERSION: ${{ vars.GLOBAL_PYTHON_VERSION || vars.PYTHON_VERSION || '3.12' }}
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Validate-Dev Green Gate
+  # ===========================================================================
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: physical-validate-dev.yml
+
+  # ===========================================================================
+  # Stage 2: Prepare Release
+  # ===========================================================================
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: physical
+      tier: B
+      previous_tag_pattern: 'physical-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
+
+  # ===========================================================================
+  # Stage 3: Build PDF & EPUB
+  # ===========================================================================
+  build-pdfs:
+    name: '📚 Build PDFs & EPUB'
+    needs: [guard]
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/physical-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
+  # ===========================================================================
+  # Stage 4: Build Site & Deploy
+  # ===========================================================================
+  build-and-deploy:
+    name: '🔧 Build & Deploy Physical AI'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    needs: [guard, prepare, build-pdfs]
+    if: inputs.confirm == 'PUBLISH'
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.GLOBAL_PYTHON_VERSION }}
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📦 Install Image/SVG tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+      - name: 🔨 Render Physical AI HTML
+        working-directory: ${{ env.PHYSICAL_BOOK_DIR }}
+        run: |
+          quarto render --to html
+          touch _build/.nojekyll
+
+      - name: 📥 Download PDF & EPUB Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PHYSICAL_ARTIFACT_NAME }}
+          path: ${{ env.PHYSICAL_DOWNLOADS_DIR }}/
+
+      - name: 📋 Verify Downloads
+        run: |
+          echo "📋 Artifacts staged for web download:"
+          ls -la "${{ env.PHYSICAL_DOWNLOADS_DIR }}/"
+          echo ""
+          echo "📊 Artifact file sizes:"
+          du -h "${{ env.PHYSICAL_DOWNLOADS_DIR }}/"*
+
+      - name: 🕐 Inject Build Stamp
+        run: bash shared/scripts/inject-build-stamp.sh "${{ env.PHYSICAL_BUILD_DIR }}" "Physical AI"
+
+      - name: 📦 Emit release manifest
+        env:
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+        run: |
+          set -euo pipefail
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths ${{ env.PHYSICAL_ROOT }} \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '.quarto')
+
+          echo "📦 Release: physical v${NEW_RELEASE_ID} (hash ${RELEASE_HASH:0:12})"
+
+          python3 scripts/version/release.py emit-manifest \
+            --output "${{ env.PHYSICAL_BUILD_DIR }}/release-manifest.json" \
+            --project physical \
+            --tier B \
+            --release-id "$NEW_RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ env.PHYSICAL_BUILD_DIR }}
+          destination_dir: ${{ env.DEV_PHYSICAL_PATH }}
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🔧 Deploy Physical AI ${{ needs.prepare.outputs.new_tag }} - ${{ github.sha }}'
+
+  # ===========================================================================
+  # Stage 5: Tag & GitHub Release
+  # ===========================================================================
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Physical AI $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_TAG" \
+            --title "Physical AI v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}\n\n**Site**: https://mlsysbook.ai/${{ env.DEV_PHYSICAL_PATH }}/" \
+            --draft \
+            ${PREV_TAG:+--generate-notes --notes-start-tag="$PREV_TAG"} || \
+          gh release create "$NEW_TAG" \
+            --title "Physical AI v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}" \
+            --draft
