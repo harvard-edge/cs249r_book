@@ -538,12 +538,12 @@ Each operation knows only its own derivative; the chain rule does the connecting
 
 ### Backward Pass Implementation
 
-The backward pass walks the computation graph in reverse, computing gradients for every tensor it visits. Your `backward()` method does this as a recursive tree walk — short enough to read in one sitting, but enough to support arbitrarily deep networks:
+The backward pass walks the computation graph in reverse, computing gradients for every tensor it visits. The order matters: a tensor can feed more than one operation, and its true gradient is the sum of what every consumer sends back, so it must not propagate until all of them have contributed. Your `backward()` method therefore sorts the graph topologically first, then makes a single pass over it:
 
 The code in @lst-06-autograd-tensor-backward makes this concrete.
 
 ```python
-def backward(self, gradient=None):
+def backward(self, gradient=None, retain_graph=False):
     """Compute gradients via backpropagation."""
     if not self.requires_grad:
         return
@@ -555,23 +555,50 @@ def backward(self, gradient=None):
         else:
             raise ValueError("backward() requires gradient for non-scalar tensors")
 
-    # Accumulate gradient (vectorized NumPy operation)
-    if self.grad is None:
-        self.grad = np.zeros_like(self.data)
-    self.grad += gradient
+    # Step 1: topological order — every consumer of a tensor comes before it
+    topo_order, seen = [], set()
 
-    # Propagate to parent tensors
-    if hasattr(self, '_grad_fn') and self._grad_fn is not None:
-        grads = self._grad_fn.apply(gradient)  # Compute input gradients using vectorized ops
+    def visit(tensor):
+        if id(tensor) in seen:
+            return
+        seen.add(id(tensor))
+        fn = getattr(tensor, '_grad_fn', None)
+        if fn is not None:
+            for parent in fn.saved_tensors:
+                if isinstance(parent, Tensor):
+                    visit(parent)
+        topo_order.append(tensor)
 
-        for tensor, grad in zip(self._grad_fn.saved_tensors, grads):
-            if isinstance(tensor, Tensor) and tensor.requires_grad and grad is not None:
-                tensor.backward(grad)  # Recursive call
+    visit(self)
+    topo_order.reverse()
+
+    # Step 2: seed the output, then make one pass
+    pending = {id(self): gradient}
+    for tensor in topo_order:
+        grad = pending.get(id(tensor))
+        if grad is None or not tensor.requires_grad:
+            continue
+
+        if tensor.grad is None:
+            tensor.grad = np.zeros_like(tensor.data)
+        tensor.grad += grad                      # accumulate into .grad
+
+        fn = getattr(tensor, '_grad_fn', None)
+        if fn is None:
+            continue
+        for parent, parent_grad in zip(fn.saved_tensors, fn.apply(grad)):
+            if isinstance(parent, Tensor) and parent_grad is not None:
+                pending[id(parent)] = pending.get(id(parent), 0) + parent_grad
+
+    # Step 3: release the graph once, after the whole walk
+    if not retain_graph:
+        for tensor in topo_order:
+            tensor._grad_fn = None
 ```
 
-: **Listing 6.3 — `Tensor.backward()` seeds the output gradient, accumulates into `.grad`, and recurses through the `_grad_fn` chain.** {#lst-06-autograd-tensor-backward}
+: **Listing 6.3 — `Tensor.backward()` sorts the graph topologically, then makes one pass that accumulates into each `.grad` and hands every parent its share.** {#lst-06-autograd-tensor-backward}
 
-For a 100-layer network, `loss.backward()` triggers 100 recursive calls — one per layer — flowing gradients from output to input. The traversal is recursive Python; the math inside each `apply()` is vectorized NumPy. That split is why the system stays both readable and fast.
+For a 100-layer network, `loss.backward()` sorts 100 tensors and then visits each exactly once, flowing gradients from output to input. Sorting first is what makes that "exactly once" possible: descending into a tensor's parents the moment you reach it would re-walk any shared subtree once per consumer, which is exponential on a graph with residual connections. The traversal is Python; the math inside each `apply()` is vectorized NumPy. That split is why the system stays both readable and fast.
 
 The `gradient` argument deserves a closer look. For scalar losses (the typical case) you call `loss.backward()` with no arguments and the method seeds the gradient to 1.0 — because `∂loss/∂loss = 1`. For non-scalar outputs you must pass the upstream gradient explicitly; there is no canonical scalar to seed from, and silently picking one would hide bugs.
 
