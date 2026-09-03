@@ -477,24 +477,18 @@ class TestModule08Completion:
             if sum(1 for _ in dataloader) == 5:
                 capabilities["Batch iteration"] = True
             
-            # Test 4: Manual training loop
-            try:
-                for batch_x, batch_y in dataloader:
-                    pred = layer(batch_x)
-                    loss = loss_fn(pred, batch_y)
-                    if hasattr(loss, 'backward'):
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                capabilities["Manual training loop"] = True
-            except:
-                pass
-            
-            completed = sum(capabilities.values())
-            total = len(capabilities)
-            
-            # Pass if basic training infrastructure exists
-            assert completed >= 3, f"Training not ready: {capabilities}"
+            # Test 4: Manual training loop. A failure here is a real failure --
+            # swallowing it would let "training is broken" score 3/4 and pass.
+            for batch_x, batch_y in dataloader:
+                pred = layer(batch_x)
+                loss = loss_fn(pred, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            capabilities["Manual training loop"] = True
+
+            missing = [k for k, v in capabilities.items() if not v]
+            assert not missing, f"Training capabilities missing: {missing}"
             
         except ImportError as e:
             assert False, f"Module 08 import failed: {e}"

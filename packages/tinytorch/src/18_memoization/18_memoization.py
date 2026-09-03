@@ -42,8 +42,8 @@ Let's make inference blazingly fast through computational reuse!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/18_memoization/kvcaching_dev.py`
-**Building Side:** Code exports to `tinytorch.generation.kv_cache`
+**Learning Side:** You work in `modules/18_memoization/memoization.ipynb`
+**Building Side:** Code exports to `tinytorch.perf.memoization`
 
 ```python
 # How to use this module:
@@ -53,11 +53,11 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 **Why this matters:**
 - **Learning:** Complete caching system demonstrating production optimization techniques
 - **Production:** Proper organization matching Hugging Face's generation/ module structure
-- **Consistency:** All generation optimizations in generation.kv_cache
+- **Consistency:** All generation optimizations in perf.memoization
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.memoization
 #| export
 
@@ -120,7 +120,7 @@ Memoization Pattern:
 **Key Insight**: For transformers, K and V matrices for previous tokens NEVER change, yet naive generation recomputes them every step. This is the inefficiency we'll eliminate.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "solution": false}
 def profile_naive_generation():
     """
     Profile transformer generation to discover the O(n²) bottleneck.
@@ -313,8 +313,8 @@ Cached Approach:
 Memory: O(n × d_k)    (store all K,V pairs)
 Compute: O(n)         (only compute new pairs)
 
-For n=100, d_k=64:
-Memory cost: 6.4 KB per layer
+For n=100, d_k=64 (float32, one attention head):
+Memory cost: 2 x 100 x 64 x 4 bytes = 50 KB
 Compute savings: 50x reduction in K,V computations
 ```
 
@@ -1670,7 +1670,7 @@ if __name__ == "__main__":
 Let's analyze the performance characteristics and trade-offs of KV caching. Understanding these trade-offs is essential for making informed decisions about when and how to use caching in production systems.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "solution": false}
 def analyze_kvcache_memory():
     """
     📊 Analyze KV cache memory usage across different configurations.
@@ -1735,7 +1735,7 @@ def analyze_kvcache_memory():
     print("   • Trade-off: 2× memory removes 10-15× of the arithmetic")
     print("   • Worth it for inference-heavy workloads!")
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "solution": false}
 def analyze_kvcache_speedup():
     """
     📊 Measure KV cache speedup vs vanilla attention.
@@ -2032,7 +2032,7 @@ Congratulations! You've built the optimization that makes production language mo
 - Discovered why speedup increases with generation length
 - All tests pass ✅ (validated by `test_module()`)
 
-### Systems Insights Gained
+### Systems Insights Discovered
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
 - **Memory-Speed Trade-off**: Doubling memory enables order-of-magnitude speedup
 - **Scaling Benefits**: Longer generation = better cache return on investment (~50× at 100 tokens)
@@ -2061,7 +2061,8 @@ This optimization is THE technique that transformed language models from researc
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
 
-**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
 Export with: `tito module complete 18`
+
+**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 """

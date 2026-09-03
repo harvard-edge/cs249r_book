@@ -55,7 +55,7 @@ Let's get started!
 - **Integration:** Foundation that every other module will build upon
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.tensor
 #| export
 
@@ -1180,6 +1180,12 @@ Validation Decision Tree:
 Separating validation from computation keeps each function focused on a single
 concept: `_validate_matmul_shapes` teaches input checking, while `matmul`
 teaches the algorithm itself.
+
+**What we're testing**: All three shape-mismatch categories are caught and named
+**Why it matters**: A shape error caught at the boundary names the problem; one
+that slips through surfaces as a NumPy error deep inside a matmul, pages away
+from the line that caused it
+**Expected**: Valid shapes pass silently; each invalid case raises with its reason
 """
 
 # %% nbgrader={"grade": true, "grade_id": "tensor-validate-matmul", "locked": true, "points": 5}
@@ -1316,8 +1322,10 @@ Memory Layout (unchanged):
 Before: [1][2][3][4][5][6]
 After:  [1][2][3][4][5][6]  ← Same memory, different interpretation
 
-Key Insight: Reshape is O(1) operation - no data copying!
-Just changes how we interpret the memory layout.
+Key Insight: NumPy's reshape is O(1) -- it hands back a view over the same
+buffer. Our Tensor re-wraps that result with np.array(), which copies, so
+TinyTorch's reshape is O(N). The layout reasoning is unchanged; the copy is
+the price of every Tensor owning its buffer outright.
 
 Common ML Reshapes:
 ┌───────────────────────┬─────────────────────┬─────────────────────┐
@@ -1339,11 +1347,15 @@ Result:  [[1, 4],        (shape: (3, 2))
           [2, 5],
           [3, 6]]
 
-Memory Layout (rearranged):
-Before: [1][2][3][4][5][6]
-After:  [1][4][2][5][3][6]  ← Same data, different stride interpretation — cache-unfriendly access pattern
+Memory Layout (unchanged; strides swapped):
+Before: [1][2][3][4][5][6]   read row-by-row  (row stride 3, col stride 1)
+After:  [1][2][3][4][5][6]   read column-by-column (row stride 1, col stride 2)
+        ↑ the bytes never move; only the strides do, so walking a row of the
+          transposed view now jumps through memory — cache-unfriendly
 
-Key Insight: Transpose is a non-contiguous view (no copy, but poor cache locality) - more expensive to access than reshape.
+Key Insight: transposing is a stride change, not a data move. NumPy returns a
+non-contiguous view; our Tensor copies it (preserving the layout), so the
+result is still cache-unfriendly to traverse row-wise.
 
 Common Linear Algebra Usage:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
@@ -1368,7 +1380,7 @@ Operation Performance (for 1000×1000 matrix):
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
 Why transpose() is slower:
-- Non-contiguous view: same data, different stride interpretation
+- Non-contiguous layout: same values, different stride interpretation
 - Poor cache locality (accessing columns)
 - Can't be parallelized easily
 ```
@@ -1524,19 +1536,21 @@ Reduction Performance:
 │ Operation       │ Time Complex │ Memory Access   │ Cache Behavior  │
 ├─────────────────┼──────────────┼─────────────────┼─────────────────┤
 │ .sum()          │ O(N)         │ Sequential read │ Excellent       │
-│ .sum(axis=0)    │ O(N)         │ Column access   │ Poor (strided)  │
-│ .sum(axis=1)    │ O(N)         │ Row access      │ Excellent       │
+│ .sum(axis=0)    │ O(N)         │ Walks rows      │ Vectorizes well │
+│ .sum(axis=1)    │ O(N)         │ Per-row reduce  │ Fair            │
 │ .mean()         │ O(N)         │ Sequential read │ Excellent       │
 │ .max()          │ O(N)         │ Sequential read │ Excellent       │
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
-Why axis=0 is slower:
-- Accesses elements with large strides
-- Poor cache locality (jumping rows)
-- Less vectorization-friendly
+Why axis=0 is usually FASTER than axis=1 (measured ~1.7x on a 4000x4000 array):
+- NumPy reduces over axis 0 by sweeping memory sequentially and accumulating
+  into an output row, which vectorizes cleanly
+- axis=1 is a horizontal reduction within each row, which vectorizes less well
+- The intuition that 'column access must be strided and therefore slow' is
+  about element-at-a-time access, not about how NumPy implements reductions
 
 Optimization strategies:
-- Prefer axis=-1 operations when possible
+- Measure before assuming a reduction axis is the slow one
 - Use keepdims=True to maintain shape for broadcasting
 - Consider reshaping before reduction for better cache behavior
 ```
@@ -1899,7 +1913,7 @@ What's the memory difference between float64 and float32 for a (1000, 1000) tens
 - Total elements: 1,000,000
 - Memory: float64 = 8MB, float32 = 4MB (2x difference)
 
-**Key Insight**: Production systems often use float16 or bfloat16 for 4x memory savings over float32,
+**Key Insight**: Production systems often use float16 or bfloat16 for 2x memory savings over float32 (2 bytes vs 4),
 trading precision for capacity. GPU memory limits (8-16GB) make this critical.
 
 ### Question 4: Production Scale Memory

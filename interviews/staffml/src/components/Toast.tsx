@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Trophy, Flame, CheckCircle2 } from "lucide-react";
+import { X, Trophy, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 
 interface ToastMessage {

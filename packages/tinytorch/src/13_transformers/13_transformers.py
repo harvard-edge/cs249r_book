@@ -44,7 +44,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
+**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
 **Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
@@ -59,7 +59,7 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 - **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -113,25 +113,6 @@ def create_causal_mask(seq_len: int) -> Tensor:
 
 # %% [markdown]
 """
-## 📦 Where This Code Lives in the Final Package
-
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
-**Building Side:** Code exports to `tinytorch.core.transformers`
-
-```python
-# How to use this module:
-from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, MLP
-```
-
-**Why this matters:**
-- **Learning:** Complete transformer system showcasing how all components work together
-- **Production:** Matches PyTorch's transformer implementation with proper model organization
-- **Consistency:** All transformer components and generation logic in core.transformer
-- **Integration:** Demonstrates the power of modular design by combining all previous modules
-"""
-
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01-12 must be complete
@@ -141,8 +122,8 @@ from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, ML
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Module 01: Tensor foundation)
-- `tinytorch.core.activations` (Module 03: GELU activation)
-- `tinytorch.core.layers` (Module 04: Linear layers)
+- `tinytorch.core.activations` (Module 02: GELU activation)
+- `tinytorch.core.layers` (Module 03: Linear layers)
 - `tinytorch.core.embeddings` (Module 11: Embedding layers)
 - `tinytorch.core.attention` (Module 12: MultiHeadAttention)
 
@@ -684,7 +665,7 @@ Parameters:
 - Total MLP: ~2.1M parameters
 
 For comparison:
-- Attention (same embed_dim): ~1.5M parameters
+- Attention (same embed_dim): ~1.05M parameters
 - MLP has MORE parameters → more computational capacity
 ```
 
@@ -1070,10 +1051,28 @@ def test_unit_transformer_block():
     # Check shape preservation
     assert output.shape == (batch_size, seq_len, embed_dim)
 
-    # Test with causal mask (for autoregressive generation)
-    mask = Tensor(np.triu(np.ones((seq_len, seq_len)) * -np.inf, k=1))
+    # Test with causal mask (for autoregressive generation).
+    # Use create_causal_mask, which follows the convention _apply_mask expects
+    # in Module 12: a BINARY mask where 1 = attend and 0 = block, turned into an
+    # additive (1 - mask) * MASK_VALUE. Handing it a pre-built additive -inf mask
+    # instead flattens every allowed score to the same constant, so attention
+    # stops depending on Q.K at all -- and a shape-only assertion never notices.
+    mask = create_causal_mask(seq_len)
     masked_output = block.forward(x, mask)
     assert masked_output.shape == (batch_size, seq_len, embed_dim)
+
+    # Causality is the whole point of the mask, so assert it: changing the last
+    # token must not move any earlier position's output. The perturbation has to
+    # be non-uniform across the embedding, because LayerNorm subtracts the mean
+    # and would erase a constant shift before attention ever sees it.
+    x_perturbed = np.array(x.data, copy=True)
+    x_perturbed[:, -1, :] = rng.standard_normal(embed_dim) * 5
+    perturbed_output = block.forward(Tensor(x_perturbed), mask)
+    assert np.allclose(
+        np.asarray(masked_output.data)[:, :-1, :],
+        np.asarray(perturbed_output.data)[:, :-1, :],
+        atol=1e-5,
+    ), "Causal mask leaked a future token into an earlier position"
 
     # Test parameter counting
     params = block.parameters()
@@ -1213,7 +1212,7 @@ Probs: [0.09, 0.24, 0.67] → Weighted sampling
 
 Temperature = 2.0 (Creative):
 Scaled: [0.5, 1.0, 1.5] → Flatter distribution
-Probs: [0.18, 0.33, 0.49] → More random
+Probs: [0.19, 0.31, 0.51] → More random
 ```
 
 #### Model Scaling and Parameters
@@ -1222,8 +1221,8 @@ Probs: [0.18, 0.33, 0.49] → More random
 GPT Model Size Scaling:
 
 Tiny GPT (our implementation):
-- embed_dim: 64, layers: 2, heads: 4
-- Parameters: ~50K
+- vocab_size: 100, embed_dim: 64, layers: 2, heads: 4
+- Parameters: ~180K
 - Use case: Learning and experimentation
 
 GPT-2 Small:
@@ -1609,7 +1608,7 @@ This integration demo will show:
 - **Temperature effects** on creativity
 """
 
-# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": false}
 def demonstrate_transformer_integration():
     """
     Demonstrate complete transformer pipeline.
@@ -1748,7 +1747,7 @@ Memory Scaling by Component:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": false}
 def analyze_parameter_scaling():
     """📊 Analyze how parameter count scales with model dimensions."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
@@ -1787,12 +1786,12 @@ def analyze_parameter_scaling():
         print()
 
     print("💡 Parameter scaling is roughly quadratic with embedding dimension")
-    print("🚀 Real GPT-3 has 175B parameters, requiring ~350GB memory!")
+    print("🚀 Real GPT-3 has 175B parameters, requiring ~700GB memory in float32 (~350GB in float16)!")
 
 if __name__ == "__main__":
     analyze_parameter_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": false}
 def analyze_attention_memory():
     """📊 Analyze attention memory complexity with sequence length."""
     print("📊 Analyzing Attention Memory Complexity...")
@@ -2025,6 +2024,16 @@ Congratulations! You've built the complete transformer architecture that powers 
 - Built full GPT model with embeddings, positional encoding, and autoregressive generation
 - Discovered attention memory scaling and parameter distribution patterns
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Attention memory scales quadratically**: the score matrix is seq_len^2 per
+  head, which is why context length is expensive and not merely inconvenient
+- **Parameters concentrate in the MLP**: the 4x expansion means the feed-forward
+  block holds roughly two thirds of a transformer block's weights
+- **Pre-norm is a systems decision**: normalizing before each sublayer keeps the
+  residual path clean, so gradients reach early layers without vanishing
+- **Generation is memory-bound, not compute-bound**: each new token re-reads the
+  entire model, which is the problem Module 18 exists to solve
 
 ### Ready for Next Steps
 Your transformer implementation is the capstone of the language modeling pipeline.

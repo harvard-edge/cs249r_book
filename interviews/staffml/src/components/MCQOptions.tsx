@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import clsx from "clsx";
 import { CheckCircle2, XCircle, Circle } from "lucide-react";
 import MarkdownText from "./MarkdownText";

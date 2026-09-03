@@ -33,7 +33,6 @@ import type {
   InterviewConfig,
   InterviewSession,
   InterviewReport,
-  TranscriptEntry,
 } from "@/lib/interview-types";
 
 type Phase = "setup" | "active" | "feedback";

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Terminal, Cpu } from "lucide-react";
+import { Terminal } from "lucide-react";
 import clsx from "clsx";
 import { HARDWARE_SPECS, FORMULAS, HardwareSpec } from "@/lib/hardware";
 

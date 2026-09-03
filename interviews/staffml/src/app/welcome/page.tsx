@@ -24,10 +24,10 @@
  *     is to clear localStorage.
  */
 
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect } from "react";
-import { Target, Crosshair, Shuffle, ArrowRight, Network, Map, Library, BarChart3 } from "lucide-react";
+import { Target, Crosshair, Shuffle, ArrowRight, Map, Library } from "lucide-react";
 import {
   QUESTION_COUNT_FORMATTED,
   TOPIC_COUNT,
@@ -178,57 +178,5 @@ export default function WelcomePage() {
         </div>
       </div>
     </div>
-  );
-}
-
-// ─── ActionCard ───────────────────────────────────────────────
-function ActionCard({
-  icon: Icon,
-  title,
-  body,
-  cta,
-  onClick,
-  accent,
-  primary = false,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  body: string;
-  cta: string;
-  onClick: () => void;
-  accent: "blue" | "amber" | "red" | "purple";
-  primary?: boolean;
-}) {
-  const accentBorder = {
-    blue: "border-accentBlue/30 hover:border-accentBlue/60",
-    amber: "border-accentAmber/30 hover:border-accentAmber/60",
-    red: "border-accentRed/30 hover:border-accentRed/60",
-    purple: "border-accentPurple/30 hover:border-accentPurple/60",
-  }[accent];
-  const accentIcon = {
-    blue: "text-accentBlue",
-    amber: "text-accentAmber",
-    red: "text-accentRed",
-    purple: "text-accentPurple",
-  }[accent];
-  const accentCta = {
-    blue: "text-accentBlue",
-    amber: "text-accentAmber",
-    red: "text-accentRed",
-    purple: "text-accentPurple",
-  }[accent];
-
-  return (
-    <button
-      onClick={onClick}
-      className={`group p-5 rounded-xl border text-left bg-surface/50 hover:bg-surface transition-all focus:outline-none focus:ring-2 focus:ring-accentBlue/40 ${accentBorder} ${primary ? "ring-1 ring-accentBlue/20" : ""}`}
-    >
-      <Icon className={`w-6 h-6 mb-3 ${accentIcon}`} />
-      <h3 className="text-[14px] font-bold text-textPrimary mb-1.5">{title}</h3>
-      <p className="text-[12px] text-textSecondary leading-relaxed mb-3">{body}</p>
-      <span className={`inline-flex items-center gap-1 text-[12px] font-bold ${accentCta}`}>
-        {cta} <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
-      </span>
-    </button>
   );
 }

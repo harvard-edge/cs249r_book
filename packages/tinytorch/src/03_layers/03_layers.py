@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/03_layers/layers_dev.py
+**Learning Side:** You work in modules/03_layers/layers.ipynb
 **Building Side:** Code exports to tinytorch.core.layers
 
 ```python
@@ -57,7 +57,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 - **Integration:** Works seamlessly with tensors and activations for complete neural networks
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.layers
 #| export
 
@@ -189,7 +189,7 @@ Let's build our layer system step by step. We'll implement two essential layer t
 All neural network layers share common functionality: forward pass, parameter management, and callable interface. The base Layer class provides this consistent interface.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": false}
 #| export
 class Layer:
     """
@@ -265,7 +265,7 @@ Input Features     Weight Matrix        Bias Vector      Output Features
 Example: MNIST Digit Recognition
 [32, 784]       @  [784, 10]          + [10]        =  [32, 10]
   ↑                   ↑                    ↑             ↑
-32 images         784 pixels          10 classes    10 probabilities
+32 images         784 pixels          10 classes    10 class scores (logits)
                   to 10 classes       adjustments   per image
 ```
 
@@ -462,6 +462,12 @@ if __name__ == "__main__":
 ### 🧪 Edge Case Tests: Linear Layer
 
 Additional tests for edge cases and error handling.
+
+**What we're testing**: Linear layer behavior at the boundaries -- empty batches,
+single samples, and mismatched input widths
+**Why it matters**: Edge cases are where a layer that "works" quietly stops
+working, usually the first time a real dataset has a ragged final batch
+**Expected**: Correct shapes at every boundary, clear errors on genuine mismatches
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
@@ -505,6 +511,12 @@ if __name__ == "__main__":
 ### 🧪 Parameter Collection Tests: Linear Layer
 
 Tests to ensure Linear layer parameters can be collected for optimization.
+
+**What we're testing**: parameters() returns the weight and bias, in a form the
+optimizer accepts
+**Why it matters**: The optimizer trains exactly what parameters() hands it. A
+parameter left out of that list is a parameter that silently never learns
+**Expected**: Both tensors returned, with the shapes the layer was built with
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
@@ -576,7 +588,7 @@ Dropout Memory Usage:
 ┌─────────────────────────────┐
 │ Input Tensor: X MB          │
 ├─────────────────────────────┤
-│ Random Mask: X/4 MB         │  (boolean mask, 1 byte/element)
+│ Random Mask: X MB           │  (float32 mask, 4 bytes/element)
 ├─────────────────────────────┤
 │ Output Tensor: X MB         │
 └─────────────────────────────┘
@@ -871,7 +883,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Sequential - Layer Container for Composition
+## 🏗️ Sequential: Layer Container for Composition
 
 `Sequential` chains layers together, calling forward() on each in order.
 
@@ -1104,7 +1116,7 @@ Layer Memory Components:
 ├─────────────────────────────────────────────────────────────┤
 │                   TEMPORARY MEMORY                          │
 ├─────────────────────────────────────────────────────────────┤
-│ • Dropout masks: batch_size × features × 1 byte             │
+│ • Dropout masks: batch_size × features × 4 bytes (float32)   │
 │ • Computation buffers for matrix operations                 │
 │ • Total: Peak during forward/backward passes                │
 └─────────────────────────────────────────────────────────────┘
@@ -1131,7 +1143,7 @@ Layer Operation Complexity:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": false}
 def analyze_layer_memory():
     """📊 Analyze memory usage patterns in layer operations."""
     print("📊 Analyzing Layer Memory Usage...")
@@ -1174,7 +1186,7 @@ def analyze_layer_memory():
 if __name__ == "__main__":
     analyze_layer_memory()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": false}
 def analyze_layer_performance():
     """📊 Analyze computational complexity of layer operations."""
     import time
@@ -1457,6 +1469,16 @@ Congratulations! You've built the fundamental building blocks that make neural n
 - Demonstrated manual layer composition for building neural networks
 - Analyzed memory scaling and computational complexity of layer operations
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Parameter memory dominates**: A Linear layer stores in_features x out_features
+  weights; the activations it produces are usually far smaller
+- **Initialization is not cosmetic**: Xavier scaling keeps activation variance
+  stable across depth, which is what makes deep stacks trainable at all
+- **Dropout costs memory, not just compute**: the mask is a full float32 tensor
+  the same shape as the activations it gates
+- **Composition is the whole idea**: layers are interchangeable because they all
+  agree on one contract, forward(x) -> Tensor
 
 ### Ready for Next Steps
 Your layer implementation enables building complete neural networks! The Linear layer provides learnable transformations, manual composition chains them together, and Dropout prevents overfitting.

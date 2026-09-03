@@ -68,6 +68,18 @@ on:
         options:
           - dev
           - main
+      # Target selection
+      build_target:
+        description: '📦 Build target (vol1, vol2, vol3, vol4, all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - vol1
+          - vol2
+          - vol3
+          - vol4
       # Format & OS selection
       build_formats:
         description: '📦 Build formats (all, html, pdf, epub)'
@@ -191,39 +203,69 @@ jobs:
       build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
+      build_target: ${{ steps.config.outputs.build_target }}
       container_registry: ${{ steps.config.outputs.container_registry }}
       container_tag: ${{ steps.config.outputs.container_tag }}
       target: ${{ steps.config.outputs.target }}
 
     steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
       - name: 🎯 Determine build configuration
         id: config
         run: |
           echo "🎯 === BUILD CONFIGURATION ==="
 
           # Determine what to build based on inputs (individual format flags)
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Auto-trigger: build Linux only. Windows validate-dev is temporarily
-            # disabled on push — the Windows container itself is still built by
-            # infra-container-windows.yml on its own schedule/path triggers.
-            # Re-enable by flipping BUILD_WINDOWS back to "true" below.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
             BUILD_HTML="true"
             BUILD_PDF="true"
             BUILD_EPUB="true"
             BUILD_LINUX="true"
             BUILD_WINDOWS="false"
-            TARGET="dev" # For push events, always target dev
-            echo "📊 Trigger: Automatic (dev branch push)"
-            echo "📊 HTML: $BUILD_HTML (mandatory)"
-            echo "📊 PDF: $BUILD_PDF (mandatory)"
-            echo "📊 EPUB: $BUILD_EPUB (mandatory)"
-            echo "📊 Linux: $BUILD_LINUX (mandatory)"
-            echo "📊 Windows: $BUILD_WINDOWS (temporarily disabled on dev push)"
-            echo "📊 Method: container-only"
-            echo "📊 Target: $TARGET"
+            TARGET="dev"
+
+            # Selective auto-detection of modified volume paths
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            echo "📝 Changed files: $CHANGED_FILES"
+
+            HAS_VOL1=false
+            HAS_VOL2=false
+            HAS_VOL3=false
+            HAS_VOL4=false
+            HAS_SHARED=false
+
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              if [[ "$file" =~ ^books/vol1/ ]]; then HAS_VOL1=true; fi
+              if [[ "$file" =~ ^books/vol2/ ]]; then HAS_VOL2=true; fi
+              if [[ "$file" =~ ^books/vol3/ ]]; then HAS_VOL3=true; fi
+              if [[ "$file" =~ ^books/vol4/ ]]; then HAS_VOL4=true; fi
+              if [[ "$file" =~ ^publishing/ || "$file" =~ ^shared/ || "$file" =~ ^\.github/ ]]; then HAS_SHARED=true; fi
+            done <<< "$CHANGED_FILES"
+
+            if [ "$HAS_SHARED" = true ]; then
+              BUILD_TARGET="all"
+            elif [ "$HAS_VOL1" = true ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL3" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol1"
+            elif [ "$HAS_VOL2" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL3" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol2"
+            elif [ "$HAS_VOL3" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol3"
+            elif [ "$HAS_VOL4" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL3" = false ]; then
+              BUILD_TARGET="vol4"
+            else
+              BUILD_TARGET="all"
+            fi
+
+            echo "📊 Trigger: Automatic ($BUILD_TARGET detected)"
           else
             # Manual trigger: respect choices
-            echo "📊 Trigger: Manual workflow dispatch"
+            BUILD_TARGET="${{ inputs.build_target || 'all' }}"
+            echo "📊 Trigger: Manual workflow dispatch ($BUILD_TARGET)"
             BUILD_HTML="false"
             if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "html" ]]; then
               BUILD_HTML="true"
@@ -247,11 +289,6 @@ jobs:
             fi
 
             TARGET="${{ inputs.target }}"
-
-            echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
-            echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
-            echo "📊 Method: container-only"
-            echo "📊 Target: $TARGET"
           fi
 
           # Container configuration
@@ -259,16 +296,18 @@ jobs:
           CONTAINER_TAG="${{ inputs.container_tag || 'latest' }}"
 
           echo "📊 Final Configuration:"
+          echo "  Target Volume: $BUILD_TARGET"
           echo "  HTML: $BUILD_HTML"
           echo "  PDF: $BUILD_PDF"
+          echo "  EPUB: $BUILD_EPUB"
           echo "  Linux: $BUILD_LINUX"
           echo "  Windows: $BUILD_WINDOWS"
-          echo "  Method: container"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           echo "  Target: $TARGET"
 
-          # Set outputs (individual format flags for matrix-driven approach)
+          # Set outputs
+          echo "build_target=$BUILD_TARGET" >> $GITHUB_OUTPUT
           echo "build_html=$BUILD_HTML" >> $GITHUB_OUTPUT
           echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
           echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
@@ -277,7 +316,6 @@ jobs:
           echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
-
 
   # Step 4: Matrix-driven build calls (clean and simple!)
   build-container:
@@ -293,7 +331,7 @@ jobs:
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
       build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
-      build_target: all
+      build_target: ${{ needs.build-config.outputs.build_target }}
       target: ${{ needs.build-config.outputs.target }}
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}

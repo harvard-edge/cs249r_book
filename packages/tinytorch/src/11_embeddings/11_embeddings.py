@@ -40,8 +40,8 @@ Let's transform tokens into intelligence!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/11_embeddings/embeddings_dev.py`
-**Building Side:** Code exports to `tinytorch.text.embeddings`
+**Learning Side:** You work in `modules/11_embeddings/embeddings.ipynb`
+**Building Side:** Code exports to `tinytorch.core.embeddings`
 
 ```python
 # How to use this module:
@@ -55,7 +55,7 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 - **Integration:** Works seamlessly with tokenizers for complete text processing pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.embeddings
 #| export
 
@@ -368,6 +368,25 @@ class EmbeddingBackward(Function):
         return (grad_weight,)
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### Embedding: The Lookup Table
+
+With `EmbeddingBackward` written, the forward direction is almost anticlimactic:
+an embedding layer is a matrix, and a lookup is one row of it.
+
+```
+weight: (vocab_size, embed_dim)      the whole table
+tokens: [7, 3, 7]                    the ids you want
+output: weight[[7, 3, 7]]            three rows, one per token
+```
+
+Two things make it worth its own class. It validates that every id is in range,
+which turns a confusing IndexError deep in NumPy into a message that names the
+offending token. And it sets `requires_grad=True` on the weight, without which
+the backward class you just wrote would never be reached at all.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "embedding-init", "solution": true}
 #| export
 class Embedding:
@@ -402,10 +421,14 @@ class Embedding:
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
 
-        # Xavier initialization for better gradient flow
+        # Xavier initialization for better gradient flow.
+        # requires_grad=True is not decoration: forward() only attaches
+        # EmbeddingBackward when the weight requires grad, so without this flag
+        # the entire backward path below is dead code and the table never learns.
         limit = math.sqrt(6.0 / (vocab_size + embed_dim))
         self.weight = Tensor(
-            rng.uniform(-limit, limit, (vocab_size, embed_dim))
+            rng.uniform(-limit, limit, (vocab_size, embed_dim)),
+            requires_grad=True
         )
         ### END SOLUTION
 
@@ -628,9 +651,13 @@ class PositionalEncoding:
 
         # Initialize position embedding matrix
         # Smaller initialization than token embeddings since these are additive
+        # Learned positions are returned by parameters(), so the optimizer will
+        # try to update them -- they have to carry gradients for that to mean
+        # anything. (Sinusoidal encodings are the opposite: fixed by design.)
         limit = math.sqrt(2.0 / embed_dim)
         self.position_embeddings = Tensor(
-            rng.uniform(-limit, limit, (max_seq_len, embed_dim))
+            rng.uniform(-limit, limit, (max_seq_len, embed_dim)),
+            requires_grad=True
         )
         ### END SOLUTION
 
@@ -692,9 +719,12 @@ class PositionalEncoding:
         # Slice position embeddings for this sequence length using Tensor slicing
         pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim)
 
-        # Reshape to add batch dimension: (1, seq_len, embed_dim)
-        pos_data = pos_embeddings.data[np.newaxis, :, :]
-        pos_embeddings_batched = Tensor(pos_data)
+        # Reshape to add batch dimension: (1, seq_len, embed_dim).
+        # Use Tensor.reshape, not Tensor(pos_embeddings.data[np.newaxis]).
+        # Reading .data and re-wrapping it builds a brand new leaf tensor, which
+        # cuts these positions out of the graph -- the forward output looks
+        # identical and the gradient silently never reaches the parameter.
+        pos_embeddings_batched = pos_embeddings.reshape(1, seq_len, embed_dim)
 
         # Add positional information
         result = x + pos_embeddings_batched
@@ -836,9 +866,9 @@ Mathematical position encoding that creates unique signatures for each position 
 │ │ Function:   sin   cos   sin   cos   sin   cos   sin   cos         │ │
 │ │                                                                   │ │
 │ │ pos=0:    [0.00, 1.00, 0.00, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=1:    [0.84, 0.54, 0.01, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=2:    [0.91,-0.42, 0.02, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
-│ │ pos=3:    [0.14,-0.99, 0.03, 1.00, 0.00, 1.00, 0.00, 1.00]        │ │
+│ │ pos=1:    [0.84, 0.54, 0.10, 1.00, 0.01, 1.00, 0.00, 1.00]        │ │
+│ │ pos=2:    [0.91,-0.42, 0.20, 0.98, 0.02, 1.00, 0.00, 1.00]        │ │
+│ │ pos=3:    [0.14,-0.99, 0.30, 0.96, 0.03, 1.00, 0.00, 1.00]        │ │
 │ │                                                                   │ │
 │ │ Each position gets a unique mathematical "fingerprint"!           │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
@@ -1423,8 +1453,11 @@ def emblayer_forward(self, tokens: Tensor) -> Tensor:
         pos_embeddings = self.pos_encoding[:seq_len]  # Slice using Tensor slicing
 
         # Reshape to add batch dimension
+        # Deliberately a fresh constant tensor: sinusoidal encodings are fixed,
+        # so they take no gradient. The addition below still carries gradients
+        # back through token_embeds, which is the part that learns.
         pos_data = pos_embeddings.data[np.newaxis, :, :]
-        pos_embeddings_batched = Tensor(pos_data)  # Sinusoidal are fixed
+        pos_embeddings_batched = Tensor(pos_data)
 
         output = token_embeds + pos_embeddings_batched
     else:

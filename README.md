@@ -14,8 +14,8 @@
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20I%3A%20Foundations&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20II%3A%20Scaling&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol3-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol3-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/vol4-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/vol4-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
 </p>
 
 <!-- Build Status: Companion Ecosystem & Tools -->
@@ -42,8 +42,8 @@
   <b><a href="https://mlsysbook.ai">📘 Textbook Series</a></b> •
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
   <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
-  <b><a href="https://mlsysbook.ai/vol3/">🟣 Vol III (In Dev)</a></b> •
-  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b>
+  <b><a href="books/vol3/">🟣 Vol III (Notebook)</a></b> •
+  <b><a href="books/vol4/">🌲 Vol IV (Notebook)</a></b>
   <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
@@ -320,7 +320,7 @@ I consider myself a student of my own learning.
 
 Whenever I want to understand an emerging or complex systems discipline, I learn it by trying to teach and build it from first principles. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
 
-This repository—the books, software frameworks, and hardware kits—is not a commercial publishing treadmill. It is my open research instrument. It is how I clarify my own thinking for research, benchmarking programs, and classroom teaching. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
+This repository—the books, software frameworks, and hardware kits—is my open research and teaching instrument. It is how I clarify my own thinking for research, benchmarking programs (like MLPerf), and classroom instruction. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
 
 </details>
 

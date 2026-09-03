@@ -92,7 +92,7 @@ This module imports directly from the TinyTorch package (`from tinytorch.core.*`
 If you see import errors, make sure you've run `tito module complete` for each previous module.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
 #| default_exp core.losses
 #| export
 
@@ -109,7 +109,7 @@ from tinytorch.core.layers import Linear
 EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
@@ -236,7 +236,7 @@ Naive softmax can explode with large numbers:
 ```
 Naive approach:
   logits = [100, 200, 300]
-  exp(300) = 1.97 × 10^130  ← This breaks computers!
+  exp(300) = 1.94 × 10^130  ← This breaks computers!
 
 Stable approach:
   max_logit = 300
@@ -530,21 +530,21 @@ Scenario: Image Classification (3 classes: cat, dog, bird)
 
 Case 1: Correct and Confident
 Model Output (logits): [5.0, 1.0, 0.1]  ← Very confident about "cat"
-After Softmax:        [0.95, 0.047, 0.003]
+After Softmax:        [0.975, 0.018, 0.007]
 True Label:           cat (class 0)
-Loss: -log(0.95) = 0.05  ← Very low loss ✅
+Loss: -log(0.975) = 0.03  ← Very low loss ✅
 
 Case 2: Correct but Uncertain
 Model Output:         [1.1, 1.0, 0.9]  ← Uncertain between classes
-After Softmax:        [0.4, 0.33, 0.27]
+After Softmax:        [0.367, 0.332, 0.301]
 True Label:           cat (class 0)
-Loss: -log(0.4) = 0.92  ← Higher loss (uncertainty penalized)
+Loss: -log(0.367) = 1.00  ← Higher loss (uncertainty penalized)
 
 Case 3: Wrong and Confident
 Model Output:         [0.1, 5.0, 1.0]  ← Very confident about "dog"
-After Softmax:        [0.003, 0.95, 0.047]
+After Softmax:        [0.007, 0.975, 0.018]
 True Label:           cat (class 0)
-Loss: -log(0.003) = 5.8  ← Very high loss ❌
+Loss: -log(0.007) = 4.93  ← Very high loss ❌
 ```
 
 ### Cross-Entropy's Learning Signal
@@ -983,7 +983,7 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": false}
 def analyze_loss_behaviors():
     """
     📊 Compare how different loss functions behave with various prediction patterns.
@@ -1027,7 +1027,7 @@ def analyze_loss_behaviors():
     return mse.data, ce.data, bce.data
 
 
-# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": false}
 def analyze_loss_sensitivity():
     """
     📊 Analyze how sensitive each loss function is to prediction errors.
@@ -1155,7 +1155,7 @@ Memory: 3*B*sizeof(float)            │ log + index
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": false}
 def analyze_numerical_stability():
     """
     📊 Demonstrate why numerical stability matters in loss computation.
@@ -1193,7 +1193,7 @@ def analyze_numerical_stability():
     print("   With it: We can handle arbitrarily large logits safely")
 
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": false}
 def analyze_loss_memory():
     """
     📊 Analyze memory usage patterns of different loss functions.
@@ -1298,7 +1298,7 @@ Common Production Optimizations:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": false}
 def analyze_production_patterns():
     """
     📊 Analyze loss function patterns in production ML systems.
@@ -1735,6 +1735,11 @@ Congratulations! You've built the measurement system that enables all machine le
 - **Numerical stability**: Log-sum-exp trick prevents overflow with large logits
 - **Computational cost**: CE is C times more expensive than MSE due to softmax
 - **Production patterns**: Hierarchical softmax and sampled softmax for large vocabularies
+
+### Ready for Next Steps
+Your loss functions turn predictions into a single number to minimize. That
+number is the only signal the optimizer ever sees, so getting it numerically
+right matters more than getting it fast.
 
 Export with: `tito module complete 04`
 

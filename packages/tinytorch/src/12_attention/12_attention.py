@@ -44,7 +44,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/12_attention/attention_dev.py`
+**Learning Side:** You work in `modules/12_attention/attention.ipynb`
 **Building Side:** Code exports to `tinytorch.core.attention`
 
 ```python
@@ -59,7 +59,7 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 - **Integration:** Works seamlessly with embeddings for complete sequence processing pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| export
 
 import numpy as np
@@ -83,7 +83,7 @@ MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0
 **Prerequisites**: Modules 01-11 must be complete
 - Module 01: Tensor (core data structure)
 - Module 03: Layers (Linear for projections)
-- Module 04: Activations (Softmax for attention weights)
+- Module 02: Activations (Softmax for attention weights)
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
@@ -110,7 +110,7 @@ that powers GPT, BERT, and all modern transformer architectures.
 
 # %% [markdown]
 """
-## 💡 Introduction - What is Attention?
+## 💡 Introduction: What is Attention?
 
 Attention is the mechanism that allows models to focus on relevant parts of the input when processing sequences. Think of it as a search engine inside your neural network - given a query, attention finds the most relevant keys and retrieves their associated values.
 
@@ -162,7 +162,7 @@ This simple formula powers GPT, BERT, and virtually every modern language model.
 
 # %% [markdown]
 """
-## 📐 Foundations - Attention Mathematics
+## 📐 Foundations: Attention Mathematics
 
 ### The Three Components Visualized
 
@@ -195,17 +195,17 @@ Values: "What actual content can I retrieve?"
 
 ```
 Step 1: Compute Similarity Scores
-Q · K₁ = 0.64    Q · K₂ = 0.81    Q · K₃ = 0.35    Q · K₄ = 0.42
+Q · K₁ = 0.69    Q · K₂ = 0.81    Q · K₃ = 0.41    Q · K₄ = 0.41
   ↓               ↓               ↓               ↓
 Raw similarity scores (higher = more relevant)
 
 Step 2: Scale and Normalize
-Scores / √d_k = [0.32, 0.41, 0.18, 0.21]  ← Scale for stability
+Scores / √d_k = [0.345, 0.405, 0.205, 0.205]  ← Scale for stability
      ↓
-Softmax = [0.20, 0.45, 0.15, 0.20]        ← Convert to probabilities
+Softmax = [0.26, 0.28, 0.23, 0.23]        ← Convert to probabilities
 
 Step 3: Weighted Combination
-Output = 0.20×V₁ + 0.45×V₂ + 0.15×V₃ + 0.20×V₄
+Output = 0.26×V₁ + 0.28×V₂ + 0.23×V₃ + 0.23×V₄
 ```
 
 ### Dimensions and Shapes
@@ -1233,7 +1233,7 @@ The quadratic wall is why long-context AI is an active research frontier, not a 
 
 # %% [markdown]
 """
-## 🔧 Integration - Attention Patterns in Action
+## 🔧 Integration: Attention Patterns in Action
 
 Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
 

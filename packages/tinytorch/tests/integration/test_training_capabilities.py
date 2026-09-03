@@ -100,20 +100,19 @@ def test_linear_regression():
         if epoch == 99:
             final_loss = float(loss.data)
 
-        # Backward (if autograd is available)
-        try:
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        except:
-            # If autograd not available, skip gradient update
-            pass
+        # Backward. Autograd IS available -- swallowing an exception here would
+        # turn "the network never trained" into a silently passing test.
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
     # Check if loss decreased
-    if initial_loss and final_loss:
-        improved = final_loss < initial_loss * 0.5  # Loss should drop by at least 50%
-        return improved
-    return False
+    assert initial_loss is not None and final_loss is not None, \
+        "Training loop never recorded a loss"
+    assert final_loss < initial_loss * 0.5, (
+        f"Linear regression did not converge: loss {initial_loss:.4f} -> "
+        f"{final_loss:.4f}, expected at least a 50% drop"
+    )
 
 
 def test_xor_learning():
@@ -149,19 +148,19 @@ def test_xor_learning():
         if epoch == 499:
             final_loss = float(loss.data)
 
-        try:
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        except:
-            pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
     # Check convergence
     if initial_loss and final_loss:
         # For XOR, we should get very low loss if learning works
         converged = final_loss < 0.1  # Should be close to 0
-        return converged
-    return False
+        assert converged, (
+            f"XOR did not converge: final loss {final_loss:.4f}"
+        )
+        return
+    raise AssertionError("Training loop never recorded a loss")
 
 
 def test_multiclass_classification():
@@ -213,18 +212,19 @@ def test_multiclass_classification():
         if epoch == 199:
             final_loss = float(loss.data)
 
-        try:
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        except:
-            pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
     # Check if loss decreased significantly
     if initial_loss and final_loss:
         improved = final_loss < initial_loss * 0.3
-        return improved
-    return False
+        assert improved, (
+            f"Multiclass classification did not converge: loss "
+            f"{initial_loss:.4f} -> {final_loss:.4f}"
+        )
+        return
+    raise AssertionError("Training loop never recorded a loss")
 
 
 def test_gradient_flow():
@@ -253,23 +253,22 @@ def test_gradient_flow():
 
     criterion = MeanSquaredError()
 
-    # Forward and backward
-    try:
-        y_pred = model(X)
-        loss = criterion(y_pred, y)
-        loss.backward()
+    # Constructing the optimizer is what flips requires_grad on the parameters
+    # (see SGD.__init__ in Module 07). Without it every weight.grad stays None
+    # and this test silently measures nothing.
+    SGD(model.parameters(), lr=0.01)
 
-        # Check if gradients exist in all layers
-        gradients_exist = True
-        for layer in model.layers:
-            if hasattr(layer, 'weight'):
-                if layer.weight.grad is None:
-                    gradients_exist = False
-                    break
+    # Forward and backward. Exceptions propagate: a crash here is a failure.
+    y_pred = model(X)
+    loss = criterion(y_pred, y)
+    loss.backward()
 
-        return gradients_exist
-    except:
-        return False
+    for i, layer in enumerate(model.layers):
+        if hasattr(layer, 'weight'):
+            assert layer.weight.grad is not None, (
+                f"No gradient reached layer {i} of a {depth}-layer network -- "
+                f"the graph is severed somewhere at or above it"
+            )
 
 
 def test_optimizer_updates():
@@ -298,9 +297,11 @@ def test_optimizer_updates():
 
         # Check if weights changed
         weights_changed = not np.allclose(initial_weights, model.weight.data)
-        return weights_changed
-    except:
-        return False
+        assert weights_changed, (
+            "Optimizer.step() did not change any parameter"
+        )
+    except Exception as e:
+        raise AssertionError(f"Optimizer update failed: {e}") from e
 
 
 def test_learning_rate_effect():
@@ -324,8 +325,8 @@ def test_learning_rate_effect():
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            except:
-                pass
+            except Exception as e:
+                raise AssertionError(f"Training step failed: {e}") from e
 
         return losses[-1] if losses else float('inf')
 
@@ -335,8 +336,10 @@ def test_learning_rate_effect():
     loss_large_lr = train_with_lr(0.1)
 
     # Medium LR should converge better than too small or too large
-    optimal_lr = (loss_medium_lr < loss_small_lr) or (loss_medium_lr < loss_large_lr)
-    return optimal_lr
+    assert (loss_medium_lr < loss_small_lr) or (loss_medium_lr < loss_large_lr), (
+        f"No learning rate advantage found: lr=0.001 -> {loss_small_lr:.4f}, "
+        f"lr=0.01 -> {loss_medium_lr:.4f}, lr=0.1 -> {loss_large_lr:.4f}"
+    )
 
 
 def test_adam_vs_sgd():
@@ -366,8 +369,8 @@ def test_adam_vs_sgd():
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            except:
-                pass
+            except Exception as e:
+                raise AssertionError(f"Training step failed: {e}") from e
 
         return losses[-1] if losses else float('inf')
 
@@ -375,8 +378,10 @@ def test_adam_vs_sgd():
     adam_loss = train_with_optimizer(Adam)
 
     # Adam should generally converge to lower loss
-    adam_better = adam_loss < sgd_loss * 1.2  # Allow some tolerance
-    return adam_better
+    assert adam_loss < sgd_loss * 1.2, (
+        f"Adam converged much worse than SGD: Adam {adam_loss:.4f} vs "
+        f"SGD {sgd_loss:.4f} (allowed up to 1.2x)"
+    )
 
 
 def run_all_training_tests():

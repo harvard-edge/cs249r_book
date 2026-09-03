@@ -133,7 +133,6 @@ def check_version_compatibility(installed_version: str, version_spec: Optional[s
         return True
     except Exception:
         # Invalid version spec, skip
-        return True
 
 
 def check_package_functionality(package_name: str, import_name: str) -> Tuple[bool, str]:

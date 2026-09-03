@@ -221,6 +221,54 @@ def pytest_configure(config):
                 f"{'='*70}\n"
             )
 
+# =============================================================================
+# Deterministic RNG: make test outcomes independent of execution order
+# =============================================================================
+# Nineteen tinytorch modules carry a module-level `rng = np.random.default_rng(7)`
+# that layer initialization draws from. Because the generator is shared and
+# mutable, how a layer initializes depends on how many random draws happened
+# earlier in the session -- so a test can pass alone and fail inside the suite.
+#
+# Two real tests were affected before this fixture existed: test_xor_learning
+# converged in isolation and landed in a local minimum under the full suite, and
+# test_deep_network_gradient_chain drew an initialization that killed every ReLU
+# and reported an exactly-zero gradient. Both created a local `rng` believing it
+# seeded Linear; it did not, because Linear reads its own module global.
+#
+# Reseeding every module generator before each test makes initialization
+# reproducible and the suite order-independent.
+
+_RNG_SEED = 7
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_rngs():
+    """Reseed every tinytorch module-level RNG before each test."""
+    try:
+        import importlib
+        import pkgutil
+        import numpy as _np
+        import tinytorch as _tt
+    except Exception:  # package not built yet; nothing to reseed
+        yield
+        return
+
+    targets = []
+    for info in pkgutil.walk_packages(_tt.__path__, "tinytorch."):
+        try:
+            mod = importlib.import_module(info.name)
+        except Exception:
+            continue
+        if isinstance(getattr(mod, "rng", None), _np.random.Generator):
+            targets.append(mod)
+
+    for mod in targets:
+        mod.rng = _np.random.default_rng(_RNG_SEED)
+    _np.random.seed(_RNG_SEED)
+
+    yield
+
+
 # Import test utilities to make them available
 try:
     from test_utils import setup_integration_test, create_test_tensor, assert_tensors_close

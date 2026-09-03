@@ -40,12 +40,12 @@ Let's build the measurement foundation for ML systems optimization!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/14_profiling/profiling_dev.py
+**Learning Side:** You work in modules/14_profiling/profiling.ipynb
 **Building Side:** Code exports to tinytorch.perf.profiling
 
 ```python
 # Final package structure:
-from tinytorch.perf.profiling import Profiler, profile_forward_pass, profile_backward_pass
+from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_distribution
 ```
 
 **Why this matters:**
@@ -55,7 +55,7 @@ from tinytorch.perf.profiling import Profiler, profile_forward_pass, profile_bac
 - **Integration:** Works with any model built using TinyTorch components
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.profiling
 #| export
 
@@ -375,7 +375,7 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
     EXAMPLE:
     >>> conv = MockConv2d(in_channels=3, out_channels=16, kernel_size=3)
     >>> _count_conv_flops(conv, (1, 3, 32, 32))
-    13824000
+    777600
 
     HINTS:
     - The output-shape formula is the same one Module 09 derived
@@ -762,6 +762,26 @@ def _estimate_optimizer_memory(gradient_memory_mb: float) -> Dict[str, float]:
         'adamw': gradient_memory_mb * 2,
     }
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### Profiler: The Object That Ties the Measurements Together
+
+Every helper above answers one narrow question: how many parameters, how many
+FLOPs, how much memory, how long. The Profiler is the object that runs them
+against a real model and returns one report.
+
+```
+count parameters  ─┐
+count FLOPs       ─┼─> Profiler.profile(model, input) ─> a single report dict
+measure memory    ─┤
+measure latency   ─┘
+```
+
+Note what it does NOT do: it never estimates a number it could measure, and it
+never reports a measurement without the run count behind it. That distinction is
+the whole subject of Module 19.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "profiler_class", "solution": true}
 #| export
@@ -1173,7 +1193,7 @@ In production ML engineering, you often need quick insights without setting up f
 These functions wrap our core Profiler class with convenience interfaces used in real ML workflows for rapid iteration and debugging.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "helper_quick_profile", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "helper_quick_profile", "solution": false}
 #| export
 def quick_profile(model, input_tensor, profiler=None):
     """
@@ -1212,7 +1232,7 @@ def quick_profile(model, input_tensor, profiler=None):
 
     return profile
 
-# %% nbgrader={"grade": false, "grade_id": "helper_weight_distribution", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "helper_weight_distribution", "solution": false}
 #| export
 def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     """
@@ -2270,7 +2290,7 @@ Insight: This workload is memory-bound -> Optimize data movement, not compute!
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": false}
 def analyze_model_scaling():
     """📊 Analyze how model performance scales with size."""
     print("📊 Analyzing Model Scaling Characteristics...")
@@ -2401,7 +2421,7 @@ Optimization Strategy:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "optimization_insights", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "optimization_insights", "solution": false}
 def benchmark_operation_efficiency():
     """📊 Compare efficiency of different operations for optimization guidance."""
     print("📊 Benchmarking Operation Efficiency...")
@@ -2772,6 +2792,8 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 ### Ready for Next Steps
 Your profiling implementation provides the measurement foundation for all optimization work.
 Export with: `tito module complete 14`
+
+**Next**: Module 15 will add quantization, the first optimization your profiler will let you measure honestly!
 
 You can't optimize what you can't measure — and now you can measure everything.
 """
