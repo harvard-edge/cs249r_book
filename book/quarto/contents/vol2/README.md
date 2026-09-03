@@ -7,7 +7,7 @@
 ---
 
 > [!CAUTION]
-> **This volume is under active development.** I am writing and revising chapters continuously. Diagrams, figures, and cross-references are being created and updated throughout. What you see here is a work in progress, not a finished product. I share it openly because I believe in transparent development. Expect the content to evolve significantly before the Summer 2026 release.
+> **This volume is under active development.** I am writing and revising chapters continuously. Diagrams, figures, and cross-references are being created and updated throughout. What you see here is a work in progress, not a finished product. I share it openly because I believe in transparent development. Expect the content to evolve significantly before the Summer 2027 release.
 
 ## About This Volume
 
