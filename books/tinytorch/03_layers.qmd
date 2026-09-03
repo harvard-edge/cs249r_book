@@ -26,37 +26,44 @@ Consider a single linear transformation without bias computing the output vector
 
 $$y_j = \sum_{i=1}^{d_{\text{in}}} x_i W_{i, j}$$
 
-Assume the input features $x_i$ are independent and identically distributed with zero mean ($\mathbb{E}[x_i] = 0$) and unit variance ($\text{Var}(x_i) = 1$). If we initialize the weight matrix elements $W_{i, j}$ from a standard normal distribution $\mathcal{N}(0, 1)$ with $\mathbb{E}[W_{i, j}] = 0$ and $\text{Var}(W_{i, j}) = 1$, the variance of each output element $y_j$ is given by:
+Assume the input features $x_i$ are independent and identically distributed with zero mean ($\mathbb{E}[x_i] = 0$) and unit variance ($\text{Var}(x_i) = \sigma_x^2 = 1$). If we initialize the weight matrix elements $W_{i, j}$ from a standard normal distribution $\mathcal{N}(0, \sigma_W^2)$ with $\mathbb{E}[W_{i, j}] = 0$, the variance of each output element $y_j$ is given by:
 
 $$\text{Var}(y_j) = \text{Var}\left(\sum_{i=1}^{d_{\text{in}}} x_i W_{i, j}\right) = \sum_{i=1}^{d_{\text{in}}} \text{Var}(x_i W_{i, j})$$
 
-Because $x_i$ and $W_{i, j}$ are independent zero-mean variables, $\text{Var}(x_i W_{i, j}) = \text{Var}(x_i) \cdot \text{Var}(W_{i, j}) = 1 \times 1 = 1$. Summing across all $d_{\text{in}}$ incoming connections yields:
+Since $x_i$ and $W_{i, j}$ are independent zero-mean random variables:
 
-$$\text{Var}(y_j) = d_{\text{in}} \cdot \text{Var}(x) \cdot \text{Var}(W) = d_{\text{in}} \times 1 = d_{\text{in}}$$
+$$\text{Var}(x_i W_{i, j}) = \mathbb{E}[(x_i W_{i, j})^2] - (\mathbb{E}[x_i W_{i, j}])^2 = \mathbb{E}[x_i^2]\mathbb{E}[W_{i, j}^2] - 0 = \text{Var}(x_i) \cdot \text{Var}(W_{i, j}) = \sigma_x^2 \sigma_W^2$$
+
+Summing across all $d_{\text{in}}$ incoming connections yields:
+
+$$\text{Var}(y_j) = d_{\text{in}} \cdot \sigma_x^2 \cdot \sigma_W^2$$
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  The Variance Explosion Trap                                │
+│  The Variance Explosion Trap (Unscaled Normal Noise)        │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 0: Input Variance = 1.0                              │
 │  Layer 1 (d_in = 512): Output Variance = 512                │
 │  Layer 2 (d_in = 512): Output Variance = 512 * 512 = 262,144│
 │  Layer 3 (d_in = 512): Output Variance = 1.34 * 10^8        │
-│  => Activations overflow IEEE 754 float32 in ~5 layers!     │
+│  Layer 5 (d_in = 512): Output Variance = 3.52 * 10^13       │
+│  => Activations overflow IEEE 754 float32 in ~6 layers!     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-If an architecture has hidden dimension $d_{\text{in}} = 512$, passing an input through just three uncalibrated layers causes activation variance to explode by a factor of $512^3 \approx 1.34 \times 10^8$, overflowing floating-point registers.
+If an architecture has hidden dimension $d_{\text{in}} = 512$ and uses unscaled $\mathcal{N}(0, 1)$ weights, passing an input through just three layers causes activation variance to explode by a factor of $512^3 \approx 1.34 \times 10^8$. In six layers, values exceed the dynamic range of IEEE 754 floating-point numbers ($> 3.4 \times 10^{38}$), crashing execution with overflow.[^hardware-saturation]
+
+[^hardware-saturation]: When activation magnitudes explode, hardware registers saturate to $\pm \infty$. When they vanish ($< 1.17 \times 10^{-38}$), floating-point hardware switches to subnormal representation, forcing CPU arithmetic pipelines into multi-cycle microcode traps that degrade compute throughput by up to 100× before collapsing to `0.0`.
 
 ::: {.callout-principle}
 ## The Law of Variance Conservation
 
-To preserve signal magnitude across consecutive linear layers ($\text{Var}(y) = \text{Var}(x)$), the variance of the weight initialization must be inversely proportional to the number of input connections ($\text{fan\_in}$):
+To preserve signal magnitude across consecutive linear layers ($\text{Var}(y) = \text{Var}(x) = 1$), the variance of the weight initialization must be inversely proportional to the number of input connections ($\text{fan\_in}$):
 
 $$\text{Var}(W) = \frac{1}{\text{fan\_in}} \implies \sigma_W = \sqrt{\frac{1}{\text{fan\_in}}}$$
 
-- **LeCun Initialization**: $\sigma = \sqrt{\frac{1}{d_{\text{in}}}}$ (optimal for linear and zero-centered activations like Tanh).
-- **He (Kaiming) Initialization**: $\sigma = \sqrt{\frac{2}{d_{\text{in}}}}$ (multiplies variance by 2 to compensate for ReLU zeroing out half of the activation distribution).
+- **LeCun Initialization**: $\sigma = \sqrt{\frac{1}{d_{\text{in}}}}$ (optimal for linear projections and zero-centered activations like Tanh).
+- **He (Kaiming) Initialization**: $\sigma = \sqrt{\frac{2}{d_{\text{in}}}}$. Because ReLU zeroes out the negative half-plane ($P(x \le 0) = 0.5$), it halves the activation variance: $\mathbb{E}[\text{ReLU}(y)^2] = \frac{1}{2}\text{Var}(y)$. To preserve unit variance across ReLU layers, the weight variance must be doubled to $\text{Var}(W) = \frac{2}{d_{\text{in}}}$.
 :::
 
 ---
@@ -66,7 +73,6 @@ $$\text{Var}(W) = \frac{1}{\text{fan\_in}} \implies \sigma_W = \sqrt{\frac{1}{\t
 In TinyTorch, all neural network components inherit from a common `Layer` base class that establishes the framework's execution and parameter tracking protocol.
 
 ```python
-# Listing 3.1: The Layer Base Class
 from tinytorch.core.tensor import Tensor
 from typing import List
 
@@ -94,7 +100,6 @@ The `Linear` layer (also termed a *Dense* or *Fully Connected* layer) encapsulat
 2. **Bias Vector ($\mathbf{b}$)** of shape $(d_{\text{out}},)$, initialized to zeros.
 
 ```python
-# Listing 3.2: The Stateful Linear Layer Implementation
 import numpy as np
 
 class Linear(Layer):
@@ -163,19 +168,24 @@ Deep neural networks with millions of parameters are susceptible to **co-adaptat
 ::: {#fig-dropout-architecture}
 ![](../../packages/tinytorch/quarto/assets/images/diagrams/03_layers-diag-1.svg)
 
-**Figure 3.1: Standard vs. Inverted Dropout Execution.** During training, a random binary mask zeroes activations with probability $p$. Inverted Dropout scales surviving units by $\frac{1}{1-p}$, ensuring test-time evaluation requires zero arithmetic scaling.
+Standard vs. Inverted Dropout Execution. During training, a random binary mask zeroes activations with probability $p$. Inverted Dropout scales surviving units by $\frac{1}{1-p}$, ensuring test-time evaluation requires zero arithmetic scaling.
 :::
 
-### The Inverted Dropout Invariant
+### The Inverted Dropout Systems Invariant
 
-In classical dropout, activations are multiplied by a Bernoulli mask during training, which scales the expected output by $(1 - p)$. To correct for this at inference time, classical implementations had to multiply all weights by $(1 - p)$ during evaluation.
+In classical dropout (Hinton et al., 2012), activations were multiplied by a Bernoulli mask during training, which reduced the expected activation sum by a factor of $(1 - p)$. To compensate, test-time inference required multiplying all model weights or activations by $(1 - p)$.
 
-Modern frameworks use **Inverted Dropout**: by scaling the surviving activations by $\frac{1}{1 - p}$ *during the forward training step*, the mathematical expectation is preserved immediately:
+In production ML systems, modifying weights or executing scaling operations during inference creates severe systems overhead:
+1. **Quantization Invalidation**: Multiplying pre-quantized INT8 weights by arbitrary floating-point factors destroys quantization scales.
+2. **Inference Latency**: Launching an element-wise scaling kernel at every layer wastes memory bandwidth on latency-critical edge devices.
+
+Modern frameworks resolve this by using **Inverted Dropout**: by scaling surviving activations by $\frac{1}{1 - p}$ *during training*, the mathematical expectation is preserved immediately:
 
 $$\mathbb{E}[y_{\text{train}}] = \mathbb{E}\left[\frac{x \cdot \text{mask}}{1 - p}\right] = \frac{x \cdot (1 - p)}{1 - p} = x = \mathbb{E}[y_{\text{eval}}]$$
 
+During inference, evaluation mode becomes a **pure cost-free identity pass** ($y = x$), requiring zero kernel launches and zero memory operations.
+
 ```python
-# Listing 3.3: Inverted Dropout Implementation with State Modes
 class Dropout(Layer):
     """
     Inverted Dropout regularization layer.
@@ -223,14 +233,13 @@ If a model is evaluated in `.train()` mode, randomly dropping 50% of activations
 
 ## Composition: The Sequential Container
 
-With `Linear`, `Dropout`, and our activation suite (`ReLU`, `GELU`, `Softmax` from Chapter 3), we can now assemble multi-layer neural network architectures.
+With `Linear`, `Dropout`, and our activation suite (`ReLU`, `GELU`, `Softmax` from the preceding chapter), we can now assemble multi-layer neural network architectures.
 
 The `Sequential` container encapsulates an ordered list of layers, executing them in sequence:
 
 $$\mathbf{x} \longrightarrow \text{Layer}_1 \longrightarrow \text{Layer}_2 \longrightarrow \dots \longrightarrow \text{Layer}_K \longrightarrow \mathbf{y}$$
 
 ```python
-# Listing 3.4: The Sequential Model Container
 class Sequential(Layer):
     """Sequential container executing layers in linear succession."""
 
@@ -273,7 +282,6 @@ class Sequential(Layer):
 We can now construct a 3-layer Multi-Layer Perceptron (MLP) for digit classification (such as MNIST: 784 input pixels, 128 hidden units, 10 output classes) and execute a forward pass:
 
 ```python
-# Listing 3.5: Constructing and Executing a Multi-Layer Network
 from tinytorch.core.activations import ReLU, Softmax
 
 # Construct the multi-layer architecture
@@ -309,7 +317,7 @@ $$\text{Memory} = \text{Total Parameters} \times \text{sizeof}(\text{dtype})$$
 ::: {.callout-checkpoint}
 ## Check Your Understanding: Calculating Network Weight Footprint
 
-Consider the 3-layer MLP constructed in Listing 3.5:
+Consider the 3-layer MLP constructed above:
 - Layer 1: `Linear(784, 128)`
 - Layer 2: `Linear(128, 64)`
 - Layer 3: `Linear(64, 10)`
@@ -327,6 +335,32 @@ Consider the 3-layer MLP constructed in Listing 3.5:
 
 ---
 
+## Production Reality: How PyTorch Implements Linear Layers and Fast Dropout
+
+In production frameworks like PyTorch, layers and regularization are mapped directly to high-throughput C++ and CUDA libraries.[^philox-prng]
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PyTorch Layer & Regularization Systems Pipeline            │
+├─────────────────────────────────────────────────────────────┤
+│  1. nn.Linear Execution: at::linear -> at::addmm            │
+│     • CPU: Intel MKL / OpenBLAS cblas_sgemm                 │
+│     • GPU: NVIDIA cuBLAS cublasGemmEx / CUTLASS kernels     │
+├─────────────────────────────────────────────────────────────┤
+│  2. nn.Dropout Vectorization: at::native::dropout_cuda      │
+│     • Hardware Philox-4x32-10 PRNG in GPU registers         │
+│     • 128-bit vector instructions (float4 mask apply)       │
+│     • Test-Time Zero-Overhead Identity Bypass               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **`torch.nn.Linear`**: In C++ (`aten/src/ATen/native/Linear.cpp`), `at::linear` dispatches directly to `at::addmm` ($\mathbf{Y} = \beta \mathbf{b} + \alpha \mathbf{X} \mathbf{W}$). On CPU, it invokes multi-threaded BLAS routines (`cblas_sgemm`); on GPU, it calls cuBLAS or CUTLASS to stream matrix blocks across GPU Tensor Cores.
+2. **Vectorized Dropout with Philox PRNG**: Rather than generating random numbers in slow DRAM arrays, PyTorch's CUDA dropout kernel uses the **Philox-4x32-10** counter-based pseudo-random number generator. Each thread computes 4 random uniform floats entirely within hardware registers, masks 4 `float32` numbers simultaneously using 128-bit vector memory instructions (`float4`), and scales surviving floats by $\frac{1}{1-p}$ in a single clock cycle.
+
+[^philox-prng]: Traditional linear congruential PRNGs maintain sequential state in memory, serializing parallel GPU threads. The Philox counter-based PRNG (Salmon et al., 2011) evaluates a stateless cryptographic bijection using only thread IDs and clock cycles as counter inputs, allowing millions of CUDA threads to generate independent, un-correlated random masks in parallel without memory locks.
+
+---
+
 ## Summary
 
 In this chapter, we built the third tier of TinyTorch: stateful layers, parameter management, and multi-layer network composition. We proved why uncalibrated random weight initialization causes exponential activation explosion, and derived the LeCun and He variance conservation scaling laws ($1/\sqrt{\text{fan\_in}}$ vs $\sqrt{2/\text{fan\_in}}$) that stabilize signal flow through deep linear layers.
@@ -336,7 +370,7 @@ We implemented the `Linear` layer encapsulating trainable weight and bias tensor
 ::: {.callout-takeaways}
 ## Chapter Takeaways
 
-- **Variance Conservation**: Initializing weights with standard normal noise explodes activation magnitude; scaling variance by $1/\text{fan\_in}$ keeps signal variance constant across layers.
+- **Variance Conservation**: Initializing weights with standard normal noise explodes activation magnitude; scaling variance by $1/\text{fan\_in}$ (LeCun) or $2/\text{fan\_in}$ (He) keeps signal variance constant across layers.
 - **Stateful Layer Encapsulation**: Unlike stateless activations, the `Linear` layer manages trainable `Tensor` parameter buffers registered via the `parameters()` protocol.
 - **Inverted Dropout Invariant**: Scaling training activations by $\frac{1}{1-p}$ maintains the mathematical expectation $\mathbb{E}[y] = x$, allowing evaluation mode to run as a cost-free identity pass.
 - **Execution Mode Switching**: Models must maintain explicit `.train()` and `.eval()` state flags to toggle stochastic behavior between training and evaluation.
@@ -346,5 +380,5 @@ We implemented the `Linear` layer encapsulating trainable weight and bias tensor
 ::: {.callout-chapter-connection}
 ## Chapter Connection: Measuring Model Error
 
-Our framework can now construct and execute multi-layer neural networks, but how do we quantify how well a network's predictions match ground-truth labels? In **Chapter 5 (Objective Functions and Loss Formulations)**, we build objective loss functions (MSE, Binary Cross-Entropy, and Softmax Cross-Entropy), analyze numerical stability in log-space, and measure forward prediction error.
+Our framework can now construct and execute multi-layer neural networks, but how do we quantify how well a network's predictions match ground-truth labels? In **Objective Functions and Loss Formulations**, we build objective loss functions (MSE, Binary Cross-Entropy, and Softmax Cross-Entropy), analyze numerical stability in log-space, and measure forward prediction error.
 :::

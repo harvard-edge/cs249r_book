@@ -201,58 +201,86 @@ class AdamW(Optimizer):
 
 ## Optimizer Memory Footprint Accounting
 
-In large-scale systems, the optimizer state is often the single largest consumer of GPU VRAM.
+In large-scale training systems, optimizer state buffers are often the single largest consumer of GPU VRAM, dwarfing the model parameters themselves.
 
-For a model with $N$ parameters in standard IEEE 754 32-bit float (`float32` = 4 bytes):
+### The 16-Byte per Parameter Law
 
-| Component | Storage Type | Bytes per Parameter | Total (LLaMA-7B) |
-| :--- | :--- | :---: | :---: |
-| **Model Weights** ($\mathbf{\theta}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| **Gradients** ($\mathbf{g}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| **AdamW First Moment** ($\mathbf{m}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| **AdamW Second Moment** ($\mathbf{v}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
-| **Total Training Memory** | | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
+For a model with $N$ parameters, let us calculate the exact memory required to store parameters, gradients, and optimizer states:
+
+| Precision Regime | Component | Precision & Type | Bytes / Param | 7B Model Footprint |
+| :--- | :--- | :--- | :---: | :---: |
+| **Pure FP32 Training** | Model Weights ($\mathbf{\theta}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | Gradients ($\mathbf{g}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | AdamW 1st Moment ($\mathbf{m}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | AdamW 2nd Moment ($\mathbf{v}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | **Total Static Footprint** | | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
+| **Mixed Precision (AMP)** | Model Weights ($\mathbf{\theta}$) | `float16` / `bfloat16` | $2\text{ bytes}$ | $14.0\text{ GB}$ |
+| | Gradients ($\mathbf{g}$) | `float16` / `bfloat16` | $2\text{ bytes}$ | $14.0\text{ GB}$ |
+| | Master Weights ($\mathbf{\theta}_{\text{master}}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | AdamW 1st Moment ($\mathbf{m}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | AdamW 2nd Moment ($\mathbf{v}$) | `float32` | $4\text{ bytes}$ | $28.0\text{ GB}$ |
+| | **Total Static Footprint** | | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
 
 ::: {.callout-principle}
-## The 16-Byte Rule of AdamW Training
+## The 16-Byte Invariant of AdamW Training
 
-Training an $N$-parameter model in standard FP32 AdamW requires at least **$16 \times N$ bytes of memory** just for parameter weights, gradients, and optimizer state buffers—excluding all activation memory.[^adam-mem]
+A common systems misconception is that switching from FP32 to 16-bit Mixed Precision (FP16/BF16) cuts total training memory in half. 
+
+In reality, because multiplying 16-bit gradients by small learning rates ($\eta = 10^{-4}$) causes underflow below the dynamic range of FP16 ($2^{-14} \approx 6 \times 10^{-5}$), adaptive optimizers **must maintain master weights and moment accumulators in full 32-bit float**. Consequently, both FP32 and AMP AdamW training require exactly **$16\text{ bytes per parameter}$** of static VRAM—excluding all activation memory.[^zero-mem][^eight-bit-adam]
 :::
 
-[^adam-mem]: This massive memory footprint motivated low-bit optimizers like 8-bit Adam (Dettmers et al., 2021) and ZeRO memory sharding (Rajbhandari et al., 2020).
+[^zero-mem]: To overcome the 16-byte wall, ZeRO (Zero Redundancy Optimizer, Rajbhandari et al., 2020) shards states across $N_{\text{GPUs}}$: **ZeRO-1** shards optimizer states ($\frac{8}{N_{\text{GPUs}}}$ bytes/param), **ZeRO-2** shards optimizer states + gradients ($\frac{10}{N_{\text{GPUs}}}$ bytes/param), and **ZeRO-3 / FSDP** shards all weights, grads, and states ($\frac{16}{N_{\text{GPUs}}}$ bytes/param).
+[^eight-bit-adam]: **8-bit Adam** (Dettmers et al., 2021) dynamically quantizes the 1st and 2nd moment buffers into block-wise INT8 representations with dynamic scale factors, reducing optimizer state memory from $8\text{ bytes/param}$ to $2\text{ bytes/param}$ (a $75\%$ reduction in optimizer VRAM).
 
-::: {.callout-note}
-## PyTorch Systems Bridge: `torch.optim.AdamW` and Fused Kernels
+---
 
-In PyTorch, training large models uses `torch.optim.AdamW` with `fused=True`:
+## PyTorch Systems Bridge: `torch.optim.AdamW` and Fused CUDA Kernels
+
+In production PyTorch, optimizing millions of parameters across GPU memory requires high-performance CUDA kernel dispatching:
 
 ```python
 import torch
 
-model = torch.nn.Linear(1024, 1024).cuda()
-# Fused AdamW launches a single vectorized CUDA kernel for all parameters
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2, fused=True)
-```
-Standard optimizer updates launch separate GPU kernels for every parameter tensor (reading weights, gradients, first moments, and second moments). `fused=True` combines multi-tensor parameter updates into a single vectorized kernel (`torch._foreach_add_`), slashing kernel launch overhead and GPU DRAM read traffic.[^fused-adamw]
-:::
+model = torch.nn.Linear(4096, 4096).cuda()
 
-[^fused-adamw]: NVIDIA Apex and PyTorch Multi-Tensor apply libraries group hundreds of parameter pointers into a single array passed to a C++ kernel, saturating GPU memory bandwidth during parameter updates.
+# Fused AdamW launches a single vectorized CUDA kernel for all parameters
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=1e-3,
+    betas=(0.9, 0.999),
+    weight_decay=1e-2,
+    fused=True  # Coalesces weight, grad, m, and v memory transactions in SRAM
+)
+```
+
+### The Three Optimizer Dispatch Modes in PyTorch
+
+1. **Standard Python Loop (`fused=False, foreach=False`)**:
+   Iterates through each parameter sequentially, launching $4$ separate CUDA kernels per tensor (weight decay, moment updates, bias correction, parameter step). For a 500-layer model, this executes $2,000$ tiny kernel launches per training step, severely bound by CPU-GPU launch latency.
+2. **Multi-Tensor Foreach (`foreach=True`)**:
+   PyTorch groups parameters by data type and device, passing lists of tensor pointers into multi-tensor C++ kernels (`torch._foreach_adamw_`), slashing Python overhead.
+3. **Fused CUDA Kernel (`fused=True`)**:
+   Launches a single monolithic CUDA kernel (`FusedAdamWKernel.cu`). For each parameter element, the GPU thread loads $\theta, g, m, v$ into fast on-chip registers simultaneously, performs all moment updates, applies decoupled weight decay, and writes the updated $\theta, m, v$ back to HBM in a single DRAM memory transaction.[^fused-adamw-ref]
+
+[^fused-adamw-ref]: In `aten/src/ATen/native/cuda/FusedAdamWKernel.cu`, fusing optimizer steps maximizes arithmetic intensity by eliminating redundant global DRAM roundtrips for intermediate moment calculations.
 
 ---
 
 ## Summary
 
-In this chapter, we explored parameter optimization from first principles. We analyzed the physical dynamics of momentum, showing how velocity accumulators eliminate oscillations across ill-conditioned ravines.
+In this chapter, we explored parameter optimization from first principles. We analyzed the physical dynamics of momentum as a second-order heavy-ball system, proving how velocity accumulators eliminate oscillations across ill-conditioned ravines ($\kappa \gg 1$) and carry trajectories across flat zero-gradient saddle points.
 
-We derived Adam and AdamW, implemented decoupled weight decay in pure Python, and established the rigorous $16\text{ bytes/parameter}$ memory accounting law governing deep learning training systems.
+We derived Adam's moment expectations and bias corrections, proved why standard $L_2$ regularization pollutes the second moment variance estimate in adaptive optimizers, and implemented decoupled weight decay (`AdamW`) in pure Python. Finally, we established the rigorous $16\text{ bytes/parameter}$ memory law governing deep learning training systems and examined fused CUDA kernel architectures.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways
 
 - **The Update Invariant**: Optimizers transform raw gradients $\mathbf{g}_t$ into smooth, variance-reduced parameter updates $\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \mathbf{u}_t$.
-- **Momentum Damping**: Velocity accumulation cancels perpendicular high-frequency oscillations while accelerating along the true low-curvature gradient direction.
-- **Decoupled Weight Decay**: AdamW applies weight decay directly to weights rather than mixing it into the second moment accumulator, preserving regularized shrinkage.
-- **Memory Multiplier**: State buffers in AdamW consume $8\text{ bytes}$ of extra memory per parameter, bringing total training memory to $16\text{ bytes/param}$.
+- **Momentum Damping & Saddle Escape**: Second-order velocity accumulation cancels orthogonal high-frequency oscillations while kinetic energy carries parameters through zero-gradient saddle points.
+- **Initialization Bias Correction**: Rescaling raw moments by $\frac{1}{1 - \beta^t}$ ensures unbiased moment estimates during early optimization steps.
+- **Decoupled Weight Decay**: AdamW applies weight decay directly to parameter weights rather than mixing it into the second moment accumulator, preventing variance pollution and restoring uniform shrinkage.
+- **The 16-Byte Law**: Storing weights, gradients, and 32-bit optimizer state buffers requires $16\text{ bytes per parameter}$ in both FP32 and Mixed-Precision (AMP) training.
+- **Kernel Fusion**: `fused=True` AdamW executes multi-tensor updates in a single register pass, eliminating DRAM memory roundtrips and maximizing memory bandwidth utilization.
 :::
 
 ::: {.callout-chapter-connection}

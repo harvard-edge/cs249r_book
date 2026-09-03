@@ -15,7 +15,7 @@ A neural network’s forward pass maps input data into raw continuous prediction
 - **Implement** epsilon-clamping safeguards to prevent $\log(0)$ register crashes and NaN corruption in binary cross-entropy evaluation.
 - **Derive** and **implement** the Log-Sum-Exp numerical invariant in `log_softmax` to execute categorical cross-entropy in a single, overflow-proof pass.
 - **Support** flexible framework target formats, handling both sparse integer class indices and dense one-hot probability vectors.
-- **Connect** our multi-layer `Sequential` architecture (built in Chapter 4) directly to `CrossEntropyLoss` to measure forward prediction error.
+- **Connect** our multi-layer `Sequential` architecture (built in the preceding chapter) directly to `CrossEntropyLoss` to measure forward prediction error.
 :::
 
 ---
@@ -28,14 +28,14 @@ $$\mathcal{L} = \text{Loss}(\hat{\mathbf{y}}, \mathbf{y})$$
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Input Batch (B, D_in)  ──>  Sequential Model (Ch 4)        │
+│  Input Batch (B, D_in)  ──>  Sequential Model               │
 │                                    │                        │
 │                                    ▼                        │
 │  Target Labels (B,)     ──>  Predictions / Logits (B, C)    │
 │            │                       │                        │
 │            └───────────────┬───────┘                        │
 │                            ▼                                │
-│                   Loss Function (Ch 5)                      │
+│                   Loss Function                             │
 │                            │                                │
 │                            ▼                                │
 │                   Scalar Loss L (0D Tensor)                 │
@@ -57,7 +57,6 @@ Given a prediction tensor $\hat{\mathbf{y}} \in \mathbb{R}^{B \times D}$ and tar
 $$\mathcal{L}_{\text{MSE}}(\hat{\mathbf{y}}, \mathbf{y}) = \frac{1}{N} \sum_{i=1}^N (\hat{y}_i - y_i)^2$$
 
 ```python
-# Listing 4.1: Mean Squared Error (MSELoss) Implementation
 from tinytorch.core.tensor import Tensor
 import numpy as np
 
@@ -96,12 +95,11 @@ $$\mathcal{L}_{\text{BCE}}(\hat{\mathbf{y}}, \mathbf{y}) = -\frac{1}{N} \sum_{i=
 
 ### The Logarithm Hazard in IEEE 754
 
-If a model predicts $\hat{y} = 0.0$ for a sample whose true label is $y = 1$, evaluating $\log(\hat{y}) = \log(0.0)$ produces $-\infty$. In subsequent arithmetic, multiplying $0 \times (-\infty)$ produces `NaN` (Not a Number), crashing execution.
+If a model predicts $\hat{y} = 0.0$ for a sample whose true label is $y = 1$, evaluating $\log(\hat{y}) = \log(0.0)$ produces $-\infty$. In subsequent arithmetic, evaluating $0 \times (-\infty)$ or subtracting $-\infty$ produces `NaN` (Not a Number), crashing execution.
 
 To guarantee complete numerical robustness, the framework must clamp predictions to an interior interval $[\epsilon, 1 - \epsilon]$ where $\epsilon = 10^{-7}$:
 
 ```python
-# Listing 4.2: Binary Cross-Entropy (BCELoss) with Epsilon Safeguard
 EPSILON = 1e-7
 
 class BCELoss:
@@ -135,9 +133,11 @@ $$\mathcal{L}_{\text{CE}}(\mathbf{z}, y) = -\log\left(\text{Softmax}(\mathbf{z})
 
 ### The Underflow Trap of Naive Softmax + Log
 
-Suppose we implement this naively by first computing $\mathbf{p} = \text{Softmax}(\mathbf{z})$ and then evaluating $\log(\mathbf{p}_y)$.
+Suppose an implementation naively computes probabilities $\mathbf{p} = \text{Softmax}(\mathbf{z})$ in linear space and then evaluates $\log(\mathbf{p}_y)$.
 
-If the model is poorly calibrated early in training, an unnormalized logit $z_y$ might be $-100.0$ relative to other classes. The resulting probability $p_y = e^{-100} \approx 3.7 \times 10^{-44}$ underflows standard 32-bit floating-point precision to `0.0`. Taking $\log(0.0)$ results in $-\infty$, corrupting the loss.
+If an unnormalized logit $z_y$ is $-100.0$ relative to other logits, the resulting probability $p_y = e^{-100} \approx 3.7 \times 10^{-44}$ underflows standard 32-bit floating-point precision ($< 1.175 \times 10^{-38}$), collapsing to `0.0`. Taking $\log(0.0)$ produces $-\infty$, corrupting the loss with `NaN`.
+
+Conversely, if logits are large ($z_j > 88.72$), evaluating $e^{z_j}$ overflows `float32` registers to `+inf`, leading to `inf / inf = NaN`.
 
 ::: {.callout-principle}
 ## The Log-Sum-Exp Invariant
@@ -156,11 +156,12 @@ Substituting back into the log-softmax formula gives the exact **Log-Sum-Exp Inv
 
 $$\log(\text{Softmax}(\mathbf{z})_i) = (z_i - M) - \log\left(\sum_{j=1}^C e^{z_j - M}\right)$$
 
-Because $z_j - M \le 0$ for all $j$, the exponential terms $e^{z_j - M} \in (0, 1]$ **never overflow**, while the subtraction in log-space prevents underflow to zero.
+This formula possesses two vital numerical stability guarantees:
+1. **No Overflow**: Because $z_j - M \le 0$ for all $j$, the exponential terms $e^{z_j - M} \in (0, 1]$ **never exceed 1.0**.
+2. **No Underflow to Zero**: Because the maximum element satisfies $z_{\text{argmax}} - M = 0$, the sum always contains $e^0 = 1.0$, guaranteeing $\sum_{j=1}^C e^{z_j - M} \ge 1.0$. The logarithm argument is strictly bounded away from zero ($\log(\ge 1.0) \ge 0.0$), making $\log(0) \to -\infty$ mathematically impossible.
 :::
 
 ```python
-# Listing 4.3: Numerically Stable Log-Softmax Implementation
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     """
     Compute log-softmax using the Log-Sum-Exp numerical stability trick.
@@ -185,8 +186,29 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 ::: {#fig-log-sum-exp-pipeline}
 ![](../../packages/tinytorch/quarto/assets/images/diagrams/04_losses-diag-1.svg)
 
-**Figure 4.1: Naive Softmax vs. Fused Log-Sum-Exp Pipeline.** Computing probabilities in linear space risks exponent overflow and log underflow. Fusing the operations into the Log-Sum-Exp invariant operates directly on shifted logits, guaranteeing stable IEEE 754 precision.
+Naive Softmax vs. Fused Log-Sum-Exp Pipeline. Computing probabilities in linear space risks exponent overflow and log underflow. Fusing the operations into the Log-Sum-Exp invariant operates directly on shifted logits, guaranteeing stable IEEE 754 precision.
 :::
+
+---
+
+## Systems Reality: Kernel Fusion and VRAM Bandwidth Reduction
+
+Beyond numerical stability, fusing `log_softmax` with cross-entropy creates enormous memory-bandwidth savings on hardware accelerators.
+
+Consider a large language model with vocabulary size $C = 128,000$ processing a batch of $B = 4096$ tokens:
+
+1. **Naive Non-Fused Softmax + NLL**:
+   - Softmax reads logits $(4096 \times 128,000)$ from DRAM, computes probabilities, and writes probabilities $(4096 \times 128,000 \times 4\text{ B} \approx 2.1\text{ GB})$ back to DRAM.
+   - Cross-entropy reads $2.1\text{ GB}$ of probabilities from DRAM, computes logs, indexes target tokens, and writes loss.
+   - **Total DRAM Traffic**: Over $4.2\text{ GB}$ of high-latency memory bus traffic.
+
+2. **Fused Log-Sum-Exp Loss Kernel**:
+   - The GPU kernel loads logit tiles directly into on-chip SRAM registers.
+   - Threads compute the maximum logit $M$ and sum-of-exponentials $\sum e^{z_j - M}$ using fast in-register warp shuffle reductions.[^warp-shuffle]
+   - The kernel indexes the ground-truth target logit directly in registers and writes back only $B$ scalar loss values ($4096 \times 4\text{ B} \approx 16\text{ KB}$).
+   - **Total DRAM Traffic**: $16\text{ KB}$ written—a **130,000× reduction in memory traffic**!
+
+[^warp-shuffle]: On NVIDIA GPUs, warp shuffle instructions (`__shfl_xor_sync`, `__shfl_down_sync`) allow threads in a 32-lane warp to exchange register values directly without writing to shared memory or global DRAM, reducing parallel reduction latency to just 1--2 clock cycles.
 
 ---
 
@@ -195,7 +217,6 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 In TinyTorch (as in PyTorch), `CrossEntropyLoss` takes **raw unnormalized logits** directly from the final `Linear` layer, bypassing explicit `Softmax` calls. It supports both 1D integer class label targets and 2D one-hot probability distributions:
 
 ```python
-# Listing 4.4: CrossEntropyLoss Implementation in TinyTorch
 class CrossEntropyLoss:
     """
     Cross-Entropy loss combining log_softmax and Negative Log-Likelihood (NLL).
@@ -240,35 +261,40 @@ A frequent beginner mistake is adding a `Softmax` layer at the end of a `Sequent
 
 ---
 
+## Production Reality: How PyTorch Dispatches Cross-Entropy in C++
 
-::: {.callout-note}
-## PyTorch Systems Bridge: `torch.nn.CrossEntropyLoss`
+In PyTorch, `torch.nn.CrossEntropyLoss` is implemented in ATen native C++ (`aten/src/ATen/native/Loss.cpp` and `aten/src/ATen/native/SoftMax.cpp`).[^pytorch-ce-dispatch]
 
-A universal source of confusion for ML newcomers is why PyTorch's `CrossEntropyLoss` takes unnormalized raw logits instead of probabilities. 
-
-In PyTorch, `nn.CrossEntropyLoss()` combines `LogSoftmax` and `NLLLoss` (Negative Log-Likelihood Loss) into a single C++ kernel:
-
-```python
-import torch
-import torch.nn as nn
-
-criterion = nn.CrossEntropyLoss()
-logits = torch.randn(8, 10)  # Shape (B, C) - Raw unnormalized scores!
-targets = torch.randint(0, 10, (8,))  # Shape (B,) - Class indices!
-
-loss = criterion(logits, targets)  # Single scalar output
 ```
-By taking raw logits, PyTorch executes the stable Log-Sum-Exp subtraction directly in CUDA without ever materializing an intermediate probability array in GPU RAM.[^pytorch-ce]
-:::
+┌─────────────────────────────────────────────────────────────┐
+│  PyTorch CrossEntropyLoss Dispatch Pipeline                 │
+├─────────────────────────────────────────────────────────────┤
+│  1. Python API: torch.nn.CrossEntropyLoss()(logits, target) │
+│     • Accepts raw unnormalized logits                       │
+├─────────────────────────────────────────────────────────────┤
+│  2. ATen C++ Dispatcher: at::cross_entropy_loss             │
+│     ├── at::_log_softmax (Warp-Level Parallel Reduction)   │
+│     └── at::nll_loss_forward (Fused Sparse Gather Indexing) │
+├─────────────────────────────────────────────────────────────┤
+│  3. CUDA Kernel Architecture                                │
+│     • Two-pass parallel reduction via __shfl_sync           │
+│     • O(B) DRAM writes instead of O(B * C)                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-[^pytorch-ce]: In PyTorch ATen (`aten/src/ATen/native/Loss.cpp`), `cross_entropy_loss` dispatches to `nll_loss_forward` with fused target indexing, achieving $O(B)$ memory writes instead of $O(B 	imes C)$.
+1. **Dispatcher Routing**: In PyTorch ATen, `cross_entropy_loss` dispatches to `at::_log_softmax` followed by `at::nll_loss_forward`.
+2. **Warp-Level Reduction**: In CUDA (`SoftMax.cu`), the `log_softmax` kernel assigns each batch row to a CUDA thread block or warp. Threads compute the row maximum and the sum of shifted exponentials entirely across registers using warp shuffle intrinsics.
+3. **Fused Sparse Indexing**: In `nll_loss_forward`, when targets are provided as 1D class indices, the kernel directly gathers the target log-probability per batch item in parallel without allocating a full $(B, C)$ target distribution.
+
+[^pytorch-ce-dispatch]: In PyTorch ATen (`aten/src/ATen/native/Loss.cpp`), `cross_entropy_loss` combines log-softmax normalization and negative log-likelihood indexing, eliminating intermediate probability allocations and guaranteeing IEEE 754 numerical stability across arbitrary dynamic ranges.
+
+---
 
 ## Forward Error Evaluation: Connecting Networks to Loss
 
-We can now connect the entire forward execution pipeline: passing an input batch through our Chapter 4 multi-layer `Sequential` network, generating raw logits, and calculating the exact forward prediction error using `CrossEntropyLoss`.
+We can now connect the entire forward execution pipeline: passing an input batch through our multi-layer `Sequential` network (built in the preceding chapter), generating raw logits, and calculating the exact forward prediction error using `CrossEntropyLoss`.
 
 ```python
-# Listing 4.5: End-to-End Forward Evaluation Pipeline
 from tinytorch.core.layers import Linear, Dropout, Sequential
 from tinytorch.core.activations import ReLU
 
@@ -317,7 +343,7 @@ Checking that your initial forward loss is close to $\log(C)$ ($\approx 2.30$ fo
 
 In this chapter, we built the fourth tier of TinyTorch: objective functions and error measurement. We explored the mathematical formulation of error across continuous regression (`MSELoss`), binary classification (`BCELoss`), and multi-class categorical classification (`CrossEntropyLoss`).
 
-We analyzed the critical numerical hazards of computing logarithms on digital hardware, implementing epsilon-clamping to prevent $\log(0)$ crashes and deriving the **Log-Sum-Exp invariant** to execute log-softmax in a single, overflow-proof pass. Finally, we demonstrated the complete forward evaluation pipeline by connecting our Chapter 4 multi-layer `Sequential` model directly to `CrossEntropyLoss` to measure forward prediction error.
+We analyzed the critical numerical hazards of computing logarithms on digital hardware, implementing epsilon-clamping to prevent $\log(0)$ crashes and deriving the **Log-Sum-Exp invariant** to execute log-softmax in a single, overflow-proof pass. We quantified how kernel fusion in cross-entropy reduces DRAM write traffic by over 130,000×, and demonstrated the complete forward evaluation pipeline by connecting our multi-layer `Sequential` model directly to `CrossEntropyLoss` to measure forward prediction error.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways
@@ -325,6 +351,7 @@ We analyzed the critical numerical hazards of computing logarithms on digital ha
 - **The Loss Contract**: Loss functions reduce multidimensional prediction and target tensors into a single scalar `Tensor` measuring prediction error.
 - **The Logarithm Hazard**: Evaluating $\log(0)$ produces $-\infty$, which creates NaN values in downstream arithmetic; epsilon clamping ($10^{-7}$) safeguards binary classification.
 - **Log-Sum-Exp Invariant**: Computing Softmax in linear probability space risks exponential overflow and underflow; fusing normalization into log-space ($(z_i - M) - \log\sum e^{z_j - M}$) guarantees numerical stability.
+- **VRAM Bandwidth Reduction**: Fusing log-softmax with negative log-likelihood eliminates gigabytes of intermediate probability matrix DRAM allocations.
 - **Raw Logits Convention**: Production frameworks require models to output raw unnormalized logits directly to `CrossEntropyLoss`, avoiding redundant and numerically fragile double-softmax passes.
 - **Initial Loss Sanity Check**: For balanced $C$-class classification, the initial forward loss of an untrained network should approximate $\log(C)$.
 :::
@@ -332,5 +359,5 @@ We analyzed the critical numerical hazards of computing logarithms on digital ha
 ::: {.callout-chapter-connection}
 ## Chapter Connection: Feeding Data at Scale
 
-Our framework can now construct multi-layer models and compute prediction error, but where do batches of training samples come from? In **Chapter 6 (Data Pipelines, Datasets, and Batching)**, we build the `Dataset` and `DataLoader` abstractions to manage shuffling, mini-batch chunking, and memory-efficient data loading pipelines.
+Our framework can now construct multi-layer models and compute prediction error, but where do batches of training samples come from? In **Data Pipelines, Datasets, and Batching**, we build the `Dataset` and `DataLoader` abstractions to manage shuffling, mini-batch chunking, and memory-efficient data loading pipelines.
 :::

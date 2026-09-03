@@ -22,7 +22,10 @@ Autoregressive language models generate text sequentially: predicting token $t+1
 
 ## The Computational Redundancy of Naive Decoding
 
-Consider generating 100 new tokens from a 500-token prompt:
+LLM inference operates in two fundamentally distinct operational regimes:
+
+1. **The Prefill Phase (Prompt Ingestion)**: All $S_{\text{prompt}}$ input tokens are ingested simultaneously in parallel. This is a dense, high-arithmetic-intensity GEMM ($B \times S_{\text{prompt}} \times D$) that operates in the compute-bound plateau of the Roofline Model.
+2. **The Decode Phase (Autoregressive Generation)**: Tokens are generated sequentially, one token at a time ($S=1$). In naive generation, step $t$ re-reads and re-processes all $t$ previous tokens through the entire network:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -62,6 +65,10 @@ $$\mathbf{K}_{\text{seq}} = \begin{bmatrix} \mathbf{K}_{\text{cached}} \\ \mathb
 4. Compute attention for the single query token against all keys:
 
 $$\text{Attention}(\mathbf{q}_t, \mathbf{K}_{\text{seq}}, \mathbf{V}_{\text{seq}}) = \text{softmax}\left( \frac{\mathbf{q}_t \mathbf{K}_{\text{seq}}^T}{\sqrt{d_k}} \right) \mathbf{V}_{\text{seq}} \in \mathbb{R}^{1 \times D}$$
+
+By memoizing past $(\mathbf{K}, \mathbf{V})$ tensors, the per-token compute cost for all feed-forward networks and projections drops from $O(t)$ to $O(1)$. Memory bus transfers during decode are reduced to streaming the cached $(\mathbf{K}, \mathbf{V})$ vectors, converting generation latency from an $O(N^2)$ quadratic bottleneck into a linear $O(N)$ memory scan.[^decode-bandwidth-footnote]
+
+[^decode-bandwidth-footnote]: During single-token decode ($S=1$), the generation throughput is strictly memory-bandwidth bound: $\text{Tokens/sec} \approx \frac{\text{Memory Bandwidth (TB/s)}}{\text{Model Parameters (Bytes)} + \text{KV Cache Active Bytes}}$. On an NVIDIA H100 with $3.35\text{ TB/s}$ HBM3 bandwidth running a 70B parameter FP16 model (140 GB), the maximum theoretical single-stream generation speed without tensor parallelism is $\approx 3350 / 140 \approx 24\text{ tokens/sec}$.
 
 ---
 
@@ -119,6 +126,8 @@ class KVCache:
 
 ```python
 # Listing 18.2: Cache-Aware MultiHeadAttention in TinyTorch
+from tinytorch.core.layers import Layer, Linear
+
 class CachedMultiHeadAttention(Layer):
     """
     MultiHeadAttention with support for incremental KV caching.
@@ -193,14 +202,31 @@ At long context lengths, the KV Cache consumes more GPU memory than the 70-billi
 
 
 ::: {.callout-note}
-## Production Systems Bridge: vLLM and PagedAttention
+## Production Systems Bridge: vLLM, PagedAttention, and FlashDecoding
 
-In modern high-concurrency LLM inference servers, **vLLM** implements **PagedAttention** (Kwon et al., 2023), inspired by operating system virtual memory paging.
+In modern high-concurrency LLM inference servers, **vLLM** implements **PagedAttention** (Kwon et al., 2023), inspired by operating system virtual memory paging.[^vllm-paper]
 
-Instead of allocating contiguous GPU memory for each request's maximum sequence length (which wastes up to $80\%$ of VRAM to internal fragmentation), PagedAttention partitions the KV cache into fixed-size virtual memory blocks ($16$ tokens per block). Non-contiguous blocks are dynamically mapped via a page table, increasing GPU serving throughput by **2× to 4×**.[^vllm-paper]
+Instead of allocating contiguous GPU memory for each request's maximum sequence length (which wastes up to $80\%$ of VRAM to internal fragmentation), PagedAttention partitions the KV cache into fixed-size virtual memory blocks ($16$ or $32$ tokens per block). Non-contiguous blocks are dynamically mapped via a page table, increasing GPU serving throughput by **2× to 4×**.
+
+```python
+import torch
+import torch.nn.functional as F
+
+# PyTorch native scaled dot-product attention with FlashDecoding
+# Q: (B, H, 1, d_k), K_cache: (B, H_kv, S, d_k), V_cache: (B, H_kv, S, d_k)
+out = F.scaled_dot_product_attention(
+    query=q,
+    key=k_cache,
+    value=v_cache,
+    is_causal=False,
+    enable_gqa=True  # Enables Grouped-Query Attention head broadcasting
+)
+```
 :::
 
-[^vllm-paper]: Kwon et al. (2023), *Efficient Memory Management for Large Language Model Serving with PagedAttention*, SOSP.
+[^vllm-paper]: Kwon et al. (2023), *Efficient Memory Management for Large Language Model Serving with PagedAttention*, SOSP. PagedAttention partitions the KV cache into fixed-size physical memory pages (e.g., 16 or 32 tokens) in GPU HBM, using dynamic virtual memory page tables. This eliminates internal and external memory fragmentation (which historically wasted 60% to 80% of VRAM to static sequence length allocations) and enables zero-copy copy-on-write page sharing for parallel sampling and beam search.
+
+---
 
 ## Architectural Mitigations: MQA, GQA, and PagedAttention
 

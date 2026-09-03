@@ -36,7 +36,9 @@ In modern computing architectures, floating-point arithmetic is essentially free
 └─────────────────────────────────────────────────────────────┘
 ```
 
-When an operator reads or writes data to DRAM, the CPU core sits completely idle for dozens of clock cycles waiting for data lines to settle.
+When an operator reads or writes data to off-chip DRAM (or GPU HBM), the processor pipeline sits completely idle for dozens or hundreds of clock cycles waiting for data lines to settle.[^sram-arch-footnote]
+
+[^sram-arch-footnote]: Modern GPU Streaming Multiprocessors (SMs) allocate 128 KB to 228 KB of ultra-fast on-chip SRAM configurable as L1 data cache and shared memory. Across 132 SMs on an H100 GPU, this represents ~30 MB of aggregate on-chip SRAM delivering over 100 TB/s of bandwidth with ~1–2 ns latency, compared to off-chip HBM3 access at 3.35 TB/s and ~50–100 ns latency.
 
 ---
 
@@ -82,7 +84,9 @@ Benchmarking a $512 \times 512$ matrix multiplication reveals that `vectorized_m
 
 When computing $\mathbf{C} = \mathbf{A} \mathbf{B}$ for large matrices (e.g., $1024 \times 1024$), matrix $\mathbf{B}$ exceeds the capacity of L1 cache ($32\text{ KB}$). As the inner loop iterates over columns of $\mathbf{B}$, cache lines are repeatedly evicted, causing constant **cache thrashing**.
 
-**Cache Tiling (Loop Blocking)** divides the $M \times N$ matrix into small $B_{\text{tile}} \times B_{\text{tile}}$ square blocks (tiles) that fit entirely inside L1 cache ($B_{\text{tile}} \approx 32 - 64$):
+Computing $\mathbf{C} = \mathbf{A} \mathbf{B}$ requires $2 N^3$ FLOPs over $3 N^2$ matrix elements. In naive 3-nested loop multiplication, every element of $\mathbf{B}$ is fetched from DRAM $N$ times, requiring $O(N^3)$ total DRAM word transfers. Because DRAM latency is $50-100\text{ ns}$ compared to ALU cycle time of $0.5\text{ ns}$, memory bus stalls consume $>99\%$ of processor clock cycles.
+
+**Cache Tiling (Loop Blocking)** divides the $M \times N$ matrix into small $B_{\text{tile}} \times B_{\text{tile}}$ square blocks (tiles) that fit entirely inside L1 cache / SRAM ($B_{\text{tile}} \approx 32 - 64$):
 
 $$\mathbf{C}_{I, J} = \sum_{K} \mathbf{A}_{I, K} \mathbf{B}_{K, J}$$
 
@@ -107,6 +111,8 @@ $$\mathbf{C}_{I, J} = \sum_{K} \mathbf{A}_{I, K} \mathbf{B}_{K, J}$$
 
 **Figure 17.1: Cache-Tiled Matrix Multiplication.** By dividing large matrices into cache-resident sub-tiles, memory accesses hit on-chip L1 cache ($1\text{ ns}$) instead of triggering DRAM cache evictions ($60\text{ ns}$).
 :::
+
+By keeping each $B_{\text{tile}} \times B_{\text{tile}}$ sub-matrix pinned in high-speed SRAM, each value loaded from DRAM is reused $B_{\text{tile}}$ times across arithmetic instructions, slashing DRAM memory traffic by a factor of $B_{\text{tile}}$ (from $O(N^3)$ to $O(N^3 / B_{\text{tile}})$) and eliminating DRAM pipeline stalls.
 
 ---
 
@@ -186,12 +192,42 @@ def fused_gelu(x: Tensor) -> Tensor:
 
 ---
 
-## Production Reality: PyTorch `torch.compile` and Triton
+## Production Reality: PyTorch `torch.compile` and OpenAI Triton
 
-In modern deep learning frameworks, engineers do not write hundreds of hand-fused C++ kernels manually. Instead, they use **Deep Learning Compilers**:
+Why does **OpenAI Triton** replace traditional CUDA boilerplate in modern compiler stacks?
 
-1. **PyTorch 2.0 `torch.compile` (TorchInductor)**: Traces Python code into a computational graph, detects chains of element-wise and reduction operations, and automatically generates fused C++ OpenMP and CUDA kernels.
-2. **OpenAI Triton**: A Python-based programming language and compiler that enables engineers to write highly optimized GPU kernels (with automatic block tiling and shared memory caching) without writing complex low-level CUDA C++.
+1. **The CUDA Complexity Trap**: In raw CUDA C++, developers must explicitly manage fine-grained thread hierarchies (`threadIdx`, `blockIdx`), declare and synchronize on-chip shared memory buffers (`__shared__`), orchestrate thread barriers (`__syncthreads()`), manually avoid 32-way shared memory bank conflicts,[^bank-conflicts-footnote] and carefully structure memory accesses to guarantee 128-byte coalescing across 32 threads in a warp.
+2. **Block-Level Python Abstraction**: Triton abstracts the GPU thread hierarchy into block-level operations over multi-dimensional tensor tiles (`tl.load`, `tl.dot`, `tl.store`). The Triton compiler automatically analyzes tile dimensions, schedules warps, manages SRAM shared memory allocation, and optimizes memory coalescing, generating bare-metal PTX assembly that matches or surpasses hand-tuned CUDA C++.
+
+[^bank-conflicts-footnote]: Shared memory on NVIDIA GPUs is organized into 32 memory banks (each 4 bytes wide). If multiple threads in a warp access different memory addresses residing in the same memory bank, the hardware serializes the requests (a shared memory bank conflict), multiplying access latency. Triton automatically arranges data layouts to guarantee bank-conflict-free memory strides.
+
+::: {.callout-note}
+## PyTorch Systems Bridge: `torch.compile`, TorchInductor, and TensorRT
+
+In PyTorch 2.0+, automated compilation is orchestrated through a three-stage pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PyTorch 2.0 Compiler Pipeline                              │
+├─────────────────────────────────────────────────────────────┤
+│  1. TorchDynamo  : Intercepts Python frame bytecode &       │
+│                    extracts FX computational graph.         │
+│  2. AOTAutograd  : Captures forward & backward autograd DAGs│
+│                    ahead-of-time.                           │
+│  3. TorchInductor: Lowers FX graph into fused C++/OpenMP    │
+│                    (for CPUs) and OpenAI Triton (for GPUs). │
+└─────────────────────────────────────────────────────────────┘
+```
+
+```python
+import torch
+
+# Compile PyTorch model into fused Triton kernels
+compiled_model = torch.compile(model, mode="reduce-overhead")
+```
+
+In enterprise serving engines, **NVIDIA TensorRT** performs graph-level transformations: fusing Convolution + BatchNorm + ReLU into a single execution layer, merging Linear projections and GELU activations, and generating hardware-tuned Tensor Core execution engines.
+:::
 
 ---
 
@@ -199,7 +235,7 @@ In modern deep learning frameworks, engineers do not write hundreds of hand-fuse
 
 In this chapter, we explored the systems mechanics of low-level kernel acceleration. We examined the physical latency hierarchy of modern processors, demonstrating why DRAM memory access is the primary bottleneck in deep neural network execution.
 
-We quantified the power of SIMD vectorization over scalar loops, implemented Cache Tiling to eliminate cache thrashing during matrix multiplications, and built Fused Linear-ReLU and Fused GELU kernels to slash off-chip memory traffic by over 60%.
+We quantified the power of SIMD vectorization over scalar loops, implemented Cache Tiling to eliminate cache thrashing during matrix multiplications, and built Fused Linear-ReLU and Fused GELU kernels to slash off-chip memory traffic by over 60%. Finally, we examined how modern deep learning compilers (`torch.compile`, TorchInductor, OpenAI Triton) automate kernel fusion and cache tiling.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways
