@@ -44,6 +44,7 @@ A model trained in a data center encounters new conditions when deployed to a us
 
 - Contrast centralized cloud training, on-device learning, and federated learning by analyzing their data flow, privacy properties, and operational trade-offs
 - Quantify edge-device training overhead relative to inference-only deployment across memory, compute, and energy
+- Derive an admission condition for background adaptation from energy, thermal, and foreground-latency slack
 - Select model adaptation strategies by comparing memory footprints, expressivity, and convergence for specific device capabilities
 - Apply data-efficiency techniques (few-shot learning, experience replay, contrastive learning) to learn from limited local data without catastrophic forgetting
 - Design federated learning systems that aggregate privacy-preserving updates while managing heterogeneous data, communication efficiency, and stragglers
@@ -1191,6 +1192,18 @@ class EdgeBattery:
 :::
 
 This battery calculation is the local edge-learning version of a broader energy constraint: training must fit the user's energy budget, not only the model's accuracy target. A production design therefore has to account for energy at scheduling time, compare local computation against communication cost, and defer learning when the user's device cannot absorb the update.
+
+That decision can be expressed as a background-work admission condition\index{Admission Control!edge adaptation}. Let $E_{\text{update}}$ be the predicted energy for one adaptation window, $E_{\text{slack}}$ the energy the policy permits before the next charging opportunity, $P_{\text{device}}$ the current sustained power, $P_{\text{update}}$ the adaptation increment, and $P_{\text{thermal}}$ the thermally sustainable limit. Let $L_{\text{fg}}$ be measured foreground latency, $\Delta L_{\text{fg}}^{\text{wc}}$ the worst-case latency increase under concurrent adaptation, and $L_{\text{deadline}}$ the foreground deadline. The runtime admits an update only if
+
+$$
+E_{\text{update}} \le E_{\text{slack}}
+\quad \land \quad
+P_{\text{device}} + P_{\text{update}} \le P_{\text{thermal}}
+\quad \land \quad
+L_{\text{fg}} + \Delta L_{\text{fg}}^{\text{wc}} \le L_{\text{deadline}}.
+$$ {#eq-edge-background-admission}
+
+Charging can enlarge the energy allowance, but it does not waive the thermal or foreground-latency tests. The quantities must come from device- and workload-specific profiling, and the runtime must revoke admission when the measured envelope changes. Shorter update windows, a lower duty cycle, or a smaller trainable parameter set can make a rejected update feasible; allowing background learning to consume the foreground deadline cannot.
 
 ::: {.column-margin}
 ![](images/svg/edge_intelligence_device_memory_ladder.svg){width="100%" fig-alt="Vertical ladder of four blue bars on a log scale showing device-class memory shrinking by orders of magnitude: smartphone 8 GB, IoT 1 GB, microcontroller flash 4 MB, microcontroller SRAM 520 KB."}
@@ -3739,6 +3752,8 @@ Edge systems must account for thermal throttling, device heterogeneity, and fede
 
 Three design levers make learning possible under those constraints. Model adaptation reduces the update footprint by freezing most of the network or using small adapters. Data efficiency extracts useful signal from few local samples or streaming experience. Federated coordination lets a population improve a shared model without centralizing raw data. Success at the edge requires more than algorithmic cleverness; it demands co-design between the software's mathematical requirements and the hardware's thermal, energy, and bandwidth realities.
 
+At runtime, those realities become an admission decision rather than a general preference to run "when idle." Background adaptation may execute only when its predicted energy and sustained power fit the current device slack and profiled worst-case interference preserves the foreground deadline. Because charging status does not eliminate heat or contention, every admitted window remains revocable as the device state changes.
+
 Many devices run inference workloads locally, from keyboard prediction on smartphones to anomaly detection on industrial sensors. Edge intelligence addresses requirements that no amount of data center scaling can satisfy: latency-critical applications where cloud round-trips introduce unacceptable delays, privacy-sensitive domains where raw data must never leave the device, and connectivity-constrained environments where network access is intermittent or absent. As on-device capabilities advance through hardware specialization and algorithmic efficiency, the boundary between what requires cloud infrastructure and what can execute locally can shift, but the co-design principles remain central to production ML system architecture.
 
 ::: {.callout-takeaways title="Physics sets the budget"}
@@ -3746,6 +3761,7 @@ Many devices run inference workloads locally, from keyboard prediction on smartp
 * The edge reverses the fleet: Data centers fight to keep many accelerators busy; edge devices fight to learn under batteries, kilobytes, thermal throttling (principle \ref{pri-power-density-wall}), and intermittent links. The same Compute, Communication, Coordination constraints produce a different discipline when scarcity, not scale, is binding.
 * Bandwidth beats advertised TOPS: On-device LLMs are limited by mobile memory bandwidth (principle \ref{pri-autoregressive-bottleneck}), not NPU peak compute. The 30--50$\times$ gap between mobile RAM and data-center HBM makes quantization and locality survival requirements for interactive decode.
 * Learning multiplies the footprint: On-device training needs activations, gradients, optimizer state, and bidirectional traffic, raising resources 4--12$\times$ over inference-only deployment. Adaptation strategies must shrink the update, not merely compress the deployed model.
+* Background learning is conditional work: Admit an adaptation window only when @eq-edge-background-admission preserves energy, thermal, and foreground-latency budgets under worst-case measured interference. Charging alone is not sufficient.
 * Adaptation needs three levers: Bias-only updates, LoRA, sparse layers, few-shot data reuse, and experience replay each spend different memory, energy, and privacy budgets. Federated coordination adds population learning only when protocols handle non-IID data and client dropout.
 * Heterogeneity is normal operation: Edge fleets span microcontrollers, phones, gateways, and NPUs with uneven availability and performance. Federated systems must treat stragglers, participation bias, rollback, and privacy-preserving observability as protocol design constraints, not deployment cleanup.
 
