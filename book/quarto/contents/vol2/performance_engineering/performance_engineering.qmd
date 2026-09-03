@@ -2414,14 +2414,64 @@ Optimizing a single node is a prerequisite, but the ultimate test of performance
 
 Before two measurements can support an optimization claim, they must share a reproducible measurement contract. Benchmark suites formalize this principle by fixing workload, quality, and measurement rules before comparing systems [@mattson2020mlperf; @reddi2020]. The contract fixes the workload envelope, including model, input and output length distributions, batch or concurrency, data distribution, and quality criterion; records hardware topology, accelerator clocks and power limits, software versions, precision, and compiler settings; and states the timing and synchronization boundaries. Cold-start compilation and cache-filling trials must remain separate from warmed steady-state trials. Each reported point needs repeated trials with a dispersion statistic, an output-equivalence or quality check, and latency percentiles at a named offered load. Without those controls, a speedup can come from different work, different machine state, asynchronous timing, or a shifted quality/SLO point rather than from the proposed optimization.
 
-| **Contract field**       | **Evidence to report**                                                                                              | **Failure prevented**                                                    |
-|:-------------------------|:--------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------|
-| Workload and correctness | Model revision; representative input/output distributions; batch or concurrency; quality or output-equivalence gate | Comparing different work or accepting an invalid numerical shortcut      |
-| System state             | Device and topology; clocks and power limit; software, compiler, precision, and kernel versions                     | Attributing a hardware or configuration change to the optimization       |
-| Timing boundary          | Included setup; device synchronization; warmup; cold-start and steady-state definitions                             | Under-timing asynchronous execution or hiding compilation                |
-| Statistical report       | Trial count; median or mean; dispersion; tail percentiles; offered load                                             | Promoting a favorable single run or comparing latency at different loads |
+| **Contract field**       | **Evidence to report**                                                                                                           | **Failure prevented**                                               |
+|:-------------------------|:---------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|
+| Workload and correctness | Model revision; representative input/output distributions; batch or concurrency; quality or output-equivalence gate              | Comparing different work or accepting an invalid numerical shortcut |
+| System state             | Device and topology; clocks and power limit; software, compiler, precision, and kernel versions                                  | Attributing a hardware or configuration change to the optimization  |
+| Timing boundary          | Included setup; device synchronization; warmup; cold-start and steady-state definitions                                          | Under-timing asynchronous execution or hiding compilation           |
+| Load generation          | Open- or closed-loop mode; intended and achieved arrival rates; completed throughput; concurrency; errors and timeouts; duration | Hiding overload when the generator reduces arrivals during a stall  |
+| Statistical report       | Trial count; median or mean; dispersion; tail percentiles                                                                        | Promoting a favorable single run                                    |
 
 : **Reproducible Performance Measurement Contract**: Every optimization result fixes workload, correctness, system state, timing, and statistical reporting before comparing implementations. {#tbl-performance-engineering-measurement-contract tbl-colwidths="[22,45,33]"}
+
+```{python}
+#| echo: false
+#| label: coordinated-omission-example
+# ┌────────────────────────────────────────────────────────────────────────────
+# │ COORDINATED OMISSION EXAMPLE (LEGO)
+# ├────────────────────────────────────────────────────────────────────────────
+# │ Context: Systems Perspective \ref{psp-performance-engineering-load-generation}.
+# │
+# │ Goal:    Quantify how a response-paced generator suppresses samples during a stall.
+# │ Show:    Intended arrivals and unobserved waiting-time samples for a simple workload.
+# │ How:     Multiply the external request rate by the stall duration, then compare
+# │          it with the single slow completion observed at fixed concurrency one.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_count, fmt_rate, fmt_time, check
+
+class CoordinatedOmissionExample:
+    """Illustrative request accounting during a one-second service stall."""
+
+    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────────
+    intended_requests_per_second = 100
+    stall_duration = 1 * second
+    closed_loop_completions = 1
+
+    # ┌── 2. EXECUTE (Request accounting) ────────────────────────────────────
+    intended_arrivals = round(intended_requests_per_second * stall_duration.to(second).magnitude)
+    suppressed_samples = intended_arrivals - closed_loop_completions
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(intended_arrivals == 100, "open-loop schedule should contain 100 arrivals")
+    check(suppressed_samples == 99, "closed-loop generator should suppress 99 samples")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    intended_rate_str = fmt_rate(intended_requests_per_second, "requests/s", commas=False)
+    stall_duration_str = fmt_time(stall_duration, second, precision=0, commas=False)
+    intended_arrivals_str = fmt_count(intended_arrivals, label="request")
+    slow_completion_str = fmt_count(closed_loop_completions, label="slow completion")
+    suppressed_samples_str = fmt_count(suppressed_samples, label="waiting-time sample")
+```
+
+::: {#psp-performance-engineering-load-generation .callout-perspective title="The load generator is part of the measurement"}
+
+An **open-loop load generator**\index{Open-loop load generation} schedules requests independently of responses. A **closed-loop load generator**\index{Closed-loop load generation} issues replacements only as earlier requests finish. The modes hold attempted arrivals and outstanding work fixed, respectively.
+
+At `{python} CoordinatedOmissionExample.intended_rate_str`, a `{python} CoordinatedOmissionExample.stall_duration_str` open-loop schedule contains `{python} CoordinatedOmissionExample.intended_arrivals_str`. At concurrency one, the closed loop records `{python} CoordinatedOmissionExample.slow_completion_str` but issues no replacements, omitting `{python} CoordinatedOmissionExample.suppressed_samples_str`. This **coordinated omission**\index{Coordinated omission} makes overload look less severe.
+
+The correct mode reproduces the target workload. Reporting intended load, achieved arrivals, completed throughput, concurrency, latency, errors, timeouts, and duration together exposes any generator feedback that conceals the queue.
+
+:::
 
 ### The fleet efficiency metric {#sec-performance-engineering-fleet-efficiency-metric-dff4}
 
