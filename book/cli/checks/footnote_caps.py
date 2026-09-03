@@ -151,24 +151,6 @@ def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
                     first_char=ch,
                 )
             )
-        term_match = leading_term_head(body)
-        if term_match is not None:
-            term, _ = term_match
-            issues = term_head_case_issues(term)
-            if issues:
-                words = ", ".join(word for _, word in issues)
-                violations.append(
-                    Violation(
-                        path=path,
-                        line_no=line_no,
-                        raw_line=line,
-                        prefix=prefix,
-                        body=body,
-                        first_char=issues[0][1][0],
-                        kind="term_head_case",
-                        detail=words,
-                    )
-                )
     return violations
 
 

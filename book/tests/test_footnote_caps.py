@@ -15,7 +15,7 @@ def _write_qmd(tmp_path: Path, body: str) -> Path:
     return path
 
 
-def test_lowercase_significant_word_in_bold_term_head_fails(tmp_path):
+def test_sentence_case_bold_term_head_passes(tmp_path):
     qmd = _write_qmd(
         tmp_path,
         "[^fn-arith-intensity]: **Arithmetic intensity**: Body.\n",
@@ -23,13 +23,7 @@ def test_lowercase_significant_word_in_bold_term_head_fails(tmp_path):
 
     violations = footnote_caps.scan_file(qmd, set())
 
-    assert len(violations) == 1
-    assert violations[0].kind == "term_head_case"
-    assert violations[0].detail == "intensity"
-    assert (
-        footnote_caps.apply_fix(violations[0])
-        == "[^fn-arith-intensity]: **Arithmetic Intensity**: Body."
-    )
+    assert violations == []
 
 
 def test_term_head_check_allows_protected_tokens(tmp_path):
@@ -60,7 +54,7 @@ def test_term_head_check_allows_protected_tokens(tmp_path):
     assert footnote_caps.scan_file(qmd, allowlist) == []
 
 
-def test_allowlist_does_not_hide_other_lowercase_term_words(tmp_path):
+def test_allowlist_accepts_lowercase_brand_and_sentence_case_head(tmp_path):
     qmd = _write_qmd(
         tmp_path,
         "[^fn-grpc-inference]: **gRPC service**: Body.\n",
@@ -68,9 +62,7 @@ def test_allowlist_does_not_hide_other_lowercase_term_words(tmp_path):
 
     violations = footnote_caps.scan_file(qmd, {"fn-grpc-inference"})
 
-    assert len(violations) == 1
-    assert violations[0].kind == "term_head_case"
-    assert violations[0].detail == "service"
+    assert violations == []
 
 
 def test_existing_lowercase_first_letter_check_still_fails(tmp_path):

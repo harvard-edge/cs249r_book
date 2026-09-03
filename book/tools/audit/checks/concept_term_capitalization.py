@@ -22,21 +22,14 @@ automatically.
 §10.3 exception contexts — *headline-style* contexts where capitals stay:
 
     1. Start of sentence
-    2. Inside **bold** (first definition)
-    3. Inside ***triple bold*** (definition callout term)
-    4. In H1 and H2 section headers (headline style)
-    5. In `\\index{}` entries
-    6. In bold table headers
-    7. In bold structural labels inside callouts (e.g. `**The Iron Law Connection:**`)
-    8. In table cells that list principles by name (pipe-table rows
+    2. Inside an explicitly preserved formal principle name
+    3. In H1 and H2 section headers (headline style)
+    4. In `\\index{}` entries
+    5. In bold table headers
+    6. In table cells that list principles by name (pipe-table rows
        that reference a canonical principle anchor like `\\ref{pri-...}`)
-    9. In `fig-cap` / `tbl-cap` / `lst-cap` bold-title position — the
-       `**Bold Title**:` part *before* the colon. Detected via the bold-span
-       logic, which sees the `**...**` markers regardless of whether the
-       text sits in body prose or in an attribute value (Quarto renders
-       both as bold).
-    10. "Iron Law of Processor Performance" (H&P canonical reference)
-    11. "Bitter Lesson" when used as Sutton's essay title
+    7. "Iron Law of Processor Performance" (H&P canonical reference)
+    8. "Bitter Lesson" when used as Sutton's essay title
 
 §10.3 *sentence-style* display contexts — concept terms STAY LOWERCASE:
 
@@ -51,8 +44,8 @@ automatically.
     - `lst-cap` descriptive text after bold title.
 
 These contexts are NOT broadly protected — concept terms in them flag.
-Only the `**Bold Title**:` portion within captions is protected (via the
-bold-span detection at exception #9).
+Bold emphasis does not change sentence case: first definitions, caption heads,
+box heads, and structural lead-ins remain scan-able.
 
 See `book-prose.md §10.3` (rule), `§10.3.2` (5-tier list), and `§10.3.3`
 (audit and edit workflow). When the rule and this script disagree, the
@@ -118,7 +111,6 @@ if not _DATA or "terms" not in _DATA:
     raise ValueError(f"Invalid concept terms data in {DATA_FILE}")
 
 _TERMS = _DATA["terms"]
-
 
 # ── Span helper that excludes attribute values ────────────────────────────
 #
@@ -226,6 +218,7 @@ def _is_inside_bold_span(
 _PRESERVED_PHRASES = (
     "Data Gravity Invariant",
     "Data as Code Invariant",
+    "Iron Law of Machine Learning Fleet Efficiency",
 )
 
 
@@ -344,13 +337,10 @@ def _skip_match(
     # 1. Start of sentence — capital is correct at sentence start.
     if is_sentence_start(line, start):
         return True
-    # 2. Inside any **bold** or ***triple bold*** span — first
-    #    definition, longer bold phrase, bold-wrapped term, or §10.3
-    #    exception #8 bold structural labels inside callouts
-    #    (e.g. `**The Iron Law Connection:**`). Uses full-span
-    #    containment, not just edge-adjacency.
-    if _is_inside_bold_span(line, start, end, bold_spans):
-        return True
+    # 2. Bold is emphasis, not a capitalization context. First definitions,
+    #    caption heads, box heads, and structural lead-ins all use sentence
+    #    case, so concept terms remain scan-able inside **...**. Preserve only
+    #    explicitly named formal principles below.
     # 2b. Inside a preserved book-coined named-principle phrase
     #     (Data Gravity Invariant, Data as Code Invariant). These
     #     are formal principle names parallel to Amdahl's Law.
@@ -487,6 +477,8 @@ _POSITIVE_LINES = [
     "A Starving Accelerator is bottlenecked on data delivery.",
     "The Four Pillars Framework organizes our analysis.",
     "With Data Gravity, computation pulls toward large corpora.",
+    "Periodic **Defragmentation** consolidates free accelerators.",
+    "A third strategy, **Over-Subscription**, admits excess demand.",
     # Non-principle callout titles are sentence-style box heads.
     '::: {.callout-definition title="Iron Law"}',
 ]
@@ -495,19 +487,9 @@ _NEGATIVE_LINES = [
     # Exception 1: start of sentence
     "Iron Law decomposes performance into three terms.",
     "Memory Wall is the binding constraint at this scale.",
-    # Exception 2: inside **bold** (first definition)
-    "The **Iron Law** of ML Systems is a three-term decomposition.",
-    "Engineers encounter the **Memory Wall** whenever bandwidth saturates.",
-    # Exception 2b: §10.3 #8 — bold structural labels in callouts
-    # where the term is in the MIDDLE of the bold span, not adjacent
-    # to the `**` markers. Requires full-span containment detection.
-    "**The Iron Law Connection:**",
-    "**The Memory Wall Implication:** bandwidth dominates.",
     # Preserved named-principle phrases (parallel to Amdahl's Law).
     "The Data Gravity Invariant determines where the model runs.",
     "Principle: the Data as Code Invariant governs reproducibility.",
-    # Exception 3: triple bold (definition callout term)
-    "***Memory Wall***\\index{Memory Wall!definition} is the point where...",
     # Exception 4: section headers (H1, H2, H3+ — all skipped by the line filter)
     "## The Iron Law of ML Systems",
     "# Memory Wall and Power Wall",
