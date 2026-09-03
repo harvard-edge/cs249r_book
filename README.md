@@ -10,28 +10,32 @@
 
 <div align="center">
 
-<!-- Build Status -->
+<!-- Build Status: Core 4-Volume Series -->
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20I%3A%20Foundations&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20II%3A%20Scaling&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/physical-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/physical-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a></br>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/sync-newsletter.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/sync-newsletter.yml?branch=dev&event=schedule&label=Newsletter&logo=buttondown&cacheSeconds=300" alt="Newsletter"></a>
-  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?branch=dev&label=Updated&logo=git&cacheSeconds=300" alt="Updated">
 </p>
 
-<!-- Meta -->
+<!-- Build Status: Companion Ecosystem & Tools -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+</p>
+
+<!-- Meta & Community -->
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md"><img src="https://img.shields.io/badge/License-CC--BY--NC--SA%204.0-blue.svg" alt="License"></a>
   <a href="CITATION.bib"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/sync-newsletter.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/sync-newsletter.yml?branch=dev&event=schedule&label=Newsletter&logo=buttondown&cacheSeconds=300" alt="Newsletter"></a>
+  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?branch=dev&label=Updated&logo=git&cacheSeconds=300" alt="Updated">
 </p>
 
 <p align="center">
@@ -39,10 +43,13 @@
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
   <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
   <b><a href="https://mlsysbook.ai/vol3/">🟣 Vol III (In Dev)</a></b> •
-  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b> •
+  <b><a href="https://mlsysbook.ai/vol4/">🌲 Vol IV (In Dev)</a></b>
+  <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
+  <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
   <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b>
 </p>
 
