@@ -253,29 +253,46 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-The textbook follows the Hennessy & Patterson pedagogical model across two volumes:
+The textbook series follows a comprehensive systems progression across four core volumes:
 
 <table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
       <th width="15%">Volume</th>
-      <th width="25%">Theme</th>
-      <th width="55%">Scope</th>
+      <th width="20%">Unit of Work</th>
+      <th width="35%">Core Systems Question</th>
+      <th width="25%">Consequence of Failure</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td align="center">📗</td>
-      <td><b>Volume I</b></td>
-      <td>Build, Optimize, Deploy</td>
-      <td>Single-machine ML systems (1–8 GPUs). Foundations, optimization, and deployment on one node.</td>
+      <td><b>Volume I</b><br><i>Foundations</i></td>
+      <td><b>The Model</b></td>
+      <td>How do we make intelligence execute efficiently on a single node?</td>
+      <td>Bad prediction or degraded runtime efficiency.</td>
     </tr>
     <tr>
       <td align="center">📘</td>
-      <td><b>Volume II</b></td>
-      <td>Scale, Distribute, Govern</td>
-      <td>Distributed systems at production scale. Multi-machine infrastructure, fault tolerance, and governance.</td>
+      <td><b>Volume II</b><br><i>Scaling</i></td>
+      <td><b>The Fleet</b></td>
+      <td>How do we scale intelligence across distributed clusters and datacenters?</td>
+      <td>Multi-million dollar cluster stall or service outage.</td>
+    </tr>
+    <tr>
+      <td align="center">🟣</td>
+      <td><b>Volume III</b><br><i>Agentic</i></td>
+      <td><b>The Trajectory</b></td>
+      <td>How do we govern intelligence acting autonomously over long horizons?</td>
+      <td>Compounding trajectory drift and unauthorized side-effects.</td>
+    </tr>
+    <tr>
+      <td align="center">🌲</td>
+      <td><b>Volume IV</b><br><i>Physical AI</i></td>
+      <td><b>The Physical Plant</b></td>
+      <td>How do we let intelligence act safely on matter and physical systems?</td>
+      <td>Irreversible physical damage in the real world.</td>
     </tr>
   </tbody>
 </table>
@@ -283,6 +300,28 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 ---
 
 ## FAQ
+
+<details>
+<summary><b>Why four volumes? Are you really writing four textbooks?</b></summary>
+
+<br>
+
+We use open, first-principles textbook writing as a **research instrument**, not a commercial publishing treadmill.
+
+We learn and clarify emerging systems disciplines by trying to teach them rigorously from the ground up. Doing so forces us to discover invariant principles, formalize missing abstractions, derive quantitative bounds, and separate durable systems foundations from ephemeral industry buzzwords.
+
+The four volumes represent a coherent intellectual progression in what a systems engineer is responsible for:
+
+1. **Volume I: The Model (Foundations)** — Focuses on single-node execution (1–8 accelerators), memory walls, kernel acceleration, and runtime optimization.
+2. **Volume II: The Fleet (Scaling)** — Focuses on distributed training, collective communication fabrics, fault tolerance, cluster orchestration, and datacenter economics.
+3. **Volume III: The Trajectory (Agentic AI)** — Focuses on stateful agent loops, context hierarchies, tool protocol boundaries (MCP), capability leases, sandboxing, and non-deterministic recovery.
+   * *Empirical Anchor:* Serves as the theoretical notebook for **MLPerf Agents**, formalizing state, trajectory boundaries, and verification before benchmarks accidentally freeze premature assumptions into standards.
+4. **Volume IV: The Physical Plant (Physical AI)** — Focuses on real-time sensor-actuator loops, microsecond latency budgets (where computational delay becomes uncontrolled physical distance), reflected inertia, joulean thermal limits, and defensible safety cases.
+   * *Empirical Anchor:* Grounded in physical hardware labs (Arduino, microcontrollers, edge accelerators, and robotics plants) to test whether principles survive real physical constraints.
+
+We deliberately avoid premature canonization. Principles are treated as living hypotheses (`Hypothesis → Candidate Invariant → Established Principle`) that must earn their place through contact with benchmarks, hardware, and students.
+
+</details>
 
 <details>
 <summary><b>Who is this for, and what should I know first?</b></summary>
