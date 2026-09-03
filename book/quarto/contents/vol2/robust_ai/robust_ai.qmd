@@ -47,6 +47,7 @@ Many software defects surface loudly: exceptions crash processes, type errors ha
 - Evaluate adversarial attack techniques and select defenses such as adversarial training, certification, and input sanitization
 - Construct data-poisoning defenses using anomaly detection, statistical validation, and robust training
 - Apply statistical drift metrics to choose monitoring, investigation, or retraining responses
+- Distinguish calibration, selective prediction, and conformal coverage, including the assumptions and operational costs of each
 - Integrate robustness across model and system dimensions while budgeting accuracy, compute, energy, and resilience trade-offs
 
 :::
@@ -1389,6 +1390,21 @@ $$
 
 Sweeping $\tau$ produces a risk-coverage curve rather than one accuracy number. Raising the threshold usually lowers accepted-request risk by reducing coverage, but the rejected traffic does not disappear. The fallback path needs enough queue, reviewer, or secondary-model capacity to absorb the abstention rate within the original latency and safety budget. If labels arrive days later, the system can monitor scores and fallback load immediately but cannot confirm selective risk until outcomes return. During that delay, rate limits, conservative thresholds, and a safe default bound exposure.
 
+#### Finite-sample coverage with conformal prediction {#sec-robust-ai-conformal-coverage}
+
+Calibration describes whether predicted probabilities match empirical frequencies; selective prediction chooses which requests the system will answer. **Conformal prediction**\index{Conformal prediction!finite-sample coverage} provides a different contract: it wraps a fitted predictor with a nonconformity score $s(x,y)$ and a held-out calibration set. If $\widehat q_{1-\alpha}$ is the appropriate empirical score quantile, the prediction set is
+
+$$
+C_\alpha(x)=\{y:s(x,y)\leq \widehat q_{1-\alpha}\}, \qquad
+\Pr\!\left(Y_{n+1}\in C_\alpha(X_{n+1})\right)\geq 1-\alpha.
+$$
+
+For exchangeable calibration and test examples, this is a finite-sample *marginal* coverage guarantee: over repeated examples, the set contains the true outcome at least at the target rate [@lei2018conformal]. It is not a guarantee for each input or subgroup. A rare subgroup can have poor coverage even when aggregate coverage is correct, particularly when it contributes few calibration examples.
+
+The systems obligation is to preserve the conditions behind the guarantee. Distribution shift or a stale calibration set breaks the exchangeability argument, while repeatedly tuning the model, score, or threshold against the same calibration outcomes makes the held-out evidence adaptive rather than independent. Production systems therefore version the predictor, score, calibration snapshot, and target $\alpha$ together; monitor realized coverage by consequential slice once labels arrive; and refresh or quarantine the contract when traffic changes. Conformalization does not protect against arbitrary shift.
+
+Set size or interval width supplies an operational load signal. Larger outputs convey less specific predictions and can trigger abstention, a stronger model, or human review, so their tail distribution determines fallback capacity just as the risk-coverage curve determines rejected traffic. The target coverage is therefore not free: increasing it usually widens sets, raises review demand, or reduces the fraction of requests on which the system can act automatically.
+
 ### Robustness in generative AI {#sec-robust-ai-robustness-generative-ai-941b}
 
 LLMs shift the failure surface from incorrect classification to semantic reliability: a fluent answer can be factually baseless while the system still appears healthy. The earlier robustness question was whether a label changed under perturbation; the generative version is whether an open-ended output preserves factuality, policy constraints, and task intent under prompt variation. Evaluations in specialized domains such as legal or medical advice show that hallucination rates\index{Hallucination!generative AI} vary strongly with model, retrieval context, prompt design, and sampling temperature. Token entropy and log-probability can expose instability in a generation, but neither is a factuality score. A model can assign high probability to a false statement learned from its data, or low probability to a correct but rare statement. Production routing must therefore calibrate these signals against task-specific errors and combine them with evidence checks, retrieval support, or external verification.
@@ -1404,10 +1420,6 @@ While prompt injection exploits the linguistic flexibility of generative models,
 ::: {#chk-robust-ai-drift-response .callout-checkpoint title="Drift detection and the retraining decision"}
 
 Environmental shifts split into distinct types, and the chapter's drift framework deliberately separates a fired metric from a retraining command.
-
-```{=latex}
-\tcbbreak
-```
 
 **Distinguishing the shift type**
 
@@ -2816,6 +2828,7 @@ Every robustness mechanism reallocates resources within the iron law of ML syste
 * **Silence is the failure mode**: Robustness exists because drift, adversarial perturbations, poisoning, and numerical faults often preserve uptime and latency while corrupting predictions. Production systems need monitors that surface competence loss before user complaints or downstream business metrics reveal it.
 * **Robustness is bought explicitly**: Strong adversarial training (principle \ref{pri-robustness-compute-penalty}) can reduce clean accuracy and multiply training compute, while certified defenses and uncertainty sampling add serving cost. Price each effect against a like-for-like baseline before deciding how much resilience the failure consequence justifies.
 * **Drift needs calibrated distance measures**: Statistical distance metrics turn environmental shift into thresholds for review, retraining, rollback, or routing. The metric is useful only when connected to a response path and calibrated against false alarms.
+* **Coverage guarantees have operating conditions**: Conformal prediction provides finite-sample marginal coverage under exchangeability, not per-input or per-subgroup certainty. Version and refresh the calibration evidence, and provision fallback capacity for large prediction sets.
 * **Threats masquerade as each other**: A software fault can look like concept drift, a poisoned sample can look like a rare outlier, and an adversarial input can hide inside natural variation. Robust systems combine ingress validation, training defenses, uncertainty signals, and output verification.
 * **Generative reliability is semantic**: LLM hallucinations are confidently fluent failures rather than simple label mistakes. Entropy and self-consistency are routing signals, not factuality guarantees; grounding checks, external verification, and escalation policies must bound what the system is allowed to assert.
 
