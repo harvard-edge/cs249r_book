@@ -235,10 +235,16 @@ class MLSysBookCLI:
 
         for arg in args:
             lower = arg.lower()
-            if lower == "--vol1":
+            if lower in ("--vol1", "-1", "vol1", "v1", "intro"):
                 volume = "vol1"
-            elif lower == "--vol2":
+            elif lower in ("--vol2", "-2", "vol2", "v2", "scaling"):
                 volume = "vol2"
+            elif lower in ("--vol3", "-3", "vol3", "v3", "agentic"):
+                volume = "vol3"
+            elif lower in ("--vol4", "-4", "vol4", "v4", "physical", "--physical"):
+                volume = "vol4"
+            elif lower in ("--tinytorch", "tinytorch"):
+                volume = "tinytorch"
             elif lower == "--all":
                 build_all = True
             elif lower == "--skip-hygiene":
