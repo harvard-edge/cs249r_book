@@ -1149,7 +1149,7 @@ def run_optimization_workflow_example():
     print("STEP 3: Optimization APIs Available (Demo)")
     print("="*70)
     print("\n  📚 Students can apply these optimizations:")
-    print("     - Module 15: quantize_model(model, bits=8)")
+    print("     - Module 15: quantize_model(model, calibration_data)")
     print("     - Module 16: magnitude_prune(model, sparsity=0.5)")
     print("     - Module 17: Use accelerated ops (vectorized_matmul, etc.)")
     print("     - Module 18: enable_kv_cache(model)  # For transformers")
