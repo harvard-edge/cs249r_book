@@ -1,10 +1,19 @@
 """PDF post-build verification used by `binder build pdf` and `binder check pdf`.
 
-Scans rendered PDF text (via ``pdftotext``) for defects Quarto/LuaLaTeX can
-emit without failing the render: unresolved cross-refs (``?@sec-foo``), literal
+Two evidence sources, because some defects are visible only in one of them.
+
+**Rendered PDF text** (via ``pdftotext``) catches what Quarto/LuaLaTeX emit
+without failing the render: unresolved cross-refs (``?@sec-foo``), literal
 unrendered cross-refs (``@sec-foo``), undefined LaTeX references
 (``Figure ??``), leaked layout-control tokens, leaked Python tracebacks, and
 matplotlib/Python ``UserWarning`` text that escaped into the rendered output.
+
+**The LuaLaTeX build log** (``scan_build_log``) catches what the typesetter
+knew but the PDF cannot show: unresolved-crossref warnings, overfull hbox/vbox
+overflow, and missing glyphs — characters a font could not render, which are
+dropped silently and leave no trace in the finished document. The log is found
+automatically next to the generated ``.tex`` (see ``default_log_path``); the
+PDF-text checks still run when no log is available.
 """
 
 from __future__ import annotations
@@ -67,6 +76,35 @@ OVERFULL_HBOX = re.compile(
 OVERFULL_VBOX = re.compile(
     r"Overfull \\vbox \((\d+(?:\.\d+)?)pt too high\)[^\n\[]*(?:\[(\d+)\])?"
 )
+# Missing glyph: the font has no outline for this codepoint, so LuaLaTeX drops
+# the character silently — it is simply absent from the printed page, with no
+# visible marker. Unlike an overfull box (which is a judgment about how much
+# overflow is tolerable), every occurrence is a defect: text the author wrote
+# did not reach the reader. Added 2026-09-02 after a camera-ready pass fixed
+# five of these by eye (missing PDF glyphs in Vol I, font-safe Vol II text
+# diagrams and diagnostic tree, PDF-safe pronunciation notation, TikZ font
+# family for LuaLaTeX) that the log had already reported for free.
+#
+# LuaTeX emits either a literal character, a "U+XXXX" form, or a "^^xx" byte
+# escape, followed by the font name:
+#   Missing character: There is no × (U+00D7) in font lmroman10-regular!
+#   Missing character: There is no ^^e2 in font [LibertinusSerif-Regular]!
+MISSING_CHARACTER = re.compile(
+    r"Missing character: There is no (.+?) in font ([^\n!]+?)!?\s*$",
+    re.MULTILINE,
+)
+# TeX wraps log lines at ``max_print_line`` (79 by default; Quarto's LuaLaTeX
+# runs use a much larger value, but that is environment-dependent and CI may
+# differ). A wrap landing inside the character or font name defeats the regex
+# above. Counting the unwrappable marker prefix separately gives an authoritative
+# total, so a wrapped log degrades to a less detailed report rather than to a
+# silent pass — the one failure mode a gate must never have.
+MISSING_CHARACTER_MARKER = "Missing character: There is no "
+
+# A log written well before the PDF it would vouch for is describing a
+# different render. Allow a small window because LuaLaTeX writes the log moments
+# before the PDF is finalized and copied into _build.
+LOG_STALENESS_TOLERANCE_S = 300.0
 
 
 @dataclass(frozen=True)
@@ -107,6 +145,32 @@ class PdfValidationResult:
 
 def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
     return quarto_dir / "_build" / f"pdf-{volume}" / PDF_BY_VOLUME[volume]
+
+
+def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
+    """Locate the LuaLaTeX log for ``volume``, or None when it cannot be trusted.
+
+    ``keep-tex`` leaves ``Machine-Learning-Systems-VolN.tex`` in the Quarto
+    directory, and with ``latex-clean: false`` the sibling ``.log`` survives
+    alongside it. Auto-discovering it means the log-based gates (crossref
+    warnings, overfull boxes, missing glyphs) run on a normal
+    ``binder check pdf`` without the caller remembering ``--log``.
+
+    Because ``latex-clean: false`` also means a log *outlives* the run that
+    produced it, a stale one could vouch for a PDF it never described — a clean
+    old log silently passing a bad new build. So the log is only returned when
+    it is at least as new as the PDF; otherwise the caller sees ``None`` and the
+    log-based checks report as skipped, which is honest rather than wrong. An
+    explicit ``--log`` bypasses this and is always trusted.
+    """
+    candidate = quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name
+    if not candidate.is_file():
+        return None
+    pdf_path = default_pdf_path(quarto_dir, volume)
+    if pdf_path.is_file():
+        if candidate.stat().st_mtime < pdf_path.stat().st_mtime - LOG_STALENESS_TOLERANCE_S:
+            return None
+    return candidate
 
 
 def _pdftotext(pdf_path: Path) -> str:
@@ -532,6 +596,56 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
             )
         )
 
+    # Missing glyphs: no threshold and no severity tiering — a dropped character
+    # is always a defect. The marker count is authoritative (wrap-proof); the
+    # regex supplies the actionable detail when lines are intact.
+    total_glyphs = text.count(MISSING_CHARACTER_MARKER)
+    if total_glyphs:
+        # Group by (character, font) so one bad glyph in a heavily used face
+        # reports as a single actionable row rather than hundreds.
+        glyph_counts: Counter[tuple[str, str]] = Counter()
+        for m in MISSING_CHARACTER.finditer(text):
+            char = m.group(1).strip()
+            # LuaTeX appends the fontspec feature string after a colon
+            # ("[NimbusRoman-Regular]:mode=node;script=latn;..."). Drop it so
+            # every instance of one face groups together rather than fragmenting.
+            font = m.group(2).split(":", 1)[0].strip().strip("[]")
+            glyph_counts[(char, font)] += 1
+
+        if glyph_counts:
+            worst = glyph_counts.most_common(5)
+            details = " " + "; ".join(
+                f"{char!r} missing from {font} (x{count})"
+                for (char, font), count in worst
+            )
+            more = len(glyph_counts) - len(worst)
+            if more > 0:
+                details += f"; +{more} more glyph/font pair(s)"
+            pairs = f"across {len(glyph_counts)} glyph/font pair(s)"
+        else:
+            # Every line was wrapped past recognition. Still block: the count is
+            # real even though the per-glyph breakdown is unavailable.
+            details = (
+                " Log lines appear wrapped, so the per-glyph breakdown is "
+                "unavailable; grep the log for 'Missing character'."
+            )
+            pairs = "(detail unavailable)"
+
+        unparsed = total_glyphs - sum(glyph_counts.values())
+        if glyph_counts and unparsed > 0:
+            details += f"; {unparsed} further warning(s) too wrapped to attribute"
+
+        issues.append(
+            PdfIssue(
+                code="missing-glyph",
+                message=(
+                    f"{total_glyphs} dropped character(s) {pairs} — this text is "
+                    f"absent from the printed page.{details}"
+                ),
+                count=total_glyphs,
+            )
+        )
+
     return issues
 
 
@@ -855,6 +969,12 @@ def verify_volume_pdf(
             "overfull-vbox",
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
+            skipped=log_path is None,
+        ),
+        PdfCheckItem(
+            "missing-glyph",
+            "No dropped characters (Missing character in build log)",
+            not any(i.code == "missing-glyph" for i in issues),
             skipped=log_path is None,
         ),
         PdfCheckItem(

@@ -9332,11 +9332,17 @@ class ValidateCommand:
         tinytorch: bool = False,
         log_path: Optional[str] = None,
     ) -> ValidationRunResult:
-        from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
+        from cli.commands._pdf_checks import (
+            default_log_path,
+            format_checklist,
+            verify_volume_pdf,
+        )
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
         quarto_dir = repo_root / "book" / "quarto"
+        # An explicit --log wins; otherwise fall back to the log the build left
+        # beside the .tex, so log-based gates run without extra ceremony.
         log = Path(log_path) if log_path else None
 
         volumes: List[str] = []
@@ -9356,7 +9362,8 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
         checked = 0
         for vol in volumes:
-            result = verify_volume_pdf(quarto_dir, vol, log_path=log)
+            vol_log = log or default_log_path(quarto_dir, vol)
+            result = verify_volume_pdf(quarto_dir, vol, log_path=vol_log)
             checked += 1
             if not result.ok:
                 for issue in result.issues:

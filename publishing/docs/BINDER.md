@@ -158,7 +158,7 @@ Requires Python 3.10+ and project dependencies (Rich, etc.). Run `./book/binder 
 | `notation` | Iron-law symbol consistency | |
 | `spelling` | aspell on prose / TikZ | opt-in (needs aspell) |
 | `epub` | Source hygiene; opt-in: smoke, epubcheck | `hygiene --fix` auto-repairs source |
-| `pdf` | Built-PDF cross-ref and warning scans | post-build, requires artifact |
+| `pdf` | Built-PDF cross-ref scans, plus LaTeX-log gates (overfull boxes, missing glyphs) | post-build, requires artifact; see [Log-based PDF gates](#log-based-pdf-gates) |
 | `registry` | Constants-to-registry migration gates | `sources`, `tests`, `appendix` |
 | `sources` | Source-note / citation formatting | |
 | `references` | External .bib verification (hallucinator) | opt-in, network |
@@ -221,6 +221,44 @@ For example, `./book/binder check math --scope multiplier-style` catches these p
 | `unicode_times_in_prose` | `A100 × H100` in normal Quarto prose | Use `A100 $\times$ H100` in prose. Raw `×` is only for non-LaTeX contexts such as alt text, Matplotlib labels, code fences, and ASCII diagrams. |
 | `times_product_spacing` | `$n$$\times$$m$` or `` `{python} n_str`$\times$`{python} m_str` `` | Put spaces around arithmetic products: `$n$ $\times$ $m$` or `` `{python} n_str` $\times$ `{python} m_str` ``. Computed prose multipliers use `*_mult_str` instead of a separate prose glyph. |
 | `fmt_sci_math_context` | `flops_math = fmt_sci(flops)` or `MarkdownStr(f"${fmt_sci(flops)}$")` | Treat `fmt_sci()` as plain-text output. For prose math, use `fmt_math(sci_latex(...))` or another LaTeX-first helper. |
+
+### Log-based PDF gates
+
+Some defects are only visible to LaTeX, not to the source or the finished PDF.
+`binder check pdf --scope verify` therefore reads the LuaLaTeX build log in
+addition to the PDF text:
+
+| Gate | Fires on | Blocking |
+|---|---|---|
+| `quarto-crossref-warning` | `Unable to resolve crossref` | yes |
+| `overfull-hbox` | Horizontal overflow >= 20pt | yes |
+| `overfull-vbox` | Vertical / margin overflow >= 20pt | yes |
+| `missing-glyph` | `Missing character:` — a character the font could not render | yes |
+
+`missing-glyph` has no severity threshold, unlike the overfull gates. An
+overfull box is a judgment about how much overflow is tolerable; a dropped
+character is always a defect, because the text is simply absent from the printed
+page with no visible marker. Warnings group by (character, font), and the report
+names the worst offenders so one bad glyph in a widely used face is a single
+actionable row.
+
+**Finding the log.** The PDF configs set `latex-clean: false`, so the log
+survives beside the generated `.tex` as
+`book/quarto/Machine-Learning-Systems-Vol{1,2}.log` (both suffixes are
+gitignored; this also preserves the `.aux` that mapped chapter layout builds
+need). The check discovers it automatically:
+
+```bash
+./book/binder build pdf --vol1          # writes the log
+./book/binder check pdf --scope verify --vol1   # reads it, no --log needed
+./book/binder check pdf --scope verify --vol1 --log /path/to/other.log  # override
+```
+
+A discovered log older than the PDF is ignored, because a log left behind by an
+earlier or failed run would otherwise vouch for a build it never described — the
+gates then report as *skipped* rather than passing on stale evidence. An explicit
+`--log` is always trusted. If no log is found, the log-based gates skip; the
+PDF-text gates still run.
 
 ### Diagnostic shape
 
