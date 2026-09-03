@@ -134,7 +134,11 @@ Raw Data Storage          Dataset Interface         DataLoader Batching         
 
 **Training Variety**: Shuffling ensures the model sees different combinations each epoch, preventing memorization.
 
-### The Dataset Abstraction
+"""
+
+# %% [markdown]
+"""
+## 📐 Foundations: The Dataset Abstraction
 
 The Dataset class provides a uniform interface for accessing data, regardless of whether it's stored as files, in memory, in databases, or generated on-the-fly:
 

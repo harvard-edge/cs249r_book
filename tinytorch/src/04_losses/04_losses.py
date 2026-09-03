@@ -109,7 +109,7 @@ from tinytorch.core.layers import Linear
 EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.

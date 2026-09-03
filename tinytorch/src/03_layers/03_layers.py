@@ -462,6 +462,12 @@ if __name__ == "__main__":
 ### 🧪 Edge Case Tests: Linear Layer
 
 Additional tests for edge cases and error handling.
+
+**What we're testing**: Linear layer behavior at the boundaries -- empty batches,
+single samples, and mismatched input widths
+**Why it matters**: Edge cases are where a layer that "works" quietly stops
+working, usually the first time a real dataset has a ragged final batch
+**Expected**: Correct shapes at every boundary, clear errors on genuine mismatches
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
@@ -505,6 +511,12 @@ if __name__ == "__main__":
 ### 🧪 Parameter Collection Tests: Linear Layer
 
 Tests to ensure Linear layer parameters can be collected for optimization.
+
+**What we're testing**: parameters() returns the weight and bias, in a form the
+optimizer accepts
+**Why it matters**: The optimizer trains exactly what parameters() hands it. A
+parameter left out of that list is a parameter that silently never learns
+**Expected**: Both tensors returned, with the shapes the layer was built with
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}

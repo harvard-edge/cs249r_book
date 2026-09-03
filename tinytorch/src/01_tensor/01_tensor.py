@@ -1180,6 +1180,12 @@ Validation Decision Tree:
 Separating validation from computation keeps each function focused on a single
 concept: `_validate_matmul_shapes` teaches input checking, while `matmul`
 teaches the algorithm itself.
+
+**What we're testing**: All three shape-mismatch categories are caught and named
+**Why it matters**: A shape error caught at the boundary names the problem; one
+that slips through surfaces as a NumPy error deep inside a matmul, pages away
+from the line that caused it
+**Expected**: Valid shapes pass silently; each invalid case raises with its reason
 """
 
 # %% nbgrader={"grade": true, "grade_id": "tensor-validate-matmul", "locked": true, "points": 5}
