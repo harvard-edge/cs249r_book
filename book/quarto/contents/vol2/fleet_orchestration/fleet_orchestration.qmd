@@ -46,7 +46,7 @@ A thousand accelerators sitting idle waiting for scheduling decisions cost the s
 - Compare HPC, cloud-native, and hybrid orchestration paradigms for batch training and self-healing serving workloads
 - Apply gang, bin-packing, and topology-aware placement policies across NVLink domains and switch hierarchies
 - Design elastic training and preemption policies that trade throughput, recovery overhead, and spot-instance savings
-- Evaluate ML-specific schedulers using job duration, iteration progress, fairness, and adaptive resource-allocation signals
+- Evaluate ML-specific schedulers using job duration, iteration progress, dominant-resource fairness, and adaptive resource-allocation signals
 - Design fleet-level inference capacity, isolation, and placement policies using queue depth, tail latency, and GPU memory pressure
 - Diagnose utilization losses from quota hoarding, noisy neighbors, fragmentation, topology mismatch, and data starvation
 
@@ -280,6 +280,23 @@ In standard web serving, request service times are often approximated by an expo
 At `{python} QueuingTheory.rho_pct_str` utilization $(\rho = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With a typical ML workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at `{python} QueuingTheory.rho_pct_str` load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
 
 :::
+
+#### Worked allocation: Dominant-resource fairness {#sec-fleet-orchestration-drf-worked-allocation}
+
+Dominant-resource fairness (DRF)\index{Dominant-resource fairness!worked allocation} makes a multi-resource entitlement comparable by normalizing each tenant's allocation against fleet capacity and taking its largest share [@ghodsi2011]. Consider the deliberately small cluster in @tbl-fleet-orchestration-drf-allocation: 8 GPUs, 32 CPU cores, 256 GB of memory, and 80 Gb/s of network capacity. Tenant A's replica requires 1 GPU, 4 cores, 32 GB, and 10 Gb/s; Tenant B's distributed worker requires 2 GPUs, 2 cores, 16 GB, and 20 Gb/s.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+| **Tenant** | **Allocation** | **GPU share** | **CPU share** | **Memory share** | **Network share** | **Dominant share** |
+|:-----------|:---------------|:-------------:|:-------------:|:----------------:|:-----------------:|:------------------:|
+| A          | 4 replicas     |   $4/8=0.50$  |  $16/32=0.50$ |  $128/256=0.50$  |    $40/80=0.50$   |       $0.50$       |
+| B          | 2 workers      |   $4/8=0.50$  |  $4/32=0.125$ |  $32/256=0.125$  |    $40/80=0.50$   |       $0.50$       |
+
+: **Worked DRF Allocation**: Progressive filling gives Tenant A four one-GPU replicas and Tenant B a pair of two-GPU workers. Both tenants reach a dominant share of 0.50 even though their CPU and memory allocations differ. GPUs and network are jointly saturated; CPU and memory remain available but cannot increase either allocation without exceeding a saturated resource. {#tbl-fleet-orchestration-drf-allocation tbl-colwidths="[12,19,13,13,14,15,14]"}
+
+The calculation equalizes $\max_r(a_{i,r}/C_r)$, not every resource share. One A replica raises A's dominant share by $1/8$; one B worker raises B's by $2/8$. Progressive filling therefore grants roughly two A replicas for each B worker until both dominant shares reach $0.50$. This is a fair policy target, but it is not yet a feasible placement. If B's two workers form one four-GPU gang, the four GPUs must become available atomically; if tensor parallelism requires one NVLink domain, four free GPUs scattered across nodes do not satisfy the allocation; and if the job requires 80 GB HBM accelerators, four incompatible GPUs do not count at all. A production scheduler therefore applies capability, gang, and topology constraints to the feasible set, then uses DRF to choose fairly among allocations that can actually run. When no equal-share placement exists, the scheduler should report the constraint causing the deviation rather than silently presenting an infeasible entitlement as service delivered.
 
 ### Bin packing {#sec-fleet-orchestration-bin-packing}
 
@@ -2615,6 +2632,8 @@ Fleet orchestration transforms raw data center capacity into productive ML infra
 
 The chapter's unifying technical insight is that placement directly dictates physical performance. By aligning model parallelism with the physical network hierarchy, topology-aware scheduling prevents cross-rack bisection bottlenecks, protecting the $D_{\text{vol}}/\text{BW}$ communication term and increasing throughput by 15 to 30 percent. Domain-specific schedulers—such as Tiresias, Gandiva, Themis, and Pollux—exploit the structure of ML workloads (iterative progress, heavy-tailed runtimes, and predictable convergence scaling) to minimize the coordination and wait-time terms ($L_{\text{lat}}$), cutting average job completion time by 40 to 60 percent compared to general-purpose FIFO policies. Elastic training and spot management extend this control by trading worker continuity for economic flexibility, provided jobs can dynamically adapt without incurring unacceptable preemption tax.
 
+Fairness is likewise a constrained allocation problem rather than a single quota percentage. DRF equalizes each tenant's largest normalized resource share, but gang size, topology locality, and accelerator compatibility determine which nominal allocations are feasible. Slowdown and maximum feasible wait then reveal whether equal resource shares translate into equitable access over time.
+
 At serving time, the fleet scheduler preserves a capacity envelope rather than choosing individual request routes. It places indivisible replicas, maintains SLO headroom, and uses measured demand to move the training-serving boundary. @Sec-inference-scale develops request admission, batching, routing, KV-cache policy, and tail-latency control within that envelope. Multi-tenant isolation and fair-share quota governance remain orchestration concerns because they decide which workloads may share hardware and which allocations yield under pressure.
 
 Ultimately, fleet orchestration is diagnostic and economic as much as algorithmic. Operational pathologies such as zombie jobs, data starvation, topology mismatch, and pool fragmentation are symptoms of policy-infrastructure misalignment rather than deficient hardware. When compute nodes are defined, networks wired, storage attached, fault tolerance integrated, and orchestrators aligned, the fleet transitions from a collection of isolated servers into a coherent, self-healing computing platform.
@@ -2623,6 +2642,7 @@ Ultimately, fleet orchestration is diagnostic and economic as much as algorithmi
 
 * **Distributed scheduling is fundamentally hard**: Cluster scheduling\index{Distributed Scheduling!challenges} faces challenges (partial failures, network partitions, state inconsistency) that single-machine schedulers never encounter. The CAP theorem forces trade-offs between consistency and availability that shape every scheduling system's design.
 * **Gang scheduling prevents deadlock but reduces flexibility**: Gang scheduling\index{Gang Scheduling!deadlock prevention} gives distributed training atomic resource allocation to prevent hold-and-wait deadlocks, but rigid gang scheduling wastes resources when combined with backfill timeouts and elastic training alternatives.
+* **Fairness is measured over feasible bundles**: DRF equalizes each tenant's dominant normalized share across GPUs, CPU, memory, and network. Gang, topology, and compatibility constraints must filter infeasible bundles first, while slowdown and maximum feasible wait test whether the resulting policy avoids delay and starvation.
 * **Topology determines performance**: Where GPUs are placed within the cluster hierarchy\index{Scheduling!topology awareness} matters as much as how many GPUs a job receives. NVLink vs. InfiniBand placement decisions can create 15 to 30 percent throughput differences for the same job on the same hardware.
 * **ML-specific scheduling outperforms generic approaches**: Exploiting workload characteristics\index{Scheduling!ML-specific policies} (predictable resource needs, iterative computation, diminishing returns) enables 40 to 60 percent improvements in job completion time compared to general-purpose FIFO or fair-share policies.
 * **Utilization is a first-order economic driver**: Improving cluster utilization from 50 percent to 80 percent on a large cluster effectively adds thousands of GPUs worth of capacity. Closing this gap through policy and algorithm work pays back faster than buying additional accelerators.
