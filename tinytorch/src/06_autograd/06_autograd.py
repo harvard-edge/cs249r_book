@@ -2440,6 +2440,52 @@ class no_grad:
         return False  # Don't suppress exceptions
 
 
+# %% [markdown]
+"""
+### Walking the Graph in the Right Order
+
+We have every gradient rule. What remains is the traversal: given the output,
+visit the graph and hand each tensor its gradient. The obvious approach is
+recursion -- compute a tensor's gradient, then immediately recurse into its
+parents. That works, right up until a tensor is used twice.
+
+```
+        x ──► y ──┬──► loss = y * y
+                  └──►
+```
+
+Here `y` feeds the multiply twice, so the true gradient at `y` is the SUM of
+what both edges send back. Naive recursion reaches `y` on the first edge and
+descends the whole subtree below it before the second edge has contributed
+anything. So `x` is updated from a partial gradient. Worse, when the second
+edge arrives it descends that same subtree all over again -- work doubles at
+every reused node, which is exponential on a graph with several of them.
+
+The fix is a **topological order**: an ordering of the graph in which every
+consumer of a tensor appears before the tensor itself.
+
+```
+   build order (DFS post-order)    reversed = topological order
+   [x, y, loss]                    [loss, y, x]
+                                     │     │   └─ visited last, gradient complete
+                                     │     └───── both edges have contributed
+                                     └─────────── the seed
+```
+
+Process tensors in that order and each one is visited exactly once, at the
+moment its gradient is complete. Correct, and linear in the size of the graph
+rather than exponential.
+
+This is the piece that makes reverse-mode AD practical, and it is why PyTorch,
+JAX, and every other framework sort before they walk. `backward()` below builds
+the order with a depth-first post-order traversal, reverses it, then makes a
+single pass -- accumulating into each `.grad` and passing each parent its share.
+
+One consequence worth noticing: the graph can only be freed *after* the whole
+walk. Releasing each node as you pass it would drop exactly the second
+contribution the sort exists to collect.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": true}
 #| export
 def enable_autograd(quiet=False):
@@ -2831,6 +2877,25 @@ def enable_autograd(quiet=False):
 
         return result
 
+    def _reduce_grad_to(grad, shape):
+        """Sum a gradient down to `shape`, undoing any broadcasting from the forward pass.
+
+        Broadcasting in the forward pass means one value was reused across many
+        positions, so in the backward pass every one of those positions sends a
+        gradient back and they must be summed. A bias of shape (features,) added
+        to a (batch, features) activation is the everyday case.
+        """
+        if grad.shape == shape:
+            return grad
+        # Remove leading axes the forward pass added: (batch, features) -> (features,)
+        while grad.ndim > len(shape):
+            grad = grad.sum(axis=0)
+        # Sum axes that were size 1 before broadcasting: (1,) -> (batch,)
+        for axis in range(grad.ndim):
+            if shape[axis] == 1 and grad.shape[axis] != 1:
+                grad = grad.sum(axis=axis, keepdims=True)
+        return grad
+
     def backward(self, gradient=None, retain_graph=False):
         """
         Compute gradients via backpropagation.
@@ -2839,11 +2904,19 @@ def enable_autograd(quiet=False):
         It implements reverse-mode automatic differentiation.
 
         **Algorithm:**
-        1. Initialize gradient if not provided (for scalar outputs)
-        2. Accumulate gradient in self.grad
-        3. If this tensor has a _grad_fn, call it to propagate gradients
-        4. Recursively call backward() on parent tensors
-        5. Release computation graph (unless retain_graph=True)
+        1. Build a topological order of the graph, so every tensor is visited
+           only after all of the operations that consumed it
+        2. Seed the output tensor with the incoming gradient
+        3. Walk that order once, accumulating into each tensor's `.grad` and
+           handing each parent its share
+        4. Release the graph once, at the end (unless retain_graph=True)
+
+        **Why the topological order matters.** A tensor can feed more than one
+        operation -- a residual connection, a reused activation, or something as
+        small as `loss = y * y`. Its true gradient is the SUM of what every
+        consumer sends back, so it must not propagate until all of them have
+        contributed. Walking the graph in topological order guarantees exactly
+        that, and visits every tensor exactly once.
 
         **Args:**
             gradient: External gradient to seed backpropagation. If None, assumes
@@ -2857,14 +2930,12 @@ def enable_autograd(quiet=False):
         ```python
         x = Tensor([2.0], requires_grad=True)
         y = x * 3
-        y.backward()  # Computes gradients for x, then releases graph
+        y.backward()   # Computes gradients for x, then releases the graph
         print(x.grad)  # [3.0]
-        # y.backward()  # Would fail — graph already released!
 
-        # To backward twice, use retain_graph=True:
-        y2 = x * 3
-        y2.backward(retain_graph=True)  # Graph kept alive
-        y2.backward()  # Works! (releases graph this time)
+        # A reused tensor accumulates from every consumer:
+        h = x * 2
+        (h * h).backward()   # dL/dx = 2*(2x)*2 = 8*x
         ```
         """
         # Ensure gradient attributes exist
@@ -2886,43 +2957,71 @@ def enable_autograd(quiet=False):
                     f"  Fix: Call backward(gradient) with the gradient tensor from the loss function."
                 )
 
-        # Initialize or accumulate gradient
-        if self.grad is None:
-            self.grad = np.zeros_like(self.data)
+        # ---- Step 1: topological sort -------------------------------------
+        # Depth-first from the output, appending each tensor only AFTER its
+        # parents. Reversing that post-order gives an order in which every
+        # consumer of a tensor appears before the tensor itself.
+        topo_order = []
+        seen = set()
 
-        # Handle broadcasting: sum gradient to match self.data shape
-        # This happens when operations broadcast tensors (e.g., adding bias to batch)
-        if gradient.shape != self.grad.shape:
-            # Step 1: Remove extra leading dimensions added during forward pass
-            # Example: gradient (batch_size, features) → self.grad (features,)
-            while gradient.ndim > self.grad.ndim:
-                gradient = gradient.sum(axis=0)
+        def visit(tensor):
+            if id(tensor) in seen:
+                return
+            seen.add(id(tensor))
+            fn = getattr(tensor, '_grad_fn', None)
+            if fn is not None:
+                for parent in fn.saved_tensors:
+                    if isinstance(parent, Tensor):
+                        visit(parent)
+            topo_order.append(tensor)
 
-            # Step 2: Sum over dimensions that were size-1 in original tensor
-            # Example: bias with shape (1,) broadcast to (batch_size,) during forward
-            for i in range(gradient.ndim):
-                if self.grad.shape[i] == 1 and gradient.shape[i] != 1:
-                    gradient = gradient.sum(axis=i, keepdims=True)
+        visit(self)
+        topo_order.reverse()
 
-        self.grad += gradient
+        # ---- Step 2: seed the output --------------------------------------
+        # pending[id(tensor)] holds the gradient accumulated from the consumers
+        # visited so far. Keyed by id() because Tensors are not hashable.
+        pending = {id(self): gradient}
 
-        # Propagate gradients through computation graph
-        # _grad_fn is set by autograd enhancement when tensor is created from an operation
-        grad_fn = getattr(self, '_grad_fn', None)
-        if grad_fn is not None:
-            grads = grad_fn.apply(gradient)
+        # ---- Step 3: one pass, in topological order ------------------------
+        for tensor in topo_order:
+            grad = pending.get(id(tensor))
+            if grad is None:
+                continue
 
-            # Recursively call backward on parent tensors
-            for tensor, grad in zip(grad_fn.saved_tensors, grads):
-                if isinstance(tensor, Tensor) and tensor.requires_grad and grad is not None:
-                    tensor.backward(grad, retain_graph=retain_graph)
+            _ensure_grad_attrs(tensor)
+            if not _get_requires_grad(tensor):
+                continue
 
-            # Release computation graph to free memory (matches PyTorch's default)
-            # Why: The graph stores references to all intermediate tensors. Without
-            # cleanup, these references prevent garbage collection, causing memory
-            # to grow linearly with the number of training steps.
-            if not retain_graph:
-                self._grad_fn = None
+            # Accumulate into this tensor's .grad
+            if tensor.grad is None:
+                tensor.grad = np.zeros_like(tensor.data)
+            tensor.grad += _reduce_grad_to(grad, tensor.grad.shape)
+
+            # Hand each parent its share
+            fn = getattr(tensor, '_grad_fn', None)
+            if fn is None:
+                continue
+            parent_grads = fn.apply(grad)
+            for parent, parent_grad in zip(fn.saved_tensors, parent_grads):
+                if not isinstance(parent, Tensor) or parent_grad is None:
+                    continue
+                if not _get_requires_grad(parent):
+                    continue
+                parent_grad = _reduce_grad_to(parent_grad, parent.data.shape)
+                if id(parent) in pending:
+                    pending[id(parent)] = pending[id(parent)] + parent_grad
+                else:
+                    pending[id(parent)] = parent_grad
+
+        # ---- Step 4: release the graph, once ------------------------------
+        # The graph holds references to every intermediate tensor, so without
+        # this, memory grows with each training step. Releasing per-node DURING
+        # the walk would be a bug: a tensor with two consumers would lose the
+        # second contribution.
+        if not retain_graph:
+            for tensor in topo_order:
+                tensor._grad_fn = None
 
     def zero_grad(self):
         """
@@ -3245,6 +3344,57 @@ def test_unit_tensor_autograd():
 
 if __name__ == "__main__":
     test_unit_tensor_autograd()
+
+
+# %% [markdown]
+"""
+### 🔬 Unit Test: Gradients Through a Reused Tensor
+
+This test validates the topological traversal: a tensor consumed by more than
+one operation must accumulate from every consumer before it propagates.
+
+**What we're testing**: Gradients are correct when an intermediate tensor is used twice
+**Why it matters**: Residual connections, attention, and any `y * y` hit this path;
+a traversal that visits a node once per edge silently halves the gradient
+**Expected**: Analytic gradients, with the default `retain_graph=False`
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-reused-tensor-gradients", "locked": true, "points": 10}
+def test_unit_reused_tensor_gradients():
+    """🔬 Test gradient accumulation through a tensor with multiple consumers."""
+    print("🔬 Unit Test: Reused Tensor Gradients...")
+
+    # loss = (x @ W)^2  ->  dL/dW = 2(xW)x = 24,  dL/dx = 2(xW)W = 36
+    x = Tensor(np.array([[2.0]]), requires_grad=True)
+    W = Tensor(np.array([[3.0]]), requires_grad=True)
+    y = x.matmul(W)
+    (y * y).backward()
+    assert np.allclose(W.grad, 24.0), f"Expected dL/dW = 24, got {W.grad}"
+    assert np.allclose(x.grad, 36.0), f"Expected dL/dx = 36, got {x.grad}"
+    print("   ✅ y = x@W, loss = y*y: both gradients correct")
+
+    # out = z + z  ->  dout/dW = 2x = 4
+    x2 = Tensor(np.array([[2.0]]), requires_grad=True)
+    W2 = Tensor(np.array([[3.0]]), requires_grad=True)
+    z = x2.matmul(W2)
+    (z + z).backward()
+    assert np.allclose(W2.grad, 4.0), f"Expected dout/dW = 4, got {W2.grad}"
+    print("   ✅ z = x@W, out = z+z: gradient accumulates from both edges")
+
+    # A tensor reused at several depths: each level doubles the gradient
+    x3 = Tensor(np.array([[1.0]]), requires_grad=True)
+    W3 = Tensor(np.array([[1.0]]), requires_grad=True)
+    h = x3.matmul(W3)
+    for _ in range(8):
+        h = h + h
+    h.backward()
+    assert np.allclose(W3.grad, 2 ** 8), f"Expected 2^8 = 256, got {W3.grad}"
+    print("   ✅ eight reuse levels: gradient is 2^8, computed in one pass")
+
+    print("✅ Reused-tensor gradients work correctly!")
+
+if __name__ == "__main__":
+    test_unit_reused_tensor_gradients()
 
 # %% [markdown]
 """

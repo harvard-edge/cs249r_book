@@ -454,8 +454,9 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
 
     APPROACH:
     1. Find min/max values in tensor data
-    2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
-    3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
+    2. Nudge the range to include zero: min_val = min(min_val, 0), max_val = max(max_val, 0)
+    3. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
+    4. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
        Formula: zero_point = round(INT8_MIN - (min_val / scale))
     4. Apply quantization formula: round(value / scale + zero_point)
     5. Clamp to INT8 range [-128, 127]
@@ -506,18 +507,29 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
-    # Step 3: Calculate scale and zero_point for standard quantization
+    # Step 3: Nudge the range to include zero before computing scale.
+    # If min_val and max_val share a sign (every post-ReLU activation, for
+    # instance), the zero_point implied by the raw range falls outside
+    # [-128, 127]. Clamping it there -- as the constant-tensor branch above
+    # warns -- destroys the affine mapping and silently corrupts every value.
+    # Widening the range so it straddles zero is what PyTorch and TFLite do,
+    # and it costs at most one quantization level of precision.
+    min_val = min(min_val, 0.0)
+    max_val = max(max_val, 0.0)
+
+    # Step 4: Calculate scale and zero_point for standard quantization
     # Map [min_val, max_val] to [INT8_MIN_VALUE, INT8_MAX_VALUE] (INT8 range)
     scale = (max_val - min_val) / (INT8_RANGE - 1)
     zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
 
-    # Clamp zero_point to valid INT8 range
+    # zero_point is now guaranteed inside the INT8 range by construction;
+    # clamp defensively rather than as a correctness crutch.
     zero_point = int(np.clip(zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
 
-    # Step 4: Apply quantization formula: q = (x / scale) + zero_point
+    # Step 5: Apply quantization formula: q = (x / scale) + zero_point
     quantized_data = np.round(data / scale + zero_point)
 
-    # Step 5: Clamp to INT8 range and convert to int8
+    # Step 6: Clamp to INT8 range and convert to int8
     quantized_data = np.clip(quantized_data, INT8_MIN_VALUE, INT8_MAX_VALUE).astype(np.int8)
 
     return Tensor(quantized_data), scale, zero_point
@@ -552,10 +564,15 @@ def test_unit_quantize_int8():
     # Test dequantization preserves approximate values
     dequantized = (q_tensor.data - zero_point) * scale
     error = np.mean(np.abs(tensor.data - dequantized))
-    # INT8 quantization has limited precision (256 levels), so error tolerance is higher
-    # For a range of 5.0 (1.0 to 6.0), quantization error can be up to ~0.2
-    # Using slightly higher tolerance to account for numerical precision variations
-    assert error < 0.25, f"Quantization error too high: {error:.4f} (expected < 0.25 for INT8, range=5.0)"
+    # Round-to-nearest bounds the error at scale/2 -- one half of a quantization
+    # step. Asserting against that real bound rather than a loose constant is
+    # what catches a broken scale or a clamped zero_point; a tolerance of 0.25
+    # here (25x the true bound) would let both through unnoticed.
+    max_error = scale / 2
+    assert error <= max_error * 1.01, (
+        f"Quantization error {error:.6f} exceeds the INT8 bound scale/2 = {max_error:.6f}. "
+        f"A round-trip should never lose more than half a quantization step."
+    )
 
     # Test edge case: constant tensor -- dequantize must recover the original value,
     # not zero. Previously zero_point was hardcoded to 0, so (0 - 0) * 1.0 = 0.0
