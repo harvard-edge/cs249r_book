@@ -248,9 +248,9 @@ except ImportError:
 from tinytorch.perf.profiling import Profiler
 
 # %%
+#| export
 from enum import Enum
 
-#| export
 class OlympicEvent(Enum):
     """
     Performance evaluation event categories for systematic optimization benchmarking.
