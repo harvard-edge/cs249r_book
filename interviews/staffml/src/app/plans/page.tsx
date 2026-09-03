@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Map, CheckCircle2, ArrowRight, Terminal, Clock, Target, Trash2 } from "lucide-react";
+import { Map, ArrowRight, Terminal, Clock, Target, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import Link from "next/link";
 import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan, getCustomPaths, generateCustomPathQuestions, deleteCustomPath, getPrepStats, type CustomPath } from "@/lib/plans";
 import PathBuilder from "@/components/plans/PathBuilder";
 import PrepDashboard from "@/components/plans/PrepDashboard";
@@ -13,7 +12,7 @@ import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { ScenarioSkeleton } from "@/components/ScenarioSkeleton";
-import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { extractRubric, RubricItem } from "@/lib/rubric";
 import { track } from "@/lib/analytics";
 import { useToast } from "@/components/Toast";
 import HardwareRef from "@/components/HardwareRef";

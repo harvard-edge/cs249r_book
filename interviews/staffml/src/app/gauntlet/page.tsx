@@ -14,14 +14,12 @@ import {
   getQuestionFullDetail,
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
-import { buildReportUrl } from "@/lib/issue-url";
 import { track } from "@/lib/analytics";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { useToast } from "@/components/Toast";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import MarkdownText from "@/components/MarkdownText";
-import MCQOptions from "@/components/MCQOptions";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
@@ -77,8 +75,6 @@ export default function GauntletPage() {
   const [showStarGate, setShowStarGate] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
-  // MCQ self-check selection (A1). Per-question, NOT scored — see MCQOptions.
-  const [mcqSelected, setMcqSelected] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Review state (self-assessment per question)
@@ -196,7 +192,7 @@ export default function GauntletPage() {
     setQuestions(selected);
     setCurrentIdx(0);
     setShowAnswer(false);
-    setUserAnswer(""); setMcqSelected(null);
+    setUserAnswer("");
     setScores([]);
     setClarifications({});
     setTimeRemaining(dur.minutes * 60);
@@ -258,7 +254,7 @@ export default function GauntletPage() {
     if (currentIdx < questions.length - 1) {
       setCurrentIdx(currentIdx + 1);
       setShowAnswer(false);
-      setUserAnswer(""); setMcqSelected(null);
+      setUserAnswer("");
       setRubricItems([]);
     } else {
       // All questions answered — show results

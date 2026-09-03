@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, Shuffle } from "lucide-react";
+import { Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, Shuffle } from "lucide-react";
 import { GithubIcon } from "@/components/GithubIcon";
 import { LEVELS } from "@/lib/levels";
 import { getQuestions } from "@/lib/corpus";

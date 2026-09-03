@@ -1,0 +1,66 @@
+schema_version: '1.0'
+id: cloud-202609-bf36
+track: cloud
+level: L5
+zone: evaluation
+topic: sequence-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Context Parallelism Interconnect Sizing RingAttention vs DeepSpeed Ulysses
+scenario: You are scaling a 70B parameter model to 1M token context length across 32 H100 GPUs partitioned with Context Parallelism degree P_C = 32. You must evaluate DeepSpeed Ulysses (All-to-All sequence sharding across attention heads) versus RingAttention (block-wise peer-to-peer ring streaming of KV blocks overlapping with FlashAttention computation). The cluster has 64 attention heads, head dimension 128, batch size 1, FP16 precision, distributed across 4 nodes (8 GPUs/node with 900 GB/s NVLink intra-node and 400 Gbps / 50 GB/s InfiniBand inter-node).
+question: What is the communication volume per GPU per attention layer for DeepSpeed Ulysses versus RingAttention, and under what conditions does network bandwidth make RingAttention communication-bound?
+details:
+  realistic_solution: |
+    DeepSpeed Ulysses partitions sequences evenly across P_C ranks (each rank holds S / P_C tokens across all H heads). For attention computation, it executes two All-to-All collectives per layer:
+    1. Input All-to-All: transposes [B, S/P_C, H, d] to [B, S, H/P_C, d] so each rank holds all tokens for H/P_C heads.
+    2. Output All-to-All: transposes context output back to [B, S/P_C, H, d].
+    Communication volume per All-to-All per GPU: ((P_C - 1) / P_C) * (B * S * H * d * 2 bytes / P_C) = (31 / 32) * (1 * 1,048,576 * 64 * 128 * 2 / 32) = 484.38 MiB.
+    Across both All-to-Alls, Ulysses transfers 968.75 MiB per layer per GPU. Over the 50 GB/s inter-node network, this takes 19.38 ms per layer.
+
+    RingAttention avoids All-to-All transfers by chunking the sequence into P_C blocks of size S / P_C = 32,768 tokens. In each of the P_C - 1 = 31 ring steps, each GPU computes FlashAttention between its local Query block and incoming Key/Value blocks while concurrently streaming KV blocks to its neighbor via P2P Send/Recv.
+    Data transferred per ring step: 2 * (32,768 * 64 * 128 * 2 bytes) = 1.0 GiB (Key + Value block).
+    Total communication over 31 steps is 31 * 1.0 GiB = 31.0 GiB per layer.
+
+    Although RingAttention transfers 32x more aggregate bytes than Ulysses, its communication is designed to overlap behind FlashAttention compute. The compute time for a 32K x 32K block at 50% MFU (494.5 TFLOPS) is:
+    4 * (32,768)^2 * 64 * 128 / (4.945 * 10^14) = 7.11 ms.
+    However, the P2P transfer over 50 GB/s InfiniBand takes 1.024 GB / 50 GB/s = 20.48 ms.
+    Because transfer time (20.48 ms) exceeds compute time (7.11 ms), RingAttention is communication-bound on this cluster. Full compute-communication overlap requires increasing the local chunk size S/P_C >= 94,500 tokens or upgrading the interconnect to 800 Gbps.
+  common_mistake: |
+    **The Pitfall:** Assuming RingAttention always eliminates communication overhead because P2P transfers are overlapped asynchronously with FlashAttention.
+    **The Rationale:** Many developers overlook that overlap only hides latency when the computation duration of the attention block exceeds the network transfer time of the KV tile.
+    **The Consequence:** Deploying RingAttention on narrow inter-node fabrics where communication time dominates, causing GPU execution to stall for 13.37 ms per ring step.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence S = 1,048,576 tokens, Context Parallelism P_C = 32.
+    - Local block size S/P_C = 32,768 tokens.
+    - Heads H = 64, Dim d = 128, Precision = FP16 (2 bytes).
+    - H100 dense compute @ 50% MFU = 494.5 TFLOPS. Inter-node bandwidth = 50 GB/s.
+
+    **Calculations:**
+    - Ulysses All-to-All transfer per GPU: 2 * (31/32) * (1M * 8192 * 2B / 32) = 968.75 MiB.
+    - Ulysses network time: 0.96875 GB / 50 GB/s = 19.38 ms per layer.
+    - RingAttention P2P transfer per step: 2 * (32,768 * 8192 * 2B) = 1.024 GB.
+    - RingAttention P2P transfer time: 1.024 GB / 50 GB/s = 20.48 ms per step.
+    - RingAttention compute time per step: 4 * (32,768)^2 * 8192 / (4.945 * 10^14 FLOP/s) = 7.11 ms.
+    - Transfer stall per step: 20.48 ms - 7.11 ms = 13.37 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication-Bound.** With S/P_C = 32K over 50 GB/s InfiniBand, RingAttention transfer exceeds compute by 2.88x. Ulysses achieves lower latency unless interconnect bandwidth is doubled to 100 GB/s or sequence chunk size is enlarged.
+status: published
+provenance: human
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-09-04'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-09-04'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: verified
+  by: vj@eecs.harvard.edu
+  date: '2026-09-04'
+  notes: 'RingAttention vs DeepSpeed Ulysses interconnect math verification'

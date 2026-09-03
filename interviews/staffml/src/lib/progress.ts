@@ -296,7 +296,7 @@ export function getStreakMilestone(streak: number): string | null {
 
 // ─── Topic-Level Progress (NeetCode-style) ──────
 
-import { getTopics, getTopicsByArea, getCompetencyAreas, getQuestionsByFilter, getQuestions } from "./corpus";
+import { getTopicsByArea, getCompetencyAreas, getQuestionsByFilter, getQuestions } from "./corpus";
 import { getTopicById } from "./taxonomy";
 
 export interface TopicProgress {
