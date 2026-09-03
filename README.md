@@ -275,21 +275,21 @@ The textbook series follows a comprehensive systems progression across four core
     </tr>
     <tr>
       <td align="center">📘</td>
-      <td><b>Volume II</b><br><i>Scaling</i></td>
+      <td><b>Volume II</b><br><i>Scaling (Preview)</i></td>
       <td><b>The Fleet</b></td>
       <td>How do we scale intelligence across distributed clusters and datacenters?</td>
       <td>Multi-million dollar cluster stall or service outage.</td>
     </tr>
     <tr>
       <td align="center">🟣</td>
-      <td><b>Volume III</b><br><i>Agentic</i></td>
+      <td><b>Volume III</b><br><i>Agentic (Notebook)</i></td>
       <td><b>The Trajectory</b></td>
       <td>How do we govern intelligence acting autonomously over long horizons?</td>
       <td>Compounding trajectory drift and unauthorized side-effects.</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
-      <td><b>Volume IV</b><br><i>Physical AI</i></td>
+      <td><b>Volume IV</b><br><i>Physical AI (Notebook)</i></td>
       <td><b>The Physical Plant</b></td>
       <td>How do we let intelligence act safely on matter and physical systems?</td>
       <td>Irreversible physical damage in the real world.</td>
@@ -297,29 +297,22 @@ The textbook series follows a comprehensive systems progression across four core
   </tbody>
 </table>
 
+> *Note: Volumes III and IV are currently active research notebooks as these disciplines rapidly evolve. Over time, they may mature into formal textbooks—for now, they are where I explore first principles and separate durable systems foundations from noise. You are welcome to follow along as they take shape.*
+
 ---
 
 ## FAQ
 
 <details>
-<summary><b>Why four volumes? Are you really writing four textbooks?</b></summary>
+<summary><b>Why do you do all this?</b></summary>
 
 <br>
 
-We use open, first-principles textbook writing as a **research instrument**, not a commercial publishing treadmill.
+I consider myself a student of my own learning.
 
-We learn and clarify emerging systems disciplines by trying to teach them rigorously from the ground up. Doing so forces us to discover invariant principles, formalize missing abstractions, derive quantitative bounds, and separate durable systems foundations from ephemeral industry buzzwords.
+Whenever I want to understand an emerging or complex systems discipline, I learn it by trying to teach and build it from first principles. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
 
-The four volumes represent a coherent intellectual progression in what a systems engineer is responsible for:
-
-1. **Volume I: The Model (Foundations)** — Focuses on single-node execution (1–8 accelerators), memory walls, kernel acceleration, and runtime optimization.
-2. **Volume II: The Fleet (Scaling)** — Focuses on distributed training, collective communication fabrics, fault tolerance, cluster orchestration, and datacenter economics.
-3. **Volume III: The Trajectory (Agentic AI)** — Focuses on stateful agent loops, context hierarchies, tool protocol boundaries (MCP), capability leases, sandboxing, and non-deterministic recovery.
-   * *Empirical Anchor:* Serves as the theoretical notebook for **MLPerf Agents**, formalizing state, trajectory boundaries, and verification before benchmarks accidentally freeze premature assumptions into standards.
-4. **Volume IV: The Physical Plant (Physical AI)** — Focuses on real-time sensor-actuator loops, microsecond latency budgets (where computational delay becomes uncontrolled physical distance), reflected inertia, joulean thermal limits, and defensible safety cases.
-   * *Empirical Anchor:* Grounded in physical hardware labs (Arduino, microcontrollers, edge accelerators, and robotics plants) to test whether principles survive real physical constraints.
-
-We deliberately avoid premature canonization. Principles are treated as living hypotheses (`Hypothesis → Candidate Invariant → Established Principle`) that must earn their place through contact with benchmarks, hardware, and students.
+This repository—the books, software frameworks, and hardware kits—is not a commercial publishing treadmill. It is my open research instrument. It is how I clarify my own thinking for research, benchmarking programs, and classroom teaching. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
 
 </details>
 
