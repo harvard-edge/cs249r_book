@@ -1682,6 +1682,11 @@ def analyze_optimizer_memory_usage():
     print("- Memory scales linearly with model size")
     print("- Trade-off: More memory for better convergence")
 
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_optimizer_memory_usage()
+
 # %% nbgrader={"grade": false, "grade_id": "optimizer-convergence", "solution": false}
 def analyze_optimizer_convergence_behavior():
     """📊 Analyze convergence behavior of different optimizers."""
@@ -1747,6 +1752,11 @@ def analyze_optimizer_convergence_behavior():
     print("- SGD+Momentum: Faster convergence, less oscillation")
     print("- Adam: Adaptive rates help with different parameter scales")
     print("- AdamW: Similar to Adam with regularization effects")
+
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_optimizer_convergence_behavior()
 
 # %% [markdown]
 """

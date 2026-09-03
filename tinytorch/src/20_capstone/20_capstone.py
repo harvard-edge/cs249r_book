@@ -1014,6 +1014,11 @@ def run_example_benchmark():
 if __name__ == "__main__":
     print("✅ Example workflow defined")
 
+
+# Run the systems analysis
+if __name__ == "__main__":
+    run_example_benchmark()
+
 # %% [markdown]
 """
 ### Understanding the Workflow Pattern
@@ -1204,6 +1209,11 @@ def run_optimization_workflow_example():
 
 if __name__ == "__main__":
     print("✅ Optimization workflow example defined")
+
+
+# Run the systems analysis
+if __name__ == "__main__":
+    run_optimization_workflow_example()
 
 # %% [markdown]
 """

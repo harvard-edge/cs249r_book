@@ -368,6 +368,25 @@ class EmbeddingBackward(Function):
         return (grad_weight,)
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### Embedding: The Lookup Table
+
+With `EmbeddingBackward` written, the forward direction is almost anticlimactic:
+an embedding layer is a matrix, and a lookup is one row of it.
+
+```
+weight: (vocab_size, embed_dim)      the whole table
+tokens: [7, 3, 7]                    the ids you want
+output: weight[[7, 3, 7]]            three rows, one per token
+```
+
+Two things make it worth its own class. It validates that every id is in range,
+which turns a confusing IndexError deep in NumPy into a message that names the
+offending token. And it sets `requires_grad=True` on the weight, without which
+the backward class you just wrote would never be reached at all.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "embedding-init", "solution": true}
 #| export
 class Embedding:

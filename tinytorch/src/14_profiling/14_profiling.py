@@ -763,6 +763,26 @@ def _estimate_optimizer_memory(gradient_memory_mb: float) -> Dict[str, float]:
     }
     ### END SOLUTION
 
+# %% [markdown]
+"""
+### Profiler: The Object That Ties the Measurements Together
+
+Every helper above answers one narrow question: how many parameters, how many
+FLOPs, how much memory, how long. The Profiler is the object that runs them
+against a real model and returns one report.
+
+```
+count parameters  ─┐
+count FLOPs       ─┼─> Profiler.profile(model, input) ─> a single report dict
+measure memory    ─┤
+measure latency   ─┘
+```
+
+Note what it does NOT do: it never estimates a number it could measure, and it
+never reports a measurement without the run count behind it. That distinction is
+the whole subject of Module 19.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "profiler_class", "solution": true}
 #| export
 class Profiler:

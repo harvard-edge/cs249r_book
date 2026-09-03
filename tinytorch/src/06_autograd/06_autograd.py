@@ -1020,6 +1020,30 @@ class MatmulBackward(Function):
         return grad_a, grad_b
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### TransposeBackward: Gradient Rules for Axis Swapping
+
+Transpose moves values to new positions without changing any of them. That makes
+its gradient the simplest kind there is: send each gradient back to where its
+value came from, which means transposing again.
+
+**Mathematical Principle:**
+```
+If Z = A.T, then grad_A = grad_Z.T
+```
+
+**Why This Works:**
+```
+Forward:  A(m×n) → transpose → Z(n×m),  Z[j,i] = A[i,j]
+Backward: every Z[j,i] owes its gradient to exactly one A[i,j]
+          so grad_A[i,j] = grad_Z[j,i], which IS grad_Z.T
+```
+
+**The pattern to notice**: for any operation that only rearranges values, the
+backward pass is the inverse rearrangement. The next three follow the same idea.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "transpose-backward", "solution": true}
 #| export
 class TransposeBackward(Function):
@@ -1107,6 +1131,30 @@ class TransposeBackward(Function):
         return (grad_x,)
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### PermuteBackward: Gradient Rules for General Reordering
+
+Permute is transpose for more than two axes. The gradient is the same idea, with
+one extra step: you have to invert the permutation rather than just reapply it.
+
+**Mathematical Principle:**
+```
+If Z = A.permute(axes), then grad_A = grad_Z.permute(argsort(axes))
+```
+
+**Why argsort and not axes:**
+```
+axes = (2, 0, 1)  means  Z's axis 0 came from A's axis 2
+                          Z's axis 1 came from A's axis 0
+                          Z's axis 2 came from A's axis 1
+To send gradients home you need the inverse map: (1, 2, 0) = argsort(axes)
+```
+
+Reapplying `axes` works for a 2D transpose only because swapping twice is the
+identity. It is wrong in general, which is what makes this one worth writing out.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "permute-backward", "solution": true}
 #| export
 class PermuteBackward(Function):
@@ -1177,6 +1225,31 @@ class PermuteBackward(Function):
         return (grad_x,)
         ### END SOLUTION
 
+
+# %% [markdown]
+"""
+### SliceBackward: Gradient Rules for Indexing
+
+Slicing keeps some values and drops the rest. Gradients follow the same split:
+the kept positions receive their gradient, and everything else receives zero.
+
+**Mathematical Principle:**
+```
+If Z = A[key], then grad_A = zeros_like(A); grad_A[key] = grad_Z
+```
+
+**Why a zeros scaffold:**
+```
+Forward:  A=[1,2,3,4,5] → A[1:3] → Z=[2,3]
+Backward: grad_Z=[g0,g1] → grad_A=[0,g0,g1,0,0]
+                            ↑ positions that were never read contributed
+                              nothing to the output, so their gradient is 0
+```
+
+This is the first backward that has to build a tensor the shape of its INPUT
+rather than reshaping its output. Embedding lookup in Module 11 is the same
+pattern at scale.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "slice-backward", "solution": true}
 #| export
@@ -1268,6 +1341,30 @@ class SliceBackward(Function):
 
         return (grad_input,)
         ### END SOLUTION
+
+# %% [markdown]
+"""
+### ReshapeBackward: Gradient Rules for Changing Shape
+
+Reshape reinterprets the same values under a new shape. Nothing is added,
+dropped, or combined, so the gradient just needs its original shape back.
+
+**Mathematical Principle:**
+```
+If Z = A.reshape(new_shape), then grad_A = grad_Z.reshape(A.shape)
+```
+
+**Why the input shape must be saved:**
+```
+Forward:  A(2,6) → reshape(3,4) → Z(3,4)
+Backward: grad_Z(3,4) → reshape(?, ?) → grad_A must be (2,6)
+                                ↑ the only way to know is to have stored A.shape
+```
+
+Every backward in this group saves something from the forward pass. Reshape
+saves a shape, slice saves a key, permute saves an axis order. That is the
+general rule: the backward pass needs whatever the forward pass consumed.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "reshape-backward", "solution": true}
 #| export
@@ -1654,21 +1751,26 @@ This means:
 
 # %% [markdown]
 """
-### The enable_autograd() Function
+### Gradient Rules for Activations and Losses
 
-This function is the magic that brings gradients to life! It enhances the existing Tensor class with autograd capabilities by:
+The Function classes above covered arithmetic and shape. This next group covers
+the two remaining kinds of node in a network's graph: the activations that sit
+between layers, and the losses that sit at the very end.
 
-1. **Monkey-patching operations** - Replaces `__add__`, `__mul__`, etc. with gradient-aware versions
-2. **Adding backward() method** - Implements reverse-mode automatic differentiation
-3. **Maintaining compatibility** - All existing code continues to work unchanged
+They share a property the earlier group did not. Every one of them can compute
+its gradient from values it already has -- usually its own output -- so none of
+them re-runs the forward computation. Watch for that as you write them; it is
+the difference between an autograd engine that is usable and one that doubles
+the cost of every backward pass.
 
-**The Pattern:**
 ```
-Original: x + y → simple addition
-Enhanced: x + y → addition + gradient tracking (if requires_grad=True)
+ReLU     -> gate: gradient passes or it does not
+Sigmoid  -> z·(1-z)          from the output alone
+Tanh     -> 1-z²             from the output alone
+Softmax  -> outputs coupled: raising one lowers the others
+GELU     -> smooth gate: both what passes AND how open the gate is
+MSE, BCE -> the losses, where every backward pass begins
 ```
-
-This approach follows PyTorch 2.0 style - clean, modern, and educational.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "relu-backward", "solution": true}
@@ -1721,6 +1823,30 @@ class ReLUBackward(Function):
         return None,
         ### END SOLUTION
 
+
+# %% [markdown]
+"""
+### SigmoidBackward: Gradient Rules for Sigmoid
+
+Sigmoid's derivative has a property worth exploiting: it can be written entirely
+in terms of the OUTPUT, so the backward pass never needs the input.
+
+**Mathematical Principle:**
+```
+If z = σ(a) = 1 / (1 + e^-a), then ∂z/∂a = z · (1 - z)
+```
+
+**Why saving the output beats saving the input:**
+```
+Saving a:  recompute σ(a), then σ(a)·(1-σ(a))   -> one exp per element, again
+Saving z:  z·(1-z) directly                     -> two multiplies, no exp
+```
+
+**The systems consequence**: the gradient peaks at 0.25 (when z = 0.5) and decays
+toward zero at both tails. Stack ten sigmoid layers and the gradient reaching the
+first one is scaled by at most 0.25^10 -- about one in a million. That is the
+vanishing gradient problem, and it is why ReLU replaced sigmoid in hidden layers.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "sigmoid-backward", "solution": true}
 #| export
@@ -1781,6 +1907,29 @@ class SigmoidBackward(Function):
         ### END SOLUTION
 
 
+# %% [markdown]
+"""
+### TanhBackward: Gradient Rules for Tanh
+
+Tanh is sigmoid's zero-centered cousin, and its gradient is also expressible from
+the output alone.
+
+**Mathematical Principle:**
+```
+If z = tanh(a), then ∂z/∂a = 1 - z²
+```
+
+**Compared with sigmoid:**
+```
+tanh max gradient: 1.0   (at z = 0)
+sigmoid max gradient: 0.25
+```
+
+Tanh saturates too, but its gradient peaks four times higher, so it vanishes more
+slowly through depth. That is the whole reason tanh outlasted sigmoid inside RNNs
+long after ReLU had taken over feed-forward networks.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "tanh-backward", "solution": true}
 #| export
 class TanhBackward(Function):
@@ -1839,6 +1988,35 @@ class TanhBackward(Function):
         return None,
         ### END SOLUTION
 
+
+# %% [markdown]
+"""
+### SoftmaxBackward: Gradient Rules for a Coupled Output
+
+Softmax is the first backward here where outputs are not independent. Raising one
+logit lowers every other probability, because they must still sum to one. The
+gradient has to account for that coupling.
+
+**Mathematical Principle:**
+```
+If z = softmax(a), the Jacobian is
+    ∂z_i/∂a_j = z_i · (δ_ij - z_j)
+which contracts with an incoming gradient g to
+    grad_a = z · (g - Σ_k g_k · z_k)
+```
+
+**Why the subtraction term exists:**
+```
+Σ_k g_k · z_k  is the probability-weighted average of the incoming gradient.
+Subtracting it removes the component that would push all logits the same way --
+which softmax ignores anyway, since adding a constant to every logit changes
+nothing.
+```
+
+Computing the full n×n Jacobian would cost O(n²) per sample. The contracted form
+above is O(n). For a 50,000-token vocabulary that is the difference between
+feasible and not.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-backward", "solution": true}
 #| export
@@ -1916,6 +2094,35 @@ class SoftmaxBackward(Function):
         ### END SOLUTION
 
 
+# %% [markdown]
+"""
+### GELUBackward: Gradient Rules for the Transformer Activation
+
+GELU is the activation inside every transformer MLP you will build in Module 13.
+Unlike ReLU it is smooth everywhere, so its gradient is defined at every point,
+including zero.
+
+**Mathematical Principle (tanh approximation):**
+```
+z = 0.5·a·(1 + tanh(√(2/π)·(a + 0.044715·a³)))
+
+∂z/∂a = 0.5·(1 + tanh(u)) + 0.5·a·(1 - tanh²(u))·√(2/π)·(1 + 3·0.044715·a²)
+        └─ the "how much passes" ─┘   └─ how the gate itself moves with a ─┘
+        where u = √(2/π)·(a + 0.044715·a³)
+```
+
+**Why two terms and not one:**
+```
+ReLU's gate is a step: it is either open or shut, so only the first term exists.
+GELU's gate is smooth, so changing a changes BOTH what passes through and how far
+open the gate is. Both effects carry gradient.
+```
+
+**The systems consequence**: GELU costs a tanh, a cube, and several multiplies per
+element where ReLU costs one comparison. Module 17 fuses this whole expression
+into a single pass over memory for exactly that reason.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "gelu-backward", "solution": true}
 #| export
 class GELUBackward(Function):
@@ -1982,6 +2189,31 @@ class GELUBackward(Function):
         ### END SOLUTION
 
 
+# %% [markdown]
+"""
+### MSEBackward: Gradient Rules for Mean Squared Error
+
+Loss functions are where the backward pass begins. MSE has the gentlest gradient
+of the two you will build, and the most obvious.
+
+**Mathematical Principle:**
+```
+If L = (1/n)·Σ(pred - target)², then ∂L/∂pred = (2/n)·(pred - target)
+```
+
+**Why the gradient is just the scaled error:**
+```
+prediction too high  -> (pred - target) > 0 -> gradient positive -> step down
+prediction too low   -> (pred - target) < 0 -> gradient negative -> step up
+prediction exact     -> gradient 0          -> no update
+```
+
+**The systems consequence**: the gradient is proportional to the error, so a
+single wildly wrong prediction produces a wildly large gradient. That is why MSE
+is sensitive to outliers, and why the training loop in Module 08 needs gradient
+clipping.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "mse-backward", "solution": true}
 #| export
 class MSEBackward(Function):
@@ -2036,6 +2268,35 @@ class MSEBackward(Function):
         return None,
         ### END SOLUTION
 
+
+# %% [markdown]
+"""
+### BCEBackward: Gradient Rules for Binary Cross-Entropy
+
+Binary cross-entropy is the loss for yes/no predictions. Its gradient looks
+alarming written out, then collapses into something remarkably clean.
+
+**Mathematical Principle:**
+```
+If L = -[y·log(p) + (1-y)·log(1-p)], then
+    ∂L/∂p = (p - y) / (p·(1 - p))
+```
+
+**And when p came from a sigmoid, the pieces cancel:**
+```
+∂L/∂logit = ∂L/∂p · ∂p/∂logit
+          = (p - y)/(p(1-p))  ·  p(1-p)
+          = p - y
+```
+
+The same clean form as MSE, arrived at by a very different route. This
+cancellation is why sigmoid and BCE are always paired.
+
+**The systems consequence**: the un-cancelled form divides by p·(1-p), which goes
+to zero as the model becomes confident. A confident wrong prediction produces a
+gradient that overflows. Real frameworks fuse sigmoid and BCE into one operation
+so the cancellation happens before any division does.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "bce-backward", "solution": true}
 #| export
@@ -2484,6 +2745,25 @@ single pass -- accumulating into each `.grad` and passing each parent its share.
 One consequence worth noticing: the graph can only be freed *after* the whole
 walk. Releasing each node as you pass it would drop exactly the second
 contribution the sort exists to collect.
+"""
+
+# %% [markdown]
+"""
+### The enable_autograd() Function
+
+This function is the magic that brings gradients to life! It enhances the existing Tensor class with autograd capabilities by:
+
+1. **Monkey-patching operations** - Replaces `__add__`, `__mul__`, etc. with gradient-aware versions
+2. **Adding backward() method** - Implements reverse-mode automatic differentiation
+3. **Maintaining compatibility** - All existing code continues to work unchanged
+
+**The Pattern:**
+```
+Original: x + y → simple addition
+Enhanced: x + y → addition + gradient tracking (if requires_grad=True)
+```
+
+This approach follows PyTorch 2.0 style - clean, modern, and educational.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": false}

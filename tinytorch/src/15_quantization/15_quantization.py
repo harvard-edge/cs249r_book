@@ -2262,7 +2262,7 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 15")
 
-# %% nbgrader={"grade": false, "grade_id": "quantization-reflection", "solution": true}
+# %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 

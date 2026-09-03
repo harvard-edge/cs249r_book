@@ -2149,6 +2149,24 @@ class BatchNorm2dBackward(Function):
 
         return (grad_x, grad_gamma, grad_beta)
 
+# %% [markdown]
+"""
+### BatchNorm2d: The Layer Itself
+
+With the gradient rules in place, the layer is the easier half. It holds two
+learnable parameters and two running statistics, and it behaves differently
+depending on which mode it is in.
+
+```
+Training:  normalize with THIS BATCH's mean/var,  update the running stats
+Eval:      normalize with the RUNNING mean/var,   update nothing
+```
+
+That mode switch is the part people get wrong in production. A model left in
+training mode at inference time normalizes a batch of one against itself, which
+produces all zeros before gamma and beta -- confident, stable, and meaningless.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
 #| export
 

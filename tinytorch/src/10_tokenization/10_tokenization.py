@@ -947,6 +947,26 @@ def test_unit_merge_pair():
 if __name__ == "__main__":
     test_unit_merge_pair()
 
+# %% [markdown]
+"""
+### BPETokenizer: Assembling the Pieces
+
+You have built the two halves of BPE separately: `_count_byte_pairs` finds the
+most frequent adjacent pair, and `_merge_pair` applies a merge everywhere it
+occurs. The tokenizer class is the loop that alternates them.
+
+```
+train():   count -> pick the winner -> merge -> repeat until vocab is full
+encode():  split into characters, then REPLAY the learned merges in order
+decode():  look each id up and join
+```
+
+The ordering in `encode` matters more than it looks: merges must be replayed in
+the order they were learned, because later merges were discovered on top of
+earlier ones. Replay them out of order and you get a different tokenization for
+the same text.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "bpe-tokenizer", "solution": true}
 #| export
 class BPETokenizer(Tokenizer):
@@ -1474,6 +1494,7 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
 
     return stats
     ### END SOLUTION
+
 
 # %% [markdown]
 """

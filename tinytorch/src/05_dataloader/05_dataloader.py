@@ -1830,6 +1830,21 @@ def analyze_collation_overhead():
 #     analyze_memory_usage()
 #     analyze_collation_overhead()
 
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_dataloader_performance()
+
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_memory_usage()
+
+
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_collation_overhead()
+
 # %% [markdown]
 """
 ## ⚠️ Common Pitfalls and Best Practices
