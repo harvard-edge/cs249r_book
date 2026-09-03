@@ -6,27 +6,28 @@ title: "Parameter Optimization and Momentum"
 
 _Why does naive stochastic gradient descent oscillate erratically in high-dimensional loss landscapes, and how do momentum and adaptive learning rates conquer non-convex optimization?_
 
-In Chapter 6, we implemented automatic differentiation, providing every parameter tensor with an exact mathematical gradient $\nabla_\theta \mathcal{L}$. However, having gradients is useless without an optimization algorithm to steer parameter updates. Naive Stochastic Gradient Descent (SGD) treats every dimension uniformly, causing parameter updates to oscillate violently across steep ravines while crawling along flat plateaus. **Optimizers** are the dynamical control systems of deep learning: they introduce physical momentum to dampen high-frequency oscillations and maintain per-parameter adaptive learning rates that normalize update steps across heterogeneous gradient scales. In a framework runtime, optimizers maintain stateful history buffers that consume substantial GPU memory, directly determining training throughput and stability.
+In Chapter 6, we implemented automatic differentiation, providing every parameter tensor with an exact mathematical gradient $\nabla_\theta \mathcal{L}$. However, having gradients is useless without an optimization algorithm to steer parameter updates. Naive Stochastic Gradient Descent (SGD) treats every dimension uniformly, causing parameter updates to oscillate violently across steep ravines while crawling along flat plateaus. **Optimizers** are the dynamical control systems of deep learning: they introduce physical momentum to dampen high-frequency oscillations, escape saddle points, and maintain per-parameter adaptive learning rates that normalize update steps across heterogeneous gradient scales. In a framework runtime, optimizers maintain stateful history buffers that consume substantial GPU memory, directly determining training throughput and stability.
 
 ::: {.callout-learning-objectives}
 ## Learning Objectives
 
 - **Formulate** the parameter update invariant across Stochastic Gradient Descent (SGD), Momentum, Adam, and AdamW.
-- **Analyze** the physical mechanics of momentum as a velocity accumulator that dampens gradient variance and accelerates traversal through saddle points.
-- **Implement** the `AdamW` optimizer from scratch in TinyTorch, proving why decoupled weight decay is mathematically required for adaptive optimizers.
-- **Calculate** the exact memory allocation footprint of optimizer state buffers ($16\text{ bytes per parameter}$ in FP32 AdamW).
-- **Bridge** TinyTorch optimizers to production PyTorch `torch.optim.AdamW` and multi-tensor fused CUDA kernels.
+- **Analyze** the physical mechanics of momentum as a second-order dynamical system that dampens high-frequency gradient variance and rolls past zero-gradient saddle points.
+- **Derive** Adam's first and second raw moment expectations and prove the mathematical necessity of time-step bias corrections ($\hat{\mathbf{m}}_t, \hat{\mathbf{v}}_t$).
+- **Prove** why $L_2$ regularization pollutes the second moment variance estimate in adaptive optimizers, and implement decoupled weight decay (`AdamW`) to restore uniform parameter shrinkage.
+- **Calculate** the exact hardware memory allocation footprint of optimizer state buffers ($16\text{ bytes per parameter}$ in FP32 / AMP AdamW).
+- **Bridge** TinyTorch optimizers to production PyTorch `torch.optim.AdamW` with fused and multi-tensor CUDA kernels.
 :::
 
 ---
 
 ## The Fundamental Parameter Update Invariant
 
-Every optimizer in deep learning implements an iterative update rule over parameter weights $\mathbf{\theta}_t \in \mathbb{R}^D$ given loss gradients $\mathbf{g}_t = \nabla_\theta \mathcal{L}(\mathbf{\theta}_t)$:
+Every optimizer in deep learning implements an iterative stateful update rule over parameter weights $\mathbf{\theta}_t \in \mathbb{R}^D$ given loss gradients $\mathbf{g}_t = \nabla_\theta \mathcal{L}(\mathbf{\theta}_t)$:
 
 $$\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \cdot \mathbf{u}(\mathbf{g}_1, \dots, \mathbf{g}_t)$$
 
-where $\eta > 0$ is the learning rate and $\mathbf{u}(\cdot)$ is the update vector.
+where $\eta > 0$ is the learning rate and $\mathbf{u}(\cdot)$ is the transformed update vector.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,9 +42,13 @@ where $\eta > 0$ is the learning rate and $\mathbf{u}(\cdot)$ is the update vect
 
 ---
 
-## The Physics of Momentum
+## The Physics of Momentum and Ill-Conditioned Surfaces
 
-In ill-conditioned loss surfaces, the curvature along one direction is far steeper than another, causing vanilla SGD to bounce between canyon walls rather than moving down the ravine:
+In high-dimensional deep learning loss surfaces, the local curvature is characterized by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$ measures the ratio of maximum to minimum curvature eigenvalues.
+
+When $\kappa \gg 1$ (an ill-conditioned ravine):
+- The gradient along the steep perpendicular direction ($\mathbf{g}_\perp$) is massive, causing vanilla SGD to oscillate violently between ravine walls.
+- The gradient along the flat parallel valley floor ($\mathbf{g}_\parallel$) is tiny, causing progress toward the minimum to stall.
 
 ::: {#fig-optimizers-momentum}
 ![](../../packages/tinytorch/quarto/assets/images/diagrams/07_optimizers-diag-1.svg)
@@ -51,31 +56,77 @@ In ill-conditioned loss surfaces, the curvature along one direction is far steep
 **Figure 7.1: Trajectory of SGD vs. Momentum in an Ill-Conditioned Ravine.** Vanilla SGD oscillates wildly across steep contours. Momentum accumulates forward velocity along the low-curvature valley, rapidly accelerating convergence.
 :::
 
-Momentum models a heavy ball rolling down a potential energy surface:
+### Heavy-Ball Dynamics: Escaping Saddle Points
+
+Polyak Momentum (1964) models optimization as a physical heavy ball with mass rolling down a potential energy surface with friction coefficient $\gamma$:
+
+$$\ddot{\mathbf{\theta}}(t) + \gamma \dot{\mathbf{\theta}}(t) + \nabla \mathcal{L}(\mathbf{\theta}(t)) = \mathbf{0}$$
+
+Discretizing this second-order ordinary differential equation yields the velocity accumulator update:
 
 $$\mathbf{v}_t = \beta \mathbf{v}_{t-1} + (1 - \beta) \mathbf{g}_t, \quad \mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \mathbf{v}_t$$
 
-Oscillating gradient components cancel out across successive time steps ($\sum g_\perp \approx 0$), while persistent downhill gradients accumulate velocity ($\sum g_\parallel \gg 0$).
+where $\beta \in [0, 1)$ is the momentum decay factor (typically $\beta = 0.9$).
+
+**Two Critical Physical Properties**:
+1. **High-Frequency Damping**: Successive gradient vectors along oscillating directions alternate signs ($\mathbf{g}_{\perp, t} \approx -\mathbf{g}_{\perp, t-1}$), canceling out inside the accumulator ($\sum \mathbf{g}_\perp \to \mathbf{0}$).
+2. **Saddle Point Escape**: At strict saddle points or flat plateaus where local gradient $\nabla \mathcal{L} \approx \mathbf{0}$, standard SGD becomes trapped. Momentum retains stored kinetic velocity ($\mathbf{v}_t = \beta \mathbf{v}_{t-1} \ne \mathbf{0}$), rolling the parameter trajectory through flat regions without stopping.
 
 ---
 
 ## Adam and AdamW: Adaptive Moment Estimation
 
-**Adam (Kingma & Ba, 2014)** tracks both the first moment (mean velocity $\mathbf{m}_t$) and the second raw moment (uncentered variance $\mathbf{v}_t$):
+**Adam (Kingma & Ba, 2014)** combines momentum with per-parameter adaptive learning rates by tracking both the exponentially decaying first raw moment (mean velocity $\mathbf{m}_t$) and second uncentered moment (variance $\mathbf{v}_t$):
 
 $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t, \quad \mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
 
-Because $\mathbf{m}_0 = \mathbf{0}$ and $\mathbf{v}_0 = \mathbf{0}$, both moment vectors are biased toward zero in early iterations. Adam applies bias correction:
+### Derivation of Initialization Bias Correction
+
+Because moment accumulators are initialized to zero ($\mathbf{m}_0 = \mathbf{0}, \mathbf{v}_0 = \mathbf{0}$), early estimates are heavily biased toward zero.
+
+Unrolling $\mathbf{m}_t$ recursively as a linear combination of past gradients:
+
+$$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i$$
+
+Taking expectations under the assumption that the true gradient distribution $\mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t]$ is locally stationary:
+
+$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}\left[ (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i \right] = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1^t)$$
+
+To obtain an unbiased estimator $\mathbb{E}[\hat{\mathbf{m}}_t] = \mathbb{E}[\mathbf{g}_t]$, we must rescale by $\frac{1}{1 - \beta_1^t}$:
 
 $$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \quad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
 
-### The L2 Regularization vs. Decoupled Weight Decay Pitfall
+As $t \to \infty$, the correction factor $\beta^t \to 0$, naturally vanishing as training progresses.
 
-In vanilla Adam, adding $L_2$ penalty $\frac{1}{2} \lambda \|\mathbf{\theta}\|^2$ to the loss modifies the gradient: $\mathbf{g}_t' = \mathbf{g}_t + \lambda \mathbf{\theta}_t$. When passed into the second moment $\mathbf{v}_t$, parameters with large weights receive smaller effective decay steps!
+---
 
-**AdamW (Loshchilov & Hutter, 2017)** decouples weight decay, subtracting the regularization step directly from the parameter update:
+### The $L_2$ Regularization vs. Decoupled Weight Decay Proof
+
+In standard stochastic gradient descent, $L_2$ regularization ($\mathcal{L}_{\text{total}} = \mathcal{L} + \frac{\lambda}{2} \|\mathbf{\theta}\|^2$) is mathematically equivalent to weight decay:
+
+$$\nabla_\theta \mathcal{L}_{\text{total}} = \mathbf{g}_t + \lambda \mathbf{\theta}_t \implies \mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta (\mathbf{g}_t + \lambda \mathbf{\theta}_t) = (1 - \eta \lambda)\mathbf{\theta}_t - \eta \mathbf{g}_t$$
+
+In adaptive optimizers (Adam), this equivalence completely breaks down.
+
+If $L_2$ regularization is applied by adding $\lambda \mathbf{\theta}_t$ directly to the gradient $\mathbf{g}_t$, the polluted gradient $\mathbf{g}_t' = \mathbf{g}_t + \lambda \mathbf{\theta}_t$ enters the second raw moment accumulator:
+
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) (\mathbf{g}_t + \lambda \mathbf{\theta}_t)^2$$
+
+::: {.callout-principle}
+## The Variance Pollution Hazard
+
+When a parameter $\theta_i$ has a large magnitude, the regularization term $(\lambda \theta_i)^2$ artificially inflates $v_{t,i}$. The resulting parameter update becomes:
+
+$$\Delta \theta_i = -\frac{\eta}{\sqrt{\hat{v}_{t,i}} + \epsilon} (\hat{m}_{t,i} + \lambda \theta_i) \approx -\frac{\eta}{\lambda |\theta_i|} (\lambda \theta_i) = -\eta \cdot \text{sign}(\theta_i)$$
+
+Parameters with **large magnitudes** have their effective regularization decay divided by $\sqrt{\hat{v}_{t,i}}$, receiving *smaller* relative shrinkage than parameters with small magnitudes—the exact opposite of the intended regularizer!
+:::
+
+**AdamW (Loshchilov & Hutter, 2017)** decouples weight decay from gradient moment accumulation, applying parameter shrinkage directly to the weight:
 
 $$\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \left( \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} + \lambda \mathbf{\theta}_t \right)$$
+
+This restores uniform, scale-invariant geometric decay across all model parameters.
 
 ---
 

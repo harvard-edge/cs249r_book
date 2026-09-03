@@ -80,10 +80,12 @@ Furthermore, mini-batching enforces strict memory bounds: instead of loading an 
 ## Decoupling Storage: The Dataset Abstraction
 
 In modern framework architecture, data management is partitioned into two distinct responsibilities:
+
 1. **Access (Dataset)**: How do we fetch a single sample $(x_i, y_i)$ from storage?
 2. **Organization (DataLoader)**: How do we group, shuffle, and collate samples into batches?
 
 The `Dataset` abstraction defines a clean Python interface requiring two fundamental methods:
+
 - `__len__()`: Returns the total number of samples in the dataset.
 - `__getitem__(index)`: Returns the $i$-th sample tuple.
 
@@ -121,13 +123,13 @@ class TensorDataset(Dataset):
     def __init__(self, *tensors: Tensor) -> None:
         if not tensors:
             raise ValueError("TensorDataset requires at least one Tensor")
-        
+
         # Verify all tensors have identical length along dimension 0
         first_len = tensors[0].shape[0]
         for t in tensors:
             if t.shape[0] != first_len:
                 raise ValueError("All tensors must have the same size along dimension 0")
-                
+
         self.tensors = tensors
 
     def __len__(self) -> int:
@@ -185,7 +187,7 @@ class DataLoader:
     ) -> None:
         if batch_size < 1:
             raise ValueError("batch_size must be a positive integer")
-            
+
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -210,7 +212,7 @@ class DataLoader:
         # 2. Iterate in strides of batch_size
         for start_idx in range(0, self.num_samples, self.batch_size):
             end_idx = start_idx + self.batch_size
-            
+
             # Handle fractional trailing batch
             if end_idx > self.num_samples:
                 if self.drop_last:
@@ -218,11 +220,11 @@ class DataLoader:
                 end_idx = self.num_samples
 
             batch_indices = indices[start_idx:end_idx]
-            
+
             # 3. Collate samples into unified batch tensors
             # Retrieve sample tuples from dataset
             samples = [self.dataset[i] for i in batch_indices]
-            
+
             # Transpose list of tuples: [(x0, y0), (x1, y1)] -> ([x0, x1], [y0, y1])
             num_fields = len(samples[0])
             collated_batch = []
@@ -244,6 +246,7 @@ Creating all batch tensors in memory before training begins duplicates dataset m
 ## Forward Pipeline Integration: Full Dataset Evaluation
 
 We can now assemble the complete forward pipeline constructed across Chapters 1 through 5:
+
 1. Wrap synthetic dataset samples in `TensorDataset`.
 2. Construct a `DataLoader` to iterate in batches of $B = 32$.
 3. Pass each batch through our Chapter 3 `Sequential` MLP.
@@ -286,11 +289,11 @@ for batch_x, batch_y in dataloader:
     logits = model(batch_x)
     # Compute batch loss
     loss = criterion(logits, batch_y)
-    
+
     # Track metrics
     batch_size = batch_x.shape[0]
     total_loss += loss.data * batch_size
-    
+
     # Calculate accuracy: argmax along class dimension
     predicted_classes = np.argmax(logits.data, axis=-1)
     correct_predictions += np.sum(predicted_classes == batch_y.data)
@@ -327,6 +330,7 @@ In production deep learning frameworks like PyTorch, reading gigabytes of traini
 ```
 
 Production data loaders solve this through three synergistic hardware mechanisms:
+
 1. **Multi-Process Worker Pools (`num_workers > 0`)**: Workers run in isolated OS processes, bypassing Python's Global Interpreter Lock (GIL) to parse, decode, and augment samples in parallel.
 2. **POSIX Shared Memory (`/dev/shm`)**: Tensors allocated by worker processes reside in shared memory segments, passing lightweight memory file descriptors to the main process without socket serialization overhead.[^shm-details]
 3. **Page-Locked (Pinned) Memory and DMA**: Host DRAM allocated via `cudaHostAlloc` (or `pin_memory=True`) is locked against OS page swapping, enabling the GPU's Direct Memory Access (DMA) engine to transfer tensors across PCIe asynchronously while CUDA compute kernels execute in parallel.[^pinned-mem]

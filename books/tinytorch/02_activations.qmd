@@ -59,14 +59,13 @@ The function $\sigma(\cdot)$ prevents algebraic factorization, enabling multi-la
 
 In TinyTorch, every activation function is implemented as a self-contained class with a standard `forward(x: Tensor) -> Tensor` method and a `parameters()` method returning an empty list (since activations contain no trainable weights).
 
-### 1. Rectified Linear Unit (ReLU)
+### Rectified Linear Unit (ReLU)
 
 ReLU is the simplest and most computationally efficient non-linear activation:
 
 $$\text{ReLU}(x) = \max(0, x)$$
 
 ```python
-# Listing 2.1: Rectified Linear Unit (ReLU) Implementation
 from tinytorch.core.tensor import Tensor
 import numpy as np
 
@@ -85,38 +84,46 @@ class ReLU:
         return self.forward(x)
 ```
 
-**Systems Trade-off**: ReLU requires only a single comparison instruction per element and no exponential math, making it fast on hardware ALUs. However, if activations become negative, the value drops permanently to 0, which can cause dead units that output zero across all subsequent layers.
+**Systems Trade-off**: ReLU requires only a single comparison and selection instruction per element in hardware ALUs (such as `MAXPS` in x86 AVX or `fmaxf` in CUDA), bypassing expensive transcendental arithmetic. However, if activations become negative, the output and its gradient drop permanently to 0, which can cause "dead neurons" that permanently cease updating.
 
 ---
 
-### 2. Sigmoid (Logistic)
+### Sigmoid (Logistic) and IEEE 754 Float Mechanics
 
 Sigmoid maps any real-valued scalar into the bounded probability interval $(0, 1)$:
 
 $$\sigma(x) = \frac{1}{1 + e^{-x}}$$
 
-When evaluating $\sigma(x)$ on hardware, large negative numbers (e.g., $x = -1000$) cause $e^{-(-1000)} = e^{1000}$ to overflow standard IEEE 754 32-bit floats ($\approx 3.4 \times 10^{38}$), resulting in runtime warnings and `inf` values. To ensure complete numerical stability across the entire real number line, TinyTorch uses a branch-stable formulation:
+In standard IEEE 754 single-precision arithmetic (`float32`), numbers are encoded with 1 sign bit, 8 exponent bits (with bias 127), and 23 mantissa bits.[^ieee754-spec] This yields a dynamic range with maximum finite float $\approx (2 - 2^{-23}) \times 2^{127} \approx 3.4028 \times 10^{38}$.
+
+Evaluating $e^{-x}$ on hardware triggers numerical hazards at extreme boundaries:
+- If $x < -88.72$, $-x > 88.72$, causing $e^{-x} > 3.4028 \times 10^{38}$, which overflows to `+inf`. Evaluating $1 / (1 + \text{inf})$ can cause floating-point exception traps.
+- If $x > 88.72$, $e^{-x}$ drops below the minimum positive normal float ($2^{-126} \approx 1.1755 \times 10^{-38}$), underflowing to subnormal numbers or `0.0`.
+
+[^ieee754-spec]: IEEE 754 `float32` allocates 8 bits to the exponent ($E \in [0, 255]$). An exponent of $E=255$ is reserved for $\pm \infty$ (when mantissa is 0) and `NaN` (when mantissa is non-zero). An exponent of $E=0$ represents subnormal numbers or zero. When subnormal numbers occur, CPU pipelines may switch to microcode exception handling, slowing execution by up to 100× unless Flush-To-Zero (FTZ) and Denormals-Are-Zero (DAZ) hardware control flags are enabled.
+
+To guarantee complete numerical stability across the entire real number line without register overflow, TinyTorch uses a branch-stable formulation:
 
 ```python
-# Listing 2.2: Numerically Stable Sigmoid Implementation
 class Sigmoid:
-    """Sigmoid activation: f(x) = 1 / (1 + exp(-x))."""
+    """Numerically stable Sigmoid activation: f(x) = 1 / (1 + exp(-x))."""
 
     def parameters(self):
         return []
 
     def forward(self, x: Tensor) -> Tensor:
         x_data = x.data
-        # Stable formulation: when x >= 0 use 1/(1 + exp(-x))
-        # When x < 0 use exp(x)/(1 + exp(x)) to prevent exp(-x) overflow
+        # Stable formulation:
+        # When x >= 0: exp(-x) is bounded in (0, 1] -> 1 / (1 + exp(-x))
+        # When x < 0: exp(x) is bounded in (0, 1] -> exp(x) / (1 + exp(x))
         with np.errstate(over='ignore'):
             positive_mask = (x_data >= 0)
             result = np.zeros_like(x_data, dtype=np.float32)
             
-            # x >= 0: exp(-x) is bounded in (0, 1] -> no overflow
+            # x >= 0 branch: no positive exponential overflow
             result[positive_mask] = 1.0 / (1.0 + np.exp(-x_data[positive_mask]))
             
-            # x < 0: exp(x) is bounded in (0, 1] -> no overflow
+            # x < 0 branch: evaluate exp(x)/(1 + exp(x))
             exp_neg = np.exp(x_data[~positive_mask])
             result[~positive_mask] = exp_neg / (1.0 + exp_neg)
             
@@ -128,14 +135,13 @@ class Sigmoid:
 
 ---
 
-### 3. Hyperbolic Tangent (Tanh)
+### Hyperbolic Tangent (Tanh)
 
 Tanh is a zero-centered sigmoid variant mapping inputs to $(-1, 1)$:
 
 $$\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} = 2\sigma(2x) - 1$$
 
 ```python
-# Listing 2.3: Hyperbolic Tangent (Tanh) Implementation
 class Tanh:
     """Hyperbolic Tangent activation: f(x) = tanh(x)."""
 
@@ -151,20 +157,21 @@ class Tanh:
 
 ---
 
-### 4. Gaussian Error Linear Unit (GELU)
+### Gaussian Error Linear Unit (GELU)
 
-Modern transformer models (including GPT-2, GPT-3, GPT-4, and BERT) standardly replace ReLU with GELU. Rather than hard-gating inputs by their sign ($\max(0, x)$), GELU weights inputs by their probability under a standard Gaussian distribution:
+Modern transformer architectures (including GPT-2, GPT-3, GPT-4, LLaMA, and BERT) standardly replace ReLU with GELU. Rather than hard-gating inputs deterministically by their sign ($\max(0, x)$), GELU weights inputs by their probability under a standard Gaussian cumulative distribution:
 
 $$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot P(X \le x), \quad X \sim \mathcal{N}(0, 1)$$
 
 $$\text{GELU}(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]$$
 
-Because calculating the exact error function $\text{erf}(x)$ requires expensive numerical series integration on GPUs, production frameworks and language models use the fast polynomial tanh approximation introduced by Hendrycks and Gimpel:
+Because calculating the exact error function $\text{erf}(x)$ requires expensive numerical series integration on hardware ALUs, production frameworks and language models use the fast polynomial tanh approximation:
 
 $$\text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715 x^3\right)\right)\right)$$
 
+This polynomial formulation executes rapidly on vector units using Fused Multiply-Add (FMA) instructions.
+
 ```python
-# Listing 2.4: Gaussian Error Linear Unit (GELU) with Tanh Approximation
 class GELU:
     """Gaussian Error Linear Unit with Hendrycks fast polynomial approximation."""
 
@@ -186,7 +193,7 @@ class GELU:
 ::: {#fig-activation-comparison}
 ![](../../packages/tinytorch/quarto/assets/images/diagrams/02_activations-diag-1.svg)
 
-**Figure 2.1: Activation Function Profiles.** Comparison of ReLU, Sigmoid, Tanh, and GELU. Notice that GELU is smooth and non-monotonic for small negative values ($x \approx -0.17$), allowing small negative activations that preserve signal flow through deep layers.
+Activation Function Profiles. Comparison of ReLU, Sigmoid, Tanh, and GELU. Notice that GELU is smooth and non-monotonic for small negative values ($x \approx -0.17$), allowing small negative activations that preserve gradient flow through deep stacks.
 :::
 
 ---
@@ -213,14 +220,13 @@ $$\text{Softmax}(\mathbf{z} - C)_i = \frac{e^{z_i - C}}{\sum_{j=1}^K e^{z_j - C}
 Subtracting a constant from all logits leaves the mathematical probability distribution completely unchanged.
 :::
 
-By choosing $C = \max_j(z_j)$, the exponent is guaranteed to satisfy:
+By choosing $C = \max_j(z_j)$, the exponent argument is guaranteed to satisfy:
 
 $$z_i - \max_j(z_j) \le 0 \quad \forall i$$
 
 Because $e^u \in (0, 1]$ for all $u \le 0$, the exponential term **can never exceed $1.0$**, completely eliminating the possibility of floating-point overflow.
 
 ```python
-# Listing 2.5: Numerically Stable Batched Softmax Implementation
 class Softmax:
     """Numerically stable Softmax activation along specified axis."""
 
@@ -245,7 +251,7 @@ class Softmax:
 ::: {.callout-pitfall}
 ## Pitfall: Forgetting `keepdims=True` in Multi-Axis Reductions
 
-When computing `np.max(x_data, axis=-1)` on a 2D batch tensor of shape $(B, D)$, omitting `keepdims=True` collapses the array to 1D shape $(B,)$. Subsequent broadcasting subtraction `x_data - max_val` can fail or incorrectly broadcast across the batch dimension instead of feature columns. Always retain dimensional rank during reduction steps.
+When computing `np.max(x_data, axis=-1)` on a 2D batch tensor of shape $(B, D)$, omitting `keepdims=True` collapses the array to 1D shape $(B,)$. Subsequent broadcasting subtraction `x_data - max_val` will fail or incorrectly broadcast across the batch dimension instead of feature columns. Always retain dimensional rank during reduction steps.
 :::
 
 ---
@@ -263,7 +269,7 @@ In TinyTorch, deep learning components adhere to a unified structural protocol:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Because activation layers contain no internal state or learnable weights, they can be shared or invoked multiple times across a forward pass without side effects. In contrast, parameterized layers (such as `Linear`, which we build in Chapter 4) encapsulate weight matrices and bias vectors that must be registered and tracked by the framework.
+Because activation layers contain no internal state or learnable weights, they can be shared or invoked multiple times across a forward pass without side effects. In contrast, parameterized layers (such as `Linear`, which we build in the next chapter) encapsulate weight matrices and bias vectors that must be registered and tracked by the framework.
 
 ---
 
@@ -274,13 +280,17 @@ Because activation layers contain no internal state or learnable weights, they c
 While matrix multiplications ($\mathbf{x} \mathbf{W}$) have high arithmetic intensity ($O(N^3)$ operations on $O(N^2)$ data), activation functions are **strictly memory-bandwidth bound**.
 
 For a tensor of $N$ elements executing ReLU in 32-bit float:
-- Read 4 bytes per element from memory into CPU/GPU registers.
+- Read 4 bytes per element from DRAM into CPU/GPU registers.
 - Perform 1 comparison operation in the ALU.
-- Write 4 bytes per element back to memory buffer.
+- Write 4 bytes per element back to the DRAM memory buffer.
 
 $$\text{Arithmetic Intensity} = \frac{1\text{ FLOP}}{8\text{ Bytes}} = 0.125\text{ FLOPs/Byte}$$
 
-Because hardware memory bandwidth is finite, executing standalone element-wise activation functions leaves ALUs idle waiting for memory loads and stores.
+Consider a modern accelerator with $312\text{ TFLOPs}$ of peak FP32 compute and $2.0\text{ TB/s}$ of High Bandwidth Memory (HBM) throughput. When executing a standalone element-wise activation kernel:
+
+$$\text{Achievable Compute} = 2.0\text{ TB/s} \times 0.125\text{ FLOPs/Byte} = 250\text{ GFLOPs}$$
+
+The hardware achieves **less than 0.1% of its peak ALU throughput**, spending over 99.9% of its execution time stalled waiting on memory bus transfers. This bottleneck provides the core motivation for **kernel fusion** (combining `Linear + Activation` into a single fused GPU kernel).
 
 ### Intermediate Forward Activation Allocations
 
@@ -307,24 +317,54 @@ While modest for single forward passes on small MLPs, this allocation pattern sc
 
 ---
 
+## Production Reality: How PyTorch Optimizes Activations in C++
+
+In production frameworks like PyTorch, element-wise activation functions are optimized to avoid the memory-bandwidth bottlenecks of standalone kernels.[^pytorch-activation-fusion]
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PyTorch ATen Activation Dispatch Architecture              │
+├─────────────────────────────────────────────────────────────┤
+│  1. Vectorized CPU Backend: at::vec::Vectorized<float>      │
+│     • Loads 8 floats (AVX2, 256-bit) or 16 floats (AVX-512) │
+│     • Vectorized polynomial math in registers               │
+├─────────────────────────────────────────────────────────────┤
+│  2. CUDA Kernel Backend: at::native::gpu_kernel             │
+│     • 128-bit vector memory reads (float4 / 4 floats/thread)│
+│     • Fast math hardware intrinsics (__expf, __fdividef)    │
+├─────────────────────────────────────────────────────────────┤
+│  3. Compiler Kernel Fusion: PyTorch Inductor & Triton        │
+│     • Fuses Linear GEMM + Activation into a single kernel   │
+│     • Eliminates intermediate HBM roundtrip allocations     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **CPU Vectorization (`at::vec::Vectorized<float>`)**: On x86 and ARM CPUs, PyTorch ATen evaluates activations using wide SIMD intrinsics (`_mm256_max_ps`, `_mm512_max_ps`), processing 8 or 16 floating-point numbers per instruction cycle.
+2. **GPU Coalesced Vector Loads**: In CUDA, activation kernels pack 4 consecutive `float32` elements into a 128-bit `float4` vector load per thread, maximizing GPU memory bus utilization.
+3. **Kernel Fusion in TorchDynamo & Inductor**: Instead of launching a separate GPU kernel for matrix multiplication followed by another kernel for activation, deep learning compilers generate a single fused kernel (`addmm_relu` or `addmm_gelu`). Intermediate pre-activation values remain in high-speed on-chip SRAM registers and are activated in-place before writing the final result back to DRAM.
+
+[^pytorch-activation-fusion]: In PyTorch ATen (`aten/src/ATen/native/cpu/ActivationKernel.cpp`), `relu_kernel` and `gelu_kernel` dispatch to vectorized CPU templates that unroll loops across 512-bit registers. On GPU devices, compiler backends like Triton and PyTorch Inductor automatically fuse element-wise activations directly into epilogues of preceding GEMM matrix multiplications.
+
+---
+
 ## Summary
 
 In this chapter, we laid the second architectural tier of TinyTorch by introducing non-linear activation functions. We mathematically proved why stacking linear transformations without activations collapses into a single layer, establishing the absolute necessity of non-linear mappings for deep neural network representation.
 
-We built five essential activation classes—`ReLU`, `Sigmoid`, `Tanh`, `GELU`, and `Softmax`—and implemented the shift-invariance numerical stabilization property to protect exponential operations against floating-point register overflow. Finally, we analyzed the memory-bandwidth characteristics of element-wise operators and established the framework contract distinguishing stateless activation transformations from stateful parameterized layers.
+We built five essential activation classes—`ReLU`, `Sigmoid`, `Tanh`, `GELU`, and `Softmax`—and implemented the shift-invariance numerical stabilization property to protect exponential operations against floating-point register overflow. Finally, we analyzed the memory-bandwidth characteristics of element-wise operators ($0.125\text{ FLOPs/byte}$), introduced the systems rationale for kernel fusion, and established the framework contract distinguishing stateless activation transformations from stateful parameterized layers.
 
 ::: {.callout-takeaways}
 ## Chapter Takeaways
 
 - **Breaking Linearity**: Without non-linear activation functions, multi-layer networks collapse into a single composite linear transformation with zero effective depth.
-- **Activation Profiles**: ReLU provides fast computation; Sigmoid and Tanh offer bounded ranges; GELU provides smooth probabilistic gating standard in modern LLMs.
-- **Shift Invariance**: Subtracting $\max(\mathbf{z})$ from logits before computing Softmax prevents exponential overflow without altering the mathematical probability distribution.
-- **Memory-Bandwidth Bound**: Element-wise activations exhibit low arithmetic intensity ($0.125\text{ FLOPs/byte}$), making execution speed dependent on memory transfer rates.
+- **Activation Profiles**: ReLU provides fast ALU computation; Sigmoid and Tanh offer bounded ranges; GELU provides smooth probabilistic gating standard in modern LLMs.
+- **IEEE 754 Floating-Point Safety**: Unconstrained exponentials overflow `float32` registers at $x > 88.72$; branch-stable Sigmoid and shift-invariant Softmax ($z_i - \max(\mathbf{z})$) eliminate overflow and NaN corruption.
+- **Memory-Bandwidth Bound**: Element-wise activations exhibit low arithmetic intensity ($0.125\text{ FLOPs/byte}$), making standalone execution memory-bound and motivating compiler kernel fusion.
 - **Stateless Framework Contract**: Activation functions contain no internal parameters (`parameters() -> []`), allowing them to be shared and reused across network layers.
 :::
 
 ::: {.callout-chapter-connection}
 ## Chapter Connection: Encapsulating Weights and Parameters
 
-Now that we have non-linear activation functions, how do we encapsulate learnable weights, biases, and regularization? In **Chapter 4 (Layers, Regularization, and Parameter Management)**, we build the stateful `Linear` layer, implement `Dropout` for regularization, and create the container abstractions that allow complex multi-layer networks to be composed and executed.
+Now that we have non-linear activation functions, how do we encapsulate learnable weights, biases, and regularization? In **Layers, Regularization, and Parameter Management**, we build the stateful `Linear` layer, implement `Dropout` for regularization, and create the container abstractions that allow complex multi-layer networks to be composed and executed.
 :::

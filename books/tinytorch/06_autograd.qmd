@@ -93,6 +93,7 @@ evaluating the vector-matrix contraction directly as a localized operation that 
 ## The Reverse-Mode Scaling Advantage
 
 For a function $f: \mathbb{R}^N \to \mathbb{R}^M$:
+
 - **Forward-Mode Autograd** computes one column of the Jacobian per pass: efficient when inputs $N \ll M$ (few inputs, many outputs).
 - **Reverse-Mode Autograd** computes one row of the Jacobian per pass: efficient when outputs $M \ll N$.
 
@@ -108,6 +109,7 @@ In TinyTorch (as in PyTorch), the computation graph is **dynamic** (Define-by-Ru
 ### The Function Contract
 
 Every differentiable operation is represented by a `Function` class that implements a two-phase contract:
+
 1. **Forward Pass (`__init__`)**: Saves input tensors required for the backward pass (`saved_tensors`).[^activation-checkpoint]
 2. **Backward Pass (`apply`)**: Receives the upstream incoming gradient (`grad_output`) and returns the Vector-Jacobian Product for each input.
 
@@ -120,7 +122,7 @@ from typing import Tuple, Any
 class Function:
     """
     Base class for differentiable operations in TinyTorch.
-    
+
     Encapsulates forward tensor caching and backward VJP evaluation.
     """
 
@@ -131,7 +133,7 @@ class Function:
     def apply(self, grad_output: np.ndarray) -> Tuple[np.ndarray, ...]:
         """
         Compute Vector-Jacobian Products for all inputs.
-        
+
         Args:
             grad_output: Upstream gradient flowing backward (dL / dOutput)
         Returns:
@@ -215,12 +217,12 @@ def _reduce_broadcast_grad(grad: np.ndarray, original_shape: Tuple[int, ...]) ->
     # 1. Sum over leading batch dimensions that were prepended during broadcasting
     while grad.ndim > len(original_shape):
         grad = grad.sum(axis=0)
-    
+
     # 2. Sum over singleton dimensions where original shape was 1
     for i in range(len(original_shape)):
         if original_shape[i] == 1 and grad.shape[i] > 1:
             grad = grad.sum(axis=i, keepdims=True)
-            
+
     return grad
 ```
 
@@ -331,7 +333,7 @@ def backward(self: Tensor, gradient: Optional[Tensor] = None) -> None:
 
         # Evaluate VJP
         grads = node._ctx.apply(node.grad.data)
-        
+
         # Route gradients to parents
         for parent, g in zip(node._ctx.saved_tensors, grads):
             if isinstance(parent, Tensor) and parent.requires_grad:
@@ -361,50 +363,49 @@ def gradcheck(func, inputs: Tuple[Tensor, ...], eps: float = 1e-5, tol: float = 
     # 1. Run forward and backward to compute analytical autograd gradients
     out = func(*inputs)
     out.backward()
-    
+
     for tensor in inputs:
         if not tensor.requires_grad:
             continue
-            
+
         analytical_grad = tensor.grad.data.copy()
         numerical_grad = np.zeros_like(tensor.data)
-        
+
         # 2. Compute numerical gradient element-by-element
         it = np.nditer(tensor.data, flags=['multi_index'])
         while not it.finished:
             idx = it.multi_index
             orig_val = tensor.data[idx]
-            
+
             # f(w + eps)
             tensor.data[idx] = orig_val + eps
             out_pos = func(*inputs).data.copy()
-            
+
             # f(w - eps)
             tensor.data[idx] = orig_val - eps
             out_neg = func(*inputs).data.copy()
-            
+
             # Restore original value
             tensor.data[idx] = orig_val
-            
+
             # Symmetric difference quotient
             numerical_grad[idx] = np.sum((out_pos - out_neg) / (2.0 * eps))
             it.iternext()
-            
+
         # 3. Measure relative error: ||g_ana - g_num|| / (||g_ana|| + ||g_num|| + 1e-8)
         diff = np.abs(analytical_grad - numerical_grad)
         denom = np.maximum(np.abs(analytical_grad) + np.abs(numerical_grad), 1e-8)
         rel_error = np.max(diff / denom)
-        
+
         if rel_error > tol:
             print(f"FAIL: Max relative error {rel_error:.2e} exceeds tolerance {tol:.2e}")
             return False
-            
+
     print("PASS: Autograd gradients match numerical finite differences to 1e-5 precision!")
     return True
 ```
 
 ---
-
 
 ::: {.callout-note}
 ## PyTorch Systems Bridge: `torch.autograd.Function` and `grad_fn`
@@ -453,6 +454,7 @@ In production PyTorch, the autograd DAG is not evaluated in Python; it is execut
 ```
 
 When `backward()` is triggered:
+
 1. An `Engine::execute()` call constructs a `GraphTask` tracking the in-degree dependencies of all nodes in the active DAG subgraph.
 2. Root nodes with zero unresolved dependencies are pushed to a concurrent `ReadyQueue`.
 3. Worker CPU threads pop `Node` instances from the `ReadyQueue`, execute their compiled C++/CUDA VJP kernels (`Node::operator()`), and decrement the dependency counters of predecessor nodes.
@@ -464,6 +466,7 @@ When `backward()` is triggered:
 If a tensor $\mathbf{x}$ is cached during the forward pass by `save_for_backward()`, and user code subsequently mutates $\mathbf{x}$ in-place before `backward()` executes (`x += 1` or `x[0] = 5.0`), the backward pass will evaluate incorrect mathematical gradients using corrupted values.
 
 PyTorch protects against silent mathematical corruption by attaching an atomic `_version` counter to every `TensorImpl` storage object:
+
 - Every in-place operation increments `tensor._version` by 1.
 - `save_for_backward()` records the tensor's version snapshot $V_0$.
 - When the backward kernel runs, the engine verifies that `tensor._version == V_0`.
