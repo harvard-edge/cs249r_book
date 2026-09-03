@@ -1590,6 +1590,7 @@ class IncastBurst:
     sender_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
     egress_port = Systems.Fabrics.Ethernet_400G.bandwidth  # 400 Gb/s (50 GB/s) egress port
     buffer = 32 * MB  # scenario assumption: switch egress buffer
+    feedback_rtt = 5 * microsecond  # scenario assumption: congestion-feedback round trip
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     offered = n_senders * sender_bw
@@ -1597,12 +1598,14 @@ class IncastBurst:
     buffer_hold = buffer / egress_port  # time one egress stream takes to drain the buffer
     net_fill = offered - egress_port  # fill rate after the single egress port drains
     overflow = buffer / net_fill
+    bandwidth_delay_product = egress_port * feedback_rtt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 × 50 GB/s should be 12.8 TB/s")
     check(round(oversub) == 256, "Offered load should oversubscribe the egress port 256×")
     check(abs(buffer_hold.to(microsecond).magnitude - 640) < 1e-3, "32 MB / 50 GB/s should be 640 μs")
     check(overflow.to(microsecond).magnitude < 5, "Buffer should overflow in a few microseconds")
+    check(abs(bandwidth_delay_product.to(KB).magnitude - 250) < 1e-6, "50 GB/s × 5 μs should be 250 KB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_senders_str = fmt_count(n_senders, commas=False)
@@ -1612,6 +1615,10 @@ class IncastBurst:
     offered_tb_per_s_str = fmt_qty(offered, TB / second, precision=1, commas=False)
     port_gbit_per_s_str = fmt_bandwidth(egress_port, unit=Gbps, precision=0, commas=False)
     buffer_mb_str = fmt_qty(buffer, MB, precision=0, commas=False)
+    buffer_hold_us_str = fmt_time(buffer_hold, microsecond, precision=0, commas=False)
+    feedback_rtt_us_str = fmt_time(feedback_rtt, microsecond, precision=0, commas=False)
+    bandwidth_delay_product_kb_str = fmt_qty(bandwidth_delay_product, KB, precision=0, commas=False)
+    oversubscription_mult_str = fmt_multiple(oversub, precision=0, commas=False)
     overflow_us_str = fmt_time(overflow, microsecond, precision=1, commas=False)
 ```
 
@@ -1624,6 +1631,16 @@ class IncastBurst:
 3.  **Common pitfall**: Incast is not necessarily rare or unpredictable. Synchronized training can produce repeated bursts as gradient collectives begin during the backward pass. The severity depends on the collective algorithm, topology, routing, and oversubscription, so it must be measured and mitigated rather than treated as an edge case.
 
 :::
+
+The incast calculation also exposes the finite-buffer mechanism behind congestion. Let the aggregate arrival rate to one egress be $\lambda$, the egress service rate be $\mu$, and the instantaneous queue occupancy be $Q(t)$. While a burst persists and $\lambda > \mu$, the queue grows at the net rate
+
+$$
+Q(t) = \min\!\left(B,\; Q(0) + (\lambda-\mu)t\right),
+$$
+
+where $B$ is the finite buffer capacity. The ratio $\rho=\lambda/\mu$ distinguishes a drainable workload from sustained overload: for $\rho<1$, idle intervals can drain the queue; as long-run $\rho$ approaches one, less slack remains to absorb bursts; and for $\rho>1$, occupancy must reach a control threshold or the buffer limit if the overload persists. This is a packet queue, distinct from the request queues analyzed in @sec-inference-scale. Serialization and propagation set the unloaded path latency, whereas queued bytes add approximately $Q/\mu$ of waiting time.
+
+In the deliberately worst-case incast above, $\rho$ is `{python} IncastBurst.oversubscription_mult_str`, so the `{python} IncastBurst.buffer_mb_str` buffer fills in about `{python} IncastBurst.overflow_us_str`. Once full, that buffer represents `{python} IncastBurst.buffer_hold_us_str` of egress waiting time. By contrast, the **bandwidth-delay product**\index{Bandwidth-delay product!buffer distinction} for the `{python} IncastBurst.port_gbit_per_s_str` egress and an illustrative `{python} IncastBurst.feedback_rtt_us_str` feedback round trip is only `{python} IncastBurst.bandwidth_delay_product_kb_str`: it measures data in flight on the path, not the buffering needed to absorb an arbitrary fan-in burst. ECN must mark early enough for feedback to arrive before exhaustion; PFC can prevent a drop, but its backpressure can spread congestion. A larger buffer extends the reaction window at the cost of a larger tail-latency bound.
 
 ```{python}
 #| echo: false
