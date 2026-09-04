@@ -42,8 +42,8 @@
   <b><a href="https://mlsysbook.ai">📘 Textbook Series</a></b> •
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
   <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
-  <b><a href="books/vol3/">🟣 Vol III (Notebook)</a></b> •
-  <b><a href="books/vol4/">🌲 Vol IV (Notebook)</a></b>
+  <b><a href="books/vol3/">🟣 Vol III (In Dev)</a></b> •
+  <b><a href="books/vol4/">🌲 Vol IV (In Dev)</a></b>
   <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
