@@ -12,10 +12,10 @@
 
 <!-- Build Status: Core 4-Volume Series -->
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20I%3A%20Foundations&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20II%3A%20Scaling&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20III%3A%20Agentic&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&event=push&label=Vol%20IV%3A%20Physical%20AI&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol1.json&logo=book&cacheSeconds=300" alt="Vol I: Foundations"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol2.json&logo=book&cacheSeconds=300" alt="Vol II: Scaling"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol3.json&logo=robot&cacheSeconds=300" alt="Vol III: Agentic"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol4.json&logo=gear&cacheSeconds=300" alt="Vol IV: Physical AI"></a>
 </p>
 
 <!-- Build Status: Companion Ecosystem & Tools -->
