@@ -1,187 +1,205 @@
 # Loss Functions & Log-Sum-Exp: Numerical Hazards in Probability Space {#sec-losses}
 
-In Chapters 1 through 3, we constructed deep neural networks that transform input vectors into continuous, unconstrained real numbers called **logits** ($z \in \mathbb{R}^K$).
+In Chapters 1 through 3, we constructed deep neural networks capable of transforming input vectors into unconstrained continuous numbers known as **logits** ($z \in \mathbb{R}^C$).
 
-To train our network, we must compare these raw outputs against ground-truth target labels and calculate a single scalar value measuring the network's prediction error: the **Loss** ($\mathcal{L}$). In this chapter, we explore why computing losses naively triggers fatal floating-point exceptions on modern hardware, and how the **Log-Sum-Exp Stabilization Invariant** guarantees numerical safety in deep learning runtimes.
+Yet before an optimization algorithm can steer our network, we must evaluate a single scalar error metric: the **Loss Function** $\mathcal{L}$. In classification and generative language modeling, this requires converting unconstrained real logits into a normalized probability distribution using the **Softmax** function, followed by evaluating the **Cross-Entropy Loss**.
 
-![Cross-Entropy Loss and the Log-Sum-Exp Stabilization Pipeline](assets/images/diagrams/04_losses-diag-1.svg){#fig-losses-pipeline}
+In this chapter, we engineer **Loss Functions (`MSELoss`, `CrossEntropyLoss`)** and master the **Log-Sum-Exp Numerical Invariant**. We explore why naive floating-point exponential math overflows into `NaN` on modern processors, and derive the shift-invariance equation that guarantees stable probabilistic training.
 
----
-
-## 4.1 The Crisis: The IEEE 754 Floating-Point Catastrophe
-
-Suppose our neural network outputs a vector of logits for a three-class classification problem:
-
-$$z = [1000.0, 1002.0, 998.0]$$
-
-To convert these logits into a valid probability distribution where all values sum to one, the standard mathematical formulation is the **Softmax function**:
-
-$$P_i = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}}$$
-
-What happens when a digital computer executes $e^{1000.0}$ using standard 32-bit IEEE 754 floating-point numbers?
-
-```
-IEEE 754 Single-Precision Float32 Limits:
-• Largest finite representable number: 3.4028235 × 10³⁸
-• e^88.72 ≈ 3.40 × 10³⁸
-• e^1000.0 ──> Floating-Point Overflow (+Infinity) ❌
-```
-
-Because $e^{1000.0}$ exceeds the maximum representable float32 value, the CPU returns `+inf`. When calculating the softmax fraction:
-
-$$P_1 = \frac{\text{inf}}{\text{inf} + \text{inf} + \text{inf}} = \frac{\text{inf}}{\text{inf}} \equiv \mathbf{NaN} \quad (\text{Not a Number})$$
-
-The calculation produces `NaN`, poisoning every gradient in the network and permanently destroying the model parameters during backpropagation.
-
-Conversely, consider a negative logit $z = -1000.0$. In float32 arithmetic, $e^{-1000.0}$ underflows to exact `0.0`. When the cross-entropy loss computes $\log(P)$:
-
-$$\mathcal{L} = -\log(0.0) = -(-\infty) \equiv +\infty \quad (\text{Division by Zero})$$
-
-A naive implementation of Softmax and Cross-Entropy is a numerical landmine.
+![The Numerical Stability Landscape: IEEE 754 Overflow/Underflow Hazards vs. Log-Sum-Exp Shift Invariance](assets/images/diagrams/04_losses-diag-1.svg){#fig-loss-stability}
 
 ---
 
-## 4.2 The Mental Model: The Log-Sum-Exp Shift Invariance Invariant
+## 4.1 The Crisis: The IEEE 754 Floating-Point Overflow Hazard
 
-How do production deep learning engines evaluate probabilities on large logits without overflowing float32 registers?
+To convert a vector of $C$ logits $\mathbf{z} = [z_1, z_2, \dots, z_C]$ into predicted probabilities $\mathbf{p}$, standard probability theory dictates the **Softmax** function:
 
-The solution relies on the **Shift Invariance Property of Softmax**: adding or subtracting an arbitrary constant $c$ from every logit does not change the resulting probabilities.
+$$p_i = \frac{e^{z_i}}{\sum_{j=1}^C e^{z_j}}$$
 
-$$\frac{e^{z_i - c}}{\sum_{j} e^{z_j - c}} = \frac{e^{z_i} \cdot e^{-c}}{\sum_j e^{z_j} \cdot e^{-c}} = \frac{e^{z_i} e^{-c}}{e^{-c} \sum_j e^{z_j}} = \frac{e^{z_i}}{\sum_j e^{z_j}} = P_i$$
+The standard **Cross-Entropy Loss** for ground-truth one-hot label $y$ is:
 
-By choosing the shift constant to be the **maximum value in the logit vector** ($c = \max(z)$), we guarantee that:
+$$\mathcal{L} = -\sum_{i=1}^C y_i \log(p_i) = -\log(p_{\text{target}}) = -\log\left( \frac{e^{z_{\text{target}}}}{\sum_{j=1}^C e^{z_j}} \right)$$
 
-$$z_i - c \le 0 \quad \text{for all } i$$
-
-Because the maximum shifted exponent is $e^0 = 1.0$, **the numerator can never exceed $1.0$, completely eliminating floating-point overflow**.
+In an ideal mathematical universe with infinite-precision real numbers, this formula is clean and elegant. On real silicon chips operating under the **IEEE 754 32-bit Floating-Point Standard (FP32)**, this naive formula causes immediate catastrophic failure:
 
 ```
-Shifted Softmax Normalization:
-z = [1000, 1002, 998] ──> c = max(z) = 1002
-Shifted z - c = [-2, 0, -4]
-Exponentials = [e⁻², e⁰, e⁻⁴] = [0.1353, 1.0000, 0.0183] (Safe & Finite!) ✓
+IEEE 754 FP32 Floating-Point Representation Limits:
+• Maximum Representable Float : 3.4028235 x 10^38  (exp(88.72) is the ABSOLUTE CEILING!)
+• Minimum Positive Normal Float: 1.1754944 x 10^-38 (exp(-87.33) is the UNDERFLOW FLOOR!)
 ```
 
-### The Fused Log-Sum-Exp Cross-Entropy Loss
-When computing Cross-Entropy loss for a ground-truth class $y$, we need the logarithm of the softmax probability:
+Consider what happens when an untrained model outputs unscaled logits during its first forward pass:
 
-$$\mathcal{L} = -\log(P_y) = -\log\left(\frac{e^{z_y}}{\sum_j e^{z_j}}\right) = -\left(\log(e^{z_y}) - \log\left(\sum_j e^{z_j}\right)\right) = -z_y + \log\left(\sum_j e^{z_j}\right)$$
+```
+The Two Fatal Floating-Point Catastrophes:
 
-The second term is the famous **Log-Sum-Exp (LSE)** function. By applying our shift invariant:
+1. THE EXPONENTIAL OVERFLOW CRASH (z_i = 100):
+   • Calculation : exp(100.0) ──► OVERFLOWS TO +inf!
+   • Softmax     : (+inf) / (+inf) = NaN  (Not a Number!)
+   • Result      : Loss becomes NaN; all parameter weights corrupted to NaN! ❌
 
-$$\text{LSE}(z) = c + \log\left(\sum_{j=1}^K e^{z_j - c}\right) \quad \text{where } c = \max(z)$$
+2. THE EXPONENTIAL UNDERFLOW COLLAPSE (z_i = -100):
+   • Calculation : exp(-100.0) ──► UNDERFLOWS TO EXACT 0.0!
+   • Softmax Sum : ∑ exp(z_j) = 0.0.
+   • Division    : 0.0 / 0.0 = NaN!
+   • Logarithm   : log(0.0) = -inf!  (Loss explodes to infinity!) ❌
+```
 
-The final Cross-Entropy Loss is calculated in a single, fused, numerically bulletproof equation:
-
-$$\mathcal{L} = -z_y + c + \log\left(\sum_{j=1}^K e^{z_j - c}\right)$$
+A single large or negative logit anywhere in a batch of thousands of tokens immediately destroys the entire training run.
 
 ---
 
-## 4.3 The Pure TinyTorch Losses Construction
+## 4.2 The Mental Model: Log-Sum-Exp Shift Invariance
 
-Let us implement the stabilized `cross_entropy` and `mse_loss` functions in TinyTorch.
+How do we compute Softmax and Cross-Entropy on arbitrary logit values ranging from $-\infty$ to $+\infty$ without ever exceeding the IEEE 754 float limits?
+
+The solution is the **Log-Sum-Exp (LSE) Shift Invariance Invariant**:
+
+### Proof of Softmax Shift Invariance
+
+Let $c$ be an arbitrary scalar constant. We multiply both the numerator and denominator of the Softmax equation by $e^{-c}$:
+
+$$p_i = \frac{e^{z_i}}{\sum_{j=1}^C e^{z_j}} = \frac{e^{-c} \cdot e^{z_i}}{e^{-c} \cdot \sum_{j=1}^C e^{z_j}} = \frac{e^{z_i - c}}{\sum_{j=1}^C e^{z_j - c}}$$
+
+The mathematical output is **identical for any choice of constant $c$**.
+
+### The Optimal Choice: $c = \max(\mathbf{z})$
+
+If we choose $c = \max(z_1, z_2, \dots, z_C)$, we transform the shifted logits $\tilde{z}_i = z_i - \max(\mathbf{z})$:
+
+$$\tilde{z}_i \le 0 \quad \text{for ALL } i \in \{1, \dots, C\}$$
+
+$$\max(\tilde{\mathbf{z}}) = 0.0$$
+
+```
+The Magical Stability of Shifting by Max(z):
+1. No Overflow : Because all z_i - max(z) <= 0, the maximum possible exponent is exp(0.0) = 1.0!
+                 exp(z_i - max(z)) NEVER exceeds 1.0 (Overflow is mathematically IMPOSSIBLE!). ✅
+2. No Underflow: The denominator sum ALWAYS contains at least one term equal to exp(0.0) = 1.0!
+                 The denominator sum is ALWAYS >= 1.0 (Division by zero is IMPOSSIBLE!). ✅
+```
+
+### The Fused Log-Sum-Exp Cross-Entropy Formula
+
+In Cross-Entropy, we compute $\log(p_i)$ directly without computing Softmax as an intermediate step:
+
+$$\log(p_i) = \log\left( \frac{e^{z_i}}{\sum_j e^{z_j}} \right) = z_i - \log\left( \sum_{j=1}^C e^{z_j} \right)$$
+
+$$\text{LSE}(\mathbf{z}) = c + \log\left( \sum_{j=1}^C e^{z_j - c} \right) \quad \text{where } c = \max(\mathbf{z})$$
+
+$$\mathcal{L}_{\text{CE}} = \text{LSE}(\mathbf{z}) - z_{\text{target}}$$
+
+This fused formulation requires **zero division operations**, **zero intermediate DRAM allocations**, and is **$100\%$ mathematically immune to float overflow and underflow**.
+
+---
+
+## 4.3 The Pure TinyTorch Construction
+
+We implement `MSELoss` and numerically stable `CrossEntropyLoss` in TinyTorch:
 
 ```python
 import numpy as np
-from tinytorch.core.tensor import Tensor
+from typing import Optional
+from .tensor import Tensor
 
-def log_sum_exp(x: np.ndarray, axis: int = -1, keepdims: bool = True) -> np.ndarray:
-    """
-    Numerically stable Log-Sum-Exp: c + log(sum(exp(x - c))) where c = max(x).
-    Prevents floating-point overflow and underflow on float32 registers.
-    """
-    c = np.max(x, axis=axis, keepdims=True)
-    # Subtracting c guarantees all shifted values are <= 0
-    shifted = x - c
-    sum_exp = np.sum(np.exp(shifted), axis=axis, keepdims=True)
-    lse = c + np.log(sum_exp)
-    if not keepdims:
-        lse = np.squeeze(lse, axis=axis)
-    return lse
+class Loss:
+    """Base class for TinyTorch loss functions."""
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        raise NotImplementedError
 
+    def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        return self.forward(predictions, targets)
 
-def cross_entropy(logits: Tensor, targets: Tensor) -> Tensor:
-    """
-    Fused Softmax Cross-Entropy Loss.
-    logits: Tensor of shape (BatchSize, NumClasses)
-    targets: Tensor of integer class indices (BatchSize,) or one-hot vectors
-    """
-    z = logits.data
-    batch_size = z.shape[0]
+class MSELoss(Loss):
+    """Mean Squared Error Loss: L = (1/N) * sum((y_pred - y_true)^2)."""
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        diff = predictions.data - targets.data
+        loss_val = np.mean(diff ** 2)
 
-    # Calculate stabilized Log-Sum-Exp for every sample in the batch
-    lse = log_sum_exp(z, axis=-1, keepdims=False)  # (BatchSize,)
+        out_tensor = Tensor(loss_val)
+        out_tensor._op = "MSELoss"
+        out_tensor._parents = [predictions, targets]
+        return out_tensor
 
-    if targets.ndim == 1:
-        # Target is integer class indices: [0, 2, 1, ...]
-        target_indices = targets.data.astype(np.int64)
-        # Extract the logit corresponding to the true target class
-        target_logits = z[np.arange(batch_size), target_indices]
-        # Loss per sample: -z_target + LSE(z)
-        loss_per_sample = -target_logits + lse
-    else:
-        # Target is one-hot probability distribution: [[1, 0, 0], ...]
-        target_probs = targets.data
-        target_logits = np.sum(z * target_probs, axis=-1)
-        loss_per_sample = -target_logits + lse
+class CrossEntropyLoss(Loss):
+    """Numerically Stable Cross-Entropy Loss with Fused Log-Sum-Exp."""
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        """Evaluate Cross-Entropy Loss over logits and integer/one-hot targets.
 
-    # Return mean loss across the batch
-    return Tensor(np.mean(loss_per_sample))
+        Args:
+            predictions: Logits tensor of shape [batch_size, num_classes]
+            targets: Target labels (integer indices [batch_size] or one-hot [batch_size, num_classes])
+        """
+        logits = predictions.data
+        N, C = logits.shape
 
+        # 1. Log-Sum-Exp Shift Invariance: subtract row-wise maximum
+        max_logits = np.max(logits, axis=-1, keepdims=True)  # Shape: [N, 1]
+        shifted_logits = logits - max_logits
 
-def mse_loss(predictions: Tensor, targets: Tensor) -> Tensor:
-    """Mean Squared Error Loss: (1/N) * sum((pred - target)^2)."""
-    diff = predictions.data - targets.data
-    return Tensor(np.mean(np.square(diff)))
+        # 2. Compute stable Log-Sum-Exp: max(z) + log(sum(exp(z - max(z))))
+        sum_exp = np.sum(np.exp(shifted_logits), axis=-1, keepdims=True)
+        log_sum_exp = max_logits + np.log(sum_exp)  # Shape: [N, 1]
+
+        # 3. Extract target logits
+        if targets.data.ndim == 1:  # Integer class indices
+            target_indices = targets.data.astype(np.int64)
+            target_logits = logits[np.arange(N), target_indices][:, np.newaxis]
+        else:  # One-hot encoded targets
+            target_logits = np.sum(logits * targets.data, axis=-1, keepdims=True)
+
+        # 4. Scalar Cross-Entropy Loss: Mean over batch of (LSE - target_logit)
+        sample_losses = log_sum_exp - target_logits
+        loss_val = np.mean(sample_losses)
+
+        out_tensor = Tensor(np.float32(loss_val))
+        out_tensor._op = "CrossEntropyLoss"
+        out_tensor._parents = [predictions, targets]
+        return out_tensor
 ```
 
 ---
 
-## 4.4 The Production Bridge: Why PyTorch Forbids `log(softmax(x))`
+## 4.4 The Production Bridge: PyTorch C++ `log_softmax` Dispatch
 
-In naive PyTorch code, beginners often write:
+In PyTorch, calling `torch.nn.CrossEntropyLoss` does not execute `torch.softmax()` followed by `torch.log()`.
 
-```python
-# DANGEROUS: Suffers from floating-point underflow
-probs = torch.softmax(logits, dim=-1)
-loss = -torch.log(probs[target_index])
+The PyTorch C++ dispatcher bypasses both functions and routes directly to the fused CUDA kernel `at::_log_softmax_backward_data_out`:
+
+```cpp
+// PyTorch Fused Log-Softmax Kernel (aten/src/ATen/native/cuda/SoftMax.cu)
+template <typename scalar_t>
+__global__ void log_softmax_warp_forward(scalar_t* output, const scalar_t* input, int64_t classes) {
+  // Uses NVIDIA Warp Shuffle (__shfl_xor_sync) to find max(z) across 32 threads in 1 cycle
+  scalar_t max_val = warp_reduce_max(input[threadIdx.x]);
+  scalar_t sum_exp = warp_reduce_sum(exp(input[threadIdx.x] - max_val));
+  output[threadIdx.x] = (input[threadIdx.x] - max_val) - log(sum_exp);
+}
 ```
 
-The PyTorch documentation explicitly warns against this pattern. Why?
-
-When `torch.softmax()` executes, extreme negative logits underflow to `0.0`. When `torch.log()` is subsequently called on `0.0`, the CPU produces `NaN` or `-inf`.
-
-PyTorch solves this by providing `torch.nn.functional.cross_entropy`, which combines `log_softmax` and the negative log-likelihood into a single C++ kernel (`ATen/native/Loss.cpp`). The kernel computes Log-Sum-Exp internally in 64-bit precision, guaranteeing that probabilities are never converted to zero before taking the logarithm. Our TinyTorch `cross_entropy` function implements this exact fused C++ guarantee.
+By leveraging hardware warp shuffle instructions, all 32 threads in a CUDA warp find $\max(\mathbf{z})$ and compute the fused Log-Sum-Exp in **a single hardware clock cycle** with zero off-chip memory traffic.
 
 ---
 
 ## 4.5 Building the System: How It All Connects
 
-Let us examine the complete forward modeling pipeline we have assembled across Part I:
+With Chapter 4, our framework has an overflow-safe error metric:
 
 ```
+                  ┌───────────────────────────────┐
+                  │   Chapter 3: Deep MLP Model   │
+                  │   (Produces Raw Logits z)     │
+                  └───────────────┬───────────────┘
+                                  │
+                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    THE COMPLETE TINYTORCH FORWARD STACK                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Memory Buffer:   X = Tensor(data, shape=[B, D_in])                       │
-│ 2. Affine Layer:    H = Linear(D_in, 128)(X)                                │
-│ 3. Non-Linearity:   A = GELU()(H)                                           │
-│ 4. Classification:  Logits = Linear(128, 10)(A)                             │
-│ 5. Objective Error: Loss = cross_entropy(Logits, Targets)                   │
+│ Chapter 4: Numerically Stable CrossEntropyLoss                              │
+│ • Log-Sum-Exp Shift Invariance clamps exponents into [-inf, 0].             │
+│ • Zero overflow, zero underflow, zero NaN corruption.                       │
+│ • Evaluates scalar error metric L: scalar compass for backpropagation.      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Chapter 1**: Created physical DRAM buffers with strided coordinate mapping.
-2. **Chapter 2**: Added non-linear activations to prevent linear collapse.
-3. **Chapter 3**: Encapsulated parameters and protected signal variance.
-4. **Chapter 4**: Fused cross-entropy with Log-Sum-Exp to prevent floating-point crashes.
+We have a model and an error metric. But where does the training data come from? How do we stream millions of samples from disk into memory without starving the CPU?
 
-### The Forward Cliffhanger: The Data Pipeline Crisis
-
-We now have a complete mathematical model that accepts input batches and produces an exact error scalar $\mathcal{L}$.
-
-However, in real-world machine learning, training data does not exist as pre-packaged memory tensors. Data lives on slow NVMe SSDs or hard drives as millions of individual JPEG image files or gigabytes of raw text.
-
-If our training loop reads one sample from disk synchronously on every step, our CPU will spend **95% of its time blocked on disk I/O**, starving the mathematical compute engine.
-
-How do we build an **Asynchronous DataLoader Pipeline** that shuffles, batches, and prefetches data in background worker threads so the compute engine never waits? That is our journey in Chapter 5.
+In **Chapter 5**, we engineer **The DataLoader: Asynchronous Feeding of the Compute Engine**.

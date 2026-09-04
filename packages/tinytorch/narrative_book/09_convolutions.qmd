@@ -1,8 +1,8 @@
 # Spatial Convolutions: Preserving 2D Topology via im2col GEMMs {#sec-convolutions}
 
-In Part I, we constructed the complete Core Engine of TinyTorch, culminating in our validation of multi-layer perceptrons on handwritten digits. Yet fully connected linear layers possess a fatal structural flaw: they treat every input element as an independent dimension. To feed a 2D image into a linear layer, we must flatten the matrix into a 1D vector, discarding all spatial neighborhood relationships.
+In Part I, we constructed the complete Core Engine of TinyTorch, culminating in our milestone validation of multi-layer perceptrons on handwritten digit classification. Yet fully connected linear layers possess a fatal structural limitation: they treat every input feature as an independent, isolated dimension. To feed a two-dimensional image into a linear layer, we must flatten the 2D matrix into a flat 1D vector, discarding all spatial neighborhood geometry.
 
-In this chapter, we engineer **Spatial 2D Convolutions (`Conv2d`)** and **Max Pooling (`MaxPool2d`)**. We explore why sliding window convolutions preserve translational equivariance, and we unlock the fundamental systems trick used by every GPU vision library: the **`im2col` image-to-column transformation** that translates sliding convolutions into high-throughput systolic matrix multiplications (GEMMs).
+In this chapter, we engineer **Spatial 2D Convolutions (`Conv2d`)** and **Max Pooling (`MaxPool2d`)**. We explore why sliding window receptive fields preserve translational equivariance, analyze why nested loops destroy processor throughput, and unlock the foundational systems trick used by every GPU vision framework: the **`im2col` (image-to-column) transformation** that translates sliding convolutions into high-throughput systolic General Matrix Multiplications (GEMMs).
 
 ![Spatial Convolution Topology: Sliding Receptive Fields and the im2col Matrix Unrolling Engine](assets/images/diagrams/09_convolutions-diag-1.svg){#fig-conv-topology}
 
@@ -20,18 +20,23 @@ $$\text{Weights} = 3,145,728 \times 1,024 = 3,221,225,472 \text{ parameters} \qu
 
 ```
 The Fully Connected Vision Failure:
-1. Memory Explosion: 12.8 GB for a single layer! ❌
-2. Spatial Blindness: Shuffling all pixels randomly changes nothing for Linear,
-   destroying edge detection, texture coherence, and shape boundaries. ❌
+1. Memory Explosion: 12.8 Gigabytes for a SINGLE linear layer! ❌
+2. Spatial Blindness: Shuffling all pixels randomly changes nothing for a Linear layer,
+   destroying edge detection, texture coherence, and object contours. ❌
 3. Lack of Translation Invariance: A cat in the top-left corner activates
    completely different weights than the exact same cat in the bottom-right. ❌
 ```
 
-Vision in the physical world possesses two foundational mathematical properties:
-1. **Local Spatial Correlation**: Pixels close to one another are strongly correlated; distant pixels are weakly correlated. Edge filters only need to look at local $3 \times 3$ or $5 \times 5$ neighborhoods.
-2. **Translational Equivariance**: A vertical edge or a texture pattern is identical regardless of where it appears in the frame. The same filter weights should scan across the entire image.
+Vision in the physical world possesses two foundational geometric properties:
 
-By sharing a small $K \times K$ kernel across all spatial locations, a $3 \times 3$ convolution layer requires only $3 \times 3 \times C_{\text{in}} \times C_{\text{out}}$ parameters---reducing a 3-billion parameter matrix to just **27,648 parameters**, a **$116,500\times$ compression**!
+1. **Local Spatial Correlation**: Pixels close to one another are strongly correlated; distant pixels are weakly correlated. An edge detector or texture filter only needs to examine local $3 \times 3$ or $5 \times 5$ pixel neighborhoods.
+2. **Translational Equivariance**: A vertical edge or a texture pattern is identical regardless of where it appears in the frame. The exact same filter weights should scan across the entire image.
+
+By sharing a small $K \times K$ kernel across all spatial locations, a $3 \times 3$ convolution layer with 64 output channels requires only:
+
+$$\text{Parameters} = 64 \times 3 \times 3 \times 3 = 1,728 \text{ parameters}$$
+
+We reduce a 3.2-billion parameter matrix to just **1,728 parameters**---a **$1,864,000\times$ reduction in parameter memory**!
 
 ---
 
@@ -39,7 +44,7 @@ By sharing a small $K \times K$ kernel across all spatial locations, a $3 \times
 
 A 2D convolution slides a small kernel tensor $W \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w}$ across an input tensor $X \in \mathbb{R}^{N \times C_{\text{in}} \times H \times W}$:
 
-$$Y[n, c_{\text{out}}, h, w] = b[c_{\text{out}}] + \sum_{c_{\text{in}}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K_h-1} \sum_{j=0}^{K_w-1} X[n, c_{\text{in}}, h+i, w+j] \cdot W[c_{\text{out}}, c_{\text{in}}, i, j]$$
+$$Y[n, c_{\text{out}}, h, w] = b[c_{\text{out}}] + \sum_{c_{\text{in}}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K_h-1} \sum_{j=0}^{K_w-1} X[n, c_{\text{in}}, h \cdot S + i, w \cdot S + j] \cdot W[c_{\text{out}}, c_{\text{in}}, i, j]$$
 
 The output spatial dimensions ($H_{\text{out}}, W_{\text{out}}$) depend on input dimensions, kernel size $K$, padding $P$, and stride $S$:
 
@@ -47,29 +52,35 @@ $$H_{\text{out}} = \left\lfloor \frac{H + 2P - K_h}{S} \right\rfloor + 1, \qquad
 
 ### The Systems Bottleneck: Why Nested Loops Kill Hardware
 
-A naive software implementation of 2D convolution requires **six nested `for` loops** (batch $N$, output channels $C_{\text{out}}$, output height $H_{\text{out}}$, output width $W_{\text{out}}$, input channels $C_{\text{in}}$, and kernel spatial elements $K_h \times K_w$).
+A naive software implementation of 2D convolution requires **six nested `for` loops**:
+- Loop 1: Batch index $n \in \{0, \dots, N-1\}$
+- Loop 2: Output channel $c_{\text{out}} \in \{0, \dots, C_{\text{out}}-1\}$
+- Loop 3: Spatial height $h \in \{0, \dots, H_{\text{out}}-1\}$
+- Loop 4: Spatial width $w \in \{0, \dots, W_{\text{out}}-1\}$
+- Loop 5: Input channel $c_{\text{in}} \in \{0, \dots, C_{\text{in}}-1\}$
+- Loop 6: Kernel patch elements $(i, j) \in \{0, \dots, K-1\}^2$
 
 In modern CPU and GPU hardware, nested loops are disastrous: they cause non-contiguous DRAM memory jumps, destroy CPU branch predictors, and prevent vectorized SIMD arithmetic units from firing at peak throughput.
 
 ### The im2col Solution: Unrolling Geometry into GEMM
 
-In 2006, Chellapilla et al. introduced **`im2col` (image-to-column)**, which reorganizes the 4D convolution into a single high-speed General Matrix Multiply (GEMM):
+In 2006, Kumar Chellapilla et al. introduced **`im2col` (image-to-column)**, which reorganizes the 4D convolution into a single high-speed General Matrix Multiply (GEMM):
 
 ```
-The im2col Transformation:
+The im2col Transformation Engine:
 
 1. Unroll Receptive Fields:
    Every K x K x C_in sliding window patch in the image is flattened into
-   a single COLUMN (or row) of an unrolled matrix X_col.
-   Shape: [ (C_in * K_h * K_w)  x  (N * H_out * W_out) ]
+   a single ROW of an unrolled matrix X_col.
+   Shape: [ (N * H_out * W_out)  x  (C_in * K_h * K_w) ]
 
 2. Reshape Kernel Weights:
-   Flatten filter kernels into a dense weight matrix W_row.
-   Shape: [ C_out  x  (C_in * K_h * K_w) ]
+   Flatten filter kernels into a dense weight matrix W_col.
+   Shape: [ (C_in * K_h * K_w)  x  C_out ]
 
 3. High-Speed Systolic Matrix Multiplication:
-   Y_col = W_row @ X_col
-   Shape: [ C_out  x  (N * H_out * W_out) ]
+   Y_col = X_col @ W_col
+   Shape: [ (N * H_out * W_out)  x  C_out ]
 
 4. Reshape to 4D Output:
    Reshape Y_col back into [ N, C_out, H_out, W_out ]!
@@ -81,7 +92,7 @@ By unrolling receptive fields, the entire convolution is computed by our optimiz
 
 ## 9.3 The Pure TinyTorch Construction
 
-We implement `Conv2d` and `MaxPool2d` in TinyTorch, utilizing the spatial coordinate extraction engine:
+We implement `Conv2d` and `MaxPool2d` in TinyTorch:
 
 ```python
 import numpy as np
@@ -159,15 +170,9 @@ class Conv2d(Layer):
         out_tensor._op = "Conv2d"
         out_tensor._parents = [x, self.weight, self.bias]
         return out_tensor
-```
 
-### Implementing 2D Max Pooling (`MaxPool2d`)
-
-Downsampling reduces spatial dimensionality, expanding the effective receptive field while providing translational robustness:
-
-```python
 class MaxPool2d(Layer):
-    """Spatial 2D Max Pooling Layer."""
+    """Spatial 2D Max Pooling Layer for Spatial Downsampling."""
     def __init__(self, kernel_size: int = 2, stride: int = 2):
         super().__init__()
         self.kernel_size = kernel_size
@@ -246,4 +251,4 @@ We can now process continuous, two-dimensional grids of pixels. But the natural 
 
 How do we convert continuous, open-ended human text into discrete mathematical tokens without exploding our vocabulary?
 
-In **Chapter 10**, we build **Byte-Pair Encoding (BPE): Compressing Language into Subword Tokens**.
+In **Chapter 10**, we engineer **Byte-Pair Encoding: Compressing Language into Subword Tokens**.

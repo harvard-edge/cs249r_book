@@ -1,20 +1,18 @@
 # Tensors & Strides: The Flat Memory Illusion {#sec-tensors}
 
-Every machine learning system begins with a single foundational challenge: **how to represent multidimensional mathematical operations on flat, one-dimensional physical memory.**
+Before we can compute a single gradient, train a neural network, or generate a single word with a transformer, we must confront the foundational data structure of all numerical computing: **The Multi-Dimensional Tensor**.
 
-To a mathematician, a tensor is an abstract geometric entity with transformation rules across coordinate systems. To a deep learning practitioner, a tensor is a multi-dimensional array of numbers representing batches of images or token embeddings. But to an ML systems engineer, a tensor is something far more grounded: **a contiguous one-dimensional buffer of raw bytes in DRAM, viewed through an algebraic coordinate translator called strides.**
+In introductory machine learning courses, a tensor is often described as a *"mathematical grid of numbers"* or a *"nested list of floats"*. In computer systems engineering, this high-level abstraction is dangerously misleading. Physical computer memory (Dynamic Random-Access Memory, or DRAM) is not a multi-dimensional matrix. DRAM is a flat, one-dimensional ribbon of sequential byte addresses extending from address `0x00000000` to `0xFFFFFFFF`.
 
-In this chapter, we will build the core `Tensor` engine of TinyTorch from first principles.
+In this chapter, we build the core data structure of TinyTorch: the **`Tensor`**. We explore why nested Python lists destroy CPU cache lines, how multi-dimensional coordinates are mapped to flat memory addresses through **strides**, and how the **stride-0 broadcasting trick** enables complex algebraic operations with zero memory allocation.
 
-![Tensor Architecture: N-Dimensional Logical View vs 1D Contiguous Physical Storage](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-arch}
+![The Multi-Dimensional Tensor Illusion: Flat 1D Memory Buffers Viewed Through Strides and Shapes](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-strides}
 
 ---
 
-## 1.1 The Crisis: The Naive Python List Trap
+## 1.1 The Crisis: The Spatial Locality Failure of Nested Lists
 
-Why can we not simply represent tensors using standard nested Python lists?
-
-Suppose we want to represent a $3 \times 3$ matrix of 32-bit floating-point numbers:
+When a programmer creates a 2D matrix in pure Python:
 
 ```python
 matrix = [
@@ -24,259 +22,231 @@ matrix = [
 ]
 ```
 
-In pure Python, `matrix` is not a block of nine numbers packed neatly together in memory. It is a list of pointers pointing to three independent list objects, each containing three pointers pointing to individual Python `float` objects scattered arbitrarily across the heap.
+Python does not allocate a compact block of nine floating-point numbers. Instead, Python allocates an outer list containing three pointers. Each pointer references an independent inner list allocated on the operating system heap. Each element within those inner lists is a full-fledged `PyObject` (occupying 24 bytes of metadata for an 8-byte float).
 
 ```
-Python List Memory Layout:
-matrix ──> [ Ptr0, Ptr1, Ptr2 ]
-              │     │     │
-              ▼     │     ▼
-           [Ptr, Ptr, Ptr] [Ptr, Ptr, Ptr]
-             │
-             ▼
-      (PyFloatObject: 24 bytes overhead)
+The Nested Python List Memory Nightmare:
+
+Heap Address: 0x1000        Heap Address: 0x5400        Heap Address: 0x8200
+┌──────────────────┐        ┌──────────────────┐        ┌──────────────────┐
+│ [Ptr to Row 0] ──┼───────►│ 1.0 │ 2.0 │ 3.0  │        │ 7.0 │ 8.0 │ 9.0  │
+├──────────────────┤        └──────────────────┘        └──────────────────┘
+│ [Ptr to Row 1] ──┼──────────────────────┐                       ▲
+├──────────────────┤                      ▼                       │
+│ [Ptr to Row 2] ──┼──────────────────────────────────────────────┘
+└──────────────────┘        Heap Address: 0x2100
+Outer List Pointer Array    ┌──────────────────┐
+                            │ 4.0 │ 5.0 │ 6.0  │
+                            └──────────────────┘
 ```
 
-This pointer-chasing representation creates three catastrophic systems bottlenecks:
+This pointer-indirected heap layout causes three catastrophic systems failures:
 
-1. **Massive Memory Overhead**: In standard 64-bit Python, a simple 4-byte float is wrapped inside a 24-byte `PyFloatObject`. Storing one million floats requires over 32 megabytes of RAM instead of 4 megabytes---an $8\times$ memory bloat.
-2. **Cache Line Thrashing**: Modern CPUs do not read single floats from DRAM; they fetch 64-byte chunks called **cache lines**. In a contiguous array, loading one float automatically loads the next 15 floats into the L1 cache for near-instant access (one nanosecond latency). With nested Python lists, every element access requires dereferencing an arbitrary heap address, causing repeated L1/L2 cache misses and stalling the CPU on slow DRAM (50 to 100 nanoseconds latency).
-3. **Impossibility of Vectorization (SIMD)**: Modern hardware arithmetic units (AVX-512, ARM Neon, Apple Silicon AMX, GPU Tensor Cores) execute Single Instruction, Multiple Data (SIMD) instructions that multiply 8 to 64 numbers in a single clock cycle. SIMD instructions strictly require data to be stored contiguously in memory. They cannot operate on scattered heap pointers.
+1. **Spatial Locality Destruction**: The rows of the matrix are scattered across arbitrary, disconnected heap locations. When the CPU attempts to read `matrix[0][1]` followed by `matrix[1][0]`, the CPU cache line misses completely, forcing the processor to stall for hundreds of clock cycles while waiting for off-chip DRAM.
+2. **SIMD Vectorization Impossibility**: Modern CPU registers (AVX-512, ARM Neon) and GPU Tensor Cores can execute eight to sixty-four floating-point multiplications in a single clock cycle. However, SIMD instructions require contiguous memory: they cannot chase Python heap pointers.
+3. **Massive Memory Overhead**: Nine 64-bit floats require 72 bytes of raw data. The nested Python list consumes over 300 bytes of pointer tables and reference counts---a **$400\%$ memory tax**.
 
-To build a high-performance deep learning engine, we must store data as a **flat, contiguous 1D array of numbers in physical memory**.
+To build a high-performance machine learning runtime, our framework must enforce a strict invariant: **All tensor data must reside in a single, contiguous 1D memory buffer.**
 
 ---
 
-## 1.2 The Mental Model: Shapes, Storage, and Strides
+## 1.2 The Mental Model: The Coordinate Translation Engine
 
-If physical memory is strictly a flat one-dimensional line of bytes, how does our framework create the illusion of multidimensional matrices, three-dimensional image batches, and four-dimensional attention heads?
+If physical memory is strictly a flat 1D buffer, how do we represent a $3 \times 4 \times 5$ three-dimensional tensor?
 
-The answer is the **Tensor Triad**:
-
-1. **Storage Buffer (`data`)**: A flat, contiguous 1D array containing the raw numbers.
-2. **Shape (`shape`)**: A tuple of integers $(d_0, d_1, \dots, d_{N-1})$ defining the logical dimensions of the tensor.
-3. **Strides (`strides`)**: A tuple of integers $(s_0, s_1, \dots, s_{N-1})$ defining how many elements to step across in the 1D storage buffer to advance by one in logical dimension $k$.
+A tensor is not a physical container of multi-dimensional memory. A tensor is an **algebraic coordinate translator** consisting of three lightweight metadata components layered over a flat 1D storage array:
 
 ```
-Logical Matrix [2, 3]:
-  Col 0   Col 1   Col 2
-┌───────┬───────┬───────┐
-│  1.0  │  2.0  │  3.0  │  Row 0
-├───────┼───────┼───────┤
-│  4.0  │  5.0  │  6.0  │  Row 1
-└───────┴───────┴───────┘
-
-Physical 1D Storage:
-┌─────┬─────┬─────┬─────┬─────┬─────┐
-│ 1.0 │ 2.0 │ 3.0 │ 4.0 │ 5.0 │ 6.0 │
-└─────┴─────┴─────┴─────┴─────┴─────┘
-  idx 0 idx 1 idx 2 idx 3 idx 4 idx 5
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          THE ANATOMY OF A TENSOR                            │
+├───────────────────┬─────────────────────────────────────────────────────────┤
+│ Component         │ Systems Function                                        │
+├───────────────────┼─────────────────────────────────────────────────────────┤
+│ 1. Storage Buffer │ A contiguous 1D array of raw bytes in DRAM or VRAM.     │
+│ 2. Shape (d_0..d) │ A tuple specifying the virtual dimensions (e.g. (3, 4)).│
+│ 3. Strides (s_0..s│ The step size in memory needed to advance 1 unit along  │
+│                   │ each respective dimension.                              │
+│ 4. Storage Offset │ The starting memory index of the tensor within storage. │
+└───────────────────┴─────────────────────────────────────────────────────────┘
 ```
 
-### The Universal Indexing Equation
+### The Universal Memory Offset Equation
 
-To find the exact memory offset for an arbitrary multidimensional coordinate $(i_0, i_1, \dots, i_{N-1})$, the tensor runtime evaluates a single closed-form linear equation:
+Given an $N$-dimensional virtual coordinate $(i_0, i_1, \dots, i_{N-1})$, the exact 1D physical index in the underlying memory buffer is evaluated by the dot product of the coordinate vector with the strides vector:
 
-$$\text{Memory Offset} = \text{StorageOffset} + \sum_{k=0}^{N-1} i_k \times s_k$$
+$$\text{Physical Offset} = \text{storage\_offset} + \sum_{k=0}^{N-1} i_k \times \text{stride}_k$$
 
-In standard **row-major (C-contiguous)** layout, the elements of the last dimension are stored adjacent to one another in physical memory. The strides are defined recursively as:
+For a row-major contiguous tensor of shape $(D_0, D_1, D_2)$, the standard strides are computed by cumulative products from right to left:
 
-$$s_{N-1} = 1$$
-$$s_k = s_{k+1} \times d_{k+1} \quad \text{for } k = N-2, N-3, \dots, 0$$
+$$\text{stride}_2 = 1, \qquad \text{stride}_1 = D_2, \qquad \text{stride}_0 = D_1 \times D_2$$
 
-For our $2 \times 3$ matrix:
-- Shape: $(2, 3)$
-- Strides: $(3, 1)$
+```
+Row-Major 2D Memory Layout Example: Shape (2, 3), Strides (3, 1)
 
-To look up row 1, column 2 (`matrix[1, 2]`):
-$$\text{Offset} = (1 \times 3) + (2 \times 1) = 5$$
-Looking at index 5 in the flat 1D buffer yields `6.0`.
+Virtual 2D Matrix:            Flat 1D Physical Buffer:
+      Col 0  Col 1  Col 2     Index:  0    1    2    3    4    5
+Row 0 ┌ 1.0   2.0   3.0 ┐     Value:[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+Row 1 └ 4.0   5.0   6.0 ┘            └─── Row 0 ───┘  └─── Row 1 ───┘
+
+To access Element (1, 2):
+Offset = 1 * stride[0] + 2 * stride[1] = 1 * 3 + 2 * 1 = 5 ──► Value 6.0!
+```
 
 ---
 
-## 1.3 Zero-Copy Views: The Power of Stride Manipulation
+## 1.3 Zero-Copy Tensor Views and the Stride-0 Trick
 
-The separation of logical metadata (shape and strides) from physical memory (flat buffer) is one of the most powerful architectural patterns in computer science.
+Because the shape and strides are decoupled from the physical memory storage, we can perform complex geometric transformations in **$O(1)$ constant time without copying a single byte of memory**.
 
-It enables **Zero-Copy Views**: operations that reshape, slice, or transpose a tensor in $O(1)$ constant time and zero allocated bytes of memory.
+### 1. Zero-Copy Transpose
 
-![Tensor Strides and Zero-Copy Transpose View](assets/images/diagrams/01_tensor-diag-2.svg){#fig-tensor-strides}
+To transpose a 2D matrix from shape $(M, N)$ with strides $(S_0, S_1)$ to shape $(N, M)$, we simply swap the stride values to $(S_1, S_0)$:
 
-### The Transpose Miracle
-Suppose we want to transpose our $2 \times 3$ matrix into a $3 \times 2$ matrix.
+```
+Transposing Shape (2, 3) with Strides (3, 1) ──► Shape (3, 2) with Strides (1, 3):
+Original Coordinate (row, col): Offset = row * 3 + col * 1
+Transposed Coordinate (col, row): Offset = col * 1 + row * 3  (SAME MEMORY!)
+```
 
-In a naive framework, transposing requires allocating a new memory buffer and physically copying all elements into new positions ($O(N)$ time and $O(N)$ memory).
+The underlying 1D data buffer is completely untouched. The transpose is instantaneous ($0.0\text{ microseconds}$).
 
-In TinyTorch, transposing is an $O(1)$ metadata operation. We leave the 1D physical storage buffer completely untouched and simply **swap the strides**:
+### 2. The Stride-0 Broadcasting Trick
 
-- Original: Shape $(2, 3)$, Strides $(3, 1)$
-- Transposed: Shape $(3, 2)$, Strides $(1, 3)$
+When adding a vector of shape $(3,)$ to a matrix of shape $(4, 3)$, standard algebra requires expanding the vector into four identical rows.
 
-Let us check coordinate $(1, 0)$ in the transposed matrix:
-$$\text{Offset} = (1 \times 1) + (0 \times 3) = 1 \implies \text{Buffer}[1] = 2.0$$
-The value at $(1, 0)$ in the transposed matrix is indeed $2.0$. We achieved an exact mathematical transpose with **zero memory copies**.
+In TinyTorch, we never allocate memory for broadcasted copies. We set the stride of the expanded dimension to **zero**:
 
-### The Broadcasting Invariant: Stride Zero
-What happens when we want to add a 1D bias vector of shape $(3,)$ to a batch of one hundred samples of shape $(100, 3)$?
+$$\text{Broadcasted Shape} = (4, 3), \qquad \text{Broadcasted Strides} = (0, 1)$$
 
-![Broadcasting Semantics and the Stride-0 Expansion](assets/images/diagrams/01_tensor-diag-3.svg){#fig-tensor-broadcast}
+```
+Offset = row * 0 + col * 1 = col * 1
+```
 
-In standard math, broadcasting expands the bias vector by duplicating it one hundred times. In physical memory, duplicating arrays wastes megabytes of DRAM bandwidth.
-
-In TinyTorch, we achieve broadcasting via the **Stride-0 Trick**:
-- We set the stride of the broadcasted dimension to **$0$**:
-- Shape: $(100, 3)$, Strides: $(0, 1)$
-
-When the compute engine steps across the batch dimension ($i=0, 1, \dots, 99$), multiplying $i \times 0 = 0$ means the read pointer always points back to the original three elements in memory. We get the illusion of a $100 \times 3$ matrix while storing only three floats in DRAM.
+Regardless of which row index is requested ($0, 1, 2, \text{ or } 3$), multiplying by `stride[0] = 0` always maps back to the exact same physical elements in memory! We achieve infinite virtual memory expansion with **zero bytes of RAM allocated**.
 
 ---
 
-## 1.4 The Pure TinyTorch Tensor Construction
+## 1.4 The Pure TinyTorch Construction
 
-Let us implement this architecture in clean, readable Python.
+We implement the fundamental `Tensor` class in TinyTorch, managing contiguous memory, shapes, strides, and basic arithmetic:
 
 ```python
 import numpy as np
+from typing import Tuple, List, Union, Optional
 
 class Tensor:
+    """The Fundamental Multi-Dimensional Tensor in TinyTorch.
+
+    Encapsulates flat 1D memory buffers viewed through shape, strides,
+    and automatic differentiation gradient tracking metadata.
     """
-    Core TinyTorch Multidimensional Tensor.
-    Separates logical N-D metadata (shape, strides) from 1D physical storage.
-    """
-    def __init__(self, data, requires_grad=False):
-        if isinstance(data, (list, tuple, int, float)):
-            self.data = np.array(data, dtype=np.float32)
-        elif isinstance(data, np.ndarray):
+    def __init__(self, data: Union[List, np.ndarray, float, int], requires_grad: bool = False):
+        if isinstance(data, np.ndarray):
             self.data = data.astype(np.float32)
+        elif isinstance(data, (list, tuple)):
+            self.data = np.array(data, dtype=np.float32)
+        elif isinstance(data, (float, int)):
+            self.data = np.array([data], dtype=np.float32)
         elif isinstance(data, Tensor):
-            self.data = np.array(data.data, dtype=np.float32)
+            self.data = data.data.copy()
         else:
             raise TypeError(f"Unsupported data type for Tensor: {type(data)}")
 
-        self.grad = None
         self.requires_grad = requires_grad
-        self._creator = None
+        self.grad: Optional[Union['Tensor', np.ndarray]] = None
+
+        # Autograd graph metadata (initialized in Chapter 6)
+        self._op: Optional[str] = None
+        self._parents: List['Tensor'] = []
+        self._ctx: Optional[dict] = None
 
     @property
-    def shape(self):
+    def shape(self) -> Tuple[int, ...]:
         return self.data.shape
 
     @property
-    def strides(self):
-        return self.data.strides
+    def strides(self) -> Tuple[int, ...]:
+        # Convert byte strides to element strides (dividing by sizeof(float32)=4)
+        return tuple(s // self.data.itemsize for s in self.data.strides)
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         return self.data.ndim
 
-    @property
-    def size(self):
-        return self.data.size
-
-    def __repr__(self):
-        return f"Tensor({self.data}, shape={self.shape})"
-
-    # --- Elementwise Arithmetic ---
-    def __add__(self, other):
-        other_data = other.data if isinstance(other, Tensor) else other
-        return Tensor(self.data + other_data)
-
-    def __sub__(self, other):
-        other_data = other.data if isinstance(other, Tensor) else other
-        return Tensor(self.data - other_data)
-
-    def __mul__(self, other):
-        other_data = other.data if isinstance(other, Tensor) else other
-        return Tensor(self.data * other_data)
-
-    def __truediv__(self, other):
-        other_data = other.data if isinstance(other, Tensor) else other
-        return Tensor(self.data / other_data)
-
-    # --- Matrix Multiplication ---
-    def matmul(self, other):
-        """General Matrix Multiplication (GEMM)."""
-        if not isinstance(other, Tensor):
-            raise TypeError("matmul argument must be a Tensor")
-        if self.ndim < 2 or other.ndim < 2:
-            raise ValueError("Both tensors must have at least 2 dimensions for matmul")
-        if self.shape[-1] != other.shape[-2]:
-            raise ValueError(
-                f"Matrix dimension mismatch: cannot multiply {self.shape} and {other.shape}"
-            )
-        return Tensor(np.matmul(self.data, other.data))
-
-    def __matmul__(self, other):
-        return self.matmul(other)
-
-    # --- Shape Transformations (Zero-Copy Views) ---
-    def reshape(self, *shape):
-        """Returns a tensor with a new shape viewing the same storage."""
+    def reshape(self, *shape) -> 'Tensor':
+        """Return a new tensor view with reshaped dimensions."""
         if len(shape) == 1 and isinstance(shape[0], (list, tuple)):
             shape = shape[0]
-        return Tensor(self.data.reshape(shape))
+        return Tensor(self.data.reshape(shape), requires_grad=self.requires_grad)
 
-    def transpose(self, dim0, dim1):
-        """Swaps two dimensions via stride manipulation."""
-        axes = list(range(self.ndim))
-        axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
-        return Tensor(np.transpose(self.data, axes))
+    def transpose(self, dim0: int = -2, dim1: int = -1) -> 'Tensor':
+        """Zero-copy matrix transpose swapping two dimensions."""
+        return Tensor(np.swapaxes(self.data, dim0, dim1), requires_grad=self.requires_grad)
 
-    @property
-    def T(self):
-        """2D Transpose shortcut."""
-        return self.transpose(-2, -1)
+    def __add__(self, other: Union['Tensor', float, int]) -> 'Tensor':
+        other_data = other.data if isinstance(other, Tensor) else other
+        out = Tensor(self.data + other_data)
+        out._op = "Add"
+        out._parents = [self, other] if isinstance(other, Tensor) else [self]
+        return out
+
+    def __mul__(self, other: Union['Tensor', float, int]) -> 'Tensor':
+        other_data = other.data if isinstance(other, Tensor) else other
+        out = Tensor(self.data * other_data)
+        out._op = "Mul"
+        out._parents = [self, other] if isinstance(other, Tensor) else [self]
+        return out
+
+    def matmul(self, other: 'Tensor') -> 'Tensor':
+        """Matrix multiplication: Y = A @ B."""
+        out = Tensor(np.matmul(self.data, other.data))
+        out._op = "MatMul"
+        out._parents = [self, other]
+        return out
+
+    def __repr__(self) -> str:
+        return f"Tensor(shape={self.shape}, data=\n{self.data})"
 ```
 
 ---
 
-## 1.5 The Production Bridge: PyTorch `c10::TensorImpl`
+## 1.5 The Production Bridge: PyTorch C++ `c10::TensorImpl`
 
-How does this compare to production C++ runtimes like PyTorch?
-
-In PyTorch's core C++ library (`c10`), every tensor is split into two distinct C++ classes:
-
-1. **`c10::StorageImpl`**: Owns a pointer to raw allocated heap memory (`void* data_ptr`), tracking byte allocation, reference counting, and the hardware device allocator (CPU allocator or CUDA `cudaMalloc`).
-2. **`c10::TensorImpl`**: Contains the lightweight metadata: `sizes_` (shape), `strides_`, `storage_offset_`, and `dtype_`.
+In production PyTorch, Python's `torch.Tensor` is a lightweight Python wrapper around a deep C++ object called **`c10::TensorImpl`**:
 
 ```cpp
-// Simplified excerpt from PyTorch c10/core/TensorImpl.h
+// PyTorch Core C++ Tensor Implementation (c10/core/TensorImpl.h)
 struct TensorImpl : public c10::intrusive_ptr_target {
-  c10::Storage storage_;                 // 1D flat memory buffer
-  c10::SmallVector<int64_t, 5> sizes_;   // Logical shape
-  c10::SmallVector<int64_t, 5> strides_; // Stride coordinate translator
-  int64_t storage_offset_ = 0;           // Starting byte offset
-  c10::ScalarType data_type_;            // float32, int8, etc.
+  c10::Storage storage_;           // Pointer to flat 1D memory buffer
+  c10::SmallVector<int64_t, 5> sizes_;   // Shape tuple
+  c10::SmallVector<int64_t, 5> strides_; // Strides tuple
+  int64_t storage_offset_ = 0;     // Memory offset
+  caffe2::TypeMeta data_type_;     // float32, float16, int8
+  c10::Device device_;             // CPU, CUDA:0, TPU
 };
 ```
 
-When you call `t.view()` or `t.transpose()` in PyTorch, PyTorch allocates a new 64-byte `TensorImpl` structure pointing to the exact same `StorageImpl` object. This C++ architecture is identical to the Python tensor engine we just constructed.
+When you call `tensor.transpose(0, 1)` or `tensor.view(-1)` in PyTorch, the C++ runtime does not touch the `c10::Storage` memory pointer. It creates a brand-new `TensorImpl` instance whose `sizes_` and `strides_` point to the original storage. This is why PyTorch views are guaranteed to execute in zero microseconds with zero memory allocations.
 
 ---
 
 ## 1.6 Building the System: How It All Connects
 
-Let us step back and look at what we have established in this opening chapter:
+Let us examine what we have established in Chapter 1:
 
-1. **Physical Reality vs. Logical Abstraction**: We established that physical DRAM is strictly a linear, contiguous byte array. By coupling this flat buffer with mathematical strides, we created multidimensional tensors without heap pointer fragmentation.
-2. **Zero-Copy Efficiency**: We unlocked $O(1)$ matrix transpositions and stride-zero broadcasting, eliminating unnecessary DRAM bandwidth traffic.
-3. **The Foundation of the Engine**: Every future layer in this book---from dense linear projections and spatial convolutions to multi-head self-attention and KV caches---will execute directly on this `Tensor` abstraction.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CHAPTER 1 RECAP: THE PHYSICAL FOUNDATION                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • Flat 1D Memory Buffers  : Eliminates heap pointer chasing & cache misses. │
+│ • Multi-Dimensional Strides: Decouples virtual coordinates from DRAM layout. │
+│ • Zero-Copy Views         : Instant transpose, slice, and reshape in O(1).  │
+│ • Stride-0 Broadcasting   : Virtual tensor expansion with zero memory tax.  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-### The Forward Cliffhanger: The Linear Collapse Trap
+We now have multi-dimensional matrix operations flowing over contiguous memory.
 
-We now possess a working tensor engine capable of fast General Matrix Multiplications:
+However, if we begin stacking linear matrix multiplications on top of each other ($W_2(W_1 x)$), we immediately hit a brick wall of linear algebra: **all multi-layer linear networks collapse into a single shallow matrix**.
 
-$$Y = X \cdot W_1$$
-
-Suppose we decide to build a deep neural network by stacking five linear matrix multiplications together:
-
-$$Y = ((((X \cdot W_1) \cdot W_2) \cdot W_3) \cdot W_4) \cdot W_5$$
-
-Because matrix multiplication is associative, we can group all five weight matrices together:
-
-$$W_{\text{collapsed}} = W_1 \cdot W_2 \cdot W_3 \cdot W_4 \cdot W_5$$
-$$Y = X \cdot W_{\text{collapsed}}$$
-
-No matter how many millions of parameters or how many hundreds of linear layers we stack, **the entire multi-layer network collapses mathematically into a single linear transformation.** It cannot learn curves, cannot classify non-linear boundaries, and cannot even solve the basic XOR logical function.
-
-To break this mathematical wall, we must introduce **Non-Linear Activation Functions**. That is our journey in Chapter 2.
+In **Chapter 2**, we explore why deep linear networks fail, and engineer **Non-Linear Activations: Breaking the Linear Collapse Wall**.
