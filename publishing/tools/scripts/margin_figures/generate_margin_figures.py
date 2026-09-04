@@ -1607,8 +1607,8 @@ def performance_engineering_kv_precision(candidate=None):
     ratio_annotation_ladder(
         "vol2/performance_engineering",
         "vol2_performance_engineering_margin_003",
-        [("FP16 80 GB", 80), ("INT4 20 GB", 20)],
-        ratio_label="4x",
+        [("INT4 + INT8: 971", 971), ("FP16 baseline: 407", 407)],
+        ratio_label="2.4x",
         domain="memory",
     )
 
