@@ -1,0 +1,280 @@
+# Automatic Differentiation: The Dynamic Tape DAG {#sec-autograd}
+
+In Chapters 1 through 5, we constructed the complete forward execution pipeline of TinyTorch. We can load batches of data, pass them through deep layers of non-linear transformations, and compute an exact scalar loss $\mathcal{L}$.
+
+Now we confront the central mathematical miracle that powers all of modern artificial intelligence: **Automatic Differentiation (Autograd)**. In this chapter, we explore why numerical and symbolic differentiation fail for deep networks, and construct a **Dynamic Reverse-Mode Tape Directed Acyclic Graph (DAG)** that evaluates exact analytical gradients for millions of parameters in a single reverse sweep.
+
+![Dynamic Autograd Tape: Forward Tape Recording and Reverse-Mode Topological Accumulation](assets/images/diagrams/06_autograd-diag-1.svg){#fig-autograd-dag}
+
+---
+
+## 6.1 The Crisis: The Derivative Calculation Bottleneck
+
+To minimize our loss function $\mathcal{L}(W)$ using gradient descent, we must compute the partial derivative of the loss with respect to every single parameter weight $w_i$:
+
+$$\nabla_W \mathcal{L} = \left[ \frac{\partial \mathcal{L}}{\partial w_1}, \frac{\partial \mathcal{L}}{\partial w_2}, \dots, \frac{\partial \mathcal{L}}{\partial w_N} \right]$$
+
+In computer science history, engineers attempted three distinct approaches to differentiation before modern autograd was discovered:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. NUMERICAL FINITE DIFFERENCES: The O(N) Compute Wall                      │
+│    • Formula:  ∂L/∂w_i ≈ (L(w_i + ε) - L(w_i)) / ε                          │
+│    • Flaw:     Requires N+1 forward passes for N parameters.                │
+│    • Reality:  A 100M parameter model would take 3 years for ONE step! ❌   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 2. SYMBOLIC ALGEBRAIC DIFFERENTIATION: The Expression Explosion             │
+│    • Formula:  Applies product/chain rules algebraically (e.g. Mathematica).│
+│    • Flaw:     Expression length grows exponentially with network depth.    │
+│    • Reality:  Differentiating a 50-layer network yields gigabytes of math! ❌│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 3. MANUAL ANALYTICAL DERIVATION: The Brittleness Wall                       │
+│    • Formula:  Hand-coding backward formulas in C++ for every network.      │
+│    • Flaw:     Breaks instantly if a researcher adds an `if` branch. ❌    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+Modern deep learning demands an engine that can compute exact analytical derivatives for **arbitrary, dynamically branching Python code** with the computational cost of just **two forward passes** ($O(1)$ scaling with respect to parameter count).
+
+That engine is **Reverse-Mode Automatic Differentiation on a Dynamic Tape**.
+
+---
+
+## 6.2 The Mental Model: The Reverse-Mode Tape DAG
+
+Reverse-mode automatic differentiation operates across two distinct phases:
+
+### Phase 1: Forward Tape Recording
+During the forward pass, as each mathematical operation (`+`, `*`, `matmul`, `gelu`) executes, the runtime dynamically records an **Operation Node (`Op`)** on an in-memory execution tape.
+
+Each Node stores three pieces of information:
+1. **Pointers to Input Tensors**: The parent nodes in the computational graph.
+2. **Saved Tensors for Backward**: Any intermediate activations needed to compute local derivatives (e.g., input $x$ for $\text{ReLU}$, or inputs $A$ and $B$ for $\text{MatMul}$).
+3. **The Vector-Jacobian Product (VJP) Function**: A function that multiplies an incoming upstream gradient by the local Jacobian matrix.
+
+```
+Forward Graph Construction (DAG):
+X [B, D] ────┐
+             ├──>[ MatMulOp ]──> Z [B, H] ──>[ GeluOp ]──> A [B, H] ──>[ LossOp ]──> L (Scalar)
+W [D, H] ────┘
+```
+
+### Phase 2: Reverse-Mode Topological Sweep
+Once the forward pass computes the scalar loss $\mathcal{L}$, we initiate backpropagation by seeding the loss with its own derivative:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$$
+
+The engine performs a **Reverse Topological Sort** of the computational graph, visiting each operation in exact reverse order of execution. For each node, it evaluates the local chain rule:
+
+$$\text{Gradient to Parent } i = \text{Upstream Gradient} \times \text{Local Jacobian}$$
+
+```
+Reverse Gradient Propagation:
+dL/dX ◄────┐
+           ├──◄[ dMatMul ]◄──── dL/dZ ◄────[ dGELU ]◄──── dL/dA ◄────[ dLoss ]◄──── dL/dL = 1.0
+dL/dW ◄────┘
+```
+
+---
+
+## 6.3 The Fundamental Vector-Jacobian Products (VJPs)
+
+Let us derive the exact matrix calculus formulas for the elementary operations in TinyTorch:
+
+### 1. Elementwise Addition: $Z = X + Y$
+$$\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z}, \quad \frac{\partial \mathcal{L}}{\partial Y} = \frac{\partial \mathcal{L}}{\partial Z}$$
+*Intuition*: Addition acts as a **gradient router**, copying the upstream gradient equally to both inputs.
+
+### 2. Elementwise Multiplication: $Z = X \odot Y$
+$$\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z} \odot Y, \quad \frac{\partial \mathcal{L}}{\partial Y} = \frac{\partial \mathcal{L}}{\partial Z} \odot X$$
+*Intuition*: Multiplication scales the upstream gradient by the value of the opposing input.
+
+### 3. Matrix Multiplication: $Z = X \cdot W$
+Where $X \in \mathbb{R}^{B \times D_{\text{in}}}$ and $W \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$, yielding $Z \in \mathbb{R}^{B \times D_{\text{out}}}$:
+
+$$\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z} \cdot W^T \quad \left( [B, D_{\text{out}}] \times [D_{\text{out}}, D_{\text{in}}] = [B, D_{\text{in}}] \right)$$
+$$\frac{\partial \mathcal{L}}{\partial W} = X^T \cdot \frac{\partial \mathcal{L}}{\partial Z} \quad \left( [D_{\text{in}}, B] \times [B, D_{\text{out}}] = [D_{\text{in}}, D_{\text{out}}] \right)$$
+
+*Intuition*: The gradient with respect to the input multiplies the upstream gradient by the transposed weight matrix; the gradient with respect to the weight multiplies the transposed input by the upstream gradient.
+
+### 4. The In-Place Accumulation Invariant
+When a tensor is used in multiple branches of a computation graph (e.g. $Z = X + (X \cdot W)$), the multivariate chain rule states that its total gradient is the **sum of gradients from all downstream branches**:
+
+$$\frac{\partial \mathcal{L}}{\partial X} = \sum_{\text{branches } k} \frac{\partial \mathcal{L}}{\partial Z_k} \frac{\partial Z_k}{\partial X}$$
+
+Therefore, autograd must never overwrite gradients with `=`; it must strictly **accumulate in place**:
+
+$$\text{tensor.grad} \mathrel{+}= \text{grad}$$
+
+---
+
+## 6.4 The Pure TinyTorch Autograd Construction
+
+Let us implement this dynamic tape autograd engine in clean Python.
+
+```python
+import numpy as np
+from typing import List, Optional
+
+class Op:
+    """Abstract Operation Node on the Autograd Tape."""
+    def backward(self, grad_output: np.ndarray) -> tuple:
+        raise NotImplementedError
+
+
+class AddOp(Op):
+    def backward(self, grad_output: np.ndarray):
+        return grad_output, grad_output
+
+
+class MulOp(Op):
+    def __init__(self, x_data: np.ndarray, y_data: np.ndarray):
+        self.x = x_data
+        self.y = y_data
+
+    def backward(self, grad_output: np.ndarray):
+        return grad_output * self.y, grad_output * self.x
+
+
+class MatMulOp(Op):
+    def __init__(self, a_data: np.ndarray, b_data: np.ndarray):
+        self.a = a_data
+        self.b = b_data
+
+    def backward(self, grad_output: np.ndarray):
+        # dL/dA = grad_output @ B.T
+        grad_a = np.matmul(grad_output, np.swapaxes(self.b, -1, -2))
+        # dL/dB = A.T @ grad_output
+        grad_b = np.matmul(np.swapaxes(self.a, -1, -2), grad_output)
+        return grad_a, grad_b
+
+
+class GeluOp(Op):
+    def __init__(self, x_data: np.ndarray):
+        self.x = x_data
+
+    def backward(self, grad_output: np.ndarray):
+        c = np.sqrt(2.0 / np.pi)
+        x = self.x
+        inner = c * (x + 0.044715 * np.power(x, 3))
+        tanh_inner = np.tanh(inner)
+        sech2 = 1.0 - np.square(tanh_inner)
+        d_inner = c * (1.0 + 3.0 * 0.044715 * np.square(x))
+        dgelu = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2 * d_inner
+        return (grad_output * dgelu,)
+
+
+class Tensor:
+    """Autograd-enabled TinyTorch Tensor."""
+    def __init__(self, data, requires_grad: bool = False):
+        self.data = np.array(data, dtype=np.float32) if not isinstance(data, np.ndarray) else data.astype(np.float32)
+        self.requires_grad = requires_grad
+        self.grad: Optional[np.ndarray] = None
+        self._creator: Optional[Op] = None
+        self._parents: List['Tensor'] = []
+
+    def zero_grad(self):
+        """Clears accumulated gradients."""
+        self.grad = None
+
+    def backward(self, grad: Optional[np.ndarray] = None):
+        """Executes reverse topological backpropagation from this tensor."""
+        if not self.requires_grad and self._creator is None:
+            return
+
+        if grad is None:
+            if self.data.size == 1:
+                grad = np.array(1.0, dtype=np.float32)
+            else:
+                raise RuntimeError("Grad can only be implicitly created for scalar outputs")
+
+        # In-place accumulation
+        if self.grad is None:
+            self.grad = np.array(grad, dtype=np.float32)
+        else:
+            self.grad += grad
+
+        # 1. Build reverse topological ordering of DAG
+        topo = []
+        visited = set()
+
+        def build_topo(t: 'Tensor'):
+            if id(t) not in visited:
+                visited.add(id(t))
+                for parent in t._parents:
+                    build_topo(parent)
+                topo.append(t)
+
+        build_topo(self)
+
+        # 2. Traverse tape in reverse
+        for t in reversed(topo):
+            if t._creator is not None:
+                parent_grads = t._creator.backward(t.grad)
+                if not isinstance(parent_grads, tuple):
+                    parent_grads = (parent_grads,)
+
+                for parent, p_grad in zip(t._parents, parent_grads):
+                    if parent.requires_grad or parent._creator is not None:
+                        # Handle broadcasting reduction in gradient
+                        if p_grad.shape != parent.data.shape:
+                            # Sum out broadcasted dimensions
+                            axis_diff = p_grad.ndim - parent.data.ndim
+                            p_grad = np.sum(p_grad, axis=tuple(range(axis_diff)))
+                            for axis, (s_p, s_in) in enumerate(zip(parent.data.shape, p_grad.shape)):
+                                if s_p == 1 and s_in > 1:
+                                    p_grad = np.sum(p_grad, axis=axis, keepdims=True)
+
+                        if parent.grad is None:
+                            parent.grad = np.array(p_grad, dtype=np.float32)
+                        else:
+                            parent.grad += p_grad
+```
+
+---
+
+## 6.5 The Production Bridge: PyTorch vs. JAX
+
+How do production engines approach automatic differentiation?
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PYTORCH: Eager Dynamic Tape DAG (Imperative)                                │
+│ • Code:       loss.backward()                                               │
+│ • Mechanics:  Executes operations immediately in Python; builds a C++ DAG   │
+│               tape in the background (torch::autograd::Engine).             │
+│ • Strength:   Completely dynamic; supports native Python `if`, `while`, etc.│
+├─────────────────────────────────────────────────────────────────────────────┤
+│ JAX: Pure Functional Transformations (Declarative / Traced)                 │
+│ • Code:       grad_fn = jax.grad(loss_fn)                                   │
+│ • Mechanics:  Functions must be mathematically pure (no in-place mutations).│
+│               Traces operations into an abstract jaxpr IR graph and lowers  │
+│               the entire forward+backward graph to the XLA compiler.        │
+│ • Strength:   Whole-program compiler optimizations (operator fusion, vmap). │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+TinyTorch implements the **PyTorch Eager Dynamic Tape** model. It gives you the transparency of stepping through the graph node-by-node with standard Python debuggers, while adhering strictly to the vector-Jacobian calculus rules of modern AI runtimes.
+
+---
+
+## 6.6 Building the System: How It All Connects
+
+Look at the extraordinary milestone we have achieved:
+
+1. **Chapters 1–5**: Built the entire forward tensor stack, modules, loss calculation, and dataset streaming.
+2. **Chapter 6**: Created the dynamic reverse-mode tape that calculates exact partial derivatives $\frac{\partial \mathcal{L}}{\partial W}$ for every parameter with $O(1)$ efficiency.
+
+### The Forward Cliffhanger: Updating the Parameters
+
+We now have gradient tensors populated across all our weights:
+
+$$W.\text{grad} = \left[ \frac{\partial \mathcal{L}}{\partial W} \right]$$
+
+Gradients tell us the direction of **steepest ascent** on the loss surface. To train our model, we must step in the opposite direction (gradient descent):
+
+$$W \leftarrow W - \alpha \nabla_W \mathcal{L}$$
+
+However, in complex multi-dimensional loss landscapes, vanilla gradient descent oscillates wildly in narrow ravines and stalls completely in flat saddle points. Furthermore, when training adaptive optimizers, standard L2 regularization pollutes gradient variance estimates.
+
+How do we build physical **Momentum** buffers and **AdamW Decoupled Weight Decay** engines to navigate complex loss landscapes? That is our journey in Chapter 7.

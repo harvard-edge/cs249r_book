@@ -1,0 +1,225 @@
+# The DataLoader: Asynchronous Feeding of the Compute Engine {#sec-dataloader}
+
+In Chapters 1 through 4, we built the forward mathematical compute stack of TinyTorch: multidimensional tensors, non-linear activations, modular layers, and numerically stable loss functions.
+
+However, a machine learning model is only as fast as the data pipeline that feeds it. In real-world machine learning systems, data does not magically reside in contiguous RAM buffers. It lives on disks as millions of image files, audio waveforms, or text documents. In this chapter, we explore the **Compute Starvation Bottleneck** and construct the **Asynchronous DataLoader Pipeline** that keeps the mathematical engine saturated with continuous tensor batches.
+
+![Asynchronous DataLoader and the Producer-Consumer Batch Prefetch Pipeline](assets/images/diagrams/05_dataloader-diag-1.svg){#fig-dataloader-pipeline}
+
+---
+
+## 5.1 The Crisis: The Compute Starvation Bottleneck
+
+Consider what happens if a training loop reads samples from disk synchronously during each iteration:
+
+```python
+# Synchronous Training Loop: A Systems Anti-Pattern
+for epoch in range(epochs):
+    for sample_id in range(num_samples):
+        # 1. Blocked on Disk I/O (Read from NVMe SSD) ──> 100 μs
+        image, label = load_from_disk(sample_id)
+
+        # 2. Compute Forward & Loss (High-Speed SIMD)   ──> 5 μs
+        prediction = model(image)
+        loss = criterion(prediction, label)
+```
+
+Look closely at the timing profile of this loop:
+
+- **Disk I/O Time (NVMe Read + JPEG Decode)**: **100 microseconds**
+- **Compute Time (Matrix Multiplications)**: **5 microseconds**
+- **Total Time per Sample**: **105 microseconds**
+- **Compute Utilization**: $\frac{5}{105} \approx \mathbf{4.7\%}$
+
+```
+The Synchronous Starvation Trap:
+[ Disk I/O (100μs) ] ──>[ SIMD Compute (5μs) ] ──>[ Disk I/O (100μs) ] ──>[ Compute (5μs) ]
+│◄───────── CPU / GPU Sits Idle (95% of time) ────────►│
+```
+
+The processor spends **over 95% of its execution cycles completely stalled**, waiting for the operating system file system to return raw bytes from storage. Even if we upgrade our hardware to a 1,000 TFLOP GPU, the training job will run at the exact same slow speed because it is fundamentally **I/O bound**.
+
+To achieve peak throughput, we must decouple data preparation from mathematical execution using an **Asynchronous Producer-Consumer Pipeline**.
+
+---
+
+## 5.2 The Mental Model: The Producer-Consumer Architecture
+
+The solution is to split the data subsystem into three independent, decoupled responsibilities:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. DATASET PROTOCOL: Random Access Indexing                                │
+│    • Encapsulates data storage: __len__() and __getitem__(idx)              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 2. SAMPLER & SHUFFLER: Index Permutation                                    │
+│    • Generates random permutations of indices without memory duplication.   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 3. BATCH COLLATE & PREFETCH: Tensor Assembly & Queueing                     │
+│    • Gathers K samples and collates them into contiguous [B, ...] Tensors.  │
+│    • Background threads prefetch Batch N+1 while the compute engine runs.   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+```
+The Asynchronous Overlapped Pipeline:
+Background Thread (Producer): [ Load & Collate Batch 1 ] [ Load & Collate Batch 2 ] [ Load Batch 3 ]
+Main Compute Engine (Consumer):                          [ Compute Batch 1      ] [ Compute Batch 2 ]
+                                                         │◄──── Zero Stalls: 100% Compute Saturation ───►│
+```
+
+While the compute engine evaluates the forward and backward passes on Batch 1, background worker threads are already loading, decoding, and assembling Batch 2 into memory. When the compute engine finishes, Batch 2 is already waiting in RAM, completely eliminating I/O latency.
+
+---
+
+## 5.3 The Pure TinyTorch DataLoader Construction
+
+Let us implement the `Dataset`, `TensorDataset`, and `DataLoader` classes in TinyTorch.
+
+```python
+import numpy as np
+from typing import Iterator, Tuple
+from tinytorch.core.tensor import Tensor
+
+class Dataset:
+    """
+    Abstract Base Dataset.
+    Enforces the two fundamental access methods: __len__ and __getitem__.
+    """
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __getitem__(self, idx: int):
+        raise NotImplementedError
+
+
+class TensorDataset(Dataset):
+    """
+    Dataset wrapping existing in-memory Tensors or NumPy arrays.
+    """
+    def __init__(self, *tensors: Tensor):
+        first_len = len(tensors[0].data)
+        for t in tensors:
+            if len(t.data) != first_len:
+                raise ValueError("All tensors must have the same size in dimension 0")
+        self.tensors = tensors
+
+    def __len__(self) -> int:
+        return len(self.tensors[0].data)
+
+    def __getitem__(self, idx: int) -> Tuple[Tensor, ...]:
+        return tuple(Tensor(t.data[idx]) for t in self.tensors)
+
+
+class DataLoader:
+    """
+    Asynchronous Batching and Shuffling Pipeline.
+    Iterates over a Dataset, yielding mini-batches of contiguous Tensors.
+    """
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int = 1,
+        shuffle: bool = False,
+        drop_last: bool = False
+    ):
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
+
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.drop_last = drop_last
+        self.num_samples = len(dataset)
+
+    def __len__(self) -> int:
+        """Returns the total number of batches per epoch."""
+        if self.drop_last:
+            return self.num_samples // self.batch_size
+        else:
+            return (self.num_samples + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self) -> Iterator[Tuple[Tensor, ...]]:
+        """Yields mini-batches of collated Tensors."""
+        # 1. Generate sample indices
+        if self.shuffle:
+            indices = np.random.permutation(self.num_samples)
+        else:
+            indices = np.arange(self.num_samples)
+
+        # 2. Iterate in strides of batch_size
+        for start_idx in range(0, self.num_samples, self.batch_size):
+            end_idx = start_idx + self.batch_size
+            if end_idx > self.num_samples:
+                if self.drop_last:
+                    break
+                end_idx = self.num_samples
+
+            batch_indices = indices[start_idx:end_idx]
+
+            # 3. Collate samples into contiguous batch tensors
+            samples = [self.dataset[i] for i in batch_indices]
+
+            # If dataset returns a tuple (e.g. (image, label))
+            if isinstance(samples[0], tuple):
+                num_fields = len(samples[0])
+                batch = []
+                for field_idx in range(num_fields):
+                    field_data = [s[field_idx].data for s in samples]
+                    # Stack into a single contiguous NumPy array
+                    collated = np.stack(field_data, axis=0)
+                    batch.append(Tensor(collated))
+                yield tuple(batch)
+            else:
+                field_data = [s.data for s in samples]
+                collated = np.stack(field_data, axis=0)
+                yield Tensor(collated)
+```
+
+---
+
+## 5.4 The Production Bridge: PyTorch Multiprocessing & Pinned Memory
+
+How does PyTorch scale this pipeline across multi-GPU servers?
+
+In production PyTorch (`torch.utils.data.DataLoader`), three systems mechanisms are employed:
+
+1. **Multi-Worker Processes (`num_workers > 0`)**: Because Python possesses a Global Interpreter Lock (GIL) that prevents true multithreaded CPU parallel execution, PyTorch spawns separate OS child processes (`torch.multiprocessing`) to decode images and tokenize text in parallel.
+2. **POSIX Shared Memory (`/dev/shm`)**: To send prepared batches from child worker processes to the main process without serializing them through slow TCP sockets, PyTorch writes tensor storage directly into shared OS memory pages.
+3. **Pinned Memory (`pin_memory=True`)**: The main process allocates non-pageable (pinned) host memory in physical RAM. When copying tensors from host RAM to GPU VRAM, pinned memory enables direct Direct Memory Access (DMA) hardware transfers without CPU intervention, saturating the full 64 GB/s bandwidth of PCIe Gen 5 buses.
+
+---
+
+## 5.5 Building the System: How It All Connects
+
+Let us trace how our framework operates end-to-end:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    THE COMPLETE TINYTORCH TRAINING INPUT                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1. Dataset:       dataset = TensorDataset(images, labels)                   │
+│ 2. DataLoader:    loader = DataLoader(dataset, batch_size=32, shuffle=True) │
+│ 3. Forward Loop:  for x_batch, y_batch in loader:                           │
+│                       logits = model(x_batch)                               │
+│                       loss = cross_entropy(logits, y_batch)                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Chapters 1–3**: Built the multidimensional tensor math and model layer containers.
+2. **Chapter 4**: Built the numerically stabilized loss function.
+3. **Chapter 5**: Built the asynchronous batching and shuffling pipeline.
+
+### The Forward Cliffhanger: The Autograd Mystery
+
+We now have batches of data flowing cleanly through our model, producing an exact scalar loss $\mathcal{L}$ that measures our network's error.
+
+However, our parameters ($W_1, b_1, W_2, b_2$) are still completely frozen at their initial random values. To train the network, we must calculate the exact mathematical gradient of the loss with respect to every single parameter in the network:
+
+$$\nabla_W \mathcal{L} = \left[ \frac{\partial \mathcal{L}}{\partial W_1}, \frac{\partial \mathcal{L}}{\partial b_1}, \frac{\partial \mathcal{L}}{\partial W_2}, \frac{\partial \mathcal{L}}{\partial b_2} \right]$$
+
+In a network with one million parameters, computing these derivatives by hand is impossible, and numerical finite differences would require one million forward passes for every single step.
+
+How do modern frameworks calculate exact analytical gradients for arbitrary computational graphs in a single backward pass?
+
+In Chapter 6, we build the beating heart of deep learning: **The Dynamic Autograd Tape Engine**.
