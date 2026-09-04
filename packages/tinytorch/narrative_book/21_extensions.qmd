@@ -1,194 +1,88 @@
----
-title: "Framework Extensions: C++, CUDA & Triton Compilers"
----
+# The Modern Stack: Triton JIT, Custom Silicon, and Physical Systems {#sec-extensions}
 
-# Framework Extensions: C++, CUDA & Triton Compilers {.unnumbered}
+We have completed the construction of TinyTorch. In twenty chapters and three milestones, you did not merely read about deep learning---you engineered every layer, stride, tape, optimizer, transformer block, and cache line from first principles.
 
-## Purpose {.unnumbered}
+In this concluding chapter, we bridge the concepts you built in TinyTorch to the cutting-edge frontiers of production machine learning systems: **OpenAI Triton block programming**, **PyTorch 2.0 Graph Compilers (`torch.compile`)**, and **Domain-Specific Hardware Accelerators (TPUs, NPUs, and Edge Silicon)**.
 
-_How do modern machine learning frameworks transcend Python interpreters and harness bare-metal hardware accelerators like GPUs, TPUs, and systolic arrays?_
-
-Throughout this book, we authored TinyTorch in pure Python and NumPy to make every data structure, stride formula, autograd DAG traversal, and quantization scale completely transparent and debuggable. However, in production machine learning systems, Python serves strictly as a high-level orchestration frontend. The heavy lifting of matrix multiplication, convolution, and transformer attention is executed by compiled C++ engines, handwritten CUDA kernels, and domain-specific compilers. In this concluding extensions chapter, we explore how to extend TinyTorch into bare-metal performance. We demonstrate how to write custom C++ extensions via `pybind11`, write custom GPU kernels using CUDA and OpenAI Triton, and interface with modern neural processing units (NPUs).
-
-::: {.callout-learning-objectives}
-## Learning Objectives
-
-- **Analyze** the architectural boundary between high-level Python framework frontends and low-level native runtime execution engines.
-- **Construct** custom C++ tensor extensions using `pybind11`, eliminating Python interpreter overhead on critical path operations.
-- **Author** custom GPU kernels in CUDA and **OpenAI Triton**, demonstrating block-level programming and register reuse.
-- **Trace** the compilation pipeline of PyTorch 2.0 (`torch.compile`, TorchDynamo, and TorchInductor).
-- **Curate** a definitive bibliography of foundational systems papers, repositories, and engineering guides for further study.
-:::
+![The Modern Machine Learning Systems Hierarchy: From High-Level Frameworks to Triton JIT and Domain-Specific Silicon](assets/images/diagrams/00_journey-diag-1.svg){#fig-modern-stack}
 
 ---
 
-## The Architecture of Modern ML Frameworks
+## 21.1 The Frontier: The End of Hand-Written CUDA C++
 
-A production deep learning framework is partitioned into three distinct layers:
+For a decade (2012--2022), high-performance deep learning required writing thousands of lines of low-level CUDA C++. Engineers had to manually manage thread block synchronization (`__syncthreads()`), bank conflicts in shared memory, and warp shuffle instructions.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  THE THREE-TIER RUNTIME ARCHITECTURE                        │
-├─────────────────────────────────────────────────────────────┤
-│  1. Frontend (Python / PyTorch / TinyTorch)                 │
-│     • User API, autograd DAG construction, model definition │
-│     • Zero raw memory arithmetic; dispatches to backend.   │
-├─────────────────────────────────────────────────────────────┤
-│  2. Dispatch & Compiler (ATen / TorchDynamo / MLIR)         │
-│     • Operator fusion, dead code elimination, graph capture │
-│     • Lowering high-level DAGs to hardware kernel IR.       │
-├─────────────────────────────────────────────────────────────┤
-│  3. Execution Backend (C++ / CUDA / Triton / ROCm / Metal)  │
-│     • Hardware-optimized GEMMs (cuBLAS, CUTLASS, oneDNN)    │
-│     • Bare-metal vector registers, SRAM caches & systolic.  │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Building C++ Extensions with `pybind11`
-
-To achieve native speed in CPU operations, frameworks wrap high-performance C++ routines into Python modules using `pybind11`:
-
-```cpp
-// Listing 21.1: High-Performance C++ Vectorized ReLU Kernel (relu_kernel.cpp)
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
-#include <algorithm>
-
-namespace py = pybind11;
-
-py::array_t<float> fast_relu_cpp(py::array_t<float> input) {
-    py::buffer_info buf = input.request();
-    auto result = py::array_t<float>(buf.size);
-    py::buffer_info res_buf = result.request();
-
-    float* in_ptr = static_cast<float*>(buf.ptr);
-    float* out_ptr = static_cast<float*>(res_buf.ptr);
-
-    #pragma omp parallel for
-    for (size_t i = 0; i < buf.size; i++) {
-        out_ptr[i] = std::max(0.0f, in_ptr[i]);
-    }
-
-    result.resize(buf.shape);
-    return result;
-}
-
-PYBIND11_MODULE(tinytorch_cpp, m) {
-    m.def("fast_relu", &fast_relu_cpp, "Vectorized OpenMP ReLU in C++");
-}
-```
-
-Binding this into Python requires just a few lines of `setup.py`, allowing TinyTorch to execute multithreaded OpenMP C++ kernels with zero Python overhead.
-
----
-
-## Writing Custom CUDA Kernels
-
-When training on GPUs, custom operations are written in CUDA C++ and compiled just-in-time via `torch.utils.cpp_extension`:
-
-```cuda
-// Listing 21.2: CUDA Kernel for Elementwise Activation (relu_cuda.cu)
-__global__ void relu_cuda_kernel(const float* __restrict__ in, float* __restrict__ out, int N) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        out[idx] = in[idx] > 0.0f ? in[idx] : 0.0f;
-    }
-}
-```
+Today, the industry is transitioning to **OpenAI Triton**:
 
 ```python
-# Listing 21.3: Compiling CUDA Kernels Just-In-Time in Python
-from torch.utils.cpp_extension import load_inline
-
-cuda_src = """
-void launch_relu(const float* in, float* out, int N);
-"""
-
-# Compile and link CUDA kernel into active Python session
-custom_cuda = load_inline(
-    name="custom_cuda_relu",
-    cpp_sources="void launch_relu(const float* in, float* out, int N);",
-    cuda_sources=open("relu_cuda.cu").read(),
-    functions=["launch_relu"],
-    with_cuda=True
-)
-```
-
----
-
-## The Compiler Revolution: OpenAI Triton and PyTorch 2.0
-
-Traditional CUDA programming requires deep expertise in memory coalescing, shared memory bank conflicts,[^triton-sram-footnote] and warp synchronization. **OpenAI Triton (Tillet et al., 2019)** allows engineers to write GPU kernels in pure Python that compile directly to PTX assembly through an automated compiler pipeline:[^triton-jit-pipeline-footnote]
-
-```python
-# Listing 21.4: OpenAI Triton Fused Softmax Kernel in Python
+# A Modern Triton Kernel (Philippe Tillet et al., 2022):
 import triton
 import triton.language as tl
 
 @triton.jit
-def softmax_kernel(output_ptr, input_ptr, stride_row, n_cols, BLOCK_SIZE: tl.constexpr):
-    row_idx = tl.program_id(0)
-    row_start = input_ptr + row_idx * stride_row
-    col_offsets = tl.arange(0, BLOCK_SIZE)
-    input_ptrs = row_start + col_offsets
+def fused_add_gelu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
 
-    # Load row into GPU registers
-    mask = col_offsets < n_cols
-    row = tl.load(input_ptrs, mask=mask, other=-float('inf'))
+    # Load block into registers in one instruction
+    x = tl.load(x_ptr + offsets, mask=mask)
 
-    # Fused Log-Sum-Exp computation in registers
-    row_max = tl.max(row, axis=0)
-    numerator = tl.exp(row - row_max)
-    denominator = tl.sum(numerator, axis=0)
-    softmax_out = numerator / denominator
+    # Fused math directly in registers
+    y = 0.5 * x * (1.0 + tl.math.tanh(0.79788456 * (x + 0.044715 * x * x * x)))
 
-    # Store result back to HBM
-    output_ptrs = output_ptr + row_idx * stride_row + col_offsets
-    tl.store(output_ptrs, softmax_out, mask=mask)
+    # Write back to DRAM
+    tl.store(y_ptr + offsets, y, mask=mask)
 ```
 
-Triton is the default code generation backend of **PyTorch 2.0 TorchInductor**, generating peak-performance GPU kernels with zero C++ compilation steps.
-
-[^triton-sram-footnote]: Modern GPU Streaming Multiprocessors (SMs) allocate 128 KB to 228 KB of ultra-fast on-chip SRAM shared memory organized into 32 banks (4 bytes per bank). When threads in a warp access different memory addresses within the same bank, the hardware serializes accesses into separate cycles. Triton's compiler automatically computes conflict-free tile layouts and swizzles matrix strides to eliminate bank conflicts.
-
-[^triton-jit-pipeline-footnote]: The OpenAI Triton compiler transforms `@triton.jit` Python functions through a multi-stage compilation pipeline: Python AST $\to$ Triton-IR (Tile dialect) $\to$ MLIR passes (memory coalescing, pipelining, automatic loop unrolling) $\to$ LLVM-IR $\to$ PTX assembly $\to$ GPU SASS binary.
+Instead of programming individual threads, Triton lets engineers program **2D blocks of tensors**. The Triton compiler automatically generates optimal PTX assembly, manages register allocation, and hides DRAM latency.
 
 ---
 
-::: {.callout-note}
-## Production Systems Bridge: Compilers vs. Handwritten Libraries
+## 21.2 The Modern Compiler Stack: PyTorch 2.0 and TorchInductor
 
-In modern high-performance AI runtimes:
+Modern frameworks no longer execute Python operations eagerly one-by-one. Instead, they operate as **Ahead-of-Time (AOT) Graph Compilers**:
 
-- **PyTorch 2.0 `torch.compile` (TorchInductor)**: Compiles high-level FX graphs into fused OpenAI Triton kernels, matching or outperforming vendor BLAS libraries on custom fused operators (e.g., Fused Multi-Head Attention, RoPE, RMSNorm).
-- **NVIDIA TensorRT & TensorRT-LLM**: Employs automated kernel auto-tuning (choosing optimal tile sizes and warp shapes for specific GPU architectures) and integrates INT8/FP8 quantization with layer fusion.
-:::
+```
+PyTorch 2.0 Compiler Pipeline:
 
----
-
-## Further Learning: The Machine Learning Systems Canon
-
-To continue your builder journey into production systems, we recommend the following seminal literature, repositories, and learning guides:
-
-### Seminal Research Papers
-1. **FlashAttention-2**: Dao, T. (2023). *FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning*.
-2. **PyTorch 2.0 Compiler**: Ansel et al. (2024). *PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode Transformation and Graph Compilation*. ASPLOS.
-3. **vLLM PagedAttention**: Kwon et al. (2023). *Efficient Memory Management for Large Language Model Serving with PagedAttention*. SOSP.
-4. **LoRA**: Hu et al. (2021). *LoRA: Low-Rank Adaptation of Large Language Models*. ICLR.
-5. **AdamW**: Loshchilov & Hutter (2017). *Decoupled Weight Decay Regularization*. ICLR.
-
-### Open-Source Reference Repositories
-- **`karpathy/nanoGPT` & `karpathy/llm.c`**: Pure C and minimalist PyTorch implementations of GPT training.
-- **`vllm-project/vllm`**: High-throughput LLM inference and serving engine.
-- **`triton-lang/triton`**: Python-like programming language for high-performance GPU kernels.
-- **`pytorch/pytorch`**: The reference open-source deep learning framework.
+Python Code: model(x)
+   │
+   ▼
+[ TorchDynamo ] ────────► Safely captures computation into FX Graph via Python Bytecode Interception
+   │
+   ▼
+[ AOTAutograd ] ────────► Traces both forward and backward graphs Ahead-of-Time
+   │
+   ▼
+[ TorchInductor ] ──────► Fuses operators, schedules memory, and JIT-compiles custom Triton/C++ code!
+```
 
 ---
 
-## Summary
+## 21.3 Custom Silicon: TPUs, NPUs, and the Future of Systems
 
-In this final extensions chapter, we examined the architectural bridge connecting high-level Python frameworks to bare-metal hardware execution. We demonstrated how C++ extensions (`pybind11`), CUDA kernels, and modern Python-based GPU compilers (OpenAI Triton) power the real-world infrastructure of artificial intelligence.
+As AI models scale to trillions of parameters, general-purpose GPUs are joined by **Domain-Specific Architectures (DSAs)**:
+- **Google TPUs (Tensor Processing Units)**: Built around massive two-dimensional systolic arrays (e.g. $128 \times 128$ multipliers) that stream activations directly between ALUs without register file reads.
+- **Apple Neural Engine (ANE)**: Dedicated on-die NPU cores optimized for ultra-low-power INT8 and FP16 inference on mobile devices.
+- **Edge Robotics Silicon**: Specialized accelerators executing real-time spatial vision and tactile feedback loops with microsecond latency bounds.
 
-By mastering both the foundational mechanics of TinyTorch and the modern compiler landscapes of PyTorch and Triton, you are now equipped to build, optimize, and scale the next generation of machine learning systems.
+---
+
+## 21.4 Epilogue: You Built the Machine
+
+When you began this book in Chapter 1, deep learning might have seemed like an opaque, magical black box:
+
+```python
+import torch
+loss.backward()
+optimizer.step()
+```
+
+You now know the truth.
+
+There is no magic in artificial intelligence. There are only flat memory arrays viewed through arithmetic strides. There are non-linear activation gates that prevent matrix collapse. There are dynamic tapes that evaluate reverse topological calculus. There are momentum buffers that roll past saddle points. There are query-key attention matrices that route contextual meaning. And there are cache lines, register files, and SRAM buffers that govern the speed of thought.
+
+You didn't just import the framework.
+
+**You built it.**
