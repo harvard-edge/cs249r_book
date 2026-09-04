@@ -16,9 +16,9 @@ Serving performance analysis has two coupled layers. The queue determines how re
 
 The batching efficiency curve provides intuition about throughput-latency trade-offs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
 
-#### The M/G/c/K queue model for GPU serving {#sec-appdx-inference-scale-mgck-queue-model-gpu-serving-c4c4}
+#### Queueing notation and the M/G/1 batch surrogate {#sec-appdx-inference-scale-mgck-queue-model-gpu-serving-c4c4}
 
-GPU inference systems can be modeled as **M/G/c/K Queues**\index{M/G/c/K Queues}, a standard notation from queueing theory that captures the essential characteristics of production serving systems:
+The **M/G/c/K notation**\index{M/G/c/K Queues} names four characteristics that a production GPU-serving model may need to represent:
 
 - **M (Markov arrivals)**: Requests arrive according to a Poisson process with rate $\lambda_{\text{arr}}$. This models the memoryless property of user requests, where arrival of one request does not predict the timing of the next.
 - **G (General service distribution)**: Service times follow a general distribution, not restricted to exponential. GPU inference times depend on batch size and exhibit deterministic components (compute) mixed with stochastic variation (memory contention, kernel scheduling).
@@ -29,7 +29,7 @@ The notation comes from the same systems-performance lineage that sized telephon
 
 ::: {#psp-inference-queuing-theory-performance .callout-perspective title="Queuing theory and performance"}
 
-Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering [@erlang1909telephone]. The same mathematical framework that sized telephone exchanges now determines GPU cluster capacity. The M/G/c/K model is standard in systems textbooks, appearing in Jain's *The Art of Computer Systems Performance Analysis* [@jain1991art] and Kleinrock's *Queueing Systems* [@kleinrock1975queueing].
+Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering [@erlang1909telephone]. The same mathematical framework that sized telephone exchanges now informs GPU cluster capacity. Standard systems texts develop the component queueing models and approximations on which this notation builds [@jain1991art; @kleinrock1975queueing].
 
 :::
 
@@ -233,12 +233,12 @@ Four operational regimes emerge across these batch sizes:
 1. **Unstable regime (batch sizes 1--4)**\index{Batching!stability threshold}: Utilization exceeds 100 percent, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
 2. **Stability threshold (batch size 8)**\index{Batching!utilization headroom}: At `{python} GPT3ServingResults.b8_util_pct_str` utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms_str`), causing queuing latency to explode near saturation (@fig-queuing-hockey-stick).
 
-::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**: Relationship between system utilization $\rho_{\text{serv}}$ and queue length (M/M/1 queue length $\rho_{\text{serv}}/(1-\rho_{\text{serv}})$). Three zones are shaded: a Safe Zone ($\rho_{\text{serv}} < 0.7$), a Caution band (0.7--0.85), and a Danger Zone ($\rho_{\text{serv}} > 0.85$) where queue depth grows unboundedly. Production systems typically target $\rho_{\text{serv}} \leq 0.7$ to maintain latency headroom." fig-alt="Plot of queue length in requests versus serving utilization rho_serv from 0 to 1. The curve is flat until rho_serv around 0.7, bends upward through a caution band from 0.7 to 0.85, then rises sharply in a danger zone toward saturation at rho_serv equals 1."}
-![](images/svg/queuing-hockey-stick.svg)
-:::
-
 3. **Latency knee (batch sizes 8--16)**\index{Batching!latency knee}: Batch size 8 gives the lowest mean latency in this model. Batch size 16 trades a few milliseconds of additional total latency for lower utilization and queue wait time (`{python} GPT3ServingResults.b16_wait_ms_str` vs. `{python} GPT3ServingResults.b8_wait_ms_str`), while $B=32$ leaves still more utilization headroom but pays too much batch-accumulation delay.
 4. **Diminishing returns (batch sizes beyond 32)**\index{Batching!diminishing returns}: Further batch size increases would reduce utilization, but memory constraints prevent exploration.
+
+::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The queuing hockey stick**: The M/M/1 relation $\rho_{\text{serv}}/(1-\rho_{\text{serv}})$ shows queue length rising sharply as utilization approaches one. The shaded safe, caution, and danger regions emphasize why production systems retain utilization headroom rather than operating near saturation." fig-alt="Plot of queue length in requests versus serving utilization rho_serv from 0 to 1. The curve is flat until rho_serv around 0.7, bends upward through a caution band from 0.7 to 0.85, then rises sharply in a danger zone toward saturation at rho_serv equals 1."}
+![](images/svg/queuing-hockey-stick.svg)
+:::
 
 Applying Little's Law provides an internal consistency check for these results.
 
