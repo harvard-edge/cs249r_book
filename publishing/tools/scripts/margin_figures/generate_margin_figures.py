@@ -2495,7 +2495,7 @@ def generate() -> None:
     network_fabrics_physical_reach_ladder()
     ops_scale_embedding_update_blast()
     ops_scale_canary_exposure_ladder()
-    make_ironbar("vol2/ops_scale", "ops_scale_tco_dominance", [("Tr", 0.10, GRID), ("Inf", 0.50, COMP), ("Da", 0.25, GRID), ("It", 0.15, GRID)], dom=1)
+    make_ironbar("vol2/ops_scale", "ops_scale_tco_dominance", [("T", 0.10, GRID), ("Inf", 0.50, COMP), ("Da", 0.25, GRID), ("It", 0.15, GRID)], dom=1)
     make_ironbar("vol2/performance_engineering", "performance_engineering_iron_law_bars", [("D", 0.58, MEM), ("C", 0.22, COMP), ("L", 0.20, NET)], dom=0)
     make_ladder("vol2/performance_engineering", "performance_engineering_flash_ladder", [("naive 35 GB", 35), ("Flash 537 MB", 0.537)], domain="memory")
     make_roofline("vol2/performance_engineering", "performance_engineering_specdec_roofline", ridge=60, dot_ai=20)
