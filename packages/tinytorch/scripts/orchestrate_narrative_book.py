@@ -6,7 +6,7 @@ Orchestrates the generation and refinement of the narrative textbook:
 "TinyTorch: The xv6 of Machine Learning Systems"
 
 Enforces strict progressive disclosure, first-principles systems intuition,
-5-beat chapter narrative arcs, and seamless chapter-to-chapter flow.
+Chicago Manual of Style (CMOS) prose rules, and seamless chapter-to-chapter flow.
 """
 
 import argparse
@@ -25,15 +25,28 @@ Your goal is to write a deeply intuitive, elegant, and engaging systems book for
 
 CORE PEDAGOGICAL PHILOSOPHY:
 - This is NOT a dry university textbook filled with mathematical boilerplate and detached proofs.
-- This is NOT a homework lab manual with "TODO: fill in this function" instructions.
+- This is NOT a homework lab manual: NEVER include "Purpose" sections, NEVER include "Learning Objectives" bullet lists, and NEVER include "TODO: fill in this function" instructions.
 - This IS the "xv6 of Machine Learning Systems": a clear, first-principles engineering journey where a curious learner builds an entire modern deep learning framework from raw Python lists to a complete GPT-2 transformer with hardware acceleration.
 
-THE 5-BEAT NARRATIVE ARC FOR EVERY CHAPTER:
-1. THE CRISIS / THE TENSION: Why does standard software / naive code fail? (e.g. Memory fragmentation across OS heaps, 90% cache misses, linear collapse walls, O(N) GPU memory bandwidth stalls).
-2. THE MENTAL MODEL: The intuitive physical/geometrical insight before touching code (e.g. A tensor is not a grid in DRAM; it is a 1D contiguous buffer with an algebraic coordinate translator called strides).
-3. THE PURE CONSTRUCTION: Building the clean, minimal, working TinyTorch Python engine with working code blocks that execute cleanly.
+CMOS (CHICAGO MANUAL OF STYLE) PROSE RULES:
+1. SPELLING & PUNCTUATION: American English throughout (e.g. "optimize", "backward", "modeling", "labeled"). Use serial (Oxford) commas. Use em-dashes without surrounding spaces (---).
+2. NUMBERS: Spell out whole numbers from zero through one hundred in general prose ("four tiers", "two matrices", "twenty-one chapters"). Use numerals for percentages (4.2x speedup, 90%), memory byte sizes (64 bytes, 4 MB), dimensions, coordinates, and equations.
+3. HEADINGS: Title Case for all chapter and section headings.
+4. TONE & REGISTER: Authoritative, inviting, narrative, and deeply grounded in systems reality. Speak directly to the engineer ("When we execute...", "Notice what happens on the hardware...").
+
+FIGURE PLACEHOLDERS & DIAGRAMS:
+- Embed existing vector diagrams with clear, descriptive captions: `![Caption text](assets/images/diagrams/xx_name.svg){#fig-label}`.
+- If an additional conceptual diagram is needed that does not exist yet, leave a structured placeholder:
+  `::: {#fig-concept-name .figure-placeholder}`
+  `*Figure X.Y: Detailed descriptive caption explaining the physical/visual layout to be illustrated.*`
+  `:::`
+
+CHAPTER STRUCTURE (4 MANDATORY MOVEMENTS):
+1. THE CRISIS / HOOK: Open immediately with the engineering tension. Why does standard software fail? (Memory fragmentation, cache line misses, linear collapse walls, O(N) GPU memory bandwidth stalls).
+2. THE MENTAL MODEL & GEOMETRY: The physical insight before touching code.
+3. THE PURE CONSTRUCTION: Clean, minimal, working TinyTorch Python implementations with syntax-highlighted code blocks.
 4. THE PRODUCTION BRIDGE: Connecting our implementation directly to how production engines (PyTorch c10::TensorImpl, CUDA kernels, cuDNN, Triton JIT) solve the same invariant at scale.
-5. THE NATURAL BRIDGE / CLIFFHANGER: Closing with a compelling engineering question that immediately propels the reader into the next chapter.
+5. BUILDING THE SYSTEM: HOW IT ALL CONNECTS: Every chapter MUST conclude with an integration section that recaps what was built, how it locks into the previous chapters, and how the global machine learning engine is coming together, finishing with a forward cliffhanger to the next chapter.
 
 STRICT PROGRESSIVE DISCLOSURE INVARIANT:
 - Never assume knowledge of tools or layers not yet built.
@@ -51,7 +64,7 @@ CHAPTER_REGISTRY = {
         "crisis": "Why do modern ML developers feel alienated by 500,000-line C++ framework codebases?",
         "mental_model": "The pedagogical power of minimal, complete systems (MIT xv6 analogy).",
         "knowledge_prev": "Basic Python and linear algebra.",
-        "knowledge_new": "The 4-tier architecture of TinyTorch and how to read this book as an active builder.",
+        "knowledge_new": "The 4-tier architecture of TinyTorch (4,558 pure lines of code) and how to read this book as an active builder.",
         "forbidden": "Do not give implementation details of specific layers yet.",
         "diagram": "00_journey-diag-1.svg",
         "next_bridge": "Stepping into the engine room: Why we must start from scratch."
@@ -354,7 +367,7 @@ CHAPTER_REGISTRY = {
 }
 
 def build_prompt_for_chapter(chapter_key: str) -> str:
-    """Constructs a comprehensive, high-context prompt for generating a book chapter."""
+    """Constructs a comprehensive, CMOS-compliant prompt for generating a book chapter."""
     info = CHAPTER_REGISTRY.get(chapter_key)
     if not info:
         raise ValueError(f"Unknown chapter key: {chapter_key}")
@@ -378,22 +391,23 @@ CHAPTER CONTEXT & INVARIANTS:
 - Reader's Prior Knowledge: {info['knowledge_prev']}
 - Concepts Introduced in this Chapter: {info['knowledge_new']}
 - STRICT BOUNDARY (Do NOT introduce): {info['forbidden']}
-- Vector Diagram Reference: assets/images/diagrams/{info.get('diagram', '')}
+- Primary Vector Diagram: assets/images/diagrams/{info.get('diagram', '')}
 - Chapter Exit Cliffhanger: {info['next_bridge']}
 
-TINYTORCH SOURCE REFERENCE IMPLEMENTATION:
+TINYTORCH SOURCE CODE REFERENCE:
 ```python
-{src_code_snippet[:4000]}
+{src_code_snippet[:4500]}
 ```
 
 WRITING INSTRUCTIONS:
-1. Write the complete, production-grade Quarto Markdown (.qmd) file for this chapter.
-2. Structure the chapter into clear narrative sections using the 5-beat arc.
-3. Embed the vector diagram using `![...](assets/images/diagrams/{info.get('diagram', '')})`.
-4. Include working, tested TinyTorch Python implementations with syntax-highlighted code blocks.
-5. Add Systems Perspective callouts explaining hardware realities (cache lines, DRAM bandwidth, C10/CUDA equivalents).
-6. End with the specified cliffhanger bridge that leads directly into the next chapter.
-7. Write the complete file directly to `packages/tinytorch/narrative_book/{info['file']}`.
+1. Write the complete, publication-grade Quarto Markdown (.qmd) file for this chapter adhering strictly to CMOS rules.
+2. DO NOT include "Purpose" or "Learning Objectives" sections.
+3. Open immediately with Section X.1: The Crisis (the engineering problem/tension).
+4. Embed the primary vector diagram and include clear figure placeholders for any additional visual architectures needed.
+5. Provide clean, tested TinyTorch Python implementations with syntax-highlighted code blocks.
+6. Add Systems Perspective callouts explaining hardware realities (cache lines, DRAM bandwidth, C10/CUDA equivalents).
+7. End with "Section X.N: Building the System: How It All Connects" which recaps what was built, how it locks into the previous chapters, and how the global machine learning engine is coming together, finishing with the specified cliffhanger bridge.
+8. Write the complete file directly to `packages/tinytorch/narrative_book/{info['file']}`.
 """
     return prompt
 
@@ -409,7 +423,7 @@ def orchestrate_chapter(chapter_key: str, dry_run: bool = False):
     print(f"================================================================================\n")
 
     if dry_run:
-        print("[DRY RUN] Generated Prompt:\n")
+        print("[DRY RUN] Generated CMOS Prompt:\n")
         print(prompt[:1200] + "\n... [TRUNCATED] ...\n")
         return
 
