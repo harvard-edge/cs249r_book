@@ -848,7 +848,7 @@ def distributed_training_ratio_threshold(candidate=None):
     ax.axvline(x + w / 2, ymin=0.22, ymax=0.78, color=RED, lw=0.75, ls="--")
     ax.text(x + w * 0.25, y + h / 2, "compute", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
     ax.text(x + w * 0.75, y + h / 2, "comm", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
-    ax.text(x + w / 2 + 0.035, 0.78, "rho=1", ha="left", va="center", color=RED, fontsize=5.0, fontweight="bold")
+    ax.text(x + w / 2 + 0.035, 0.78, "ρ = 1", ha="left", va="center", color=RED, fontsize=5.0, fontweight="bold")
     ax.text(x + w * 0.22, 0.24, "ideal", ha="center", va="center", color=COMP, fontsize=4.8)
     ax.text(x + w * 0.76, 0.24, "wait", ha="center", va="center", color=RED, fontsize=4.8)
     write(fig, "vol2/distributed_training", "vol2_distributed_training_margin_001")
@@ -873,7 +873,7 @@ def distributed_training_energy_tax(candidate=None):
     make_ladder(
         "vol2/distributed_training",
         "vol2_distributed_training_margin_003",
-        [("IB 35 pJ/bit", 35.0), ("NVLink 7.5", 7.5), ("HBM 1.5", 1.5)],
+        [("IB 35 pJ/bit", 35.0), ("NVLink 7.5 pJ/bit", 7.5), ("HBM 1.5 pJ/bit", 1.5)],
         domain="energy",
         wall=False,
     )
@@ -883,8 +883,8 @@ def distributed_training_bandwidth_gap(candidate=None):
     ratio_annotation_ladder(
         "vol2/distributed_training",
         "vol2_distributed_training_margin_004",
-        [("NVLink 900 GB/s", 900), ("NDR 50 GB/s", 50)],
-        ratio_label="18x",
+        [("NVLink 450 GB/s", 450), ("NDR 50 GB/s", 50)],
+        ratio_label="9×",
         domain="bandwidth",
     )
 
