@@ -1,0 +1,252 @@
+# The Transformer: Assembling GPT-2 with Pre-LN Residual Highways {#sec-transformers}
+
+In Chapter 12, we engineered Multi-Head Scaled Dot-Product Attention, enabling tokens to communicate causally across time. Yet multi-head attention is purely a routing and dynamic mixing operation; it contains no feed-forward non-linear reasoning capacity. Furthermore, if we stack twenty attention layers sequentially, signal variances explode and gradients vanish.
+
+In this chapter, we assemble the complete, publication-grade architecture that powers modern generative artificial intelligence: **The GPT-2 Transformer Engine**. We build **Layer Normalization (`LayerNorm`)**, the **$4\times$ Multi-Layer Perceptron (`MLP`)**, the **Pre-LayerNorm Transformer Block (`TransformerBlock`)**, and the complete **`TinyGPT` Language Model**.
+
+![The Transformer Architecture: Pre-LN Residual Highway, Multi-Head Attention, 4x Expansion MLP, and Language Modeling Logit Head](assets/images/diagrams/13_transformers-diag-1.svg){#fig-transformer-arch}
+
+---
+
+## 13.1 The Crisis: The Vanishing Gradient Wall in 100-Layer Deep Stacks
+
+When the original 2017 transformer was published (*"Attention Is All You Need"*), it utilized **Post-LayerNorm**:
+
+$$x_{l+1} = \text{LayerNorm}(x_l + \text{SubLayer}(x_l))$$
+
+In Post-LN architectures, the normalization operator sits directly on the residual path. As network depth grows beyond twelve layers, gradients passing through dozens of chained normalization operations decay exponentially ($O(1/L)$ decay). Training a 50-layer Post-LN model requires excruciating warm-up schedules and frequently diverges into NaN loss values.
+
+```
+Post-LN vs. Pre-LN Residual Gradient Pathways:
+
+Post-LN (Original 2017 Transformer - Brittle Gradient Decay):
+x ──► [ Attention ] ──► ( + ) ──► [ LayerNorm ] ──► [ MLP ] ──► ( + ) ──► [ LayerNorm ] ──► Output
+  └──────────────────────┘                          └────────────┘
+  (Gradients must pass through every LayerNorm; decays exponentially in deep stacks! ❌)
+
+Pre-LN (GPT-2 & Modern LLMs - Clean Unimpeded Gradient Highway):
+x ──┬──► [ LayerNorm ] ──► [ Attention ] ──► ( + ) ──┬──► [ LayerNorm ] ──► [ MLP ] ──► ( + ) ──► Output
+    │                                         ▲      │                                   ▲
+    └─────────────────────────────────────────┘      └───────────────────────────────────┘
+    (The residual skip connection provides an UNMODIFIED highway for gradient flow! ✅)
+```
+
+In **Pre-LayerNorm (Pre-LN)**, normalization is applied to the input of each sub-layer *before* the transformation, while the residual skip connection ($x + f(x)$) remains completely clean and unnormalized. The residual connection acts as an **unimpeded gradient superhighway**, allowing loss gradients from layer 100 to propagate directly back to layer 1 with zero attenuation.
+
+---
+
+## 13.2 The Mental Model: The Anatomy of a GPT-2 Block
+
+A modern generative transformer consists of four modular systems:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Complete GPT-2 Language Model Architecture                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1. Token & Positional Embeddings:                                           │
+│    h_0 = Embedding_token(tokens) + PositionalEncoding(seq_len)              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 2. Stack of N Pre-LN Transformer Blocks:                                    │
+│    For layer l = 1 to N:                                                    │
+│      • Communication Sub-Layer:                                             │
+│          h'_l = h_{l-1} + MultiHeadAttention(LayerNorm_1(h_{l-1}))         │
+│      • Computation / Reasoning Sub-Layer:                                   │
+│          h_l  = h'_l    + MLP(LayerNorm_2(h'_l))                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 3. Final Layer Normalization:                                               │
+│    h_final = LayerNorm_final(h_N)                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 4. Language Modeling Logit Head:                                            │
+│    Logits = Linear(embed_dim, vocab_size)(h_final)                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Layer Normalization: Channel-Wise Stabilization
+
+Unlike Batch Normalization (which normalizes across samples in a batch and fails with small batch sizes), **Layer Normalization** normalizes activations across the channel dimension $D$ independently for each token:
+
+$$\mu = \frac{1}{D} \sum_{i=1}^D x_i, \qquad \sigma^2 = \frac{1}{D} \sum_{i=1}^D (x_i - \mu)^2$$
+
+$$\hat{x}_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}}, \qquad y_i = \gamma_i \hat{x}_i + \beta_i$$
+
+where $\gamma, \beta \in \mathbb{R}^D$ are learnable affine gain and bias parameters.
+
+### The $4\times$ MLP Expansion Block
+
+While attention allows tokens to dynamically aggregate context, the **MLP (Multi-Layer Perceptron)** provides per-token nonlinear processing capacity. It expands embedding dimension $D$ by $4\times$, applies the non-linear Gaussian Error Linear Unit (`GELU`), and projects back down:
+
+$$\text{MLP}(x) = \text{Linear}(4D, D)\left( \text{GELU}(\text{Linear}(D, 4D)(x)) \right)$$
+
+---
+
+## 13.3 The Pure TinyTorch Construction
+
+We construct `LayerNorm`, `MLP`, `TransformerBlock`, and `TinyGPT` in TinyTorch:
+
+```python
+import numpy as np
+from typing import List, Optional
+from .tensor import Tensor
+from .layers import Layer, Linear
+from .activations import GELU
+from .embeddings import Embedding, PositionalEncoding
+from .attention import MultiHeadAttention
+
+def create_causal_mask(seq_len: int) -> Tensor:
+    """Generate additive lower-triangular causal attention mask."""
+    mask = np.triu(np.full((seq_len, seq_len), -np.inf, dtype=np.float32), k=1)
+    return Tensor(mask, requires_grad=False)
+
+class LayerNorm(Layer):
+    """Channel-wise Layer Normalization Layer."""
+    def __init__(self, normalized_shape: int, eps: float = 1e-5):
+        super().__init__()
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        self.gamma = Tensor(np.ones((normalized_shape,), dtype=np.float32), requires_grad=True)
+        self.beta = Tensor(np.zeros((normalized_shape,), dtype=np.float32), requires_grad=True)
+
+    def parameters(self) -> List[Tensor]:
+        return [self.gamma, self.beta]
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Normalize across the last dimension."""
+        mean = np.mean(x.data, axis=-1, keepdims=True)
+        var = np.var(x.data, axis=-1, keepdims=True)
+        x_norm = (x.data - mean) / np.sqrt(var + self.eps)
+        out_data = self.gamma.data * x_norm + self.beta.data
+
+        out_tensor = Tensor(out_data)
+        out_tensor._op = "LayerNorm"
+        out_tensor._parents = [x, self.gamma, self.beta]
+        return out_tensor
+
+class MLP(Layer):
+    """Transformer Feed-Forward Network with 4x Dimension Expansion and GELU."""
+    def __init__(self, embed_dim: int):
+        super().__init__()
+        self.fc1 = Linear(embed_dim, 4 * embed_dim)
+        self.act = GELU()
+        self.fc2 = Linear(4 * embed_dim, embed_dim)
+
+    def parameters(self) -> List[Tensor]:
+        return self.fc1.parameters() + self.fc2.parameters()
+
+    def forward(self, x: Tensor) -> Tensor:
+        h = self.fc1.forward(x)
+        h = self.act.forward(h)
+        return self.fc2.forward(h)
+
+class TransformerBlock(Layer):
+    """Pre-LayerNorm Transformer Block with Residual Skip Connections."""
+    def __init__(self, embed_dim: int, num_heads: int):
+        super().__init__()
+        self.ln1 = LayerNorm(embed_dim)
+        self.attn = MultiHeadAttention(embed_dim, num_heads)
+        self.ln2 = LayerNorm(embed_dim)
+        self.mlp = MLP(embed_dim)
+
+    def parameters(self) -> List[Tensor]:
+        return self.ln1.parameters() + self.attn.parameters() + self.ln2.parameters() + self.mlp.parameters()
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        # Sub-layer 1: Pre-LN Attention with Residual Connection
+        norm1 = self.ln1.forward(x)
+        attn_out = self.attn.forward(norm1, mask=mask)
+        x = Tensor(x.data + attn_out.data)  # Clean residual addition
+
+        # Sub-layer 2: Pre-LN MLP with Residual Connection
+        norm2 = self.ln2.forward(x)
+        mlp_out = self.mlp.forward(norm2)
+        x = Tensor(x.data + mlp_out.data)  # Clean residual addition
+
+        return x
+
+class TinyGPT(Layer):
+    """Complete Generative Pretrained Transformer (GPT-2) Language Model."""
+    def __init__(self, vocab_size: int = 1000, embed_dim: int = 128,
+                 num_heads: int = 4, num_layers: int = 3, max_seq_len: int = 256):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.max_seq_len = max_seq_len
+
+        # Embeddings
+        self.tok_emb = Embedding(vocab_size, embed_dim)
+        self.pos_emb = PositionalEncoding(max_seq_len, embed_dim)
+
+        # Transformer Blocks Stack
+        self.blocks = [TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)]
+
+        # Final Normalization and Language Modeling Head
+        self.ln_final = LayerNorm(embed_dim)
+        self.head = Linear(embed_dim, vocab_size)
+
+    def parameters(self) -> List[Tensor]:
+        params = self.tok_emb.parameters()
+        for block in self.blocks:
+            params.extend(block.parameters())
+        params.extend(self.ln_final.parameters())
+        params.extend(self.head.parameters())
+        return params
+
+    def forward(self, idx: Tensor) -> Tensor:
+        """Forward pass: Token IDs -> Contextualized Next-Token Logits."""
+        B, S = idx.data.shape
+        mask = create_causal_mask(S)
+
+        # 1. Embed tokens and inject positional frequencies
+        x = self.tok_emb.forward(idx)
+        x = self.pos_emb.forward(x)
+
+        # 2. Flow activations through Transformer Block stack
+        for block in self.blocks:
+            x = block.forward(x, mask=mask)
+
+        # 3. Final LayerNorm and projection to vocabulary logits
+        x = self.ln_final.forward(x)
+        logits = self.head.forward(x)  # Shape: [B, S, vocab_size]
+        return logits
+```
+
+---
+
+## 13.4 The Production Bridge: PyTorch `torch.compile` and Weight Tying
+
+In production architectures (such as GPT-3 and LLaMA), two major optimizations are applied:
+
+```
+Production Transformer Optimizations:
+
+1. Weight Tying (Press & Wolf, 2016):
+   • The output language head weight matrix W_head is TIED directly to the input
+     token embedding matrix W_tok: W_head = W_tok^T.
+   • Cuts model parameter count by 30% without sacrificing accuracy.
+
+2. RMSNorm (Root Mean Square Normalization):
+   • Drops the mean subtraction term from LayerNorm:
+     RMSNorm(x) = x / sqrt( (1/D) * sum(x_i^2) + eps ) * gamma
+   • Cuts kernel execution latency by 15% across all layers.
+```
+
+---
+
+## 13.5 Building the System: How It All Connects
+
+We have assembled the complete generative AI engine in pure TinyTorch:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         TINYTORCH PART II: DEEP ARCHITECTURES               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 9. Spatial Convolutions   : Sliding receptive fields & im2col GEMMs         │
+│ 10. BPE Tokenization      : Subword entropy compression with zero OOV       │
+│ 11. Embeddings & Position : Dense latent space & Fourier positional waves   │
+│ 12. Multi-Head Attention  : Scaled dot-product & causal lower-triangular mask│
+│ 13. The GPT-2 Transformer : Pre-LN residual highways & complete TinyGPT     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+The mathematical and architectural foundation of modern artificial intelligence is complete.
+
+Now, we put our transformer to the test. In **Milestone II**, we train `TinyGPT` on real-world text corpora and engineer the **Autoregressive Generation Loop** with temperature scaling and top-$k$ sampling to generate coherent human language from scratch.
