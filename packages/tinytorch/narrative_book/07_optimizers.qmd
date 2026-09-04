@@ -1,292 +1,330 @@
----
-title: "Parameter Optimization and Momentum"
----
+# Optimizers: Momentum, AdamW, and Decoupled Weight Decay {#sec-optimizers}
 
-## Purpose {.unnumbered}
+In Chapter 6, we constructed the dynamic reverse-mode automatic differentiation engine. With a single call to `loss.backward()`, TinyTorch traverses the computational tape in reverse topological order, populating the `.grad` field of every learnable parameter tensor with its exact analytical partial derivative $\nabla_\theta \mathcal{L}$.
 
-_Why does naive stochastic gradient descent oscillate erratically in high-dimensional loss landscapes, and how do momentum and adaptive learning rates conquer non-convex optimization?_
+Yet having exact gradients is only half the battle. A gradient is merely a compass pointing in the direction of steepest ascent on the loss surface. How we choose to step along that surface determines whether our network converges to an optimal solution in minutes, oscillates erratically across steep ravines, or stalls completely in zero-gradient saddle points. In this chapter, we build the dynamical control systems of deep learning: **Stochastic Gradient Descent (SGD) with Momentum**, **Adam**, and **AdamW with Decoupled Weight Decay**.
 
-In Chapter 6, we implemented automatic differentiation, providing every parameter tensor with an exact mathematical gradient $\nabla_\theta \mathcal{L}$. However, having gradients is useless without an optimization algorithm to steer parameter updates. Naive Stochastic Gradient Descent (SGD) treats every dimension uniformly, causing parameter updates to oscillate violently across steep ravines while crawling along flat plateaus. **Optimizers** are the dynamical control systems of deep learning: they introduce physical momentum to dampen high-frequency oscillations, escape saddle points, and maintain per-parameter adaptive learning rates that normalize update steps across heterogeneous gradient scales. In a framework runtime, optimizers maintain stateful history buffers that consume substantial GPU memory, directly determining training throughput and stability.
-
-::: {.callout-learning-objectives}
-## Learning Objectives
-
-- **Formulate** the parameter update invariant across Stochastic Gradient Descent (SGD), Momentum, Adam, and AdamW.
-- **Analyze** the physical mechanics of momentum as a second-order dynamical system that dampens high-frequency gradient variance and rolls past zero-gradient saddle points.
-- **Derive** Adam's first and second raw moment expectations and prove the mathematical necessity of time-step bias corrections ($\hat{\mathbf{m}}_t, \hat{\mathbf{v}}_t$).
-- **Prove** why $L_2$ regularization pollutes the second moment variance estimate in adaptive optimizers, and implement decoupled weight decay (`AdamW`) to restore uniform parameter shrinkage.
-- **Calculate** the exact hardware memory allocation footprint of optimizer state buffers ($16\text{ bytes per parameter}$ in FP32 / AMP AdamW).
-- **Bridge** TinyTorch optimizers to production PyTorch `torch.optim.AdamW` with fused and multi-tensor CUDA kernels.
-:::
+![The Optimization Landscape: Vanilla SGD Oscillations vs. Momentum Acceleration and AdamW Adaptive Curvature Scaling](assets/images/diagrams/07_optimizers-diag-1.svg){#fig-optimizers-landscape}
 
 ---
 
-## The Fundamental Parameter Update Invariant
+## 7.1 The Crisis: Ill-Conditioned Ravines and Variance Pollution
 
-Every optimizer in deep learning implements an iterative stateful update rule over parameter weights $\mathbf{\theta}_t \in \mathbb{R}^D$ given loss gradients $\mathbf{g}_t = \nabla_\theta \mathcal{L}(\mathbf{\theta}_t)$:
+When optimizing high-dimensional neural networks, the local geometry of the loss landscape is dictated by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \lambda_{\max} / \lambda_{\min}$ measures the ratio between the maximum and minimum eigenvalues of the local curvature.
 
-$$\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \cdot \mathbf{u}(\mathbf{g}_1, \dots, \mathbf{g}_t)$$
-
-where $\eta > 0$ is the learning rate and $\mathbf{u}(\cdot)$ is the transformed update vector.
+In deep networks, $\kappa$ frequently exceeds $10^4$, creating what optimization theorists call an **ill-conditioned ravine**:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  The Optimizer Hierarchy in Framework Architecture          │
-├─────────────────────────────────────────────────────────────┤
-│  1. Vanilla SGD : u_t = g_t (Memory: 0 extra bytes)         │
-│  2. SGD Momentum: u_t = v_t (Memory: 4 bytes/param)         │
-│  3. AdamW       : u_t = m_t / sqrt(v_t) + lambda * theta    │
-│                   (Memory: 8 extra bytes/param)             │
-└─────────────────────────────────────────────────────────────┘
+Ill-Conditioned Loss Ravine (Curvature Ratio κ ≫ 1):
+
+     Steep Wall (High Curvature, λ_max)
+     │       ▲
+     │      ╱ ╲     Vanilla SGD: Oscillates violently between walls
+     │     ╱   ╲    while making almost zero progress along the floor!
+     │    ▼     ▲
+     │   ╱       ╲  ───► Momentum: Accumulates velocity along valley floor,
+     │  ▼         ▲      dampening perpendicular cross-ravine oscillations.
+     └────────────────────────► Low Curvature Valley Floor (λ_min)
 ```
 
----
+In an ill-conditioned ravine:
+1. Along the steep perpendicular walls, the gradient $\mathbf{g}_\perp$ is massive, causing vanilla SGD updates ($\mathbf{\theta} \leftarrow \mathbf{\theta} - \eta \mathbf{g}$) to oscillate violently from side to side.
+2. Along the flat parallel valley floor, the gradient $\mathbf{g}_\parallel$ is minuscule, causing forward progress toward the global minimum to crawl at a near standstill.
 
-## The Physics of Momentum and Ill-Conditioned Surfaces
+If we increase the learning rate $\eta$ to accelerate along the valley floor, the cross-ravine oscillations explode into numerical instability ($\|\mathbf{\theta}\| \to \infty$). If we decrease $\eta$ to stabilize the oscillations, training grinds to a halt.
 
-In high-dimensional deep learning loss surfaces, the local curvature is characterized by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$ measures the ratio of maximum to minimum curvature eigenvalues.
+Furthermore, when researchers introduced adaptive learning rates (Adam) in 2014, they combined standard $L_2$ weight regularization by adding $\lambda \mathbf{\theta}$ directly to the gradient vector $\mathbf{g}_t$. As Ilya Loshchilov and Frank Hutter proved in 2017, this naively mixes weight decay into the second-moment variance accumulator $\mathbf{v}_t \leftarrow \beta_2 \mathbf{v}_t + (1-\beta_2)\mathbf{g}_t^2$. Parameters with large historical gradients experience *less* weight decay than parameters with small gradients---completely inverting the mathematical intent of $L_2$ regularization!
 
-When $\kappa \gg 1$ (an ill-conditioned ravine):
-
-- The gradient along the steep perpendicular direction ($\mathbf{g}_\perp$) is massive, causing vanilla SGD to oscillate violently between ravine walls.
-- The gradient along the flat parallel valley floor ($\mathbf{g}_\parallel$) is tiny, causing progress toward the minimum to stall.
-
-::: {#fig-optimizers-momentum}
-![](../quarto/assets/images/diagrams/07_optimizers-diag-1.svg)
-
-**Figure 7.1: Trajectory of SGD vs. Momentum in an Ill-Conditioned Ravine.** Vanilla SGD oscillates wildly across steep contours. Momentum accumulates forward velocity along the low-curvature valley, rapidly accelerating convergence.
-:::
-
-### Heavy-Ball Dynamics: Escaping Saddle Points
-
-Polyak Momentum (1964) models optimization as a physical heavy ball with mass rolling down a potential energy surface with friction coefficient $\gamma$:
-
-$$\ddot{\mathbf{\theta}}(t) + \gamma \dot{\mathbf{\theta}}(t) + \nabla \mathcal{L}(\mathbf{\theta}(t)) = \mathbf{0}$$
-
-Discretizing this second-order ordinary differential equation yields the velocity accumulator update:
-
-$$\mathbf{v}_t = \beta \mathbf{v}_{t-1} + (1 - \beta) \mathbf{g}_t, \quad \mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \mathbf{v}_t$$
-
-where $\beta \in [0, 1)$ is the momentum decay factor (typically $\beta = 0.9$).
-
-**Two Critical Physical Properties**:
-
-1. **High-Frequency Damping**: Successive gradient vectors along oscillating directions alternate signs ($\mathbf{g}_{\perp, t} \approx -\mathbf{g}_{\perp, t-1}$), canceling out inside the accumulator ($\sum \mathbf{g}_\perp \to \mathbf{0}$).
-2. **Saddle Point Escape**: At strict saddle points or flat plateaus where local gradient $\nabla \mathcal{L} \approx \mathbf{0}$, standard SGD becomes trapped. Momentum retains stored kinetic velocity ($\mathbf{v}_t = \beta \mathbf{v}_{t-1} \ne \mathbf{0}$), rolling the parameter trajectory through flat regions without stopping.
+To train modern deep architectures, our framework engine must solve both crises: we must model second-order physical momentum to conquer ill-conditioned ravines, and we must decouple weight decay from adaptive moment estimation.
 
 ---
 
-## Adam and AdamW: Adaptive Moment Estimation
+## 7.2 The Mental Model: Heavy-Ball Dynamics and Adaptive Scaling
 
-**Adam (Kingma & Ba, 2014)** combines momentum with per-parameter adaptive learning rates by tracking both the exponentially decaying first raw moment (mean velocity $\mathbf{m}_t$) and second uncentered moment (variance $\mathbf{v}_t$):
+To understand how modern optimizers conquer non-convex loss surfaces, we look to two physical analogies: classical mechanics and per-coordinate coordinate scaling.
 
-$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t, \quad \mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
+### Heavy-Ball Momentum: Simulating Inertia
 
-### Derivation of Initialization Bias Correction
+Imagine rolling a heavy iron ball down a corrugated mountain canyon. Unlike a massless particle that changes direction instantaneously with every microscopic pebble, a heavy ball possesses mass and physical momentum $\mathbf{v}_t$.
 
-Because moment accumulators are initialized to zero ($\mathbf{m}_0 = \mathbf{0}, \mathbf{v}_0 = \mathbf{0}$), early estimates are heavily biased toward zero.
+When the ball bounces between the steep canyon walls, the opposing lateral forces cancel each other out over time. Meanwhile, the consistent gravitational pull along the valley floor continuously accelerates the ball forward:
 
-Unrolling $\mathbf{m}_t$ recursively as a linear combination of past gradients:
+$$\mathbf{v}_t = \beta \mathbf{v}_{t-1} + \mathbf{g}_t$$
 
-$$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i$$
+$$\mathbf{\theta}_t = \mathbf{\theta}_{t-1} - \eta \mathbf{v}_t$$
 
-Taking expectations under the assumption that the true gradient distribution $\mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t]$ is locally stationary:
+where $\beta \in [0, 1)$ represents the momentum coefficient (typically $0.9$, corresponding to friction that retains $90\%$ of previous velocity).
 
-$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}\left[ (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i \right] = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1^t)$$
+```
+Momentum Velocity Accumulation:
+Step 1:  v_1 = g_1
+Step 2:  v_2 = β * g_1 + g_2
+Step 3:  v_3 = β^2 * g_1 + β * g_2 + g_3
+Step t:  v_t = ∑_{i=1}^t β^{t-i} g_i   (Exponentially Weighted Moving Average)
+```
 
-To obtain an unbiased estimator $\mathbb{E}[\hat{\mathbf{m}}_t] = \mathbb{E}[\mathbf{g}_t]$, we must rescale by $\frac{1}{1 - \beta_1^t}$:
+Momentum provides two crucial systems benefits:
+1. **Dampening High-Frequency Noise**: Transverse oscillations cancel out ($+g$ followed by $-g$ sums to zero).
+2. **Escaping Saddle Points**: When traversing a flat plateau where $\nabla \mathcal{L} \approx 0$, the stored velocity carries the parameters across the flat region rather than stalling.
 
-$$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \quad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
+### AdamW: Decoupled Adaptive Moment Estimation
 
-As $t \to \infty$, the correction factor $\beta^t \to 0$, naturally vanishing as training progresses.
+While momentum maintains a single velocity vector, **Adam** (Adaptive Moment Estimation) computes per-coordinate adaptive learning rates by tracking both the first raw moment (mean $\mathbf{m}_t$) and the second uncentered moment (variance $\mathbf{v}_t$) of the gradients:
 
----
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t \quad \text{(First Moment: Direction)}$$
 
-### The $L_2$ Regularization vs. Decoupled Weight Decay Proof
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2 \quad \text{(Second Moment: Scale)}$$
 
-In standard stochastic gradient descent, $L_2$ regularization ($\mathcal{L}_{\text{total}} = \mathcal{L} + \frac{\lambda}{2} \|\mathbf{\theta}\|^2$) is mathematically equivalent to weight decay:
+Because $\mathbf{m}_0$ and $\mathbf{v}_0$ are initialized to zero vectors, they are heavily biased toward zero in the initial training steps. We correct this initialization bias by dividing by $(1 - \beta^t)$:
 
-$$\nabla_\theta \mathcal{L}_{\text{total}} = \mathbf{g}_t + \lambda \mathbf{\theta}_t \implies \mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta (\mathbf{g}_t + \lambda \mathbf{\theta}_t) = (1 - \eta \lambda)\mathbf{\theta}_t - \eta \mathbf{g}_t$$
+$$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \qquad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
 
-In adaptive optimizers (Adam), this equivalence completely breaks down.
+In **AdamW**, we decouple weight decay entirely from the gradient variance updates. The parameter update rule becomes:
 
-If $L_2$ regularization is applied by adding $\lambda \mathbf{\theta}_t$ directly to the gradient $\mathbf{g}_t$, the polluted gradient $\mathbf{g}_t' = \mathbf{g}_t + \lambda \mathbf{\theta}_t$ enters the second raw moment accumulator:
+$$\mathbf{\theta}_t = \mathbf{\theta}_{t-1} - \eta \left( \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} + \lambda \mathbf{\theta}_{t-1} \right)$$
 
-$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) (\mathbf{g}_t + \lambda \mathbf{\theta}_t)^2$$
-
-::: {.callout-principle}
-## The Variance Pollution Hazard
-
-When a parameter $\theta_i$ has a large magnitude, the regularization term $(\lambda \theta_i)^2$ artificially inflates $v_{t,i}$. The resulting parameter update becomes:
-
-$$\Delta \theta_i = -\frac{\eta}{\sqrt{\hat{v}_{t,i}} + \epsilon} (\hat{m}_{t,i} + \lambda \theta_i) \approx -\frac{\eta}{\lambda |\theta_i|} (\lambda \theta_i) = -\eta \cdot \text{sign}(\theta_i)$$
-
-Parameters with **large magnitudes** have their effective regularization decay divided by $\sqrt{\hat{v}_{t,i}}$, receiving *smaller* relative shrinkage than parameters with small magnitudes—the exact opposite of the intended regularizer!
-:::
-
-**AdamW (Loshchilov & Hutter, 2017)** decouples weight decay from gradient moment accumulation, applying parameter shrinkage directly to the weight:
-
-$$\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \left( \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} + \lambda \mathbf{\theta}_t \right)$$
-
-This restores uniform, scale-invariant geometric decay across all model parameters.
+Notice that weight decay $\lambda \mathbf{\theta}_{t-1}$ is subtracted directly from the weight vector without ever touching $\hat{\mathbf{m}}_t$ or $\hat{\mathbf{v}}_t$. Every parameter decays at a rate strictly proportional to its magnitude, regardless of gradient variance.
 
 ---
 
-## Implementing Optimizers in TinyTorch
+## 7.3 The Pure TinyTorch Construction
+
+We construct our optimizer hierarchy starting with an abstract `Optimizer` base class that defines the core interface contract: `zero_grad()` and `step()`.
 
 ```python
-# Listing 7.1: The Optimizer Base Class and AdamW in TinyTorch
-from tinytorch.core.tensor import Tensor
-from typing import List
 import numpy as np
+from typing import List, Optional
+from .tensor import Tensor
 
 class Optimizer:
-    """Base class for all TinyTorch optimizers."""
+    """Base class for all TinyTorch parameter optimizers."""
+    def __init__(self, params: List[Tensor]):
+        self.params = list(params)
+        for param in self.params:
+            if isinstance(param, Tensor):
+                param.requires_grad = True
+                if not hasattr(param, 'grad'):
+                    param.grad = None
+        self.step_count = 0
 
-    def __init__(self, params: List[Tensor], lr: float = 1e-3) -> None:
-        self.params = params
+    def zero_grad(self):
+        """Reset gradients across all tracked parameters to None."""
+        for param in self.params:
+            param.grad = None
+
+    def _extract_gradient(self, param: Tensor) -> np.ndarray:
+        """Normalize gradient extraction across Tensor and ndarray representations."""
+        if isinstance(param.grad, Tensor):
+            return param.grad.data
+        return param.grad
+
+    def step(self):
+        raise NotImplementedError("Each optimizer subclass must implement step().")
+```
+
+### Implementing SGD with Momentum
+
+We implement Stochastic Gradient Descent with support for configurable learning rate $\eta$, momentum coefficient $\beta$, and weight decay $\lambda$:
+
+```python
+class SGD(Optimizer):
+    """Stochastic Gradient Descent with Heavy-Ball Momentum."""
+    def __init__(self, params: List[Tensor], lr: float = 0.01,
+                 momentum: float = 0.0, weight_decay: float = 0.0):
+        super().__init__(params)
         self.lr = lr
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.momentum_buffers = [None for _ in self.params]
 
-    def zero_grad(self) -> None:
-        """Reset gradients of all parameters to zero."""
-        for p in self.params:
-            p.zero_grad()
+    def has_momentum(self) -> bool:
+        return self.momentum > 0
 
-    def step(self) -> None:
-        raise NotImplementedError
+    def get_momentum_state(self) -> Optional[List]:
+        if not self.has_momentum():
+            return None
+        return [buf.copy() if buf is not None else None for buf in self.momentum_buffers]
 
+    def set_momentum_state(self, state: Optional[List]) -> None:
+        if state is None or not self.has_momentum():
+            return
+        for i, buf in enumerate(state):
+            if buf is not None:
+                self.momentum_buffers[i] = buf.copy()
+
+    def step(self):
+        """Execute one SGD optimization step with momentum."""
+        for i, param in enumerate(self.params):
+            if param.grad is None:
+                continue
+
+            grad_data = self._extract_gradient(param)
+
+            # Apply L2 weight decay to gradient
+            if self.weight_decay != 0:
+                grad_data = grad_data + self.weight_decay * param.data
+
+            # Apply momentum velocity accumulation
+            if self.momentum != 0:
+                if self.momentum_buffers[i] is None:
+                    self.momentum_buffers[i] = np.zeros_like(param.data)
+                self.momentum_buffers[i] = (self.momentum * self.momentum_buffers[i] +
+                                            grad_data)
+                grad_data = self.momentum_buffers[i]
+
+            # In-place parameter update
+            param.data = param.data - self.lr * grad_data
+
+        self.step_count += 1
+```
+
+### Implementing AdamW with Decoupled Weight Decay
+
+Next, we implement the state-of-the-art `AdamW` optimizer used to train transformers and modern generative models:
+
+```python
 class AdamW(Optimizer):
-    """AdamW optimizer with decoupled weight decay."""
-
-    def __init__(
-        self,
-        params: List[Tensor],
-        lr: float = 1e-3,
-        betas: tuple = (0.9, 0.999),
-        eps: float = 1e-8,
-        weight_decay: float = 1e-2
-    ) -> None:
-        super().__init__(params, lr)
+    """AdamW Optimizer with Decoupled Weight Decay (Loshchilov & Hutter, 2017)."""
+    def __init__(self, params: List[Tensor], lr: float = 0.001,
+                 betas: tuple = (0.9, 0.999), eps: float = 1e-8,
+                 weight_decay: float = 0.01):
+        super().__init__(params)
+        self.lr = lr
         self.beta1, self.beta2 = betas
         self.eps = eps
         self.weight_decay = weight_decay
-        self.t = 0
 
-        # Optimizer state buffers (First & Second moments per parameter)
-        self.m = [np.zeros_like(p.data) for p in self.params]
-        self.v = [np.zeros_like(p.data) for p in self.params]
+        # Stateful moment buffers (mean and uncentered variance)
+        self.m_buffers = [None for _ in self.params]
+        self.v_buffers = [None for _ in self.params]
 
-    def step(self) -> None:
-        self.t += 1
-        b1, b2 = self.beta1, self.beta2
+    def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
+        """Update biased first and second moments and compute bias-corrected estimates."""
+        if self.m_buffers[i] is None:
+            self.m_buffers[i] = np.zeros_like(grad_data)
+            self.v_buffers[i] = np.zeros_like(grad_data)
 
-        for i, p in enumerate(self.params):
-            if p.grad is None:
+        # Update first moment (running mean)
+        self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1.0 - self.beta1) * grad_data
+
+        # Update second moment (running variance)
+        self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1.0 - self.beta2) * (grad_data ** 2)
+
+        # Compute step-dependent bias corrections
+        bias_correction1 = 1.0 - (self.beta1 ** self.step_count)
+        bias_correction2 = 1.0 - (self.beta2 ** self.step_count)
+
+        m_hat = self.m_buffers[i] / bias_correction1
+        v_hat = self.v_buffers[i] / bias_correction2
+
+        return m_hat, v_hat
+
+    def step(self):
+        """Perform one AdamW parameter update step."""
+        self.step_count += 1
+
+        for i, param in enumerate(self.params):
+            if param.grad is None:
                 continue
 
-            g = p.grad.data
+            # Extract pure gradient without weight decay pollution
+            grad_data = self._extract_gradient(param)
 
-            # 1. Update biased 1st and 2nd moments
-            self.m[i] = b1 * self.m[i] + (1 - b1) * g
-            self.v[i] = b2 * self.v[i] + (1 - b2) * (g ** 2)
+            # Update moments using pure gradients
+            m_hat, v_hat = self._update_moments(i, grad_data)
 
-            # 2. Bias corrections
-            m_hat = self.m[i] / (1.0 - (b1 ** self.t))
-            v_hat = self.v[i] / (1.0 - (b2 ** self.t))
+            # Step 1: Apply adaptive gradient update
+            param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 
-            # 3. Decoupled weight decay + adaptive gradient step
-            step_val = (m_hat / (np.sqrt(v_hat) + self.eps)) + (self.weight_decay * p.data)
-            p.data -= self.lr * step_val
+            # Step 2: Apply decoupled weight decay directly to parameter
+            if self.weight_decay != 0:
+                param.data = param.data * (1.0 - self.lr * self.weight_decay)
 ```
 
 ---
 
-## Optimizer Memory Footprint Accounting
+## 7.4 The Production Bridge: PyTorch C++ Fused Kernels and the 16-Byte Footprint
 
-In large-scale training systems, optimizer state buffers are often the single largest consumer of GPU VRAM, dwarfing the model parameters themselves.
+In production frameworks like PyTorch, optimizer execution is bounded not by arithmetic compute (FLOPs), but by **DRAM memory bandwidth**.
 
-### The 16-Byte per Parameter Law
+### The 16-Bytes-per-Parameter Memory Law
 
-For a model with $N$ parameters, let us calculate the exact memory required to store parameters, gradients, and optimizer states:
+Consider what memory state must reside in GPU VRAM during FP32 AdamW training of a one-billion parameter model ($N = 10^9$):
 
-| Precision Regime          | Component                                          | Precision & Type       |     Bytes / Param     |   7B Model Footprint  |
-|:--------------------------|:---------------------------------------------------|:-----------------------|:---------------------:|:---------------------:|
-| **Pure FP32 Training**    | Model Weights ($\mathbf{\theta}$)                  | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | Gradients ($\mathbf{g}$)                           | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | AdamW 1st Moment ($\mathbf{m}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | AdamW 2nd Moment ($\mathbf{v}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | **Total Static Footprint**                         |                        | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
-| **Mixed Precision (AMP)** | Model Weights ($\mathbf{\theta}$)                  | `float16` / `bfloat16` |    $2\text{ bytes}$   |    $14.0\text{ GB}$   |
-|                           | Gradients ($\mathbf{g}$)                           | `float16` / `bfloat16` |    $2\text{ bytes}$   |    $14.0\text{ GB}$   |
-|                           | Master Weights ($\mathbf{\theta}_{\text{master}}$) | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | AdamW 1st Moment ($\mathbf{m}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | AdamW 2nd Moment ($\mathbf{v}$)                    | `float32`              |    $4\text{ bytes}$   |    $28.0\text{ GB}$   |
-|                           | **Total Static Footprint**                         |                        | **$16\text{ bytes}$** | **$112.0\text{ GB}$** |
-
-::: {.callout-principle}
-## The 16-Byte Invariant of AdamW Training
-
-A common systems misconception is that switching from FP32 to 16-bit Mixed Precision (FP16/BF16) cuts total training memory in half.
-
-In reality, because multiplying 16-bit gradients by small learning rates ($\eta = 10^{-4}$) causes underflow below the dynamic range of FP16 ($2^{-14} \approx 6 \times 10^{-5}$), adaptive optimizers **must maintain master weights and moment accumulators in full 32-bit float**. Consequently, both FP32 and AMP AdamW training require exactly **$16\text{ bytes per parameter}$** of static VRAM—excluding all activation memory.[^zero-mem][^eight-bit-adam]
-:::
-
-[^zero-mem]: To overcome the 16-byte wall, ZeRO (Zero Redundancy Optimizer, Rajbhandari et al., 2020) shards states across $N_{\text{GPUs}}$: **ZeRO-1** shards optimizer states ($\frac{8}{N_{\text{GPUs}}}$ bytes/param), **ZeRO-2** shards optimizer states + gradients ($\frac{10}{N_{\text{GPUs}}}$ bytes/param), and **ZeRO-3 / FSDP** shards all weights, grads, and states ($\frac{16}{N_{\text{GPUs}}}$ bytes/param).
-[^eight-bit-adam]: **8-bit Adam** (Dettmers et al., 2021) dynamically quantizes the 1st and 2nd moment buffers into block-wise INT8 representations with dynamic scale factors, reducing optimizer state memory from $8\text{ bytes/param}$ to $2\text{ bytes/param}$ (a $75\%$ reduction in optimizer VRAM).
-
----
-
-## PyTorch Systems Bridge: `torch.optim.AdamW` and Fused CUDA Kernels
-
-In production PyTorch, optimizing millions of parameters across GPU memory requires high-performance CUDA kernel dispatching:
-
-```python
-import torch
-
-model = torch.nn.Linear(4096, 4096).cuda()
-
-# Fused AdamW launches a single vectorized CUDA kernel for all parameters
-optimizer = torch.optim.AdamW(
-    model.parameters(),
-    lr=1e-3,
-    betas=(0.9, 0.999),
-    weight_decay=1e-2,
-    fused=True  # Coalesces weight, grad, m, and v memory transactions in SRAM
-)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GPU Memory Allocation per Parameter in FP32 AdamW Training                  │
+├────────────────────────────────┬──────────────────────────┬─────────────────┤
+│ Component                      │ Bytes per Parameter      │ 1B Model Size   │
+├────────────────────────────────┼──────────────────────────┼─────────────────┤
+│ Model Parameter Weights (θ)    │ 4 bytes (FP32)           │ 4.0 GB          │
+│ Gradient Buffers (g)           │ 4 bytes (FP32)           │ 4.0 GB          │
+│ First Moment Buffer (m)        │ 4 bytes (FP32)           │ 4.0 GB          │
+│ Second Moment Buffer (v)       │ 4 bytes (FP32)           │ 4.0 GB          │
+├────────────────────────────────┼──────────────────────────┼─────────────────┤
+│ TOTAL OPTIMIZER RESIDENCY      │ 16 bytes / parameter     │ 16.0 GB         │
+└────────────────────────────────┴──────────────────────────┴─────────────────┘
 ```
 
-### The Three Optimizer Dispatch Modes in PyTorch
+Even before allocating memory for activations, KV caches, or batch buffers, an FP32 model requires **sixteen bytes of VRAM for every single parameter**.
 
-1. **Standard Python Loop (`fused=False, foreach=False`)**:
-   Iterates through each parameter sequentially, launching $4$ separate CUDA kernels per tensor (weight decay, moment updates, bias correction, parameter step). For a 500-layer model, this executes $2,000$ tiny kernel launches per training step, severely bound by CPU-GPU launch latency.
-2. **Multi-Tensor Foreach (`foreach=True`)**:
-   PyTorch groups parameters by data type and device, passing lists of tensor pointers into multi-tensor C++ kernels (`torch._foreach_adamw_`), slashing Python overhead.
-3. **Fused CUDA Kernel (`fused=True`)**:
-   Launches a single monolithic CUDA kernel (`FusedAdamWKernel.cu`). For each parameter element, the GPU thread loads $\theta, g, m, v$ into fast on-chip registers simultaneously, performs all moment updates, applies decoupled weight decay, and writes the updated $\theta, m, v$ back to HBM in a single DRAM memory transaction.[^fused-adamw-ref]
+### Kernel Fusion: `torch.optim.AdamW(..., fused=True)`
 
-[^fused-adamw-ref]: In `aten/src/ATen/native/cuda/FusedAdamWKernel.cu`, fusing optimizer steps maximizes arithmetic intensity by eliminating redundant global DRAM roundtrips for intermediate moment calculations.
+In a naive Python implementation, updating a parameter requires executing four separate memory passes across DRAM:
+1. Load $g$ and $m$, write updated $m$.
+2. Load $g$ and $v$, write updated $v$.
+3. Compute $\sqrt{v} + \epsilon$, divide $m$, update $\theta$.
+4. Apply weight decay to $\theta$.
+
+In PyTorch C++ / CUDA (`fused=True`), these four passes are fused into a **single monolithic GPU kernel**. The CUDA block loads $\theta_i, g_i, m_i, v_i$ directly into fast on-chip SRAM registers in one coalesced 128-bit memory transaction, performs all algebraic updates in registers, and writes the results back to DRAM once. This delivers a **$3.5\times$ speedup** over naive unfused optimizer loops.
 
 ---
 
-## Summary
+## 7.5 Building the System: How It All Connects
 
-In this chapter, we explored parameter optimization from first principles. We analyzed the physical dynamics of momentum as a second-order heavy-ball system, proving how velocity accumulators eliminate oscillations across ill-conditioned ravines ($\kappa \gg 1$) and carry trajectories across flat zero-gradient saddle points.
+Let us step back and examine how Chapter 7 locks into our expanding framework architecture:
 
-We derived Adam's moment expectations and bias corrections, proved why standard $L_2$ regularization pollutes the second moment variance estimate in adaptive optimizers, and implemented decoupled weight decay (`AdamW`) in pure Python. Finally, we established the rigorous $16\text{ bytes/parameter}$ memory law governing deep learning training systems and examined fused CUDA kernel architectures.
+```
+                  ┌─────────────────────────────────┐
+                  │   Chapter 5: DataLoader         │
+                  │   (Batches of Data & Labels)    │
+                  └───────────────┬─────────────────┘
+                                  │
+                                  ▼
+                  ┌─────────────────────────────────┐
+                  │   Chapters 1-3: Model Layers    │
+                  │   (Forward Affine Transforms)   │
+                  └───────────────┬─────────────────┘
+                                  │
+                                  ▼
+                  ┌─────────────────────────────────┐
+                  │   Chapter 4: Cross-Entropy Loss │
+                  │   (Scalar Loss Computation L)   │
+                  └───────────────┬─────────────────┘
+                                  │
+                                  ▼
+                  ┌─────────────────────────────────┐
+                  │   Chapter 6: Dynamic Autograd   │
+                  │   (Tape Backward: Populates .grad)│
+                  └───────────────┬─────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Chapter 7: Optimizers (SGD Momentum & AdamW)                                │
+│   • zero_grad() clears stale gradient memory buffers.                       │
+│   • step() executes momentum and decoupled adaptive variance updates.       │
+│   • In-place param.data mutation completes the mathematical learning cycle. │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-::: {.callout-takeaways}
-## Chapter Takeaways
+Every fundamental component of deep learning is now alive in TinyTorch:
+- **Tensors** manage flat contiguous memory.
+- **Layers & Activations** formulate deep non-linear functional graphs.
+- **Losses** evaluate prediction errors without floating-point overflow.
+- **DataLoaders** feed batches asynchronously.
+- **Autograd** evaluates exact analytical gradients.
+- **Optimizers** guide parameter weights toward loss minima.
 
-- **The Update Invariant**: Optimizers transform raw gradients $\mathbf{g}_t$ into smooth, variance-reduced parameter updates $\mathbf{\theta}_{t+1} = \mathbf{\theta}_t - \eta \mathbf{u}_t$.
-- **Momentum Damping & Saddle Escape**: Second-order velocity accumulation cancels orthogonal high-frequency oscillations while kinetic energy carries parameters through zero-gradient saddle points.
-- **Initialization Bias Correction**: Rescaling raw moments by $\frac{1}{1 - \beta^t}$ ensures unbiased moment estimates during early optimization steps.
-- **Decoupled Weight Decay**: AdamW applies weight decay directly to parameter weights rather than mixing it into the second moment accumulator, preventing variance pollution and restoring uniform shrinkage.
-- **The 16-Byte Law**: Storing weights, gradients, and 32-bit optimizer state buffers requires $16\text{ bytes per parameter}$ in both FP32 and Mixed-Precision (AMP) training.
-- **Kernel Fusion**: `fused=True` AdamW executes multi-tensor updates in a single register pass, eliminating DRAM memory roundtrips and maximizing memory bandwidth utilization.
-:::
+Yet these six systems currently exist as separate standalone modules. How do we orchestrate them into a unified, crash-resilient training pipeline that manages epochs, learning rate decay schedules, gradient clipping, and atomic checkpoint serialization?
 
-::: {.callout-chapter-connection}
-## Chapter Connection: Closing the Training Loop
-
-We now have parameter tensors (Ch 1), forward activations (Ch 2), layers (Ch 3), losses (Ch 4), dataloaders (Ch 5), autograd gradients (Ch 6), and optimizers (Ch 7). In **Chapter 8 (The Training Loop and Trainer Architecture)**, we assemble these components into the unified 5-step training contract and train complete neural networks.
-:::
+In **Chapter 8**, we build the master orchestrator: **The Training Engine and the Rigid Five-Step Loop Contract**.

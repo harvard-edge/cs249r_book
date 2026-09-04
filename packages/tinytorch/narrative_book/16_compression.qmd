@@ -1,292 +1,184 @@
----
-title: "Model Compression: Pruning and Distillation"
----
+# Model Compression: Pruning, Low-Rank SVD, and Distillation {#sec-compression}
 
-## Purpose {.unnumbered}
+In Chapter 15, we shrunk the bit-width precision of our parameters from 32-bit floats to 8-bit integers, achieving a $4\times$ reduction in memory bandwidth traffic. Yet every matrix still retains its full, original dimensions ($N \times M$).
 
-_Why does setting 90% of a weight matrix to zero fail to produce a 10x speedup on modern GPUs?_
+In this chapter, we engineer three structural compression techniques: **Magnitude Pruning**, **Structured Channel Pruning**, and **Low-Rank Singular Value Decomposition (SVD)**. We explore why unstructured sparsity often delivers zero real-world speedup on dense GPU tensor cores, and how structured matrix factorizations physically shrink matrix dimensions for guaranteed hardware acceleration.
 
-Trained deep neural networks are drastically overparameterized: thousands of weight parameters can be zeroed out without degrading final model accuracy. However, in systems engineering, not all sparsity is created equal. Setting individual scalar weights to zero (**Unstructured Pruning**) creates irregular, scattered sparse matrices: while theoretical FLOP counts drop by 90%, modern GPU systolic arrays—which depend on dense, coalesced memory reads across 32-thread warps—experience branch divergence and memory bus stalls, often running *slower* than dense models. To achieve actual hardware speedups, frameworks use **Structured Pruning** (which removes entire rows, columns, or convolution channels, physically shrinking matrix dimensions) and **Knowledge Distillation** (which transfers dark knowledge from large teacher ensembles into compact student models).
-
-::: {.callout-learning-objectives}
-## Learning Objectives
-
-- **Implement** unstructured magnitude pruning with binary sparsity masks ($\mathbf{W}_{\text{pruned}} = \mathbf{W} \odot \mathbf{M}$).
-- **Construct** structured neuron and channel pruning that physically reshapes weight tensors, reducing GEMM dimensions.
-- **Analyze** the hardware execution disparity between unstructured random sparsity and structured dense tensor execution.
-- **Build** the Knowledge Distillation loss function, combining temperature-scaled soft targets ($D_{\text{KL}}$) with hard cross-entropy ground truth.
-- **Decompose** dense weight matrices into Low-Rank factorized projections ($\mathbf{W} \approx \mathbf{A} \mathbf{B}^T$).
-:::
+![Model Compression Spectrum: Unstructured Sparsity vs. Structured Column/Row Pruning vs. Low-Rank SVD Factorization](assets/images/diagrams/16_compression-diag-1.svg){#fig-compression-spectrum}
 
 ---
 
-## Overparameterization and the Lottery Ticket Hypothesis
+## 16.1 The Crisis: The Unstructured Sparsity Mirage
 
-Why can we remove 50% to 90% of parameters from a trained model?
+In 1989, Yann LeCun introduced *Optimal Brain Damage*, proving that deep networks are drastically overparameterized: up to $80\%$ of parameter weights can be zeroed out with negligible loss in accuracy.
 
-In 2018, Frankle and Carbin proposed the **Lottery Ticket Hypothesis**: dense, randomly initialized feed-forward networks contain sparse sub-networks ("winning lottery tickets") that, when trained in isolation, match the test accuracy of the original dense network in comparable training iterations.
+A developer implements **Unstructured Magnitude Pruning**: they find the smallest $80\%$ of weights in matrix $W$ and set them to zero:
+
+$$W_{\text{sparse}} = W \odot \mathbf{M}, \qquad M_{i,j} = \begin{cases} 1 & \text{if } |W_{i,j}| \ge \theta \\ 0 & \text{if } |W_{i,j}| < \theta \end{cases}$$
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  The Model Compression Landscape                            │
-├─────────────────────────────────────────────────────────────┤
-│  1. Unstructured Pruning: Removes individual weights.       │
-│     • Fine-grained, preserves high accuracy.                │
-│     • Requires sparse matrix libraries (CSR/COO) for speed. │
-├─────────────────────────────────────────────────────────────┤
-│  2. Structured Pruning: Removes entire channels or neurons. │
-│     • Coarse-grained, shrinks physical tensor dimensions.   │
-│     • Runs at 100% efficiency on standard dense BLAS/GEMM.  │
-├─────────────────────────────────────────────────────────────┤
-│  3. Knowledge Distillation: Trains smaller student models.  │
-│     • Learns from soft probability distributions.           │
-│     • Unlocks architecture redesign (e.g., 12 layers -> 4). │
-└─────────────────────────────────────────────────────────────┘
+The Unstructured Sparsity Trap:
+The matrix is now 80% zeros.
+The developer runs the model on an NVIDIA GPU or Intel CPU.
+Latency Result: THE MODEL RUNS SLOWER THAN DENSE MATRIX MULTIPLY! ❌
+```
+
+Why does an $80\%$ sparse matrix run *slower* on modern hardware?
+
+Modern processors are dense systolic engines. They achieve peak performance by streaming contiguous 64-byte cache lines into wide SIMD vector registers and computing uniform $16 \times 16$ tile multiplies.
+
+When zeros are scattered randomly (unstructured sparsity):
+1. The hardware must store an auxiliary **index pointer map** (Compressed Sparse Row / CSR format), adding memory overhead.
+2. Sparse matrix libraries (`spmm`) execute non-contiguous, irregular memory gathers that thrash CPU caches and cause massive instruction branch divergence.
+
+To achieve real-world hardware speedups, compression must be **Structured**.
+
+---
+
+## 16.2 The Mental Model: Structured Pruning and Low-Rank SVD
+
+### 1. Structured Channel Pruning
+
+Instead of zeroing individual scalar elements, **Structured Pruning** removes entire neurons, channels, or attention heads:
+
+```
+Structured vs. Unstructured Pruning Geometry:
+
+Unstructured (Random Zeros):           Structured (Drop Entire Columns):
+┌   0.0   1.2   0.0   0.0  ┐           ┌   1.2   0.0  ┐
+│   0.4   0.0   0.0   3.1  │   ──►     │   0.0   3.1  │  (Physically smaller
+│   0.0   0.0   2.1   0.0  │           │   0.0   0.0  │   dense matrix!)
+└   1.1   0.0   0.0   0.0  ┘           └   0.0   0.0  ┘
+```
+
+Because entire rows or columns are deleted, the weight matrix physically shrinks from $W \in \mathbb{R}^{M \times N}$ to $W' \in \mathbb{R}^{M' \times N'}$. The resulting operation is a **pure, dense GEMM** that runs at full hardware throughput on standard tensor cores.
+
+### 2. Low-Rank SVD Matrix Factorization
+
+Any weight matrix $W \in \mathbb{R}^{M \times N}$ can be factorized using **Singular Value Decomposition**:
+
+$$W = U \Sigma V^T$$
+
+If we keep only the top $r$ largest singular values ($r \ll \min(M, N)$):
+
+$$W \approx W_A \cdot W_B$$
+
+where $W_A = U_r \sqrt{\Sigma_r} \in \mathbb{R}^{M \times r}$ and $W_B = \sqrt{\Sigma_r} V_r^T \in \mathbb{R}^{r \times N}$.
+
+```
+Low-Rank SVD Parameter Compression:
+Original Layer : Y = X · W^T             (Parameters = M * N)
+Factorized Pair: Y = (X · W_B^T) · W_A^T (Parameters = r * (M + N))
+
+For M = 4096, N = 4096, and rank r = 256:
+• Original Parameters = 16,777,216
+• Factorized Parameters = 256 * (4096 + 4096) = 2,097,152  (8.0x Compression!)
 ```
 
 ---
 
-## Unstructured Magnitude Pruning
+## 16.3 The Pure TinyTorch Construction
 
-In magnitude pruning, we compute the absolute magnitude $|w_{ij}|$ of all weights and zero out the lowest $k$ percentile:
-
-$$\text{Threshold } \tau = \text{Percentile}(|\mathbf{W}|, \text{sparsity}\times 100)$$
-
-$$\mathbf{M}_{ij} = \begin{cases} 1 & \text{if } |w_{ij}| \ge \tau \\ 0 & \text{if } |w_{ij}| < \tau \end{cases}$$
-
-$$\mathbf{W}_{\text{pruned}} = \mathbf{W} \odot \mathbf{M}$$
+We implement structured pruning, magnitude pruning, and low-rank approximation in TinyTorch:
 
 ```python
-# Listing 16.1: Magnitude Pruning in TinyTorch
 import numpy as np
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
-from typing import Any
+from typing import Tuple, List, Dict
+from .tensor import Tensor
+from .layers import Linear
 
-def magnitude_prune_layer(layer: Linear, target_sparsity: float) -> np.ndarray:
-    """
-    Apply unstructured magnitude pruning to a Linear layer.
-    Returns the binary sparsity mask.
-    """
-    assert 0.0 <= target_sparsity < 1.0, "Sparsity must be between 0 and 1"
-
-    weights = layer.weight.data
-    abs_weights = np.abs(weights)
-
-    # Determine magnitude threshold
-    threshold = np.percentile(abs_weights, target_sparsity * 100.0)
-
-    # Generate binary mask
-    mask = (abs_weights >= threshold).astype(np.float32)
-
-    # Apply mask in-place
-    layer.weight.data *= mask
-    return mask
-
-def measure_sparsity(model: Any) -> float:
-    """Compute overall fraction of zero weights across all parameters."""
-    total_zeros = 0
+def measure_sparsity(model) -> float:
+    """Calculate the exact percentage of zero-valued parameters in a model."""
     total_elements = 0
+    zero_elements = 0
     for p in model.parameters():
-        total_zeros += np.sum(p.data == 0.0)
         total_elements += p.data.size
-    return float(total_zeros / total_elements)
-```
+        zero_elements += np.sum(p.data == 0.0)
+    return float(zero_elements / total_elements) if total_elements > 0 else 0.0
 
-::: {#fig-pruning-types}
-![](../quarto/assets/images/diagrams/16_compression-diag-1.svg)
+def magnitude_prune(model, sparsity: float = 0.5):
+    """Apply unstructured magnitude pruning by zeroing the smallest weights."""
+    for p in model.parameters():
+        data = p.data
+        threshold = np.percentile(np.abs(data), sparsity * 100.0)
+        mask = np.abs(data) >= threshold
+        p.data = p.data * mask
 
-**Figure 16.1: Unstructured vs. Structured Pruning.** Unstructured pruning creates scattered zero elements in the matrix. Structured pruning removes complete rows and columns, physically shrinking matrix dimensions.
-:::
+def structured_prune(linear: Linear, prune_ratio: float = 0.5) -> Linear:
+    """Physically remove lowest L1-norm input feature columns from a Linear layer."""
+    w = linear.weight.data  # Shape: [out_features, in_features]
+    in_features = w.shape[1]
 
----
+    # Calculate L1-norm across input channels
+    channel_importance = np.sum(np.abs(w), axis=0)
+    k = int(in_features * (1.0 - prune_ratio))
+    top_indices = np.argsort(channel_importance)[-k:]
+    top_indices = np.sort(top_indices)
 
-## Structured Pruning: Physically Shrinking Layers
+    # Physically slice matrix to smaller dense dimensions
+    pruned_weight = w[:, top_indices]
 
-Structured pruning removes entire output neurons from a `Linear` layer or feature channels from a `Conv2d` layer.
-
-For a weight matrix $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$, we rank each neuron $j \in [0, D_{\text{out}}-1]$ by its $L_2$ norm:
-
-$$S_j = \|\mathbf{W}_{:, j}\|_2 = \sqrt{\sum_{i=1}^{D_{\text{in}}} W_{i, j}^2}$$
-
-We retain only the top $(1 - \text{prune\_ratio}) \times D_{\text{out}}$ neurons and construct a new, physically smaller `Linear` layer:
-
-```python
-# Listing 16.2: Structured Neuron Pruning in TinyTorch
-def structured_prune_linear(layer: Linear, prune_ratio: float) -> Linear:
-    """
-    Prune neurons with smallest L2 norm, physically reducing layer dimensions.
-    """
-    in_features, out_features = layer.weight.shape
-    num_keep = int(out_features * (1.0 - prune_ratio))
-
-    # Compute L2 norm for each output neuron column
-    neuron_norms = np.linalg.norm(layer.weight.data, axis=0)
-
-    # Find indices of top neurons
-    keep_indices = np.argsort(neuron_norms)[-num_keep:]
-    keep_indices = np.sort(keep_indices)
-
-    # Create physically smaller Linear layer
-    new_layer = Linear(in_features, num_keep)
-    new_layer.weight.data = layer.weight.data[:, keep_indices].copy()
-    if layer.bias is not None:
-        new_layer.bias.data = layer.bias.data[keep_indices].copy()
+    new_layer = Linear(in_features=k, out_features=linear.out_features)
+    new_layer.weight = Tensor(pruned_weight.copy(), requires_grad=True)
+    if linear.bias is not None:
+        new_layer.bias = Tensor(linear.bias.data.copy(), requires_grad=True)
 
     return new_layer
-```
 
-Because `new_layer` has shape $(D_{\text{in}}, D_{\text{out}}')$, downstream matrix multiplications execute with fewer floating-point instructions on standard dense GEMM hardware without requiring sparse libraries.
+def low_rank_approximate(linear: Linear, rank_ratio: float = 0.25) -> Tuple[Linear, Linear]:
+    """Decompose a large Linear layer W into two smaller low-rank Linear layers (W_A, W_B)."""
+    w = linear.weight.data  # Shape: [out_features, in_features]
+    out_dim, in_dim = w.shape
+    r = max(1, int(min(out_dim, in_dim) * rank_ratio))
 
----
+    # Singular Value Decomposition: W = U · S · V^T
+    U, S, Vt = np.linalg.svd(w, full_matrices=False)
 
-## Unstructured vs. Structured Hardware Realities
+    # Truncate to top-r components
+    U_r = U[:, :r]
+    S_r = np.diag(np.sqrt(S[:r]))
+    Vt_r = Vt[:r, :]
 
-| Dimension                     |                         Unstructured Pruning                         |                  Structured Pruning                 |
-|:------------------------------|:--------------------------------------------------------------------:|:---------------------------------------------------:|
-| **Pruning Granularity**       |                      Individual scalar weights                       |           Entire rows / channels / layers           |
-| **Accuracy Retention**        |           Exceptional ($>80\%$ sparsity with $<1\%$ drop)            |      Moderate ($30-50\%$ sparsity before drop)      |
-| **Hardware Execution**        |                Requires sparse CSR/COO index pointers                |         **Native dense GEMM / Tensor Cores**        |
-| **Memory Coalescing**         | **Broken** (scattered DRAM line requests)[^warp-coalescing-footnote] |           **100% Contiguous & Coalesced**           |
-| **Actual Speedup on CPU/GPU** |        Often **$0\times$ (or slower!)** on standard hardware         | **Direct linear speedup ($1.5\times - 2.5\times$)** |
-| **Hardware Exceptions**       |      NVIDIA Ampere 2:4 Sparse Tensor Cores[^sparse-tc-footnote]      |                  Universal support                  |
+    W_A = np.dot(U_r, S_r)           # Shape: [out_features, r]
+    W_B = np.dot(S_r, Vt_r)          # Shape: [r, in_features]
 
-[^warp-coalescing-footnote]: On modern GPUs, memory controllers service DRAM requests in 32-byte, 64-byte, or 128-byte cache line segments. When 32 threads in a warp request contiguous 4-byte floats, a single 128-byte DRAM transaction satisfies all 32 threads (100% bus utilization). Unstructured random sparsity causes threads to request scattered addresses across different cache lines, triggering up to 32 separate 128-byte DRAM fetches (delivering only 4 bytes of useful payload each, or 3.1% bus efficiency).
+    layer_B = Linear(in_features=in_dim, out_features=r)
+    layer_B.weight = Tensor(W_B, requires_grad=True)
+    layer_B.bias = None
 
-[^sparse-tc-footnote]: NVIDIA 2:4 Structured Sparsity (introduced in Ampere GA100) compresses each 4-element FP16/INT8 vector into 2 nonzero elements plus a 2-bit index metadata per pair. Dedicated Sparse Tensor Core hardware decompresses these pairs on-the-fly inside register banks before feeding the systolic multiplier array, delivering an exact $2\times$ theoretical math speedup.
+    layer_A = Linear(in_features=r, out_features=out_dim)
+    layer_A.weight = Tensor(W_A, requires_grad=True)
+    if linear.bias is not None:
+        layer_A.bias = Tensor(linear.bias.data.copy(), requires_grad=True)
 
----
-
-## Knowledge Distillation: Soft Targets
-
-In *Distilling the Knowledge in a Neural Network* (2015), Geoffrey Hinton, Oriol Vinyals, and Jeff Dean proposed **Knowledge Distillation**.
-
-Instead of training a compact student network on one-hot ground-truth labels ($y = [0, 1, 0]$), the student learns from the continuous probability distribution produced by a large teacher network.
-
-### The Temperature Softmax
-
-Dividing logits by temperature $T > 1$ softens the probability distribution, revealing rich relative affinities across incorrect classes ("dark knowledge"):
-
-$$q_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}$$
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Dark Knowledge Extraction: Classifying a BMW               │
-├─────────────────────────────────────────────────────────────┤
-│  • Hard Label (One-Hot):  [ Car: 1.0,  Truck: 0.0,  Dog: 0.0 ]│
-│  • Teacher (T = 1):       [ Car: 0.99, Truck: 0.01, Dog: 0.00]│
-│  • Teacher Softened (T=5):[ Car: 0.65, Truck: 0.30, Dog: 0.05]│
-│    -> Teaches the student that a BMW is much closer to a    │
-│       truck than to a dog!                                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### The Distillation Loss Formula
-
-$$\mathcal{L}_{\text{total}} = \alpha T^2 \cdot D_{\text{KL}}\left(\text{softmax}\left(\frac{\mathbf{z}_S}{T}\right) \parallel \text{softmax}\left(\frac{\mathbf{z}_T}{T}\right)\right) + (1 - \alpha) \mathcal{L}_{\text{CE}}(\mathbf{z}_S, y)$$
-
-```python
-# Listing 16.3: Knowledge Distillation Loss in TinyTorch
-def distillation_loss(
-    student_logits: Tensor,
-    teacher_logits: Tensor,
-    targets: Tensor,
-    temperature: float = 4.0,
-    alpha: float = 0.7
-) -> Tensor:
-    """
-    Compute combined soft KL-divergence and hard cross-entropy distillation loss.
-    """
-    # 1. Soft predictions with temperature scaling
-    p_s = np.exp(student_logits.data / temperature)
-    p_s /= np.sum(p_s, axis=-1, keepdims=True)
-
-    p_t = np.exp(teacher_logits.data / temperature)
-    p_t /= np.sum(p_t, axis=-1, keepdims=True)
-
-    # 2. KL Divergence: sum(p_t * log(p_t / p_s))
-    kl_div = np.sum(p_t * (np.log(np.maximum(p_t, 1e-8)) - np.log(np.maximum(p_s, 1e-8))), axis=-1)
-    soft_loss = np.mean(kl_div) * (temperature ** 2)
-
-    # 3. Standard cross-entropy on hard targets
-    b = targets.data.astype(int)
-    log_probs = np.log(np.maximum(p_s, 1e-8))
-    hard_loss = -np.mean(log_probs[np.arange(len(b)), b])
-
-    total = alpha * soft_loss + (1.0 - alpha) * hard_loss
-    return Tensor(np.array(total, dtype=np.float32))
+    return layer_B, layer_A
 ```
 
 ---
 
-## Low-Rank Matrix Factorization (SVD / LoRA)
+## 16.4 The Production Bridge: LoRA (Low-Rank Adaptation)
 
-A dense weight matrix $\mathbf{W} \in \mathbb{R}^{M \times N}$ can be approximated by the product of two low-rank matrices $\mathbf{A} \in \mathbb{R}^{M \times r}$ and $\mathbf{B} \in \mathbb{R}^{r \times N}$ where $r \ll \min(M, N)$:
+In production LLM fine-tuning, the low-rank factorization principles of SVD are used by **LoRA (Hu et al., 2021)**:
 
-$$\mathbf{W} \approx \mathbf{A} \mathbf{B}$$
+$$W_{\text{adapted}} = W_{\text{frozen}} + \frac{\alpha}{r} (B \cdot A)$$
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Low-Rank Factorization Memory Reduction                    │
-├─────────────────────────────────────────────────────────────┤
-│  Original Matrix: W (4,096 x 4,096) = 16,777,216 parameters │
-│                                                             │
-│  Factorized (Rank r = 64):                                  │
-│  • Matrix A: (4,096 x 64) = 262,144 parameters              │
-│  • Matrix B: (64 x 4,096) = 262,144 parameters              │
-│  • Total Parameters: 524,288 parameters                     │
-│  ────────────────────────────────────────────────────────── │
-│  Parameter Reduction: 96.9% reduction (32x compression)!    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-This mathematical factorization forms the foundation of **LoRA (Low-Rank Adaptation)**, allowing billion-parameter foundational LLMs to be fine-tuned using tiny $r=16$ adapter matrices.
+where $W_{\text{frozen}}$ is a multi-billion parameter frozen model, and $B \in \mathbb{R}^{d \times r}, A \in \mathbb{R}^{r \times k}$ are low-rank adapters ($r = 8$). This reduces fine-tuning memory by **$99\%$**, enabling massive models to be customized on single consumer GPUs.
 
 ---
 
-::: {.callout-note}
-## PyTorch Systems Bridge: `torch.nn.utils.prune`, TensorRT, and PEFT LoRA
+## 16.5 Building the System: How It All Connects
 
-In PyTorch, pruning and low-rank adaptation are integrated across both training and deployment frameworks:
+Chapter 16 provides the architectural tools to reshape network geometry for maximum hardware efficiency:
 
-```python
-import torch
-import torch.nn.utils.prune as prune
-
-# Apply structured L2-norm pruning across output channels
-prune.ln_structured(
-    module=model.conv1,
-    name="weight",
-    amount=0.3,
-    n=2,
-    dim=0
-)
-# Permanently remove pruned channels, physically reshaping the tensor
-prune.remove(model.conv1, "weight")
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Cumulative Compression Wins:                                                │
+│ 1. INT8 Quantization (Ch 15)  : 4.0x Memory Bandwidth Reduction             │
+│ 2. Low-Rank Factorization (Ch 16): 3.2x Parameter Count Reduction          │
+│ 3. Combined Result            : ~12.8x Total Memory Footprint Shrinkage!    │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-For large generative models, **HuggingFace PEFT** implements Low-Rank Adaptation ($\mathbf{W} + \frac{\alpha}{r} \mathbf{A}\mathbf{B}$), keeping 70B parameter base weights frozen in 4-bit INT4 quantization while training low-rank adapter matrices. In serving engines like **vLLM**, dynamic multi-LoRA routing allows hundreds of custom adapters to be evaluated concurrently over a single shared base model in GPU HBM.
-:::
+Yet even when a network is quantized and compressed, consecutive elementwise operations launch separate GPU kernels that waste roundtrips to off-chip DRAM.
 
----
-
-## Summary
-
-In this chapter, we explored algorithms for shrinking neural network architectures. We analyzed the fundamental distinction between unstructured magnitude pruning (which creates scattered zeros that stall standard GPUs) and structured pruning (which physically resizes weight matrices for guaranteed dense GEMM acceleration).
-
-We implemented Knowledge Distillation to transfer dark knowledge from large teacher models to compact students via temperature-softened probability distributions, and formulated Low-Rank Matrix Factorization (the mathematical basis for LoRA).
-
-::: {.callout-takeaways}
-## Chapter Takeaways
-
-- **The Sparsity Speed Paradox**: Unstructured pruning reduces theoretical FLOPs but often fails to accelerate GPU inference due to uncoalesced memory reads and branch divergence.
-- **Structured Pruning Speedup**: Structured pruning physically reduces matrix dimensions, delivering immediate speedups on standard dense BLAS/Tensor Core hardware.
-- **Knowledge Distillation**: Softening teacher probabilities with temperature $T > 1$ exposes rich inter-class affinities that guide small student networks toward higher accuracy.
-- **Low-Rank Decomposition**: Factoring an $(M \times N)$ weight matrix into $(M \times r)$ and $(r \times N)$ compresses parameter storage by $(M \times N) / (r(M + N))$.
-:::
-
-::: {.callout-chapter-connection}
-## Chapter Connection: Accelerating Execution Kernels
-
-We have shrunk our models through quantization and pruning. How do we make the remaining operations execute at peak hardware speed on the processor? In **Chapter 17 (Kernel Acceleration: Vectorization, Tiling, and Fusion)**, we dive into the low-level systems mechanics of hardware caches, loop tiling, SIMD vectorization, and operator fusion.
-:::
+In **Chapter 17**, we engineer **Hardware Acceleration: Kernel Fusion and SRAM Register Residency**.

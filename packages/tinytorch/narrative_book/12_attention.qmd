@@ -1,347 +1,267 @@
----
-title: "Scaled Dot-Product Attention and Multi-Head Mechanisms"
----
+# Attention Mechanisms: Scaled Dot-Product & Causal Masking {#sec-attention}
 
-## Purpose {.unnumbered}
+In Chapters 10 and 11, we converted raw human text into continuous semantic vectors infused with temporal positional waveforms. Yet our tokens currently travel through the framework in complete isolation: no token can inspect, communicate with, or gather context from any other token in the sequence.
 
-_Why did scaled dot-product attention replace recurrent memory cells across the entire landscape of artificial intelligence?_
+In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**. We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor, and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation.
 
-Prior to the transformer, sequence processing relied on Recurrent Neural Networks (RNNs, LSTMs, and GRUs) that updated a fixed-size hidden state vector $\mathbf{h}_t$ sequentially token-by-token. This sequential dependency created two fatal bottlenecks: computational unrolling prohibited hardware parallelism across time steps ($O(S)$ sequential latency), and sequential backpropagation compressed long-range context through an information bottleneck, suffering from vanishing gradients. Attention shatters this paradigm by establishing direct $O(1)$ routing connections between every token pair in a sequence, retrieving context dynamically via **Query-Key-Value (QKV)** dot products. In a framework runtime, attention replaces sequential loops with dense, parallel matrix multiplications, but introduces a new systems challenge: the pairwise similarity matrix requires $O(S^2)$ memory and arithmetic, creating the infamous **quadratic attention memory wall**.
-
-::: {.callout-learning-objectives}
-## Learning Objectives
-
-- **Formulate** the Query-Key-Value information retrieval mechanism and derive the variance stabilization scaling factor $\frac{1}{\sqrt{d_k}}$.
-- **Implement** `scaled_dot_product_attention` in pure Python, supporting both bidirectional and causal autoregressive masking.
-- **Construct** `MultiHeadAttention` with parallel head projection, 4D tensor reshaping $(B, H, S, d_k)$, and linear output recombination.
-- **Calculate** the exact memory allocation footprint of intermediate attention score matrices across varying sequence lengths ($S = 512 \to 8192$).
-- **Evaluate** the systems transition from naive materialization of $S \times S$ attention maps to tile-based IO-aware kernel fusion (FlashAttention).
-:::
+![The Attention Engine: Query-Key Routing, 1/sqrt(d_k) Variance Scaling, and Causal Lower-Triangular Masking](assets/images/diagrams/12_attention-diag-1.svg){#fig-attention-engine}
 
 ---
 
-## The Information Bottleneck of Recurrence
+## 12.1 The Crisis: The Recurrence Bottleneck and the Softmax Gradient Cliff
 
-In an RNN, information from token 1 must pass through $S-1$ recurrent state transitions to reach token $S$:
+Before the transformer architecture was discovered, sequential language was processed using **Recurrent Neural Networks (RNNs)** and LSTMs.
 
-$$\mathbf{h}_t = \tanh(\mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{W}_{xh} \mathbf{x}_t)$$
+An RNN maintains a hidden state vector $\mathbf{h}_t$, updating it one step at a time:
+
+$$\mathbf{h}_t = \tanh(W_{hh} \mathbf{h}_{t-1} + W_{xh} \mathbf{x}_t)$$
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Recurrent Neural Network: Sequential Information Bottleneck│
-├─────────────────────────────────────────────────────────────┤
-│  Token 1 ──> [Cell 1] ──> [Cell 2] ──> ... ──> [Cell S]     │
-│                 │            │                    │         │
-│                 ▼            ▼                    ▼         │
-│             Hidden h1    Hidden h2            Hidden hS     │
-│  • Parallelism across time: ZERO (Must wait for h_{t-1})    │
-│  • Maximum path length between tokens: O(S)                 │
-├─────────────────────────────────────────────────────────────┤
-│  Self-Attention: Direct Parallel Interconnect               │
-├─────────────────────────────────────────────────────────────┤
-│  Token 1 <──────────────────────────────────────> Token S   │
-│  • Parallelism across time: FULL (Matrix multiplications)   │
-│  • Maximum path length between tokens: O(1)                 │
-└─────────────────────────────────────────────────────────────┘
+The Fatal Recurrence Bottleneck in GPU Hardware:
+
+Time Step 1        Time Step 2        Time Step 3        Time Step S
+  [ x_1 ]            [ x_2 ]            [ x_3 ]            [ x_S ]
+     │                  │                  │                  │
+     ▼                  ▼                  ▼                  ▼
+  [ h_1 ] ─────────► [ h_2 ] ─────────► [ h_3 ] ─────────► [ h_S ]
+  (Executed 1st)     (Executed 2nd)     (Executed 3rd)     (Executed S-th)
+
+To compute h_S, the GPU MUST wait for S sequential serial steps!
+GPU parallel tensor cores sit 95% idle waiting on serial dependency chains! ❌
 ```
 
-Attention replaces sequential unrolling with direct pairwise dot products, reducing the maximum path length between any two tokens in a document from $O(S)$ to $O(1)$.
+Recurrence is fundamentally incompatible with massively parallel GPU accelerators: to compute step $t$, the hardware *must* wait for step $t-1$. We cannot parallelize over time.
+
+### The Variance Explosion of Raw Dot Products
+
+When researchers replaced recurrence with all-to-all dot products ($A = Q K^T$), they encountered a second crisis: **vanishing gradients in softmax space**.
+
+Consider two random vectors $\mathbf{q}, \mathbf{k} \in \mathbb{R}^{d_k}$ with components independently sampled with zero mean and unit variance ($q_i, k_i \sim \mathcal{N}(0, 1)$). The dot product is:
+
+$$z = \mathbf{q}^T \mathbf{k} = \sum_{i=1}^{d_k} q_i k_i$$
+
+The mean and variance of $z$ are:
+
+$$\mathbb{E}[z] = \sum_{i=1}^{d_k} \mathbb{E}[q_i] \mathbb{E}[k_i] = 0$$
+
+$$\text{Var}(z) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = \sum_{i=1}^{d_k} \text{Var}(q_i) \text{Var}(k_i) = \sum_{i=1}^{d_k} (1)(1) = d_k$$
+
+```
+The Softmax Gradient Cliff (For d_k = 64):
+• Standard Deviation of dot products: σ = √64 = 8.0.
+• Dot product scores range from -24.0 to +24.0.
+• When inputs to Softmax exceed |z| > 10, Softmax saturates:
+  Softmax([24.0, -8.0, 0.0]) ──► [1.0, 0.0, 0.0]
+• Derivative of Softmax: ∂S_i / ∂z_j = S_i (δ_ij - S_j).
+• For saturated probabilities (S_i ≈ 1 or S_i ≈ 0), GRADIENTS BECOME ZERO! ❌
+```
+
+Without scaling, the largest dot product dominates completely, saturating the softmax function and causing **all backpropagation gradients to vanish to zero**.
 
 ---
 
-## The Query-Key-Value Paradigm
+## 12.2 The Mental Model: Database Retrieval and Causal Masking
 
-Attention formulates sequence interaction as a differentiable database retrieval system:
-
-- **Query ($\mathbf{Q} \in \mathbb{R}^{S \times d_k}$)**: What the current token is searching for.
-- **Key ($\mathbf{K} \in \mathbb{R}^{S \times d_k}$)**: What each candidate token in the sequence contains.
-- **Value ($\mathbf{V} \in \mathbb{R}^{S \times d_v}$)**: The actual semantic payload retrieved if the Query matches the Key.
-
-For an input matrix $\mathbf{X} \in \mathbb{R}^{S \times D}$, the three matrices are computed via learned linear projections:
-
-$$\mathbf{Q} = \mathbf{X} \mathbf{W}_Q, \quad \mathbf{K} = \mathbf{X} \mathbf{W}_K, \quad \mathbf{V} = \mathbf{X} \mathbf{W}_V$$
-
-where $\mathbf{W}_Q, \mathbf{W}_K \in \mathbb{R}^{D \times d_k}$ and $\mathbf{W}_V \in \mathbb{R}^{D \times d_v}$.
-
-::: {#fig-qkv-attention}
-![](../quarto/assets/images/diagrams/12_attention-diag-1.svg)
-
-**Figure 12.1: Scaled Dot-Product Attention Mechanism.** Queries and Keys are multiplied to produce pairwise affinity logits. After scaling and causal masking, Softmax normalizes affinities into attention weights that linearly blend Value vectors.
-:::
-
----
-
-## Scaled Dot-Product Attention
-
-The attention weights between all token pairs are computed via the scaled dot-product formula:
-
-$$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left( \frac{\mathbf{Q} \mathbf{K}^T}{\sqrt{d_k}} + \mathbf{M} \right) \mathbf{V}$$
-
-### Why the Scale Factor $\frac{1}{\sqrt{d_k}}$ is Mandatory: Preventing Softmax Gradient Extinction
-
-To understand why the scaling factor $\frac{1}{\sqrt{d_k}}$ is essential for training stability, consider the statistical behavior of the raw Query-Key dot product.
-
-Assume the components of query vector $\mathbf{q} \in \mathbb{R}^{d_k}$ and key vector $\mathbf{k} \in \mathbb{R}^{d_k}$ are independent, zero-mean, unit-variance random variables:
-
-$$\mathbb{E}[q_i] = 0, \quad \text{Var}(q_i) = 1, \quad \mathbb{E}[k_i] = 0, \quad \text{Var}(k_i) = 1$$
-
-The raw scalar dot product $z = \mathbf{q}^T \mathbf{k} = \sum_{i=1}^{d_k} q_i k_i$ has expectation zero:
-
-$$\mathbb{E}[z] = \sum_{i=1}^{d_k} \mathbb{E}[q_i k_i] = \sum_{i=1}^{d_k} \mathbb{E}[q_i]\mathbb{E}[k_i] = 0$$
-
-Because the terms are mutually independent, the variance of the sum is the sum of the variances:
-
-$$\text{Var}(z) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = \sum_{i=1}^{d_k} \left( \mathbb{E}[q_i^2 k_i^2] - (\mathbb{E}[q_i k_i])^2 \right) = \sum_{i=1}^{d_k} (\text{Var}(q_i)\text{Var}(k_i)) = \sum_{i=1}^{d_k} (1 \cdot 1) = d_k$$
-
-The standard deviation of raw dot products grows with the square root of the head dimension: $\sigma_z = \sqrt{d_k}$.
+To understand Scaled Dot-Product Attention, we use the analogy of a **differentiable database query**:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  The Softmax Gradient Saturation Hazard                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Unscaled Attention (d_k = 128):                                        │
-│  • Raw dot-product std dev: sigma = sqrt(128) ≈ 11.31                   │
-│  • Logit values range from -30 to +30                                   │
-│  • Softmax Exponentiation: exp(30) ≈ 1.07 * 10^13 (Argmax Collapse)     │
-│  • Output Distribution: [0.0, 0.0, ..., 1.0, ..., 0.0]                  │
-│                                                                         │
-│  Softmax Jacobian Gradient Flow:                                        │
-│  • Winning index (p_i = 1.0): d(p_i) / d(z_i) = p_i * (1 - p_i) = 0.0   │
-│  • Losing indices (p_j = 0.0): d(p_j) / d(z_j) = p_j * (1 - p_j) = 0.0  │
-│  • RESULT: Gradient is EXACTLY ZERO everywhere! Model learning halts!   │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Scaled Attention (Scaled by 1 / sqrt(d_k)):                            │
-│  • Scaled dot-product std dev: sigma = 1.0 (Unit Variance)              │
-│  • Logits remain in the sensitive linear dynamic range of Softmax       │
-│  • Non-zero gradients propagate smoothly to W_Q and W_K parameter arrays│
-└─────────────────────────────────────────────────────────────────────────┘
+The Query-Key-Value Database Analogy:
+1. Queries (Q): What each token is currently searching for ("I am a pronoun looking for my subject").
+2. Keys (K)   : What each token advertises about itself ("I am a singular noun in the subject position").
+3. Values (V) : The actual semantic content retrieved when a Query matches a Key.
 ```
 
-When unscaled logits are fed into $\mathbf{p} = \text{softmax}(\mathbf{z})$, the exponential function pushes the largest logit to $p_{\text{max}} \approx 1.0$ and all competing logits to $p_j \approx 0.0$. Evaluating the multivariable Softmax Jacobian:
+The mathematical formula for Scaled Dot-Product Attention is:
 
-$$\frac{\partial p_i}{\partial z_j} = p_i (\delta_{ij} - p_j)$$
+$$\text{Attention}(Q, K, V) = \text{Softmax}\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-- When $i = j = \text{argmax}$: $p_i (1 - p_i) = 1.0 \times (1.0 - 1.0) = 0$.
-- When $i \ne j$: $p_i (0 - p_j) = 0.0 \times 0.0 = 0$.
+### Why $1/\sqrt{d_k}$ Restores Unit Variance
 
-The gradient vanishes to zero across all entries, permanently extinguishing backpropagation through the attention projections. Dividing by $\sqrt{d_k}$ enforces $\text{Var}\left(\frac{\mathbf{q}^T \mathbf{k}}{\sqrt{d_k}}\right) = 1.0$, guaranteeing stable, non-vanishing gradient highways regardless of head dimensionality.
+By dividing the dot product by $\sqrt{d_k}$, the variance of the scaled attention scores becomes:
 
----
+$$\text{Var}\left( \frac{\mathbf{q}^T \mathbf{k}}{\sqrt{d_k}} \right) = \frac{1}{d_k} \text{Var}(\mathbf{q}^T \mathbf{k}) = \frac{d_k}{d_k} = 1.0$$
 
-## Causal Masking: Enforcing the Arrow of Time
+The inputs to Softmax remain nicely bounded within $[-2, +2]$ regardless of whether head dimension $d_k$ is $64$, $128$, or $512$. Softmax gradients remain healthy and non-vanishing throughout deep training.
 
-In autoregressive language generation (GPT), token $i$ must not attend to future tokens $j > i$.
+### Causal Masking: Enforcing the Arrow of Time
 
-To enforce this causal constraint without disrupting parallel matrix multiplications, frameworks apply an upper-triangular **Causal Mask** $\mathbf{M} \in \mathbb{R}^{S \times S}$:
+In autoregressive language generation, token $t$ is allowed to look at past tokens $1, 2, \dots, t$, but is strictly forbidden from "looking into the future" at tokens $t+1, t+2, \dots, S$.
 
-$$\mathbf{M}_{ij} = \begin{cases} 0 & \text{if } j \le i \\ -\infty \quad (\text{or } -10^9) & \text{if } j > i \end{cases}$$
+We enforce this constraint by adding a **Causal Lower-Triangular Mask Matrix** $M \in \mathbb{R}^{S \times S}$:
 
-When added to the scaled scores before Softmax:
-
-$$\text{softmax}\left( \frac{\mathbf{Q} \mathbf{K}^T}{\sqrt{d_k}} + \mathbf{M} \right)_{ij} = \frac{e^{z_{ij} + M_{ij}}}{\sum_k e^{z_{ik} + M_{ik}}} = \frac{e^{-\infty}}{\sum \dots} = 0 \quad \forall j > i$$
+$$M_{i, j} = \begin{cases} 0 & \text{if } j \le i \quad \text{(Past and Present: Allowed)} \\ -\infty & \text{if } j > i \quad \text{(Future: Forbidden)} \end{cases}$$
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Causal Attention Mask Matrix M (4 x 4 Sequence)            │
-├─────────────────────────────────────────────────────────────┤
-│               Token 0   Token 1   Token 2   Token 3         │
-│  Token 0: [      0,       -inf,     -inf,     -inf   ]      │
-│  Token 1: [      0,         0,      -inf,     -inf   ]      │
-│  Token 2: [      0,         0,        0,      -inf   ]      │
-│  Token 3: [      0,         0,        0,        0    ]      │
-└─────────────────────────────────────────────────────────────┘
+Causal Mask Matrix M (4x4 Sequence):
+              Token 0   Token 1   Token 2   Token 3
+Token 0 (Now) ┌   0       -inf      -inf      -inf   ┐
+Token 1 (Now) │   0         0       -inf      -inf   │
+Token 2 (Now) │   0         0         0       -inf   │
+Token 3 (Now) └   0         0         0         0    ┘
+
+After Softmax: exp(-inf) = 0.0! Future positions receive EXACTLY ZERO attention weight.
 ```
 
 ---
 
-## Multi-Head Attention: Parallel Subspaces
+## 12.3 The Pure TinyTorch Construction
 
-Rather than performing a single attention function with $D$-dimensional keys and values, **Multi-Head Attention (MHA)** projects the queries, keys, and values $H$ times into lower-dimensional subspaces of dimension $d_k = D / H$:
-
-$$\text{head}_h = \text{Attention}(\mathbf{Q} \mathbf{W}_Q^{(h)}, \mathbf{K} \mathbf{W}_K^{(h)}, \mathbf{V} \mathbf{W}_V^{(h)})$$
-
-$$\text{MultiHead}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{Concat}(\text{head}_1, \text{head}_2, \dots, \text{head}_H) \mathbf{W}_O$$
-
-where $\mathbf{W}_O \in \mathbb{R}^{D \times D}$ linearly recombines the outputs of all heads.
-
-Multi-head projections allow the network to jointly attend to information from different representation subspaces at different positions (e.g., Head 1 tracks grammatical syntax, Head 2 tracks pronoun reference, and Head 3 tracks punctuation).
-
----
-
-## Implementing MultiHeadAttention in TinyTorch
+We implement Scaled Dot-Product Attention and Multi-Head Attention in TinyTorch:
 
 ```python
-# Listing 12.1: MultiHeadAttention Implementation in TinyTorch
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Layer, Linear
-from tinytorch.core.activations import Softmax
-from typing import List, Optional, Tuple
 import numpy as np
+from typing import List, Tuple, Optional
+from .tensor import Tensor
+from .layers import Layer, Linear
+from .losses import LogSumExpStabilizer
 
-def scaled_dot_product_attention(
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    mask: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]:
+def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor,
+                                 mask: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+    """Compute Scaled Dot-Product Attention: Softmax(QK^T / sqrt(d_k) + Mask) V.
+
+    Args:
+        Q: Queries of shape [batch, heads, seq_len, d_k]
+        K: Keys of shape [batch, heads, seq_len, d_k]
+        V: Values of shape [batch, heads, seq_len, d_k]
+        mask: Optional additive causal mask of shape [seq_len, seq_len]
+    Returns:
+        Tuple of (Context Output, Attention Weights)
     """
-    Compute Scaled Dot-Product Attention over 4D tensors (B, H, S, d_k).
-    """
-    d_k = q.shape[-1]
+    d_k = Q.data.shape[-1]
     scale = 1.0 / np.sqrt(d_k)
 
-    # 1. Compute raw affinity scores: Q @ K^T -> (B, H, S, S)
-    # Transpose last two dimensions of K
-    k_t = np.swapaxes(k.data, -1, -2)
-    scores = np.matmul(q.data, k_t) * scale
+    # 1. Compute raw affinity scores: Q @ K^T -> [batch, heads, seq_len, seq_len]
+    scores_data = np.matmul(Q.data, np.swapaxes(K.data, -1, -2)) * scale
 
-    # 2. Apply causal or padding mask
+    # 2. Apply causal mask if provided
     if mask is not None:
-        scores += mask.data
+        scores_data = scores_data + mask.data
 
-    # 3. Softmax along last dimension to obtain attention probabilities
-    softmax = Softmax(dim=-1)
-    attn_weights = softmax(Tensor(scores))
+    # 3. Numerically stable softmax across the last dimension
+    max_scores = np.max(scores_data, axis=-1, keepdims=True)
+    exp_scores = np.exp(scores_data - max_scores)
+    attn_weights_data = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
 
-    # 4. Multiply by Values: (B, H, S, S) @ (B, H, S, d_k) -> (B, H, S, d_k)
-    output = np.matmul(attn_weights.data, v.data)
+    # 4. Multiply attention weights by Values: Attn @ V -> [batch, heads, seq_len, d_k]
+    out_data = np.matmul(attn_weights_data, V.data)
 
-    return Tensor(output), attn_weights
-
+    out_tensor = Tensor(out_data)
+    attn_weights = Tensor(attn_weights_data)
+    out_tensor._op = "ScaledDotProductAttention"
+    out_tensor._parents = [Q, K, V]
+    return out_tensor, attn_weights
 
 class MultiHeadAttention(Layer):
-    """
-    Multi-Head Attention module for parallel subspace representation.
-    """
+    """Multi-Head Attention Layer with Parallel Projections."""
+    def __init__(self, embed_dim: int, num_heads: int):
+        super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
 
-    def __init__(self, d_model: int, num_heads: int) -> None:
-        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
-        self.d_model = d_model
+        self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.d_k = d_model // num_heads
+        self.d_k = embed_dim // num_heads
 
-        # Linear projections for Q, K, V and output O
-        self.w_q = Linear(d_model, d_model)
-        self.w_k = Linear(d_model, d_model)
-        self.w_v = Linear(d_model, d_model)
-        self.w_o = Linear(d_model, d_model)
-
-    def forward(self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        B, S_q, _ = q.shape
-        B, S_k, _ = k.shape
-
-        # 1. Linear projections: (B, S, D)
-        proj_q = self.w_q(q)
-        proj_k = self.w_k(k)
-        proj_v = self.w_v(v)
-
-        # 2. Split heads and transpose: (B, S, H, d_k) -> (B, H, S, d_k)
-        q_heads = proj_q.data.reshape(B, S_q, self.num_heads, self.d_k).swapaxes(1, 2)
-        k_heads = proj_k.data.reshape(B, S_k, self.num_heads, self.d_k).swapaxes(1, 2)
-        v_heads = proj_v.data.reshape(B, S_k, self.num_heads, self.d_k).swapaxes(1, 2)
-
-        # 3. Scaled dot-product attention
-        out_heads, _ = scaled_dot_product_attention(
-            Tensor(q_heads), Tensor(k_heads), Tensor(v_heads), mask
-        )
-
-        # 4. Concatenate heads: (B, H, S_q, d_k) -> (B, S_q, H * d_k)
-        out_concat = out_heads.data.swapaxes(1, 2).reshape(B, S_q, self.d_model)
-
-        # 5. Final output projection
-        return self.w_o(Tensor(out_concat))
+        # Linear projections for Q, K, V and Output
+        self.q_proj = Linear(embed_dim, embed_dim)
+        self.k_proj = Linear(embed_dim, embed_dim)
+        self.v_proj = Linear(embed_dim, embed_dim)
+        self.out_proj = Linear(embed_dim, embed_dim)
 
     def parameters(self) -> List[Tensor]:
-        return (
-            self.w_q.parameters() +
-            self.w_k.parameters() +
-            self.w_v.parameters() +
-            self.w_o.parameters()
-        )
+        return (self.q_proj.parameters() + self.k_proj.parameters() +
+                self.v_proj.parameters() + self.out_proj.parameters())
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        """Forward multi-head attention over input sequence.
+
+        Args:
+            x: Input embeddings of shape [batch_size, seq_len, embed_dim]
+            mask: Optional causal mask
+        Returns:
+            Output activations of shape [batch_size, seq_len, embed_dim]
+        """
+        B, S, D = x.data.shape
+        H = self.num_heads
+        d_k = self.d_k
+
+        # 1. Project inputs to Q, K, V
+        Q = self.q_proj.forward(x)  # [B, S, D]
+        K = self.k_proj.forward(x)  # [B, S, D]
+        V = self.v_proj.forward(x)  # [B, S, D]
+
+        # 2. Reshape and transpose for multi-head parallel attention: [B, H, S, d_k]
+        Q_heads = Tensor(Q.data.reshape(B, S, H, d_k).swapaxes(1, 2))
+        K_heads = Tensor(K.data.reshape(B, S, H, d_k).swapaxes(1, 2))
+        V_heads = Tensor(V.data.reshape(B, S, H, d_k).swapaxes(1, 2))
+
+        # 3. Scaled dot-product attention across all heads simultaneously
+        attn_out, _ = scaled_dot_product_attention(Q_heads, K_heads, V_heads, mask)
+
+        # 4. Concatenate heads back into [B, S, D]
+        out_concat_data = attn_out.data.swapaxes(1, 2).reshape(B, S, D)
+        out_concat = Tensor(out_concat_data)
+
+        # 5. Final output projection
+        return self.out_proj.forward(out_concat)
 ```
 
 ---
 
-::: {.callout-note}
-## PyTorch Systems Bridge: `torch.nn.functional.scaled_dot_product_attention` (SDPA)
+## 12.4 The Production Bridge: FlashAttention-2 and SRAM Tiling
 
-In modern PyTorch (2.0+), production architectures never manually execute the sequence `(Q @ K.T) / sqrt(d_k) -> Softmax -> @ V`. PyTorch provides `torch.nn.functional.scaled_dot_product_attention`, which dynamically selects the optimal hardware kernel at runtime:
-
-```python
-import torch
-import torch.nn.functional as F
-
-# Query, Key, Value tensors: (Batch=2, Heads=8, SeqLen=1024, HeadDim=64) in fp16
-q = torch.randn(2, 8, 1024, 64, dtype=torch.float16, device="cuda" if torch.cuda.is_available() else "cpu")
-k = torch.randn(2, 8, 1024, 64, dtype=torch.float16, device="cuda" if torch.cuda.is_available() else "cpu")
-v = torch.randn(2, 8, 1024, 64, dtype=torch.float16, device="cuda" if torch.cuda.is_available() else "cpu")
-
-# Fused FlashAttention-2 execution: ZERO intermediate S x S allocations in HBM!
-out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-```
-
-### PyTorch Kernel Dispatch Logic
-PyTorch's C++ dispatcher evaluates four candidate backends in priority order:[^sdpa-dispatch]
-
-1. **FlashAttention-2 (`enable_flash=True`)**: Triggered for half-precision (`float16`, `bfloat16`) on NVIDIA Ampere, Ada Lovelace, and Hopper GPUs (`sm_80+`). Delivers up to $72\%$ of peak hardware TFLOPs.
-2. **Memory-Efficient Attention (`enable_mem_efficient=True`)**: Uses CUTLASS templated kernels (Rabe & Staats, 2021; xFormers), supporting arbitrary head dimensions and older architectures (Volta/Turing).
-3. **cuDNN SDPA (`enable_cudnn=True`)**: Hardware-specific graph fusion in cuDNN 8.9+.
-4. **C++ Math Fallback (`enable_math=True`)**: Materializes explicit intermediate matrices; used for CPU execution or unsupported data types.
-:::
-
-[^sdpa-dispatch]: You can enforce or profile specific dispatch backends in PyTorch using the context manager `torch.backends.cuda.sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False)`.
-
-[^flash-attn2]: **FlashAttention-2 Algorithm (Dao, 2023)**: Standard attention loads $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ from High-Bandwidth Memory (HBM), writes the $S \times S$ attention matrix to HBM, reads it back for Softmax, writes normalized probabilities to HBM, and reads them again to multiply by $\mathbf{V}$—incurring $O(S^2)$ memory traffic. FlashAttention-2 tiles blocks of $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ directly into on-chip **GPU SRAM ($192\text{ KB}$ per Streaming Multiprocessor)** and executes **Online Softmax** (Milakov & Gimelshein, 2018):
-$$m_{\text{new}} = \max(m_{\text{prev}}, \max(\mathbf{S}_{\text{tile}})), \quad l_{\text{new}} = e^{m_{\text{prev}} - m_{\text{new}}} l_{\text{prev}} + \sum e^{\mathbf{S}_{\text{tile}} - m_{\text{new}}}$$
-$$\mathbf{O}_{\text{new}} = \text{diag}\left(e^{m_{\text{prev}} - m_{\text{new}}}\right) \mathbf{O}_{\text{prev}} + e^{\mathbf{S}_{\text{tile}} - m_{\text{new}}} \mathbf{V}_{\text{tile}}$$
-By scaling the output accumulator on-the-fly and never materializing the $S \times S$ matrix in HBM, FlashAttention-2 reduces HBM access by $10\times$ and reduces memory complexity from $O(S^2)$ to strictly $O(S)$.
-
-[^kv-cache-footnote]: **The KV Cache Memory Footprint**: During autoregressive text generation, past key and value vectors are stored in GPU memory to prevent redundant recomputation. The exact byte footprint of the KV cache across $L$ layers is:
-$$\text{Memory}_{\text{KV}} = 2 \times L \times H_{\text{kv}} \times d_k \times S \times B \times \text{sizeof(dtype)}$$
-For a LLaMA-2 70B model ($L=80, H_{\text{kv}}=64, d_k=128$, `float16` = 2 bytes) with context $S=4096$ and batch size $B=16$:
-$$\text{KV Footprint} = 2 \times 80 \times 64 \times 128 \times 4096 \times 16 \times 2 = 171,798,691,840\text{ bytes} \approx 171.8\text{ GB of VRAM!}$$
-This massive memory overhead inspired **Grouped-Query Attention (GQA)**, which shares 1 key-value head across every 8 query heads ($H_{\text{kv}} = 8$), reducing the KV cache footprint by $8\times$ to **$21.5\text{ GB}$**.
-
-## Systems Reality: The Quadratic Memory Wall and FlashAttention-2
-
-The intermediate attention score matrix $\mathbf{S} = \mathbf{Q}\mathbf{K}^T$ has shape $(B, H, S, S)$.
+In standard PyTorch, materializing the attention score matrix $S = Q K^T$ requires allocating $O(S^2)$ bytes in GPU HBM (DRAM):
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Attention Activation Memory Footprint (B=4, H=32, float16: 2 bytes)    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  • Context Length S = 512    : 4 * 32 * 512^2   * 2B = 67.1 MB          │
-│  • Context Length S = 2,048  : 4 * 32 * 2048^2  * 2B = 1.07 GB          │
-│  • Context Length S = 8,192  : 4 * 32 * 8192^2  * 2B = 17.18 GB         │
-│  • Context Length S = 32,768 : 4 * 32 * 32768^2 * 2B = 274.88 GB        │
-│  • Context Length S = 131,072: 4 * 32 * 131072^2* 2B = 4.398 TB (OOM!)  │
-└─────────────────────────────────────────────────────────────────────────┘
+Standard Attention Memory Traffic (DRAM Roundtrips):
+1. Load Q, K from DRAM ──► Compute S = Q K^T ──► Write S to DRAM  (O(S^2) Memory Traffic)
+2. Load S from DRAM    ──► Compute Softmax   ──► Write P to DRAM  (O(S^2) Memory Traffic)
+3. Load P, V from DRAM ──► Compute O = P V   ──► Write O to DRAM  (O(S^2) Memory Traffic)
 ```
 
-At context length $S = 32,768$, storing a single layer's attention map in half-precision requires **$274.88\text{ GB}$ of GPU memory**—exceeding the entire physical capacity of an NVIDIA H100 GPU ($80\text{ GB}$).
+For long sequences ($S = 8,192$), DRAM bandwidth stalls consume $80\%$ of execution time.
 
-The introduction of **FlashAttention-2**[^flash-attn2] shattered this memory wall. By fusing Query-Key dot products, online Softmax rescaling, and Value accumulation into a single GPU kernel, attention requires strictly $O(S)$ activation storage. Combined with modern **KV Cache** management strategies (PagedAttention, GQA)[^kv-cache-footnote], foundation models can scale context windows beyond 1,000,000 tokens.
+In 2022, Tri Dao introduced **FlashAttention-2**:
+
+```
+FlashAttention-2 SRAM Tiling Engine:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. Block Tiling: Divide Q, K, V into SRAM-sized blocks (e.g. 128x128).     │
+│ 2. Online Softmax: Compute incremental softmax statistics (m_i, l_i)       │
+│    without ever writing the full S matrix back to DRAM.                     │
+│ 3. Zero DRAM S Matrix: Eliminates O(S^2) memory footprint entirely!         │
+│ 4. Result: 3x to 5x faster attention with O(S) memory footprint.            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attention`.
 
 ---
 
-## Summary
+## 12.5 Building the System: How It All Connects
 
-In this chapter, we constructed the core attention mechanism of modern deep learning. We examined how direct $O(1)$ routing overcomes the sequential information bottleneck of Recurrent Neural Networks.
+Let us observe the complete attention transformation pipeline:
 
-We derived the variance-stabilizing scaling factor $\frac{1}{\sqrt{d_k}}$ that prevents Softmax saturation, implemented causal autoregressive masking to enforce sequential dependencies, and built `MultiHeadAttention` with 4D tensor manipulation. Finally, we quantified the $O(S^2)$ quadratic memory wall and examined how modern IO-aware kernels eliminate intermediate matrix allocation.
+```
+Positional Embeddings X: [Batch, Seq_Len, Embed_Dim]
+   │
+   ├────────────────────────┬────────────────────────┐
+   ▼                        ▼                        ▼
+[ Q Projection ]         [ K Projection ]         [ V Projection ]
+   │                        │                        │
+   └────────────────────────┼────────────────────────┘
+                            ▼
+      [ Scaled Dot-Product Attention + Causal Mask ]
+                            │
+                            ▼
+              [ Multi-Head Output Projection ]
+                            │
+                            ▼ (Next: Chapter 13)
+        [ Complete GPT-2 Transformer Architecture ]
+```
 
-::: {.callout-takeaways}
-## Chapter Takeaways
+We now have multi-head scaled attention that routes context across tokens with causal discipline.
 
-- **Direct Token Routing**: Self-attention replaces $O(S)$ sequential recurrent transitions with direct $O(1)$ pairwise Query-Key-Value interactions.
-- **Variance Stabilization**: Scaling by $\frac{1}{\sqrt{d_k}}$ maintains unit variance in dot products, preventing Softmax gradient saturation.
-- **Causal Masking**: Adding $-\infty$ to upper-triangular elements enforces the autoregressive property during parallel training.
-- **Multi-Head Subspaces**: Splitting hidden dimension $D$ across $H$ heads allows the model to attend to distinct semantic relations simultaneously.
-- **The Quadratic Memory Wall**: The $O(S^2)$ attention map creates severe memory bottlenecks at long context lengths, solved in production by fused IO-aware algorithms (FlashAttention).
-:::
+However, stacking ten layers of raw attention directly on top of each other causes activations to explode and gradients to vanish. How do we stabilize deep transformer stacks and provide non-linear feature transformations?
 
-::: {.callout-chapter-connection}
-## Chapter Connection: Assembling the Full Transformer
-
-With multi-head attention, positional encodings, and linear projections complete, how do we combine these components into a stable, deep architecture capable of generating text? In **Chapter 13 (The Modern Transformer and Autoregressive GPT)**, we build Layer Normalization, residual connections, and complete GPT language models.
-:::
+In **Chapter 13**, we construct **The Transformer: Assembling GPT-2 with Pre-LN Residual Highways**.

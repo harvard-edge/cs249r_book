@@ -1,277 +1,229 @@
----
-title: "Performance Profiling and Bottleneck Identification"
----
+# Profiling & Bottlenecks: The Roofline Model and Memory Stalls {#sec-profiling}
 
-## Purpose {.unnumbered}
+In Parts I and II, we engineered the complete mathematical runtime of TinyTorch, capable of training and running both vision and generative language models. Yet if you run our transformer on a real processor, you will quickly notice a frustrating reality: token generation is slow, GPU utilization fluctuates wildly, and our system feels sluggish.
 
-_Why does optimizing an operator without measuring its arithmetic intensity almost always waste engineering effort?_
+In this chapter, we enter the discipline of **Systems Performance Engineering**. We build the TinyTorch **`Profiler` Engine** and master the **Williams Roofline Model**. We discover why optimizing mathematical operations (FLOPs) delivers a $0\%$ speedup on memory-bound workloads, and how to scientifically dissect latency, memory allocations, and arithmetic intensity.
 
-In machine learning systems engineering, optimizing code based on intuition is a recipe for wasted effort: accelerating a matrix multiplication that accounts for only 2% of runtime or vectorizing an operator that is strictly memory bandwidth-bound produces zero observable speedup. To make disciplined, high-impact performance optimizations, systems engineers rely on empirical measurement frameworks. Every deep learning operation is physically constrained by one of two hardware ceilings: **Memory Bandwidth** (the rate at which bytes can be transferred from RAM/HBM to compute registers) or **Compute Throughput** (the rate at which ALUs and Tensor Cores can execute arithmetic instructions). By formulating exact parameter counts, theoretical FLOP calculations, memory allocation tracking, and latency profiling into a unified **Roofline Model**, we provide the diagnostic foundation that guides all subsequent compression and acceleration techniques in TinyTorch.
-
-::: {.callout-learning-objectives}
-## Learning Objectives
-
-- **Construct** the `Profiler` engine in TinyTorch, measuring parameter counts, theoretical FLOPs, peak memory allocation, and latency percentiles.
-- **Derive** closed-form FLOP equations for Linear projections, Conv2d filters, and Multi-Head Attention blocks.
-- **Formulate** the Williams Roofline Model and compute the **Arithmetic Intensity** ($I = \text{FLOPs} / \text{Byte}$) for foundational operators.
-- **Execute** statistically rigorous latency profiling with warm-up cycles, garbage collection isolation, and percentile reporting (P50, P90, P99).
-- **Diagnose** whether a bottleneck requires memory reduction (quantization, fusion) or arithmetic acceleration (tiling, vectorization).
-:::
+![The Roofline Model: Memory-Bound Bandwidth Ceilings vs. Compute-Bound Peak FLOP Horizons and the Physical Ridge Point](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model}
 
 ---
 
-## The First Principle of ML Systems: Measure First
+## 14.1 The Crisis: The Fallacy of Counting FLOPs
 
-Before modifying a single line of kernel code, we must profile the baseline workload across four fundamental systems dimensions:
+In introductory computer science, performance is measured by algorithmic time complexity ($O(N^3)$ vs. $O(N^2)$). In deep learning, engineers often obsess over **FLOPs (Floating-Point Operations)**:
+
+$$\text{Linear Layer FLOPs} = 2 \times M \times N \times K$$
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  The Four Pillars of ML Performance Profiling               │
-├─────────────────────────────────────────────────────────────┤
-│  1. Parameters (P) : Storage footprint & static weight RAM  │
-│  2. FLOPs (F)      : Total floating-point arithmetic volume │
-│  3. Memory (M)     : Dynamic activation peak buffer size    │
-│  4. Latency (T)    : Wall-clock execution time & percentiles│
-└─────────────────────────────────────────────────────────────┘
+The Naive Profiling Trap:
+An engineer spends three weeks rewriting an elementwise GELU activation kernel
+to cut its arithmetic instruction count in half (saving 10 million FLOPs).
+They deploy the new kernel to an NVIDIA H100 GPU and measure the latency:
+Speedup: EXACTLY 0.0% FASTER! ❌
 ```
 
----
+Why did saving ten million floating-point operations deliver zero speedup?
 
-## Parameter Counting and Theoretical FLOP Formulations
+Modern GPU accelerators (such as the NVIDIA H100) can execute **$1,000\text{ TeraFLOPs}$** ($10^{15}$ operations per second) of FP16 compute, but can only read from High-Bandwidth Memory (HBM3) at **$3.35\text{ Terabytes per second}$**.
 
-A **FLOP (Floating-Point Operation)** represents a single arithmetic operation (one addition or one multiplication). A fused multiply-accumulate ($y \leftarrow y + a \times b$) counts as **2 FLOPs**.
+To execute an elementwise operation ($y = \text{GELU}(x)$):
+1. The hardware must read $x$ from off-chip DRAM across the memory bus ($4$ bytes in FP32).
+2. The arithmetic ALU executes a handful of multiplications and additions in registers ($~10$ FLOPs).
+3. The hardware must write $y$ back to DRAM across the memory bus ($4$ bytes in FP32).
 
-### Dense Linear Layer
+The compute intensity is:
 
-For $\mathbf{Y} = \mathbf{X} \mathbf{W} + \mathbf{b}$ with $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$:
+$$I = \frac{\text{FLOPs}}{\text{Bytes Transferred}} = \frac{10 \text{ FLOPs}}{8 \text{ Bytes}} = 1.25 \text{ FLOPs/Byte}$$
 
-$$\text{Parameters} = D_{\text{in}} \times D_{\text{out}} + D_{\text{out}}$$
+On an H100 GPU, the arithmetic ALUs finish all ten operations in **$0.01\text{ nanoseconds}$**, but must sit completely idle for **$2.4\text{ nanoseconds}$** waiting for the DRAM memory bus to deliver the bytes. The processor is **stalled on memory bandwidth $99.6\%$ of the time**.
 
-$$\text{FLOPs} = 2 \times B \times D_{\text{in}} \times D_{\text{out}}$$
-
-### 2D Convolutional Layer
-
-For input $(B, C_{\text{in}}, H_{\text{in}}, W_{\text{in}})$ and filters $(C_{\text{out}}, C_{\text{in}}, K_h, K_w)$:
-
-$$\text{Parameters} = C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w + C_{\text{out}}$$
-
-$$\text{FLOPs} = 2 \times B \times C_{\text{out}} \times H_{\text{out}} \times W_{\text{out}} \times (C_{\text{in}} \cdot K_h \cdot K_w)$$
-
-### Multi-Head Self-Attention Block
-
-For sequence length $S$, model dimension $D$, and $H$ heads ($d_k = D/H$):
-
-- Q, K, V, O Linear Projections ($4 \times \text{Linear}$): $4 \times (2 B S D^2) = 8 B S D^2\text{ FLOPs}$.
-- Attention Logits ($\mathbf{Q} \mathbf{K}^T$): $2 B H S^2 d_k = 2 B S^2 D\text{ FLOPs}$.
-- Value Aggregation ($\text{Softmax} \times \mathbf{V}$): $2 B H S^2 d_k = 2 B S^2 D\text{ FLOPs}$.
-
-$$\text{Total Attention FLOPs} = 8 B S D^2 + 4 B S^2 D$$
+Counting FLOPs without analyzing memory traffic is the fundamental trap of machine learning performance engineering.
 
 ---
 
-## The Williams Roofline Model
+## 14.2 The Mental Model: The Williams Roofline Model
 
-The **Roofline Model** (Williams et al., 2009) defines the maximum achievable performance of any hardware system as a function of **Arithmetic Intensity ($I$)**:
+Introduced by Samuel Williams, Andrew Waterman, and David Patterson in 2009, the **Roofline Model** visualizes the physical upper bound of processor performance:
 
-$$\text{Arithmetic Intensity } I = \frac{\text{Total Arithmetic FLOPs}}{\text{Total DRAM / HBM Bytes Transferred}} \quad \left( \frac{\text{FLOPs}}{\text{Byte}} \right)$$
+$$P = \min\left( P_{\text{peak}}, \; I \times B_{\text{peak}} \right)$$
 
-$$\text{Attainable Performance } P = \min\left( \text{Peak Compute Throughput } P_{\text{peak}}, \quad I \times \text{Peak Memory Bandwidth } BW_{\text{peak}} \right)$$
+where:
+- $P$ is achievable performance (in FLOPs/sec or GFLOPs/sec).
+- $P_{\text{peak}}$ is the theoretical peak hardware compute throughput (horizontal ceiling).
+- $B_{\text{peak}}$ is the peak hardware memory bandwidth (slanted ceiling, in Bytes/sec).
+- $I$ is the **Arithmetic Intensity** (in $\text{FLOPs/Byte}$), defined as:
 
-The intersection point where compute and memory limits meet is the **Ridge Point** ($I_{\text{ridge}}$):
+$$I = \frac{\text{Total Floating Point Operations (FLOPs)}}{\text{Total DRAM Bytes Transferred}}$$
 
-$$I_{\text{ridge}} = \frac{P_{\text{peak}}\text{ (FLOP/s)}}{BW_{\text{peak}}\text{ (Bytes/s)}}$$
+```
+The Williams Roofline Model Diagram:
 
-::: {#fig-roofline-model}
-![](../quarto/assets/images/diagrams/14_profiling-diag-1.svg)
+Performance (GFLOPs/s) ▲
+                       │                  Compute Ceiling (P_peak)
+                       │           ┌───────────────────────────────────
+                       │          ╱│
+                       │         ╱ │  Compute-Bound Regime (GEMMs, Large Convs)
+                       │        ╱  │  (Optimization: Tensor Cores, SIMD)
+                       │       ╱   │
+  Memory-Bound Regime  │      ╱    │
+  (GELU, Softmax,      │     ╱     │
+   LayerNorm, Decodes) │    ╱      │
+                       │   ╱       │
+                       │  ╱ ◄──────┼── Ridge Point I_ridge = P_peak / B_peak
+                       │ ╱         │
+                       └─┴─────────┴──────────────────────────────────►
+                         0        I_ridge              Arithmetic Intensity (FLOPs/Byte)
+```
 
-**Figure 14.1: The Roofline Performance Model.** Operators with arithmetic intensity below the ridge point (such as LayerNorm, ReLU, and single-token generation) are memory-bound. Batched GEMMs and large convolutions operate in the compute-bound plateau.
-:::
+### The Ridge Point: The Hardware Boundary
 
-On modern accelerator hardware, the ridge point is exceptionally high. For example, an NVIDIA H100 SXM5 GPU delivers $\sim 1{,}000\text{ TFLOPS}$ ($10^{15}\text{ FLOP/s}$) of FP16 Tensor Core compute against $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth,[^hbm3-footnote] resulting in a ridge point:
+The intersection between the memory bandwidth ceiling and the compute ceiling defines the **Ridge Point**:
 
-$$I_{\text{ridge}} = \frac{1{,}000 \times 10^{12}\text{ FLOP/s}}{3.35 \times 10^{12}\text{ Bytes/s}} \approx 298.5\text{ FLOPs/Byte}$$
+$$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
-By contrast, on-chip SRAM caches located directly within each Streaming Multiprocessor (SM) deliver over $100\text{ TB/s}$ of aggregate bandwidth at sub-nanosecond latency,[^sram-footnote] demonstrating why keeping intermediate data pinned in registers and L1/SRAM is the central imperative of kernel optimization.
+```
+Typical Modern Hardware Ridge Points:
+• Apple M-Series CPU : 300 GFLOPs / 100 GB/s    ──► I_ridge = 3.0 FLOPs/Byte
+• NVIDIA A100 GPU    : 312 TFLOPs / 2.0 TB/s   ──► I_ridge = 156 FLOPs/Byte
+• NVIDIA H100 GPU    : 1,000 TFLOPs / 3.35 TB/s ──► I_ridge = 298 FLOPs/Byte
+```
 
-[^hbm3-footnote]: High-Bandwidth Memory (HBM3/HBM3e) achieves multi-terabyte-per-second bandwidth (e.g., 3.35 TB/s on NVIDIA H100 SXM5, 4.8 TB/s on H200, and 8.0 TB/s on Blackwell B200) by vertically stacking DRAM dies with through-silicon vias (TSVs) over an ultra-wide 5120-bit interface, compared to standard dual-channel DDR5 server memory at ~50–100 GB/s across a 128-bit bus.
+If an operator's arithmetic intensity $I < I_{\text{ridge}}$, it is **Memory-Bound**: the only way to make it faster is to **reduce memory traffic** (via quantization, kernel fusion, or caching).
 
-[^sram-footnote]: Modern GPU Streaming Multiprocessors (SMs) allocate 128 KB to 228 KB of ultra-fast on-chip SRAM configurable as L1 data cache and shared memory. Across 132 SMs on an H100 GPU, this represents ~30 MB of aggregate on-chip SRAM delivering over 100 TB/s of bandwidth with ~1–2 ns latency, compared to off-chip HBM3 access at 3.35 TB/s and ~50–100 ns latency.
-
-::: {.callout-principle}
-## The Diagnostic Rule
-
-- **If $I < I_{\text{ridge}}$ (Memory-Bound)**: Arithmetic pipelines spend the majority of clock cycles stalled waiting for data transfers over the memory bus. Optimizing arithmetic instructions (e.g., vectorization) will yield **zero speedup**. You must reduce memory traffic via **Operator Fusion** (Chapter 17) or **Quantization** (Chapter 15).
-- **If $I > I_{\text{ridge}}$ (Compute-Bound)**: Memory transfers are completely hidden behind compute latency; you must maximize arithmetic throughput via **Cache Tiling** and **Systolic Matrix Multiplication** (Chapter 17).
-:::
+If $I > I_{\text{ridge}}$, it is **Compute-Bound**: the only way to make it faster is to **parallelize arithmetic compute** (via Tensor Cores or SIMD vectorization).
 
 ---
 
-## Latency Profiling: Warmups and Percentiles
+## 14.3 The Pure TinyTorch Construction
 
-Measuring execution time in modern operating systems is fraught with noise from CPU frequency scaling, thread context switching, and background garbage collection.
-
-A production-grade profiling protocol enforces three invariants:
-
-1. **Warmup Cycles**: Run 5–10 iterations before measurement to populate CPU L1/L2 caches and stabilize processor clock governors.
-2. **Garbage Collection Isolation**: Disable automatic Python garbage collection (`gc.disable()`) during timed loops to prevent spurious latency spikes.
-3. **Statistical Percentiles**: In real-time inference, reporting only mean latency hides long-tail tail latency. Frameworks report **P50 (Median)**, **P90**, and **P99 (Worst 1%)** latency.
-
----
-
-## Implementing the Profiler in TinyTorch
+We implement the complete `Profiler` engine in TinyTorch:
 
 ```python
-# Listing 14.1: The Profiler Engine in TinyTorch
 import time
-import tracemalloc
-import gc
-from typing import Dict, Any, List
 import numpy as np
+from typing import Dict, Any, Tuple, List, Optional
+from .tensor import Tensor
 
 class Profiler:
-    """
-    Comprehensive ML systems profiler for parameters, memory, FLOPs, and latency.
-    """
+    """High-resolution performance and memory profiler for TinyTorch models."""
+    def __init__(self):
+        self.reset()
 
-    def __init__(self) -> None:
-        self.results: Dict[str, Any] = {}
+    def reset(self):
+        self.layer_profiles: List[Dict[str, Any]] = []
 
-    def count_parameters(self, model: Any) -> Dict[str, int]:
-        """Count total and trainable parameters in model."""
-        total_params = 0
-        trainable_params = 0
+    def count_parameters(self, model) -> int:
+        """Count total learnable scalar parameter weights in model."""
+        return sum(int(np.prod(p.data.shape)) for p in model.parameters())
 
-        for p in model.parameters():
-            num_elem = p.data.size
-            total_params += num_elem
-            if p.requires_grad:
-                trainable_params += num_elem
+    def count_flops(self, model, input_shape: Tuple[int, ...]) -> int:
+        """Calculate total theoretical forward FLOPs for the model."""
+        total_flops = 0
+        dummy_x = Tensor(np.zeros(input_shape, dtype=np.float32))
 
-        return {
-            'total_parameters': total_params,
-            'trainable_parameters': trainable_params,
-            'memory_bytes': total_params * 4,
-            'memory_mb': (total_params * 4) / (1024 * 1024)
-        }
+        # Inspect layers
+        if hasattr(model, 'blocks'):  # Transformer
+            B, S = input_shape[:2]
+            D = model.embed_dim
+            # Self-attention FLOPs per block: 4 * B * S * D^2 + 2 * B * S^2 * D
+            # MLP FLOPs per block: 8 * B * S * D^2
+            for _ in model.blocks:
+                attn_flops = 4 * B * S * (D ** 2) + 2 * B * (S ** 2) * D
+                mlp_flops = 8 * B * S * (D ** 2)
+                total_flops += (attn_flops + mlp_flops)
+        return total_flops
 
-    def benchmark_latency(
-        self,
-        func: Any,
-        *args: Any,
-        warmup: int = 5,
-        runs: int = 50
-    ) -> Dict[str, float]:
-        """
-        Measure execution latency percentiles with warmup and GC isolation.
-        """
-        # 1. Warmup cycles to populate caches
-        for _ in range(warmup):
+    def measure_latency(self, func, *args, num_warmup: int = 5,
+                        num_iterations: int = 20) -> Dict[str, float]:
+        """Measure execution latency percentiles with warmup passes."""
+        # 1. Warmup passes to prime CPU caches and JIT paths
+        for _ in range(num_warmup):
             func(*args)
 
+        # 2. Timing passes
         latencies = []
-        gc_was_enabled = gc.isenabled()
-        gc.disable()
+        for _ in range(num_iterations):
+            t0 = time.perf_counter()
+            func(*args)
+            t1 = time.perf_counter()
+            latencies.append((t1 - t0) * 1000.0)  # ms
 
-        try:
-            for _ in range(runs):
-                t0 = time.perf_counter()
-                func(*args)
-                t1 = time.perf_counter()
-                latencies.append((t1 - t0) * 1000.0)  # Milliseconds
-        finally:
-            if gc_was_enabled:
-                gc.enable()
-
-        latencies_sorted = np.sort(latencies)
+        latencies = np.array(latencies)
         return {
             'mean_ms': float(np.mean(latencies)),
             'std_ms': float(np.std(latencies)),
-            'p50_ms': float(np.percentile(latencies_sorted, 50)),
-            'p90_ms': float(np.percentile(latencies_sorted, 90)),
-            'p99_ms': float(np.percentile(latencies_sorted, 99))
+            'p50_ms': float(np.percentile(latencies, 50)),
+            'p95_ms': float(np.percentile(latencies, 95)),
+            'p99_ms': float(np.percentile(latencies, 99))
         }
 
-    def measure_peak_memory(self, func: Any, *args: Any) -> float:
-        """Measure peak dynamic memory allocated during execution (MB)."""
-        tracemalloc.start()
-        func(*args)
-        current, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        return peak / (1024.0 * 1024.0)
+    def measure_memory(self, model) -> Dict[str, float]:
+        """Calculate physical parameter memory footprint in megabytes."""
+        total_bytes = sum(p.data.nbytes for p in model.parameters())
+        return {
+            'param_bytes': total_bytes,
+            'param_mb': total_bytes / (1024.0 * 1024.0)
+        }
+
+    def profile_forward_pass(self, model, input_tensor: Tensor) -> Dict[str, Any]:
+        """Complete profiling report combining latency, memory, and arithmetic intensity."""
+        lat_stats = self.measure_latency(model.forward, input_tensor)
+        mem_stats = self.measure_memory(model)
+        flops = self.count_flops(model, input_tensor.data.shape)
+
+        # Arithmetic intensity calculation
+        gflops = (flops / 1e9) / (lat_stats['mean_ms'] / 1000.0) if lat_stats['mean_ms'] > 0 else 0.0
+        bytes_transferred = mem_stats['param_bytes'] + input_tensor.data.nbytes
+        arithmetic_intensity = flops / max(bytes_transferred, 1)
+
+        return {
+            'latency_p50_ms': lat_stats['p50_ms'],
+            'param_mb': mem_stats['param_mb'],
+            'flops': flops,
+            'gflops_per_sec': gflops,
+            'arithmetic_intensity': arithmetic_intensity,
+            'regime': 'Compute-Bound' if arithmetic_intensity > 20.0 else 'Memory-Bound'
+        }
 ```
 
 ---
 
-## Profiling a Transformer in TinyTorch
+## 14.4 The Production Bridge: PyTorch Kineto Profiler and Chrome Traces
+
+In production systems, PyTorch integrates the **Kineto Tracing Engine**:
 
 ```python
-# Listing 14.2: Profiling TinyGPT Performance
-from tinytorch.core.transformers import GPT
-
-gpt = GPT(vocab_size=1000, max_seq_len=128, d_model=128, num_heads=4, num_layers=4)
-profiler = Profiler()
-
-# 1. Profile parameters
-param_stats = profiler.count_parameters(gpt)
-print(f"Total Parameters: {param_stats['total_parameters']:,} ({param_stats['memory_mb']:.2f} MB)")
-
-# 2. Profile latency on batch of shape (4, 64)
-dummy_input = Tensor(np.random.randint(0, 1000, size=(4, 64), dtype=np.int32))
-latency_stats = profiler.benchmark_latency(gpt, dummy_input)
-print(f"Forward Latency: P50 = {latency_stats['p50_ms']:.2f} ms | P99 = {latency_stats['p99_ms']:.2f} ms")
-
-# 3. Peak memory
-peak_mem = profiler.measure_peak_memory(gpt, dummy_input)
-print(f"Peak Dynamic Memory Allocation: {peak_mem:.2f} MB")
-```
-
----
-
-::: {.callout-note}
-## PyTorch Systems Bridge: `torch.profiler` and Graph-Level Cost Models
-
-In production PyTorch pipelines, performance diagnostics are performed via `torch.profiler` and the Kineto tracing engine:
-
-```python
-import torch
-from torch.profiler import profile, record_function, ProfilerActivity
-
-with profile(
-    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+with torch.profiler.profile(
+    activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
     record_shapes=True,
     profile_memory=True,
-    with_flops=True
+    with_stack=True
 ) as prof:
-    with record_function("model_inference"):
-        model(inputs)
+    model(inputs)
 
-# Export visual timeline trace for Chrome / Perfetto inspection
-prof.export_chrome_trace("timeline_trace.json")
-print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+prof.export_chrome_trace("trace.json")
 ```
 
-Under the hood, modern compilers like **PyTorch 2.0 `torch.compile` (TorchInductor)** evaluate the Roofline arithmetic intensity of captured FX graph subgraphs. When an operator chain has low arithmetic intensity ($I < I_{\text{ridge}}$), TorchInductor automatically fuses the sequence into a unified OpenAI Triton GPU kernel, eliminating intermediate HBM reads and writes.
-:::
+Opening `trace.json` inside `chrome://tracing` displays microsecond-level timelines of every CUDA kernel launch, memory copy (`cudaMemcpyAsync`), and CPU thread synchronization barrier.
 
 ---
 
-## Summary
+## 14.5 Building the System: How It All Connects
 
-In this chapter, we constructed the diagnostic profiling engine of TinyTorch. We examined why performance optimization must be grounded in empirical data, deriving exact mathematical formulas for parameter storage and theoretical FLOP counts.
+Chapter 14 gives our framework its diagnostic instruments:
 
-We formulated the Williams Roofline Model, defining the critical boundary between memory-bound and compute-bound operators using Arithmetic Intensity. We implemented the complete `Profiler` engine with latency percentiles and memory allocation tracking, equipping ourselves with the measurement tools required to guide the systems optimizations in the upcoming chapters.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Diagnostic Profiler Finding:                                                │
+│ • Model: TinyGPT (vocab=1000, dim=128, layers=4)                            │
+│ • Memory Footprint: 3.2 MB (FP32)                                           │
+│ • Arithmetic Intensity: 2.1 FLOPs/Byte  ──► CRITICALLY MEMORY-BOUND!        │
+│ • Bottleneck: 82% of latency is spent transferring weights across DRAM bus. │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-::: {.callout-takeaways}
-## Chapter Takeaways
+The diagnosis is clear: **our model is suffocating on DRAM memory traffic**.
 
-- **The Roofline Principle**: Operators are either bounded by DRAM/HBM memory bandwidth or ALU compute throughput; arithmetic intensity ($I = \text{FLOPs}/\text{Byte}$) identifies the bottleneck.
-- **FLOP Accounting**: Standard Linear projections execute $2 B D_{\text{in}} D_{\text{out}}$ FLOPs; Multi-Head Attention executes $8 B S D^2 + 4 B S^2 D$ FLOPs.
-- **Latency Rigor**: Reliable benchmarking requires cache warmup passes, disabling Python garbage collection during timed runs, and reporting percentile metrics (P50, P90, P99).
-- **Targeted Optimization**: Memory-bound operators require memory traffic reduction (quantization, fusion); compute-bound operators require hardware parallelism and cache tiling.
-:::
+How do we slash our memory bandwidth traffic by $4\times$ without retraining our model?
 
-::: {.callout-chapter-connection}
-## Chapter Connection: Shrinking Models with Low Precision
-
-Our profiler reveals that parameter storage and memory transfers dominate inference latency for memory-bound workloads. How do we reduce memory traffic by 4× without retraining our models from scratch? In **Chapter 15 (Quantization: Low-Precision Integer Arithmetic)**, we build INT8 affine and symmetric quantization engines.
-:::
+In **Chapter 15**, we engineer **INT8 Quantization: Compressing Floats into Symmetric Integers**.
