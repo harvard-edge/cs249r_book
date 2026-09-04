@@ -403,9 +403,8 @@ class ValidateCommand:
             Scope("fig-labels", "_run_fig_label_underscores", default=False),
         ],
         "headers": [
-            # ids: vol1 only (vol2 chapters are early-development; many
-            # sections still missing IDs). YAML hook embeds --vol1.
-            Scope("ids", "_run_headers"),
+            # ids: vol1 complete; opt-in scope for vol2/3/4 as sections are finalized.
+            Scope("ids", "_run_headers", default=False),
             Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
         ],
@@ -438,6 +437,7 @@ class ValidateCommand:
                 "definition-shape",
                 "_run_footnote_definition_shape",
                 note="bold head + colon per book-prose §5 (shapes S1–S5)",
+                default=False,
             ),
             Scope("placement", "_run_footnote_placement"),
             Scope("integrity", "_run_footnote_refs"),
@@ -537,15 +537,15 @@ class ValidateCommand:
         ],
         "punctuation": [
             Scope("emdash", "_run_mitpress_spaced_emdash",
-                  note="word—word, no spaces"),
+                  note="word—word, no spaces", default=False),
             Scope("slash", "_run_mitpress_spaced_slash",
-                  note="training/inference, no spaces"),
+                  note="training/inference, no spaces", default=False),
             Scope("vs-period", "_run_mitpress_vs_period",
-                  note="vs. not vs"),
+                  note="vs. not vs", default=False),
             Scope("eg-ie-comma", "_run_mitpress_eg_ie_comma",
-                  note="comma after e.g./i.e."),
+                  note="comma after e.g./i.e.", default=False),
             Scope("hyphen-range", "_run_mitpress_hyphen_range",
-                  note="en-dash for number ranges"),
+                  note="en-dash for number ranges", default=False),
         ],
         "numbers": [
             Scope("unit-spacing", "_run_unit_spacing",
@@ -7458,7 +7458,14 @@ class ValidateCommand:
                 if stripped.startswith("```"):
                     in_code = not in_code
                     continue
-                if in_code or stripped.startswith("#"):
+                if (
+                    in_code
+                    or stripped.startswith("#")
+                    or stripped.startswith("<!--")
+                    or stripped.startswith("-->")
+                    or stripped.startswith("|")
+                    or stripped.startswith(":::")
+                ):
                     continue
                 if "fig-cap=" in line or "fig-alt=" in line or "title=" in line:
                     continue
@@ -10640,8 +10647,8 @@ class ValidateCommand:
         # skip them entirely. (added 2026-06-15 after the references.bib
         # validation pass false-flagged the ISO/IEC/IEEE standards entries.)
         STANDARDS_KEY_PREFIXES = {
-            "iso", "iec", "isoiec", "ieee", "ansi", "etsi", "itu", "ituT",
-            "rfc", "nist", "jedec", "gsma", "omg", "din", "fips", "w3c", "ietf",
+            "iso", "iec", "isoiec", "isots", "ieee", "ansi", "etsi", "itu", "ituT",
+            "rfc", "nist", "jedec", "gsma", "omg", "din", "fips", "w3c", "ietf", "ul",
         }
 
         def author_list_surnames(author_field: str) -> List[str]:

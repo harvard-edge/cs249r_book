@@ -494,20 +494,26 @@ def _split_at_top_level_commas(body: str) -> list[str]:
     i = 0
     while i < len(body):
         c = body[i]
-        if c == '"' and (i == 0 or body[i - 1] != "\\"):
-            # Only flip in_dquote for non-escaped quotes. Handles both
-            # entry and exit of string literals.
-            in_dquote = not in_dquote
+        if depth > 0:
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
             current.append(c)
         elif in_dquote:
+            if c == '"' and (i == 0 or body[i - 1] != "\\"):
+                in_dquote = False
+            current.append(c)
+        elif c == '"' and (i == 0 or body[i - 1] != "\\"):
+            in_dquote = True
             current.append(c)
         elif c == "{":
-            depth += 1
+            depth = 1
             current.append(c)
         elif c == "}":
             depth -= 1
             current.append(c)
-        elif c == "," and depth == 0:
+        elif c == ",":
             parts.append("".join(current))
             current = []
         else:
