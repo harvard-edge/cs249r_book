@@ -2,13 +2,16 @@
 
 In Chapters 10 and 11, we converted raw human text into continuous semantic vectors infused with temporal positional waveforms. Yet our tokens currently travel through the framework in complete isolation: no token can inspect, communicate with, or gather context from any other token in the sequence.
 
-In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**. We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor, and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation.
+In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**.[^flash-sram] We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor,[^var-proof] and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation.
+
+[^flash-sram]: Modern kernels like FlashAttention-2 load $Q, K, V$ blocks into fast on-chip SRAM (128–228 KB per streaming multiprocessor on NVIDIA Hopper), computing online softmax scaling without ever allocating the $O(S^2)$ attention matrix in off-chip DRAM.
+[^var-proof]: If $q_i, k_i \sim \mathcal{N}(0, 1)$ are independent with unit variance, then $\mathbb{E}[q_i k_i] = 0$ and $\text{Var}(q_i k_i) = \mathbb{E}[(q_i k_i)^2] = 1$. The sum of $d_k$ independent components has variance $\sum_{i=1}^{d_k} 1 = d_k$. Dividing by $\sqrt{d_k}$ yields $\text{Var}\left(\frac{q \cdot k}{\sqrt{d_k}}\right) = \frac{d_k}{d_k} = 1$.
 
 ![The Attention Engine: Query-Key Routing, 1/sqrt(d_k) Variance Scaling, and Causal Lower-Triangular Masking](assets/images/diagrams/12_attention-diag-1.svg){#fig-attention-engine}
 
 ---
 
-## 12.1 The Crisis: The Recurrence Bottleneck and the Softmax Gradient Cliff
+## The Crisis: The Recurrence Bottleneck and the Softmax Gradient Cliff
 
 Before the transformer architecture was discovered, sequential language was processed using **Recurrent Neural Networks (RNNs)** and LSTMs.
 
@@ -60,7 +63,7 @@ Without scaling, the largest dot product dominates completely, saturating the so
 
 ---
 
-## 12.2 The Mental Model: Database Retrieval and Causal Masking
+## The Mental Model: Database Retrieval and Causal Masking
 
 To understand Scaled Dot-Product Attention, we use the analogy of a **differentiable database query**:
 
@@ -104,7 +107,7 @@ After Softmax: exp(-inf) = 0.0! Future positions receive EXACTLY ZERO attention 
 
 ---
 
-## 12.3 The Pure TinyTorch Construction
+## The Pure TinyTorch Construction
 
 We implement Scaled Dot-Product Attention and Multi-Head Attention in TinyTorch:
 
@@ -207,7 +210,7 @@ class MultiHeadAttention(Layer):
 
 ---
 
-## 12.4 The Production Bridge: FlashAttention-2 and SRAM Tiling
+## The Production Bridge: FlashAttention-2 and SRAM Tiling
 
 In standard PyTorch, materializing the attention score matrix $S = Q K^T$ requires allocating $O(S^2)$ bytes in GPU HBM (DRAM):
 
@@ -237,7 +240,7 @@ PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attent
 
 ---
 
-## 12.5 Building the System: How It All Connects
+## Building the System: How It All Connects
 
 Let us observe the complete attention transformation pipeline:
 

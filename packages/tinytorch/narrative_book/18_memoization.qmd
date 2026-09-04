@@ -2,13 +2,16 @@
 
 In Chapter 17, we accelerated operator execution using kernel fusion and cache tiling. Yet during autoregressive language generation, our transformer exhibits an alarming algorithmic flaw: **generation latency degrades quadratically with sequence length**. Generating the 10th token is fast, but generating the 500th token crawls at a snail's pace.
 
-In this chapter, we engineer **The KV Cache Engine (`KVCache`)**. We explore why naive autoregression recomputes identical Key and Value vectors for past tokens at every step, derive the $O(S^2) \to O(S)$ complexity reduction, and build static, pre-allocated ring buffers that transform generation into an **$O(1)$ memory bandwidth matrix-vector operation**.
+In this chapter, we engineer **The KV Cache Engine (`KVCache`)**.[^vllm-paged] We explore why naive autoregression recomputes identical Key and Value vectors for past tokens at every step, derive the $O(S^2) \to O(S)$ complexity reduction, and build static, pre-allocated ring buffers that transform generation into an **$O(1)$ memory bandwidth matrix-vector operation**.[^kv-footprint]
+
+[^vllm-paged]: In production inference engines like vLLM, KV cache fragmentation is managed via *PagedAttention*, which borrows virtual memory page tables from operating systems to allocate non-contiguous physical DRAM blocks for token sequences.
+[^kv-footprint]: For a 32-layer transformer with 32 heads of dimension 128 in FP16 (2 bytes per element), caching 1 token requires $2 \times 32 \times 32 \times 128 \times 2 \approx 524 \text{ KB}$. A batch of 64 requests with 4,096 tokens consumes $\approx 137 \text{ GB}$ of GPU VRAM.
 
 ![The KV Cache Architecture: Pre-Allocated Static SRAM/DRAM Buffers Appending New Token Vectors Without Recomputation](assets/images/diagrams/18_memoization-diag-1.svg){#fig-kv-cache}
 
 ---
 
-## 18.1 The Crisis: The $O(S^2)$ Autoregressive Recomputation Tax
+## The Crisis: The $O(S^2)$ Autoregressive Recomputation Tax
 
 Consider generating a 1,000-token paragraph. During step $t = 500$:
 1. The model receives all 500 previous tokens: $[x_1, x_2, \dots, x_{500}]$.
@@ -37,7 +40,7 @@ Recomputing them on every step is 99.8% redundant work! ❌
 
 ---
 
-## 18.2 The Mental Model: Dynamic Append-Only Memoization
+## The Mental Model: Dynamic Append-Only Memoization
 
 The solution is **Key-Value Memoization (KV Caching)**:
 
@@ -70,7 +73,7 @@ Algorithmic Complexity Comparison:
 
 ---
 
-## 18.3 The Pure TinyTorch Construction
+## The Pure TinyTorch Construction
 
 We implement the complete `KVCache` class in TinyTorch:
 
@@ -142,7 +145,7 @@ class KVCache:
 
 ---
 
-## 18.4 The Production Bridge: vLLM PagedAttention and Multi-Query Attention
+## The Production Bridge: vLLM PagedAttention and Multi-Query Attention
 
 In production inference servers (such as `vLLM`):
 
@@ -161,7 +164,7 @@ Production KV Cache Innovations:
 
 ---
 
-## 18.5 Building the System: How It All Connects
+## Building the System: How It All Connects
 
 Let us examine the performance impact of KV caching:
 
