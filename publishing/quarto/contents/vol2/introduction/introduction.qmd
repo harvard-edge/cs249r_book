@@ -1467,7 +1467,7 @@ $$\text{CI} = \frac{\text{Bytes Transferred (Network)}}{\text{FLOPs Executed (Lo
 *Past the communication-intensity cliff, adding GPUs stops helping.*
 :::
 
-Low communication intensity, $\text{CI} < 0.01$, describes compute-heavy workloads whose GPUs spend most of their time doing math, so scaling is relatively easy. High communication intensity, $\text{CI} > 0.1$, describes network-bound workloads limited by bisection bandwidth, where adding more GPUs can slow training rather than speed it up.
+Low communication intensity describes compute-heavy workloads whose accelerators spend most of their time doing math, so scaling is comparatively easy. High communication intensity describes workloads whose network demand approaches the available fabric balance; in that regime, bisection bandwidth can bind and adding more accelerators can slow training rather than speed it up. The boundary is configuration-specific because it depends on both local compute throughput and effective network bandwidth.
 
 Communication and scaling optimizations, from gradient sparsification (sending fewer gradient bytes) to 3D parallelism\index{3D Parallelism} (partitioning data, tensor, and pipeline dimensions across different fabric tiers), try to lower exposed communication intensity so that the machine learning fleet acts as a single, massive computer rather than a collection of idling processors waiting for the wire. While this section applies the ratio qualitatively, @sec-appdx-fleet-foundations-comm-compute-ratio analyzes communication intensity across concrete regimes and demonstrates the bandwidth-saturation point where adding accelerators ceases to improve throughput.
 
@@ -1549,7 +1549,7 @@ Google's **ML Productivity Goodput**\index{ML Productivity Goodput!definition} m
 
 @Fig-c3-taxonomy visualizes the C$^3$ framework as a three-column layout, with Compute, Communication, and Coordination each occupying their own column of subtopics and the inter-column gaps highlighting the bottlenecks that arise where the dimensions meet. The same framework can be drawn as a triangle in which the vertices are the three resources, the edges are the trade-offs, and the center embodies the displacement of overhead, the unavoidable consequence of distributing computation across independent machines.
 
-::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ taxonomy**: Every distributed ML system partitions wall-clock time among three irreducible dimensions: Compute (the useful math), Communication (data movement across the network), and Coordination (synchronization logic). The figure lays out each dimension as a column of subtopics, with the bottlenecks that arise between adjacent dimensions called out in the inter-column gaps. The framework's underlying claim—displacement of overhead—asserts that overhead cannot be eliminated, only relocated; this is the diagnostic lens for every performance analysis in this book." fig-alt="Three-column layout with Compute, Communication, and Coordination as column headers; each column lists the subtopics it covers. Bottleneck labels sit in the gaps between adjacent columns."}
+::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ taxonomy**: The framework attributes exposed distributed-execution cost to three dimensions: Compute (the useful math), Communication (data movement across the network), and Coordination (synchronization logic). The figure lays out each dimension as a column of subtopics, with the bottlenecks that arise between adjacent dimensions called out in the inter-column gaps. The displacement-of-overhead heuristic asks where a change relocates cost when it reduces one of these dimensions." fig-alt="Three-column layout with Compute, Communication, and Coordination as column headers; each column lists the subtopics it covers. Bottleneck labels sit in the gaps between adjacent columns."}
 ![](images/svg/c3-taxonomy.svg)
 :::
 
@@ -1575,7 +1575,7 @@ The fleet law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling exper
 
 :::
 
-Applying both laws to a GPT-3-class synchronization estimate makes the coordination tax and its thermodynamic counterpart visible in the same terms as the scaling equation: the same Ring AllReduce that starves the accelerators of time also burns energy on every step.
+Applying both laws to a GPT-3-class synchronization estimate makes the exposed communication tax and its thermodynamic counterpart visible in the same terms as the scaling equation: the same Ring AllReduce that starves the accelerators of time also burns energy on every step.
 
 ::: {.column-margin}
 ![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step almost entirely filled by a violet synchronization segment, with only a thin compute sliver at the left, showing that at fleet scale the network dominates the step and accelerators sit idle."}
@@ -1630,9 +1630,9 @@ class GPT3SyncTax:
     t_comm_ib = (sync_size / bw_ib).to(second)
     t_comm_eth = (sync_size / bw_eth).to(second)
 
-    # Efficiency = (T_compute/N) / (T_compute/N + T_comm)
-    eff_ib = (t_compute_iter / (t_compute_iter + t_comm_ib)).to("").magnitude * 100
-    eff_eth = (t_compute_iter / (t_compute_iter + t_comm_eth)).to("").magnitude * 100
+    # Compute-time fraction = (T_compute/N) / (T_compute/N + T_comm)
+    compute_fraction_ib = (t_compute_iter / (t_compute_iter + t_comm_ib)).to("").magnitude * 100
+    compute_fraction_eth = (t_compute_iter / (t_compute_iter + t_comm_eth)).to("").magnitude * 100
 
     # Energy Tax (per step)
     # Total Energy = bits * (Joules/bit)
@@ -1643,7 +1643,7 @@ class GPT3SyncTax:
     sync_energy_delta = abs((sync_energy_total - sync_energy_expected).to(MJ))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(eff_ib > eff_eth, "InfiniBand must be more efficient than Ethernet")
+    check(compute_fraction_ib > compute_fraction_eth, "InfiniBand must expose a larger compute-time fraction than Ethernet")
     check(abs(sync_energy.to(joule).magnitude - 84.0) < 0.1, f"Expected 84 J sync energy, got {sync_energy.to(joule).magnitude}")
     check(sync_energy_delta < 0.5 * MJ, f"Expected about 84 MJ for 1M syncs, got {sync_energy_total.to(MJ).magnitude}")
 
@@ -1653,10 +1653,10 @@ class GPT3SyncTax:
     ib_bw_gbit_per_s_str = fmt_bandwidth(bw_ib, unit=Gbps, precision=0, commas=False)
     eth_bw_gbit_per_s_str = fmt_bandwidth(bw_eth, unit=Gbps, precision=0, commas=False)
     energy_per_bit_pj_per_bit_str = fmt_qty(energy_per_bit, pJ / bit, precision=0, commas=False)
-    ib_efficiency_pct_str = fmt_percent(eff_ib / 100, precision=1, style='prose')
-    eth_efficiency_pct_str = fmt_percent(eff_eth / 100, precision=1, style='prose')
-    ib_productive_time_s_str = fmt_time(eff_ib / 100 * productivity_window, second, precision=1, commas=False, style='word')
-    eth_productive_time_s_str = fmt_time(eff_eth / 100 * productivity_window, second, precision=1, commas=False, style='word')
+    ib_compute_fraction_pct_str = fmt_percent(compute_fraction_ib / 100, precision=1, style='prose')
+    eth_compute_fraction_pct_str = fmt_percent(compute_fraction_eth / 100, precision=1, style='prose')
+    ib_productive_time_s_str = fmt_time(compute_fraction_ib / 100 * productivity_window, second, precision=1, commas=False, style='word')
+    eth_productive_time_s_str = fmt_time(compute_fraction_eth / 100 * productivity_window, second, precision=1, commas=False, style='word')
     productivity_window_s_str = fmt_time(productivity_window, second, precision=0, commas=False, style='word')
     # Formatting energy in Joules (J) for scale impact
     sync_energy_j_str = fmt_energy(sync_energy, unit=joule, precision=0)
@@ -1664,21 +1664,21 @@ class GPT3SyncTax:
     sync_energy_mj_str = fmt_energy(sync_energy_total, unit=MJ, precision=0)
 ```
 
-::: {#nbk-introduction-coordination-energy-tax .callout-notebook title="The coordination and energy tax"}
+::: {#nbk-introduction-coordination-energy-tax .callout-notebook title="The communication and energy tax"}
 
-**Problem**: What scaling efficiency and energy cost result when training GPT-3 (`{python} GPT3SyncTax.model_params_b_str` params) on a cluster connected by `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet vs. `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand?
+**Problem**: What compute-time fraction and endpoint network-energy cost result in an illustrative GPT-3 synchronization scenario using `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet versus `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand?
 
 **Physics**:
 To synchronize `{python} GPT3SyncTax.model_params_b_str` parameters (FP16), a Ring AllReduce\index{Ring AllReduce} must move approximately `{python} GPT3SyncTax.sync_size_gb_str` of data through each participating accelerator endpoint per iteration.
 
 **Analysis**: The fleet law exposes the communication tax.
 
-*   **InfiniBand** (`{python} GPT3SyncTax.ib_bw_gbit_per_s_str`): High bandwidth and low latency yield a scaling efficiency of only `{python} GPT3SyncTax.ib_efficiency_pct_str`, meaning the accelerators compute for only `{python} GPT3SyncTax.ib_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str` while the rest is consumed by synchronization.
-*   **Ethernet** (`{python} GPT3SyncTax.eth_bw_gbit_per_s_str`): Lower bandwidth and higher overhead collapse the scaling efficiency further to `{python} GPT3SyncTax.eth_efficiency_pct_str`, leaving the accelerators productive for roughly `{python} GPT3SyncTax.eth_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str`.
+*   **InfiniBand** (`{python} GPT3SyncTax.ib_bw_gbit_per_s_str`): Under the optimistic line-rate transfer model, the compute-time fraction is only `{python} GPT3SyncTax.ib_compute_fraction_pct_str`, meaning the accelerators compute for `{python} GPT3SyncTax.ib_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str` while the remainder is exposed communication time.
+*   **Ethernet** (`{python} GPT3SyncTax.eth_bw_gbit_per_s_str`): Lower line rate reduces the compute-time fraction further to `{python} GPT3SyncTax.eth_compute_fraction_pct_str`, leaving the accelerators productive for roughly `{python} GPT3SyncTax.eth_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str`.
 
 **Energy**: The energy wall is the thermodynamic cost of the same synchronization. Each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` across the network fabric (at `{python} GPT3SyncTax.energy_per_bit_pj_per_bit_str`). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` of energy before multiplying by the number of participating accelerators.
 
-**Systems insight**: Scale makes the network the primary "processor." If the network is inefficient, the GPUs sit idle, wasting millions of dollars in compute capacity. Furthermore, the thermodynamic cost of data movement (the energy wall) means that "more GPUs" is not a sustainable scaling strategy without communication-hiding and compression.
+**Systems insight**: This lower-bound scenario assumes effective transfer at the advertised link rate and omits collective topology, software overhead, contention, and overlap. Even under that optimistic boundary, exposed synchronization can leave accelerators idle, while the same data movement consumes energy on every step. More accelerators therefore do not guarantee a proportional speedup without communication hiding, compression, and a fabric matched to the workload.
 
 :::
 
