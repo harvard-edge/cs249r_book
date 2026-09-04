@@ -803,7 +803,11 @@ def compute_infrastructure_mtbf_ladder(candidate=None):
     make_ladder(
         "vol2/compute_infrastructure",
         "vol2_compute_infrastructure_margin_003",
-        [("1 GPU %.0fh" % gpu_mttf, gpu_mttf), ("1K GPUs %.0fh" % (gpu_mttf / 1_000), gpu_mttf / 1_000), ("10K GPUs %.0fh" % (gpu_mttf / 10_000), gpu_mttf / 10_000)],
+        [
+            ("1 GPU %s h" % f"{gpu_mttf:,.0f}", gpu_mttf),
+            ("1,000 GPUs %s h" % f"{gpu_mttf / 1_000:,.0f}", gpu_mttf / 1_000),
+            ("10,000 GPUs %s h" % f"{gpu_mttf / 10_000:,.0f}", gpu_mttf / 10_000),
+        ],
         domain="time",
         wall=False,
     )
@@ -817,8 +821,8 @@ def compute_infrastructure_cxl_bandwidth_gap():
     ratio_annotation_ladder(
         "vol2/compute_infrastructure",
         "compute_infrastructure_cxl_bandwidth_gap",
-        [(f"HBM3 {hbm_gb_s / 1000:.2f} TB/s", hbm_gb_s), ("CXL3 64 GB/s", cxl_gb_s)],
-        ratio_label="50x",
+        [(f"HBM3 {hbm_gb_s / 1000:.2f} TB/s", hbm_gb_s), ("CXL 3.0 64 GB/s", cxl_gb_s)],
+        ratio_label=f"{hbm_gb_s / cxl_gb_s:.1f}×",
         domain="bandwidth",
     )
 
@@ -834,9 +838,8 @@ def compute_infrastructure_rack_power_envelope(candidate=None):
     ax.axvspan(x0 + w * legacy_hi / max_kw, x0 + w, color=REDFILL, alpha=0.32)
     ax.axvline(x0 + w * legacy_hi / max_kw, color=RED, lw=0.7, ls="--")
     ax.plot(x0 + w * dgx_kw / max_kw, y, "o", color=RED, ms=3.8)
-    ax.text(x0 + w * legacy_hi / max_kw + 0.035, y + 0.23, "10kW\nair", ha="left", va="center", color=RED, fontsize=4.6, fontweight="bold")
-    ax.text(x0 + w * dgx_kw / max_kw - 0.02, y - 0.20, "DGX\n33kW", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
-    ax.text(0.68, 0.88, "rack power", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(x0 + w * legacy_hi / max_kw + 0.035, y + 0.23, "10 kW\nair", ha="left", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(x0 + w * dgx_kw / max_kw - 0.02, y - 0.20, "DGX\n33.5 kW", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
     write(fig, "vol2/compute_infrastructure", "vol2_compute_infrastructure_margin_002")
 
 
