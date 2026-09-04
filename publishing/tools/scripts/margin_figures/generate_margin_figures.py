@@ -2095,7 +2095,7 @@ def _error_feedback(candidate):
 
 def _epsilon_budget(candidate):
     fig, ax = new_fig("budget-envelope")
-    budget_envelope(ax, [("10 queries", 10, RED)], limit=10, limit_label="eps=10")
+    budget_envelope(ax, [("10 releases", 10, RED)], limit=10, limit_label="ε = 10")
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
