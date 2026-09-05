@@ -196,12 +196,14 @@ class CrossEntropyLoss(Loss):
 
 Let us trace a single sample with extreme logits $\mathbf{z} = [1000.0, 1002.0, 1001.0]$ and ground-truth target class $t = 1$ ($z_t = 1002.0$):
 
-| Calculation Step | Naive Formula ($\mathcal{L} = -\log(\text{Softmax})$) | Fused Log-Sum-Exp ($\mathcal{L} = \text{LSE}(\mathbf{z}) - z_t$) |
+| Calculation Step | Naive Softmax ($\mathcal{L} = -\log(\text{Softmax})$) | Fused Log-Sum-Exp ($\mathcal{L} = \text{LSE}(\mathbf{z}) - z_t$) |
 | :--- | :--- | :--- |
-| **1. Logit Exponentiation** | $e^{1000} = \mathbf{+inf}$<br>$e^{1002} = \mathbf{+inf}$<br>$e^{1001} = \mathbf{+inf}$ | $c = \max(\mathbf{z}) = 1002.0$<br>$\tilde{\mathbf{z}} = [-2.0, 0.0, -1.0]$<br>$e^{\tilde{\mathbf{z}}} = [0.135335, 1.000000, 0.367879]$ |
-| **2. Exponent Sum** | $\sum e^{z_j} = \mathbf{+inf}$ | $\sum e^{\tilde{z}_j} = 0.135335 + 1.0 + 0.367879 = \mathbf{1.503214}$ |
-| **3. Normalization / LSE** | $p_1 = \frac{+inf}{+inf} = \mathbf{NaN}$ | $\text{LSE} = 1002.0 + \log(1.503214) = \mathbf{1002.40759}$ |
-| **4. Final Loss $\mathcal{L}$** | $\mathcal{L} = -\log(\text{NaN}) = \mathbf{NaN} \quad ❌$ | $\mathcal{L} = 1002.40759 - 1002.0 = \mathbf{0.40759} \quad ✅$ |
+| **1. Logit Exponentiation** | $e^{1000}, e^{1002}, e^{1001} \to \mathbf{+inf}$ | $c = 1002.0$, $\tilde{\mathbf{z}} = [-2, 0, -1]$, $e^{\tilde{\mathbf{z}}} = [0.1353, 1.0, 0.3679]$ |
+| **2. Exponent Sum** | $\sum e^{z_j} = \mathbf{+inf}$ | $\sum e^{\tilde{z}_j} = 0.1353 + 1.0 + 0.3679 = \mathbf{1.5032}$ |
+| **3. Normalization / LSE** | $p_1 = \frac{+inf}{+inf} \implies \mathbf{NaN}$ | $\text{LSE} = 1002.0 + \log(1.5032) = \mathbf{1002.4076}$ |
+| **4. Final Loss $\mathcal{L}$** | $\mathcal{L} = -\log(\text{NaN}) \implies \mathbf{NaN}$ *(Fault)* | $\mathcal{L} = 1002.4076 - 1002.0 = \mathbf{0.4076}$ *(Stable)* |
+
+: Step-by-step numerical trace comparing naive softmax cross-entropy against max-subtracted fused Log-Sum-Exp on extreme logits $\mathbf{z} = [1000, 1002, 1001]$. {#tbl-lse-trace tbl-colwidths="[26,37,37]"}
 
 The naive calculation crashes into `NaN` due to exponent overflow. The fused Log-Sum-Exp operator computes the exact mathematical loss ($0.40759$) with full 32-bit floating-point precision.
 

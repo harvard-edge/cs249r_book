@@ -189,10 +189,12 @@ def tiled_matmul(A: Tensor, B: Tensor, tile_size: int = 64) -> Tensor:
 
 Let us trace the exact memory bus traffic for an MLP block activation with batch $B=1$, sequence length $S=4$, and intermediate dimension $4D = 512$ ($4\text{ bytes/float}$):
 
-| Kernel Strategy | Execution Steps | Intermediate DRAM Writes | Intermediate DRAM Reads | Total Memory Bus Traffic | Arithmetic Intensity $I$ |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Unfused (Separate Passes)** | 1. `z = Linear(x) + b`<br>2. `a = GELU(z)` | Write $\mathbf{z}$: $8,192\text{ B}$<br>Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $8,192\text{ B}$ | **$24,576\text{ Bytes}$** | $0.83\text{ FLOPs/B}$ |
-| **Fused (`fused_gelu`)** | 1. `a = FusedLinearGELU(x, b)` | Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: **$0\text{ Bytes}$ (In Registers)** | **$8,192\text{ Bytes}$** | **$2.50\text{ FLOPs/B}$ ($3.0\times$ higher)** |
+| Kernel Strategy | Execution Steps | Intermediate DRAM Writes | Intermediate DRAM Reads | Memory Bus Traffic | Arithmetic Intensity $I$ |
+| :--- | :--- | :--- | :--- | :---: | :---: |
+| **Unfused (Separate Passes)** | 1. Linear; 2. GELU | Write $\mathbf{z}$: $8,192\text{ B}$; Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $8,192\text{ B}$ | $24,576\text{ B}$ | $0.83\text{ FLOPs/B}$ |
+| **Fused (`fused_gelu`)** | 1. Fused Linear+GELU | Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $0\text{ B}$ (SRAM Registers) | $8,192\text{ B}$ | **$2.50\text{ FLOPs/B}$ ($3\times$)** |
+
+: Memory bus traffic and arithmetic intensity comparison between unfused and fused linear-activation kernels. {#tbl-fusion-traffic-trace tbl-colwidths="[20,18,24,18,10,10]"}
 
 By eliminating intermediate DRAM roundtrips, Kernel Fusion triples the operational intensity and eliminates memory bus stalls.
 

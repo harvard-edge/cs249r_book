@@ -239,13 +239,23 @@ $$\mathcal{L} = 2.5 + 0.5 = 3.0$$
 
 #### Step 2: Reverse Topological Sweep Trace Table
 
-| DAG Node | Operation | Saved Activation | Incoming Upstream Grad $\mathbf{G}$ | VJP Formula | Output Gradient | Memory & Cache Reality |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Node 4 ($\mathcal{L}$)** | Root Seed | $\mathcal{L} = 3.0$ | N/A | Seed $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | 4-byte float scalar in register |
-| **Node 3 ($\mathbf{a}$)** | Sum Reduction | $\mathbf{a} = [2.5, 0.5]$ | $\mathbf{G}_{\mathcal{L}} = [1.0]$ | $\mathbf{G}_{\mathbf{a}} = \mathbf{G}_{\mathcal{L}} \cdot [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{a}} = [1.0, 1.0]$ | Broadcast into 8-byte contiguous buffer |
-| **Node 2 ($\mathbf{z}$)** | $\text{ReLU}(\mathbf{z})$ | $\mathbf{z} = [2.5, 0.5]$ | $\mathbf{G}_{\mathbf{a}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{z}} = \mathbf{G}_{\mathbf{a}} \odot \mathbb{I}(\mathbf{z} > 0)$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{z}} = [1.0, 1.0]$ | In-place SIMD bitmask filtering |
-| **Node 1 ($\mathbf{W}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{x} = [1.0, 2.0]$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{x}^T \cdot \mathbf{G}_{\mathbf{z}}$ | $\begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$ | 16-byte $2 \times 2$ gradient matrix |
-| **Node 0 ($\mathbf{x}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{W}$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{G}_{\mathbf{z}} \cdot \mathbf{W}^T$ | $\begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}$ | 8-byte input activation gradient |
+Evaluating the vector-Jacobian products backward from the loss scalar down to the input leaf tensors:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{x}^T \mathbf{G}_{\mathbf{z}} = \begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$$
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{G}_{\mathbf{z}} \mathbf{W}^T = \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}$$
+
+In @tbl-autograd-trace, we trace the node-by-node reverse topological traversal through the dynamic tape.
+
+| DAG Node | Operation | Upstream $\mathbf{G}$ | VJP Rule | Evaluated Gradient | Memory & Hardware State |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Node 4 ($\mathcal{L}$)** | Root Loss Seed | N/A | Seed $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | $1.0$ | 4-byte scalar register |
+| **Node 3 ($\mathbf{a}$)** | Sum Reduction | $\mathbf{G}_{\mathcal{L}} = [1.0]$ | $\mathbf{G}_{\mathcal{L}} \cdot [1.0, 1.0]$ | $[1.0, 1.0]$ | Broadcast 8-byte buffer |
+| **Node 2 ($\mathbf{z}$)** | $\text{ReLU}(\mathbf{z})$ | $\mathbf{G}_{\mathbf{a}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{a}} \odot \mathbb{I}(\mathbf{z} > 0)$ | $[1.0, 1.0]$ | In-place SIMD bitmask |
+| **Node 1 ($\mathbf{W}$)** | MatMul ($\mathbf{x}\mathbf{W}$) | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\mathbf{x}^T \cdot \mathbf{G}_{\mathbf{z}}$ | $[1.0, 1.0;\, 2.0, 2.0]$ | 16-byte $2 \times 2$ matrix |
+| **Node 0 ($\mathbf{x}$)** | MatMul ($\mathbf{x}\mathbf{W}$) | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{z}} \cdot \mathbf{W}^T$ | $[0.0, 1.5]$ | 8-byte activation buffer |
+
+: Reverse topological sweep trace through the dynamic computation tape DAG during backward backpropagation. {#tbl-autograd-trace tbl-colwidths="[14,14,14,16,22,20]"}
 
 ```python
 # Hand-Verification Script: Run with TinyTorch autograd or standard NumPy
