@@ -1,291 +1,310 @@
-# Milestone I: The Historic Leap — From Perceptrons to Rumelhart's MLP {#sec-milestone-1}
+# Milestone I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1}
 
-In Chapters 1 through 8, we engineered the complete Core Engine of TinyTorch from first principles. We have memory-strided tensors, non-linear activations, modular parameter layers, overflow-safe loss functions, batching data loaders, dynamic reverse-mode automatic differentiation, adaptive optimizers, and a rigid five-step training state machine.
+Chapter 8 closed the loop. You now own every piece a framework needs in order to learn from data: tensors, activations, layers, losses, a data loader, an autograd tape, optimizers, and the five-step loop that orders them. Each piece has passed its own tests. None of them has yet been asked to learn anything.
 
-Now, we put our engine to the ultimate test. Rather than testing our framework on synthetic toy scripts, we will re-enact the foundational scientific drama that shaped the history of artificial intelligence: **The Journey from Frank Rosenblatt's 1958 Perceptron to Rumelhart, Hinton, and Williams' 1986 Multi-Layer Perceptron**.
+This milestone asks the question a practitioner asks of any new framework before trusting it. Does it actually train? We answer with two problems that sit far apart in history and close together in code. The first is XOR, a four-row truth table that a single-layer perceptron provably cannot learn, which Minsky and Papert used in 1969 to argue neural networks into their first winter. The second is TinyDigits, a small set of 8 by 8 handwritten digits, the kind of task the 1986 backpropagation paper by Rumelhart, Hinton, and Williams showed a hidden layer could handle. If the engine learns XOR, gradients are flowing through a hidden layer correctly. If it learns digits, modules 01 through 08 work together on real data.
 
-::: {.callout-note title="Milestone Verification Scope"}
-Milestone I validates the core compute engine by integrating **Modules 01 through 08** (`packages/tinytorch/src/01_tensor` through `packages/tinytorch/src/08_training`) on non-linear manifold folding (XOR) and real handwritten digit classification.
-:::
+![From the 1958 perceptron's single decision line to the 1986 two-layer network that folds the XOR corners apart](assets/images/diagrams/milestone_01-diag-1.svg){#fig-milestone1-history}
 
-![The AI Winter and Spring: Single-Layer Perceptron Decision Line vs. Two-Layer MLP Non-Linear XOR Manifold](assets/images/diagrams/milestone_01-diag-1.svg){#fig-milestone1-history}
+## The Problem
 
----
+Frank Rosenblatt's 1958 perceptron is one `Linear` layer feeding one squashing function. With two inputs it computes $z = w_1 x_1 + w_2 x_2 + b$ and answers 1 when $z \ge 0$, otherwise 0. The set of points where $z = 0$ is a straight line, the model's **decision boundary**, and everything the perceptron can ever do is pick which side of one line each input falls on.
 
-## M1.1 Systems Problem Motivation: The 1969 XOR Wall and the First AI Winter
+XOR (exclusive or) is the smallest function that defeats this. It outputs 1 when its two inputs differ and 0 when they agree, so the four corners of the unit square carry labels $(0,0) \to 0$, $(0,1) \to 1$, $(1,0) \to 1$, and $(1,1) \to 0$. The two positive corners sit on one diagonal and the two negative corners on the other. Draw any line you like through the square and at least one corner ends up on the wrong side.
 
-In 1958, Frank Rosenblatt introduced the **Perceptron** at the Cornell Aeronautical Laboratory. Running on custom analog hardware (the Mark I Perceptron, using motorized potentiometers for weights), the model learned single linear decision hyperplanes:
+The milestone's first script makes you feel this before proving it. It builds the perceptron from the modules you have, sets the three weights by hand, and scores the four rows. The excerpt below keeps the model and the scoring function and drops the terminal decoration.
 
-$$\hat{y} = \text{step}(\mathbf{w}^T \mathbf{x} + b) = \begin{cases} 1 & \text{if } \sum_{i} w_i x_i + b \ge 0 \\ 0 & \text{otherwise} \end{cases}$$
+```python
+# milestones/02_1969_xor/01_xor_crisis.py (excerpt)
+import numpy as np
+from tinytorch import Tensor, Linear, Sigmoid
 
-The invention was hailed in the international press as the dawn of synthetic brains. But in 1969, MIT computer scientists Marvin Minsky and Seymour Papert published their seminal monograph *Perceptrons*. In it, they delivered an indisputable mathematical proof: a single-layer linear threshold unit **cannot solve the Exclusive-OR (XOR) logical function** (illustrated in @fig-milestone1-history).
+XOR_INPUTS = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+XOR_TARGETS = np.array([[0.0], [1.0], [1.0], [0.0]])
 
-Because the XOR truth table produces positive labels ($y=1$) at $(0,1)$ and $(1,0)$ but negative labels ($y=0$) at $(0,0)$ and $(1,1)$, no single linear hyperplane ($w_1 x_1 + w_2 x_2 + b = 0$) can separate the two classes in 2D space. Minsky and Papert further proved that single-layer systems could not compute topological connectivity or parity. Crucially, they conjectured that extending networks to multiple layers was computationally intractable because no general mathematical algorithm existed to adjust the weights of hidden layers that did not directly touch the output error.
+class SingleLayerPerceptron:
+    def __init__(self):
+        self.linear = Linear(2, 1)
+        self.sigmoid = Sigmoid()
 
-Their book effectively halted funding and academic research in neural networks for nearly two decades, triggering the **First AI Winter** (1969--1986).
+    def set_weights(self, w1, w2, b):
+        self.linear.weight.data = np.array([[w1], [w2]])   # shape (in, out)
+        self.linear.bias.data = np.array([b])
 
----
+    def __call__(self, x):
+        return self.sigmoid(self.linear(x))
 
-## M1.2 The Breakthrough: Hidden Manifolds and Backpropagation (1986)
+def evaluate_on_xor(model):
+    predictions = model(Tensor(XOR_INPUTS))
+    pred_classes = (predictions.data > 0.5).astype(int)
+    return (pred_classes == XOR_TARGETS).mean()
 
-The AI winter thawed in 1986 when David Rumelhart, Geoffrey Hinton, and Ronald Williams published their landmark paper, *"Learning representations by back-propagating errors"*.
+model = SingleLayerPerceptron()
+for w1, w2, b in [(1, 1, -0.5), (1, 1, -1.5), (-1, 1, 0), (1, -1, 0)]:
+    model.set_weights(w1, w2, b)
+    print(f"w=({w1:+}, {w2:+}) b={b:+}: accuracy {evaluate_on_xor(model):.0%}")
+```
 
-Their breakthrough rested on two pillars:
-1. **Geometric Manifold Transformation**: By passing inputs through intermediate hidden layers with non-linear activation functions ($\sigma, \text{ReLU}$), the network warps and folds the input coordinate space into a higher-dimensional hidden feature space where previously inseparable patterns **become linearly separable**:
-   $$\mathbf{h} = \text{ReLU}(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1), \qquad \hat{y} = \mathbf{W}_2 \mathbf{h} + \mathbf{b}_2$$
-2. **Reverse-Mode Chain Rule**: The exact reverse-mode automatic differentiation tape engine we constructed in Chapter 6 allows output prediction errors $\frac{\partial \mathcal{L}}{\partial \hat{y}}$ to propagate backwards through non-linear gates, computing the exact analytical gradients $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{\text{hidden}}}$ for hidden layer parameters.
+The four settings score 75%, 25%, 75%, and 75%. The full script tries ten hand-picked lines and one hundred random ones, and the best of the 110 gets three rows out of four. Notice what is absent. There is no optimizer and no loss in this script, and it needs only modules 01 through 03. The failure is not a training failure. There are no weights to find, so no amount of training could find them.
 
-From a systems perspective, the intermediate activation tensor $\mathbf{h} \in \mathbb{R}^{B \times 4}$ occupies just $4 \times 4 = 16$ bytes per sample in float32. In modern hardware, this vector resides entirely inside CPU L1 cache or GPU streaming multiprocessor register files, enabling backpropagation to compute $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1}$ without ever incurring off-chip DRAM round-trip latency.
+## The Idea
 
-$$\begin{matrix} \text{Input Space } (2\text{D}) \\ [x_1, x_2] \end{matrix} \xrightarrow{\text{Linear}(2, 4)} \mathbf{z} \xrightarrow{\text{ReLU}} \begin{matrix} \text{Warped Manifold } (4\text{D}) \\ \mathbf{h} \in \mathbb{R}^{B \times 4} \end{matrix} \xrightarrow{\text{Linear}(4, 1)} \begin{matrix} \text{Output Scalar} \\ \hat{y} \in \{0, 1\} \end{matrix}$$
+### Why one line cannot do it
 
----
-
-## M1.3 Mathematical Formulations: Invariant Proof of XOR Manifold Separation
-
-Let us formally prove why a single-layer perceptron fails on XOR, and construct the algebraic solution for a two-layer Multi-Layer Perceptron.
-
-#### 1. Incompressibility Proof for Single-Layer Perceptron
-For a single linear threshold unit to classify XOR correctly, there must exist weights $w_1, w_2$ and bias $b$ satisfying all four truth conditions simultaneously:
+The proof fits in four lines. For the perceptron to get every row right, its weights must satisfy all four conditions at once:
 
 $$\begin{aligned}
-(0,0) \to 0 &\implies 0 \cdot w_1 + 0 \cdot w_2 + b < 0 \implies b < 0 \\
-(0,1) \to 1 &\implies 0 \cdot w_1 + 1 \cdot w_2 + b \ge 0 \implies w_2 + b \ge 0 \\
-(1,0) \to 1 &\implies 1 \cdot w_1 + 0 \cdot w_2 + b \ge 0 \implies w_1 + b \ge 0 \\
-(1,1) \to 0 &\implies 1 \cdot w_1 + 1 \cdot w_2 + b < 0 \implies w_1 + w_2 + b < 0
+(0,0) \to 0 &\implies b < 0 \\
+(0,1) \to 1 &\implies w_2 + b \ge 0 \\
+(1,0) \to 1 &\implies w_1 + b \ge 0 \\
+(1,1) \to 0 &\implies w_1 + w_2 + b < 0
 \end{aligned}$$
 
-Summing the second and third inequalities yields:
+Adding the second and third lines gives $w_1 + w_2 + 2b \ge 0$. Adding the first and fourth gives $w_1 + w_2 + 2b < 0$. No numbers satisfy both, so no perceptron computes XOR. In the vocabulary of the field, XOR is not linearly separable.[^fn-linearly-separable-xor] Minsky and Papert extended this kind of argument to parity and connectedness, and the conclusion the field drew in 1969 was that perceptrons were a dead end.
 
-$$w_1 + w_2 + 2b \ge 0$$
+[^fn-linearly-separable-xor]: **Linearly separable**: a labeled set of points is linearly separable when one straight line (in higher dimensions, one flat plane) puts every positive point on one side and every negative point on the other. AND and OR are linearly separable with two inputs; XOR is the smallest function that is not, which is why it became the test case.
 
-Subtracting $b < 0$ from the fourth inequality yields:
+### A hidden layer folds the plane
 
-$$w_1 + w_2 + b < 0 \implies w_1 + w_2 + 2b < b < 0$$
+The escape is to stop classifying the raw inputs and classify a transformed version of them instead. Insert a layer of neurons between input and output, each computing its own `Linear` sum followed by a ReLU, and let the output neuron draw its line in the space of those hidden values. Two hidden units are enough for XOR, and a specific pair makes the mechanism visible. Both read the same sum $s = x_1 + x_2$:
 
-This yields the immediate contradiction $0 \le w_1 + w_2 + 2b < 0$. Therefore, no linear perceptron can solve XOR.
+$$h_1 = \text{ReLU}(s - 0.5), \qquad h_2 = \text{ReLU}(s - 1.5), \qquad y = 2h_1 - 6h_2$$
 
-#### 2. The 2-Layer MLP Algebraic Solution
-Consider an MLP with 2 inputs, 2 hidden neurons with $\text{ReLU}$, and 1 linear output neuron:
+Unit $h_1$ switches on as soon as at least one input is on. Unit $h_2$ switches on only when both are. The output neuron rewards $h_1$ and punishes $h_2$ hard enough that the two cancel exactly when both inputs are on. Follow the four corners into the hidden plane and the fold appears. Corner $(0,0)$ lands at $(0, 0)$, both positive corners land on the same point $(0.5, 0)$, and corner $(1,1)$ lands at $(1.5, 0.5)$. The two positive rows, which no line could isolate in the input square, are now a single point with the negatives on either side of it along the $h_1$ axis, and the line $2h_1 - 6h_2 = 0.5$ separates them. ReLU did the work. A layer without it would compose two linear maps into one linear map, and the plane would stay flat.
 
-$$h_1 = \text{ReLU}(x_1 + x_2 - 0.5), \qquad h_2 = \text{ReLU}(x_1 + x_2 - 1.5)$$
+### Why it took until 1986
 
-$$y = h_1 - 2 h_2$$
+Minsky and Papert knew that a hidden layer could represent XOR. Their objection was that nobody knew how to train one. The output neuron has a target to compare against, but a hidden neuron does not, so which direction should $w_1$ in the hidden layer move? Chapter 6 answered this. The tape records the hidden `Linear`, the ReLU, and the output `Linear` as ordinary operations, and `loss.backward()` pushes the output error through each of them by the chain rule until every hidden weight has a gradient. Rumelhart, Hinton, and Williams published that procedure in 1986 under the name backpropagation, and the winter ended. Everything below is that procedure, run by the modules you built.
 
-Let us evaluate this exact system across all four XOR inputs:
-- $(0, 0) \implies h_1 = \max(0, -0.5) = 0, \quad h_2 = \max(0, -1.5) = 0 \implies y = 0 - 0 = \mathbf{0}$
-- $(0, 1) \implies h_1 = \max(0, 0.5) = 0.5, \quad h_2 = \max(0, -0.5) = 0 \implies y = 0.5 - 0 = \mathbf{0.5}$
-- $(1, 0) \implies h_1 = \max(0, 0.5) = 0.5, \quad h_2 = \max(0, -0.5) = 0 \implies y = 0.5 - 0 = \mathbf{0.5}$
-- $(1, 1) \implies h_1 = \max(0, 1.5) = 1.5, \quad h_2 = \max(0, 0.5) = 0.5 \implies y = 1.5 - 2(0.5) = \mathbf{0.5}$
+## The Code
 
-::: {.callout-note title="Napkin Math: How Non-Linear Activation Folds the 2D Coordinate Plane"}
-Consider the four XOR corners in physical 1D memory ($4$ coordinate pairs, occupying $4 \times 2 \times 4\text{ bytes} = 32\text{ bytes}$ in a single 64-byte L1 cache line):
-- Points $(0, 1)$ and $(1, 0)$ are separated by distance $\sqrt{2} \approx 1.414$, with diagonal points $(0, 0)$ and $(1, 1)$ trapping them between opposite corners.
-- When transformed by hidden neurons $h_1 = \text{ReLU}(x_1 + x_2 - 0.5)$ and $h_2 = \text{ReLU}(x_1 + x_2 - 1.5)$:
-  1. Points $(0, 1)$ and $(1, 0)$ both map to the exact same hidden coordinate $[0.5, 0.0]$.
-  2. Point $(0, 0)$ maps to $[0.0, 0.0]$.
-  3. Point $(1, 1)$ maps to $[1.5, 0.5]$.
-- The non-linear ReLU has physically folded the 2D plane like a sheet of paper! The two target-1 points are now clustered together at $[0.5, 0.0]$, allowing a single final linear hyperplane ($y = h_1 - 2h_2$) to separate them cleanly from both target-0 points.
+::: {.callout-note title="Source Code Mapping"}
+Milestone I is three scripts: `milestones/02_1969_xor/01_xor_crisis.py`, `milestones/02_1969_xor/02_xor_solved.py`, and `milestones/03_1986_mlp/01_rumelhart_tinydigits.py`. They import the NumPy-backed modules 01 through 08 that students build in the TinyTorch course (`src/01_tensor` through `src/08_training`), so they run only inside a TinyTorch checkout after those modules have been exported into the `tinytorch` package. The listings in this chapter are excerpts of those scripts with the progress bars and panels removed; they are not standalone, because every class they use was built in Chapters 1 through 8.
 :::
 
----
+### The XOR network and its data
 
-## M1.4 Line-by-Line Reference Implementation
+The first decision is what to train on. The obvious choice is the truth table itself, the same four rows the perceptron script scored, and for training it is a poor dataset. Four points can be fit by carving four tiny islands around four coordinates, and a network that has done that has learned nothing you could check, because there is no fifth point to ask it about. The solved script instead draws twenty-five samples around each corner with a little Gaussian noise, a standard deviation of 0.1 so the clouds do not touch, one hundred points in all, and shuffles them. Now the boundary the network finds has to hold over a region rather than at a point, and the four exact corners become inputs it never trained on, which we can test at the end.
 
-Let us validate our complete Core Engine on both historical milestones using pure TinyTorch.
-
-#### Test 1: Demonstrating Single-Layer Linear Failure
+The model is the two-layer shape from The Idea with two changes from what I could build by hand. The hidden layer has four units rather than two. Two suffice when I choose the weights, but gradient descent starts from random weights and needs spare units so that one bad draw is not fatal; the next subsection shows what happens when the slack runs out. The hidden units use ReLU rather than the sigmoid of the 1986 paper, because Chapter 2 showed that a sigmoid passes at most a quarter of the gradient through and ReLU passes all of it. After the output layer comes a sigmoid, and the reason is the loss. Binary cross-entropy, the two-class form of Chapter 4's cross-entropy, scores a probability against a 0 or 1 target, and a `Linear` layer emits any real number, so the sigmoid is what turns the score into something the loss can read.
 
 ```python
-# Reference Integration Test: packages/tinytorch/milestones/02_1969_xor
+# milestones/02_1969_xor/02_xor_solved.py (excerpt)
 import numpy as np
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, Sequential
-from tinytorch.core.activations import ReLU
-from tinytorch.core.losses import MSELoss
-from tinytorch.core.optimizers import SGD, AdamW
-from tinytorch.core.training import Trainer
+from tinytorch import Tensor, Linear, ReLU, Sigmoid, BinaryCrossEntropyLoss, SGD
 
-# 1. Define XOR Truth Table Dataset
-X_xor = Tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
-Y_xor = Tensor([[0.0], [1.0], [1.0], [0.0]])
+rng = np.random.default_rng(7)
 
-# 2. Build Single-Layer Linear Model: Y = XW^T + b
-single_layer = Linear(in_features=2, out_features=1)
-optimizer_single = SGD(single_layer.parameters(), lr=0.1)
-trainer_single = Trainer(single_layer, optimizer_single, MSELoss())
+def generate_xor_data(n_samples=100):
+    per_corner = n_samples // 4
+    xs, ys = [], []
+    for (a, b), target in [((0, 0), 0), ((0, 1), 1), ((1, 0), 1), ((1, 1), 0)]:
+        xs.append(rng.standard_normal((per_corner, 2)) * 0.1 + np.array([a, b]))
+        ys.append(np.full((per_corner, 1), float(target)))
+    X, y = np.vstack(xs), np.vstack(ys)
+    order = rng.permutation(n_samples)
+    return Tensor(X[order]), Tensor(y[order])
 
-# Train for 200 epochs
-for _ in range(200):
-    trainer_single.train_epoch([(X_xor, Y_xor)])
+class XORNetwork:
+    def __init__(self, hidden_size=4):
+        self.hidden = Linear(2, hidden_size)
+        self.relu = ReLU()
+        self.output = Linear(hidden_size, 1)
+        self.sigmoid = Sigmoid()
 
-_, acc_single = trainer_single.evaluate([(X_xor, Y_xor)])
-print(f"Single-Layer Perceptron XOR Accuracy: {acc_single * 100:.1f}% (Expected: ~50% failure)")
+    def __call__(self, x):
+        return self.sigmoid(self.output(self.relu(self.hidden(x))))
+
+    def parameters(self):
+        return self.hidden.parameters() + self.output.parameters()
 ```
 
-#### Test 2: Conquering XOR with the 1986 Multi-Layer Perceptron
+The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidden layer, a 4 by 1 weight matrix and 1 bias in the output layer. Notice `parameters()`. `XORNetwork` is a plain Python class, not a Chapter 3 `Layer`, so nothing walks its attributes for it; it has to hand the optimizer the concatenation of the two layers' lists itself. That list is all the optimizer ever learns about the model's structure, and the same is true in PyTorch, where `nn.Module.parameters()` does the walk and returns the same kind of list.
+
+### The loop
+
+A framework needs one more thing before it can learn, and it is not a class. It is an order. Forward, loss, backward, step, clear, and Chapter 8 spent a chapter on why that order matters. The step that is easiest to drop is the clear. Chapter 6's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, epoch two trains on the sum of two epochs' gradients, epoch three on three, and the effective learning rate climbs every step. Nothing raises an error. The loss just stops falling, or blows up.
+
+The training function below is Chapter 8's five steps written out by hand. The milestone scripts do not use the `Trainer` class; they show the loop in the open so that there is nothing between you and the mechanism.
 
 ```python
-# 3. Build Multi-Layer Perceptron (2 -> 4 -> 1)
-mlp = Sequential(
-    Linear(in_features=2, out_features=4),
-    ReLU(),
-    Linear(in_features=4, out_features=1)
-)
+def train_network(model, X, y, epochs=500, lr=0.5):
+    loss_fn = BinaryCrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr=lr)
+    for epoch in range(epochs):
+        predictions = model(X)                 # forward
+        loss = loss_fn(predictions, y)         # loss
+        loss.backward()                        # backward, through the hidden layer
+        optimizer.step()                       # update
+        optimizer.zero_grad()                  # clear, ready for the next epoch
+        if (epoch + 1) % 100 == 0:
+            accuracy = ((predictions.data > 0.5).astype(int) == y.data).mean()
+            print(f"epoch {epoch + 1:3d}  loss {float(loss.data):.4f}  accuracy {accuracy:.0%}")
+    return model
 
-optimizer_mlp = AdamW(mlp.parameters(), lr=0.05)
-trainer_mlp = Trainer(mlp, optimizer_mlp, MSELoss())
+import tinytorch.core.layers as layers
+layers.rng = np.random.default_rng(1986)       # see below
 
-# Train for 200 epochs
-for _ in range(200):
-    trainer_mlp.train_epoch([(X_xor, Y_xor)])
-
-preds = mlp.forward(X_xor)
-print("MLP XOR Predictions:")
-for i in range(4):
-    print(f"  Input: {X_xor.data[i]} -> Target: {Y_xor.data[i][0]} | Pred: {preds.data[i][0]:.4f}")
+X, y = generate_xor_data(100)
+model = train_network(XORNetwork(hidden_size=4), X, y)
 ```
 
-Within 50 epochs, the loss drops to zero, and the MLP predicts exact outputs: `[0.001, 0.998, 0.997, 0.002]`. **The XOR wall is conquered.**
+Two things to notice. First, `zero_grad()` comes last rather than first. That is Chapter 8's cycle rotated by one step, and what matters is that the gradients are cleared between one `backward()` and the next; PyTorch loops usually put `optimizer.zero_grad()` first, and both orders are correct. Second, the script reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] This is the slack from the previous subsection running out. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and the network settles at 75% accuracy with one corner stuck near probability 0.5. That is the dying ReLU failure from Chapter 2 showing up in the smallest network that can exhibit it. The seed 1986 is a start I checked; the script tells you to rerun with another if you land on the plateau.
 
----
+[^fn-seed-xor-init]: **Seed**: the starting value of a pseudo-random number generator. Two runs with the same seed draw the same sequence of "random" numbers, which makes a training run reproducible; two runs with different seeds start from different initial weights and can end in different places.
 
-## M1.5 Concrete Numerical Trace Table: The XOR Hidden Manifold
+With that seed, on my machine the script starts at loss 0.7357 and 50% accuracy, reaches 100% accuracy by epoch 100 at loss 0.0755, and ends after 500 epochs at loss 0.0053. Fed the four exact corners, the trained network answers 0.002, 0.998, 0.998, and 0.003. The wall has a door in it.
 
-Let us examine the concrete numerical transformation that occurs inside the trained 2-layer MLP for all four XOR input points:
+### Digits
 
-#### Numerical Verification & Memory Layout
+The third script moves from a truth table to images, and three things have to change for the same two-layer shape to cope. TinyDigits ships with the repository as two pickled arrays: 150 training images and 47 test images, each 8 by 8 pixels with values from 0 to 16, labeled 0 through 9. An 8 by 8 image flattens to a 64-vector, the hidden layer has 32 units, and the output has 10, one per digit.
 
-| Input Coordinate $(x_1, x_2)$ | Target Label $y$ | Hidden Pre-Activation $\mathbf{z}_1$ | Hidden Post-ReLU $\mathbf{h}$ | Output Logit $\hat{y}$ | Prediction Rounded | Memory State |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **$(0.0, 0.0)$** | $0.0$ | $[-0.52, -1.48, -0.81, -0.35]$ | $[0.00, 0.00, 0.00, 0.00]$ | $-0.012$ | **$0$ (Correct)** | 8 bytes in L1 cache |
-| **$(0.0, 1.0)$** | $1.0$ | $[+0.49, -0.51, +0.62, +0.12]$ | $[0.49, 0.00, 0.62, 0.12]$ | $+0.994$ | **$1$ (Correct)** | 8 bytes in L1 cache |
-| **$(1.0, 0.0)$** | $1.0$ | $[+0.51, -0.49, +0.60, +0.15]$ | $[0.51, 0.00, 0.60, 0.15]$ | $+0.996$ | **$1$ (Correct)** | 8 bytes in L1 cache |
-| **$(1.0, 1.0)$** | $0.0$ | $[+1.52, +0.52, +1.84, +0.72]$ | $[1.52, 0.52, 1.84, 0.72]$ | $+0.008$ | **$0$ (Correct)** | 8 bytes in L1 cache |
+The first change is the output. A digit classifier has ten answers, not two, and the two-class trick of one sigmoid and one probability does not stretch to cover it; ten separate sigmoids would give ten probabilities that need not sum to one and ten losses with nothing tying them together. Chapter 4's `CrossEntropyLoss` takes the ten raw scores and an integer label and does the softmax and the logarithm inside, with the max shift that keeps a score of 100 from overflowing float32. So the model emits ten raw scores, there is no sigmoid, and the prediction is the index of the largest score.
 
-: Concrete numerical forward trace across all four XOR coordinates through the trained 2-layer MLP. {#tbl-xor-numerical-trace tbl-colwidths="[15,10,22,20,11,11,11]"}
+The second change is how the data arrives. XOR fed all one hundred points through the network at once, one gradient step per epoch. Doing the same with 150 images gives twenty steps in twenty epochs, which is not many. The other extreme, one image at a time, is 3,000 steps of 1 by 64 matrix multiplies, each too small to be worth the Python around it, and a gradient from one image is a poor stand-in for the gradient of the dataset. Chapter 5's `DataLoader` splits the difference. Shuffled batches of 32 give five steps per epoch, one hundred in twenty epochs, each on a matrix big enough to be worth the call and averaged over enough images to point the right way.
+
+The third change is what we measure. The network has 2,410 parameters and sees 150 images, sixteen parameters per image, which is more than enough to memorize every one of them. Accuracy on the training set therefore cannot tell a model that learned to read digits from one that learned 150 pictures. The 47 test images never enter the loop, and accuracy on them is the only number in this chapter that means anything.
 
 ```python
-# Hand-Verification Script: Run with standard Python and NumPy
+# milestones/03_1986_mlp/01_rumelhart_tinydigits.py (excerpt)
+import pickle
 import numpy as np
+from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss, SGD
+from tinytorch.core.dataloader import TensorDataset, DataLoader
 
-X = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
-W1 = np.array([[1.0, -1.0], [1.0, -1.0]])
-b1 = np.array([-0.5, 0.5])
-W2 = np.array([[1.0], [1.0]])
-b2 = np.array([0.0])
+def load_split(name):                                   # paths relative to the repo root
+    with open(f"datasets/tinydigits/{name}.pkl", "rb") as f:
+        d = pickle.load(f)                              # {"images": (N, 8, 8), "labels": (N,)}
+    return Tensor(d["images"].astype(np.float32)), Tensor(d["labels"].astype(np.int64))
 
-# Forward pass through 2-layer MLP
-h = np.maximum(0, X @ W1 + b1)
-y = h @ W2 + b2
+train_images, train_labels = load_split("train")
+test_images, test_labels = load_split("test")
 
-print("Inputs:\n", X)
-print("Hidden Post-ReLU:\n", h)
-print("MLP Output:\n", y)
+class DigitMLP:
+    def __init__(self, input_size=64, hidden_size=32, num_classes=10):
+        self.fc1 = Linear(input_size, hidden_size)
+        self.relu = ReLU()
+        self.fc2 = Linear(hidden_size, num_classes)
+
+    def __call__(self, x):
+        if len(x.data.shape) > 2:                       # (N, 8, 8) -> (N, 64)
+            x = Tensor(x.data.reshape(x.data.shape[0], -1))
+        return self.fc2(self.relu(self.fc1(x)))
+
+    def parameters(self):
+        return [self.fc1.weight, self.fc1.bias, self.fc2.weight, self.fc2.bias]
+
+def evaluate_accuracy(model, images, labels):
+    predictions = np.argmax(model(images).data, axis=1)
+    return 100.0 * (predictions == labels.data).mean()
+
+model = DigitMLP()
+train_loader = DataLoader(TensorDataset(train_images, train_labels),
+                          batch_size=32, shuffle=True)
+loss_fn = CrossEntropyLoss()
+optimizer = SGD(model.parameters(), lr=0.01)
+
+for epoch in range(20):
+    for batch_images, batch_labels in train_loader:
+        logits = model(batch_images)
+        loss = loss_fn(logits, batch_labels)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+    print(f"epoch {epoch + 1:2d}  test accuracy {evaluate_accuracy(model, test_images, test_labels):.1f}%")
 ```
 
-Notice how the hidden post-$\text{ReLU}$ state maps both $(0,1)$ and $(1,0)$ to the positive coordinate region around $[0.50, 0.00]$, while $(1,1)$ activates the second neuron ($0.52$) whose negative output weight cancels the sum back down to $0.00$. The non-linear activation physically folds the metric space!
+Two details in the listing are worth a second look. `DigitMLP.__call__` reshapes an (N, 8, 8) batch to (N, 64) before the first `Linear`, and on a contiguous array that reshape is a view, no copy, the same stride bookkeeping as Chapter 1. And `parameters()` is hand-written again, four tensors in a list, because the model is a plain class. In PyTorch the same script is an `nn.Flatten` in front of two `nn.Linear` layers inside an `nn.Sequential`, with an `nn.CrossEntropyLoss` and a `DataLoader` that look exactly like the ones here.
 
----
+The napkin math says how small this still is. The model's $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$ parameters are about 9.6 KB in float32. The entire training set is $150 \times 64$ floats, about 38 KB. I ran the script four times. The untrained model scored 17% on the test images, training crossed 100% on both the training and test sets by epoch 5, and the loss was near 0.016 at epoch 20. The script's own docstring predicts 75 to 85%, which was written for a harder split; with 47 test images, 100% means the network makes fewer than one error in 47, not that digit recognition is solved. The point is not the number. The point is that every module, from the strided tensor to the shuffled loader to the tape, cooperated on data it had never seen.
 
-## M1.6 End-to-End Benchmark: TinyDigits Handwritten Recognition
+## A Worked Trace
 
-To conclude Milestone I, we train our complete Core Engine on the `TinyDigits` dataset ($8 \times 8$ grayscale images of handwritten digits 0 through 9). Each input vector $\mathbf{x} \in \mathbb{R}^{64}$ represents unrolled 8-bit grayscale pixel intensities normalized to float32 ($64 \times 4\text{ bytes} = 256\text{ bytes}$ per sample).
-
-The model parameter count follows directly from our modular layer architecture:
-$$N_{\text{params}} = (64 \times 128 + 128) + (128 \times 64 + 64) + (64 \times 10 + 10) = 8,320 + 8,256 + 650 = 17,226\text{ parameters}$$
-
-In 32-bit floating point, the entire model occupies $17,226 \times 4\text{ bytes} \approx 68.9\text{ KB}$ of memory, fitting entirely inside the CPU L2 cache ($512\text{ KB}$--$1\text{ MB}$ per core):
+The hand-built two-unit network from The Idea is small enough to run in your head, and running it is the fastest way to see the fold. The listing is plain Python with no framework, so it runs anywhere.
 
 ```python
-from tinytorch.core.losses import CrossEntropyLoss
-from tinytorch.core.dataloader import Dataset, DataLoader
-from tinytorch.core.training import CosineSchedule, Trainer
-from tinytorch.core.layers import Linear, Sequential
-from tinytorch.core.activations import ReLU
-from tinytorch.core.optimizers import AdamW
+corners = [(0, 0), (0, 1), (1, 0), (1, 1)]
+targets = [0, 1, 1, 0]
 
-# 1. Construct Deep Multi-Layer Perceptron for 10-Class Classification
-digit_model = Sequential(
-    Linear(in_features=64, out_features=128),
-    ReLU(),
-    Linear(in_features=128, out_features=64),
-    ReLU(),
-    Linear(in_features=64, out_features=10)
-)
+def relu(v):
+    return v if v > 0 else 0.0
 
-# 2. Configure AdamW with Cosine Annealing Learning Rate
-opt = AdamW(digit_model.parameters(), lr=0.01, weight_decay=0.001)
-sched = CosineSchedule(max_lr=0.01, min_lr=0.0001, total_epochs=20)
-trainer = Trainer(digit_model, opt, CrossEntropyLoss(), scheduler=sched, grad_clip_norm=1.0)
-
-print("Starting TinyDigits Training Benchmark...")
-# Executing 20 epochs achieves >96% validation accuracy!
+for (x1, x2), t in zip(corners, targets):
+    s = x1 + x2                      # both hidden units read the same sum
+    z1, z2 = s - 0.5, s - 1.5        # pre-activations
+    h1, h2 = relu(z1), relu(z2)      # the fold
+    y = 2 * h1 - 6 * h2              # output neuron
+    print(f"x=({x1},{x2})  z=({z1:+.1f},{z2:+.1f})  h=({h1:.1f},{h2:.1f})  y={y:.1f}  target={t}")
 ```
 
----
+| Input $(x_1, x_2)$ | Target | Pre-activation $(z_1, z_2)$ | Hidden $(h_1, h_2)$ | Output $y = 2h_1 - 6h_2$ |
+| :--- | :--- | :--- | :--- | :--- |
+| $(0, 0)$ | 0 | $(-0.5, -1.5)$ | $(0.0, 0.0)$ | $0.0$ |
+| $(0, 1)$ | 1 | $(+0.5, -0.5)$ | $(0.5, 0.0)$ | $1.0$ |
+| $(1, 0)$ | 1 | $(+0.5, -0.5)$ | $(0.5, 0.0)$ | $1.0$ |
+| $(1, 1)$ | 0 | $(+1.5, +0.5)$ | $(1.5, 0.5)$ | $0.0$ |
 
-## M1.7 The Production Systems Bridge: From PyTorch `nn.Sequential` to Systolic Arrays
+: The hand-built two-unit network on the four XOR corners. The two positive rows collapse onto the same hidden point. {#tbl-xor-numerical-trace tbl-colwidths="[18,10,26,22,24]"}
 
-In modern production systems, Multi-Layer Perceptrons are executed across high-throughput hardware architectures using optimized C++ and CUDA runtimes:
+Read down the hidden column. Rows two and three are identical after the ReLU, and row four is the only one where $h_2$ is nonzero, so the output neuron only has to subtract it away. Every number is exact, which is what makes this a good first check when your own `Linear` and `ReLU` produce something surprising.
 
-```python
-# Production PyTorch Equivalent Bridge
-import torch
-import torch.nn as nn
+The trained four-unit network finds a fold of its own, and it is worth seeing that gradient descent did not need our hand-picked one. The values below come from my seeded run above, read out by feeding the four exact corners through the trained layers.
 
-torch_mlp = nn.Sequential(
-    nn.Linear(64, 128),
-    nn.ReLU(),
-    nn.Linear(128, 64),
-    nn.ReLU(),
-    nn.Linear(64, 10)
-)
-```
-
-| System Layer | TinyTorch Pure Python | Production PyTorch C++ / CUDA | Hardware Execution Engine |
+| Input | Hidden $(h_1, h_2, h_3, h_4)$ | Output score $z$ | Probability $\sigma(z)$ |
 | :--- | :--- | :--- | :--- |
-| **Model Hierarchy** | `Sequential([Linear, ReLU])` | `torch::nn::Sequential` | C++ graph traversal (`c10::intrusive_ptr`) |
-| **GEMM Kernel** | `np.dot(X, W.T)` | `cublasSgemm` / `cutlass::gemm` | Tensor Core MMA (Matrix-Multiply-Accumulate) |
-| **Activation Fusion** | Separate `ReLU` pass | Fused `gemm_bias_relu` | In-register SRAM arithmetic without DRAM writeback |
-| **Memory Bandwidth** | Unfused memory passes | TorchInductor pointwise fusion | Coalesced 128-bit memory bus transactions |
+| $(0, 0)$ | $(0.05, 0.75, 0.16, 1.60)$ | $-6.36$ | $0.002$ |
+| $(0, 1)$ | $(2.69, 1.96, 0.00, 0.00)$ | $+6.15$ | $0.998$ |
+| $(1, 0)$ | $(0.00, 1.82, 2.87, 0.00)$ | $+6.22$ | $0.998$ |
+| $(1, 1)$ | $(0.00, 3.03, 0.00, 0.00)$ | $-5.92$ | $0.003$ |
 
-: Systems mapping from TinyTorch pure Python components to production PyTorch C++/CUDA runtime primitives. {#tbl-milestone1-production-bridge tbl-colwidths="[20,26,26,28]"}
+: Hidden activations of the trained four-unit XOR network at the four corners. The output score is $z = \mathbf{w}_2 \cdot \mathbf{h} + b_2$ with learned weights $\mathbf{w}_2 = (3.83, -1.67, 3.52, -3.12)$ and bias $b_2 = -0.85$. {#tbl-xor-learned-fold tbl-colwidths="[14,36,24,26]"}
 
----
+The learned units have readable jobs. Unit 1 fires only for $(0,1)$ and unit 3 only for $(1,0)$, and both carry large positive output weights. Unit 2 fires for everything, more strongly the more inputs are on, and carries a negative weight, which is how the network cancels the $(1,1)$ row. Unit 4 fires only for $(0,0)$ and is also weighted negative. Nobody told the network to decompose XOR this way. It is one of many folds that work, and a different seed finds a different one.
 
-::: {#nbk-m1-xor-arithmetic-intensity .callout-notebook title="Arithmetic intensity of the XOR two-layer perceptron"}
-Consider evaluating a forward-backward training pass on the complete XOR dataset ($B = 4$ samples) through our two-layer network: $\text{Linear}(2, 4) \to \text{ReLU} \to \text{Linear}(4, 1)$:
+## From TinyTorch to Production
 
-- **Floating-Point Operations (FLOPs)**:
-  - Layer 1 Forward GEMM ($2 \times B \times D_{\text{in}} \times D_{\text{hidden}}$): $2 \times 4 \times 2 \times 4 = 64\text{ FLOPs}$
-  - ReLU non-linear gating: $4 \times 4 = 16\text{ FLOPs}$
-  - Layer 2 Forward GEMM ($2 \times B \times D_{\text{hidden}} \times D_{\text{out}}$): $2 \times 4 \times 4 \times 1 = 32\text{ FLOPs}$
-  - Mean Squared Error Loss: $4 \times 3 = 12\text{ FLOPs}$
-  $$\text{Total Forward Compute} = 124\text{ FLOPs}$$
+The same experiment in PyTorch is shorter, because the container, the loss, and the loop are library code, but every line has a counterpart you have now written.
 
-- **Memory Traffic (Bytes Transferred)**:
-  - Input batch ($4 \times 2$ floats): $32\text{ bytes}$
-  - Layer 1 weights and bias ($2 \times 4 + 4 = 12$ floats): $48\text{ bytes}$
-  - Layer 2 weights and bias ($4 \times 1 + 1 = 5$ floats): $20\text{ bytes}$
-  - Target labels ($4$ floats): $16\text{ bytes}$
-  $$\text{Total DRAM Traffic} = 116\text{ bytes}$$
+```python
+import torch, torch.nn as nn
 
-- **Operational Intensity**:
-  $$I = \frac{124\text{ FLOPs}}{116\text{ bytes}} \approx 1.07\text{ FLOPs/Byte}$$
+model = nn.Sequential(nn.Linear(2, 4), nn.ReLU(), nn.Linear(4, 1))
+loss_fn = nn.BCEWithLogitsLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+for epoch in range(500):
+    optimizer.zero_grad()
+    loss = loss_fn(model(X), y)
+    loss.backward()
+    optimizer.step()
+```
 
-**Systems Takeaway**: With an operational intensity near $1\text{ FLOP/byte}$, small multi-layer networks operate deep within the **memory-bandwidth bound** regime of modern processors (which require $I \ge 100\text{ FLOPs/byte}$ to saturate compute ALUs). Over $98\%$ of execution time is spent moving data between cache and registers rather than executing arithmetic.
-:::
+| Piece | TinyTorch milestone | PyTorch |
+| :--- | :--- | :--- |
+| Model container | `XORNetwork` class with a hand-written `parameters()` | `nn.Sequential`; `parameters()` walks the module tree |
+| Output and loss | `Sigmoid` then `BinaryCrossEntropyLoss` with the probability clipped to $[10^{-7}, 1 - 10^{-7}]$ | `BCEWithLogitsLoss`, sigmoid and loss fused into one numerically stable function |
+| Weight init | LeCun-scaled normal, seeded from a module-level generator | Kaiming-uniform by default, seeded by `torch.manual_seed` |
+| Loop | Five steps written by hand | Five steps written by hand |
+| Batches | `DataLoader` over in-memory arrays, one process | `DataLoader` with worker processes, pinned memory, prefetching |
+| Arithmetic | NumPy on the CPU | CPU, or GPU kernels launched per operation |
 
-::: {.callout-checkpoint title="Milestone I Checkpoint: The Core Engine Is Complete"}
-1. **Zero External ML Dependencies**: Built purely on Python and NumPy buffers.
-2. **Exact Analytical Autograd**: Evaluated reverse topological VJPs with zero numerical error.
-3. **Universal Function Separation**: Conquered Minsky's 1969 XOR Crisis via non-linear coordinate warping.
-4. **Production Digit Recognition**: Achieved $>96\%$ test accuracy on TinyDigits handwritten classification.
-:::
+: The XOR and digits experiments in TinyTorch and in PyTorch. {#tbl-milestone1-production-bridge tbl-colwidths="[18,42,40]"}
 
-We have proven that our from-scratch Core Engine is mathematically sound and capable of training multi-layer neural networks to high accuracy. Across all four benchmarks, our dynamic reverse-mode tape, numerical invariants, and fused updates operate with zero external machine learning dependencies.
+The loss is the one place where the production code differs in kind rather than in speed. TinyTorch applies a sigmoid, then takes a logarithm of the result, and has to clip the probability away from 0 and 1 to keep the logarithm finite. `BCEWithLogitsLoss` takes the raw score and computes $\log(1 + e^{-z})$ in a form that never overflows, the same log-sum-exp trick Chapter 4 used for the multi-class case. The clip is a small lie, since past $10^{-7}$ the loss stops changing no matter how wrong the score is; the fused loss tells the truth at every scale. When you reach for a loss function in PyTorch, prefer the version that ends in "WithLogits" for exactly this reason.
 
-Yet fully connected MLPs suffer from a fundamental architectural limitation: they treat every input dimension independently through dense weight matrices. When dealing with spatial 2D images or sequential human language, flattening inputs into 1D vectors destroys crucial spatial locality and sequential syntax, forcing the network to spend parameter capacity relearning translational invariance.
+Everything else carries over unchanged. A model is a list of parameter tensors. Training is forward, loss, backward, step, clear, in that cycle. Accuracy is an `argmax` compared to a label on data held out from training. A run is reproducible only if its seed is. The reason PyTorch does not look like this on a real workload is scale, not mechanism. When the matrices are large, `x.matmul(W)` becomes a call into cuBLAS and the ReLU is fused into the same kernel so the activations never make a round trip to memory; when the dataset does not fit in RAM, loader workers decode the next batch while the GPU is busy with this one. Nothing in that story changes what `backward()` computes.
 
-In Part II (which we begin in Chapter 9: Convolutions), we expand TinyTorch into modern deep learning: Spatial 2D Convolutions, Byte-Pair Tokenization, Embedding Spaces, Multi-Head Scaled Dot-Product Attention, and the full GPT-2 Transformer Architecture.
+The XOR network is also a useful reminder of when the production machinery does not help. Seventeen parameters and one hundred samples are a few thousand floating-point operations per step. On a GPU, each of the roughly ten operations in the forward and backward pass is a separate kernel launch costing several microseconds of fixed overhead, which is more than the arithmetic itself, so this network trains faster on a CPU than on any accelerator. The digits network, at 2,410 parameters, is in the same regime. Accelerators pay off when the work per launch is large; until then the simple path is the fast path.
+
+Two habits from this milestone transfer directly to your own work. When a small network plateaus at a suspiciously round number, 75% on XOR or chance on one class, suspect a dead unit or a symmetric initialization before suspecting the code, and rerun with a different seed before changing anything else. And keep a test split from the first run, even on 197 images; a training accuracy of 100% tells you the model can memorize, and only the held-out number tells you it learned.
+
+## Summary
+
+You put eight modules together and they learned. A one-layer perceptron scored 75% on XOR after 110 attempts because no line separates the diagonal corners, a fact four inequalities prove. A hidden layer with ReLU folds the input plane so that the two positive corners land on the same point, the output layer separates them with a line, and backpropagation through the tape is what lets gradient descent find that fold from a random start. The same two-layer shape, widened to 64 by 32 by 10 and fed shuffled batches through the `DataLoader`, reached 100% on held-out TinyDigits images in a few epochs. The principle to keep is that a network's power comes from the nonlinearity between its layers, and a framework's job is to route the loss gradient back through that nonlinearity to weights that have no target of their own. Chapter 9 takes for granted that a flattened 8 by 8 image trains to high accuracy with a two-layer MLP and asks what the flattening threw away.
+
+## Exercises
+
+1. **The plateau.** Remove the `layers.rng` reseed from the XOR script and run it ten times with `hidden_size=4`, then ten times with `hidden_size=8`. Count the runs that end at 75%. Explain, using the dying ReLU argument from Chapter 2, why the wider network gets stuck less often.
+
+2. **Sigmoid hidden units.** Replace the hidden `ReLU` with `Sigmoid`, as the 1986 paper did, and train XOR again with the same learning rate and epochs. Report the loss at epochs 100 and 500 and account for the difference using the gradient magnitudes Chapter 2 gives for the two activations.
+
+3. **Updates per epoch.** With 150 training images and `batch_size=32`, the digits loop makes five optimizer steps per epoch. Predict how many steps twenty epochs make at batch sizes 16, 64, and 256, then run all three and record the test accuracy at epoch 5 for each. Explain which quantity, steps or samples seen, the accuracy tracks.

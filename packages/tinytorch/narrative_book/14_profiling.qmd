@@ -1,275 +1,366 @@
-# Profiling & Bottlenecks: The Roofline Model and Memory Stalls {#sec-profiling}
+# Profiling: The Roofline Model {#sec-profiling}
 
-In Parts I and II, we engineered the complete mathematical runtime of TinyTorch, capable of training and running both vision and generative language models. Yet if you run our transformer on a real processor, you will quickly notice a frustrating reality: token generation is slow, GPU utilization fluctuates wildly, and our system feels sluggish.
+Milestone II left you with a working language model. TinyGPT trains, the generation loop produces text one token at a time, and each of those tokens is slow. The milestone closed on the observation that every generated token reads every weight in the model to do almost no arithmetic, without saying what that costs or how to measure it. This chapter answers the question every practitioner asks at that moment. Where does the time go, and which change would actually make it faster: a faster processor, fewer floating-point operations, or fewer bytes moved?
 
-In this chapter, we enter the discipline of **Systems Performance Engineering**. We build the TinyTorch **`Profiler` Engine** and master the **Williams Roofline Model**.[^roofline-ref] We discover why optimizing mathematical operations (FLOPs) delivers a $0\%$ speedup on memory-bound workloads, and how to scientifically dissect latency, memory allocations, and arithmetic intensity.
+The answer needs two things that Parts I and II never built. The first is a **profiler**, a small tool that counts what a forward pass does (parameters, floating-point operations, bytes) and times how long it takes. The second is a way to turn those counts into a diagnosis. That is the roofline model, a one-line formula that says how fast a given operation could possibly run on a given machine, and which of two ceilings it is hitting. Once you can place an operation on the roofline, the rest of Part III becomes a set of deliberate moves. Quantization, fusion, and caching each attack one ceiling, and this chapter tells you which one you are under.
 
-[^roofline-ref]: The Roofline Model was formulated by Samuel Williams, Andrew Waterman, and David Patterson (CACM 2009) to visualize processor performance bounds relative to memory bandwidth.
-
-![The Roofline Model: Memory-Bound Bandwidth Ceilings vs. Compute-Bound Peak FLOP Horizons and the Physical Ridge Point](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model}
+![The roofline model. Performance rises with arithmetic intensity along the bandwidth ceiling until it reaches the compute ceiling; the corner where they meet is the ridge point.](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model}
 
 ---
 
-## Systems Problem Motivation: The Fallacy of Counting FLOPs
+## The Problem
 
-In introductory computer science, performance is measured by algorithmic time complexity ($O(N^3)$ vs. $O(N^2)$). In deep learning, engineers often obsess over **FLOPs (Floating-Point Operations)**:
+The natural way to estimate how long a computation takes is to count its arithmetic. A Linear layer with $n$ inputs and $m$ outputs, applied to $R$ rows, does $2Rnm$ floating-point operations, or FLOPs, counting one for each multiply and one for each add. Double the rows and you double the FLOPs, so you expect to double the time.
 
-$$\text{Linear Layer FLOPs} = 2 \times M \times N \times K$$
+Try it. Take one weight matrix the size of a real model's layer and push two rows through it, then sixteen. The second call does eight times the arithmetic.
 
-::: {.callout-caution title="The Naive Profiling Trap"}
-An engineer spends three weeks rewriting an elementwise GELU activation kernel to cut its arithmetic instruction count in half (saving 10 million FLOPs). When deployed to an NVIDIA H100 GPU and benchmarked, the measured latency improves by:
+```python
+import time
+import numpy as np
 
-$$\text{Speedup} = \mathbf{0.0\%}$$
-:::
+rng = np.random.default_rng(0)
+W = rng.standard_normal((4096, 4096), dtype=np.float32)   # one Linear weight, 64 MB
 
-Why did saving ten million floating-point operations deliver zero speedup?
+def time_ms(rows):
+    x = rng.standard_normal((rows, 4096), dtype=np.float32)
+    for _ in range(5):                      # warmup, explained below
+        x @ W.T
+    t0 = time.perf_counter()
+    for _ in range(20):
+        x @ W.T
+    return (time.perf_counter() - t0) / 20 * 1000.0
 
-Modern GPU accelerators (such as the NVIDIA H100) can execute **$1,000\text{ TeraFLOPs}$** ($10^{15}$ operations per second) of FP16 compute, but can only read from High-Bandwidth Memory (HBM3) at **$3.35\text{ Terabytes per second}$**.[^h100-ridge]
+print(f"2 rows:  {time_ms(2):.2f} ms")
+print(f"16 rows: {time_ms(16):.2f} ms")
+```
 
-[^h100-ridge]: Peak throughput ($1,979 \text{ TFLOPs}$) divided by memory bandwidth ($3.35 \text{ TB/s}$) establishes the H100 SXM5 hardware ridge point: $I_{\text{ridge}} \approx 590 \text{ FLOPs/Byte}$. Any operation with arithmetic intensity below 590 FLOPs/Byte is physically bound by memory bandwidth, not compute throughput.
+On my laptop (an Apple M5 Max running NumPy 1.26 with Apple's Accelerate library), one run printed `2.06 ms` and `2.04 ms`. Eight times the FLOPs, and the clock did not move. Your numbers will differ, but the shape will not. The weight matrix is far larger than any cache, and on most machines the two calls take about the same time.
 
-To execute an elementwise operation ($y = \text{GELU}(x)$):
-1. The hardware must read $x$ from off-chip DRAM across the memory bus ($4$ bytes in FP32).
-2. The arithmetic ALU executes a handful of multiplications and additions in registers ($~10$ FLOPs).
-3. The hardware must write $y$ back to DRAM across the memory bus ($4$ bytes in FP32).
-
-The compute intensity is:
-
-$$I = \frac{\text{FLOPs}}{\text{Bytes Transferred}} = \frac{10 \text{ FLOPs}}{8 \text{ Bytes}} = 1.25 \text{ FLOPs/Byte}$$
-
-On an H100 GPU, the arithmetic ALUs finish all ten operations in **$0.01\text{ nanoseconds}$**, but must sit completely idle for **$2.4\text{ nanoseconds}$** waiting for the DRAM memory bus to deliver the bytes. The processor is **stalled on memory bandwidth $99.6\%$ of the time**.
-
-Counting FLOPs without analyzing memory traffic is the fundamental trap of machine learning performance engineering.
+The FLOP count was not wrong. It was measuring the wrong thing. Both calls have to pull the same 64 MB weight matrix out of memory, and on my machine that transfer, not the arithmetic, is what the two milliseconds are spent on. The sixteen-row call does its extra multiplications in the shadow of a memory transfer that was going to happen anyway. Any optimization that only trims arithmetic here, however clever, saves nothing. Counting FLOPs without counting bytes is the trap this chapter exists to remove.
 
 ---
 
-## The Mental Model: The Williams Roofline Model
+## The Idea
 
-Introduced by Samuel Williams, Andrew Waterman, and David Patterson in 2009, the **Roofline Model** visualizes the physical upper bound of processor performance:
+### Two costs, two rates
 
-$$P = \min\left( P_{\text{peak}}, \; I \times B_{\text{peak}} \right)$$
+Every operation a model performs has two costs. It does some number of floating-point operations, call it $F$. It also moves some number of bytes, $Q$, between memory and the processor: weights read in, activations read in, results written out. The machine, in turn, has two rates. It can perform at most $P_{\text{peak}}$ FLOPs per second, and it can move at most $B_{\text{peak}}$ bytes per second between memory and the processor, its memory bandwidth.
 
-where:
-- $P$ is achievable performance (in FLOPs/sec or GFLOPs/sec).
-- $P_{\text{peak}}$ is theoretical peak hardware compute throughput (horizontal ceiling).
-- $B_{\text{peak}}$ is peak hardware memory bandwidth (slanted ceiling, in Bytes/sec).
-- $I$ is **Arithmetic Intensity** (in $\text{FLOPs/Byte}$), defined as:
+The arithmetic alone needs at least $F / P_{\text{peak}}$ seconds. The bytes alone need at least $Q / B_{\text{peak}}$ seconds. Hardware overlaps the two as far as it can, issuing the next loads while the current arithmetic runs, so the time is bounded by the slower of the two, not their sum:
 
-$$I = \frac{\text{Total Floating Point Operations (FLOPs)}}{\text{Total DRAM Bytes Transferred}}$$
+$$T \;\ge\; \max\!\left(\frac{F}{P_{\text{peak}}},\; \frac{Q}{B_{\text{peak}}}\right)$$
 
-As illustrated in @fig-roofline-model, the model partitions operations into two distinct hardware execution regimes:
+This one line already explains the experiment. For the 64 MB weight, $Q$ is the same in both calls, and $Q / B_{\text{peak}}$ is the larger term. Growing $F$ by eight times moves the smaller term and leaves the maximum alone.
 
-1. **Memory-Bound Regime ($I < I_{\text{ridge}}$)**: Performance is strictly bounded by the memory bus ($P = I \cdot B_{\text{peak}}$). Arithmetic units sit starved waiting on DRAM fetches. Optimizations must reduce byte traffic (quantization, caching, fusion).
-2. **Compute-Bound Regime ($I \ge I_{\text{ridge}}$)**: Performance reaches the execution unit limit ($P = P_{\text{peak}}$). Memory bandwidth is saturated. Optimizations must exploit vectorization, Tensor Cores, and instruction parallelism.
+### Arithmetic intensity and the roofline
 
-#### The Ridge Point: The Hardware Boundary
+Divide the two costs and you get the number that decides everything. **Arithmetic intensity** is the FLOPs an operation performs per byte it moves:
 
-The intersection between the memory bandwidth ceiling and the compute ceiling defines the **Ridge Point**:
+$$I = \frac{F}{Q} \quad \text{(FLOPs per byte)}$$
+
+An operation with high intensity does a lot of work on each byte it fetches; an operation with low intensity fetches a byte, touches it once or twice, and throws it away. Rewrite the time bound as achieved performance, $F / T$, and it becomes the **roofline**:
+
+$$\frac{F}{T} \;\le\; \min\!\left(P_{\text{peak}},\; I \times B_{\text{peak}}\right)$$
+
+Plotted against $I$ on log axes, as in @fig-roofline-model, the right-hand side is a slanted line that rises with intensity until it hits a flat ceiling at $P_{\text{peak}}$. The corner is the **ridge point**, the intensity at which the two ceilings meet:
 
 $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
-- **Apple M-Series (M3 Max)**: $300\text{ GFLOPs} / 100\text{ GB/s} \implies I_{\text{ridge}} = 3.0\text{ FLOPs/Byte}$
-- **NVIDIA A100 SXM4**: $312\text{ TFLOPs} / 2.0\text{ TB/s} \implies I_{\text{ridge}} = 156\text{ FLOPs/Byte}$
-- **NVIDIA H100 SXM5**: $1,000\text{ TFLOPs} / 3.35\text{ TB/s} \implies I_{\text{ridge}} = 298\text{ FLOPs/Byte}$
+An operation whose intensity sits left of the ridge is **memory bound**. It cannot run faster than $I \times B_{\text{peak}}$, no matter how fast the arithmetic units are; the only lever is moving fewer bytes. An operation right of the ridge is **compute bound**. Its bytes arrive faster than it can use them, and the lever is arithmetic: fewer FLOPs, or a faster way to do them. The model has no third case. Suppose a machine does 1,000 GFLOP/s and moves 50 GB/s; its ridge is 20 FLOPs per byte. An operation at 0.5 FLOPs per byte on that machine can reach at most 25 GFLOP/s, one fortieth of what the silicon can do. The rest of the chip idles, waiting for bytes.
 
-If an operator's arithmetic intensity $I < I_{\text{ridge}}$, it is **Memory-Bound**: the only way to make it faster is to **reduce memory traffic** (via quantization in Chapter 15, kernel fusion in Chapter 17, or caching in Chapter 18).
+### Why a Linear layer's intensity is its row count
 
-If $I > I_{\text{ridge}}$, it is **Compute-Bound**: the only way to make it faster is to **parallelize arithmetic compute** (via Tensor Cores or SIMD vectorization).
+Apply the definition to the layer that dominates every model in this book. A Linear layer with $n$ inputs, $m$ outputs, and $R$ rows does $F = 2Rnm$ FLOPs. It reads $4nm$ bytes of weights (four per float32), reads $4Rn$ bytes of input, and writes $4Rm$ bytes of output. When $R$ is small compared to $n$ and $m$, the weights dominate the bytes:
+
+$$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
+
+The intensity of a Linear layer is roughly half its row count, and nothing else about the layer matters. This is the fact behind Milestone II's complaint. Generating one token at a time means $R = 1$ (one batch element, one new position), so every Linear layer in the model runs at about 0.5 FLOPs per byte. Processing a 64-token prompt in one pass means $R = 64$ and about 32 FLOPs per byte, from the same weights. The weights have to cross from memory to the processor either way; the row count decides how much work gets done per crossing.
+
+### Measuring instead of assuming
+
+The roofline is a model of the machine, and every model needs its numbers checked. Three things are cheap to obtain and together tell you where an operation sits. The first two are counts: $F$ from the layer shapes, and $Q$ from the parameter bytes plus the activations that enter and leave. The third is a clock, and the clock is the part people get wrong. The timer in The Code builds in two rules for that reason, and they get their explanation beside the code.
+
+The machine's two ceilings can be measured with the same timer, without a datasheet. A matrix multiply with very many rows sits far right of the ridge, and its achieved FLOP/s approximates $P_{\text{peak}}$. One with very few rows sits far left, and its achieved bytes per second approximates $B_{\text{peak}}$. The worked trace does exactly this.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 14** in the TinyTorch runtime: `packages/tinytorch/src/14_profiling/14_profiling.py`.
+Module 14 (`src/14_profiling/14_profiling.py`) is the NumPy-backed implementation students build in the TinyTorch course. Its `Profiler` counts FLOPs by dispatching on layer type (`Linear`, `Conv2d`, `Sequential`), tracks peak memory during a forward pass with `tracemalloc`, times with warmup and a median, and classifies a bottleneck with a bandwidth-versus-throughput heuristic. The listings in this chapter are a stripped-down model of the same design, written against the NumPy-backed `Tensor` the book has used since Chapter 6 and small enough to show every step of counting, timing, and placing the result on a roofline.
 :::
 
-We implement the complete `Profiler` engine in TinyTorch:
+The profiler is four short pieces: two counters, a timer, and a roofline that combines them, under a hundred lines in all. Each piece works on any model built from the book's layers, because it only asks for what Chapter 3's `Layer` already provides: a `parameters()` list and a `forward` method. Each piece also exists for a reason the previous sections set up, and I want that reason on the page before the code every time. The code takes a minute to read; the reason is what you will carry to a real framework.
+
+### Counting parameters and bytes
+
+The first number a framework needs about a model is its size in bytes, and it needs it twice. The number decides whether the model fits at all. A seven-billion-parameter model in 16-bit floats is 14 GB, which will not load on a GPU with 12 GB of memory, and knowing that before loading is better than finding out during. And for the workload that closed Milestone II, the number is $Q$. A decode step of TinyGPT reads every weight once and does almost nothing with it, so the weight bytes divided by the memory bandwidth is the floor on that step's time, whatever the arithmetic.
+
+The tempting shortcut is to work the count out from the architecture. The worked trace below does exactly that for TinyGPT and needs a seven-row table to reach 1,050,344, and that is a model with four blocks; a production model has dozens, plus the bias vectors, normalization gains, and embedding tables that a back-of-envelope count leaves out. The other shortcut is to trust the parameter count printed beside the model, which someone else's counter produced. We want our own, and it should not be work. Every parameter is already a `Tensor` around a NumPy array, and a NumPy array knows its own element count and its own byte size, so both counts are one sum over the list Chapter 3's `parameters()` already builds.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/14_profiling/14_profiling.py
 import time
 import numpy as np
-from typing import Dict, Any, Tuple, List, Optional
-from .autograd import Tensor
+
+def count_parameters(model):
+    """Number of learnable scalars in the model."""
+    return sum(p.data.size for p in model.parameters())
+
+def weight_bytes(model):
+    """Bytes the weights occupy in memory (4 per float32)."""
+    return sum(p.data.nbytes for p in model.parameters())
+```
+
+Notice `nbytes` rather than `size * 4`. The array reads its own dtype, so if a weight were stored as int8 the same line would report a quarter as many bytes, which is the whole promise of Chapter 15. PyTorch's idiom is the same sum, `p.numel()` and `p.element_size()` over `model.parameters()`. To a first approximation, `weight_bytes` is also the byte count $Q$ for a forward pass. Every weight has to be read from memory once per pass, and for a small-row pass the weights dwarf the activations.
+
+### Counting FLOPs
+
+$F$ is the other half of the intensity, and a framework wants it before it runs anything. It wants to know which regime an operation will land in, how large a batch has to be before the arithmetic starts to matter, and whether one architecture is cheaper than another at the same size, and every one of those is a question about $F$ that should not require paying for the forward pass it is trying to predict. For TinyGPT the two cases that matter come out to about 1.8 million FLOPs for one decoding step and about 125 million for a 64-token prompt, and the trace derives both.
+
+The naive way to get $F$ is to count it while it happens, with a counter inside every multiply that ticks on every element. That slows the pass it is measuring, it produces the number only after the pass is over, and it counts the same thing every time, because FLOPs do not depend on the values. They depend on the shapes. A Linear layer does one multiply and one add per weight per row, $2 \times \text{rows} \times \text{in} \times \text{out}$, and the attention score and weighting products inside each transformer block cost $4 \times B \times S^2 \times D$ for batch $B$, sequence length $S$, and embedding width $D$ (the two matrix products inside Chapter 12's attention). Everything else in the models of this book (embeddings, LayerNorm, GELU, softmax, residual adds) is a few operations per element and is left out; it is below the precision of the estimate. So the counter never runs the model. It finds every Linear layer and reads its shape.
+
+The counter needs to find every Linear layer inside a model. Chapter 3's `Layer.parameters()` walked the object's attributes recursively; `linear_layers` walks them the same way and stops at anything that has `in_features` and `out_features`.
+
+```python
+def linear_layers(obj):
+    """Yield every Linear layer reachable from obj, in definition order."""
+    if hasattr(obj, "in_features") and hasattr(obj, "out_features"):
+        yield obj
+        return
+    for child in vars(obj).values():
+        children = child if isinstance(child, (list, tuple)) else [child]
+        for c in children:
+            if hasattr(c, "forward"):
+                yield from linear_layers(c)
+
+def count_flops(model, batch, seq_len):
+    """FLOPs for one forward pass over an input of shape [batch, seq_len]."""
+    rows = batch * seq_len
+    flops = 0
+    for layer in linear_layers(model):
+        flops += 2 * rows * layer.in_features * layer.out_features
+    for _ in getattr(model, "blocks", []):
+        flops += 4 * batch * seq_len * seq_len * model.embed_dim
+    return flops
+```
+
+The `hasattr(c, "forward")` test keeps the walk inside layers. A `Tensor` has no `forward`, so the walk never descends into parameter tensors or the autograd graph hanging off them. The second loop is specific to Chapter 13's `TinyGPT`, which exposes its blocks as `model.blocks` and its width as `model.embed_dim`; a model without those attributes gets only its Linear layers counted, which is the right answer for the MLPs of Part I. PyTorch's `FlopCounterMode` reaches the same numbers by intercepting each operator call instead of walking attributes.
+
+One more word on the operations the counter leaves out, because they come back. A GELU reads one float and writes one float, 8 bytes, and does about ten operations in between, which is 1.25 FLOPs per byte. Leaving its arithmetic out of $F$ costs the estimate nothing. What it moves through memory is another matter, and it is the reason a clever rewrite of GELU that halves its arithmetic speeds up nothing; Chapter 17 is about those bytes.
+
+### Timing
+
+Two counts are a prediction. The clock is the check, and the difference between them is the diagnosis, so the timer has to be honest about a call that takes two milliseconds. That is harder than it sounds. The naive timer, `time.time()` around one call, gets it wrong in two ways. The first call of anything pays costs that never recur (memory pages being mapped, library code being loaded, caches being filled). On my machine the very first two-row multiply against the 64 MB weight took 3.6 ms and the next one 2.2 ms, so a single reading would have reported the cost as more than half again what it is. And a single reading can land on a bad moment. In one batch of fifty repeats of the same call, the median was 2.4 ms and the slowest was 4.0 ms, because something else on the machine wanted the memory for a moment.
+
+So the timer follows two rules, and they are the two rules the experiment in The Problem followed without saying so. Run the operation a few times before you start the clock; that is the **warmup**. Then run it many times, time each call on its own, and report percentiles rather than an average. The median, or p50, is what a typical call costs. The p99[^fn-p99-latency-tail] is what the slow calls cost, and one large outlier in a hundred can drag an average far from either.
+
+[^fn-p99-latency-tail]: **p99 latency**: the time under which 99 of every 100 runs finish; p50, the median, is the time under which half finish. A p99 far above the p50 means something outside the code (another process, a cache eviction, the operating system) intruded on one run in a hundred, which is why serving systems state their guarantees at p99 rather than at the mean.
+
+The timer takes any callable and its arguments, warms up, then records each call separately so that percentiles are available afterward.
+
+```python
+def measure_latency(fn, *args, warmup=5, repeats=50):
+    """Wall-clock time of fn(*args) in milliseconds, after warmup."""
+    for _ in range(warmup):
+        fn(*args)
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn(*args)
+        times.append((time.perf_counter() - t0) * 1000.0)
+    times = np.array(times)
+    return {
+        "min_ms": float(times.min()),
+        "p50_ms": float(np.percentile(times, 50)),
+        "p99_ms": float(np.percentile(times, 99)),
+    }
+```
+
+`time.perf_counter` is the right clock for this job. It has sub-microsecond resolution and is not affected by the system clock being adjusted. Each call is timed on its own rather than timing the whole loop and dividing, because the per-call list is what makes the p99 possible. The minimum is worth keeping too. It is the closest you will get to the operation's cost with nothing else interfering. PyTorch's `torch.utils.benchmark.Timer` is this function with a warmup built in and a median instead of a mean, plus the GPU synchronization the production bridge explains.
+
+### The roofline and the profiler
+
+Now there is a measured time, and the question is what to compare it with. Measured alone, 2 ms is just a number. Compared with the wrong reference it is worse than nothing. The two-row multiply in The Problem runs at 33 GFLOP/s on my laptop, and the same chip reaches about 1.2 TFLOP/s when the rows are plentiful (the trace measures both), so a report that divides one by the other says the code is running at 3 percent of peak. A practitioner who reads that goes looking for a bug in the arithmetic and finds none, because the operation is memory bound and is already at its ceiling. The 3 percent is the roofline's prediction, not a defect.
+
+What a framework needs, then, is the machine's two ceilings held next to the operation's two counts, so that every measurement comes with the fastest time the machine could possibly have delivered and a verdict on which ceiling is in the way. A `Roofline` holds the ceilings and answers those two questions about any operation: what is the fastest it could possibly run here, and which ceiling is it under. The `Profiler` gathers the counts and the timing for a model and asks the roofline both.
+
+```python
+class Roofline:
+    """A machine described by two ceilings: peak compute and peak bandwidth."""
+    def __init__(self, peak_gflops, bandwidth_gbs):
+        self.peak_gflops = peak_gflops
+        self.bandwidth_gbs = bandwidth_gbs
+        self.ridge = peak_gflops / bandwidth_gbs   # FLOPs per byte
+
+    def bound_ms(self, flops, nbytes):
+        """Fastest the machine could possibly run this operation."""
+        compute_ms = flops / (self.peak_gflops * 1e9) * 1e3
+        memory_ms = nbytes / (self.bandwidth_gbs * 1e9) * 1e3
+        return max(compute_ms, memory_ms)
+
+    def regime(self, intensity):
+        return "memory-bound" if intensity < self.ridge else "compute-bound"
 
 class Profiler:
-    """High-resolution performance and memory profiler for TinyTorch models."""
-    def __init__(self):
-        self.reset()
+    def __init__(self, machine):
+        self.machine = machine
 
-    def reset(self):
-        self.layer_profiles: List[Dict[str, Any]] = []
-
-    def count_parameters(self, model) -> int:
-        """Count total learnable scalar parameter weights in model."""
-        return sum(int(np.prod(p.data.shape)) for p in model.parameters())
-
-    def count_flops(self, model, input_shape: Tuple[int, ...]) -> int:
-        """Calculate total theoretical forward FLOPs for the model."""
-        total_flops = 0
-
-        if hasattr(model, 'blocks'):  # Transformer
-            B, S = input_shape[:2]
-            D = model.embed_dim
-            # Self-attention FLOPs per block: 4 * B * S * D^2 + 2 * B * S^2 * D
-            # MLP FLOPs per block: 8 * B * S * D^2
-            for _ in model.blocks:
-                attn_flops = 4 * B * S * (D ** 2) + 2 * B * (S ** 2) * D
-                mlp_flops = 8 * B * S * (D ** 2)
-                total_flops += (attn_flops + mlp_flops)
-        return total_flops
-
-    def measure_latency(self, func, *args, num_warmup: int = 5,
-                        num_iterations: int = 20) -> Dict[str, float]:
-        """Measure execution latency percentiles with warmup passes."""
-        # 1. Warmup passes to prime CPU caches and JIT paths
-        for _ in range(num_warmup):
-            func(*args)
-
-        # 2. Timing passes
-        latencies = []
-        for _ in range(num_iterations):
-            t0 = time.perf_counter()
-            func(*args)
-            t1 = time.perf_counter()
-            latencies.append((t1 - t0) * 1000.0)
-
-        latencies = np.array(latencies)
+    def profile(self, model, x):
+        batch, seq_len = x.data.shape[:2]
+        out = model.forward(x)
+        flops = count_flops(model, batch, seq_len)
+        nbytes = weight_bytes(model) + x.data.nbytes + out.data.nbytes
+        intensity = flops / nbytes
+        lat = measure_latency(model.forward, x)
         return {
-            'mean_ms': float(np.mean(latencies)),
-            'std_ms': float(np.std(latencies)),
-            'p50_ms': float(np.percentile(latencies, 50)),
-            'p95_ms': float(np.percentile(latencies, 95)),
-            'p99_ms': float(np.percentile(latencies, 99))
-        }
-
-    def measure_memory(self, model) -> Dict[str, float]:
-        """Calculate physical parameter memory footprint in megabytes."""
-        total_bytes = sum(p.data.nbytes for p in model.parameters())
-        return {
-            'param_bytes': total_bytes,
-            'param_mb': total_bytes / (1024.0 * 1024.0)
-        }
-
-    def profile_forward_pass(self, model, input_tensor: Tensor) -> Dict[str, Any]:
-        """Complete profiling report combining latency, memory, and arithmetic intensity."""
-        lat_stats = self.measure_latency(model.forward, input_tensor)
-        mem_stats = self.measure_memory(model)
-        flops = self.count_flops(model, input_tensor.data.shape)
-
-        gflops = (flops / 1e9) / (lat_stats['mean_ms'] / 1000.0) if lat_stats['mean_ms'] > 0 else 0.0
-        bytes_transferred = mem_stats['param_bytes'] + input_tensor.data.nbytes
-        arithmetic_intensity = flops / max(bytes_transferred, 1)
-
-        return {
-            'latency_p50_ms': lat_stats['p50_ms'],
-            'param_mb': mem_stats['param_mb'],
-            'flops': flops,
-            'gflops_per_sec': gflops,
-            'arithmetic_intensity': arithmetic_intensity,
-            'regime': 'Compute-Bound' if arithmetic_intensity > 20.0 else 'Memory-Bound'
+            "params": count_parameters(model),
+            "flops": flops,
+            "bytes": nbytes,
+            "intensity": intensity,
+            "regime": self.machine.regime(intensity),
+            "bound_ms": self.machine.bound_ms(flops, nbytes),
+            "p50_ms": lat["p50_ms"],
+            "p99_ms": lat["p99_ms"],
+            "achieved_gflops": flops / 1e9 / (lat["p50_ms"] / 1e3),
         }
 ```
 
+`bound_ms` is the time inequality from The Idea, in milliseconds. `regime` is the ridge test, taken against the ridge of the machine in hand rather than a fixed threshold; the ridge is near 36 FLOPs per byte on my laptop and 156 on an A100, and any constant would be wrong on one of them. The gap between `bound_ms` and the measured `p50_ms` is the profiler's most useful output. It says how far the implementation is from what the hardware permits, which is a different question from which ceiling it is under, and it is the number Nsight Compute reports as a percentage of peak bandwidth or peak throughput. The listings above run on their own; `profile` needs a model to point at, and the trace below uses Chapter 13's `TinyGPT`.
+
 ---
 
-## Concrete Numerical Trace Table: Roofline Breakdown Across Transformer Layers
+## A Worked Trace
 
-Let us profile every sub-operation inside a single Transformer Block forward pass for sequence length $S = 4$, embedding dimension $D = 128$, and float32 precision ($4\text{ bytes/float}$):
+The trace has two halves. The first counts a TinyGPT by hand and checks the counters against it. The second measures a real machine's ceilings with the timer and reads the roofline off the result.
 
-| Operation Sub-Layer | FLOP Count | DRAM Traffic | Operational Intensity | Hardware Regime ($I_{\text{ridge}}=156$) |
-| :--- | :---: | :---: | :---: | :--- |
-| **LayerNorm 1** | $2,048$ | $4,096\text{ B}$ | **$0.50\text{ FLOPs/B}$** | Memory-Bound ($99.7\%$ stalled) |
-| **QKV Projection** | $393,216$ | $196,608\text{ B}$ | **$2.00\text{ FLOPs/B}$** | Memory-Bound ($98.7\%$ stalled) |
-| **Attention $QK^T$** | $4,096$ | $4,160\text{ B}$ | **$0.98\text{ FLOPs/B}$** | Memory-Bound ($99.4\%$ stalled) |
-| **Softmax Reduction**| $48$ | $128\text{ B}$ | **$0.38\text{ FLOPs/B}$** | Memory-Bound ($99.8\%$ stalled) |
-| **MLP Expand ($1\times \to 4\times$)**| $524,288$ | $262,144\text{ B}$ | **$2.00\text{ FLOPs/B}$** | Memory-Bound ($98.7\%$ stalled) |
-| **GELU Activation** | $5,120$ | $4,096\text{ B}$ | **$1.25\text{ FLOPs/B}$** | Memory-Bound ($99.2\%$ stalled) |
-| **Total Block** | **$928,816$** | **$471,232\text{ B}$** | **$1.97\text{ FLOPs/B}$** | **Severely Memory-Bound!** |
+### Counting TinyGPT
 
-: Arithmetic intensity and roofline operational classification across sub-layers of a transformer block. {#tbl-roofline-block-breakdown tbl-colwidths="[22,18,18,20,22]"}
+Take Chapter 13's `TinyGPT(vocab_size=1000, embed_dim=128, num_heads=4, num_layers=4)`. Its parameters come from five places, and each is a product of shapes plus a bias.
 
-Every single sub-layer in small-batch autoregressive inference has an arithmetic intensity $I \le 2.0$, sitting orders of magnitude below the GPU hardware ridge point ($I_{\text{ridge}} \approx 156\text{--}298$).
+| Component | Shape arithmetic | Parameters |
+| :--- | :--- | ---: |
+| Token embedding | $1000 \times 128$ | 128,000 |
+| Per block: two LayerNorms | $2 \times (128 + 128)$ | 512 |
+| Per block: Q, K, V, output projections | $4 \times (128 \times 128 + 128)$ | 66,048 |
+| Per block: MLP expand and contract | $(128 \times 512 + 512) + (512 \times 128 + 128)$ | 131,712 |
+| Four blocks | $4 \times 198{,}272$ | 793,088 |
+| Final LayerNorm | $128 + 128$ | 256 |
+| Output head | $128 \times 1000 + 1000$ | 129,000 |
+| **Total** | | **1,050,344** |
+
+: Parameter count of a four-block TinyGPT with $D = 128$ and a 1,000-token vocabulary. The sinusoidal positional encoding has no parameters. {#tbl-tinygpt-params tbl-colwidths="[34,44,22]"}
+
+At four bytes per parameter that is 4,201,376 bytes, or 4.2 MB, and this is $Q$ up to the small activation terms.
+
+FLOPs depend on the row count. Each block has six Linear layers whose in-times-out products sum to $4 \times 128^2 + 2 \times 128 \times 512 = 196{,}608$, so one row through one block costs $2 \times 196{,}608 = 393{,}216$ FLOPs in Linear layers, plus the attention products. One row through the head costs $2 \times 128 \times 1000 = 256{,}000$. The two cases that matter are one token of decoding ($B = 1$, $S = 1$) and a 64-token prompt ($B = 1$, $S = 64$).
+
+| Quantity | Decode, $S = 1$ | Prompt, $S = 64$ |
+| :--- | ---: | ---: |
+| Linear FLOPs, four blocks | 1,572,864 | 100,663,296 |
+| Attention products, $4 \times 4 \times S^2 \times 128$ | 2,048 | 8,388,608 |
+| Head FLOPs | 256,000 | 16,384,000 |
+| **Total FLOPs** | **1,830,912** | **125,435,904** |
+| Bytes (weights + input + logits) | 4,205,384 | 4,457,888 |
+| **Arithmetic intensity** | **0.44** | **28.1** |
+
+: FLOPs, bytes, and arithmetic intensity for one forward pass of the same TinyGPT at two sequence lengths. {#tbl-tinygpt-intensity tbl-colwidths="[46,27,27]"}
+
+The prompt pass does 68 times the arithmetic of the decode step and moves six percent more bytes. Its intensity is about 64 times higher, the row-count rule from The Idea. Decoding sits at 0.44 FLOPs per byte, which is below the ridge of every machine you will meet in this book; the byte count even flatters it slightly, since the embedding lookup reads one row of its 512 KB table rather than all of it. The counters agree with the hand arithmetic, which the following check confirms without needing the model itself.
 
 ```python
-# Pure Python Verification of Transformer Block Roofline Metrics
-flops = {
-    "LayerNorm 1": 2048,
-    "QKV Proj": 393216,
-    "Attn QK^T": 4096,
-    "Softmax": 48,
-    "MLP Expand": 524288,
-    "GELU": 5120
-}
-bytes_transferred = {
-    "LayerNorm 1": 4096,
-    "QKV Proj": 196608,
-    "Attn QK^T": 4160,
-    "Softmax": 128,
-    "MLP Expand": 262144,
-    "GELU": 4096
-}
+D, V, L = 128, 1000, 4
+per_block_linear = 2 * (4 * D * D + 2 * D * 4 * D)     # six Linear layers, one row
+head = 2 * D * V
+params = V * D + L * (4 * D + 4 * (D * D + D) + (D * 4 * D + 4 * D) + (4 * D * D + D)) + 2 * D + (D * V + V)
+assert params == 1_050_344
 
-total_flops = sum(flops.values())
-total_bytes = sum(bytes_transferred.values())
-total_intensity = total_flops / total_bytes
-
-print(f"Total Block FLOPs: {total_flops:,}")
-print(f"Total Block DRAM Bytes: {total_bytes:,} bytes")
-print(f"Arithmetic Intensity: {total_intensity:.2f} FLOPs/Byte")
-assert np.isclose(total_intensity, 1.97, atol=0.02), "Roofline calculation mismatch!"
+for S in (1, 64):
+    flops = L * S * per_block_linear + L * 4 * S * S * D + S * head
+    nbytes = 4 * params + 8 * S + 4 * S * V           # int64 ids in, float32 logits out
+    print(f"S={S:3d}  FLOPs={flops:>12,}  bytes={nbytes:>10,}  I={flops / nbytes:5.2f}")
 ```
 
----
+```
+S=  1  FLOPs=   1,830,912  bytes= 4,205,384  I= 0.44
+S= 64  FLOPs= 125,435,904  bytes= 4,457,888  I=28.14
+```
 
-## The Production Systems Bridge: PyTorch Kineto Profiler and Chrome Traces
+Running `count_parameters` and `count_flops` on the actual Chapter 13 model returns the same three numbers; the arithmetic above is the version you can check on paper.
 
-In production systems, PyTorch integrates the **Kineto Tracing Engine** (built jointly with Meta and NVIDIA), providing hardware-counter visibility into CUDA runtime streams:
+### Measuring a machine's ceilings
+
+The second half returns to the 64 MB weight matrix from The Problem and sweeps the row count with `measure_latency`. Every row count moves the same weights, so the sweep is the roofline traced from left to right on one machine.
 
 ```python
-import torch
+rng = np.random.default_rng(0)
+N = 4096
+W = rng.standard_normal((N, N), dtype=np.float32)
 
-with torch.profiler.profile(
-    activities=[
-        torch.profiler.ProfilerActivity.CPU,
-        torch.profiler.ProfilerActivity.CUDA
-    ],
-    record_shapes=True,
-    profile_memory=True,
-    with_stack=True
-) as prof:
-    model(inputs)
-
-# Export timeline for interactive visualization
-prof.export_chrome_trace("trace.json")
+for rows in (1, 2, 8, 16, 64, 256, 1024):
+    X = rng.standard_normal((rows, N), dtype=np.float32)
+    lat = measure_latency(np.matmul, X, W.T)
+    flops = 2 * rows * N * N
+    nbytes = W.nbytes + X.nbytes + rows * N * 4
+    ms = lat["p50_ms"]
+    print(f"rows={rows:5d}  I={flops / nbytes:6.1f}  p50={ms:6.2f} ms  "
+          f"GFLOP/s={flops / 1e9 / (ms / 1e3):6.0f}  GB/s={nbytes / 1e9 / (ms / 1e3):5.1f}")
 ```
 
-Opening `trace.json` inside `chrome://tracing` displays microsecond-level timelines of every CUDA kernel launch, memory copy (`cudaMemcpyAsync`), and CPU thread synchronization barrier. In addition, command-line profiling tools like NVIDIA Nsight Compute (`ncu`) directly report hardware DRAM bus saturation percentages and streaming multiprocessor (SM) active warp occupancy, confirming whether a kernel is bound by the memory wall or compute pipes.
+One run on the same laptop as before printed the following. Three repeats of the sweep agreed to within a few percent at every row.
+
+| Rows | Intensity (FLOPs/byte) | p50 (ms) | Achieved GFLOP/s | Achieved GB/s |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.5 | 0.57 | 59 | 118 |
+| 2 | 1.0 | 2.06 | 33 | 33 |
+| 8 | 4.0 | 2.06 | 131 | 33 |
+| 16 | 7.9 | 2.04 | 263 | 33 |
+| 64 | 31.0 | 2.91 | 737 | 24 |
+| 256 | 113.8 | 7.84 | 1,095 | 9.6 |
+| 1,024 | 341.3 | 29.70 | 1,157 | 3.4 |
+
+: Row-count sweep through a $4096 \times 4096$ float32 weight on one laptop (Apple M5 Max, NumPy 1.26, Accelerate). Achieved rates are FLOPs and bytes divided by the median time. {#tbl-roofline-sweep tbl-colwidths="[12,24,16,24,24]"}
+
+Read the table from the top. From 2 to 16 rows the time is flat at about 2 ms while the achieved FLOP/s climbs eightfold. This is the slanted part of the roofline, where bytes set the pace and arithmetic is free. From 64 rows on, the time starts to grow with the rows and the FLOP/s flattens toward 1.2 TFLOP/s. That is the compute ceiling, $P_{\text{peak}}$ for this routine on this chip. The flat 33 GB/s from the memory-bound rows is the effective $B_{\text{peak}}$ for the same routine, and their ratio puts my machine's ridge near 36 FLOPs per byte. The 64-row call, at 31 FLOPs per byte, is right at the knee, which is where the time first begins to rise.
+
+Two caveats on the data. The single-row case is faster than the two-row case because NumPy hands a single row to a dedicated matrix-vector routine that streams the weights at nearly four times the rate of the general routine; that difference is a property of the library, not the hardware, and it is exactly the kind of thing a profiler exists to surface. And the 33 GB/s ceiling is what this routine achieves, not what the memory system can deliver; the one-row case shows the chip can do at least 118 GB/s. A roofline built from measured ceilings describes the machine as your code sees it, which is the one that matters.
+
+Now put TinyGPT on this roofline. Decoding at 0.44 FLOPs per byte is eighty times left of the ridge. The profiler's `bound_ms` for one decode step is $4.2\text{ MB} / 33\text{ GB/s} \approx 0.13$ ms; the arithmetic would need $1.83\text{ MFLOP} / 1.2\text{ TFLOP/s} \approx 0.0015$ ms. Every optimization in the next four chapters that works on this model works by lowering the first number.
 
 ---
 
-## Building the System: How It All Connects
+## From TinyTorch to Production
 
-Chapter 14 gives our framework its diagnostic instruments:
+The profiler you built reads two counts off shapes and one time off a clock. Production profilers do the same three things, and the differences are about where the numbers come from and how much the hardware hides.
 
-::: {.callout-important title="Diagnostic Profiler Finding: The Memory Wall"}
-- **Target Model**: TinyGPT ($V = 1,000, D = 128, L = 4$)
-- **Memory Footprint**: $3.2\text{ MB}$ (FP32 precision)
-- **Arithmetic Intensity**: $1.97\text{ FLOPs/Byte}$ $\implies$ **critically memory-bound** ($I \ll I_{\text{ridge}} = 156$)
-- **Hardware Bottleneck**: $98\%$ of execution latency is spent waiting for memory transfers across the DRAM bus.
-:::
+PyTorch's `torch.profiler` (built on a tracing library called Kineto) records every operator the model runs, with its shapes, its time on the CPU, and its time on the GPU, and exports a timeline that Chrome's `chrome://tracing` page or Perfetto can display. `torch.utils.flop_counter.FlopCounterMode` does what `count_flops` does, but for every operator PyTorch knows, by intercepting the calls rather than by walking attributes. What forces the extra machinery is that a GPU runs asynchronously from the CPU that drives it. The CPU queues up work, called kernels, and returns immediately; wrap `time.perf_counter` around a GPU call and you time the queueing, not the work. Production timers use events recorded on the GPU's own stream, or call `torch.cuda.synchronize()` before reading the clock.
 
-The diagnosis is clear: **our model is suffocating on DRAM memory traffic**.
+NVIDIA's Nsight Compute reads the hardware's own counters and reports, per kernel, how much of the memory bandwidth and how much of the arithmetic throughput the kernel used, and it draws the kernel on a roofline for you. The ceilings it uses are steep. An A100 delivers 312 TFLOP/s of FP16 matrix arithmetic from its Tensor Cores against 2.0 TB/s from its HBM (the high-bandwidth memory stacked beside the GPU die), for a ridge near 156 FLOPs per byte; an H100 delivers 989 TFLOP/s against 3.35 TB/s, a ridge near 295 (both from NVIDIA's datasheets). At 0.44 FLOPs per byte, a single-token decode step can use less than one percent of either chip. That is the arithmetic behind Milestone II's observation that decoding starves the GPU, and it is why every production serving system batches many requests into one forward pass. Batching raises the row count, and the row count is the intensity.
 
-::: {#nbk-profiling-roofline-ridge-point .callout-notebook title="Roofline ridge point and hardware compute efficiency"}
-Why does arithmetic intensity dictate our optimization roadmap?
-- At $I = 1.97\text{ FLOPs/Byte}$, an NVIDIA A100 GPU capable of $312\text{ TFLOPs}$ can only achieve:
-  $$\text{Throughput} = I \times B_{\text{peak}} = 1.97\text{ FLOPs/Byte} \times 2,000\text{ GB/s} \approx 3.94\text{ TFLOPs/s}$$
-  The GPU is operating at just **$1.26\%$ of its theoretical arithmetic capability**! Over $98\%$ of the silicon is idle, waiting for float32 numbers to arrive over the memory bus.
-- If we convert FP32 weights ($4\text{ bytes}$) to INT8 integers ($1\text{ byte}$), DRAM traffic drops by exactly $4\times$, boosting operational throughput by $400\%$ without altering a single neural architecture layer!
-:::
+What carries over unchanged is the whole model. The time bound is a maximum of two terms; intensity is FLOPs per byte; the ridge is the ratio of two peaks; warmup and percentiles are how you time anything. Production rooflines add rows to the table rather than replacing it. A GPU has a separate compute ceiling for each precision (FP32, FP16 on Tensor Cores, INT8), so a chip has several roofs and quantization moves an operation to a higher one as well as cutting its bytes. Caches complicate $Q$. Bytes that are reused from on-chip memory never cross the bus, so a fused sequence of operations can move far fewer bytes than the sum of its parts. And for small operations a third floor appears below both ceilings. Each kernel costs a few microseconds just to launch, so a model made of thousands of tiny kernels is bound by launch overhead rather than by either roofline term. Chapters 15, 17, and 18 are each a way of attacking one of those three: fewer bytes per weight, fewer separate kernels, and fewer bytes recomputed.
 
-How do we slash our memory bandwidth traffic by $4\times$ without retraining our model?
+| | TinyTorch `Profiler` | `torch.profiler` and Nsight Compute |
+| :--- | :--- | :--- |
+| FLOPs | Formula from layer shapes | Counted per operator (`FlopCounterMode`) or from hardware counters |
+| Bytes | Parameter bytes plus activations in and out | Measured DRAM traffic, cache hits excluded |
+| Time | `perf_counter` around a Python call | GPU-side events; CPU and GPU timelines aligned |
+| Regime | Intensity against a user-supplied ridge | Achieved bandwidth and throughput against measured peaks |
 
-In **Chapter 15**, we engineer **INT8 Quantization: Compressing Floats into Symmetric Integers**.
+: The same three measurements in this chapter's profiler and in production tools. {#tbl-profiler-comparison tbl-colwidths="[14,38,48]"}
+
+For your own work, the habit to take away is the order of operations. Compute the intensity of your workload before you optimize anything, because it tells you which half of the optimization literature applies. Find the row count, which for inference is batch size times new tokens, since that single number moves most workloads across the ridge. Profile before and after any change, with warmup and percentiles, and treat a p99 that drifts away from the p50 as a signal about the system rather than the model. And when a measured time sits far above the roofline bound, suspect the software path first; the single-row anomaly in the sweep was the library, not the silicon.
+
+---
+
+## Summary
+
+You built a profiler that counts parameters, bytes, and FLOPs from a model's shapes and times a forward pass with warmup and percentiles, and you placed its output on the roofline. The principle to keep is the time bound $T \ge \max(F / P_{\text{peak}},\, Q / B_{\text{peak}})$: an operation is limited by whichever of its two costs the machine finishes last, and arithmetic intensity, $F / Q$, compared with the machine's ridge point tells you which. For a Linear layer the intensity is about half the row count, which puts single-token decoding at roughly 0.5 FLOPs per byte and far below the ridge of any modern processor, so the 64 MB weight that took 2 ms would take 2 ms with an eighth of the arithmetic. Everything in the rest of Part III is a way of lowering $Q$ or raising $I$ for that case. Chapter 15 takes for granted that a batch-1 Linear layer runs at about 0.5 FLOPs per byte, far below any ridge point, and asks how to move fewer bytes per weight without retraining the model.
+
+---
+
+## Exercises
+
+1. **Batched decoding.** Generate for eight prompts at once, so that the decode step has $B = 8$ and $S = 1$. Count its FLOPs, bytes, and intensity by hand for the TinyGPT of @tbl-tinygpt-params, then confirm with `count_flops`. On the machine of @tbl-roofline-sweep, how many prompts would have to be batched before decoding crosses the ridge?
+
+2. **Convolutions.** Extend `count_flops` to handle Chapter 9's `Conv2d`. A convolution with $C_{\text{in}}$ input channels, $C_{\text{out}}$ output channels, a $K \times K$ kernel, and an output of $H_{\text{out}} \times W_{\text{out}}$ costs $2 \times C_{\text{out}} \times C_{\text{in}} \times K^2 \times H_{\text{out}} \times W_{\text{out}}$ FLOPs per image. Compute the intensity of a `Conv2d` with 3 input channels, 16 output channels, and a $3 \times 3$ kernel on a $32 \times 32$ image, at batch 1 and at batch 64. Why does a convolution reach the ridge at a far smaller batch than a Linear layer does?
+
+3. **When the weights fit in cache.** Rerun the sweep of @tbl-roofline-sweep with $N = 512$, so that the weight matrix is 1 MB instead of 64 MB. The flat region should shrink or vanish. Explain what happened to $Q$, and why a roofline drawn from main-memory bandwidth no longer describes this operation.

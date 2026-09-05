@@ -1,156 +1,105 @@
 # Loss Functions and Numerical Stability {#sec-losses}
 
-In Chapters 1 through 3, we constructed deep neural network architectures capable of transforming raw input vectors into unconstrained continuous values known as **logits** ($\mathbf{z} \in \mathbb{R}^C$).
+Chapter 3 ended with a `Sequential` model that turns a batch of inputs into a row of raw, unbounded scores per example, one score per class. Those scores are not yet an answer, and they are not yet something a training loop can act on. The question this chapter answers is the one every practitioner asks the first time a run prints `loss: nan`: how do we turn the model's output and the correct label into a single number that says how wrong the model is, and why does the textbook formula for that number fall apart on real hardware?
 
-Yet before an optimization algorithm can adjust network parameters, the framework must evaluate a scalar objective: the **Loss Function** $\mathcal{L}$. In multi-class classification and autoregressive language modeling (which we construct in Milestone II), this requires converting unconstrained real logits into a normalized probability distribution using the **Softmax** function, followed by evaluating the **Cross-Entropy Loss**.
+The single number is the **loss**. It has to be one scalar rather than a vector because a scalar has an unambiguous "down," and the chapters on gradients and optimizers (6 and 7) need a direction to push. This chapter builds two losses. `MSELoss` handles regression, where the target is a number. `CrossEntropyLoss` handles classification, where the target is a class index, and it is the one with the numerical trap. Along the way we build `log_softmax`, the helper that defuses the trap.
 
-This chapter examines the numerical hazards of computing probabilities on digital hardware. We analyze why naive floating-point exponential math overflows into `NaN` under the **IEEE 754 Standard**, derive the mathematical shift-invariance of the **Log-Sum-Exp (LSE)** operator, implement the complete TinyTorch loss subsystem (`MSELoss`, `CrossEntropyLoss`), and examine how production frameworks like PyTorch execute warp-level reductions in GPU registers.
+The fix itself is three lines: subtract the largest logit before exponentiating. The reason those three lines are needed, and why the order of two subtractions inside them matters, is the rest of the chapter.
 
-![The Numerical Stability Landscape: IEEE 754 Overflow/Underflow Hazards vs. Log-Sum-Exp Shift Invariance](assets/images/diagrams/04_losses-diag-1.svg){#fig-loss-stability}
-
----
-
-## The Crisis: IEEE 754 Floating-Point Hazards in Probability Space
-
-To convert a vector of $C$ logits $\mathbf{z} = [z_1, z_2, \dots, z_C]$ into a valid probability distribution $\mathbf{p} = [p_1, p_2, \dots, p_C]$ where $\sum p_i = 1.0$ and $p_i \ge 0$, standard probability theory dictates the **Softmax** function:
-
-$$p_i = \frac{e^{z_i}}{\sum_{j=1}^C e^{z_j}}$$
-
-For a training sample with ground-truth target index $t \in \{1, \dots, C\}$, the **Cross-Entropy Loss** measures the negative log-likelihood of the true class:
-
-$$\mathcal{L}_{\text{CE}} = -\log(p_t) = -\log\left( \frac{e^{z_t}}{\sum_{j=1}^C e^{z_j}} \right)$$
-
-In an abstract mathematical setting with infinite precision, this equation is clean and well-behaved. On physical computing hardware executing under the **IEEE 754 32-bit Single-Precision Floating-Point Standard (FP32)**, naive evaluation of this formula causes immediate numerical catastrophe.
-
-#### The Limits of IEEE 754 FP32 Arithmetic
-
-An IEEE 754 single-precision float allocates 1 sign bit, 8 exponent bits, and 23 mantissa bits:
-
-$$\text{Maximum Representable Positive Number:} \quad \approx 3.4028235 \times 10^{38} \quad (e^{88.7228})$$
-
-$$\text{Minimum Normalized Positive Number:} \quad \approx 1.1754944 \times 10^{-38} \quad (e^{-87.3365})$$
-
-Any exponential calculation $e^z$ where $z > 88.72$ overflows to `+inf`. Any calculation where $z < -87.33$ underflows to exact `0.0`.
-
-#### The Two Numerical Failure Modes
-
-During early training epochs or deep transformer generation (which we construct in Chapter 13), logit values frequently reach magnitudes of $\pm 100$ before weights are calibrated. This triggers two fatal failure modes:
-
-1. **The Exponential Overflow Hazard ($z_i = 100.0$)**:
-   - Evaluating $e^{100.0}$ exceeds the float32 ceiling, returning `+inf`.
-   - The Softmax fraction becomes $\frac{+\infty}{+\infty}$, which IEEE 754 defines as **`NaN` (Not a Number)**.
-   - The loss evaluates to `NaN`. During backpropagation, `NaN` multiplies through all weight tensors, permanently corrupting millions of model parameters.
-
-2. **The Exponential Underflow Hazard ($z_i = -100.0$)**:
-   - Evaluating $e^{-100.0}$ underflows to exact `0.0`.
-   - The denominator sum $\sum_{j=1}^C e^{z_j}$ evaluates to `0.0`.
-   - The Softmax fraction evaluates to $\frac{0.0}{0.0} = \text{NaN}$, or $\log(0.0) = -\infty$, destroying gradient updates.
+![Where the textbook softmax overflows in float32, and how subtracting the row maximum keeps every exponential in range](assets/images/diagrams/04_losses-diag-1.svg){#fig-loss-stability}
 
 ---
 
-## The Mathematical Invariant: Log-Sum-Exp Shift Invariance
+## The Problem
 
-To execute probabilistic operations safely on arbitrary logits ranging from $-\infty$ to $+\infty$, modern machine learning runtimes exploit the **Shift Invariance of the Softmax Function**.
-
-#### Mathematical Proof of Softmax Shift Invariance
-
-Let $c$ be an arbitrary scalar constant. We multiply both the numerator and denominator of the Softmax equation by $e^{-c}$:
-
-$$p_i = \frac{e^{z_i}}{\sum_{j=1}^C e^{z_j}} = \frac{e^{-c} \cdot e^{z_i}}{e^{-c} \cdot \sum_{j=1}^C e^{z_j}} = \frac{e^{z_i - c}}{\sum_{j=1}^C e^{z_j - c}}$$
-
-Because $e^{-c} / e^{-c} = 1.0$, the exact mathematical probability $p_i$ is **strictly identical for any scalar $c$**.
-
-#### The Optimal Systems Shift: $c = \max(\mathbf{z})$
-
-What is the optimal choice of constant $c$? In systems engineering, we choose:
-
-$$c = \max(z_1, z_2, \dots, z_C)$$
-
-Let us define the shifted logit vector $\tilde{\mathbf{z}} = \mathbf{z} - \max(\mathbf{z})$. This transformation establishes two powerful systems invariants:
-
-1. **Zero Overflow Invariant**: Because every shifted logit $\tilde{z}_i \le 0$, the maximum possible exponential value is $e^0 = 1.0$. No exponential calculation can ever exceed $1.0$, making overflow mathematically impossible:
-   $$e^{\tilde{z}_i} \in (0.0, 1.0] \quad \text{for all } i$$
-2. **Zero Division-by-Zero Invariant**: Because at least one element in $\tilde{\mathbf{z}}$ is exactly $0.0$ (the maximum element), the denominator sum always contains at least one term equal to $e^0 = 1.0$:
-   $$\sum_{j=1}^C e^{\tilde{z}_j} \ge 1.0$$
-   The denominator is strictly bounded away from zero, making division by zero impossible.
-
-#### The Fused Log-Sum-Exp Cross-Entropy Formulation
-
-In classification and language modeling, we do not need the intermediate probability vector $\mathbf{p}$; we only need the scalar loss $\mathcal{L}_{\text{CE}} = -\log(p_t)$.
-
-Expanding the logarithm of the shifted softmax:
-
-$$\mathcal{L}_{\text{CE}} = -\log\left( \frac{e^{z_t - c}}{\sum_{j=1}^C e^{z_j - c}} \right) = -\left[ (z_t - c) - \log\left( \sum_{j=1}^C e^{z_j - c} \right) \right]$$
-
-$$\mathcal{L}_{\text{CE}} = \left[ c + \log\left( \sum_{j=1}^C e^{z_j - c} \right) \right] - z_t$$
-
-We define the **Log-Sum-Exp (LSE)** operator as:
-
-$$\text{LSE}(\mathbf{z}) = \max(\mathbf{z}) + \log\left( \sum_{j=1}^C e^{z_j - \max(\mathbf{z})} \right)$$
-
-$$\mathcal{L}_{\text{CE}} = \text{LSE}(\mathbf{z}) - z_t$$
-
-This fused formulation eliminates intermediate probability tensor allocations, halves DRAM memory bandwidth consumption, and guarantees $100\%$ numerical stability across all real inputs.
-
-::: {#nbk-losses-lse-fusion-footprint .callout-notebook title="Log-Sum-Exp numerical headroom and fused memory traffic"}
-Consider computing cross-entropy loss for an autoregressive language model with vocabulary $V = 32,000$, sequence length $S = 2048$, and batch size $B = 4$ in FP32 (4 bytes per element).
-
-- **Logits Tensor Size**:
-  $$\text{Elements} = 4 \times 2048 \times 32,000 = 262,144,000\text{ floats}$$
-  $$\text{Memory} = 262,144,000 \times 4\text{ bytes} = 1,048,576,000\text{ bytes} \approx 1.05\text{ GB}$$
-
-- **Unfused Naive Softmax Allocation Chain**:
-  Evaluating `loss = nll_loss(log(softmax(logits)))` naively allocates three separate intermediate DRAM buffers:
-  1. Numerator exponentials $e^{\mathbf{z}}$: $1.05\text{ GB}$
-  2. Softmax probabilities $\mathbf{p} = e^{\mathbf{z}} / \sum e^{\mathbf{z}}$: $1.05\text{ GB}$
-  3. Logarithm tensor $\log \mathbf{p}$: $1.05\text{ GB}$
-  Total transient DRAM allocations: **$> 3.15\text{ GB}$**!
-
-- **Fused In-Register Log-Sum-Exp Kernel**:
-  $$\mathcal{L}_{\text{CE}} = \text{LSE}(\mathbf{z}) - z_t$$
-  A fused cross-entropy kernel reads the logits once from DRAM, computes the running maximum $c = \max(\mathbf{z})$ and sum $\sum e^{z_j - c}$ entirely in 32-bit registers, subtracts the target logit $z_t$, and directly returns a single scalar float ($4\text{ bytes}$).
-
-**Systems Takeaway**: Fused Log-Sum-Exp slashes peak transient memory allocation from **$3.15\text{ GB}$ down to zero**, eliminating $4.2\text{ GB}$ of DRAM read/write traffic while preventing IEEE 754 float overflow.
-:::
+A classifier with three classes produces three numbers. Suppose, early in training, they come out as `[100.0, 101.0, 99.0]`. The standard recipe for turning them into probabilities is to exponentiate each one and divide by the sum. Here is that recipe, verbatim, in float32.
 
 ```python
-# Pure Python demonstration of Softmax overflow vs Log-Sum-Exp stability:
 import numpy as np
 
-logits = np.array([100.0, 101.0, 99.0], dtype=np.float32)
-
-# Naive softmax: overflows to NaN under IEEE 754 float32
-naive_exp = np.exp(logits)
-naive_prob = naive_exp / np.sum(naive_exp)
-
-# Numerically stable Log-Sum-Exp:
-c = np.max(logits)
-shifted_exp = np.exp(logits - c)
-stable_prob = shifted_exp / np.sum(shifted_exp)
-stable_lse = c + np.log(np.sum(shifted_exp))
-
-print("Naive Softmax:     ", naive_prob)              # [nan, nan, nan]
-print("Stable Softmax:    ", np.round(stable_prob, 4)) # [0.2119, 0.5761, 0.2119]
-print("Stable Log-Sum-Exp:", np.round(stable_lse, 4))  # 101.5514
+z = np.array([100.0, 101.0, 99.0], dtype=np.float32)
+e = np.exp(z)                # [inf, inf, inf]
+print(e / np.sum(e))         # [nan nan nan]
 ```
 
+NumPy prints an overflow warning and carries on, and every probability comes out as `nan`. The reason is the range of a 32-bit float. The largest finite float32 is about $3.4 \times 10^{38}$, which is $e^{88.72}$, so `exp` of anything above 88.72 returns `inf`. Chapter 2 met the same wall inside the sigmoid and stepped around it by only ever calling `exp` on a negative argument; this chapter applies the same idea to a whole row of numbers at once. Once one term is `inf`, the sum is `inf`, and `inf / inf` is not a number. The other direction fails just as quietly. Below about $-104$, `exp` returns an exact `0.0`, so logits of `[-1000, -1002, -1001]` give a sum of zero and `0 / 0`, which is also `nan`.
+
+Logits of 100 are not exotic. Chapter 3 showed how fast badly scaled weights inflate activations; a few layers of that and the outputs are in the hundreds. Nor is a `nan` a local event. Every arithmetic operation on `nan` returns `nan`, so once the loss is `nan`, the gradients Chapter 6 computes from it are `nan`, and the update Chapter 7 applies writes `nan` into every weight. One overflow in one row of one batch ends the run.
+
+So the need is concrete. We want a loss for classification that behaves like the textbook formula for ordinary inputs and returns a finite, correct number for any input at all.
+
 ---
 
-## Reference Implementation: The Loss Subsystem
+## The Idea
+
+### A loss is one number, and lower is better
+
+A loss function takes the model's predictions and the true targets and returns one scalar that is zero when the predictions are perfect and grows as they get worse. For regression, where the target is a number, the natural choice is **mean squared error**:
+
+$$\mathcal{L}_{\text{MSE}} = \frac{1}{N} \sum_{i=1}^{N} (\hat{y}_i - y_i)^2$$
+
+Here $N$ is the number of predictions, $\hat{y}_i$ is the model's $i$-th prediction, and $y_i$ is the true value. Squaring makes the error positive and punishes large misses more than small ones. Dividing by $N$ makes the value independent of batch size, so a loss of 0.18 means the same thing whether it came from three examples or three thousand. There is nothing numerically dangerous here, and `MSELoss` will be a few lines.
+
+### Cross-entropy scores the probability of the right answer
+
+For classification the model outputs a vector $\mathbf{z} = [z_1, \dots, z_C]$ of $C$ raw scores, one per class. These are the **logits**, and they can be any real numbers. To read them as probabilities we apply the **softmax** function:
+
+$$p_i = \frac{e^{z_i}}{\sum_{j=1}^{C} e^{z_j}}$$
+
+Exponentiating makes every entry positive, and dividing by the total makes them sum to one. The largest logit gets the largest probability, and the gap between logits controls how confident the distribution is; that is the "soft" in softmax.
+
+Given the true class $t$, **cross-entropy** is the negative logarithm of the probability the model assigned to it:
+
+$$\mathcal{L}_{\text{CE}} = -\log p_t$$
+
+A few values make the shape of this function clear. If the model gives the right class probability 0.99, the loss is 0.01. At 0.5 it is 0.69. At 0.1 it is 2.30, and at 0.01 it is 4.61. The loss is near zero for a confident correct answer and grows without bound for a confident wrong one, which is exactly the pressure we want training to apply. Statisticians call this quantity the negative log-likelihood,[^fn-nll-cross-entropy] and over a batch of $N$ examples we average it, for the same reason MSE divides by $N$.
+
+[^fn-nll-cross-entropy]: **Negative log-likelihood** (NLL): the negative logarithm of the probability a model assigns to the outcome that actually occurred. PyTorch exposes it directly as `nll_loss`, which expects log-probabilities as input, and its `cross_entropy` is exactly `nll_loss(log_softmax(logits))`.
+
+### The fix: shift before you exponentiate
+
+Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
+
+$$p_i = \frac{e^{z_i}}{\sum_j e^{z_j}} = \frac{e^{-c} \, e^{z_i}}{e^{-c} \sum_j e^{z_j}} = \frac{e^{z_i - c}}{\sum_j e^{z_j - c}}$$
+
+So we may subtract any constant $c$ from every logit before exponentiating, and the probabilities are identical on paper. On hardware they are not identical, and the choice $c = \max(\mathbf{z})$ is the one that makes the computation safe. After the shift, every logit is at most zero, so every $e^{z_i - c}$ is at most $e^0 = 1$ and nothing can overflow. And the largest logit becomes exactly zero, so the sum contains at least one term equal to 1 and can never be zero. Tiny terms may still underflow to `0.0`, but a term that small was contributing nothing next to a 1 anyway. Both failures in the previous section are gone.
+
+### Take the logarithm before you divide
+
+The loss never needs the probabilities themselves; it needs $\log p_t$. Taking the logarithm of the shifted softmax turns the division into a subtraction:
+
+$$\log p_i = (z_i - c) - \log \sum_{j=1}^{C} e^{z_j - c}$$
+
+The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}$, and the scalar $c + \log \sum_j e^{z_j - c}$ is called the **log-sum-exp** of $\mathbf{z}$. It is a safe way to compute $\log \sum_j e^{z_j}$, and the cross-entropy loss is simply the log-sum-exp minus the target logit. That rearrangement is the algebra. The code keeps one more detail straight, which is that $z_t - c$ must be computed first, as its own small number, before the log of the sum is subtracted. The worked trace shows why, with a case where the other order is wrong in the second decimal place.
+
+---
+
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 04** in the TinyTorch runtime: `packages/tinytorch/src/04_losses/04_losses.py`.
+Module 04 (`src/04_losses/04_losses.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of the max-shifted log-softmax and the losses built on it. The real module also ships a `BinaryCrossEntropyLoss` that works on probabilities rather than logits; the first exercise asks you to improve on it.
 :::
 
-We implement `MSELoss` and `CrossEntropyLoss` in TinyTorch.
+The listings need only one thing from a `Tensor`, the array of numbers it holds, so they reuse the small NumPy-backed stand-in that Chapter 3 introduced in place of Chapter 1's strided `Tensor`. It is repeated here, minus the parts this chapter does not use, so the chapter runs on its own.
+
+### A loss is one scalar in a `Tensor`
+
+Here is where the number goes. The training loop we assemble in Chapter 8 does the same three things every step: run a batch forward, call `backward()` on the loss, let the optimizer take one step. Chapter 6's `backward()` needs one number to start from, and Chapter 7's optimizer needs one direction to push in. Hand them the 64 per-example errors of a Chapter 5 batch as a vector and neither has what it needs, because 64 errors point in 64 directions. The mean over the batch is the answer, chosen once and written into the loss, so no caller has to remember it.
+
+The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in Chapter 6, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value. A base class fixes that contract, and `MSELoss` is the smallest thing that satisfies it.
 
 ```python
 import numpy as np
-from typing import Optional, Union
-from tinytorch.core.tensor import Tensor
+
+class Tensor:
+    """Stand-in for Chapter 1's Tensor: an array plus a trainable flag."""
+    def __init__(self, data, requires_grad=False):
+        self.data = np.asarray(data, dtype=np.float32)
+        self.requires_grad = requires_grad
+        self.grad = None
 
 class Loss:
-    """Base class for all loss functions in TinyTorch."""
+    """Every loss maps (predictions, targets) to one scalar Tensor."""
     def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
         raise NotImplementedError
 
@@ -158,133 +107,170 @@ class Loss:
         return self.forward(predictions, targets)
 
 class MSELoss(Loss):
-    """Mean Squared Error Loss: L = (1/N) * sum((y_pred - y_true)^2)."""
+    """Mean squared error: the average of (prediction - target)^2."""
     def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
         diff = predictions.data - targets.data
-        loss_val = np.mean(diff ** 2)
-
-        out_tensor = Tensor(np.float32(loss_val))
-        out_tensor._op = "MSELoss"
-        out_tensor._parents = [predictions, targets]
-        return out_tensor
-
-class CrossEntropyLoss(Loss):
-    """Numerically Stable Cross-Entropy Loss with Fused Log-Sum-Exp."""
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        """Compute scalar cross-entropy loss over batch logits and targets.
-
-        Args:
-            predictions: Logits tensor of shape [batch_size, num_classes]
-            targets: Target labels (integer indices [batch_size] or one-hot [batch_size, num_classes])
-        """
-        logits = predictions.data
-        N, C = logits.shape
-
-        # 1. Compute row-wise maximum for shift invariance: max(z) [N, 1]
-        max_logits = np.max(logits, axis=-1, keepdims=True)
-        shifted_logits = logits - max_logits  # All values <= 0
-
-        # 2. Compute stable Log-Sum-Exp: max(z) + log(sum(exp(z - max(z))))
-        sum_exp = np.sum(np.exp(shifted_logits), axis=-1, keepdims=True)
-        log_sum_exp = max_logits + np.log(sum_exp)  # Shape: [N, 1]
-
-        # 3. Extract target logits z_target
-        if targets.data.ndim == 1:  # Integer class indices
-            target_indices = targets.data.astype(np.int64)
-            target_logits = logits[np.arange(N), target_indices][:, np.newaxis]
-        else:  # One-hot encoded probability targets
-            target_logits = np.sum(logits * targets.data, axis=-1, keepdims=True)
-
-        # 4. Scalar Loss: mean over batch of (LSE(z) - z_target)
-        sample_losses = log_sum_exp - target_logits
-        loss_val = np.mean(sample_losses)
-
-        out_tensor = Tensor(np.float32(loss_val))
-        out_tensor._op = "CrossEntropyLoss"
-        out_tensor._parents = [predictions, targets]
-        return out_tensor
+        return Tensor(np.mean(diff ** 2))
 ```
 
-### Systems Commentary on Loss Implementation
+The output is a `Tensor` holding a single float and nothing else. For now it is a number in a box; Chapter 6 makes that box the root of the backward pass, the one node every gradient is measured against. Notice that `np.mean` does two jobs at once, the average over examples and the collapse to a scalar. PyTorch's `nn.MSELoss` exposes that choice as `reduction="mean"`, its default, with `"sum"` and `"none"` as the alternatives.
 
-1. **`keepdims=True` Stride Preservation**: When computing `np.max(logits, axis=-1, keepdims=True)`, the reduced dimension is retained with size $1$ (shape `[N, 1]`). This enables zero-copy broadcasting against `[N, C]` logits without memory allocation.
-2. **Fused Target Extraction**: By evaluating `target_logits` directly from integer indices via pointer offsets (`logits[np.arange(N), target_indices]`), we avoid constructing large $N \times C$ one-hot target matrices in memory.
-3. **Reduction to Scalar**: The loss forward pass collapses an $N \times C$ activation matrix into a single 4-byte scalar float, establishing the root node of the automatic differentiation computation graph.
+### `log_softmax`, the max shift in code
 
----
+Every classifier in this book ends here. Chapter 3's ten-class network hands the loss a `[64, 10]` block of logits for a batch of 64. Chapter 13's language model hands it one row of $V$ logits per position, one entry per word in a vocabulary of tens of thousands, for every position in every sequence. Chapter 12's attention runs the same softmax over every row of a score matrix. Each row needs its own log-probabilities, there may be thousands of rows a step, and the helper has to be correct on any row and cheap on all of them.
 
-## Numerical Trace: Naive Softmax vs. Fused Log-Sum-Exp
+The naive way is to write the textbook down as `np.log(np.exp(z) / np.sum(np.exp(z)))`. The Problem showed the loud failure, `nan` for any logit past 88.7. There is a quiet one too. Even when nothing overflows, a probability that underflows to `0.0` goes into `log` and comes out `-inf`. On my machine `log(softmax([-110, 0]))` prints `[-inf, 0.]`, where the right answer is `[-110, 0]`; the naive form has thrown away a perfectly finite number. And it makes four passes over the row (exponentiate, sum, divide, log) to do it.
 
-Let us trace a single sample with extreme logits $\mathbf{z} = [1000.0, 1002.0, 1001.0]$ and ground-truth target class $t = 1$ ($z_t = 1002.0$):
-
-| Calculation Step | Naive Softmax ($\mathcal{L} = -\log(\text{Softmax})$) | Fused Log-Sum-Exp ($\mathcal{L} = \text{LSE}(\mathbf{z}) - z_t$) |
-| :--- | :--- | :--- |
-| **1. Logit Exponentiation** | $e^{1000}, e^{1002}, e^{1001} \to \mathbf{+inf}$ | $c = 1002.0$, $\tilde{\mathbf{z}} = [-2, 0, -1]$, $e^{\tilde{\mathbf{z}}} = [0.1353, 1.0, 0.3679]$ |
-| **2. Exponent Sum** | $\sum e^{z_j} = \mathbf{+inf}$ | $\sum e^{\tilde{z}_j} = 0.1353 + 1.0 + 0.3679 = \mathbf{1.5032}$ |
-| **3. Normalization / LSE** | $p_1 = \frac{+inf}{+inf} \implies \mathbf{NaN}$ | $\text{LSE} = 1002.0 + \log(1.5032) = \mathbf{1002.4076}$ |
-| **4. Final Loss $\mathcal{L}$** | $\mathcal{L} = -\log(\text{NaN}) \implies \mathbf{NaN}$ *(Fault)* | $\mathcal{L} = 1002.4076 - 1002.0 = \mathbf{0.4076}$ *(Stable)* |
-
-: Step-by-step numerical trace comparing naive softmax cross-entropy against max-subtracted fused Log-Sum-Exp on extreme logits $\mathbf{z} = [1000, 1002, 1001]$. {#tbl-lse-trace tbl-colwidths="[26,37,37]"}
-
-The naive calculation crashes into `NaN` due to exponent overflow. The fused Log-Sum-Exp operator computes the exact mathematical loss ($0.40759$) with full 32-bit floating-point precision.
+The fix is The Idea's two moves, in that order. Subtract each row's maximum, so every exponential is at most 1 and every sum is at least 1. Then take the log of the sum and subtract it from the shifted logits, so no probability is ever formed and nothing is ever divided. It is four lines of NumPy. The helper takes a `Tensor` of logits with shape `[N, C]`, one row per example, and returns a `Tensor` of log-probabilities with the same shape.
 
 ```python
-# Pure Python trace verification of extreme logit loss:
-import numpy as np
-
-z = np.array([1000.0, 1002.0, 1001.0], dtype=np.float64)
-target_idx = 1
-z_target = z[target_idx]
-
-c = np.max(z)
-lse = c + np.log(np.sum(np.exp(z - c)))
-loss = lse - z_target
-
-print(f"Log-Sum-Exp: {lse:.5f}")
-print(f"Scalar Loss: {loss:.5f}")  # Exactly 0.40759!
+def log_softmax(x: Tensor) -> Tensor:
+    """log(softmax(z)) for each row of a [N, C] tensor, without overflow."""
+    logits = x.data
+    # 1. One maximum per row, kept as an [N, 1] column so it broadcasts.
+    max_logits = np.max(logits, axis=-1, keepdims=True)
+    # 2. Shifted logits are all <= 0, so exp() never exceeds 1.0.
+    shifted = logits - max_logits
+    # 3. The sum is >= 1.0 because the max term contributes exp(0) = 1.
+    log_sum_exp = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
+    # 4. log p_i = (z_i - max) - log(sum). The shift happens first.
+    return Tensor(shifted - log_sum_exp)
 ```
+
+Notice two things. The `keepdims=True` keeps the per-row maximum as a column of shape `[N, 1]` rather than a flat vector of length `N`, so that subtracting it from the `[N, C]` logits lines up one maximum with each row; that is the broadcasting rule from Chapter 1 doing the work. And the return value is `shifted - log_sum_exp`, not `logits - (max_logits + log_sum_exp)`. Both are equal on paper; only the first is exact in float32, for the reason the trace makes visible. PyTorch ships this same function as `torch.log_softmax`, and its scalar half, $c + \log \sum_j e^{z_j - c}$, as `torch.logsumexp`.
+
+### `CrossEntropyLoss` gathers instead of multiplying
+
+Labels arrive as integers. Chapter 5's loader hands over a batch of class indices alongside the batch of inputs, and Chapter 13's target for each position is the id of the next token. With log-probabilities in hand, the loss has to pick, for row `i`, the entry in column `target[i]`, negate it, and average over the batch.
+
+The textbook formula does not say "pick." It says $-\sum_i y_i \log p_i$ with a one-hot[^fn-one-hot-targets] $y$, and the obvious code follows the formula. Build an `[N, C]` matrix of zeros with a single 1 per row, multiply it into the log-probabilities elementwise, and sum across columns. That is $N \times C$ multiplications to keep $N$ numbers. For 64 examples and 10 classes it is 640 multiplies and a 2.5 KB matrix of mostly zeros, which nobody would notice. For the language-model logits the production bridge works through, 8,192 positions over a 32,000-word vocabulary, it is a 1 GB matrix of zeros, built and multiplied through on every step, to recover 8,192 numbers. Can we read those 8,192 numbers without touching the other 262 million?
+
+NumPy can. Indexing an array with two integer arrays of the same length pairs them up elementwise, so `log_probs[np.arange(N), target_idx]` pairs row `i` with column `target_idx[i]`, reads exactly `N` entries, and touches nothing else.
+
+```python
+class CrossEntropyLoss(Loss):
+    """Cross-entropy over a batch of logits and integer class targets."""
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        logits = predictions.data                   # shape [N, C]
+        N, C = logits.shape
+        target_idx = targets.data.astype(np.int64)  # shape [N]
+
+        # NumPy would accept a negative index silently; refuse it here.
+        if np.any((target_idx < 0) | (target_idx >= C)):
+            raise ValueError(f"target index outside [0, {C - 1}]")
+
+        log_probs = log_softmax(predictions).data   # shape [N, C]
+        picked = log_probs[np.arange(N), target_idx]  # one entry per row
+        return Tensor(-np.mean(picked))
+```
+
+Targets stay integers from the loader to the gather; nothing builds the one-hot matrix just to multiply most of it by zero. The range check exists because NumPy treats a negative index as counting from the end, so a corrupted label of `-1` would silently select the last class instead of failing. PyTorch calls this gather, negate, and average step `nll_loss`, and its `cross_entropy` is `nll_loss` applied to the output of `log_softmax`, the same two functions in the same order.
+
+[^fn-one-hot-targets]: **One-hot**: a vector with a 1 in the position of the correct class and 0 everywhere else, so a label of class 2 among 5 classes becomes `[0, 0, 1, 0, 0]`. For a batch of $N$ examples it takes $N \times C$ numbers to store what $N$ integers already say, which is why the code indexes with the integers instead.
+
+Here is a short run of both, on numbers small enough to check by hand. I keep a run like this next to every loss I write, because a loss that returns a plausible-looking wrong number is the kind of bug that trains for a week before anyone notices.
+
+```python
+logits = Tensor(np.array([[2.0, 1.0, 0.1],
+                          [0.5, 1.5, 0.8]], dtype=np.float32))
+targets = Tensor(np.array([0, 1]))
+loss = CrossEntropyLoss()(logits, targets)
+print(f"cross-entropy: {loss.data:.4f}")   # 0.5200
+
+preds = Tensor(np.array([1.0, 2.0, 3.0], dtype=np.float32))
+truth = Tensor(np.array([1.5, 2.5, 2.8], dtype=np.float32))
+print(f"mse: {MSELoss()(preds, truth).data:.4f}")  # 0.1800
+```
+
+The second number is $(0.5^2 + 0.5^2 + 0.2^2) / 3 = 0.18$, which you can do in your head. The first takes a page, and it is the page that follows.
 
 ---
 
-## Real World: PyTorch C++ `log_softmax` Warp Shuffle Reductions
+## A Worked Trace
 
-In production PyTorch, `torch.nn.CrossEntropyLoss` dispatches directly to an optimized CUDA C++ kernel (`aten/src/ATen/native/cuda/SoftMax.cu`):
+Take the first row of the batch above, logits $\mathbf{z} = [2.0, 1.0, 0.1]$ with target $t = 0$, and follow it through `log_softmax` one line at a time.
 
-```cpp
-// PyTorch Warp-Level Fused Log-Softmax Reduction (SoftMax.cu)
-template <typename scalar_t>
-__global__ void log_softmax_warp_forward(
-    scalar_t* __restrict__ output,
-    const scalar_t* __restrict__ input,
-    int64_t classes) {
-  int tid = threadIdx.x;
-  scalar_t val = input[tid];
+| Step | Computation | Value |
+| :--- | :--- | :--- |
+| 1. Row maximum | $c = \max(\mathbf{z})$ | $2.0$ |
+| 2. Shift | $\mathbf{z} - c$ | $[0.0, -1.0, -1.9]$ |
+| 3. Exponentiate | $e^{\mathbf{z} - c}$ | $[1.0000, 0.3679, 0.1496]$ |
+| 4. Sum | $\sum_j e^{z_j - c}$ | $1.5174$ |
+| 5. Log of the sum | $\log 1.5174$ | $0.4170$ |
+| 6. Log-probabilities | $(\mathbf{z} - c) - 0.4170$ | $[-0.4170, -1.4170, -2.3170]$ |
+| 7. Pick target, negate | $-\log p_0$ | $0.4170$ |
 
-  // 1. Warp Shuffle Max Reduction: All 32 threads find max(z) in 5 clock cycles
-  scalar_t max_val = val;
-  for (int mask = 16; mask > 0; mask >>= 1) {
-    max_val = max(max_val, __shfl_xor_sync(0xffffffff, max_val, mask));
-  }
+: Hand trace of `log_softmax` and `CrossEntropyLoss` on one row of logits $[2.0, 1.0, 0.1]$ with target class 0. {#tbl-losses-ce-trace tbl-colwidths="[24,36,40]"}
 
-  // 2. Warp Shuffle Sum Reduction: All 32 threads sum exp(z - max) in registers
-  scalar_t sum_exp = exp(val - max_val);
-  for (int mask = 16; mask > 0; mask >>= 1) {
-    sum_exp += __shfl_xor_sync(0xffffffff, sum_exp, mask));
-  }
+Exponentiating the log-probabilities gives the probabilities themselves, $[0.659, 0.242, 0.099]$, which sum to one as they must. The model puts 66 percent on the right class and pays a loss of 0.417 for its remaining doubt. The second row, $[0.5, 1.5, 0.8]$ with target 1, works through the same steps to a loss of 0.623, and the batch mean is $(0.417 + 0.623) / 2 = 0.520$, which matches the printed value.
 
-  // 3. Direct in-register evaluation
-  output[tid] = (val - max_val) - log(sum_exp);
-}
+The same seven steps on the logits that broke the naive formula show the shift doing its job. With $\mathbf{z} = [1000, 1002, 1001]$ and $t = 1$, the naive and stable paths diverge at the very first exponential.
+
+| Step | Naive softmax | Max-shifted log-softmax |
+| :--- | :--- | :--- |
+| Exponentiate | $e^{1000}, e^{1002}, e^{1001} \to$ `inf` | $c = 1002$, shifted $[-2, 0, -1]$, $e^{\cdot} = [0.1353, 1.0, 0.3679]$ |
+| Sum | `inf` | $1.5032$ |
+| Normalize or take log | `inf / inf` $=$ `nan` | $\log 1.5032 = 0.4076$ |
+| Loss | $-\log($`nan`$) =$ `nan` | $-(0 - 0.4076) = 0.4076$ |
+
+: The naive and max-shifted paths on the extreme logits $[1000, 1002, 1001]$ with target class 1. {#tbl-lse-trace tbl-colwidths="[22,34,44]"}
+
+The stable column never handles a number larger than 1002 or smaller than 0.1353, and the answer, 0.4076, is the same loss the row would have if all three logits were 998 smaller. That is the shift invariance from The Idea, now visible as arithmetic.
+
+One last detail hides in the final row. The loss can be written as $\text{LSE}(\mathbf{z}) - z_t = 1002.4076 - 1002$, or as $-((z_t - c) - \log\text{sum}) = -(0 - 0.4076)$. On paper these are equal. In float32 they are not, because a float32 carries about seven significant digits, and $1002.4076$ has already spent four of them on the integer part. Adding $1002$ to $0.4076$ and then subtracting $1002$ throws away the digits that matter.
+
+```python
+import numpy as np
+
+for base in (1e3, 1e6):
+    z = np.array([base, base + 2.0, base + 1.0], dtype=np.float32)
+    c = np.max(z)
+    log_sum = np.log(np.sum(np.exp(z - c)))     # 0.40760596 in every case
+    lse_first = (c + log_sum) - z[1]            # big numbers first
+    shift_first = log_sum - (z[1] - c)          # small numbers first
+    print(f"logits near {base:.0e}: {lse_first:.6f} vs {shift_first:.6f}")
+# logits near 1e+03: 0.407593 vs 0.407606
+# logits near 1e+06: 0.437500 vs 0.407606
 ```
 
-By utilizing NVIDIA CUDA **Warp Shuffle Instructions** (`__shfl_xor_sync`), threads exchange data directly through on-chip register files rather than writing to shared memory or DRAM. The entire Log-Sum-Exp reduction completes in **5 clock cycles**, eliminating memory bandwidth stalls.
+On my machine that prints the two lines in the comments. At logits near a thousand the error sits in the fifth decimal place. At logits near a million, where float32 can only represent multiples of 0.0625, the "big numbers first" form is off by 0.03, a 7 percent error in the loss, while the form the code uses is unchanged. This is why `log_softmax` returns `shifted - log_sum_exp` and why `CrossEntropyLoss` gathers from that array rather than computing the log-sum-exp as a separate scalar. Overflow is the loud failure; loss of precision is the quiet one, and the same subtraction order fixes both.
+
+---
+
+## From TinyTorch to Production
+
+PyTorch's `nn.CrossEntropyLoss` is the same design as the listing above. It takes logits, not probabilities, applies the max shift inside `log_softmax`, gathers the target entries with `nll_loss`, and averages over the batch by default. The mental model carries over unchanged, and so does the most common mistake built on it. Because the loss applies softmax internally, feeding it the output of a softmax layer squashes the logits into $[0, 1]$ before they are shifted and exponentiated again; the network still trains, but slowly and to a worse answer, and nothing warns you. The PyTorch version adds options the TinyTorch one lacks, such as `ignore_index` for padding tokens, `label_smoothing`, per-class weights, and targets given as class probabilities instead of indices, but each is a small variation on the gather-and-average step.
+
+What production changes is not the math but the number of passes over memory. The TinyTorch `log_softmax` walks the logits three times, once for the maximum, once for the exponentials and their sum, and once for the subtraction, and each pass writes an `[N, C]` temporary that the next pass reads back. The operation does almost no arithmetic per element, one `exp` and a couple of subtractions, so its cost is set by how many bytes move rather than how many operations run; it is memory bound, in the sense Chapter 2 introduced. A GPU kernel therefore computes the whole thing in one pass. Each thread holds a few logits of one row in registers, the threads of a warp[^fn-warp-softmax-reduction] exchange partial maximums and partial sums among themselves without writing to memory, and the row is read from memory exactly once. PyTorch keeps a family of such kernels in `aten/src/ATen/native/cuda/SoftMax.cu`, chosen by row length.
+
+[^fn-warp-softmax-reduction]: **Warp**: a group of 32 GPU threads that execute the same instruction at the same moment. Threads in a warp can pass values to one another directly through registers, without touching memory, which is what makes a 32-way maximum or sum nearly free compared with the cost of reading the row.
+
+Fusion matters most where the logits are largest, which is language modeling. A language model picks each piece of output text, called a token, from a fixed vocabulary, and every token is one class. With a vocabulary of 32,000 and a batch that scores 8,192 positions, the logits number $8{,}192 \times 32{,}000 \approx 262$ million, which is about 1 GB in float32; that is napkin math, and a modern vocabulary of 128,000 tokens quadruples it. The naive `log(softmax(x))` composition creates up to three temporaries of that size before the loss is a single number, and the fused kernel creates none. Kernels such as Liger's fused linear cross-entropy go one step further and compute the final `Linear` layer and the loss together in chunks, so the full logits array is never materialized at all. Chapter 17 returns to kernel fusion as a general technique; the loss is simply the place where it pays off first.
+
+Precision is the other production concern. Modern training runs most of the network in 16-bit floats to halve memory traffic, and 16-bit formats have far less headroom than float32. A float16 overflows above 65,504, which is $e^{11.09}$, so a logit of 12 is enough to break it. Frameworks handle this by refusing to run the loss in low precision. PyTorch's `autocast` lists `softmax`, `log_softmax`, and `cross_entropy` among the operations it always promotes to float32, whatever precision the rest of the model uses. The max shift is necessary but not sufficient; it needs a format wide enough to hold the exponentials it produces.
+
+| | TinyTorch | PyTorch |
+| :--- | :--- | :--- |
+| Input | Logits, shape `[N, C]` | Logits, shape `(N, C)` or with extra spatial dimensions |
+| Targets | Integer class indices | Indices or class probabilities; `ignore_index`, `label_smoothing`, class weights |
+| Stability | Max shift inside `log_softmax` | Same |
+| Passes over the logits | Three, with `[N, C]` temporaries | One fused kernel per row; fused with the final `Linear` in some libraries |
+| Precision | float32 throughout | Promoted to float32 even when the model runs in 16-bit |
+
+: What carries over from the TinyTorch loss to `torch.nn.CrossEntropyLoss` and what production adds. {#tbl-losses-tinytorch-vs-pytorch tbl-colwidths="[22,34,44]"}
+
+For the practitioner, three habits follow. Pass logits to the loss and let it do the softmax; if a model has a `Softmax` as its last layer and a `CrossEntropyLoss` after it, one of them is a bug. Use the library's `log_softmax` or `logsumexp` rather than composing `log` and `softmax` by hand, because `log(softmax(x))` returns `-inf` the moment a probability underflows to zero, and it runs as two kernels instead of one. And check the loss at initialization. A freshly initialized classifier should be close to guessing uniformly, which puts its cross-entropy near $\log C$, about 2.30 for ten classes. A first loss of 2.3 says the plumbing is right; a first loss of 15 or `nan` says the logits are already too large, and this chapter says where to look.
+
+---
+
+## Summary
+
+You built `MSELoss` and `CrossEntropyLoss`, and the `log_softmax` helper that makes the second one safe. Cross-entropy is the negative log of the probability the model gives the right class, and the textbook softmax that produces that probability overflows float32 as soon as a logit passes 88.7. Subtracting the row maximum before exponentiating leaves the probabilities unchanged on paper and makes every exponential at most 1 and every denominator at least 1, so nothing overflows and nothing divides by zero. The invariant to carry forward is that softmax is shift invariant, and the shift by the maximum is the one that fits in a float. Inside that fix, subtract the maximum from the target logit before subtracting the log of the sum, or precision leaks in the last digits. Production systems keep exactly this math and change how many times the logits cross memory, fusing the three passes into one kernel and promoting the computation to float32 when the model runs in 16-bit. Chapter 5 takes for granted that a batch of logits and a batch of integer targets collapse to one scalar loss, and asks where those batches come from and how to keep the model fed with them.
 
 ---
 
 ## Exercises
 
-1. **Binary Cross-Entropy with Logits**: In binary classification, computing $\sigma(z)$ followed by $\mathcal{L}_{\text{BCE}} = -y \log(p) - (1-y) \log(1-p)$ is also numerically unstable. Derive the fused, overflow-safe formula for `BCEWithLogitsLoss(z, y)` in terms of $\text{softplus}(z) = \log(1 + e^z)$.
-2. **Label Smoothing Regularization**: Label smoothing replaces hard target distributions ($y_t = 1, y_{j \neq t} = 0$) with softened targets:
-   $$y_i^{\text{smooth}} = (1 - \epsilon) y_i + \frac{\epsilon}{C}$$
-   Implement `CrossEntropyLoss(label_smoothing=0.1)` in TinyTorch. How does label smoothing prevent logit vectors from growing toward $\pm \infty$?
-3. **Temperature-Scaled Log-Sum-Exp**: In large language model autoregressive generation (which we build in Milestone II), logits are scaled by temperature $T > 0$ ($\mathbf{z}' = \mathbf{z} / T$). Prove how the output probability entropy changes as $T \to 0$ (greedy decoding) versus $T \to \infty$ (uniform random sampling).
+1. **Binary cross-entropy with logits**: For a single logit $z$ and label $y \in \{0, 1\}$, the loss $-y \log \sigma(z) - (1 - y) \log(1 - \sigma(z))$ overflows for the same reason softmax does. Rewrite it in terms of $\text{softplus}(z) = \log(1 + e^z)$, then make softplus itself safe using the same max-shift idea. Compare with the real module's `BinaryCrossEntropyLoss`, which instead clips probabilities to $[10^{-7}, 1 - 10^{-7}]$. What is the largest loss that version can ever report for a confidently wrong prediction, and why is that a problem for training?
+2. **Label smoothing**: Label smoothing replaces the hard target ($y_t = 1$, all others 0) with $y_i^{\text{smooth}} = (1 - \epsilon) y_i + \epsilon / C$. Extend `CrossEntropyLoss` to accept a `label_smoothing` argument. Since the target is now a full probability vector, the gather in the listing no longer applies; write the loss as a weighted sum of log-probabilities. Then explain why the smoothed loss stops the logits from growing without bound.
+3. **Temperature**: In text generation, logits are divided by a temperature $T > 0$ before the softmax. Work out what happens to the probabilities as $T \to 0$ and as $T \to \infty$, and show that the max shift in `log_softmax` keeps the computation safe for every $T > 0$, including values small enough to push $z / T$ past the float32 limit.

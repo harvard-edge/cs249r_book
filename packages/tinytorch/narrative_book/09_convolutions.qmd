@@ -1,361 +1,383 @@
-# Spatial Convolutions: Preserving 2D Topology via im2col GEMMs {#sec-convolutions}
+# Convolutions: Sliding Windows and the im2col Trick {#sec-convolutions}
 
-In Part I, we constructed the complete Core Engine of TinyTorch, culminating in our milestone validation of multi-layer perceptrons on handwritten digit classification. Yet fully connected linear layers possess a fatal structural limitation: they treat every input feature as an independent, isolated dimension. To feed a two-dimensional image into a linear layer, we must flatten the 2D matrix into a flat 1D vector, discarding all spatial neighborhood geometry.
+Milestone I ended with a multi-layer perceptron reading handwritten digits. To feed each $8 \times 8$ image to the first `Linear` layer, we flattened it into a vector of 64 numbers and never told the network which pixels sat next to which. That worked because the images were tiny. It stops working the moment the images are not.
 
-In this chapter, we engineer **Spatial 2D Convolutions (`Conv2d`)** and **Max Pooling (`MaxPool2d`)**. We explore why sliding window receptive fields preserve translational equivariance, analyze why nested loops destroy processor throughput, and unlock the foundational systems trick used by every GPU vision framework: the **`im2col` (image-to-column) transformation** that translates sliding convolutions into high-throughput systolic General Matrix Multiplications (GEMMs).
+This chapter answers a question every practitioner meets the first time they type `nn.Conv2d`: what does a convolution layer actually compute, and why does every framework turn it into a matrix multiply? We build `Conv2d` and `MaxPool2d` twice, once with plain loops that show every multiply, and once by rearranging the input into a matrix so that the whole layer becomes one `matmul`. The two versions produce the same numbers, and the second one is the shape production libraries use.
 
-![Spatial Convolution Topology: Sliding Receptive Fields and the im2col Matrix Unrolling Engine](assets/images/diagrams/09_convolutions-diag-1.svg){#fig-conv-topology}
-
----
-
-## Systems Problem Motivation: The Parameter Explosion of Flattened Vision
-
-Consider processing a standard high-definition image with dimensions $1024 \times 1024$ pixels and three color channels ($C = 3$). The raw input tensor contains:
-
-$$N = 1024 \times 1024 \times 3 = 3,145,728 \text{ input features}$$
-
-If we connect this input to a modest hidden layer containing 1,024 neurons using a standard fully connected `Linear` layer ($Y = XW^T + b$), the weight matrix $W$ requires:
-
-$$\text{Weights} = 3,145,728 \times 1,024 = 3,221,225,472 \text{ parameters} \quad (\approx 12.88 \text{ GB in FP32!})$$
-
-```
-The Fully Connected Vision Failure:
-1. Memory Explosion: 12.8 Gigabytes for a SINGLE linear layer! ❌
-2. Spatial Blindness: Shuffling all pixels randomly changes nothing for a Linear layer,
-   destroying edge detection, texture coherence, and object contours. ❌
-3. Lack of Translation Invariance: A cat in the top-left corner activates
-   completely different weights than the exact same cat in the bottom-right. ❌
-```
-
-Vision in the physical world possesses two foundational geometric properties:
-
-1. **Local Spatial Correlation**: Pixels close to one another are strongly correlated; distant pixels are weakly correlated. An edge detector or texture filter only needs to examine local $3 \times 3$ or $5 \times 5$ pixel neighborhoods.
-2. **Translational Equivariance**: A vertical edge or a texture pattern is identical regardless of where it appears in the frame. The exact same filter weights should scan across the entire image.
-
-By sharing a small $K \times K$ kernel across all spatial locations, a $3 \times 3$ convolution layer with 64 output channels requires only:
-
-$$\text{Parameters} = 64 \times 3 \times 3 \times 3 = 1,728 \text{ parameters}$$
-
-We reduce a 3.2-billion parameter matrix to just **1,728 parameters**---a **$1,864,000\times$ reduction in parameter memory**!
+![Sliding a small filter across an image, and unrolling the windows it visits into the rows of a matrix (im2col).](assets/images/diagrams/09_convolutions-diag-1.svg){#fig-conv-topology}
 
 ---
 
-## The Mental Model: Sliding Windows and the im2col Transformation
+## The Problem
 
-A 2D convolution slides a small kernel tensor $W \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w}$ across an input tensor $X \in \mathbb{R}^{N \times C_{\text{in}} \times H \times W}$:
+Take a modest color photo, $224 \times 224$ pixels with three color channels. Flattened, that is $224 \times 224 \times 3 = 150{,}528$ input numbers. A `Linear` layer from those inputs to 1,024 hidden units needs a weight for every (input, output) pair, so its weight matrix has $150{,}528 \times 1{,}024 \approx 154$ million entries. In float32 that is about 617 MB for the first layer alone, before a single deeper layer or a single gradient buffer. Napkin math, but the conclusion holds at any reasonable image size. A dense first layer on raw pixels is enormous.
 
-$$Y[n, c_{\text{out}}, h, w] = b[c_{\text{out}}] + \sum_{c_{\text{in}}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K_h-1} \sum_{j=0}^{K_w-1} X[n, c_{\text{in}}, h \cdot S + i, w \cdot S + j] \cdot W[c_{\text{out}}, c_{\text{in}}, i, j]$$
+Size is the smaller of the two problems. The larger one is that a `Linear` layer has no idea the input was ever a picture. Every input index is just a column of $W$. If you shuffled the pixels of every training image with the same fixed permutation, the layer would learn exactly as well, because nothing in $XW^T + b$ knows that pixel $(3, 4)$ is next to pixel $(3, 5)$. The layer has to discover neighborhoods from data, and it has to discover them separately at every location. A vertical edge in the top-left corner and the same edge shifted ten pixels right touch disjoint sets of weights, so the network learns the detector twice, or as many times as there are places an edge can appear.
 
-The output spatial dimensions ($H_{\text{out}}, W_{\text{out}}$) depend on input dimensions, kernel size $K$, padding $P$, and stride $S$:
-
-$$H_{\text{out}} = \left\lfloor \frac{H + 2P - K_h}{S} \right\rfloor + 1, \qquad W_{\text{out}} = \left\lfloor \frac{W + 2P - K_w}{S} \right\rfloor + 1$$
-
-#### The Systems Bottleneck: Why Nested Loops Kill Hardware
-
-A naive software implementation of 2D convolution requires **six nested `for` loops**:
-- Loop 1: Batch index $n \in \{0, \dots, N-1\}$
-- Loop 2: Output channel $c_{\text{out}} \in \{0, \dots, C_{\text{out}}-1\}$
-- Loop 3: Spatial height $h \in \{0, \dots, H_{\text{out}}-1\}$
-- Loop 4: Spatial width $w \in \{0, \dots, W_{\text{out}}-1\}$
-- Loop 5: Input channel $c_{\text{in}} \in \{0, \dots, C_{\text{in}}-1\}$
-- Loop 6: Kernel patch elements $(i, j) \in \{0, \dots, K-1\}^2$
-
-In modern CPU and GPU hardware, nested loops are disastrous: they cause non-contiguous DRAM memory jumps, destroy CPU branch predictors, and prevent vectorized SIMD arithmetic units from firing at peak throughput.
-
-#### The im2col Solution: Unrolling Geometry into GEMM
-
-In 2006, Kumar Chellapilla et al. introduced **`im2col` (image-to-column)**, which reorganizes the 4D convolution into a single high-speed General Matrix Multiply (GEMM):
-
-```
-The im2col Transformation Engine:
-
-1. Unroll Receptive Fields:
-   Every K x K x C_in sliding window patch in the image is flattened into
-   a single ROW of an unrolled matrix X_col.
-   Shape: [ (N * H_out * W_out)  x  (C_in * K_h * K_w) ]
-
-2. Reshape Kernel Weights:
-   Flatten filter kernels into a dense weight matrix W_col.
-   Shape: [ (C_in * K_h * K_w)  x  C_out ]
-
-3. High-Speed Systolic Matrix Multiplication:
-   Y_col = X_col @ W_col
-   Shape: [ (N * H_out * W_out)  x  C_out ]
-
-4. Reshape to 4D Output:
-   Reshape Y_col back into [ N, C_out, H_out, W_out ]!
-```
-
-By unrolling receptive fields, the entire convolution is computed by our optimized `matmul` engine in a single hardware call.
+We want a layer that spends its weights on *what* a pattern looks like, not on *where* it is.
 
 ---
 
-## Mathematical Formulations: Inductive Strides and Spatial Output Bounds
+## The Idea
 
-Let us formally specify the spatial transformation equations and padding constraints for 2D convolutions.
+### A filter that slides
 
-#### 1. Spatial Dimension Proof
-Let $H$ be input height, $K_h$ kernel height, $P_h$ total vertical padding ($P_{\text{top}} + P_{\text{bottom}}$), and $S_h$ vertical stride. The spatial range of valid sliding receptive windows is the set of starting offsets $k \in \mathbb{N}$ such that the kernel fits completely inside the padded image:
+A **convolution** replaces the giant weight matrix with a small grid of weights, called a **filter** (or kernel), typically $3 \times 3$ or $5 \times 5$. The filter is placed over the top-left corner of the image, the overlapping pixels are multiplied by the matching filter weights, the products are summed, and the sum becomes one output pixel. Then the filter slides one step to the right and the same weights produce the next output pixel, and so on across and down the image.
 
-$$k \cdot S_h + K_h \le H + P_h \implies k \cdot S_h \le H + P_h - K_h \implies k \le \left\lfloor \frac{H + P_h - K_h}{S_h} \right\rfloor$$
+With input $X$ of height $H$ and width $W$, a $K \times K$ filter $w$, and a scalar bias $b$, the output at row $h$ and column $c$ is
 
-Since $k \in \{0, 1, \dots, k_{\max}\}$, the total count of spatial outputs is:
+$$Y[h, c] = b + \sum_{i=0}^{K-1} \sum_{j=0}^{K-1} X[h + i,\; c + j] \cdot w[i, j].$$
 
-$$H_{\text{out}} = k_{\max} + 1 = \left\lfloor \frac{H + 2P - K_h}{S_h} \right\rfloor + 1$$
+Each output pixel sees only a $K \times K$ neighborhood of the input, its **receptive field**, and every output pixel is computed with the same $K^2 + 1$ numbers. That sharing is the whole point. Shift the input one pixel to the right and the output shifts one pixel to the right, unchanged. This property is called **translation equivariance**, and it means a filter that learns to detect a vertical edge detects it everywhere at no extra cost in parameters.
 
-#### 2. Parameter and FLOP Complexity Comparison
-For an input tensor of shape $[N, C_{\text{in}}, H, W]$ and convolution with $C_{\text{out}}$ filters of size $K \times K$:
+### Channels, padding, stride
 
-$$\text{Parameter Count} = C_{\text{out}} \times (C_{\text{in}} \cdot K^2 + 1)$$
+Real images have several channels (red, green, blue), and a useful layer produces several output planes, called **feature maps**, one per filter. TinyTorch, like PyTorch, stores an image batch as a 4D tensor with shape $[N, C, H, W]$, meaning $N$ images, each with $C$ channels of $H \times W$ pixels. A filter then spans all input channels, so a layer with $C_{\text{in}}$ input channels and $C_{\text{out}}$ filters holds a weight tensor of shape $[C_{\text{out}}, C_{\text{in}}, K, K]$ plus one bias per filter. Output pixel $(h, c)$ of filter $o$ sums over the input channels too:
 
-$$\text{Arithmetic FLOPs} = 2 \times N \times C_{\text{out}} \times H_{\text{out}} \times W_{\text{out}} \times (C_{\text{in}} \cdot K^2)$$
+$$Y[n, o, h, c] = b[o] + \sum_{\text{ch}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K-1} \sum_{j=0}^{K-1} X[n, \text{ch}, h S + i,\; c S + j] \cdot W[o, \text{ch}, i, j].$$
 
-For a fully connected layer operating on the same flattened tensor:
+Two knobs appear here that did not appear in the single-channel formula. **Padding** $P$ adds a border of $P$ zero pixels around each input plane, so that the filter can be centered on edge pixels and the output does not shrink. **Stride** $S$ is how far the filter jumps between output pixels; a stride of 2 visits every other position and halves the output width. The number of filter positions that fit along one axis, and therefore the output size, is
 
-$$\text{FLOPs}_{\text{Linear}} = 2 \times N \times (C_{\text{in}} \cdot H \cdot W) \times (C_{\text{out}} \cdot H_{\text{out}} \cdot W_{\text{out}})$$
+$$H_{\text{out}} = \left\lfloor \frac{H + 2P - K}{S} \right\rfloor + 1,$$
 
-The convolution reduces total computational complexity by a factor of $\frac{H \cdot W}{K^2} \approx \frac{1024 \times 1024}{3 \times 3} \approx 116,500\times$!
+and the same for width. The formula is worth memorizing, because it is the source of most shape errors in convolutional networks. For a $3 \times 3$ filter, padding 1 and stride 1 keep the size ($32 \to 32$), padding 0 shrinks it by two ($32 \to 30$), and stride 2 roughly halves it ($32 \to 15$).
+
+Count the parameters. A $3 \times 3$ layer taking 3 channels to 64 filters holds $64 \times 3 \times 3 \times 3 + 64 = 1{,}792$ numbers, and it works on a $224 \times 224$ photo or a $2000 \times 2000$ one without changing. The dense layer from The Problem needed 154 million and was tied to one image size.
+
+### Max pooling
+
+**Max pooling** is the second layer we build, and it shrinks the planes a convolution produces. A $2 \times 2$ window with stride 2 slides over each channel independently and keeps only the largest value in each window, halving both height and width. It has no weights. It also makes the network a little tolerant to small shifts, since moving a strong activation one pixel within its window does not change the pooled output. The output-size formula is the same one as for convolution.
+
+### The im2col trick
+
+Look again at the single-output formula. Each output pixel is a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter. That means the entire layer is a matrix multiply in disguise. Write every patch the filter visits as one row of a matrix, with $N \cdot H_{\text{out}} \cdot W_{\text{out}}$ rows of length $C_{\text{in}} K^2$, and write every filter as one column of a second matrix, with $C_{\text{in}} K^2$ rows and $C_{\text{out}}$ columns. Their product has one row per output position and one column per filter, and reshaping it gives the $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ output. Building the patch matrix is called **im2col** ("image to column"), and the four steps are
+
+1. unroll every $K \times K \times C_{\text{in}}$ patch into a row of $X_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{in}} K^2]$;
+2. flatten every filter into a column of $W_{\text{col}}$, shape $[C_{\text{in}} K^2,\; C_{\text{out}}]$;
+3. compute $Y_{\text{col}} = X_{\text{col}} W_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{out}}]$;
+4. add the bias and reshape to $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$.
+
+That is the whole trick. What it buys, and what it costs, is measured where the code is.
+
+### The backward pass
+
+Convolution is linear in the input and linear in the weights, so its gradients are sliding-window sums as well. Call the incoming gradient $G = \partial \mathcal{L} / \partial Y$, with the same shape as the output. Since $Y$ is a sum of terms $X[\ldots] \cdot W[\ldots]$, each output pixel contributes its gradient value times the input pixel it multiplied to the weight's gradient, and its gradient value times the weight to the input pixel's gradient:
+
+$$\frac{\partial \mathcal{L}}{\partial W[o, \text{ch}, i, j]} = \sum_{n, h, c} G[n, o, h, c] \cdot X[n, \text{ch}, hS + i, cS + j], \qquad \frac{\partial \mathcal{L}}{\partial b[o]} = \sum_{n, h, c} G[n, o, h, c].$$
+
+The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \text{ch}, i, j]$ back onto input pixel $(hS + i, cS + j)$. The same seven loops compute all three gradients in one pass, with the accumulation targets swapped. Max pooling has no weights, and its gradient goes entirely to the one input pixel that won each window; the others receive zero.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 09** in the TinyTorch runtime: `packages/tinytorch/src/09_convolutions/09_convolutions.py`.
+Module 09 (`src/09_convolutions/09_convolutions.py`) is the NumPy-backed implementation students build in the TinyTorch course. It computes `Conv2d` and `MaxPool2d` with explicit loops over NumPy arrays and attaches `Conv2dBackward` and `MaxPool2dBackward` objects for autograd. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every multiply of a convolution and to place the loop version and the im2col version side by side. The listings run on their own, without the `Tensor` class from Chapter 1.
 :::
 
-We implement `Conv2d` and `MaxPool2d` in TinyTorch:
+Images are nested lists indexed `x[n][c][h][w]`.
+
+### Output size and padding
+
+Before any filter slides, two things have to be settled. How big will the output be, and what happens at the border?
+
+The size question comes first because every layer allocates its output before it computes a single value, and the layer after it needs that shape to allocate its own. Get it wrong by one and the network fails three layers later with an error that names the wrong layer. `conv_output_size` is the formula from The Idea, and it is the only place in this chapter the formula is written in code.
+
+The border question is what padding is for. A $3 \times 3$ filter with no padding shrinks the image by two pixels per layer, so a $32 \times 32$ input is $12 \times 12$ after ten layers, and the pixels near the edge get less attention than the ones in the middle (a corner pixel is covered by exactly one filter position, a center pixel by nine). A border of zeros fixes both. The naive way to handle a border is a bounds check inside the innermost loop, an `if` on every one of the roughly 87 million multiplies a $224 \times 224$ color photo needs from a single 64-filter layer. The better way is to build the padded image once, before the loops, and then let every loop run as if there were no edge at all.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/09_convolutions/09_convolutions.py
-import numpy as np
-from typing import List, Tuple, Optional
-from .autograd import Tensor
-from .layers import Layer
+def conv_output_size(size, kernel, stride, padding):
+    """How many kernel positions fit along one axis."""
+    return (size + 2 * padding - kernel) // stride + 1
 
-def validate_4d_input(x: Tensor) -> Tuple[int, int, int, int]:
-    """Validate that input tensor has shape [N, C, H, W]."""
-    shape = x.data.shape
-    if len(shape) != 4:
-        raise ValueError(f"Expected 4D input [batch, channels, height, width], got shape {shape}")
-    return shape[0], shape[1], shape[2], shape[3]
+def pad2d(x, padding):
+    """Add a border of zeros around every image plane in x[n][c]."""
+    if padding == 0:
+        return x
+    padded = []
+    for image in x:
+        planes = []
+        for plane in image:
+            width = len(plane[0])
+            blank = [0.0] * (width + 2 * padding)
+            rows = [blank[:] for _ in range(padding)]
+            rows += [[0.0] * padding + row + [0.0] * padding for row in plane]
+            rows += [blank[:] for _ in range(padding)]
+            planes.append(rows)
+        padded.append(planes)
+    return padded
+```
 
-class Conv2d(Layer):
-    """2D Spatial Convolutional Layer with Kaiming Uniform Initialization."""
-    def __init__(self, in_channels: int, out_channels: int,
-                 kernel_size: int = 3, stride: int = 1, padding: int = 0):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
+Only the two spatial axes get padded; batch and channel are untouched. Pad once, then treat the padded image as if there were no padding, which is why the size calls below pass `padding=0`. PyTorch takes `padding=1` as an argument to `nn.Conv2d` rather than asking you to pad, and the GPU routines in the bridge treat the border as index arithmetic rather than a copy.
 
-        # Kaiming uniform initialization: bound = 1 / sqrt(fan_in)
+### The direct convolution
+
+Why build the slow version at all? Because it is the formula and nothing else, and everything faster in this chapter is checked against it. The im2col version below, the gradient routine, and PyTorch's `nn.Conv2d` in the bridge all have to reproduce its numbers, so this is the reference. It is also where you can see what the arithmetic costs. The 87 million multiply-adds for one photo through one modest layer come out of these loops, four to pick the output pixel and three to form its dot product. On my machine the pure-Python version manages a little over 9 million multiplies a second, which puts that one layer at about nine seconds per image. Nobody trains at that rate. The point of writing it out is to see exactly where the time goes, so the im2col section can move it.
+
+```python
+def conv2d(x, weight, bias, stride=1, padding=0):
+    """x: [N][C_in][H][W]; weight: [C_out][C_in][K][K]; bias: [C_out]."""
+    x = pad2d(x, padding)
+    N, C_in = len(x), len(x[0])
+    H, W = len(x[0][0]), len(x[0][0][0])
+    C_out, K = len(weight), len(weight[0][0])
+    H_out = conv_output_size(H, K, stride, 0)   # padding already applied
+    W_out = conv_output_size(W, K, stride, 0)
+    out = [[[[0.0] * W_out for _ in range(H_out)]
+            for _ in range(C_out)] for _ in range(N)]
+    for n in range(N):
+        for co in range(C_out):
+            for oh in range(H_out):
+                for ow in range(W_out):
+                    total = bias[co]
+                    for ci in range(C_in):
+                        for i in range(K):
+                            for j in range(K):
+                                pixel = x[n][ci][oh * stride + i][ow * stride + j]
+                                total += pixel * weight[co][ci][i][j]
+                    out[n][co][oh][ow] = total
+    return out
+```
+
+Notice the index arithmetic `oh * stride + i`. That single expression is what stride means; everything else is bookkeeping. The real module's `_convolve_loops` has the same seven loops in the same order.
+
+### Pooling
+
+With padding, a convolution hands the next layer a plane the same size as the one it received, and that gets expensive to keep doing. Run the numbers for the first layer of a photo network. The $224 \times 224$ color input holds 150,528 numbers. After `Conv2d(3, 64, 3, padding=1)` there are $64 \times 224 \times 224 = 3{,}211{,}264$ of them, 12.8 MB in float32 for a single image, and a second $3 \times 3$ layer with 64 input channels does about 1.85 billion multiplies per image, 21 times what the first layer did, because its dot products are 576 long instead of 27. Left at full resolution, every later layer pays that. There is a second problem. A $3 \times 3$ filter widens what one output pixel can see by only two pixels per layer, so at full resolution it takes over a hundred layers before any output has seen the whole 224-wide picture.
+
+The cheap fix is to shrink the planes between convolutions. Max pooling slides a $2 \times 2$ window with stride 2 over each channel and keeps the largest value in each window. That quarters the numbers, costs no weights, and doubles the field of view of every layer after it, because each pooled pixel now stands for four. In code it replaces the dot product with a `max` and runs per channel, so it has no channel loop inside the window.
+
+```python
+def maxpool2d(x, kernel=2, stride=2):
+    """Keep the largest value in each kernel x kernel window."""
+    N, C = len(x), len(x[0])
+    H, W = len(x[0][0]), len(x[0][0][0])
+    H_out = conv_output_size(H, kernel, stride, 0)
+    W_out = conv_output_size(W, kernel, stride, 0)
+    out = [[[[0.0] * W_out for _ in range(H_out)]
+            for _ in range(C)] for _ in range(N)]
+    for n in range(N):
+        for c in range(C):
+            for oh in range(H_out):
+                for ow in range(W_out):
+                    window = [x[n][c][oh * stride + i][ow * stride + j]
+                              for i in range(kernel) for j in range(kernel)]
+                    out[n][c][oh][ow] = max(window)
+    return out
+```
+
+PyTorch's `nn.MaxPool2d(2)` is this routine with the same defaults, and the only thing it keeps for the backward pass is which pixel won each window.
+
+### im2col
+
+Now the fast version. The seven loops in `conv2d` spend almost nothing on arithmetic. Each innermost iteration does one multiply and one add, wrapped in seven list indexings, a loop-counter update, and Python bytecode dispatch for every one of those. The hardware never sees a run of arithmetic long enough to feed its vector units, and the memory system never sees a predictable stream of addresses. That is the old complaint about nested loops, and it is why no framework runs a convolution this way.
+
+Look at the direct routine again. The three innermost loops form a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter, and every output pixel is one of those dot products. So the question is whether we can stop paying the loop overhead per multiply and pay it once per matrix instead. Copy each patch the filter visits into the row of a matrix, flatten each filter into a column, and let one `matmul` do every dot product at once. Chapter 3 already gave us `matmul`, and it is the one routine every numerical library has spent decades making fast.
+
+I timed the trade on a $32 \times 32$ color image with sixteen $3 \times 3$ filters, 442,368 multiplies. The seven loops took 47 ms. The im2col version with the pure-Python `matmul` below took 21 ms, faster already because the seven indexings per multiply have become one step of a `zip`. Swap in NumPy's `matmul` and the whole thing takes 4 ms, and 3 of those are spent building the patch matrix. The copying is now the cost, and that is the price of the trick. Neighboring patches overlap, so every input pixel is copied into up to $K^2$ rows of the patch matrix; for a $3 \times 3$ filter the matrix is about nine times the input. The bridge at the end of the chapter is about what production libraries do with that bill.
+
+`im2col` walks the same output positions as `conv2d`, but instead of multiplying it copies the patch into a row. The order inside a row (channel, then filter row, then filter column) must match the order used to flatten the filters, or the dot products pair the wrong numbers.
+
+```python
+def im2col(x, K, stride=1, padding=0):
+    """Return (patches, H_out, W_out). patches has one row per output position."""
+    x = pad2d(x, padding)
+    N, C_in = len(x), len(x[0])
+    H, W = len(x[0][0]), len(x[0][0][0])
+    H_out = conv_output_size(H, K, stride, 0)
+    W_out = conv_output_size(W, K, stride, 0)
+    patches = []
+    for n in range(N):
+        for oh in range(H_out):
+            for ow in range(W_out):
+                row = []
+                for ci in range(C_in):
+                    for i in range(K):
+                        for j in range(K):
+                            row.append(x[n][ci][oh * stride + i][ow * stride + j])
+                patches.append(row)
+    return patches, H_out, W_out
+
+def matmul(A, B):
+    """Plain matrix product of two lists of lists."""
+    return [[sum(a * b for a, b in zip(row, col)) for col in zip(*B)] for row in A]
+
+def conv2d_im2col(x, weight, bias, stride=1, padding=0):
+    N, C_out, K = len(x), len(weight), len(weight[0][0])
+    patches, H_out, W_out = im2col(x, K, stride, padding)
+    # One column per filter, flattened in the same (ci, i, j) order as im2col.
+    columns = [[w for plane in weight[co] for row in plane for w in row]
+               for co in range(C_out)]
+    product = matmul(patches, list(zip(*columns)))   # [N*H_out*W_out][C_out]
+    out = [[[[0.0] * W_out for _ in range(H_out)]
+            for _ in range(C_out)] for _ in range(N)]
+    for n in range(N):
+        for oh in range(H_out):
+            for ow in range(W_out):
+                r = (n * H_out + oh) * W_out + ow
+                for co in range(C_out):
+                    out[n][co][oh][ow] = product[r][co] + bias[co]
+    return out
+```
+
+The multiplies all happen inside `matmul`. Everything around it is copying and reshaping. `patches` holds $N H_{\text{out}} W_{\text{out}} C_{\text{in}} K^2$ numbers where the input held $N C_{\text{in}} H W$, which is the nine-times bill from the timing above. The final loop exists only because our output is a nested list; with a strided `Tensor` from Chapter 1 the reshape would be free. PyTorch exposes the same patch matrix as `torch.nn.functional.unfold`.
+
+### The gradients
+
+Chapter 8's training loop calls `backward()` every step, and Chapter 6's tape can only route a gradient through an operation that knows its own derivative, so `Conv2d` needs one. The cheap way to get it would be a disaster. Nudging each of the 1,792 weights in `Conv2d(3, 64, 3)` and rerunning the forward pass, the finite-difference idea Chapter 6 set aside, costs 1,792 forward passes per gradient, and each of them is the nine-second layer from above, hours for one image. The Idea already did the calculus instead. A convolution is linear in both the input and the weights, so its gradients are the same sliding-window sums with the accumulation targets swapped, and all three of them come out of one pass over the same seven loops. The routine returns gradients for the input, the weights, and the bias from the incoming gradient `grad_out`.
+
+```python
+def conv2d_backward(x, weight, grad_out, stride=1, padding=0):
+    """Return gradients for x, weight, and bias given dL/d(out)."""
+    xp = pad2d(x, padding)
+    N, C_in = len(xp), len(xp[0])
+    Hp, Wp = len(xp[0][0]), len(xp[0][0][0])
+    C_out, K = len(weight), len(weight[0][0])
+    H_out, W_out = len(grad_out[0][0]), len(grad_out[0][0][0])
+    grad_xp = [[[[0.0] * Wp for _ in range(Hp)] for _ in range(C_in)] for _ in range(N)]
+    grad_w = [[[[0.0] * K for _ in range(K)] for _ in range(C_in)] for _ in range(C_out)]
+    grad_b = [0.0] * C_out
+    for n in range(N):
+        for co in range(C_out):
+            for oh in range(H_out):
+                for ow in range(W_out):
+                    g = grad_out[n][co][oh][ow]
+                    grad_b[co] += g
+                    for ci in range(C_in):
+                        for i in range(K):
+                            for j in range(K):
+                                h, w = oh * stride + i, ow * stride + j
+                                grad_w[co][ci][i][j] += g * xp[n][ci][h][w]
+                                grad_xp[n][ci][h][w] += g * weight[co][ci][i][j]
+    # Strip the padding border: gradients of zeros we added are not needed.
+    grad_x = [[[row[padding:Wp - padding] for row in plane[padding:Hp - padding]]
+               for plane in image] for image in grad_xp]
+    return grad_x, grad_w, grad_b
+```
+
+Where the forward pass read `pixel * weight` and wrote to `out`, the backward pass reads `g` and writes to two places. Notice line 245: `grad_b[co] += g`. Because the bias vector of shape `[C_out]` was broadcast across the batch dimension $N$ and both spatial dimensions $(H_{\text{out}}, W_{\text{out}})$ during the forward pass, backward automatic differentiation is mathematically bound by the multivariable chain rule to sum upstream gradients over all three broadcast axes ($N \times H_{\text{out}} \times W_{\text{out}}$). It is the exact same forward-backward broadcast contract from Chapters 1 and 6, reappearing inside 2D spatial convolution. The real module packages this routine as `Conv2dBackward.apply`, hooked into the autograd tape from Chapter 6 so that `loss.backward()` reaches it without the caller knowing, and PyTorch's `convolution_backward` returns the same three gradients.
+
+### The layer
+
+Finally the layer object, because the routines above are functions and the rest of TinyTorch works with layers. The optimizer from Chapter 7 asks each layer for `parameters()`, and `Sequential` from Chapter 3 calls `forward`, so `Conv2d` needs the same two methods `Linear` has. The one decision hiding in the constructor is the initial scale of the weights, and the wrong choice here produces a wrong number, not a slow one. The rule from Chapter 3 is a normal distribution with standard deviation $\sqrt{2 / \text{fan\_in}}$, and the trap is what fan-in means for a filter. It is not the number of pixels in the image. Each output pixel sums $C_{\text{in}} K^2$ products, 27 for the first layer of a color network, so that is the fan-in. Use the image size instead, 150,528 for a $224 \times 224$ photo, and the weights come out about 75 times too small; the activations then shrink by that factor at every layer until nothing useful reaches the loss. The real module uses $\text{fan\_in} = C_{\text{in}} K^2$ and starts the bias at zero.
+
+```python
+import math, random
+
+class Conv2d:
+    """A convolution layer: learnable filters plus the conv2d routine above."""
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        self.stride, self.padding = stride, padding
         fan_in = in_channels * kernel_size * kernel_size
-        bound = 1.0 / np.sqrt(fan_in)
+        std = math.sqrt(2.0 / fan_in)                     # He initialization
+        self.weight = [[[[random.gauss(0.0, std) for _ in range(kernel_size)]
+                         for _ in range(kernel_size)]
+                        for _ in range(in_channels)] for _ in range(out_channels)]
+        self.bias = [0.0] * out_channels
 
-        # Weight shape: [out_channels, in_channels, kernel_size, kernel_size]
-        w_data = np.random.uniform(-bound, bound,
-                                   (out_channels, in_channels, kernel_size, kernel_size))
-        self.weight = Tensor(w_data, requires_grad=True)
-
-        b_data = np.random.uniform(-bound, bound, (out_channels,))
-        self.bias = Tensor(b_data, requires_grad=True)
-
-    def parameters(self) -> List[Tensor]:
+    def parameters(self):
         return [self.weight, self.bias]
 
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward spatial convolution with padding and stride support."""
-        N, C_in, H, W = validate_4d_input(x)
-        K = self.kernel_size
-        S = self.stride
-        P = self.padding
-
-        H_out = (H + 2 * P - K) // S + 1
-        W_out = (W + 2 * P - K) // S + 1
-
-        # Apply zero-padding to spatial dimensions if P > 0
-        if P > 0:
-            x_pad = np.pad(x.data, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant')
-        else:
-            x_pad = x.data
-
-        out_data = np.zeros((N, self.out_channels, H_out, W_out), dtype=np.float32)
-
-        # Vectorized channel convolution
-        for n in range(N):
-            for c_out in range(self.out_channels):
-                w_kernel = self.weight.data[c_out]  # [C_in, K, K]
-                bias_val = self.bias.data[c_out]
-                for h_idx in range(H_out):
-                    h_start = h_idx * S
-                    h_end = h_start + K
-                    for w_idx in range(W_out):
-                        w_start = w_idx * S
-                        w_end = w_start + K
-
-                        patch = x_pad[n, :, h_start:h_end, w_start:w_end]
-                        out_data[n, c_out, h_idx, w_idx] = np.sum(patch * w_kernel) + bias_val
-
-        out_tensor = Tensor(out_data)
-        out_tensor._op = "Conv2d"
-        out_tensor._parents = [x, self.weight, self.bias]
-        return out_tensor
-
-class MaxPool2d(Layer):
-    """Spatial 2D Max Pooling Layer for Spatial Downsampling."""
-    def __init__(self, kernel_size: int = 2, stride: int = 2):
-        super().__init__()
-        self.kernel_size = kernel_size
-        self.stride = stride
-
-    def forward(self, x: Tensor) -> Tensor:
-        N, C, H, W = validate_4d_input(x)
-        K = self.kernel_size
-        S = self.stride
-
-        H_out = (H - K) // S + 1
-        W_out = (W - K) // S + 1
-
-        out_data = np.zeros((N, C, H_out, W_out), dtype=np.float32)
-
-        for n in range(N):
-            for c in range(C):
-                for h in range(H_out):
-                    h_s = h * S
-                    for w in range(W_out):
-                        w_s = w * S
-                        out_data[n, c, h, w] = np.max(x.data[n, c, h_s:h_s+K, w_s:w_s+K])
-
-        out_tensor = Tensor(out_data)
-        out_tensor._op = "MaxPool2d"
-        out_tensor._parents = [x]
-        return out_tensor
+    def forward(self, x):
+        return conv2d(x, self.weight, self.bias, self.stride, self.padding)
 ```
+
+`Conv2d(3, 64, 3)` has exactly the 1,792 numbers counted earlier, and `parameters()` hands them to an optimizer the same way `Linear` did. PyTorch's `nn.Conv2d` computes its fan-in the same way, $C_{\text{in}} K^2$, for its default initialization.
 
 ---
 
-## Concrete Numerical Trace Table: Tracing im2col Unrolling Step-by-Step
+## A Worked Trace
 
-Let us trace a concrete 2D spatial convolution step-by-step with real numbers:
-- Input Image $X \in \mathbb{R}^{1 \times 1 \times 3 \times 3}$:
-  $$\mathbf{X} = \begin{bmatrix} 1.0 & 2.0 & 0.0 \\ 0.0 & 1.0 & 3.0 \\ 2.0 & 1.0 & 0.0 \end{bmatrix}$$
-- Filter Kernel $W \in \mathbb{R}^{1 \times 1 \times 2 \times 2}$ with bias $b = 1.0$:
-  $$\mathbf{W} = \begin{bmatrix} 1.0 & 0.0 \\ -1.0 & 1.0 \end{bmatrix}$$
-- Parameters: $S = 1, P = 0 \implies H_{\text{out}} = \frac{3 - 2}{1} + 1 = 2, \quad W_{\text{out}} = 2$.
+One image, one channel, $3 \times 3$ pixels, one $2 \times 2$ filter with bias $1$, no padding, stride 1:
 
-#### The im2col Matrix Construction and Dot Product Trace
+$$X = \begin{bmatrix} 1 & 2 & 0 \\ 0 & 1 & 3 \\ 2 & 1 & 0 \end{bmatrix}, \qquad w = \begin{bmatrix} 1 & 0 \\ -1 & 1 \end{bmatrix}, \qquad b = 1.$$
 
-| Spatial Coordinate | Slice Indices | Unrolled $\mathbf{x}_{\text{col}}$ Vector | Dot Product $\mathbf{x}_{\text{col}} \mathbf{w} + b$ | Evaluated Output $Y$ |
+The output is $\lfloor (3 - 2)/1 \rfloor + 1 = 2$ pixels on each side. The filter visits four positions, and each row of the trace in @tbl-im2col-trace is also one row of the im2col matrix.
+
+| Output $(h, c)$ | Input slice | Patch as a row | Dot product plus bias | $Y[h, c]$ |
 | :--- | :---: | :--- | :--- | :---: |
-| **Top-Left $(0, 0)$** | $[0:2, 0:2]$ | $[1.0, 2.0, 0.0, 1.0]$ | $1(1) + 2(0) + 0(-1) + 1(1) + 1.0$ | **$3.0$** |
-| **Top-Right $(0, 1)$** | $[0:2, 1:3]$ | $[2.0, 0.0, 1.0, 3.0]$ | $2(1) + 0(0) + 1(-1) + 3(1) + 1.0$ | **$5.0$** |
-| **Bottom-Left $(1, 0)$** | $[1:3, 0:2]$ | $[0.0, 1.0, 2.0, 1.0]$ | $0(1) + 1(0) + 2(-1) + 1(1) + 1.0$ | **$0.0$** |
-| **Bottom-Right $(1, 1)$**| $[1:3, 1:3]$ | $[1.0, 3.0, 1.0, 0.0]$ | $1(1) + 3(0) + 1(-1) + 0(1) + 1.0$ | **$1.0$** |
+| $(0, 0)$ | $[0{:}2,\, 0{:}2]$ | $[1, 2, 0, 1]$ | $1(1) + 2(0) + 0(-1) + 1(1) + 1$ | $3$ |
+| $(0, 1)$ | $[0{:}2,\, 1{:}3]$ | $[2, 0, 1, 3]$ | $2(1) + 0(0) + 1(-1) + 3(1) + 1$ | $5$ |
+| $(1, 0)$ | $[1{:}3,\, 0{:}2]$ | $[0, 1, 2, 1]$ | $0(1) + 1(0) + 2(-1) + 1(1) + 1$ | $0$ |
+| $(1, 1)$ | $[1{:}3,\, 1{:}3]$ | $[1, 3, 1, 0]$ | $1(1) + 3(0) + 1(-1) + 0(1) + 1$ | $1$ |
 
-: Concrete numerical trace of spatial patch unrolling and GEMM dot-product evaluation with kernel vector $\mathbf{w} = [1, 0, -1, 1]^T$ and bias $b = 1.0$. {#tbl-im2col-trace tbl-colwidths="[20,16,26,26,12]"}
+: Each output pixel as a dot product between the flattened patch and the flattened filter $[1, 0, -1, 1]$. The four patch rows stacked are exactly $X_{\text{col}}$. {#tbl-im2col-trace tbl-colwidths="[16,16,22,34,12]"}
 
-Resulting in output feature map:
+So $Y = \begin{bmatrix} 3 & 5 \\ 0 & 1 \end{bmatrix}$, and a $2 \times 2$ max pool over it keeps the single value $5$.
 
-$$\mathbf{Y} = \begin{bmatrix} 3.0 & 5.0 \\ 0.0 & 1.0 \end{bmatrix}$$
+The backward pass is just as checkable. Send back a gradient of 1 at every output pixel. Weight $w[0, 0]$ multiplied the top-left pixel of each of the four patches, so its gradient is $1 + 2 + 0 + 1 = 4$. Weight $w[0, 1]$ saw the top-right pixel of each patch, $2 + 0 + 1 + 3 = 6$. The bias gradient is the sum of the four incoming ones. For the input, the center pixel $X[1, 1]$ was touched by all four filter positions, once under each weight, so its gradient is $1 + 0 + (-1) + 1 = 1$; the corner $X[2, 0]$ was touched only by $w[1, 0]$ and gets $-1$.
 
 ```python
-# Pure Python Verification of im2col GEMM Equivalence
-import numpy as np
+X = [[[[1.0, 2.0, 0.0],
+       [0.0, 1.0, 3.0],
+       [2.0, 1.0, 0.0]]]]          # [N=1][C_in=1][H=3][W=3]
+w = [[[[1.0, 0.0],
+       [-1.0, 1.0]]]]              # [C_out=1][C_in=1][K=2][K=2]
+b = [1.0]
 
-# 1. Physical 3x3 input image and 2x2 kernel
-X = np.array([[1.0, 2.0, 0.0],
-              [0.0, 1.0, 3.0],
-              [2.0, 1.0, 0.0]], dtype=np.float32)
-W = np.array([[1.0, 0.0],
-              [-1.0, 1.0]], dtype=np.float32)
-b = 1.0
+print(conv2d(X, w, b)[0][0])                 # [[3.0, 5.0], [0.0, 1.0]]
+print(conv2d_im2col(X, w, b)[0][0])          # [[3.0, 5.0], [0.0, 1.0]]
+print(maxpool2d(conv2d(X, w, b))[0][0])      # [[5.0]]
 
-# 2. Unroll 2x2 sliding patches into X_col (4 patches, 4 values each)
-X_col = np.array([
-    X[0:2, 0:2].flatten(),  # [1.0, 2.0, 0.0, 1.0]
-    X[0:2, 1:3].flatten(),  # [2.0, 0.0, 1.0, 3.0]
-    X[1:3, 0:2].flatten(),  # [0.0, 1.0, 2.0, 1.0]
-    X[1:3, 1:3].flatten(),  # [1.0, 3.0, 1.0, 0.0]
-])
-
-# 3. Flatten kernel into column vector W_col
-W_col = W.flatten().reshape(4, 1)
-
-# 4. Perform systolic GEMM: Y_col = X_col @ W_col + b
-Y_col = X_col @ W_col + b
-Y_out = Y_col.reshape(2, 2)
-
-print("Constructed im2col Matrix:\n", X_col)
-print("Systolic GEMM Output:\n", Y_out)
-assert np.allclose(Y_out, [[3.0, 5.0], [0.0, 1.0]]), "GEMM verification failed!"
+ones = [[[[1.0, 1.0], [1.0, 1.0]]]]
+grad_x, grad_w, grad_b = conv2d_backward(X, w, ones)
+print(grad_w[0][0])   # [[4.0, 6.0], [4.0, 5.0]]
+print(grad_b)         # [4.0]
+print(grad_x[0][0])   # [[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [-1.0, 0.0, 1.0]]
 ```
+
+The loop version and the im2col version agree here and on padded, strided, multi-channel inputs; the only difference between them is where the multiplies happen.
 
 ---
 
-## The Production Bridge: NVIDIA cuDNN and Tensor Cores
+## From TinyTorch to Production
 
-In production deep learning (NVIDIA GPUs), convolution execution is orchestrated by **cuDNN** (CUDA Deep Neural Network library):
+On a GPU, `torch.nn.Conv2d` hands the work to cuDNN, NVIDIA's library of convolution routines, and cuDNN does not commit to one algorithm. It keeps several and picks per layer shape, because each one is the right answer under different pressure. The pressures are the two we have already met, the number of multiplies and the memory the patch matrix costs, plus one we have not met. GPUs contain hardware built specifically for matrix multiplies (Tensor Cores), so any formulation that ends in one big matrix multiply (a GEMM, in library jargon) gets to use the fastest unit on the chip.
 
-```python
-# Production PyTorch Conv2d Bridge
-import torch
-import torch.nn as nn
-
-torch_conv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=2, stride=1, padding=0)
-with torch.no_grad():
-    torch_conv.weight.copy_(torch.tensor([[[[1.0, 0.0], [-1.0, 1.0]]]]))
-    torch_conv.bias.copy_(torch.tensor([1.0]))
-
-x_torch = torch.tensor([[[[1.0, 2.0, 0.0], [0.0, 1.0, 3.0], [2.0, 1.0, 0.0]]]])
-y_torch = torch_conv(x_torch)
-print("PyTorch Conv2d Output:", y_torch.squeeze().numpy())
-```
-
-| Algorithm | Best Receptive Field & Topology Regime | Hardware Characteristic |
+| Algorithm | Where it wins | What it does |
 | :--- | :--- | :--- |
-| **Direct GEMM (`im2col`)** | General-purpose large kernels ($5\times 5, 7\times 7$) | Unrolls spatial patches into standard 2D matrix multiplication. |
-| **Winograd Minimal Filtering** | Small $3\times 3$ kernels ($F(2\times 2, 3\times 3)$) | Reduces elementwise multiplications by $2.25\times$ via polynomial transforms. |
-| **FFT (Fast Fourier Transform)** | Massive $7\times 7, 9\times 9+$ kernels | Frequency-domain multiplication ($O(N \log N)$ vs $O(N^2)$ spatial). |
-| **Implicit GEMM** | Modern Tensor Cores (NVIDIA Hopper/Blackwell) | Generates coordinate offsets on-the-fly inside registers with zero memory expansion. |
+| Explicit im2col + GEMM | Odd shapes, small inputs | Exactly our `conv2d_im2col`: build the patch matrix, then one matrix multiply. |
+| Implicit GEMM | Most layers on modern GPUs | Same matrix multiply, but each thread computes which input pixel it needs on the fly; the patch matrix is never stored. |
+| Winograd | $3 \times 3$ filters, stride 1 | Trades multiplies for additions through a fixed change of basis, about 2.25 times fewer multiplies.[^fn-winograd-conv-algos] |
+| FFT | Large filters ($7 \times 7$ and up) | Converts convolution to elementwise multiplication in the frequency domain.[^fn-fft-conv-algos] |
 
-: Industrial cuDNN 2D convolution algorithm selection strategies. {#tbl-cudnn-conv-algorithms tbl-colwidths="[25,35,40]"}
+: The convolution algorithms cuDNN chooses among. `torch.backends.cudnn.benchmark = True` makes it time each candidate on your actual shapes and keep the fastest. {#tbl-cudnn-conv-algorithms tbl-colwidths="[24,26,50]"}
 
-Rather than materializing the expanded `im2col` buffer in DRAM (which consumes $K^2 \times$ extra memory bandwidth, requiring $N \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot C_{\text{in}} \cdot K^2 \times 4\text{ bytes}$ transfers over PCIe or HBM), modern cuDNN kernels use **Implicit GEMM**: CUDA threads calculate the input spatial coordinates on-the-fly inside SM registers, achieving peak TensorCore compute throughput ($>300\text{ TFLOPs}$ on H100) with zero off-chip memory expansion overhead.
+[^fn-winograd-conv-algos]: **Winograd convolution**: a 1980 minimal-filtering result, applied to CNNs by Lavin and Gray in 2016, that computes a $2 \times 2$ block of outputs from a $3 \times 3$ filter with 16 multiplies instead of 36. The saving is real only when multiplies dominate, which is why it is chosen for small stride-1 filters and not for the rest.
 
-::: {#nbk-convolutions-im2col-memory-expansion .callout-notebook title="The im2col memory expansion inflation factor"}
-In 2D spatial convolution, unrolling an input image tensor $\mathbf{X} \in \mathbb{R}^{B \times C_{\text{in}} \times H \times W}$ into a column matrix $\mathbf{X}_{\text{col}} \in \mathbb{R}^{(B \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (C_{\text{in}} \cdot K_h \cdot K_w)}$ replicates spatial pixels across overlapping receptive fields:
+[^fn-fft-conv-algos]: **FFT convolution**: uses the fast Fourier transform to turn a sliding-window sum into a pointwise product, so cost grows with the image size rather than with the image size times the filter size. Transforming the image costs enough that it only pays off for large filters.
 
-- **Expansion Ratio**:
-  $$\text{Expansion Factor} = \frac{H_{\text{out}} \times W_{\text{out}} \times K_h \times K_w}{H \times W} \approx K_h \times K_w$$
-  For standard $3 \times 3$ filters with stride 1 and padding 1 ($H_{\text{out}} = H, W_{\text{out}} = W$), every input pixel is duplicated into up to 9 separate receptive fields, yielding an exact **$9\times$ memory expansion**.
+The memory pressure decides more than the arithmetic. Recall that im2col copies every input pixel up to $K^2$ times. A mid-network feature map of 32 images, 64 channels, $112 \times 112$ pixels, occupies about 103 MB in float32; its $3 \times 3$ patch matrix would be nine times that, about 925 MB, allocated and freed for one layer of one forward pass. Napkin math, but it explains why implicit GEMM exists. Instead of writing the patch matrix to memory and reading it back, each GPU thread runs the index expression `oh * stride + i` at the moment it needs the value, which is exactly the arithmetic our `im2col` loop does before the `append`. The multiply still happens in the Tensor Core; only the copy is gone.
 
-- **Concrete Footprint Calculation**:
-  Consider an intermediate feature map batch with $B = 32$, $C_{\text{in}} = 64$, and spatial resolution $H = 112, W = 112$ in FP32 (4 bytes per element):
-  $$\text{Original Input Tensor} = 32 \times 64 \times 112 \times 112 \times 4\text{ bytes} \approx 102.76\text{ MB}$$
-  $$\text{Unrolled im2col Matrix} = 102.76\text{ MB} \times 9 \approx \mathbf{924.84\text{ MB}}$$
+What carries over from TinyTorch unchanged is everything the practitioner has to reason about. The output-size formula, the weight shape $[C_{\text{out}}, C_{\text{in}}, K, K]$, the parameter count, and the gradient formulas are the same in PyTorch, and `nn.Conv2d(1, 1, 2)` loaded with our filter returns our $[[3, 5], [0, 1]]$. The FLOP count is easiest to read off the im2col view, $2 \cdot N H_{\text{out}} W_{\text{out}} \cdot C_{\text{out}} \cdot C_{\text{in}} K^2$ (one multiply and one add per matrix entry), and it lets you predict which layers of a network dominate its cost before you run it. Max pooling still routes each gradient to one winning pixel.
 
-**Systems Takeaway**: The `im2col` transform trades nearly **$1\text{ GB}$ of transient DRAM allocation** for computational speed, transforming complex 6-deep nested loops into a contiguous matrix multiply that saturates hardware systolic GEMM engines. Modern production engines (like cuDNN) avoid this memory penalty through **Implicit GEMM**, generating the unrolled index coordinates directly in thread registers.
-:::
+```python
+# If PyTorch is installed, the trace numbers reproduce exactly.
+import torch, torch.nn as nn
+
+conv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=2)
+with torch.no_grad():
+    conv.weight.copy_(torch.tensor([[[[1.0, 0.0], [-1.0, 1.0]]]]))
+    conv.bias.copy_(torch.tensor([1.0]))
+
+x = torch.tensor([[[[1.0, 2.0, 0.0], [0.0, 1.0, 3.0], [2.0, 1.0, 0.0]]]])
+print(conv(x).squeeze())          # tensor([[3., 5.], [0., 1.]])
+```
+
+Two things change in how you should read your own code. First, memory layout matters. Our lists and PyTorch's default both store an image as $[N, C, H, W]$, but the GPU routines are fastest when the channel index moves fastest in memory, the $[N, H, W, C]$ order that PyTorch calls `channels_last`, because then the $C_{\text{in}} K^2$ numbers of one patch sit closer together and one memory fetch serves more of the dot product. Second, the first convolution of a network usually has few input channels, so its dot products are short and the layer spends more time fetching pixels than multiplying them; deeper layers with hundreds of channels are the reverse. Chapter 14 gives that intuition a number, the arithmetic intensity, and shows how to measure which regime a layer is in. Until then, expect the algorithm cuDNN picks, and the time a layer takes, to change with $C_{\text{in}}$ and image size in ways a parameter count does not predict.
 
 ---
 
-## Building the System: How It All Connects
+## Summary
 
-With Chapter 9, TinyTorch extends from flat 1D vectors into multi-channel 2D spatial manifolds:
+You built a convolution layer twice. The direct version slides a small filter across an image and computes one dot product per output pixel with seven loops; the im2col version copies each visited patch into the row of a matrix and computes every output pixel with one matrix multiply. Both give identical numbers, and the second is the shape that GPU libraries use, with implicit GEMM removing the copy that makes im2col expensive. The principle to keep is that a convolution is a dot product repeated at every position with shared weights, which is why its parameter count depends on the filter and not on the image, why shifting the input shifts the output, and why its gradient is another sliding-window sum. Max pooling shrinks the planes and sends each gradient to the pixel that won. Chapter 10 takes for granted that a network consumes a tensor of numbers and asks how raw text becomes such a tensor in the first place.
 
-::: {.callout-note title="TinyTorch 2D Vision Pipeline Architecture"}
-1. **Input Tensor**: $[B, C_{\text{in}}, H, W]$ contiguous 4D image buffer.
-2. **`Conv2d(in=1, out=16, k=3)`**: Sliding receptive fields extract spatial features while preserving 2D topology.
-3. **`ReLU()`**: In-place non-linear gating over spatial channels.
-4. **`MaxPool2d(k=2, s=2)`**: Downsamples spatial grid by $2\times$, doubling the effective receptive field of subsequent layers.
-5. **`Linear(Flattened, Classes)`**: Dense affine projection yielding final classification logits.
-:::
+---
 
-From a systems perspective, spatial convolutions achieve high computational throughput by reusing weight parameters $C_{\text{in}} \cdot K^2$ across all $H_{\text{out}} \cdot W_{\text{out}}$ receptive fields, shifting the operational regime toward compute-bound execution (which we formalize in Chapter 14: arithmetic intensity, measuring FLOPs per memory byte transferred).
+## Exercises
 
-We can now process continuous, two-dimensional grids of pixels. But modern AI systems must also process discrete, sequential, variable-length symbolic language. How do we convert open-ended human text into discrete mathematical tokens without exploding our vocabulary or blowing out DRAM memory buffers?
+1. **Same-size output.** For a $K \times K$ filter with stride 1, show from the output-size formula that padding $P = (K - 1)/2$ keeps $H_{\text{out}} = H$ whenever $K$ is odd. Then run `conv2d` on a $5 \times 5$ input with `Conv2d(1, 1, 3, padding=1)` and confirm the output shape, and explain why the same trick, with equal padding on both sides, cannot give an exact match for an even $K$.
 
-In **Chapter 10**, we engineer **Byte-Pair Encoding: Compressing Language into Subword Tokens**.
+2. **Check the gradient.** Write a loss that sums every output of `conv2d`, nudge one weight by $10^{-6}$, and compare the change in loss to the corresponding entry of `grad_w` from `conv2d_backward`. Repeat for one input pixel. Try it with `padding=1` and `stride=2` to confirm the border stripping and the stride arithmetic in the backward pass.
+
+3. **Count before you run.** Take a $224 \times 224$ color image through `Conv2d(3, 64, 3, padding=1)`, a $2 \times 2$ max pool, `Conv2d(64, 128, 3, padding=1)`, another max pool, and `Conv2d(128, 256, 3, padding=1)`. For each convolution compute the parameter count, the FLOPs using the im2col view, and the size of its patch matrix in float32. Which layer holds the most parameters, and which would need the largest im2col buffer? They are not the same layer, and the FLOP counts of the second and third layers tell a third story.

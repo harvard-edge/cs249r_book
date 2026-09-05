@@ -1,367 +1,280 @@
 # Byte-Pair Encoding: Compressing Language into Subword Tokens {#sec-tokenization}
 
-In Chapter 9, we conquered continuous 2D spatial inputs. But artificial intelligence must also understand and generate human language. Unlike images, which consist of continuous pixel intensities in bounded 2D grids, human language consists of **discrete, variable-length sequences of symbolic characters**.
+After Chapter 9, TinyTorch can take a grid of pixels, slide a kernel across it, and hand the result to the same `Linear` layers and training loop it already had. Every input so far has arrived as numbers. Text does not. A sentence is a string of characters, and a network can only multiply and add. The question this chapter answers is the one a practitioner asks the first time they call a language model. What integers does the model actually see when I type a sentence, and who decides where one integer ends and the next begins?
 
-Before a neural network can perform a single floating-point multiplication on a sentence, we must solve a fundamental systems problem: how do we translate arbitrary human text into discrete integer token sequences? In this chapter, we engineer **Byte-Pair Encoding (BPE)**: the information-theoretic subword tokenization engine that powers GPT-2, GPT-4, and modern large language models.
+The answer is a tokenizer, and the tokenizer that GPT-2, GPT-4, Llama, and most modern language models use is **Byte-Pair Encoding (BPE)**. It is not a neural network. It is a small, deterministic compression algorithm that learns a vocabulary from text by repeatedly gluing together the most common adjacent pair of symbols. We build it in about eighty lines of Python, trace every merge by hand on a five-word corpus, and then see why the production versions differ from ours mostly in speed and in one preprocessing step.
 
-![The Tokenization Spectrum: Character-Level Memory Bloat vs. Word-Level OOV Explosion vs. Subword BPE Compression](assets/images/diagrams/10_tokenization-diag-1.svg){#fig-tokenization-spectrum}
-
----
-
-## Systems Problem Motivation: The Out-of-Vocabulary Wall and Sequence Bloat
-
-When engineers first attempted to process text in neural networks, they encountered two opposing failure modes:
-
-::: {.callout-note title="The Two Extremes of Text Representation"}
-1. **Character-Level Tokenization (The Sequence Bloat Wall)**:
-   - **Vocabulary**: 256 raw byte tokens (compact memory footprint).
-   - **Flaw**: A 1,000-word essay expands into $\sim 6,000$ discrete tokens.
-   - **Systems Consequence**: In Chapter 12, we prove that attention memory scales quadratically $O(S^2)$ with sequence length $S$. A $6,000$-token sequence requires $36\times$ more VRAM than a $1,000$-token sequence, exhausting GPU memory.
-
-2. **Word-Level Tokenization (The Out-of-Vocabulary Wall)**:
-   - **Vocabulary**: 500,000+ words (dictionary lookup).
-   - **Flaw**: Fails on typos, morphological variants, technical jargon, or code.
-   - **Systems Consequence**: Unseen words map to an `<UNK>` token, corrupting semantic representations. Furthermore, an embedding matrix of $500,000 \times 4096$ consumes over $8\text{ GB}$ of persistent VRAM before inference even starts.
-:::
-
-#### The Memory Trade-Off: Embedding Tables vs. Sequence Context Windows
-Consider the hardware memory trade-off between vocabulary size $V$ and sequence length $S$ for a modern model with hidden dimension $D = 4,096$:
-
-1. **Word-Level Memory Footprint**: A vocabulary of $V = 1,000,000$ unique words requires an embedding parameter matrix of shape $[1,000,000 \times 4,096]$. In FP32, this single lookup table consumes:
-   $$\text{VRAM}_{\text{Embed}} = 10^6 \times 4096 \times 4\text{ bytes} \approx 16.38\text{ GB of VRAM!}$$
-   This memory must remain permanently pinned in GPU high-bandwidth memory (HBM) before processing a single word.
-2. **Character-Level Sequence Memory Footprint**: A character-level model with $V = 256$ has an embedding table of only $1\text{ MB}$, but an average English word is 5 to 6 characters long. For an input document of 2,048 words, character-level tokenization produces $S \approx 12,000$ tokens. As we will see in Chapter 12, multi-head attention memory scales quadratically as $O(S^2)$, where the attention score matrix $\mathbf{Q} \mathbf{K}^T$ requires:
-   $$\text{Attention Memory} = 12,000^2 \times 4\text{ bytes} \approx 576\text{ MB per attention head!}$$
-   Across 32 attention heads and 32 layers (which we build in Chapter 12: attention layers), intermediate activations explode into **590 GB of VRAM**, crashing the GPU cluster.
-
-Modern deep learning demands an optimal middle ground: **Subword Tokenization**. A subword tokenizer must:
-1. Represent common words as single compact tokens (minimizing sequence length $S$).
-2. Decompose rare words, typos, and code snippets into frequent subword fragments (e.g., `"tokenization"` $\to$ `["token", "ization"]`).
-3. Guarantee **zero out-of-vocabulary (`<UNK>`) errors** by backing down to raw UTF-8 bytes when necessary.
-
-That algorithm is **Byte-Pair Encoding (BPE)**.
+![The tokenization spectrum. Characters give a tiny vocabulary and long sequences, words give short sequences and a vocabulary that never covers everything, and subword BPE sits between them.](assets/images/diagrams/10_tokenization-diag-1.svg){#fig-tokenization-spectrum}
 
 ---
 
-## The Mental Model: Information Entropy and Pair Merge Rules
+## The Problem
 
-Originally developed by Philip Gage in 1994 as a data compression technique, BPE was adapted for natural language processing by Rico Sennrich et al. in 2015 and refined by OpenAI for GPT-2 in 2019.
+There are two obvious ways to turn text into integers, and both fail, in opposite directions.
 
-The algorithm identifies the most frequent adjacent pair of symbols across the entire training corpus and replaces all occurrences with a single newly created symbol:
+The first is to number the characters. Every character (or, more robustly, every byte) gets an ID, so the vocabulary has at most 256 entries and nothing can ever be missing. The cost is length. An English word averages about five letters plus a space, so a 1,000-word essay becomes roughly 6,000 tokens. Every layer downstream does work proportional to the number of tokens, and the attention layers of Chapter 12 do work proportional to its square, so a sequence six times longer is not six times more expensive there but thirty-six times.
 
-$$\text{Merge}(a, b) \implies c^* = \arg\max_{(u, v) \in \mathcal{V} \times \mathcal{V}} \text{Freq}(u, v)$$
-
-From a systems memory perspective, text initially enters the tokenizer as a contiguous 1D buffer of raw 8-bit unsigned bytes (`uint8_t` in C++). Merging adjacent bytes into a subword token replaces two contiguous 1-byte elements with a single 16-bit (`uint16_t`) or 32-bit (`uint32_t`) integer identifier. This transformation halves the sequence memory footprint and effectively doubles the L1 instruction and data cache hit rate ($32\text{ KB}$ to $64\text{ KB}$ per core), allowing modern batch processors to stream text tokens at multi-gigabyte-per-second memory bandwidth.
-
-#### The BPE Algorithm Lifecycle
-
-BPE operates across two distinct phases: **Vocabulary Induction (Training)** and **Runtime Encoding (Inference)**.
-
-```
-Vocabulary Induction (Finding Frequent Byte Pairs):
-Step 0: Start with base alphabet of 256 individual UTF-8 bytes.
-        Text: "low low lower newest widest"
-        Splits: ['l','o','w'], ['l','o','w'], ['l','o','w','e','r'], ...
-
-Step 1: Count all adjacent token pairs.
-        Pair ('l', 'o') appears 3 times.
-        Pair ('o', 'w') appears 3 times.
-        Pair ('e', 'r') appears 1 time.
-        Merge most frequent pair: ('l', 'o') -> 'lo'.
-
-Step 2: Update vocabulary: Vocab size = 256 + 1 = 257 ('lo').
-        Text becomes: ['lo','w'], ['lo','w'], ['lo','w','e','r'], ...
-
-Step 3: Count pairs again: ('lo', 'w') appears 3 times!
-        Merge ('lo', 'w') -> 'low'.
-        Vocab size = 258 ('low').
-
-Repeat until target vocabulary size V (e.g. 50,257) is reached!
-```
-
-```
-Runtime Encoding via Merge Priority Ranks:
-Given a new word "lowest":
-1. Split into characters: ['l', 'o', 'w', 'e', 's', 't']
-2. Check merge dictionary for known pairs with lowest merge rank.
-3. Merge ('l','o') -> ['lo', 'w', 'e', 's', 't']
-4. Merge ('lo','w') -> ['low', 'e', 's', 't']
-5. Merge ('e','s') -> ['low', 'es', 't']
-6. Resulting Tokens: [Token('low'), Token('es'), Token('t')] (IDs: [421, 89, 74])
-```
-
-Because the base alphabet includes all 256 possible bytes, **no input string can ever produce an `<UNK>` error**. Every sequence of bytes is fully representable.
+The second is to number the words. Split on spaces, give each distinct word an ID, and a 1,000-word essay is 1,000 tokens. Now the vocabulary is the problem. The listing below builds a word vocabulary from one sentence and then encodes three others. Any word the vocabulary has not seen maps to a reserved ID, conventionally written `<unk>` for "unknown".
 
 ```python
-# Conceptual pair census over raw byte sequences in memory
-def count_byte_pairs(byte_stream):
-    return {(byte_stream[i], byte_stream[i+1]): byte_stream.count(byte_stream[i:i+2])
-            for i in range(len(byte_stream) - 1)}
+train_words = "the cat sat on the mat".split()
+vocab = {word: i + 1 for i, word in enumerate(sorted(set(train_words)))}  # id 0 is <unk>
+
+def encode_words(text):
+    return [vocab.get(word, 0) for word in text.split()]
+
+print(encode_words("the cat sat"))     # [5, 1, 4]
+print(encode_words("the cats sat"))    # [5, 0, 4]   one extra letter and the word is gone
+print(encode_words("The cat sat."))    # [0, 1, 0]   a capital and a period lose two words
 ```
 
----
+One plural and the model reads nothing where "cats" was. A capital letter and a period erase two of three words. Real text is full of plurals, capitals, typos, names, code, and words coined last week, so a word vocabulary large enough to be safe runs to hundreds of thousands of entries and still leaks. Size has its own cost. Chapter 11 turns each token ID into a row of a lookup table with one entry per vocabulary word and $D$ numbers per row, so as napkin math, a vocabulary of one million words at $D = 4{,}096$ in 32-bit floats is $10^6 \times 4{,}096 \times 4$ bytes, about 16 GB, before the model has read a single word.
 
-## Mathematical Formulations: Shannon Information Entropy of Token Streams
-
-Let $\mathcal{D} = (c_1, c_2, \dots, c_N)$ be a corpus of $N$ characters over an alphabet $\Sigma$. Let $p(t_i)$ represent the empirical frequency of token $t_i$ in the induced vocabulary $\mathcal{V}$.
-
-#### 1. Shannon Entropy and Compression Bound
-The average information entropy per token is given by:
-
-$$H(\mathcal{V}) = -\sum_{t_i \in \mathcal{V}} p(t_i) \log_2 p(t_i)$$
-
-The total bit length required to encode corpus $\mathcal{D}$ using vocabulary $\mathcal{V}$ is bounded by:
-
-$$L(\mathcal{D}, \mathcal{V}) = |\mathcal{T}_{\mathcal{D}}| \cdot H(\mathcal{V})$$
-
-where $|\mathcal{T}_{\mathcal{D}}|$ is the total number of tokens emitted when encoding $\mathcal{D}$.
-
-Each BPE merge operation replaces the most frequent pair $(t_a, t_b)$ with a new symbol $t_{ab}$, reducing the total sequence length $|\mathcal{T}_{\mathcal{D}}|$ by the count of that pair $\text{Freq}(t_a, t_b)$ while slightly increasing vocabulary entropy $H(\mathcal{V})$.
-
-::: {.callout-note title="Napkin Math: The Pareto Frontier of Vocabulary Size"}
-Consider training a model on $10^9$ words ($10^9 \times 5.5 = 5.5 \times 10^9$ raw bytes):
-- **Raw Bytes ($V=256$)**: Sequence length $|\mathcal{T}| = 5.5 \times 10^9$. Embedding parameters: $256 \times 4,096 \times 4\text{ bytes} \approx 4\text{ MB}$. But sequence length $S$ is bloated, forcing quadratic sequence buffers to overflow GPU VRAM (as we formalize in Chapter 12: attention matrices).
-- **BPE Subwords ($V=50,257$)**: Sequence length $|\mathcal{T}| \approx 1.3 \times 10^9$ tokens ($4.2\times$ compression). Embedding parameters: $50,257 \times 4,096 \times 4\text{ bytes} \approx 823\text{ MB}$ in DRAM.
-- The optimal vocabulary size $V^* \approx 50,000$ represents the Pareto frontier that balances embedding parameter memory in DRAM against quadratic sequence activation memory in GPU SRAM.
-:::
+The two extremes trade one cost for the other. Characters give a tiny table and long sequences; words give short sequences and an enormous, leaky table. What we want is in between. Common words should be single tokens, so sequences stay short. Rare words should split into pieces the vocabulary does know, so nothing is ever unknown. The split itself should be learned from data rather than written by hand, because no one can list the useful pieces of every language.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Idea
+
+BPE was invented by Philip Gage in 1994 as a file compressor, adapted to translation by Sennrich, Haddow, and Birch in 2016, and made byte-level by OpenAI for GPT-2 in 2019. The compression origin is the right way to think about it. A compressor looks for repeated patterns and gives them short codes. BPE looks for the most repeated adjacent pair of symbols and gives it a new symbol.
+
+Start with an alphabet of the 256 possible byte values. Write the training text as a sequence of those symbols. Then repeat one step. Count how often every adjacent pair occurs, pick the pair with the highest count, invent a new symbol for it, and replace every occurrence of the pair with that symbol. In symbols, with $\text{count}(a, b)$ the number of times symbol $a$ is immediately followed by symbol $b$ anywhere in the corpus,
+
+$$(a^*, b^*) = \arg\max_{(a, b)} \text{count}(a, b), \qquad \text{new symbol } c = a^* b^*.$$
+
+Each step shrinks the corpus by about $\text{count}(a^*, b^*)$ symbols in exchange for one new vocabulary entry. The vocabulary ends up holding "es", "est", and so on up to whole common words, each earned by frequency, and the merges are recorded in the order they were made. That ordered list is the tokenizer. Training runs once, over a large corpus, and produces the list; you can stop after any number of merges, and the number you stop at is the vocabulary size.
+
+Encoding new text replays the list. Split the text into bytes, look at every adjacent pair, and among the pairs that appear in the merge list, apply the one that was learned earliest. Repeat until no adjacent pair is a known merge. Because the merge list is fixed and the earliest-first rule is fixed, the same string always encodes to the same IDs, and a string the tokenizer never saw still encodes, because at worst it stays as bytes. That is the guarantee that word vocabularies could not give. There is no `<unk>` in a byte-level BPE tokenizer's output, ever.
+
+Decoding is trivial by comparison. Each ID names a byte string, so concatenate the byte strings and decode the result as UTF-8. Two choices in this design, bytes as the alphabet and rank order as the replay rule, are the ones that make the guarantees hold, and I explain each beside the code that makes it.
+
+---
+
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 10** in the TinyTorch runtime: `packages/tinytorch/src/10_tokenization/10_tokenization.py`.
+Module 10 (`src/10_tokenization/10_tokenization.py`) is the implementation students build in the TinyTorch course. It is character-level rather than byte-level, marks the end of each word with a `</w>` symbol, expects its training corpus pre-split into words, and keeps an `<UNK>` ID for characters it did not see in training. The listings in this chapter are a stripped-down pure-Python model of the same merge loop, moved to the byte level so that every string encodes and the unknown-token problem disappears entirely. The class name, the `train` / `encode` / `decode` interface, and the pair-counting and pair-merging helpers match the module; the base alphabet and the special-token layout do not.
 :::
 
-We implement the complete BPE Tokenizer engine in TinyTorch, supporting vocabulary training, merge rank generation, encoding, and decoding:
+The tokenizer is one class with five short methods, and we build it in about eighty lines. It holds a vocabulary in both directions (ID to bytes and bytes to ID) and a dictionary of merges keyed by the pair and valued by the order in which the pair was learned. We call that order the pair's **rank**; rank 0 is the first merge made.
+
+### The base vocabulary
+
+Everything after this chapter works on integers. Chapter 11 turns each ID into a row of a lookup table, and the model's final layer produces one score per ID, so the tokenizer's job is a fixed two-way mapping between byte strings and IDs that must not change once the model starts training. The first question is what goes into that mapping before any merge is learned.
+
+The obvious answer is the one the word vocabulary in The Problem used, and the one the real Module 10 uses. Scan the training text, give every distinct character an ID, and reserve `<UNK>` for whatever else shows up. That works until the first character the corpus lacked. Train on English and the first "ï", "€", or emoji a user types arrives at the model as `<UNK>`, and everything the model could have learned from that character is gone before the first layer runs. Here is the way out. Text reaches a program as UTF-8,[^fn-utf8-byte-alphabet] so every character is already one to four bytes, and there are exactly 256 possible byte values. Seed the vocabulary with all 256 before training begins and nothing can ever be missing. The worst that happens to a character the corpus never contained is that it costs a few IDs instead of one.
+
+[^fn-utf8-byte-alphabet]: **UTF-8**: the encoding that turns Unicode characters into bytes, used for nearly all text on disk and on the wire. ASCII letters take one byte each, accented letters like "ï" take two, most Chinese characters take three, and emoji take four, which is why a byte-level tokenizer needs no special cases for any of them.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/10_tokenization/10_tokenization.py
-from typing import List, Dict, Tuple, Optional
-import unicodedata
+from typing import List, Dict, Tuple
 
 class BPETokenizer:
-    """Byte-Pair Encoding (BPE) Subword Tokenizer Engine."""
+    """Byte-Pair Encoding tokenizer: bytes in, integer token IDs out."""
     def __init__(self, vocab_size: int = 1000):
         self.vocab_size = vocab_size
-        self.vocab: Dict[int, bytes] = {}
-        self.encoder: Dict[bytes, int] = {}
-        self.merges: Dict[Tuple[bytes, bytes], int] = {}
+        self.vocab: Dict[int, bytes] = {}            # id -> bytes
+        self.encoder: Dict[bytes, int] = {}          # bytes -> id
+        self.merges: Dict[Tuple[bytes, bytes], int] = {}   # pair -> rank
         self.special_tokens: Dict[str, int] = {
             '<pad>': 0, '<unk>': 1, '<bos>': 2, '<eos>': 3, '<mask>': 4
         }
         self._init_base_vocab()
 
     def _init_base_vocab(self):
-        """Initialize base vocabulary with special tokens and all 256 UTF-8 bytes."""
+        """Special tokens get ids 0..4; the 256 byte values get ids 5..260."""
         for token_str, token_id in self.special_tokens.items():
             token_bytes = token_str.encode('utf-8')
             self.vocab[token_id] = token_bytes
             self.encoder[token_bytes] = token_id
-
         offset = len(self.special_tokens)
         for b in range(256):
-            byte_val = bytes([b])
-            token_id = offset + b
-            self.vocab[token_id] = byte_val
-            self.encoder[byte_val] = token_id
+            self.vocab[offset + b] = bytes([b])
+            self.encoder[bytes([b])] = offset + b
+```
 
-    def _get_stats(self, token_list: List[List[bytes]]) -> Dict[Tuple[bytes, bytes], int]:
-        """Count frequency of all adjacent byte pairs across all sequences."""
+The five special tokens are reserved IDs a model needs for reasons outside the tokenizer. `<pad>` fills out short sequences in a batch, `<bos>` and `<eos>` mark where a text begins and ends, `<mask>` hides a token during some kinds of training, and `<unk>` is kept for interface compatibility even though byte-level encoding never emits it. They take IDs 0 through 4, so byte value $b$ lives at ID $b + 5$; the letter "l" is byte 108 and therefore ID 113. Nothing about the offset is deep. It only has to be applied consistently, and keeping both dictionaries makes sure it is. `tiktoken` keeps the same bytes-to-ID table under the name `mergeable_ranks` and builds the reverse table when it loads.
+
+### Counting and merging pairs
+
+Training has exactly one step, repeated. Find the most frequent adjacent pair anywhere in the corpus, then rewrite every occurrence of it as one symbol. GPT-2's trainer ran that step about 50,000 times, so whatever we write here is the loop the whole training cost lives in.
+
+Both halves have a tempting shortcut that breaks. For counting, we could ask each candidate pair how often it occurs with a search over the corpus, but that is one full pass per candidate, and a corpus of a few hundred kilobytes has thousands of candidates. For merging, we could join each word back into a byte string and call `bytes.replace`. That is wrong, not slow. After the first merge the symbols are no longer single bytes, and a byte-level search cannot see where one symbol ends. Once "es" has been merged, `widest` is the five symbols `w i d es t`; there is no `(s, t)` pair in it, but the bytes still read `widest`, and `b'widest'.replace(b'st', ...)` would happily glue the `s` inside `es` to the `t`. We count in a single pass with a dictionary instead, and we merge by walking the list of symbols, where the boundaries are explicit.
+
+```python
+    def _get_stats(self, sequences: List[List[bytes]]) -> Dict[Tuple[bytes, bytes], int]:
+        """Count every adjacent pair across every sequence."""
         pairs: Dict[Tuple[bytes, bytes], int] = {}
-        for seq in token_list:
+        for seq in sequences:
             for i in range(len(seq) - 1):
                 pair = (seq[i], seq[i + 1])
                 pairs[pair] = pairs.get(pair, 0) + 1
         return pairs
 
+    def _merge(self, seq: List[bytes], pair: Tuple[bytes, bytes], new_token: bytes) -> List[bytes]:
+        """Replace every adjacent occurrence of pair in seq with new_token."""
+        out, i = [], 0
+        while i < len(seq):
+            if i < len(seq) - 1 and (seq[i], seq[i + 1]) == pair:
+                out.append(new_token)
+                i += 2
+            else:
+                out.append(seq[i])
+                i += 1
+        return out
+```
+
+Notice that `_merge` walks left to right and skips two positions after a match. On the sequence `a a a` with the pair `(a, a)`, that yields `aa a`, not `a aa` and not an overlapping double match. The rule is arbitrary, but the same rule has to apply during training and encoding, or the two will disagree about how a string splits. Hugging Face's `tokenizers` library runs the same two operations, counting pairs and rewriting matches, over a table of distinct words instead of the raw corpus.
+
+### Training
+
+A framework trains its tokenizer once, before the model exists, and the number you pass as `vocab_size` is the decision that sizes the model afterward. Chapter 11's lookup table has one row of $D$ numbers per ID, and the output layer has one score per ID, so every entry we add here is a set of weights the model has to learn; at $D = 4{,}096$ in 32-bit floats that is 16 KB of table per entry, before the output layer. An entry that never fires on real text is that memory spent on nothing.
+
+The naive loop merges until the vocabulary is full, whether or not the winning pair repeats. I tried that on the five-word corpus from the next section with `vocab_size=300`, room for thirty-nine merges. It made twelve, and eight of the twelve fired exactly once, each gluing together two symbols that occur together in a single word of a five-word corpus and nowhere else. On a real corpus the waste is smaller but the same in kind. One test removes it. If the best pair occurs fewer than twice, merging it buys a vocabulary entry without shortening anything, and we stop.
+
+```python
     def train(self, texts: List[str]):
-        """Induce subword merge rules from a training text corpus."""
-        sequences: List[List[bytes]] = []
-        for text in texts:
-            byte_seq = text.encode('utf-8')
-            sequences.append([bytes([b]) for b in byte_seq])
-
-        current_vocab_size = len(self.vocab)
-        num_merges = self.vocab_size - current_vocab_size
-
-        for merge_idx in range(num_merges):
+        """Learn merges until the vocabulary reaches vocab_size or no pair repeats."""
+        sequences = [[bytes([b]) for b in text.encode('utf-8')] for text in texts]
+        num_merges = self.vocab_size - len(self.vocab)
+        for rank in range(num_merges):
             stats = self._get_stats(sequences)
             if not stats:
                 break
-
             best_pair = max(stats, key=stats.get)
-            if stats[best_pair] < 1:
-                break
+            if stats[best_pair] < 2:
+                break                                  # nothing repeats; merging would not compress
+            new_token = best_pair[0] + best_pair[1]
+            new_id = len(self.vocab)
+            self.vocab[new_id] = new_token
+            self.encoder[new_token] = new_id
+            self.merges[best_pair] = rank
+            sequences = [self._merge(seq, best_pair, new_token) for seq in sequences]
+```
 
-            new_token_bytes = best_pair[0] + best_pair[1]
-            new_token_id = len(self.vocab)
+Each pass through the loop re-counts every pair in the whole corpus, picks the winner, registers it under the next free ID, records its rank, and rewrites the corpus. Two things to notice. When two pairs tie, `max` returns whichever was counted first, which depends on corpus order. Ties are common in small corpora and harmless, but they are why two BPE trainers given the same data can produce slightly different vocabularies. And the re-count is the whole cost. On my machine, 200 merges over 100 KB of English prose take about 2 seconds, and the time doubles when I double either the corpus or the merge count, which is the $N \times M$ scaling the production bridge has to fix. The `< 2` test is what Hugging Face's `BpeTrainer` exposes as `min_frequency`.
 
-            self.vocab[new_token_id] = new_token_bytes
-            self.encoder[new_token_bytes] = new_token_id
-            self.merges[best_pair] = merge_idx
+### Encoding and decoding
 
-            new_sequences = []
-            for seq in sequences:
-                new_seq = []
-                i = 0
-                while i < len(seq):
-                    if i < len(seq) - 1 and (seq[i], seq[i+1]) == best_pair:
-                        new_seq.append(new_token_bytes)
-                        i += 2
-                    else:
-                        new_seq.append(seq[i])
-                        i += 1
-                new_sequences.append(new_seq)
-            sequences = new_sequences
+Every prompt a user sends passes through `encode`, and every ID the model generates passes through `decode`, one at a time as the model produces them. These two methods are the ones that run on every request for the life of the model, and the encoder has one hard requirement. New text must split the way the training text split, because the model only knows the tokens it saw during training.
 
+The tempting encoder is greedy: at each position, take the longest byte string that is in the vocabulary. It gives fewer tokens on average, and it is wrong, because it does not reproduce what the trainer saw. The merges were learned on text that already had the earlier merges applied; "est" was learned from sequences containing "es", not from `e` `s` `t`. A greedy encoder can grab a long vocabulary entry that the trainer would never have assembled at that position, and hand the model a token sequence it never saw in training. Replaying the merges in the order they were learned recreates the trainer's conditions exactly, so training text encodes exactly as it did during training, and the result is deterministic. Decoding needs only concatenation, plus one decision about what to do when a language model stops between the bytes of a character.
+
+```python
     def encode(self, text: str) -> List[int]:
-        """Encode arbitrary string into a sequence of BPE integer token IDs."""
-        byte_seq = text.encode('utf-8')
-        tokens = [bytes([b]) for b in byte_seq]
-
+        """Replay the learned merges on new text, lowest rank first."""
+        tokens = [bytes([b]) for b in text.encode('utf-8')]
         while len(tokens) >= 2:
-            stats = [(self.merges.get((tokens[i], tokens[i+1]), float('inf')), i)
-                     for i in range(len(tokens) - 1)]
-            min_rank, min_idx = min(stats, key=lambda x: x[0])
-
-            if min_rank == float('inf'):
-                break
-
-            merged_token = tokens[min_idx] + tokens[min_idx + 1]
-            tokens = tokens[:min_idx] + [merged_token] + tokens[min_idx + 2:]
-
+            ranked = [(self.merges.get((tokens[i], tokens[i + 1]), float('inf')), i)
+                      for i in range(len(tokens) - 1)]
+            best_rank, i = min(ranked)
+            if best_rank == float('inf'):
+                break                                  # no known pair remains
+            tokens = tokens[:i] + [tokens[i] + tokens[i + 1]] + tokens[i + 2:]
         return [self.encoder[tok] for tok in tokens]
 
     def decode(self, token_ids: List[int]) -> str:
-        """Decode list of integer token IDs back into a UTF-8 string."""
-        byte_chunks = []
-        for tid in token_ids:
-            if tid in self.vocab:
-                byte_chunks.append(self.vocab[tid])
-            else:
-                byte_chunks.append(b'<unk>')
-        return b''.join(byte_chunks).decode('utf-8', errors='replace')
+        """Concatenate the bytes behind each id and decode as UTF-8."""
+        chunks = [self.vocab.get(tid, b'<unk>') for tid in token_ids]
+        return b''.join(chunks).decode('utf-8', errors='replace')
 ```
+
+Each round of `encode` looks up the rank of every adjacent pair, treating unknown pairs as infinitely late, and merges the single pair with the lowest rank. Ties on rank are broken by position, leftmost first, because `min` compares the tuple's second element when the first is equal. The loop ends when every remaining pair is unknown. The final list comprehension cannot fail, because every token is either a single byte, which the base vocabulary contains, or a merge product, which `train` registered. Notice also what each round costs. It rebuilds the pair list and copies the token list, so the work grows with the square of the string length. On my machine a 5,000-character paragraph encodes in 1.3 seconds and a 20,000-character one in 22, which is fine for a worked trace and useless for a serving system; the bridge shows the two-line fix. `tiktoken` calls this same replay `encode_ordinary`.
+
+`decode` is the inverse only up to one caveat. A model generates IDs one at a time and can stop between the two bytes of "ï"; strict UTF-8 decoding would raise there, and a server streaming text to a user would fall over mid-word. With `errors='replace'`, `decode([200])` returns the Unicode replacement character and `decode([200, 180])` returns "ï", so the partial output is displayable and the complete one is exact.
 
 ---
 
-## Concrete Numerical Trace Table: Tracing BPE Merges on a Training Corpus
+## A Worked Trace
 
-Let us trace vocabulary induction step-by-step on the mini-corpus $\mathcal{D} = \{\text{"low"}, \text{"low"}, \text{"lower"}, \text{"newest"}, \text{"widest"}\}$:
+We train on the five-word corpus `low`, `low`, `lower`, `newest`, `widest`, asking for a vocabulary of 265 so that at most four merges happen on top of the 261 base IDs. The table follows the loop in `train`, one row per merge, with the corpus rewritten after each.
 
-#### Step 1: Initial Vocabulary and Pair Frequency Census
-Base alphabet includes special tokens ($0..4$) and 256 byte values ($5..260$).
-
-| Iteration Step | Most Frequent Pair | Occurrence Count | Created Merged Token | New Token ID | Updated Corpus State |
+| Merge | Most frequent pair | Count | New token | New ID | Corpus after the merge |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Step 0 (Base)** | Initial state | N/A | Base 256 bytes | $0..260$ | `[l,o,w], [l,o,w], [l,o,w,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
-| **Merge 1** | `('l', 'o')` | 3 times | `'lo'` | $261$ | `[lo,w], [lo,w], [lo,w,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
-| **Merge 2** | `('lo', 'w')` | 3 times | `'low'` | $262$ | `[low], [low], [low,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
-| **Merge 3** | `('e', 's')` | 2 times | `'es'` | $263$ | `[low], [low], [low,e,r], [n,e,w,es,t], [w,i,d,es,t]` |
-| **Merge 4** | `('es', 't')` | 2 times | `'est'` | $264$ | `[low], [low], [low,e,r], [n,e,w,est], [w,i,d,est]` |
-| **Merge 5** | `('e', 'r')` | 1 time | `'er'` | $265$ | `[low], [low], [low,er], [n,e,w,est], [w,i,d,est]` |
+| start | | | 256 bytes | 5..260 | `[l,o,w] [l,o,w] [l,o,w,e,r] [n,e,w,e,s,t] [w,i,d,e,s,t]` |
+| rank 0 | `(l, o)` | 3 | `lo` | 261 | `[lo,w] [lo,w] [lo,w,e,r] [n,e,w,e,s,t] [w,i,d,e,s,t]` |
+| rank 1 | `(lo, w)` | 3 | `low` | 262 | `[low] [low] [low,e,r] [n,e,w,e,s,t] [w,i,d,e,s,t]` |
+| rank 2 | `(e, s)` | 2 | `es` | 263 | `[low] [low] [low,e,r] [n,e,w,es,t] [w,i,d,es,t]` |
+| rank 3 | `(es, t)` | 2 | `est` | 264 | `[low] [low] [low,er] [n,e,w,est] [w,i,d,est]` |
 
-: Concrete trace of BPE vocabulary induction and iterative subword pair merges across a 5-word corpus. {#tbl-bpe-merge-trace tbl-colwidths="[16,16,14,16,12,26]"}
+: BPE training on a five-word corpus, one merge per row. `(o, w)` also occurred three times at the start; `(l, o)` won the tie by being counted first. {#tbl-bpe-merge-trace tbl-colwidths="[10,18,8,12,10,42]"}
 
-#### Step 2: Runtime Encoding Trace on Unseen String `"lowest"`
-Given test string `"lowest"`:
-1. Initial byte list: `['l', 'o', 'w', 'e', 's', 't']`
-2. Apply Merge 1 (`'l'` + `'o'` $\to$ `'lo'`): `['lo', 'w', 'e', 's', 't']`
-3. Apply Merge 2 (`'lo'` + `'w'` $\to$ `'low'`): `['low', 'e', 's', 't']`
-4. Apply Merge 3 (`'e'` + `'s'` $\to$ `'es'`): `['low', 'es', 't']`
-5. Apply Merge 4 (`'es'` + `'t'` $\to$ `'est'`): `['low', 'est']`
-6. Output Token IDs: `[262, 264]` (2 tokens instead of 6 bytes, a **$3\times$ reduction in sequence length**).
+After rank 3 every remaining pair occurs once, so the loop stops even though the vocabulary is only 265 entries. A larger corpus would keep going; GPT-2's trainer ran for about 50,000 merges.
+
+Now encode the unseen word `lowest`. Its bytes are `l o w e s t`. Each row below lists the ranks `encode` sees for the adjacent pairs and the merge it chooses.
+
+1. Pairs `(l,o)=0 (o,w)=∞ (w,e)=∞ (e,s)=2 (s,t)=∞`. Lowest rank is 0. Merge to `lo w e s t`.
+2. Pairs `(lo,w)=1 (w,e)=∞ (e,s)=2`. Merge to `low e s t`.
+3. Pairs `(low,e)=∞ (e,s)=2 (s,t)=∞`. Merge to `low es t`.
+4. Pairs `(low,es)=∞ (es,t)=3`. Merge to `low est`.
+5. Pairs `(low,est)=∞`. Stop.
+
+Six bytes became two IDs, `[262, 264]`, and neither "lowest" nor "est" as a standalone word was in the training corpus. The listing below runs the trace and then encodes a string with a space and a non-ASCII letter to show the no-unknowns guarantee in action. It depends on the `BPETokenizer` class from the previous listings, and the comments show what it prints on my machine.
 
 ```python
-# Pure Python Verification of BPE Merge Priority Encoding
 corpus = ["low", "low", "lower", "newest", "widest"]
-merges = {
-    (b'l', b'o'): (0, b'lo'),
-    (b'lo', b'w'): (1, b'low'),
-    (b'e', b's'): (2, b'es'),
-    (b'es', b't'): (3, b'est'),
-    (b'e', b'r'): (4, b'er')
-}
+tok = BPETokenizer(vocab_size=265)          # 261 base ids + 4 merges
+tok.train(corpus)
 
-def bpe_encode_trace(word: str):
-    tokens = [bytes([b]) for b in word.encode('utf-8')]
-    while len(tokens) >= 2:
-        ranks = [(merges.get((tokens[i], tokens[i+1]), (float('inf'), None))[0], i)
-                 for i in range(len(tokens) - 1)]
-        min_rank, min_idx = min(ranks, key=lambda x: x[0])
-        if min_rank == float('inf'):
-            break
-        merged = merges[(tokens[min_idx], tokens[min_idx+1])][1]
-        tokens = tokens[:min_idx] + [merged] + tokens[min_idx+2:]
-    return tokens
+for pair, rank in tok.merges.items():
+    print(rank, pair, "->", pair[0] + pair[1], tok.encoder[pair[0] + pair[1]])
 
-encoded = bpe_encode_trace("lowest")
-print("Encoded 'lowest' tokens:", [t.decode('utf-8') for t in encoded])
-assert [t.decode('utf-8') for t in encoded] == ["low", "est"], "BPE encoding trace mismatch!"
+ids = tok.encode("lowest")
+print(ids, [tok.vocab[i] for i in ids])     # [262, 264] [b'low', b'est']
+assert tok.decode(ids) == "lowest"
+
+ids = tok.encode("naïve widest")
+print(ids, [tok.vocab[i] for i in ids])
+# [115, 102, 200, 180, 123, 106, 37, 124, 110, 105, 264]
+# [b'n', b'a', b'\xc3', b'\xaf', b'v', b'e', b' ', b'w', b'i', b'd', b'est']
+assert tok.decode(ids) == "naïve widest"
 ```
+
+The second string is instructive. "ï" is two bytes in UTF-8, and they come out as two IDs, 200 and 180, because no merge covered them. The space is byte 32 and therefore ID 37. "widest" splits as `w i d est` because `wid` never repeated in training but `est` did. Round-tripping through `decode` gives the original string back exactly, accents and all, from a tokenizer trained on five words.
 
 ---
 
-## The Production Systems Bridge: PyTorch C++ Extensions and `tiktoken`
+## From TinyTorch to Production
 
-In production PyTorch language pipelines, tokenization is detached from the Python interpreter to avoid Global Interpreter Lock (GIL) stalls.
+The tokenizer inside GPT-2 (`tiktoken`), Hugging Face's `tokenizers` library, and the tokenizer that ships with Llama all run the same two loops you just traced. The differences fall into three groups: one preprocessing step, several speed tricks, and a set of conventions around the vocabulary file.
 
-::: {.callout-note title="Production Tokenization Pipeline Architecture"}
-- **PyTorch DataLoader Worker Threads**:
-  1. **Fast Rust BPE Engine** (`tiktoken` / HuggingFace Tokenizers Fast).
-  2. **Regex Pre-Splitting**: Compiles into native SIMD instructions to isolate contractions and punctuation.
-  3. **Direct Tensor Ingestion**: Token integer IDs are mapped directly into contiguous `c10::Tensor` buffers in host pinned memory.
-  4. **Direct Memory Access (DMA)**: Pinned token buffers stream directly across PCIe to GPU VRAM without CPU-bound buffer copying.
-:::
+The preprocessing step is the one that changes results. Our `train` counts pairs across the entire text, so if you feed it whole sentences instead of single words it will happily learn merges like `"e "` or `" t"` that straddle a word boundary, and worse, it can learn `"is."` as one token and `"is,"` as another. Production tokenizers first cut the text into chunks with a regular expression[^fn-regex-pretokenize] that separates words, numbers, punctuation, and English contractions (`'s`, `'ll`, `'ve`), and then run BPE inside each chunk only. No merge can cross a chunk boundary. This is why GPT-style tokens usually begin with a space (" the" is one token, "the" without the leading space is a different one), why long numbers split into short digit groups, and why runs of spaces in code cost so many tokens. The real TinyTorch module makes the same cut crudely, with `text.split()`, and appends an end-of-word marker to each word so the model can tell "low" from the "low" inside "lowest".
 
-::: {#nbk-tokenization-bpe-compression-entropy .callout-notebook title="BPE compression ratio and sequence length reduction"}
-Consider processing a $100,000$-word technical manuscript ($\sim 600,000$ raw UTF-8 bytes) through a Transformer:
+The speed tricks do not change the output at all. Our `train` re-counts every pair over the whole corpus after every merge, so a corpus of $N$ bytes and $M$ merges costs about $N \times M$ operations, hopeless at the scale of GPT-2's training text and 50,000 merges. Production trainers count each distinct word once and weight its pairs by how often the word occurs (the real Module 10 does exactly this with a `Counter`), and they update the counts incrementally after a merge rather than re-scanning. Our `encode` rebuilds the pair list and copies the token list on every merge, which is quadratic in the length of the string, and that is where the 22 seconds from The Code came from. The regex pre-split fixes most of it for free, because the quadratic loop then runs over six-byte words instead of a 20,000-byte string; when I split the same 5,000-character paragraph on spaces before encoding, the 1.3 seconds became 3 milliseconds. Production encoders go further and keep a cache from word to token IDs, so the ten-thousandth "the" costs a dictionary lookup, and they are written in Rust or C++ so the loop that remains runs without Python overhead. The gap is several orders of magnitude, and it matters because tokenization runs in the data-loading workers of Chapter 5 and must keep ahead of the GPU.
 
-- **Character-Level Ingestion ($V = 256$)**:
-  - Sequence Length: $S = 600,000$ tokens.
-  - Quadratic Attention FLOPs ($4 S^2 D$): For $D = 4096$, $4 \times (600,000)^2 \times 4096 \approx 5.9 \times 10^{15}\text{ FLOPs}$ per layer!
-  - Attention Score Buffer ($S \times S \times 2\text{ bytes}$ in FP16): $(600,000)^2 \times 2\text{ bytes} = 720\text{ GB}$ per layer! This immediately crashes hardware.
+The conventions are the part that bites in practice. A trained tokenizer is a vocabulary file plus an ordered merge list, and a model is only meaningful with the exact tokenizer it was trained with, because ID 262 means "low" to one tokenizer and something unrelated to another. GPT-2 stores its 256 base bytes remapped onto printable characters so that the vocabulary file is readable text, which is why you will see tokens like `Ġthe` (the `Ġ` is a space) when you open one. Special tokens sit at the end of the vocabulary rather than the start, each model family reserves its own, and each family picks its own vocabulary size.
 
-- **BPE Subword Tokenization ($V = 50,257$)**:
-  - Compression Ratio: English technical text averages $\approx 3.8\text{ bytes per token}$.
-  - Compressed Sequence Length: $S = 600,000 / 3.8 \approx 157,895$ tokens ($3.8\times$ shorter sequence).
-  - Quadratic Attention Reduction:
-    $$\text{Compute and Memory Reduction} = (3.8)^2 \approx \mathbf{14.44\times}$$
-    Within a standard $S = 2048$ context window, BPE packs $\sim 1500$ full words of context versus only $\sim 350$ words with character-level tokenization.
+| | TinyTorch `BPETokenizer` | GPT-2 `tiktoken`, Hugging Face `tokenizers` |
+| :--- | :--- | :--- |
+| Base alphabet | 256 bytes, IDs 5..260 | 256 bytes, remapped to printable characters |
+| Before merging | nothing; pairs may cross spaces | regex pre-split into words, numbers, punctuation |
+| Training cost per merge | re-scan the whole corpus | update counts over distinct words, weighted by frequency |
+| Encoding | scan all pairs, merge lowest rank, repeat | same rule, with a per-word cache |
+| Implementation | ~80 lines of Python | Rust or C++ behind a Python wrapper |
+| Vocabulary size | whatever you pass | 50,257 (GPT-2), 100,277 (GPT-4), 128,256 (Llama 3) |
 
-**Systems Takeaway**: BPE is a lossless prefix compression engine running on CPU prefetchers that slashes the quadratic memory wall ($O(S^2)$) of GPU attention cores by more than an order of magnitude.
-:::
+: What stays the same and what changes between the chapter's tokenizer and the ones in deployed models. {#tbl-bpe-production-comparison tbl-colwidths="[24,34,42]"}
 
-#### Key Differences Between TinyTorch and PyTorch C++ Tokenization:
-1. **Regex Pre-Splitting (`tiktoken`)**: In Python TinyTorch, we pass raw byte sequences. In production GPT-2/GPT-4 tokenizers, a multi-threaded C++/Rust regular expression splits contractions (e.g. `'ll`, `'ve`, `'s`) before pair counting to ensure punctuation doesn't cross token boundaries.
-2. **Parallel Rayon Dispatch**: Production tokenizers dispatch chunks of input text across all available CPU worker threads, tokenizing gigabytes of text at over $1,000,000\text{ tokens/second}$ before batching.
-3. **Direct `c10::TensorImpl` Ingestion**: Tokens are converted directly into int64 tensor buffers in shared memory, allowing the GPU DMA pipeline to ingest token streams with zero CPU-GPU copy bottlenecks.
+What carries over unchanged is everything that matters for reasoning about a model. Tokens are byte strings chosen by frequency, not by meaning; the merge list is fixed after training and never updated by gradient descent; encoding is deterministic; decoding is concatenation. When a model behaves strangely on a rare word, a misspelling, or a string of digits, the first thing to check is how the tokenizer split it, and you now know exactly how to find out.
 
-```python
-# Production Tokenization Bridge (tiktoken / PyTorch Tensor)
-import torch
+Two practical expectations follow. First, tokens are the unit that everything downstream is priced in. A model's context window[^fn-context-window-token-budget] is a token count, and so is an API bill. OpenAI's published rule of thumb for English is roughly four characters, or three quarters of a word, per token. Text in languages the training corpus underrepresented compresses far worse; a 2023 study by Petrov and colleagues, "Language Model Tokenizers Introduce Unfairness Between Languages," measured that some languages cost several times as many tokens as English for the same content, so the same context window holds less of them. Second, the tokenizer and the model travel together. Continuing to train a model with a different tokenizer, adding a special token without resizing the model's lookup table, or decoding one model's IDs with another's vocabulary are all silent failures that produce fluent garbage rather than an error.
 
-# Simulating production int64 token buffer allocated directly in pinned memory
-token_ids = torch.tensor([262, 264], dtype=torch.int64)
-print(f"Pinned Token Buffer: {token_ids} | Element Size: {token_ids.element_size()} bytes")
-```
+[^fn-regex-pretokenize]: **Regular expression** (regex): a pattern language for matching text, built into Python as the `re` module. GPT-2's pre-tokenizer is one short regex that matches, in order, contractions, words with an optional leading space, numbers, punctuation runs, and whitespace, and every model in the GPT family since has shipped a variant of it.
+
+[^fn-context-window-token-budget]: **Context window**: the maximum number of tokens a model can read and write in one pass, fixed by how it was trained and by memory. GPT-2's was 1,024 tokens; current models advertise 128,000 or more, and because the limit is in tokens rather than words, the same window holds fewer words of a language the tokenizer compresses poorly.
 
 ---
 
-## Building the System: How It All Connects
+## Summary
 
-Let us examine how BPE tokenization integrates into the global architecture:
+You built a byte-level BPE tokenizer with a training loop that merges the most frequent adjacent pair until the vocabulary is full, and an encoder that replays those merges in rank order on new text. Its base alphabet is the 256 byte values, so every string encodes and decodes exactly, with no unknown token; common strings collapse into single IDs, and rare ones split into pieces the vocabulary does know. The invariant to keep is that the merge list is the tokenizer. The same list, applied by the same earliest-first rule, gives the same IDs every time, and a model is only meaningful together with the list it was trained on. Production tokenizers add a regex pre-split so that merges never cross word boundaries, and they make the loops fast, but the merges themselves and the replay rule are what you traced by hand. Chapter 11 takes the integer token IDs for granted and asks how a bare index like 262 becomes a vector the network can do arithmetic on, and how the network is told which position in the sequence each token came from.
 
-1. **Raw Text String**: `"TinyTorch builds deep learning systems."`
-2. **`BPETokenizer.encode()`**: Compresses byte sequences via the learned merge priority table.
-3. **Integer Token ID Vector**: `[1542, 8921, 230, 4921, 104, 381]` (compact int64 buffer).
-4. **Embedding Table (Chapter 11)**: Projects discrete integer IDs into continuous semantic vectors.
+---
 
-From a systems perspective, tokenization reduces the sequence length $S$ by roughly $3\times$ to $4\times$ compared to character-level representations. Because token sequences are stored as compact 64-bit integer buffers ($8\text{ bytes}$ per token), a 2,048-token context window occupies just $2048 \times 8 = 16.384\text{ KB}$ of memory, fitting comfortably into L1 CPU caches or GPU shared memory before entering the embedding pipeline.
+## Exercises
 
-We can now translate open-ended human text into clean, compact integer token IDs with guaranteed zero out-of-vocabulary failures.
+1. Feed `train` a single string containing several sentences instead of a list of words, with `vocab_size=300`, and print the merges whose bytes contain a space or punctuation. Then split the text into words with `str.split()` before training and compare the merge lists. Explain which merges disappeared and why production tokenizers pre-split.
 
-However, an integer ID (like `1542`) is a purely symbolic index. How do we project discrete integer IDs into continuous semantic vector spaces, and how do we inject temporal order into permutation-invariant networks?
+2. Change the tie-breaking rule in `train` so that among equally frequent pairs the lexicographically smallest wins, retrain on the five-word corpus, and encode `lowest` again. Does the ID sequence change? Does the decoded string? State in one sentence what BPE guarantees and what it does not.
 
-In **Chapter 11**, we engineer **Embeddings and Positional Waveforms**.
+3. Train a tokenizer with `vocab_size=600` on a few paragraphs of English (any public-domain text will do), then encode the same paragraphs, a paragraph in another language, and a block of Python source. For each, compute bytes per token. Explain the ranking you observe in terms of which pairs the training corpus contained.
