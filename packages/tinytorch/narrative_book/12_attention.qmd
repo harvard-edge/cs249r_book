@@ -11,7 +11,7 @@ In this chapter, we engineer the core mathematical engine of the modern AI revol
 
 ---
 
-## The Crisis: The Recurrence Bottleneck and the Softmax Gradient Cliff
+## Systems Problem Motivation: The Recurrence Bottleneck and the Softmax Gradient Cliff
 
 Before the transformer architecture was discovered, sequential language was processed using **Recurrent Neural Networks (RNNs)** and LSTMs.
 
@@ -107,28 +107,20 @@ After Softmax: exp(-inf) = 0.0! Future positions receive EXACTLY ZERO attention 
 
 ---
 
-## The Pure TinyTorch Construction
+## Line-by-Line Reference Implementation
 
 We implement Scaled Dot-Product Attention and Multi-Head Attention in TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/attention.py
 import numpy as np
 from typing import List, Tuple, Optional
-from .tensor import Tensor
+from .autograd import Tensor
 from .layers import Layer, Linear
 
 def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor,
                                  mask: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
-    """Compute Scaled Dot-Product Attention: Softmax(QK^T / sqrt(d_k) + Mask) V.
-
-    Args:
-        Q: Queries of shape [batch, heads, seq_len, d_k]
-        K: Keys of shape [batch, heads, seq_len, d_k]
-        V: Values of shape [batch, heads, seq_len, d_k]
-        mask: Optional additive causal mask of shape [seq_len, seq_len]
-    Returns:
-        Tuple of (Context Output, Attention Weights)
-    """
+    """Compute Scaled Dot-Product Attention: Softmax(QK^T / sqrt(d_k) + Mask) V."""
     d_k = Q.data.shape[-1]
     scale = 1.0 / np.sqrt(d_k)
 
@@ -175,14 +167,7 @@ class MultiHeadAttention(Layer):
                 self.v_proj.parameters() + self.out_proj.parameters())
 
     def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        """Forward multi-head attention over input sequence.
-
-        Args:
-            x: Input embeddings of shape [batch_size, seq_len, embed_dim]
-            mask: Optional causal mask
-        Returns:
-            Output activations of shape [batch_size, seq_len, embed_dim]
-        """
+        """Forward multi-head attention over input sequence."""
         B, S, D = x.data.shape
         H = self.num_heads
         d_k = self.d_k
@@ -207,6 +192,28 @@ class MultiHeadAttention(Layer):
         # 5. Final output projection
         return self.out_proj.forward(out_concat)
 ```
+
+---
+
+## Concrete Numerical Trace Table: Tracing Causal Attention Step-by-Step
+
+Let us trace a concrete 2-token causal attention operation with head dimension $d_k = 2$ ($\sqrt{d_k} = \sqrt{2} \approx 1.4142$):
+- Queries: $\mathbf{Q} = \begin{bmatrix} 1.0 & 0.0 \\ 0.0 & 2.0 \end{bmatrix}$
+- Keys: $\mathbf{K} = \begin{bmatrix} 1.0 & 1.0 \\ 1.0 & 0.0 \end{bmatrix}$
+- Values: $\mathbf{V} = \begin{bmatrix} 2.0 & 1.0 \\ 0.0 & 3.0 \end{bmatrix}$
+- Causal Mask: $\mathbf{M} = \begin{bmatrix} 0.0 & -\infty \\ 0.0 & 0.0 \end{bmatrix}$
+
+### Step-by-Step Numerical Walkthrough
+
+| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ |
+| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ |
+| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ |
+| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ |
+| **5. Value Projection** | $\mathbf{A} \cdot \mathbf{V}$ | $\sum_j A_{ij} V_{j,:}$ | $1.0[2, 1] + 0.0[0, 3] = \mathbf{[2.0000, 1.0000]}$ | $0.8044[2, 1] + 0.1956[0, 3] = \mathbf{[1.6088, 1.3912]}$ |
+
+Token 0 attends strictly to itself ($100\%$), while Token 1 attends $80.4\%$ to Token 0 and $19.6\%$ to itself.
 
 ---
 

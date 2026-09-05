@@ -8,7 +8,7 @@ In this chapter, we assemble the complete, publication-grade architecture that p
 
 ---
 
-## The Crisis: The Vanishing Gradient Wall in 100-Layer Deep Stacks
+## Systems Problem Motivation: The Vanishing Gradient Wall in 100-Layer Deep Stacks
 
 When the original 2017 transformer was published (*"Attention Is All You Need"*), it utilized **Post-LayerNorm**:
 
@@ -79,14 +79,15 @@ $$\text{MLP}(x) = \text{Linear}(4D, D)\left( \text{GELU}(\text{Linear}(D, 4D)(x)
 
 ---
 
-## The Pure TinyTorch Construction
+## Line-by-Line Reference Implementation
 
 We construct `LayerNorm`, `MLP`, `TransformerBlock`, and `TinyGPT` in TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/transformer.py
 import numpy as np
 from typing import List, Optional
-from .tensor import Tensor
+from .autograd import Tensor
 from .layers import Layer, Linear
 from .activations import GELU
 from .embeddings import Embedding, PositionalEncoding
@@ -205,15 +206,43 @@ class TinyGPT(Layer):
 
         # 3. Final LayerNorm and projection to vocabulary logits
         x = self.ln_final.forward(x)
-        logits = self.head.forward(x)  # Shape: [B, S, vocab_size]
+        logits = self.head.forward(x)
         return logits
 ```
 
 ---
 
-## The Production Bridge: PyTorch `torch.compile` and Weight Tying
+## Concrete Numerical Trace Table: Tracing Pre-LN & Residual Highways Step-by-Step
 
-In production architectures (such as GPT-3 and LLaMA), two major optimizations are applied:
+Let us trace a concrete forward transformation through a single Pre-LN Transformer Block for a token vector $\mathbf{x} = [1.0, 2.0, 3.0, 4.0]$ with embedding dimension $D = 4$:
+
+### Step 1: LayerNorm Calculations ($\gamma = 1.0, \beta = 0.0$)
+
+$$\mu = \frac{1 + 2 + 3 + 4}{4} = 2.50, \qquad \sigma^2 = \frac{(1-2.5)^2 + (2-2.5)^2 + (3-2.5)^2 + (4-2.5)^2}{4} = \frac{2.25 + 0.25 + 0.25 + 2.25}{4} = 1.25$$
+
+$$\sigma = \sqrt{1.25} \approx 1.1180$$
+
+$$\hat{\mathbf{x}} = \frac{[1.0, 2.0, 3.0, 4.0] - 2.50}{1.1180} = [-1.3416, -0.4472, +0.4472, +1.3416]$$
+
+### Step 2: Complete Block Dataflow Trace Table
+
+| Pipeline Stage | Mathematical Transformation | Incoming Tensor $\mathbf{x}_{\text{in}}$ | Output Tensor $\mathbf{x}_{\text{out}}$ | Systems Property Verified |
+| :--- | :--- | :--- | :--- | :--- |
+| **Input Residual State** | Initial Embedding | N/A | $[1.000, 2.000, 3.000, 4.000]$ | Baseline activation |
+| **1. Pre-LN Normalization** | $\text{LN}_1(\mathbf{x})$ | $[1.000, 2.000, 3.000, 4.000]$ | $[-1.342, -0.447, +0.447, +1.342]$ | Mean $\mu=0$, Variance $\sigma^2=1$ |
+| **2. Multi-Head Attention** | $\text{Attn}(\text{LN}_1(\mathbf{x}))$ | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.100, +0.200, +0.100, +0.200]$ | Context aggregation |
+| **3. Residual Addition 1** | $\mathbf{x} + \text{Attn}$ | $[1.000, 2.000, 3.000, 4.000]$ | $[1.100, 2.200, 3.100, 4.200]$ | Unimpeded gradient highway |
+| **4. Pre-LN Normalization 2**| $\text{LN}_2(\mathbf{x}_1)$ | $[1.100, 2.200, 3.100, 4.200]$ | $[-1.342, -0.447, +0.447, +1.342]$ | Restores unit scale for MLP |
+| **5. 4x MLP with GELU** | $\text{MLP}(\text{LN}_2(\mathbf{x}_1))$ | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.050, +0.100, -0.050, +0.050]$ | Non-linear reasoning capacity |
+| **6. Residual Addition 2** | $\mathbf{x}_1 + \text{MLP}$ | $[1.100, 2.200, 3.100, 4.200]$ | **$[1.150, 2.300, 3.050, 4.250]$** | Final block output |
+
+Notice how Pre-LN normalizes the inputs *only* for the attention and MLP branches, while the main residual state ($1.0 \to 1.1 \to 1.15$) continues forward cleanly, preserving the original signal's magnitude.
+
+---
+
+## The Production Systems Bridge: PyTorch `torch.compile` and Weight Tying
+
+In production architectures (such as GPT-3 and LLaMA), two major systems optimizations are applied:
 
 ```
 Production Transformer Optimizations:
@@ -228,6 +257,8 @@ Production Transformer Optimizations:
      RMSNorm(x) = x / sqrt( (1/D) * sum(x_i^2) + eps ) * gamma
    • Cuts kernel execution latency by 15% across all layers.
 ```
+
+In PyTorch C++ / CUDA runtimes, `torch.compile` uses TorchInductor to fuse `LayerNorm + QKV Projection` and `GELU + Linear` into single fused kernel calls, eliminating memory bandwidth bottlenecks across GPU SM registers.
 
 ---
 

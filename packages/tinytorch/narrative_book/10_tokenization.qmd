@@ -8,7 +8,7 @@ Before a neural network can perform a single floating-point multiplication on a 
 
 ---
 
-## The Crisis: The Out-of-Vocabulary Wall and Sequence Bloat
+## Systems Problem Motivation: The Out-of-Vocabulary Wall and Sequence Bloat
 
 When engineers first attempted to process text in neural networks, they encountered two opposing failure modes:
 
@@ -30,7 +30,15 @@ The Two Extremes of Text Representation:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-If we choose character-level tokens, our sequence length $S$ explodes, destroying GPU memory bandwidth during self-attention ($O(S^2)$ memory). If we choose word-level tokens, our vocabulary size $V$ explodes to millions of words (swallowing gigabytes of embedding table memory), yet our model *still crashes* when encountering an out-of-vocabulary word.
+### The Memory Trade-Off: Embedding Tables vs. Attention Context Windows
+Consider the hardware memory trade-off between vocabulary size $V$ and sequence length $S$ for a modern model with hidden dimension $D = 4,096$:
+
+1. **Word-Level Memory Footprint**: A vocabulary of $V = 1,000,000$ unique words requires an embedding parameter matrix of shape $[1,000,000 \times 4,096]$. In FP32, this single lookup table consumes:
+   $$\text{VRAM}_{\text{Embed}} = 10^6 \times 4096 \times 4\text{ bytes} \approx 16.38\text{ GB of VRAM!}$$
+   This memory must remain permanently pinned in GPU high-bandwidth memory (HBM) before processing a single word.
+2. **Character-Level Attention Memory Footprint**: A character-level model with $V = 256$ has an embedding table of only $1\text{ MB}$, but an average English word is 5 to 6 characters long. For an input document of 2,048 words, character-level tokenization produces $S \approx 12,000$ tokens. Because self-attention memory scales as $O(S^2)$, the attention score matrix $\mathbf{Q} \mathbf{K}^T$ requires:
+   $$\text{Attention Memory} = 12,000^2 \times 4\text{ bytes} \approx 576\text{ MB per attention head!}$$
+   Across 32 attention heads and 32 layers, intermediate attention activations explode into **590 GB of VRAM**, crashing the GPU cluster.
 
 Modern deep learning demands an optimal middle ground: **Subword Tokenization**. A subword tokenizer must:
 1. Represent common words as single compact tokens (minimizing sequence length $S$).
@@ -86,11 +94,31 @@ Because the base alphabet includes all 256 possible bytes, **no input string can
 
 ---
 
-## The Pure TinyTorch Construction
+## Mathematical Formulations: Shannon Information Entropy of Token Streams
+
+Let $\mathcal{D} = (c_1, c_2, \dots, c_N)$ be a corpus of $N$ characters over an alphabet $\Sigma$. Let $p(t_i)$ represent the empirical frequency of token $t_i$ in the induced vocabulary $\mathcal{V}$.
+
+### 1. Shannon Entropy and Compression Bound
+The average information entropy per token is given by:
+
+$$H(\mathcal{V}) = -\sum_{t_i \in \mathcal{V}} p(t_i) \log_2 p(t_i)$$
+
+The total bit length required to encode corpus $\mathcal{D}$ using vocabulary $\mathcal{V}$ is bounded by:
+
+$$L(\mathcal{D}, \mathcal{V}) = |\mathcal{T}_{\mathcal{D}}| \cdot H(\mathcal{V})$$
+
+where $|\mathcal{T}_{\mathcal{D}}|$ is the total number of tokens emitted when encoding $\mathcal{D}$.
+
+Each BPE merge operation replaces the most frequent pair $(t_a, t_b)$ with a new symbol $t_{ab}$, reducing the total sequence length $|\mathcal{T}_{\mathcal{D}}|$ by the count of that pair $\text{Freq}(t_a, t_b)$ while slightly increasing vocabulary entropy $H(\mathcal{V})$. The optimal vocabulary size $V^*$ represents the Pareto frontier that minimizes the product of sequence length and embedding parameter memory.
+
+---
+
+## Line-by-Line Reference Implementation
 
 We implement the complete BPE Tokenizer engine in TinyTorch, supporting vocabulary training, merge rank generation, encoding, and decoding:
 
 ```python
+# packages/tinytorch/src/tinytorch/bpe.py
 from typing import List, Dict, Tuple, Optional
 import unicodedata
 
@@ -108,13 +136,11 @@ class BPETokenizer:
 
     def _init_base_vocab(self):
         """Initialize base vocabulary with special tokens and all 256 UTF-8 bytes."""
-        # Register special tokens
         for token_str, token_id in self.special_tokens.items():
             token_bytes = token_str.encode('utf-8')
             self.vocab[token_id] = token_bytes
             self.encoder[token_bytes] = token_id
 
-        # Register all 256 possible single-byte characters
         offset = len(self.special_tokens)
         for b in range(256):
             byte_val = bytes([b])
@@ -133,7 +159,6 @@ class BPETokenizer:
 
     def train(self, texts: List[str]):
         """Induce subword merge rules from a training text corpus."""
-        # Convert initial texts into lists of single-byte elements
         sequences: List[List[bytes]] = []
         for text in texts:
             byte_seq = text.encode('utf-8')
@@ -147,7 +172,6 @@ class BPETokenizer:
             if not stats:
                 break
 
-            # Find the most frequent adjacent pair
             best_pair = max(stats, key=stats.get)
             if stats[best_pair] < 1:
                 break
@@ -159,7 +183,6 @@ class BPETokenizer:
             self.encoder[new_token_bytes] = new_token_id
             self.merges[best_pair] = merge_idx
 
-            # Replace all occurrences of best_pair in sequences
             new_sequences = []
             for seq in sequences:
                 new_seq = []
@@ -179,16 +202,14 @@ class BPETokenizer:
         byte_seq = text.encode('utf-8')
         tokens = [bytes([b]) for b in byte_seq]
 
-        # Iteratively apply learned merge rules based on merge rank priority
         while len(tokens) >= 2:
             stats = [(self.merges.get((tokens[i], tokens[i+1]), float('inf')), i)
                      for i in range(len(tokens) - 1)]
             min_rank, min_idx = min(stats, key=lambda x: x[0])
 
             if min_rank == float('inf'):
-                break  # No more merge rules apply
+                break
 
-            # Apply highest-priority merge
             merged_token = tokens[min_idx] + tokens[min_idx + 1]
             tokens = tokens[:min_idx] + [merged_token] + tokens[min_idx + 2:]
 
@@ -207,21 +228,52 @@ class BPETokenizer:
 
 ---
 
-## The Production Bridge: OpenAI `tiktoken` and Rust Regex Splitting
+## Concrete Numerical Trace Table: Tracing BPE Merges on a Training Corpus
 
-In production language modeling (e.g. OpenAI's `tiktoken` and HuggingFace `tokenizers`), tokenization is written in high-performance Rust:
+Let us trace vocabulary induction step-by-step on the mini-corpus $\mathcal{D} = \{\text{"low"}, \text{"low"}, \text{"lower"}, \text{"newest"}, \text{"widest"}\}$:
+
+### Step 1: Initial Vocabulary and Pair Frequency Census
+Base alphabet includes special tokens ($0..4$) and 256 byte values ($5..260$).
+
+| Iteration Step | Most Frequent Pair | Occurrence Count | Created Merged Token | New Token ID | Updated Corpus State |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Step 0 (Base)** | Initial state | N/A | Base 256 bytes | $0..260$ | `[l,o,w], [l,o,w], [l,o,w,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
+| **Merge 1** | `('l', 'o')` | 3 times | `'lo'` | $261$ | `[lo,w], [lo,w], [lo,w,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
+| **Merge 2** | `('lo', 'w')` | 3 times | `'low'` | $262$ | `[low], [low], [low,e,r], [n,e,w,e,s,t], [w,i,d,e,s,t]` |
+| **Merge 3** | `('e', 's')` | 2 times | `'es'` | $263$ | `[low], [low], [low,e,r], [n,e,w,es,t], [w,i,d,es,t]` |
+| **Merge 4** | `('es', 't')` | 2 times | `'est'` | $264$ | `[low], [low], [low,e,r], [n,e,w,est], [w,i,d,est]` |
+| **Merge 5** | `('e', 'r')` | 1 time | `'er'` | $265$ | `[low], [low], [low,er], [n,e,w,est], [w,i,d,est]` |
+
+### Step 2: Runtime Encoding Trace on Unseen String `"lowest"`
+Given test string `"lowest"`:
+1. Initial byte list: `['l', 'o', 'w', 'e', 's', 't']`
+2. Apply Merge 1 (`'l'` + `'o'` $\to$ `'lo'`): `['lo', 'w', 'e', 's', 't']`
+3. Apply Merge 2 (`'lo'` + `'w'` $\to$ `'low'`): `['low', 'e', 's', 't']`
+4. Apply Merge 3 (`'e'` + `'s'` $\to$ `'es'`): `['low', 'es', 't']`
+5. Apply Merge 4 (`'es'` + `'t'` $\to$ `'est'`): `['low', 'est']`
+6. Output Token IDs: `[262, 264]` (2 tokens instead of 6 bytes, a **$3\times$ reduction in sequence length**).
+
+---
+
+## The Production Systems Bridge: PyTorch C++ Extensions and `tiktoken`
+
+In production PyTorch language pipelines, tokenization is detached from the Python interpreter to avoid Global Interpreter Lock (GIL) stalls.
 
 ```
-tiktoken Production Architecture:
-1. Regex Pre-Splitting: Uses a compiled multi-threaded regex:
-   (?i:'s|'t|'re|'ve|'m|'ll|'d)|[^
-\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[
-]*|\s*[
-]+|\s+(?!\S)|\s+
-   This prevents punctuation and contractions from contaminating words.
-2. Parallel Rayon Dispatch: Tokenizes gigabytes of text across all CPU cores simultaneously.
-3. Vocabulary Lookup Speed: Achieves >1,000,000 tokens/sec per CPU core.
+Production Tokenization Pipeline:
+┌──────────────────────────────────────────────────────────────┐
+│        PyTorch DataLoader Multi-Process Worker Threads       │
+│  1. Fast Rust BPE Tokenizer (tiktoken / HuggingFace Fast)    │
+│  2. Regex pre-splitting compiles to native SIMD instructions │
+│  3. Token integer IDs mapped directly to PyTorch c10::Tensor │
+│  4. Pinned memory buffers streamed directly to GPU VRAM      │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+### Key Differences Between TinyTorch and PyTorch C++ Tokenization:
+1. **Regex Pre-Splitting (`tiktoken`)**: In Python TinyTorch, we pass raw byte sequences. In production GPT-2/GPT-4 tokenizers, a multi-threaded C++/Rust regular expression splits contractions (e.g. `'ll`, `'ve`, `'s`) before pair counting to ensure punctuation doesn't cross token boundaries.
+2. **Parallel Rayon Dispatch**: Production tokenizers dispatch chunks of input text across all available CPU worker threads, tokenizing gigabytes of text at over $1,000,000\text{ tokens/second}$ before batching.
+3. **Direct `c10::TensorImpl` Ingestion**: Tokens are converted directly into int64 tensor buffers in shared memory, allowing the GPU DMA pipeline to ingest token streams with zero CPU-GPU copy bottlenecks.
 
 ---
 

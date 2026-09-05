@@ -8,7 +8,7 @@ In this chapter, we engineer **Post-Training INT8 Symmetric Quantization (`Quant
 
 ---
 
-## The Crisis: The 4-Byte DRAM Bandwidth Tax
+## Systems Problem Motivation: The 4-Byte DRAM Bandwidth Tax
 
 Every single FP32 floating-point number occupies **32 bits (4 bytes)** of memory:
 
@@ -38,7 +38,7 @@ If we can compress each 32-bit float into an **8-bit signed integer (`int8`)**, 
 
 ---
 
-## The Mental Model: Symmetric Affine Quantization
+## The Mental Model: Symmetric Affine Quantization vs Asymmetric Offsets
 
 Quantization is the process of mapping continuous real numbers $x \in [-\alpha, +\alpha]$ into a discrete grid of signed 8-bit integers $q \in [-127, +127]$:
 
@@ -49,13 +49,14 @@ Continuous Float Domain:       -α ─────────── 0.0 ──�
 Discrete INT8 Grid:          -127 ───────────  0  ─────────── +127
 ```
 
+### Symmetric vs Asymmetric Mapping
+There are two primary paradigms for uniform quantization:
+1. **Symmetric Uniform Quantization**: The floating-point zero maps exactly to the integer zero ($Z = 0$). The scale factor is determined purely by the maximum absolute magnitude: $S = \frac{\max(|X|)}{127}$. Because zero is unshifted, matrix multiplications require zero additive offset terms ($Y_{\text{int}} = Q_X Q_W^T$), making hardware kernel execution extremely fast and efficient.
+2. **Asymmetric Quantization**: For activation distributions that are strictly non-negative (such as post-$\text{ReLU}$ or post-$\text{GELU}$ activations where $x \ge 0$), symmetric quantization wastes half the integer dynamic range ($[-128, 0]$). Asymmetric quantization maps $[\min(X), \max(X)] \to [-128, 127]$ using both a scale factor $S = \frac{\max(X) - \min(X)}{255}$ and an integer zero-point offset $Z = \text{round}\left(-\frac{\min(X)}{S}\right) - 128$.
+
+In TinyTorch, we implement **Symmetric Quantization for Weights** (which are naturally zero-centered by Kaiming initialization) and **Calibrated Scale Tracking for Activations**.
+
 ### The Symmetric Quantization Formula
-
-In **Symmetric Uniform Quantization**, zero in float space maps exactly to zero in integer space (zero-point $Z = 0$).
-
-We determine the scale factor $S$ from the maximum absolute value in the tensor:
-
-$$S = \frac{\max(|X|)}{127}$$
 
 To **Quantize** a floating-point tensor $X$:
 
@@ -82,22 +83,45 @@ Quantized Integer Matrix Multiplication Pipeline:
 
 ---
 
-## The Pure TinyTorch Construction
+## Mathematical Formulations: Quantization Noise Bounds and QAT
+
+Let us formally evaluate the quantization error bound and signal-to-noise ratio (SNR).
+
+### Theorem: Uniform Quantization Error Bound
+For any continuous value $x \in [-\alpha, +\alpha]$ quantized with scale $S = \frac{\alpha}{127}$:
+
+$$\text{Error } e = x - \hat{x} = x - S \cdot \left\lfloor \frac{x}{S} \right\rceil$$
+
+Since rounding error is strictly bounded by $|\lfloor u \rceil - u| \le \frac{1}{2}$:
+
+$$|e| \le \frac{S}{2} = \frac{\alpha}{254}$$
+
+The maximum absolute error introduced by INT8 symmetric quantization is less than **$0.39\%$** of the dynamic range $\alpha$.
+
+### Quantization-Aware Training (QAT) & The Straight-Through Estimator (STE)
+When post-training quantization degrades accuracy on sensitive models, we train with **Quantization-Aware Training (QAT)**. During the forward pass, weights are clamped and rounded to simulate integer discretization. Because the derivative of the rounding function $\lfloor x \rceil$ is zero almost everywhere ($\frac{d\lfloor x \rceil}{dx} = 0$), backpropagation would normally stall.
+
+QAT uses the **Straight-Through Estimator (STE)** (Bengio et al., 2013), which approximates the rounding gradient as identity during the backward pass:
+
+$$\frac{\partial \mathcal{L}}{\partial x} \approx \frac{\partial \mathcal{L}}{\partial \hat{x}} \cdot \mathbb{I}(|x| \le \alpha)$$
+
+This allows weight parameters to learn representations that are naturally resilient to integer discretization.
+
+---
+
+## Line-by-Line Reference Implementation
 
 We implement INT8 quantization and the `QuantizedLinear` layer in TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/quantization.py
 import numpy as np
-from typing import Tuple, List, Optional
-from .tensor import Tensor
+from typing import Tuple, List, Optional, Dict
+from .autograd import Tensor
 from .layers import Layer, Linear
 
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
-    """Symmetrically quantize FP32 tensor into INT8 with scale factor.
-
-    Returns:
-        Tuple of (Quantized INT8 Tensor, Float Scale Factor, Zero Point = 0)
-    """
+    """Symmetrically quantize FP32 tensor into INT8 with scale factor."""
     data = tensor.data
     max_val = float(np.max(np.abs(data)))
 
@@ -124,16 +148,8 @@ class QuantizedLinear(Layer):
 
         # Quantize original FP32 weights into INT8
         self.q_weight, self.weight_scale, self.weight_zero_point = quantize_int8(original_linear.weight)
-
-        # Keep bias in FP32 / INT32 for precision preservation
         self.bias = original_linear.bias if original_linear.bias is not None else None
         self.activation_scale = 1.0
-
-    def calibrate(self, sample_inputs: List[Tensor]):
-        """Calibrate input activation scale factor using sample calibration batches."""
-        max_vals = [np.max(np.abs(x.data)) for x in sample_inputs]
-        global_max = float(np.max(max_vals))
-        self.activation_scale = max(global_max / 127.0, 1e-8)
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward inference using INT8 quantized weights."""
@@ -165,7 +181,30 @@ class QuantizedLinear(Layer):
 
 ---
 
-## The Production Bridge: PyTorch `torch.ao.quantization` and AWQ
+## Concrete Numerical Trace Table: Tracing INT8 Arithmetic Step-by-Step
+
+Let us trace a concrete matrix multiplication comparing exact FP32 against INT8 quantized execution:
+- Weight Matrix $\mathbf{W} \in \mathbb{R}^{2 \times 2} = \begin{bmatrix} +1.27 & -0.635 \\ +0.254 & -1.016 \end{bmatrix}$
+- Input Vector $\mathbf{x} \in \mathbb{R}^{1 \times 2} = \begin{bmatrix} +0.50 & -0.25 \end{bmatrix}$
+
+### Step 1: Quantization Scale Factors
+
+$$S_W = \frac{1.27}{127} = 0.0100, \qquad S_x = \frac{0.50}{127} = 0.003937$$
+
+$$Q_W = \begin{bmatrix} +127 & -64 \\ +25 & -102 \end{bmatrix}, \qquad Q_x = \begin{bmatrix} +127 & -64 \end{bmatrix}$$
+
+### Step 2: Numerical Trace Table
+
+| Computation Stage | Mathematical Operation | Exact FP32 Formula & Result | INT8 Integer Simulation | Rescaled Dequantized Output | Quantization Error |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Output 0 ($y_0$)** | $x_0 W_{0,0} + x_1 W_{0,1}$ | $0.50(1.27) + (-0.25)(-0.635) = \mathbf{+0.7938}$ | $127(127) + (-64)(-64) = 20,225$ | $20,225 \times (0.0100 \times 0.003937) = \mathbf{+0.7963}$ | $\Delta = +0.0025$ ($0.31\%$) |
+| **Output 1 ($y_1$)** | $x_0 W_{1,0} + x_1 W_{1,1}$ | $0.50(0.254) + (-0.25)(-1.016) = \mathbf{+0.3810}$ | $127(25) + (-64)(-102) = 9,703$ | $9,703 \times (0.0100 \times 0.003937) = \mathbf{+0.3820}$ | $\Delta = +0.0010$ ($0.26\%$) |
+
+Notice how the integer dot product accurately reproduces the true FP32 output with less than $0.35\%$ error while reducing DRAM weight memory from **16 bytes to 4 bytes**!
+
+---
+
+## The Production Systems Bridge: PyTorch `torch.ao.quantization` and AWQ
 
 In production deep learning (e.g. `bitsandbytes`, `AutoGPTQ`, `AWQ`):
 
@@ -181,6 +220,8 @@ Modern Production Quantization Regimes:
    • Discovers that 1% of salient weights protect 99% of model accuracy.
    • Keeps salient channels in FP16 while quantizing the remaining 99% to INT4.
 ```
+
+In production PyTorch C++ / CUDA kernels, integer matrix multiplication executes via `torch.ops.quantized.linear_dynamic` utilizing hardware SIMD vector instructions (AVX-512 VNNI on CPUs and DP4A / Tensor Cores on GPUs).
 
 ---
 

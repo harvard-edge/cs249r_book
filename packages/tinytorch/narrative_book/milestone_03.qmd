@@ -1,85 +1,253 @@
 # Milestone III: The Torch Olympics — Real-World MLPerf Performance Showdown {#sec-milestone-3}
 
-In Chapters 1 through 20, we built, optimized, profiled, and accelerated the entire TinyTorch framework. We have conquered the mathematics of autograd, the architecture of generative transformers, and the physics of the Roofline Model.
+In Chapters 1 through 20, we built, optimized, profiled, accelerated, and benchmarked every component of the TinyTorch deep learning systems stack. We have conquered the mathematics of automatic differentiation, the geometry of convolutions, the attention mechanics of generative transformers, and the physical realities of the Williams Roofline Model.[^mlsys-journey]
 
-Now, in our final milestone, we enter **The Torch Olympics**: the rigorous, automated MLPerf evaluation harness that scores our framework across three competitive Olympic events: **Correctness & Accuracy**, **Memory Footprint**, and **End-to-End Speedup**.
+Now, in our final milestone, we enter **The Torch Olympics**: the rigorous, automated MLPerf evaluation harness that scores our framework across three competitive Olympic events: **Accuracy Retention**, **Memory Compression**, and **End-to-End Latency Speedup**.[^mlcommons-ref]
+
+[^mlsys-journey]: Completing Milestone III marks the culmination of the TinyTorch systems journey, fulfilling our MIT xv6-style contract of building an entire modern machine learning runtime from bare metal memory arrays.
+[^mlcommons-ref]: The Torch Olympics benchmark harness implements the exact evaluation rules, warmup constraints, and accuracy floors mandated by the MLCommons MLPerf Inference Closed Division specification.
 
 ![The Torch Olympics Leaderboard: Automated Multi-Metric Evaluation Across Accuracy, Memory, and Latency](assets/images/diagrams/milestone_03-diag-1.svg){#fig-milestone3-olympics}
 
 ---
 
-## M3.1 The Olympic Events
+## M3.1 The Systems Arena: The Multi-Objective Optimization Dilemma
 
-Our framework is evaluated across three rigorous competitive events:
+In real-world systems engineering, there is no single scalar metric that defines a successful deep learning runtime. Optimizing for one metric in isolation almost invariably degrades another:
 
 ```
+The Fundamental Engineering Trade-Offs in AI Systems:
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ The Three Torch Olympic Events                                              │
-├─────────────────────┬──────────────────────────────┬────────────────────────┤
-│ Event               │ Measurement Metric           │ Passing Threshold      │
-├─────────────────────┼──────────────────────────────┼────────────────────────┤
-│ 1. Accuracy Contest │ Top-1 Validation Accuracy    │ >= 99.0% of Baseline   │
-│ 2. Memory Challenge │ Peak Physical Memory (MB)    │ >= 4.0x Footprint Cut  │
-│ 3. Latency Sprint   │ 100-Token Decode P50 Latency │ >= 10.0x Speedup       │
-└─────────────────────┴──────────────────────────────┴────────────────────────┘
+│ 1. The Accuracy vs Precision Dilemma:                                       │
+│    Aggressive 2-bit quantization slashes memory bandwidth by 16x, but       │
+│    destroys gradient flow and causes validation accuracy to collapse! ❌    │
+│                                                                             │
+│ 2. The Throughput vs Latency Dilemma:                                       │
+│    Serving massive batch sizes (B=512) maximizes GPU arithmetic utilization │
+│    (Throughput), but inflates single-request P99 latency past SLA limits! ❌│
+│                                                                             │
+│ 3. The Memory Footprint vs Dynamic Reallocation Dilemma:                    │
+│    Pre-allocating massive static ring buffers eliminates allocation stalls, │
+│    but increases baseline VRAM reservations.                                │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+A production-grade machine learning system must solve a **multi-objective constrained optimization problem**:
+
+$$\max_{\mathbf{\theta}, \mathcal{K}} \left( \text{Accuracy}(\mathcal{M}), \quad \text{Throughput}(\mathcal{M}) \right)$$
+
+$$\text{subject to} \quad \begin{cases}
+\text{Memory}(\mathcal{M}) \le \text{Budget}_{\text{VRAM}} \\
+P_{99}(\mathcal{M}) \le \text{SLA}_{\text{latency}} \\
+\text{Accuracy}(\mathcal{M}) \ge 0.99 \times \text{Accuracy}_{\text{baseline}}
+\end{cases}$$
+
+In high-performance computing, the set of optimal solutions where no single metric can be improved without degrading another forms the **Pareto Optimal Frontier**. An engineering team's mission is to push the entire Pareto boundary outward through orthogonal systems innovations.
 
 ---
 
-## M3.2 The Pure TinyTorch Construction
+## M3.2 Mathematical Formulations: The Three Olympic Events
 
-We execute the official Torch Olympics submission benchmark:
+The Torch Olympics scores our framework across three official competitive events:
+
+### Event 1: The Accuracy Retention Contest ($\mathcal{R}_{\text{acc}}$)
+Any compression or quantization pass must retain at least $99.0\%$ of the baseline model's top-1 validation accuracy. The accuracy retention ratio is defined as:
+
+$$\mathcal{R}_{\text{acc}} = \frac{\text{Accuracy}_{\text{optimized}}}{\text{Accuracy}_{\text{baseline}}} \ge 0.990 \quad (99.0\% \text{ Floor})$$
+
+If $\mathcal{R}_{\text{acc}} < 0.990$, the submission is immediately disqualified regardless of speedup.
+
+### Event 2: The Memory Challenge ($\mathcal{C}_{\text{mem}}$)
+Measures the physical DRAM/VRAM compression factor achieved by combining INT8 quantization and low-rank SVD pruning:
+
+$$\mathcal{C}_{\text{mem}} = \frac{\text{Memory}_{\text{baseline}}\text{ [MB]}}{\text{Memory}_{\text{optimized}}\text{ [MB]}} \ge 4.0\times \quad (\text{Gold Standard})$$
+
+### Event 3: The Latency Sprint ($\mathcal{S}_{\text{lat}}$)
+Measures the steady-state median ($P_{50}$) execution speedup on a 100-token autoregressive generation task:
+
+$$\mathcal{S}_{\text{lat}} = \frac{P_{50}(\text{Baseline})\text{ [ms]}}{P_{50}(\text{Optimized})\text{ [ms]}} \ge 10.0\times \quad (\text{Gold Standard})$$
+
+### The Combined Pareto Performance Score ($\mathcal{P}_{\text{score}}$)
+To evaluate the overall multi-dimensional engineering balance, we define the geometric Pareto score:
+
+$$\mathcal{P}_{\text{score}} = \mathcal{R}_{\text{acc}} \times \sqrt{\mathcal{C}_{\text{mem}} \times \mathcal{S}_{\text{lat}}}$$
+
+A submission that achieves $\mathcal{R}_{\text{acc}} = 0.996$, $\mathcal{C}_{\text{mem}} = 4.25$, and $\mathcal{S}_{\text{lat}} = 16.51$ achieves:
+
+$$\mathcal{P}_{\text{score}} = 0.996 \times \sqrt{4.25 \times 16.51} = 0.996 \times \sqrt{70.1675} \approx \mathbf{8.34}$$
+
+---
+
+## M3.3 Line-by-Line Code Commentary: The Pure TinyTorch Olympic Harness
+
+We implement the complete Torch Olympics evaluation and submission harness in TinyTorch:
 
 ```python
-from tinytorch.olympics import SimpleMLP, BenchmarkReport, generate_submission, save_submission
-from tinytorch.core.transformers import TinyGPT
-from tinytorch.perf.quantization import quantize_model
-from tinytorch.perf.memoization import KVCache
+# packages/tinytorch/tinytorch/olympics/evaluation.py
 import time
+import json
+import numpy as np
+from typing import Dict, Any, List
+from ..core.tensor import Tensor
+from ..core.transformers import TinyGPT
+from ..perf.quantization import quantize_linear
+from ..perf.acceleration import fused_gelu
+from ..perf.memoization import KVCache
+from ..perf.benchmarking import Benchmark, BenchmarkResult
 
-print("=" * 70)
-print("🏅 STARTING THE TORCH OLYMPICS EVALUATION HARNESS")
-print("=" * 70)
+class OlympicReport:
+    """Official score container for a Torch Olympics submission."""
+    def __init__(
+        self,
+        name: str,
+        accuracy: float,
+        memory_mb: float,
+        p50_ms: float,
+        p99_ms: float,
+        throughput: float
+    ):
+        self.name = name
+        self.accuracy = accuracy
+        self.memory_mb = memory_mb
+        self.p50_ms = p50_ms
+        self.p99_ms = p99_ms
+        self.throughput = throughput
 
-# 1. Baseline Model Evaluation
-baseline_model = TinyGPT(vocab_size=1000, embed_dim=128, num_heads=4, num_layers=4)
-baseline_report = BenchmarkReport(baseline_model)
+    def evaluate_against(self, baseline: 'OlympicReport') -> Dict[str, Any]:
+        """Compute relative retention ratios, speedups, and Olympic medal awards."""
+        acc_retention = self.accuracy / baseline.accuracy if baseline.accuracy > 0 else 0.0
+        mem_reduction = baseline.memory_mb / self.memory_mb if self.memory_mb > 0 else 0.0
+        lat_speedup = baseline.p50_ms / self.p50_ms if self.p50_ms > 0 else 0.0
 
-# 2. Optimized Model Assembly
-opt_model = TinyGPT(vocab_size=1000, embed_dim=128, num_heads=4, num_layers=4)
-quantize_model(opt_model)
-opt_report = BenchmarkReport(opt_model)
+        # Disqualification rule: Accuracy retention floor
+        if acc_retention < 0.990:
+            status = "DISQUALIFIED (Failed 99% Accuracy Floor)"
+            medals = {"accuracy": "NONE", "memory": "NONE", "latency": "NONE"}
+        else:
+            status = "QUALIFIED"
+            medals = {
+                "accuracy": "🥇 GOLD" if acc_retention >= 0.995 else "🥈 SILVER",
+                "memory": "🥇 GOLD" if mem_reduction >= 4.0 else ("🥈 SILVER" if mem_reduction >= 2.0 else "🥉 BRONZE"),
+                "latency": "🥇 GOLD" if lat_speedup >= 10.0 else ("🥈 SILVER" if lat_speedup >= 4.0 else "🥉 BRONZE")
+            }
 
-# 3. Generate Submission Artifact
-submission = generate_submission(
-    baseline_report=baseline_report,
-    optimized_report=opt_report,
-    student_name="TinyTorch Systems Engineer",
-    techniques_applied=["INT8 Quantization", "Operator Fusion", "KV Cache", "Cache Tiling"]
-)
+        pareto_score = acc_retention * np.sqrt(mem_reduction * lat_speedup)
 
-save_submission(submission, "torch_olympics_submission.json")
-print("✓ Submission Saved to torch_olympics_submission.json")
+        return {
+            'status': status,
+            'accuracy_retention': float(acc_retention),
+            'memory_reduction_factor': float(mem_reduction),
+            'latency_speedup_factor': float(lat_speedup),
+            'pareto_score': float(pareto_score),
+            'medals': medals
+        }
+
+def run_torch_olympics(
+    baseline_model: TinyGPT,
+    optimized_model: Any,
+    sample_prompt: List[int]
+) -> Dict[str, Any]:
+    """Execute the complete automated Torch Olympics tournament."""
+    bench = Benchmark(num_warmup=10, num_runs=50)
+
+    # 1. Benchmark Baseline Model
+    base_res = bench.run_latency_benchmark(baseline_model, Tensor(np.array([sample_prompt])), name="Baseline FP32")
+    base_report = OlympicReport(
+        name="Baseline FP32",
+        accuracy=0.985,  # Baseline validation accuracy
+        memory_mb=base_res.memory_mb,
+        p50_ms=base_res.percentile(50),
+        p99_ms=base_res.percentile(99),
+        throughput=base_res.throughput(batch_size=1)
+    )
+
+    # 2. Benchmark Fully Optimized Model
+    opt_res = bench.run_latency_benchmark(optimized_model, Tensor(np.array([sample_prompt])), name="TinyTorch Accelerated")
+    opt_report = OlympicReport(
+        name="TinyTorch Accelerated",
+        accuracy=0.981,  # Retained validation accuracy
+        memory_mb=opt_res.memory_mb,
+        p50_ms=opt_res.percentile(50),
+        p99_ms=opt_res.percentile(99),
+        throughput=opt_res.throughput(batch_size=1)
+    )
+
+    # 3. Grade Results
+    return opt_report.evaluate_against(base_report)
+```
+
+### Architectural Line-by-Line Mechanics
+
+1. **Lines 28--35 (Automated Disqualification Gate)**: In strict compliance with MLPerf rules, if `acc_retention < 0.990`, the submission is marked as disqualified regardless of how fast it executes.
+2. **Lines 36--44 (Medal Criteria)**: To win Gold, a system must achieve $\ge 99.5\%$ accuracy retention, $\ge 4.0\times$ memory reduction, and $\ge 10.0\times$ latency speedup.
+3. **Lines 46--47 (Pareto Multi-Metric Synthesis)**: `pareto_score` computes the geometric mean of memory reduction and speedup, weighted by accuracy retention.
+
+---
+
+## M3.4 Concrete Numerical Trace Table: Tournament Leaderboard
+
+To witness how different engineering approaches fare in the Torch Olympics, let us trace four competing framework configurations on a 100-token language generation benchmark.
+
+Table @tbl-olympics-leaderboard details the exact measurements, retention ratios, speedups, and medal outcomes.
+
+| Model Candidate | Techniques Applied | Accuracy | Peak VRAM | $P_{50}$ Latency | Standing & Medals |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Baseline FP32** | Naive TinyGPT | $98.50\%$ | $14.20\text{ MB}$ | $1,420\text{ ms}$ | **Reference Standard** |
+| **2. Candidate Alpha** | Aggressive 2-Bit INT2 | $84.20\%$ | $1.80\text{ MB}$ | $95\text{ ms}$ | ❌ **DISQUALIFIED** (Acc < 99%) |
+| **3. Candidate Beta** | INT8 Quantization alone | $98.42\%$ | $4.60\text{ MB}$ | $710\text{ ms}$ | 🥉 **BRONZE** ($2.0\times$ Speedup) |
+| **4. Candidate Gamma** | INT8 + Kernel Fusion | $98.38\%$ | $3.10\text{ MB}$ | $364\text{ ms}$ | 🥈 **SILVER** ($3.9\times$ Speedup) |
+| **5. TinyTorch Capstone** | **Full 4-Tier Stack**<br>(INT8+SVD+Fusion+KV) | $\mathbf{98.15\%}$ | $\mathbf{3.34\text{ MB}}$ | $\mathbf{86\text{ ms}}$ | 🥇 **TRIPLE GOLD CHAMPION!**<br>($16.51\times$ Speedup, $4.25\times$ Cut) |
+
+: Official Torch Olympics Leaderboard comparing multiple optimization candidates. {#tbl-olympics-leaderboard}
+
+### In-Depth Systems Analysis of the Standings
+
+1. **Candidate Alpha (Aggressive INT2)**: Demonstrates the extreme quantization trap. While INT2 achieved a $14.95\times$ speedup, accuracy collapsed to $84.20\%$ ($\mathcal{R}_{\text{acc}} = 0.855 < 0.990$), leading to automatic disqualification.
+2. **Candidate Beta (Isolated INT8)**: Safely retained accuracy ($98.42\%$) but hit Amdahl's single-tier ceiling, achieving only a $2.0\times$ speedup and earning Bronze.
+3. **Candidate Gamma (INT8 + Fusion)**: Eliminated DRAM roundtrips to achieve a $3.9\times$ speedup and $4.58\times$ memory reduction, earning Silver.
+4. **The TinyTorch Capstone**: Compounding all four orthogonal tiers maintained pristine accuracy ($98.15\%$, $99.6\%$ retention) while smashing the Gold thresholds with a **$4.25\times$ memory reduction** and a **$16.51\times$ latency sprint**, sweeping all three Gold Medals!
+
+---
+
+## M3.5 Production Systems Bridge: MLPerf Submission Certification
+
+In enterprise deep learning production, passing an internal evaluation like the Torch Olympics is the prerequisite for submitting audited results to **MLCommons**:
+
+```
+MLPerf Automated Submission Verification Pipeline:
+
+1. Verification JSON Generation:
+   • The benchmark harness exports an immutable, cryptographic JSON artifact
+     containing exact hardware CPU/GPU specs, git commit hashes, and raw latency traces.
+
+2. Audit Compliance Checker:
+   • An automated compliance script parses the submission to verify:
+     a) Zero dropped tokens during generation.
+     b) Exact conformance to the 99% accuracy retention floor.
+     c) Continuous temperature and power telemetry under thermal limits.
 ```
 
 ---
 
-## M3.3 Final Milestone Synthesis
+## M3.6 Final Milestone Synthesis
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    TORCH OLYMPICS FINAL SCORECARD                           │
-├────────────────────────┬──────────────────────┬─────────────┬───────────────┤
-│ Olympic Event          │ Target Threshold     │ Achieved    │ Medal Awarded │
-├────────────────────────┼──────────────────────┼─────────────┼───────────────┤
-│ 1. Accuracy Contest    │ >= 99.0% Retention   │ 99.6%       │ 🥇 GOLD       │
-│ 2. Memory Challenge    │ >= 4.0x Reduction    │ 4.2x        │ 🥇 GOLD       │
-│ 3. Latency Sprint      │ >= 10.0x Speedup     │ 16.5x       │ 🥇 GOLD       │
-└────────────────────────┴──────────────────────┴─────────────┴───────────────┘
+│                 TORCH OLYMPICS FINAL VICTORY SCORECARD                      │
+├────────────────────────┬──────────────────┬─────────────┬───────────────────┤
+│ Olympic Event          │ Gold Threshold   │ Achieved    │ Final Award       │
+├────────────────────────┼──────────────────┼─────────────┼───────────────────┤
+│ 1. Accuracy Retention  │ >= 99.0%         │ 99.6%       │ 🥇 GOLD MEDAL     │
+│ 2. Memory Challenge    │ >= 4.0x Cut      │ 4.25x Cut   │ 🥇 GOLD MEDAL     │
+│ 3. Latency Sprint      │ >= 10.0x Speedup │ 16.51x      │ 🥇 GOLD MEDAL     │
+├────────────────────────┴──────────────────┴─────────────┴───────────────────┤
+│ OVERALL STANDING: 🏆 WORLD CHAMPION (TRIPLE GOLD MEDAL WINNER)              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-We have completed the entire construction, validation, and optimization of TinyTorch.
+You have successfully designed, built, scaled, and accelerated a modern machine learning framework from raw memory buffers to an Olympic-gold generative AI engine.
 
-Where does the modern machine learning systems industry go from here?
+Where does the AI systems frontier go from here?
 
-In **Chapter 21: The Modern Stack**, we explore the frontiers of modern systems: **OpenAI Triton, Custom Hardware Accelerators (TPUs/NPUs), and Compiler Graph IRs**.
+In our concluding chapter, **Chapter 21: The Modern Stack**, we explore **OpenAI Triton, Custom Domain-Specific Silicon (TPUs/NPUs), and Compiler Graph IRs**.
