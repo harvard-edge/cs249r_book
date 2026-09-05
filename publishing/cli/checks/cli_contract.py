@@ -81,6 +81,8 @@ CASES: tuple[ContractCase, ...] = (
         must_include=(
             "Usage: ./binder build",
             "./binder build pdf intro,training --vol1",
+            "--no-cover",
+            "--print-marks",
         ),
         must_not_include=("build reset",),
     ),
