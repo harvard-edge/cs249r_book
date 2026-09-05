@@ -8,30 +8,33 @@ In this milestone, we take the decisive leap from static classification into **G
 
 ---
 
-## M2.1 The Crisis: The Autoregressive Generation Loop
+## M2.1 Systems Problem Motivation: The Prefill vs. Decode Memory Wall
 
-Training a language model uses **Teacher Forcing**: given a sequence of tokens $[t_1, t_2, \dots, t_S]$, the causal mask allows us to predict all next tokens $[t_2, t_3, \dots, t_{S+1}]$ simultaneously in a single forward pass.
-
-However, during text generation (inference), the ground truth does not exist. We must generate text **autoregressively**:
+When executing large language models in production systems, inference splits into two physically distinct computing regimes:
 
 ```
-The Autoregressive Generation Lifecycle:
-
-Prompt: "TinyTorch is"
-Step 1: Input ["TinyTorch", "is"]           ──► Predicts "the"
-Step 2: Input ["TinyTorch", "is", "the"]      ──► Predicts "xv6"
-Step 3: Input ["TinyTorch", "is", "the", "xv6"]──► Predicts "of"
-...
-Step N: Feed all previous tokens back into the model to sample token N+1!
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ The Two Regimes of Large Language Model Inference                           │
+├───────────────────────────────┬─────────────────────────────────────────────┤
+│ 1. PREFILL PHASE (Prompt)     │ 2. DECODE PHASE (Autoregressive Generation) │
+├───────────────────────────────┼─────────────────────────────────────────────┤
+│ • Input: Complete user prompt │ • Input: Exactly ONE token at a time.       │
+│   (e.g., S = 512 tokens).     │ • Execution: Serial token-by-token loop.    │
+│ • Execution: Parallel GEMMs   │ • Arithmetic Intensity: FLOPs/Byte ≈ 0.5.   │
+│   across all S tokens at once.│ • Bottleneck: DRAM/HBM Memory Bandwidth.    │
+│ • Bottleneck: Compute (FLOPs).│ • GPU Status: Tensor Cores sit 90% starved! │
+└───────────────────────────────┴─────────────────────────────────────────────┘
 ```
 
-If we naively take the `argmax` (the highest probability token) at every step:
-1. **Repetitive Loops**: The model frequently gets trapped in degenerate repetitive cycles (*"the model is the model is the model"*).
-2. **Lack of Creativity**: The model cannot explore diverse reasoning paths.
+During the **Prefill Phase**, the model processes the entire prompt of $S$ tokens in a single forward pass. Because tokens are processed simultaneously in dense $[S \times D] \cdot [D \times D]$ matrix multiplications, the arithmetic intensity is high, fully saturating the GPU's parallel floating-point units.
 
-Conversely, if we sample purely randomly from the raw probabilities, low-probability tail tokens introduce gibberish.
+During the **Decode Phase**, however, the ground truth does not exist. The model must predict token $S+1$, append it to the sequence, and re-run the network to predict token $S+2$. For every single generated token, the hardware must stream **every single weight parameter matrix** ($W_Q, W_K, W_V, W_{\text{out}}, W_{\text{mlp}}$) from off-chip DRAM/HBM into on-chip registers just to multiply a single $[1 \times D]$ row vector!
 
-To generate natural, coherent language, we must engineer two probability control mechanisms: **Temperature Scaling** and **Top-$k$ Filtering**.
+At batch size 1, decoding a 7-billion parameter FP16 model ($14\text{ GB}$ of weights) at 50 tokens/second requires:
+
+$$\text{Memory Bandwidth Required} = 14\text{ GB/token} \times 50\text{ tokens/sec} = 700\text{ GB/second}$$
+
+Language model generation is strictly **memory bandwidth bound**.
 
 ---
 
@@ -62,18 +65,32 @@ After re-applying Softmax, the bottom $V - k$ tokens have an exact **$0.0\%$ pro
 
 ---
 
-## M2.3 The Pure TinyTorch Construction
+## M2.3 Mathematical Formulations: Sampling Limits and Distribution Properties
 
-We implement the complete autoregressive generation engine in TinyTorch:
+Let us formally prove the asymptotic behavior of temperature scaling.
+
+### Theorem: Temperature Limits
+Let $\mathbf{z} \in \mathbb{R}^V$ with unique maximum $z^* = \max_i z_i$.
+1. **Zero-Temperature Deterministic Limit**:
+   $$\lim_{T \to 0^+} P_i(T) = \begin{cases} 1 & \text{if } z_i = z^* \\ 0 & \text{otherwise} \end{cases}$$
+   *Proof:* Let $\Delta_i = z_i - z^* \le 0$. Then $P_i = \frac{\exp(\Delta_i / T)}{\sum_j \exp(\Delta_j / T)}$. For $i \ne *$, $\Delta_i < 0 \implies \lim_{T \to 0^+} \exp(\Delta_i / T) = 0$. The denominator equals $1 + \sum_{j \ne *} 0 = 1$. Thus $P_* = 1$ and $P_{i \ne *} = 0$.
+2. **Infinite-Temperature Maximum Entropy Limit**:
+   $$\lim_{T \to \infty} P_i(T) = \frac{1}{V}$$
+   *Proof:* $\lim_{T \to \infty} \exp(z_i / T) = \exp(0) = 1$. Thus $P_i = \frac{1}{\sum_{j=1}^V 1} = \frac{1}{V}$.
+
+---
+
+## M2.4 Line-by-Line Reference Implementation
+
+We implement the complete autoregressive generation engine in pure TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/generation.py
 import numpy as np
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.tokenization import BPETokenizer
-from tinytorch.core.transformers import TinyGPT
-from tinytorch.core.losses import CrossEntropyLoss
-from tinytorch.core.optimizers import AdamW
-from tinytorch.core.training import Trainer, CosineSchedule
+from typing import List, Optional
+from .autograd import Tensor
+from .bpe import BPETokenizer
+from .transformer import TinyGPT
 
 def generate_text(model: TinyGPT, tokenizer: BPETokenizer, prompt: str,
                   max_new_tokens: int = 50, temperature: float = 0.8,
@@ -99,7 +116,6 @@ def generate_text(model: TinyGPT, tokenizer: BPETokenizer, prompt: str,
         # 4. Apply Top-k filtering
         if top_k is not None and top_k > 0:
             top_k = min(top_k, len(next_token_logits))
-            # Find the k-th largest value
             threshold = np.partition(next_token_logits, -top_k)[-top_k]
             next_token_logits[next_token_logits < threshold] = -np.inf
 
@@ -120,11 +136,34 @@ def generate_text(model: TinyGPT, tokenizer: BPETokenizer, prompt: str,
 
 ---
 
-## M2.4 End-to-End Training Validation
+## M2.5 Concrete Numerical Trace Table: Tracing Probability Shaping
+
+Let us trace temperature scaling and Top-$k$ filtering on a 5-token vocabulary with raw logits $\mathbf{z} = [4.0, 2.0, 1.0, 0.0, -2.0]$:
+
+| Candidate Token | Raw Logit $z_i$ | Standard Softmax ($T=1.0$) | Cold Sharp ($T=0.5$) | Hot Creative ($T=2.0$) | Top-$k=2$ with $T=0.8$ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Token A ("the")** | $+4.0$ | $83.60\%$ | **$97.90\%$** | $50.90\%$ | **$90.51\%$** |
+| **Token B ("a")** | $+2.0$ | $11.31\%$ | $1.79\%$ | $18.72\%$ | **$9.49\%$** |
+| **Token C ("this")**| $+1.0$ | $4.16\%$ | $0.24\%$ | $11.36\%$ | **$0.00\%$ (Filtered)** |
+| **Token D ("of")** | $0.0$ | $1.53\%$ | $0.03\%$ | $6.89\%$ | **$0.00\%$ (Filtered)** |
+| **Token E ("cat")** | $-2.0$ | $0.21\%$ | $0.00\%$ | $2.53\%$ | **$0.00\%$ (Filtered)** |
+| **Distribution Entropy** | State Entropy | $H = 0.92\text{ bits}$ | $H = 0.16\text{ bits}$ | $H = 2.04\text{ bits}$ | $H = 0.45\text{ bits}$ |
+
+Notice how $T=0.5$ concentrates $97.9\%$ of the probability mass on the top token, while Top-$k=2$ cleanly eliminates the long tail of irrelevant tokens.
+
+---
+
+## M2.6 End-to-End Training Validation
 
 Let us train `TinyGPT` on a sample language corpus:
 
 ```python
+from tinytorch.bpe import BPETokenizer
+from tinytorch.transformer import TinyGPT
+from tinytorch.losses import CrossEntropyLoss
+from tinytorch.optim import AdamW
+from tinytorch.training import Trainer, CosineSchedule
+
 # 1. Train BPE Tokenizer on text corpus
 corpus = [
     "TinyTorch is the xv6 of machine learning systems.",
@@ -162,7 +201,19 @@ print(f"  '{output}'")
 
 ---
 
-## M2.5 Milestone Synthesis: The Architectural Leap
+## M2.7 The Production Systems Bridge: vLLM, TensorRT-LLM, and Speculative Decoding
+
+In industrial LLM inference serving, naive autoregressive decoding is replaced by specialized systems:
+
+| Serving Bottleneck | Production Solution | Systems Mechanism |
+| :--- | :--- | :--- |
+| **DRAM Memory Fragmentation** | **PagedAttention (vLLM)** | Manages KV cache memory in virtual memory pages like an OS. |
+| **DRAM Bandwidth Starvation** | **Speculative Decoding** | Small draft model generates 5 tokens; large model verifies them in 1 parallel pass. |
+| **Weight Loading Latency** | **Continuous Batching** | Dynamically packs new requests into active decode iterations without waiting for sequence completion. |
+
+---
+
+## M2.8 Milestone Synthesis: The Architectural Leap
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

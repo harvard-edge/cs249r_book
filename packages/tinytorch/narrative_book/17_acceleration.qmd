@@ -8,7 +8,7 @@ In this chapter, we engineer **Operator Kernel Fusion (`fused_gelu`)** and **Cac
 
 ---
 
-## The Crisis: The DRAM Roundtrip Tax in Deep Networks
+## Systems Problem Motivation: The DRAM Roundtrip Tax in Deep Networks
 
 Consider the standard feed-forward block inside a transformer: an affine transformation followed by bias addition and GELU activation:
 
@@ -38,10 +38,13 @@ The Hardware Memory Hierarchy Latency & Bandwidth Gap:
 │ SRAM / Registers │ ~256 KB per SM  │ ~1 nanosecond     │ ~20.0 Terabytes/s  │
 │ L2 Cache         │ ~50 MB          │ ~5 nanoseconds    │ ~6.0 Terabytes/s   │
 │ Off-Chip HBM/DRAM│ 80 GB           │ ~200 nanoseconds  │ ~2.0 Terabytes/s   │
+│ Host Main RAM    │ 512 GB          │ ~100 nanoseconds  │ ~100 Gigabytes/s   │
 └──────────────────┴─────────────────┴───────────────────┴────────────────────┘
 ```
 
 Reading data from off-chip DRAM is **$200\times$ slower** than reading from on-chip SRAM registers. Writing intermediate tensor $z$ back to DRAM only to immediately read it back into registers one microsecond later is pure waste.
+
+Furthermore, on modern GPU architectures, launching an independent CUDA kernel incurs a driver dispatch overhead of $3\text{--}5\text{ microseconds}$. When a deep transformer executes dozens of small elementwise layers (LayerNorm, Residual Add, GELU, Softmax), CPU kernel launch overhead accumulates, leaving the GPU arithmetic units starved for work. In addition, when threads in a warp access non-contiguous memory, GPU hardware decomposes a single 128-byte memory transaction into multiple serialized memory requests, causing severe memory bank conflicts and stalling arithmetic pipelines.
 
 ---
 
@@ -53,7 +56,7 @@ Reading data from off-chip DRAM is **$200\times$ slower** than reading from on-c
 
 ```
 The Fused Kernel Execution Engine:
-1. Load h from DRAM directly into on-chip SRAM registers.
+1. Load h from DRAM directly into on-chip SRAM registers via coalesced 128-bit vector loads.
 2. In Registers: Compute z = h + b.
 3. In Registers: Compute a = GELU(z) immediately without ever touching DRAM!
 4. Write final activation a to DRAM ONCE.
@@ -88,23 +91,46 @@ Once a tile is loaded into fast on-chip memory, all $T^3$ multiply-accumulate op
 
 ---
 
-## The Pure TinyTorch Construction
+## Mathematical Formulations: DRAM Traffic Derivations for Tiled GEMM
+
+Let us formally derive the arithmetic traffic reduction achieved by $T \times T$ cache tiling.
+
+### 1. Naive GEMM DRAM Access Analysis
+For matrices $A \in \mathbb{R}^{M \times K}, B \in \mathbb{R}^{K \times N}, C \in \mathbb{R}^{M \times N}$ without caching:
+To compute each element $C_{ij} = \sum_k A_{ik} B_{kj}$, the inner loop reads the entire row $i$ of $A$ and entire column $j$ of $B$. If cache capacity is insufficient to retain $B$:
+
+$$\text{DRAM Reads}_{\text{Naive}} = M \cdot K + M \cdot N \cdot K \text{ elements}$$
+
+For $M = N = K = 1024$, total DRAM reads equal $1024^2 + 1024^3 \approx 1.07 \times 10^9\text{ floats} \approx 4.29\text{ GB}$.
+
+### 2. Tiled GEMM DRAM Access Analysis
+Dividing matrices into square tiles of size $T \times T$ that fit into fast on-chip memory of capacity $S_{\text{cache}} \ge 3 T^2 \times 4\text{ bytes}$:
+Each tile $A_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{N}{T}$ output tile columns.
+Each tile $B_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{M}{T}$ output tile rows.
+
+$$\text{DRAM Reads}_{\text{Tiled}} = \left( \frac{M}{T} \cdot \frac{N}{T} \cdot \frac{K}{T} \right) \times (2 T^2) = 2 \cdot \frac{M \cdot N \cdot K}{T} \text{ elements}$$
+
+The total DRAM traffic is reduced by a factor of:
+
+$$\text{Traffic Reduction Factor} = \frac{M N K}{2 M N K / T} = \frac{T}{2}$$
+
+For tile size $T = 64$, cache tiling achieves a **$32\times$ reduction in DRAM memory traffic**!
+
+---
+
+## Line-by-Line Reference Implementation
 
 We implement vectorized SIMD arithmetic, fused GELU activation, and cache-tiled matrix multiplication in TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/acceleration.py
 import numpy as np
-from typing import Optional
-from .tensor import Tensor
+from typing import Optional, Tuple
+from .autograd import Tensor
 
 def fused_gelu(x: Tensor) -> Tensor:
-    """Fused Gaussian Error Linear Unit (GELU) execution in a single memory pass.
-
-    Mathematical Formula:
-        GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-    """
+    """Fused Gaussian Error Linear Unit (GELU) execution in a single memory pass."""
     data = x.data
-    # Execute all algebraic operations in vectorized register passes
     sqrt_2_over_pi = np.float32(np.sqrt(2.0 / np.pi))
     coeff = np.float32(0.044715)
 
@@ -120,15 +146,7 @@ def fused_gelu(x: Tensor) -> Tensor:
     return out_tensor
 
 def tiled_matmul(A: Tensor, B: Tensor, tile_size: int = 64) -> Tensor:
-    """Cache-Tiled General Matrix Multiply (GEMM) optimizing L1/L2 cache residency.
-
-    Args:
-        A: Tensor of shape [M, K]
-        B: Tensor of shape [K, N]
-        tile_size: Spatial tile dimension fitting on-chip cache
-    Returns:
-        Result Tensor of shape [M, N]
-    """
+    """Cache-Tiled General Matrix Multiply (GEMM) optimizing L1/L2 cache residency."""
     a_data = A.data
     b_data = B.data
     M, K = a_data.shape
@@ -161,11 +179,26 @@ def tiled_matmul(A: Tensor, B: Tensor, tile_size: int = 64) -> Tensor:
 
 ---
 
-## The Production Bridge: PyTorch TorchInductor and Triton
+## Concrete Numerical Trace Table: Comparing Unfused vs. Fused Kernel Traffic
+
+Let us trace the exact memory bus traffic for an MLP block activation with batch $B=1$, sequence length $S=4$, and intermediate dimension $4D = 512$ ($4\text{ bytes/float}$):
+
+| Kernel Strategy | Execution Steps | Intermediate DRAM Writes | Intermediate DRAM Reads | Total Memory Bus Traffic | Arithmetic Intensity $I$ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Unfused (Separate Passes)** | 1. `z = Linear(x) + b`<br>2. `a = GELU(z)` | Write $\mathbf{z}$: $8,192\text{ B}$<br>Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $8,192\text{ B}$ | **$24,576\text{ Bytes}$** | $0.83\text{ FLOPs/B}$ |
+| **Fused (`fused_gelu`)** | 1. `a = FusedLinearGELU(x, b)` | Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: **$0\text{ Bytes}$ (In Registers)** | **$8,192\text{ Bytes}$** | **$2.50\text{ FLOPs/B}$ ($3.0\times$ higher)** |
+
+By eliminating intermediate DRAM roundtrips, Kernel Fusion triples the operational intensity and eliminates memory bus stalls.
+
+---
+
+## The Production Systems Bridge: PyTorch TorchInductor and Triton
 
 In PyTorch 2.0, operator fusion is automated by the **TorchInductor Compiler**:
 
 ```python
+import torch
+
 compiled_model = torch.compile(model, backend="inductor")
 ```
 

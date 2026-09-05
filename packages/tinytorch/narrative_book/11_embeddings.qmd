@@ -10,7 +10,7 @@ In this chapter, we engineer **Continuous Dense Embeddings (`Embedding`)** and *
 
 ---
 
-## The Crisis: The Geometry of Meaning and Temporal Blindness
+## Systems Problem Motivation: The Geometry of Meaning and Temporal Blindness
 
 When handling categorical variables in computer science, the simplest representation is a **one-hot vector** $\mathbf{e}_i \in \{0, 1\}^V$.
 
@@ -78,14 +78,38 @@ Why does this formula work?
 
 ---
 
-## The Pure TinyTorch Construction
+## Mathematical Formulations: Invariant Properties of Sinusoidal Encodings
+
+Let us formally prove the relative position property of Vaswani sinusoidal encodings.
+
+### Theorem: Linear Relative Translation
+For any fixed token offset $k \in \mathbb{Z}$, the positional vector at position $\text{pos} + k$ is a linear projection of the positional vector at position $\text{pos}$:
+
+$$PE_{\text{pos} + k} = \mathbf{M}_k \cdot PE_{\text{pos}}$$
+
+*Proof:* Let $\omega_i = \frac{1}{10000^{2i/D}}$. For dimension pair $(2i, 2i+1)$:
+
+$$PE_{(\text{pos} + k, 2i)} = \sin(\omega_i (\text{pos} + k)) = \sin(\omega_i \text{pos}) \cos(\omega_i k) + \cos(\omega_i \text{pos}) \sin(\omega_i k)$$
+
+$$PE_{(\text{pos} + k, 2i+1)} = \cos(\omega_i (\text{pos} + k)) = \cos(\omega_i \text{pos}) \cos(\omega_i k) - \sin(\omega_i \text{pos}) \sin(\omega_i k)$$
+
+In matrix form:
+
+$$\begin{bmatrix} PE_{(\text{pos} + k, 2i)} \\ PE_{(\text{pos} + k, 2i+1)} \end{bmatrix} = \begin{bmatrix} \cos(\omega_i k) & \sin(\omega_i k) \\ -\sin(\omega_i k) & \cos(\omega_i k) \end{bmatrix} \begin{bmatrix} PE_{(\text{pos}, 2i)} \\ PE_{(\text{pos}, 2i+1)} \end{bmatrix}$$
+
+The transformation matrix $\mathbf{R}(\omega_i k)$ is an orthogonal 2D rotation matrix depending solely on relative distance $k$, not absolute coordinate $\text{pos}$.
+
+---
+
+## Line-by-Line Reference Implementation
 
 We implement the `Embedding` layer and `PositionalEncoding` engine in pure TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/embeddings.py
 import numpy as np
 from typing import List, Optional
-from .tensor import Tensor
+from .autograd import Tensor
 from .layers import Layer
 
 class Embedding(Layer):
@@ -103,13 +127,7 @@ class Embedding(Layer):
         return [self.weight]
 
     def forward(self, x: Tensor) -> Tensor:
-        """Extract embedding vectors for input integer token indices.
-
-        Args:
-            x: Tensor of integer token IDs with shape [batch_size, seq_len]
-        Returns:
-            Tensor of continuous embeddings with shape [batch_size, seq_len, embedding_dim]
-        """
+        """Extract embedding vectors for input integer token indices."""
         indices = x.data.astype(np.int64)
 
         # Zero-compute DRAM row extraction via NumPy indexing
@@ -119,11 +137,8 @@ class Embedding(Layer):
         out_tensor._op = "Embedding"
         out_tensor._parents = [self.weight]
         return out_tensor
-```
 
-### Implementing Geometric Sinusoidal Positional Encodings
 
-```python
 def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
     """Precompute static Vaswani sinusoidal positional encodings table."""
     pe = np.zeros((max_seq_len, embed_dim), dtype=np.float32)
@@ -138,6 +153,7 @@ def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
 
     return Tensor(pe, requires_grad=False)
 
+
 class PositionalEncoding(Layer):
     """Injects temporal positional waveforms into token embedding vectors."""
     def __init__(self, max_seq_len: int, embed_dim: int, dropout: float = 0.0):
@@ -146,20 +162,12 @@ class PositionalEncoding(Layer):
         self.dropout = dropout
 
     def parameters(self) -> List[Tensor]:
-        return []  # Sinusoidal encodings have zero learnable parameters
+        return []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Superimpose positional frequencies onto input embeddings.
-
-        Args:
-            x: Input embeddings of shape [batch_size, seq_len, embed_dim]
-        Returns:
-            Position-encoded embeddings of shape [batch_size, seq_len, embed_dim]
-        """
+        """Superimpose positional frequencies onto input embeddings."""
         seq_len = x.data.shape[1]
-
-        # Slice static positional table to match current sequence length
-        pos_slice = self.pe.data[:seq_len, :]  # Shape: [seq_len, embed_dim]
+        pos_slice = self.pe.data[:seq_len, :]
 
         # Additive broadcasting across batch dimension
         out_data = x.data + pos_slice
@@ -172,7 +180,36 @@ class PositionalEncoding(Layer):
 
 ---
 
-## The Production Bridge: PyTorch `nn.Embedding` and Rotary Positional Encodings (RoPE)
+## Concrete Numerical Trace Table: Tracing Gather & Positional Waveforms
+
+Let us trace a concrete numeric example of token gathering and positional wave superposition for sequence $[2, 0, 3]$ with embedding dimension $D = 4$:
+
+### Step 1: Embedding Table $W_{\text{emb}} \in \mathbb{R}^{4 \times 4}$
+
+$$\mathbf{W}_{\text{emb}} = \begin{bmatrix}
++0.50 & -0.20 & +0.10 & +0.80 \\
+-0.10 & +0.40 & -0.30 & +0.20 \\
++1.20 & +0.10 & -0.50 & -0.40 \\
++0.30 & -0.90 & +0.70 & +0.00
+\end{bmatrix}$$
+
+### Step 2: Frequencies for $D = 4$
+- $\omega_0 = \frac{1}{10000^{0/4}} = 1.0$
+- $\omega_1 = \frac{1}{10000^{2/4}} = \frac{1}{\sqrt{10000}} = 0.01$
+
+### Step 3: Numerical Trace Table
+
+| Token Position $\text{pos}$ | Input Token ID | Gathered Embedding Row $\mathbf{x}_{\text{tok}}$ | Positional Waveform $PE_{\text{pos}}$ | Combined State $\mathbf{x}_{\text{tok}} + PE_{\text{pos}}$ |
+| :--- | :--- | :--- | :--- | :--- |
+| **$\text{pos} = 0$** | $\text{ID} = 2$ | $[+1.20, +0.10, -0.50, -0.40]$ | $[\sin(0), \cos(0), \sin(0), \cos(0)] = [0.00, 1.00, 0.00, 1.00]$ | **$[+1.20, +1.10, -0.50, +0.60]$** |
+| **$\text{pos} = 1$** | $\text{ID} = 0$ | $[+0.50, -0.20, +0.10, +0.80]$ | $[\sin(1), \cos(1), \sin(0.01), \cos(0.01)] = [0.84, 0.54, 0.01, 1.00]$ | **$[+1.34, +0.34, +0.11, +1.80]$** |
+| **$\text{pos} = 2$** | $\text{ID} = 3$ | $[+0.30, -0.90, +0.70, +0.00]$ | $[\sin(2), \cos(2), \sin(0.02), \cos(0.02)] = [0.91, -0.42, 0.02, 1.00]$| **$[+1.21, -1.32, +0.72, +1.00]$** |
+
+The resulting activation tensor carries both the rich continuous semantics of the token dictionary and the unique temporal timestamp of its sequence coordinate.
+
+---
+
+## The Production Systems Bridge: PyTorch `nn.Embedding` and Rotary Positional Encodings (RoPE)
 
 In modern production language models (such as LLaMA 3 and Mistral), sinusoidal additions have been evolved into **Rotary Positional Encodings (RoPE)**:
 

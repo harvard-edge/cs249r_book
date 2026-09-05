@@ -1,12 +1,12 @@
-# Activations: Breaking the Linear Collapse Wall {#sec-activations}
+# Activation Functions and Non-Linear Manifolds {#sec-activations}
 
-In Chapter 1, we constructed the multi-dimensional tensor, conquering the memory allocation and strided layout of numerical data. With high-performance matrix multiplication ($Y = XW^T$) in hand, the intuitive next step in building a "deep" neural network is simply to chain multiple matrix multiplications together:
+In Chapter 1, we constructed the `Tensor` abstraction, conquering the physical memory layout and strided coordinate mapping of multi-dimensional numerical data. With high-performance matrix multiplication ($Y = XW^T + b$) in hand, the intuitive next step in building a "deep" neural network is to chain multiple linear transformations together in sequence:
 
-$$h_1 = X W_1, \qquad h_2 = h_1 W_2, \qquad \dots, \qquad y = h_{L-1} W_L$$
+$$\mathbf{h}_1 = \mathbf{X} \mathbf{W}_1 + \mathbf{b}_1, \qquad \mathbf{h}_2 = \mathbf{h}_1 \mathbf{W}_2 + \mathbf{b}_2, \qquad \dots, \qquad \mathbf{y} = \mathbf{h}_{L-1} \mathbf{W}_L + \mathbf{b}_L$$
 
-Yet if you construct this multi-layer network and train it for a thousand epochs, you will discover an astonishing mathematical failure: **a 100-layer linear network has no more expressive power than a single-layer linear regression**.
+Yet if you construct this multi-layer network and train it for a thousand epochs, you will discover a catastrophic mathematical failure: **a 100-layer linear network has no more expressive power than a single-layer linear regression**.
 
-In this chapter, we engineer **Non-Linear Activation Functions (`ReLU`, `Sigmoid`, `Tanh`, `GELU`)**. We provide the mathematical proof of linear collapse, explore why historical sigmoid activations caused the vanishing gradient crisis, and implement the modern Gaussian Error Linear Unit (`GELU`) that powers the transformer architecture.
+This chapter examines how machine learning systems break this fundamental limitation. We walk through the mathematical proof of **associative linear collapse**, analyze the gradient propagation dynamics of the **Activation Zoo** (`Sigmoid`, `Tanh`, `ReLU`, `GELU`), implement the complete TinyTorch activation subsystem, and evaluate the memory-bandwidth bottlenecks that govern elementwise kernel execution on modern accelerator hardware.
 
 ![The Activation Zoo: Breaking Linear Hyperplanes into Warped Non-Linear Decision Manifolds](assets/images/diagrams/02_activations-diag-1.svg){#fig-activation-zoo}
 
@@ -14,107 +14,235 @@ In this chapter, we engineer **Non-Linear Activation Functions (`ReLU`, `Sigmoid
 
 ## The Crisis: The Mathematical Proof of Linear Collapse
 
-Why can a network composed entirely of linear matrix multiplications never learn non-linear patterns (such as computer vision, speech recognition, or human language)?
+In Chapter 1, we established how contiguous 1D memory buffers stream high-throughput General Matrix Multiplications ($Y = XW^T + b$) across hardware cache lines.
 
-Let us examine a deep network composed of $L$ consecutive linear layers:
+When systems engineers construct deep learning hardware pipelines, stacking 100 linear layers seems to promise immense computational expressiveness. But if you train such a network on a modern GPU cluster, you will discover a catastrophic failure of systems efficiency: **a 100-layer deep linear network burns gigabytes of memory bandwidth and billions of FLOPs of compute to learn nothing more than a single-layer linear regression**.
 
-$$y = \left( \dots \left( \left( X W_1 \right) W_2 \right) \dots \right) W_L$$
+### The Systems Bottleneck of Linear Stacking
 
-Because matrix multiplication is strictly **associative** ($A(BC) = (AB)C$), we can group all $L$ weight matrices together into a single combined matrix product:
+To understand why this is a systems disaster, consider the hardware execution profile of an $L$-layer linear network on an NVIDIA H100 GPU:
+- **Compute Overhead**: The streaming multiprocessors (SMs) execute $L$ consecutive General Matrix Multiply (GEMM) kernels, performing $2 \times B \times \sum_{k=1}^L D_k D_{k+1}$ floating-point operations.
+- **DRAM Traffic**: On every forward step, the memory bus transfers millions of weight parameters from High Bandwidth Memory (HBM3) to on-chip SRAM cache lines, consuming tens of gigabytes per second of memory bandwidth.
+- **VRAM Footprint**: Intermediate activation tensors $\mathbf{h}_1, \dots, \mathbf{h}_{L-1}$ must be allocated and retained in device memory for backpropagation.
 
-$$W_{\text{combined}} = W_1 \cdot W_2 \cdot W_3 \dots W_L$$
+Yet all of this hardware resource expenditure is mathematically redundant.
 
-If $W_1 \in \mathbb{R}^{D_{\text{in}} \times H_1}$ and $W_L \in \mathbb{R}^{H_{L-1} \times D_{\text{out}}}$, the composite product $W_{\text{combined}}$ is simply a single matrix of shape $\mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$.
+### The Associative Linear Collapse Proof
 
-```
-The Associative Linear Collapse Proof:
-Step 1: h_1 = X · W_1
-Step 2: h_2 = h_1 · W_2 = (X · W_1) · W_2 = X · (W_1 · W_2)
-Step 3: y   = h_2 · W_3 = (X · (W_1 · W_2)) · W_3 = X · (W_1 · W_2 · W_3)
+Let us examine the composite mathematical mapping of an input matrix $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ through $L$ consecutive affine layers:
 
-Result: y = X · W_effective  where W_effective = W_1 · W_2 · W_3
-```
+$$\mathbf{y} = \left( \dots \left( \left( \mathbf{X}\mathbf{W}_1 + \mathbf{b}_1 \right)\mathbf{W}_2 + \mathbf{b}_2 \right) \dots \right)\mathbf{W}_L + \mathbf{b}_L$$
 
-No matter how many millions of parameters or how many layers you stack, the entire computational graph collapses into a single affine hyper-plane. A 100-layer deep linear network cannot even solve the basic logical XOR problem (which we will explore in Milestone I).
+Because matrix multiplication is strictly **associative** ($\mathbf{A}(\mathbf{B}\mathbf{C}) = (\mathbf{A}\mathbf{B})\mathbf{C}$) and distributive over addition, we can expand the two-layer composition:
 
-To build deep intelligence, we must break the associative chain. We must insert a **non-linear mathematical gate** $\sigma(\cdot)$ after every linear transformation:
+$$\mathbf{h}_2 = (\mathbf{X}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{X}(\mathbf{W}_1\mathbf{W}_2) + (\mathbf{b}_1\mathbf{W}_2 + \mathbf{b}_2)$$
 
-$$h_1 = \sigma(X W_1), \qquad h_2 = \sigma(h_1 W_2), \qquad y = \sigma(h_{L-1} W_L)$$
+By mathematical induction across all $L$ layers, the entire multi-layer network collapses into a single affine transformation:
 
-Because $\sigma(A \cdot B) \ne \sigma(A) \cdot \sigma(B)$, the layers cannot be merged. The network can now warp, fold, and carve non-linear decision manifolds in high-dimensional space.
+$$\mathbf{y} = \mathbf{X} \mathbf{W}_{\text{effective}} + \mathbf{b}_{\text{effective}}$$
 
----
+where the effective weight matrix and effective bias vector are defined as:
 
-## The Mental Model: From Biological Thresholds to Smooth Quantum Gating
+$$\mathbf{W}_{\text{effective}} = \prod_{k=1}^L \mathbf{W}_k = \mathbf{W}_1 \mathbf{W}_2 \dots \mathbf{W}_L \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$$
 
-Over the history of artificial intelligence, four major activation functions have defined the evolution of deep learning:
+$$\mathbf{b}_{\text{effective}} = \sum_{k=1}^L \left( \mathbf{b}_k \prod_{j=k+1}^L \mathbf{W}_j \right) \in \mathbb{R}^{D_{\text{out}}}$$
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       THE EVOLUTION OF ACTIVATION FUNCTIONS                 │
-├─────────────┬───────────────────────────────┬───────────────────────────────┤
-│ Activation  │ Mathematical Formulation      │ Systems / Mathematical Impact │
-├─────────────┼───────────────────────────────┼───────────────────────────────┤
-│ 1. Sigmoid  │ σ(x) = 1 / (1 + exp(-x))      │ Bounded (0, 1). Vanishing     │
-│             │                               │ gradients for |x| > 4.        │
-├─────────────┼───────────────────────────────┼───────────────────────────────┤
-│ 2. Tanh     │ tanh(x) = (e^x - e^-x)/(e^x+e^-x) Zero-centered (-1, +1).     │
-│             │                               │ Vanishing gradients for |x|>3.│
-├─────────────┼───────────────────────────────┼───────────────────────────────┤
-│ 3. ReLU     │ ReLU(x) = max(0, x)           │ Piecewise linear. Gradient=1  │
-│             │                               │ for x>0 (Rescued deep nets!). │
-├─────────────┼───────────────────────────────┼───────────────────────────────┤
-│ 4. GELU     │ GELU(x) = x · Φ(x)            │ Smooth, probabilistic gating. │
-│             │ ≈ 0.5x(1 + tanh(√(2/π)(x+...))) Modern transformer standard.  │
-└─────────────┴───────────────────────────────┴───────────────────────────────┘
-```
+No matter how many hidden layers or millions of parameters you stack, the composite function remains an affine transformation ($\mathbb{R}^{D_{\text{in}}} \to \mathbb{R}^{D_{\text{out}}}$). Its decision boundaries are flat hyperplanes. A 100-layer linear network cannot even separate the non-linear manifold of a 4-sample XOR truth table.
 
-### The Vanishing Gradient Crisis of Sigmoid and Tanh
+### Code: Empirical Demonstration of Linear Collapse
 
-In the 1990s, networks relied primarily on the **Sigmoid** function $\sigma(x) = \frac{1}{1 + e^{-x}}$.
-
-The derivative of the sigmoid function is:
-
-$$\sigma'(x) = \sigma(x) (1 - \sigma(x))$$
-
-The maximum possible value of $\sigma'(x)$ occurs at $x = 0$, where $\sigma'(0) = 0.5 \times 0.5 = \mathbf{0.25}$.
-
-```
-Vanishing Gradients in a 10-Layer Sigmoid Network:
-During backpropagation, gradients multiply across layers by the chain rule:
-dL/dh_1 = dL/dh_10 * (0.25) * (0.25) * ... * (0.25) = dL/dh_10 * (0.25)^10 ≈ dL/dh_10 * 9.5e-7
-
-The loss error completely vanishes before reaching the first hidden layer! ❌
-```
-
-### The ReLU Revolution (Nair & Hinton, 2010)
-
-The **Rectified Linear Unit (ReLU)** rescued deep learning by defining a simple piecewise linear function:
-
-$$\text{ReLU}(x) = \max(0, x)$$
-
-For all positive activations ($x > 0$), the local derivative is exactly $\mathbf{1.0}$. Gradients propagate through 100 layers with zero attenuation.
-
-### The GELU Standard in Transformers (Hendrycks & Gimpel, 2016)
-
-While ReLU makes a hard binary decision ($x > 0$), the **Gaussian Error Linear Unit (GELU)** weights inputs by their probability under a standard Gaussian cumulative distribution:
-
-$$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot P(X \le x) \quad \text{where } X \sim \mathcal{N}(0, 1)$$
-
-GELU provides a smooth, non-monotonic curvature: for small negative values ($x \in [-2, 0]$), it allows a tiny negative gradient to pass through rather than hard-clamping to zero, preventing "dead neuron" syndrome.
-
----
-
-## The Pure TinyTorch Construction
-
-We implement the complete suite of non-linear activations in TinyTorch:
+We can verify this collapse directly using TinyTorch tensors:
 
 ```python
 import numpy as np
-from .tensor import Tensor
+from tinytorch.core.tensor import Tensor
+
+def demonstrate_linear_collapse():
+    # 1. Create batch input X (Batch=2, Dim=2)
+    X = Tensor([[1.0, 2.0], [3.0, 4.0]])
+
+    # 2. Define weights and biases for a 3-layer deep linear network
+    W1 = Tensor([[2.0, 0.0], [1.0, 3.0]])  # Shape (2, 2)
+    b1 = Tensor([0.5, -0.5])
+
+    W2 = Tensor([[1.0, 2.0], [3.0, 1.0]])  # Shape (2, 2)
+    b2 = Tensor([1.0, 0.0])
+
+    W3 = Tensor([[2.0, 1.0], [0.0, 2.0]])  # Shape (2, 2)
+    b3 = Tensor([-1.0, 1.0])
+
+    # 3. Execute 3-layer sequential forward pass
+    h1 = (X @ W1) + b1
+    h2 = (h1 @ W2) + b2
+    y_deep = (h2 @ W3) + b3
+
+    # 4. Compute analytically collapsed effective parameters
+    W_eff = W1 @ W2 @ W3
+    b_eff = ((b1 @ W2 + b2) @ W3) + b3
+
+    # 5. Execute single-layer collapsed forward pass
+    y_collapsed = (X @ W_eff) + b_eff
+
+    # 6. Verify exact bitwise numerical equivalence
+    diff = np.max(np.abs(y_deep.data - y_collapsed.data))
+    print(f"Maximum discrepancy between 3-layer net and 1-layer collapse: {diff:.8e}")
+    assert diff < 1e-6, "Linear collapse verification failed!"
+
+demonstrate_linear_collapse()
+```
+
+### Concrete Numerical Trace: Multi-Layer vs. Collapsed Output
+
+To trace the intermediate numbers through memory, consider a single input vector $\mathbf{x} = [1.0, 2.0]$:
+
+| Computation Stage | Mathematical Operation | Evaluated Intermediate Values | Memory Footprint (Floats) |
+| :--- | :--- | :--- | :---: |
+| **Layer 1 Output** ($\mathbf{h}_1$) | $[1, 2] \begin{bmatrix} 2 & 0 \\ 1 & 3 \end{bmatrix} + [0.5, -0.5]$ | $[4.0, 6.0] + [0.5, -0.5] = [4.5, 5.5]$ | 2 floats |
+| **Layer 2 Output** ($\mathbf{h}_2$) | $[4.5, 5.5] \begin{bmatrix} 1 & 2 \\ 3 & 1 \end{bmatrix} + [1.0, 0.0]$ | $[21.0, 14.5] + [1.0, 0.0] = [22.0, 14.5]$ | 2 floats |
+| **Layer 3 Output** ($\mathbf{y}_{\text{deep}}$) | $[22.0, 14.5] \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} + [-1.0, 1.0]$ | $[44.0, 51.0] + [-1.0, 1.0] = \mathbf{[43.0, 52.0]}$ | 2 floats |
+| **Collapsed Weights** ($\mathbf{W}_{\text{eff}}$) | $\mathbf{W}_1 \mathbf{W}_2 \mathbf{W}_3$ | $\begin{bmatrix} 2 & 0 \\ 1 & 3 \end{bmatrix} \begin{bmatrix} 1 & 2 \\ 3 & 1 \end{bmatrix} \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} = \begin{bmatrix} 4 & 10 \\ 20 & 15 \end{bmatrix}$ | 4 floats |
+| **Collapsed Bias** ($\mathbf{b}_{\text{eff}}$) | $((\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2) \mathbf{W}_3) + \mathbf{b}_3$ | $([-1.0, 0.5] \mathbf{W}_3) + [-1.0, 1.0] = [-3.0, 1.0]$ | 2 floats |
+| **Collapsed Output** ($\mathbf{y}_{\text{collapsed}}$) | $[1, 2] \begin{bmatrix} 4 & 10 \\ 20 & 15 \end{bmatrix} + [-3.0, 1.0]$ | $[44.0, 40.0] + [-1.0, 1.0] = \mathbf{[43.0, 52.0]}$ | 2 floats |
+
+Both computational paths evaluate to the identical output vector $[43.0, 52.0]$. Stacking linear layers achieves zero increase in model capacity while tripling memory allocations and arithmetic latency.
+
+### The Production Compiler Bridge: Weight Folding
+
+In production machine learning systems, optimizing graph compilers like **TorchInductor** (`torch.compile`) and **TensorRT** exploit linear associativity through an optimization pass called **Weight Folding** (or Linear Operator Fusion).
+
+When a graph compiler encounters consecutive linear transformations without an intervening non-linear activation:
+
+```python
+# Unoptimized PyTorch module
+model = torch.nn.Sequential(
+    torch.nn.Linear(4096, 4096, bias=False),
+    torch.nn.Linear(4096, 4096, bias=False)
+)
+```
+
+The compiler does not generate two separate CUDA GEMM kernel launches at runtime. Instead, during graph compilation, it pre-multiplies the static weight tensors ($\mathbf{W}_{\text{eff}} = \mathbf{W}_1 \mathbf{W}_2$) and replaces the entire multi-layer block with a single `at::linear` kernel launch, cutting DRAM memory bandwidth and GPU execution latency by $50\%$.
+
+To prevent this collapse and unlock the universal function approximation power of deep neural networks, the runtime must interleave non-linear mathematical operations between successive affine transformations:
+
+$$\mathbf{h}_1 = \sigma(\mathbf{X}\mathbf{W}_1 + \mathbf{b}_1), \qquad \mathbf{h}_2 = \sigma(\mathbf{h}_1\mathbf{W}_2 + \mathbf{b}_2)$$
+
+Because non-linear activation functions do not commute with matrix multiplication ($\sigma(\mathbf{X}\mathbf{W}) \neq \sigma(\mathbf{X})\mathbf{W}$), they break the associative chain, enabling deep networks to warp coordinate spaces and isolate arbitrarily complex non-linear decision manifolds.
+
+---
+
+## The Activation Zoo: Mathematical Derivatives and Gradient Flow
+
+Having established that we must insert a non-linear function $\sigma(\cdot)$ after every linear layer, a fundamental systems and mathematical question arises: **which mathematical function should we choose?**
+
+In a machine learning framework, an activation function must satisfy two strict criteria:
+1. **Mathematical Criterion (Gradient Flow)**: The function must possess well-behaved first derivatives $\sigma'(x)$ that allow loss gradients to propagate backwards through dozens of layers during backpropagation without exploding or decaying to zero.
+2. **Systems Criterion (Arithmetic Efficiency)**: The function should be computable using fast SIMD / vector arithmetic instructions without causing thread divergence or excessive transcendental function stalls on GPU streaming multiprocessors.
+
+| Activation Function | Mathematical Formulation | Derivative $\sigma'(x)$ | Systems & ML Tradeoff |
+| :--- | :--- | :--- | :--- |
+| **1. Sigmoid** | $\sigma(x) = \frac{1}{1 + e^{-x}}$<br>Domain: $(-\infty, +\infty)$, Range: $(0, 1)$ | $\sigma(x)(1 - \sigma(x))$<br>Peak: $0.25$ | Saturated gradients for $\|x\| > 4$; severe vanishing error in deep chains |
+| **2. Tanh** | $\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}$<br>Domain: $(-\infty, +\infty)$, Range: $(-1, +1)$ | $1 - \tanh^2(x)$<br>Peak: $1.0$ | Zero-centered, but saturates for $\|x\| > 3$; expensive transcendental exp |
+| **3. ReLU** | $\max(0, x)$<br>Domain: $(-\infty, +\infty)$, Range: $[0, +\infty)$ | $1$ if $x > 0$ else $0$<br>Binary gate | Zero transcendentals (1 SIMD cycle); risk of permanent "Dying ReLU" |
+| **4. GELU** | $x \cdot \Phi(x) = x \cdot P(X \le x)$<br>Domain: $(-\infty, +\infty)$, Range: $[-0.17, +\infty)$ | $\Phi(x) + x \phi(x)$<br>Continuous | Smooth non-monotonic gating; eliminates dead neurons; modern LLM standard |
+
+### 1. The Sigmoid Activation & The Vanishing Gradient Crisis
+
+Historically, early neural networks adopted the **Sigmoid** (logistic) function, inspired by biological neuron firing thresholds:
+
+$$\sigma(x) = \frac{1}{1 + e^{-x}}$$
+
+Let us calculate the first derivative with respect to $x$:
+
+$$\sigma'(x) = \frac{d}{dx} (1 + e^{-x})^{-1} = -(1 + e^{-x})^{-2} (-e^{-x}) = \frac{1}{1 + e^{-x}} \cdot \frac{e^{-x}}{1 + e^{-x}} = \sigma(x) (1 - \sigma(x))$$
+
+Look closely at the maximum value of $\sigma'(x)$: since $\sigma(x) \in (0, 1)$, the quadratic $\sigma(1 - \sigma)$ reaches its mathematical peak at $\sigma(x) = 0.5$ (where $x = 0$):
+
+$$\sigma'(0) = 0.5 \times (1 - 0.5) = \mathbf{0.25}$$
+
+For any input where $|x| > 4$, the output saturates near $0.0$ or $1.0$, driving the derivative $\sigma'(x) < 0.01$.
+
+During backpropagation in an $L$-layer network, the chain rule multiplies local derivatives across layers:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{h}_1} = \frac{\partial \mathcal{L}}{\partial \mathbf{h}_L} \prod_{k=1}^{L-1} \left( \mathbf{W}_{k+1}^T \cdot \sigma'(\mathbf{z}_k) \right)$$
+
+In a 10-layer network, even under ideal conditions ($x = 0$ at every layer), the gradient signal is attenuated by at least:
+
+$$(0.25)^{10} \approx 9.53 \times 10^{-7}$$
+
+The gradient signal completely vanishes before reaching the early layers of the network, preventing deep models from learning.
+
+### 2. The Tanh Activation
+
+The **Hyperbolic Tangent (Tanh)** activation rescales the sigmoid curve to produce zero-centered outputs in $(-1, +1)$:
+
+$$\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} = 2\sigma(2x) - 1$$
+
+Its derivative is:
+
+$$\frac{d}{dx}\tanh(x) = 1 - \tanh^2(x)$$
+
+At $x = 0$, $\tanh'(0) = 1.0$, providing a stronger gradient signal than sigmoid. However, for $|x| > 3$, $\tanh(x)$ rapidly approaches $\pm 1.0$, causing $\tanh'(x) \to 0$ and re-triggering the vanishing gradient crisis in networks deeper than 15 layers.
+
+### 3. The ReLU Revolution
+
+In 2010, the **Rectified Linear Unit (ReLU)** transformed deep learning by replacing transcendental exponential functions with a simple piecewise linear clamp:
+
+$$\text{ReLU}(x) = \max(0, x)$$
+
+Its derivative is piecewise constant:
+
+$$\text{ReLU}'(x) = \begin{cases} 1 & \text{if } x > 0 \\ 0 & \text{if } x \le 0 \end{cases}$$
+
+For all active neurons ($x > 0$), the local derivative is exactly **$1.0$**. The gradient flows through 100 consecutive layers without any mathematical attenuation:
+
+$$(1.0)^{100} = 1.0$$
+
+#### The Systems Advantage of ReLU
+On modern CPU and GPU architectures, ReLU requires zero transcendental math units. It maps directly to a single vector instruction:
+- **x86 AVX-512**: `_mm512_max_ps(a, zero)` (1 cycle latency).
+- **ARM Neon**: `vmaxq_f32(a, zero)` (1 cycle latency).
+- **NVIDIA CUDA PTX**: `max.f32 %r0, %r1, 0.0` (single ALU cycle).
+
+#### The "Dying ReLU" Failure Mode
+If a neuron receives a large negative bias update such that its input $x < 0$ for all training samples in the dataset, its output becomes $0.0$ and its gradient becomes $0.0$ permanently. The neuron can never recover, becoming a "dead neuron" that wastes parameter memory.
+
+### 4. The GELU Standard in Transformers
+
+To prevent dead neurons while preserving smooth gradient highways, modern Large Language Models (GPT-2, GPT-4, BERT, LLaMA) adopt the **Gaussian Error Linear Unit (GELU)** (Hendrycks & Gimpel, 2016).
+
+Rather than gating activations by a deterministic sign check ($x > 0$), GELU weights inputs by their probability under a standard normal distribution $\mathcal{N}(0, 1)$:
+
+$$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot P(X \le x) = x \cdot \frac{1}{2} \left[ 1 + \text{erf}\left( \frac{x}{\sqrt{2}} \right) \right]$$
+
+where $\text{erf}(z) = \frac{2}{\sqrt{\pi}} \int_0^z e^{-t^2} dt$ is the Gaussian error function.
+
+#### Fast Polynomial Approximation
+Because evaluating the exact integral $\text{erf}(z)$ in hardware requires iterative numerical quadrature, production frameworks use the high-precision Taylor series approximation:
+
+$$\text{GELU}(x) \approx 0.5 x \left( 1 + \tanh\left( \sqrt{\frac{2}{\pi}} \left( x + 0.044715 x^3 \right) \right) \right)$$
+
+```
+GELU Curvature Properties:
+1. For x > 2:   GELU(x) ≈ x (Identical to ReLU gradient highway)
+2. For x = 0:   GELU(0) = 0
+3. For x ∈ [-2, 0]: Smooth negative curvature with a global minimum at x ≈ -0.17 (GELU(-0.17) ≈ -0.17)
+4. For x < -3:  GELU(x) → 0 smoothly
+```
+
+Because the curvature is non-monotonic and differentiable everywhere, small negative signals continue to receive non-zero gradients, completely eliminating the "Dying ReLU" failure mode while enabling stable optimization in deep transformer blocks.
+
+---
+
+## Reference Implementation: The Activation Subsystem
+
+We construct the complete activation subsystem in TinyTorch. Each activation derives from a common `Activation` base class:
+
+```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
 
 class Activation:
-    """Base class for non-linear activation functions."""
+    """Base class for elementwise non-linear activation operators."""
     def forward(self, x: Tensor) -> Tensor:
         raise NotImplementedError
 
@@ -131,9 +259,12 @@ class ReLU(Activation):
         return out_tensor
 
 class Sigmoid(Activation):
-    """Sigmoid Activation: 1 / (1 + exp(-x))."""
+    """Sigmoid Activation: 1 / (1 + exp(-x)).
+
+    Includes IEEE 754 numerical clipping to prevent float32 overflow.
+    """
     def forward(self, x: Tensor) -> Tensor:
-        # Numerically stable clipping to prevent overflow
+        # Prevent float32 exp(-x) overflow when x < -88.0
         clipped_x = np.clip(x.data, -88.0, 88.0)
         out_data = 1.0 / (1.0 + np.exp(-clipped_x))
         out_tensor = Tensor(out_data)
@@ -151,9 +282,8 @@ class Tanh(Activation):
         return out_tensor
 
 class GELU(Activation):
-    """Gaussian Error Linear Unit (GPT-2 standard approximation)."""
+    """Gaussian Error Linear Unit (GPT-2 standard tanh approximation)."""
     def forward(self, x: Tensor) -> Tensor:
-        # Fast Taylor approximation used in production transformers:
         # 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         s = np.sqrt(2.0 / np.pi)
         x_cubed = x.data ** 3
@@ -166,49 +296,63 @@ class GELU(Activation):
         return out_tensor
 ```
 
+### Code Commentary and Systems Invariants
+
+1. **Memory Preservation**: Each activation allocates an output tensor of identical shape and contiguity to the input tensor.
+2. **IEEE 754 Stability in Sigmoid**: In single-precision IEEE 754 float32, the maximum finite exponent is $e^{88.72}$. For any input $x < -88.72$, naive computation of $e^{-x} = e^{+89}$ overflows to `+inf`, causing `1.0 / (1.0 + inf)` to return `NaN` or unhandled division faults. Clipping $x \in [-88.0, +88.0]$ guarantees mathematical precision without numeric overflow.
+3. **Polynomial Vectorization in GELU**: The constant $\sqrt{2/\pi} \approx 0.79788456$ and Taylor coefficient $0.044715$ are broadcast across vector registers, enabling single-pass fused evaluation without conditional branching.
+
 ---
 
-## The Production Bridge: Arithmetic Intensity of Elementwise Kernels
+## Numerical Trace: Activation Evaluation and Gradient Attenuation
 
-In systems performance engineering, non-linear activations are classified as **Elementwise Operators**.
+Let us trace the forward outputs and local gradients for an input vector containing positive, zero, and negative values:
 
-Let us calculate the **Arithmetic Intensity** ($I = \text{FLOPs} / \text{Bytes Transferred}$) of a `ReLU` kernel on an NVIDIA H100 GPU:
-- **Memory Read**: Load 32-bit float $x$ from DRAM ($4$ bytes).
+$$\mathbf{x} = [-3.0, -1.0, -0.17, 0.0, 1.0, 3.0]$$
+
+| Input $x$ | Sigmoid $\sigma(x)$ | $\sigma'(x)$ | ReLU $(x)$ | $\text{ReLU}'(x)$ | GELU $(x)$ | $\text{GELU}'(x)$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **$-3.0$** | $0.0474$ | $0.0452$ *(decay)* | $0.0000$ | $0.0000$ *(dead)* | $-0.0041$ | $-0.0051$ |
+| **$-1.0$** | $0.2689$ | $0.1966$ | $0.0000$ | $0.0000$ *(dead)* | $-0.1587$ | $-0.0833$ |
+| **$-0.17$** | $0.4576$ | $0.2482$ | $0.0000$ | $0.0000$ *(dead)* | $\mathbf{-0.1700}$ *(min)* | $+0.0000$ |
+| **$0.0$** | $0.5000$ | $\mathbf{0.2500}$ *(peak)* | $0.0000$ | $0.0000$ | $0.0000$ | $+0.5000$ |
+| **$+1.0$** | $0.7311$ | $0.1966$ | $1.0000$ | $\mathbf{1.0000}$ | $0.8413$ | $+1.0833$ |
+| **$+3.0$** | $0.9526$ | $0.0452$ *(decay)* | $3.0000$ | $\mathbf{1.0000}$ | $2.9960$ | $+1.0051$ |
+
+### Systems Insights from the Trace Table
+
+1. **Dead Zones in ReLU**: At $x = -3.0, -1.0, -0.17$, ReLU output and gradient are clamped to zero. If inputs remain negative, no learning occurs.
+2. **Smooth Non-Monotonicity in GELU**: At $x = -0.17$, GELU reaches its global minimum output of $-0.17$, passing negative curvature through the computational graph. At $x = +3.0$, its gradient is $\approx 1.0051$, acting as an ideal linear highway for positive signals.
+3. **Attenuation in Sigmoid**: For $|x| = 3.0$, the sigmoid gradient is already attenuated to $0.0452$, illustrating why sigmoid networks fail when scaled to deep architectures.
+
+---
+
+## Real World: In-Register Execution and Memory-Bound Kernels
+
+In systems performance engineering, non-linear activations are classified as **Memory-Bound Elementwise Kernels**.
+
+Let us calculate the **Arithmetic Intensity** ($I = \text{FLOPs} / \text{Bytes Transferred}$) of a standalone `ReLU` kernel on an NVIDIA H100 GPU:
+- **Memory Read**: Load 32-bit float $x$ from High Bandwidth Memory (HBM3) ($4$ bytes).
 - **Compute**: 1 comparison instruction (`max(0.0, x)` = 1 FLOP).
-- **Memory Write**: Store 32-bit float $y$ back to DRAM ($4$ bytes).
+- **Memory Write**: Store 32-bit float $y$ back to HBM3 ($4$ bytes).
 
 $$I_{\text{ReLU}} = \frac{1 \text{ FLOP}}{8 \text{ Bytes}} = 0.125 \text{ FLOPs/Byte}$$
 
-Because an H100 GPU has a ridge point of $\approx 298\text{ FLOPs/Byte}$, the arithmetic tensor cores are operating at **less than $0.05\%$ of their physical compute capability**. The processor is stalled $99.95\%$ of the time waiting on the off-chip DRAM bus!
+Because an NVIDIA H100 GPU has an arithmetic ridge point of $\approx 298\text{ FLOPs/Byte}$, executing standalone elementwise kernels leaves the GPU tensor cores operating at **less than $0.05\%$ of their physical compute capability**. The processor is stalled $99.95\%$ of the time waiting for DRAM memory transfers.
 
-In Chapter 17, we will solve this crisis using **Kernel Fusion**, combining the linear matrix multiplication and GELU activation inside fast on-chip SRAM registers to eliminate DRAM roundtrips entirely.
+### In-Place Dispatch and Kernel Fusion in PyTorch
+
+To mitigate this memory bus stall, production frameworks implement two systems optimizations:
+
+1. **In-Place Execution (`at::relu_()`)**: By overwriting the input memory buffer in-place (`torch.relu_(x)`), the runtime eliminates the output allocation and halves DRAM write traffic ($I = \frac{1 \text{ FLOP}}{4 \text{ Bytes}} = 0.25\text{ FLOPs/Byte}$).
+2. **Kernel Fusion (Triton / TorchInductor)**: Rather than storing GEMM outputs ($Y = XW$) back to DRAM and launching a separate activation kernel, modern compilers fuse the activation directly into the GEMM epilogue in on-chip SRAM registers. We will implement automated kernel fusion in Chapter 17.
 
 ---
 
-## Building the System: How It All Connects
+## Exercises
 
-Let us examine what we have established in Chapter 2:
-
-```
-                  ┌───────────────────────────────┐
-                  │   Chapter 1: Contiguous Tensor │
-                  │   (Flat 1D Memory Buffers)    │
-                  └───────────────┬───────────────┘
-                                  │
-                                  ▼
-                  ┌───────────────────────────────┐
-                  │   Chapter 2: Activations      │
-                  │   (ReLU, Sigmoid, Tanh, GELU) │
-                  └───────────────┬───────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Non-Linear Forward Pass: h_1 = GELU(X · W_1),  h_2 = GELU(h_1 · W_2)        │
-│ • Breaks associative linear collapse.                                       │
-│ • Enables arbitrary multi-dimensional manifold carving.                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-We have tensors and non-linearities. But how do we organize learnable weights, biases, and initialization variance into clean, modular containers?
-
-In **Chapter 3**, we engineer **Layers & Parameters: Packaging the Affine Transform**.
+1. **Leaky ReLU Implementation**: Implement `LeakyReLU(negative_slope=0.01)`. Derive its first derivative $\frac{d}{dx}\text{LeakyReLU}(x)$. Why does setting `negative_slope > 0` prevent the dead neuron problem?
+2. **SwiGLU Gated Activation**: Modern transformer architectures (LLaMA, Mistral) utilize the SwiGLU activation function:
+   $$\text{SwiGLU}(x, g) = \text{Swish}(x) \odot g = (x \cdot \sigma(x)) \odot g$$
+   Implement `SwiGLU` in TinyTorch. What is the additional memory footprint of the gating tensor $g$ compared to a standard GELU layer?
+3. **GELU Taylor Truncation Error**: Compare the exact error function $\text{GELU}_{\text{exact}}(x) = x \Phi(x)$ with the polynomial tanh approximation across the domain $x \in [-4.0, +4.0]$. What is the maximum absolute numerical discrepancy, and does it exceed IEEE 754 float32 single-precision tolerance?

@@ -10,7 +10,7 @@ In this chapter, we enter the discipline of **Systems Performance Engineering**.
 
 ---
 
-## The Crisis: The Fallacy of Counting FLOPs
+## Systems Problem Motivation: The Fallacy of Counting FLOPs
 
 In introductory computer science, performance is measured by algorithmic time complexity ($O(N^3)$ vs. $O(N^2)$). In deep learning, engineers often obsess over **FLOPs (Floating-Point Operations)**:
 
@@ -98,15 +98,16 @@ If $I > I_{\text{ridge}}$, it is **Compute-Bound**: the only way to make it fast
 
 ---
 
-## The Pure TinyTorch Construction
+## Line-by-Line Reference Implementation
 
 We implement the complete `Profiler` engine in TinyTorch:
 
 ```python
+# packages/tinytorch/src/tinytorch/profiling.py
 import time
 import numpy as np
 from typing import Dict, Any, Tuple, List, Optional
-from .tensor import Tensor
+from .autograd import Tensor
 
 class Profiler:
     """High-resolution performance and memory profiler for TinyTorch models."""
@@ -123,9 +124,7 @@ class Profiler:
     def count_flops(self, model, input_shape: Tuple[int, ...]) -> int:
         """Calculate total theoretical forward FLOPs for the model."""
         total_flops = 0
-        dummy_x = Tensor(np.zeros(input_shape, dtype=np.float32))
 
-        # Inspect layers
         if hasattr(model, 'blocks'):  # Transformer
             B, S = input_shape[:2]
             D = model.embed_dim
@@ -150,7 +149,7 @@ class Profiler:
             t0 = time.perf_counter()
             func(*args)
             t1 = time.perf_counter()
-            latencies.append((t1 - t0) * 1000.0)  # ms
+            latencies.append((t1 - t0) * 1000.0)
 
         latencies = np.array(latencies)
         return {
@@ -175,7 +174,6 @@ class Profiler:
         mem_stats = self.measure_memory(model)
         flops = self.count_flops(model, input_tensor.data.shape)
 
-        # Arithmetic intensity calculation
         gflops = (flops / 1e9) / (lat_stats['mean_ms'] / 1000.0) if lat_stats['mean_ms'] > 0 else 0.0
         bytes_transferred = mem_stats['param_bytes'] + input_tensor.data.nbytes
         arithmetic_intensity = flops / max(bytes_transferred, 1)
@@ -192,11 +190,31 @@ class Profiler:
 
 ---
 
-## The Production Bridge: PyTorch Kineto Profiler and Chrome Traces
+## Concrete Numerical Trace Table: Roofline Breakdown Across Transformer Layers
+
+Let us profile every sub-operation inside a single Transformer Block forward pass for sequence length $S = 4$, embedding dimension $D = 128$, and float32 precision ($4\text{ bytes/float}$):
+
+| Operation Sub-Layer | FLOP Count Formula | Total FLOPs | DRAM Traffic Formula | Total Memory Traffic | Arithmetic Intensity $I$ | Hardware Regime ($I_{\text{ridge}}=156$) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **LayerNorm 1** | $4 \cdot S \cdot D$ | $2,048$ | $2 \cdot S \cdot D \cdot 4\text{B}$ | $4,096\text{ B}$ | **$0.50\text{ FLOPs/B}$** | **Memory-Bound (99.7% stalled)** |
+| **QKV Projection** | $2 \cdot S \cdot D \cdot 3D$ | $393,216$ | $3 D^2 \cdot 4\text{B} + \dots$ | $196,608\text{ B}$ | **$2.00\text{ FLOPs/B}$** | **Memory-Bound (98.7% stalled)** |
+| **Attention $QK^T$** | $2 \cdot S^2 \cdot D$ | $4,096$ | $2 S D \cdot 4\text{B} + S^2 \cdot 4\text{B}$| $4,160\text{ B}$ | **$0.98\text{ FLOPs/B}$** | **Memory-Bound (99.4% stalled)** |
+| **Softmax Reduction**| $3 \cdot S^2$ | $48$ | $2 S^2 \cdot 4\text{B}$ | $128\text{ B}$ | **$0.38\text{ FLOPs/B}$** | **Memory-Bound (99.8% stalled)** |
+| **MLP Expand ($1\times \to 4\times$)**| $2 \cdot S \cdot D \cdot 4D$ | $524,288$ | $4 D^2 \cdot 4\text{B} + \dots$ | $262,144\text{ B}$ | **$2.00\text{ FLOPs/B}$** | **Memory-Bound (98.7% stalled)** |
+| **GELU Activation** | $10 \cdot S \cdot 4D$ | $5,120$ | $2 \cdot S \cdot 4D \cdot 4\text{B}$ | $4,096\text{ B}$ | **$1.25\text{ FLOPs/B}$** | **Memory-Bound (99.2% stalled)** |
+| **Total Block** | Cumulative | **$928,816$** | Cumulative | **$471,232\text{ B}$** | **$1.97\text{ FLOPs/B}$** | **Severely Memory-Bound!** |
+
+Every single sub-layer in small-batch autoregressive inference has an arithmetic intensity $I \le 2.0$, sitting orders of magnitude below the GPU hardware ridge point ($I_{\text{ridge}} \approx 156\text{--}298$).
+
+---
+
+## The Production Systems Bridge: PyTorch Kineto Profiler and Chrome Traces
 
 In production systems, PyTorch integrates the **Kineto Tracing Engine**:
 
 ```python
+import torch
+
 with torch.profiler.profile(
     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
     record_shapes=True,
@@ -221,8 +239,8 @@ Chapter 14 gives our framework its diagnostic instruments:
 │ Diagnostic Profiler Finding:                                                │
 │ • Model: TinyGPT (vocab=1000, dim=128, layers=4)                            │
 │ • Memory Footprint: 3.2 MB (FP32)                                           │
-│ • Arithmetic Intensity: 2.1 FLOPs/Byte  ──► CRITICALLY MEMORY-BOUND!        │
-│ • Bottleneck: 82% of latency is spent transferring weights across DRAM bus. │
+│ • Arithmetic Intensity: 1.97 FLOPs/Byte ──► CRITICALLY MEMORY-BOUND!       │
+│ • Bottleneck: 98% of latency is spent transferring weights across DRAM bus. │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

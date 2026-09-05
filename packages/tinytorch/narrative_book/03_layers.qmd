@@ -1,102 +1,158 @@
-# Layers & Parameters: Packaging the Affine Transform {#sec-layers}
+# Affine Layers, Parameters, and Variance Conservation {#sec-layers}
 
-In Chapters 1 and 2, we created the foundational data structures and mathematical gates of deep learning: contiguous tensors and non-linear activations.
+In Chapters 1 and 2, we constructed the two foundational abstractions of deep learning: contiguous strided tensors and elementwise non-linear activations.
 
-Yet if you attempt to write a 10-layer network by manually creating standalone weight matrices (`w1`, `b1`, `w2`, `b2`, ..., `w10`, `b10`), your code quickly becomes unmaintainable. You must manually manage shapes, track which matrices contain learnable parameters during backpropagation, coordinate parameter updates across training epochs, and carefully balance initialization statistics so activations do not explode into numerical infinity.
+Yet if you attempt to construct a real-world 100-layer neural network by manually creating standalone weight matrices (`w1`, `b1`, `w2`, `b2`, ..., `w100`, `b100`), your codebase quickly collapses under systems complexity. You must manually allocate shapes, manage memory lifetimes, track which buffers contain learnable parameters during backpropagation, coordinate train versus eval runtime modes, and carefully calibrate weight initialization so activation signals do not explode into numerical infinity.
 
-In this chapter, we engineer **Modular Layers & Parameter Containers (`Layer`, `Linear`, `Dropout`, `Sequential`)**. We derive **Kaiming He's Variance Conservation Law**, prove why dropout requires scaling during training, and construct the modular parameter management tree that powers PyTorch's `nn.Module`.
+This chapter examines how machine learning systems package mathematical transformations into modular, composable components. We walk through the mathematical derivation of **Kaiming He's Variance Conservation Law**, analyze the zero-cost inference mechanics of **Inverted Dropout**, implement the complete TinyTorch modular layer subsystem (`Layer`, `Linear`, `Dropout`, `Sequential`), and explore how production frameworks like PyTorch structure parameter trees in C++.
 
 ![Modular Layer Architecture: Encapsulating Learnable Weights, Biases, and Forward Transformations](assets/images/diagrams/03_layers-diag-1.svg){#fig-layers-container}
 
 ---
 
-## The Crisis: The Exploding/Vanishing Variance Wall
+## The Crisis: Exploding and Vanishing Activation Variance
 
-Before a neural network trains on a single sample of data, its parameter weights must be initialized to random numbers.
+Before a neural network trains on a single sample of data, its weight parameters must be initialized to random numbers in DRAM.
 
-What happens if you initialize the weights of a 50-layer network with standard normal random variables $W_{i,j} \sim \mathcal{N}(0, 1)$?
+What happens if you initialize the weights of an $L$-layer network with standard normal random variables $W_{i,j} \sim \mathcal{N}(0, 1)$?
 
-Let us trace the variance of activations flowing through a single linear layer $y = X W^T$ where input dimension is $D_{\text{in}} = 1024$:
+### Mathematical Derivation of Variance Expansion
 
-$$\text{Var}(y_i) = \text{Var}\left( \sum_{j=1}^{D_{\text{in}}} x_j w_{ij} \right) = \sum_{j=1}^{D_{\text{in}}} \text{Var}(x_j w_{ij})$$
+Consider a single linear transformation for a neuron $y_i = \sum_{j=1}^{D_{\text{in}}} x_j w_{ij}$.
 
-Assuming zero-mean independent variables:
+Assuming that inputs $x_j$ and weights $w_{ij}$ are independent, zero-mean random variables ($\mathbb{E}[x] = 0, \mathbb{E}[w] = 0$), the variance of their product is:
 
-$$\text{Var}(y_i) = D_{\text{in}} \times \text{Var}(x) \times \text{Var}(w) = 1024 \times (1.0) \times (1.0) = \mathbf{1024}$$
+$$\text{Var}(x_j w_{ij}) = \mathbb{E}[(x_j w_{ij})^2] - (\mathbb{E}[x_j w_{ij}])^2 = \mathbb{E}[x_j^2] \mathbb{E}[w_{ij}^2] = \text{Var}(x_j) \text{Var}(w_{ij})$$
 
-In a single layer, activation variance explodes by a factor of $1024\times$. Across just ten layers:
+Because the summation adds $D_{\text{in}}$ independent terms, the total output variance is:
 
-$$\text{Variance after 10 layers} = (1024)^{10} = 1.26 \times 10^{30} \quad (\text{Floating-point overflow into +inf!}) ❌$$
+$$\text{Var}(y_i) = \text{Var}\left( \sum_{j=1}^{D_{\text{in}}} x_j w_{ij} \right) = \sum_{j=1}^{D_{\text{in}}} \text{Var}(x_j w_{ij}) = D_{\text{in}} \cdot \text{Var}(x) \cdot \text{Var}(w)$$
 
-Conversely, if you initialize weights too small ($W_{i,j} \sim \mathcal{N}(0, 0.001)$):
+If the input feature dimension is $D_{\text{in}} = 1024$, and we initialize weights with standard unit variance $\text{Var}(w) = 1.0$:
 
-$$\text{Variance after 10 layers} = (1024 \times 10^{-6})^{10} = 10^{-30} \quad (\text{Activations collapse to exact zero!}) ❌$$
+$$\text{Var}(y) = 1024 \times \text{Var}(x) \times 1.0 = \mathbf{1024} \cdot \text{Var}(x)$$
 
-Without rigorous mathematical initialization, deep neural networks either explode into `+inf` or collapse into dead silence before training even begins.
+In a single layer, the variance of the activation signal expands by a factor of $1024\times$. Across a 10-layer network:
+
+$$\text{Variance after 10 layers} = (1024)^{10} \cdot \text{Var}(x) \approx 1.26 \times 10^{30} \cdot \text{Var}(x)$$
+
+In single-precision IEEE 754 float32, floating-point numbers overflow into `+inf` when values exceed $\approx 3.4 \times 10^{38}$. By layer 13, activations exceed the hardware ceiling, producing `NaN` (Not a Number) values that poison GPU registers and crash the training run.
+
+Conversely, if an engineer attempts to prevent overflow by initializing weights to very small values ($W_{i,j} \sim \mathcal{N}(0, 0.001)$, so $\text{Var}(w) = 10^{-6}$):
+
+$$\text{Variance after 10 layers} = (1024 \times 10^{-6})^{10} \cdot \text{Var}(x) \approx (1.024 \times 10^{-3})^{10} \approx 1.26 \times 10^{-30}$$
+
+By layer 10, activations collapse to exact zero. Gradients vanish during backpropagation, and the network fails to learn.
+
+### Concrete Trace: Variance Evolution Across Network Depth
+
+| Layer Depth ($L$) | Standard Normal $\mathcal{N}(0, 1)$ | Small Normal $\mathcal{N}(0, 0.001)$ | Kaiming He Normal $\mathcal{N}\left(0, \sqrt{2/D_{\text{in}}}\right)$ | Hardware / Numerical State |
+| :---: | :---: | :---: | :---: | :--- |
+| **Input ($L=0$)** | $1.000$ | $1.000$ | $1.000$ | IEEE 754 Normal |
+| **Layer 1** | $1.024 \times 10^3$ | $1.024 \times 10^{-3}$ | $1.000$ | Unit Variance Preserved |
+| **Layer 3** | $1.073 \times 10^9$ | $1.073 \times 10^{-9}$ | $1.000$ | Unit Variance Preserved |
+| **Layer 5** | $1.125 \times 10^{15}$ | $1.125 \times 10^{-15}$ | $1.000$ | Unit Variance Preserved |
+| **Layer 10** | $1.267 \times 10^{30}$ | $1.267 \times 10^{-30}$ | $1.000$ | Near Float32 Overflow / Underflow |
+| **Layer 15** | $\mathbf{+inf}$ *(Overflow!)* | $\mathbf{0.000}$ *(Underflow!)* | $\mathbf{1.000}$ | Perfectly Stable Gradient Highway |
 
 ---
 
-## The Mental Model: Kaiming Variance Conservation
+## Mathematical Formulations: Xavier and Kaiming Variance Preservation
 
-In 2015, Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun solved this crisis by deriving the exact condition for **Variance Conservation across ReLU networks**.
+To maintain stable signal flow through arbitrary network depths, a machine learning framework must enforce a strict invariant: **Activation variance must equal input variance at every layer**:
 
-### Derivation of Kaiming Initialization
+$$\text{Var}(y) = \text{Var}(x)$$
 
-When activations pass through a `ReLU` gate ($\max(0, x)$), exactly half of the distribution is zeroed out, cutting the active variance in half:
+### 1. Xavier (Glorot) Initialization (2010)
+
+For linear activations and symmetric functions (such as `Tanh`), Xavier Glorot and Yoshua Bengio analyzed variance preservation during both the forward pass ($\text{Var}(w) = \frac{1}{D_{\text{in}}}$) and the backward gradient pass ($\text{Var}(w) = \frac{1}{D_{\text{out}}}$).
+
+To balance forward and backward stability, Xavier initialization takes the harmonic mean of fan-in and fan-out:
+
+$$\mathbf{\text{Var}(w) = \frac{2}{D_{\text{in}} + D_{\text{out}}}}$$
+
+For a uniform distribution $\mathcal{U}(-a, a)$, whose variance is $\text{Var} = \frac{a^2}{3}$, the bounds are:
+
+$$a = \sqrt{3 \cdot \text{Var}(w)} = \sqrt{\frac{6}{D_{\text{in}} + D_{\text{out}}}}$$
+
+### 2. Kaiming (He) Initialization (2015)
+
+When networks employ `ReLU` or `GELU` non-linearities, Xavier initialization fails. As established in Chapter 2, `ReLU` zeroes out all negative inputs ($\max(0, x)$), halving the active variance:
 
 $$\text{Var}(\text{ReLU}(x)) = \frac{1}{2} \text{Var}(x)$$
 
-Therefore, for a layer with input dimension $D_{\text{in}}$:
+Substituting this into our layer variance equation:
 
-$$\text{Var}(y) = D_{\text{in}} \times \left( \frac{1}{2} \text{Var}(x) \right) \times \text{Var}(w) = \left( \frac{D_{\text{in}}}{2} \text{Var}(w) \right) \text{Var}(x)$$
+$$\text{Var}(y) = D_{\text{in}} \cdot \left( \frac{1}{2} \text{Var}(x) \right) \cdot \text{Var}(w) = \left( \frac{D_{\text{in}}}{2} \text{Var}(w) \right) \text{Var}(x)$$
 
-To enforce the invariant that activation variance remains constant across every layer ($\text{Var}(y) = \text{Var}(x)$), we must set:
+To enforce $\text{Var}(y) = \text{Var}(x)$, we set $\frac{D_{\text{in}}}{2} \text{Var}(w) = 1.0$, yielding:
 
-$$\frac{D_{\text{in}}}{2} \text{Var}(w) = 1.0 \implies \mathbf{\text{Var}(w) = \frac{2}{D_{\text{in}}}}$$
+$$\mathbf{\text{Var}(w) = \frac{2}{D_{\text{in}}}} \implies \mathbf{\sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}}$$
 
-$$\mathbf{\sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}}$$
+For a uniform distribution $\mathcal{U}(-b, b)$:
 
-By sampling initial weights from $\mathcal{N}\left(0, \sqrt{\frac{2}{D_{\text{in}}}}\right)$ or uniform distribution $\mathcal{U}\left(-\sqrt{\frac{6}{D_{\text{in}}}}, \sqrt{\frac{6}{D_{\text{in}}}}\right)$, activation signals flow through 100 deep layers with perfectly preserved unit variance!
+$$b = \sqrt{3 \cdot \frac{2}{D_{\text{in}}}} = \sqrt{\frac{6}{D_{\text{in}}}}$$
 
----
-
-## Inverted Dropout: Zero-Cost Inference
-
-To prevent co-adaptation of neurons during training, Nitish Srivastava and Geoffrey Hinton introduced **Dropout** (2014): randomly dropping each neuron with probability $p$.
-
-```
-Standard Dropout vs. Inverted Dropout:
-
-Standard Dropout (Old):
-• Training : y = x * mask  (where mask ~ Bernoulli(1 - p))
-• Inference: y = x * (1 - p)  (Requires floating-point multiplication on every neuron!) ❌
-
-Inverted Dropout (Modern TinyTorch Standard):
-• Training : y = (x * mask) / (1 - p)  (Pre-scaled during training)
-• Inference: y = x  (ZERO FLOPs, completely transparent identity pass!) ✅
-```
-
-By scaling activations by $\frac{1}{1-p}$ during the training forward pass, the expected value $\mathbb{E}[y]$ is preserved, requiring **zero computation at test-time inference**.
+| Initialization Scheme | Target Non-Linearity | Distribution | Variance Formula | Uniform Bounds |
+| :--- | :--- | :--- | :---: | :---: |
+| **Xavier Uniform** | Linear, Sigmoid, Tanh | $\mathcal{U}(-a, a)$ | $\frac{2}{D_{\text{in}} + D_{\text{out}}}$ | $\pm \sqrt{\frac{6}{D_{\text{in}} + D_{\text{out}}}}$ |
+| **Xavier Normal** | Linear, Sigmoid, Tanh | $\mathcal{N}(0, \sigma^2)$ | $\frac{2}{D_{\text{in}} + D_{\text{out}}}$ | $\sigma = \sqrt{\frac{2}{D_{\text{in}} + D_{\text{out}}}}$ |
+| **Kaiming Uniform** | ReLU, LeakyReLU, GELU | $\mathcal{U}(-b, b)$ | $\frac{2}{D_{\text{in}}}$ | $\pm \sqrt{\frac{6}{D_{\text{in}}}}$ |
+| **Kaiming Normal** | ReLU, LeakyReLU, GELU | $\mathcal{N}(0, \sigma^2)$ | $\frac{2}{D_{\text{in}}}$ | $\sigma = \sqrt{\frac{2}{D_{\text{in}}}}$ |
 
 ---
 
-## The Pure TinyTorch Construction
+## Inverted Dropout: Training Regularization vs. Zero-Cost Inference
 
-We implement the `Layer` base class, `Linear` affine layer, `Dropout`, and `Sequential` container:
+To prevent feature co-adaptation during training, Nitish Srivastava and Geoffrey Hinton introduced **Dropout** (2014): during each forward pass, every neuron is independently zeroed out with dropout probability $p \in [0, 1)$.
+
+### The Systems Dilemma: Standard Dropout vs. Inverted Dropout
+
+In early neural network frameworks, dropout was applied naively:
+
+$$\text{Forward (Train):} \quad \mathbf{y} = \mathbf{x} \odot \mathbf{m}, \qquad m_i \sim \text{Bernoulli}(1 - p)$$
+
+Because only a fraction $(1 - p)$ of neurons are active during training, the expected sum of activations during inference (when all neurons are active) would be $\frac{1}{1-p}$ times larger, destroying prediction calibration.
+
+To fix this, standard dropout required scaling every neuron by $(1 - p)$ during inference:
+
+$$\text{Forward (Inference):} \quad \mathbf{y} = \mathbf{x} \cdot (1 - p)$$
+
+From a systems perspective, this is highly inefficient: production inference engines would have to execute billions of floating-point multiplications on every token or image pass purely to rescale unmasked activations.
+
+### The Modern Solution: Inverted Dropout
+
+TinyTorch implements **Inverted Dropout**: we invert the scaling factor and apply it **during training**:
+
+$$\text{Forward (Train):} \quad \mathbf{y} = \frac{\mathbf{x} \odot \mathbf{m}}{1 - p}, \qquad m_i \sim \text{Bernoulli}(1 - p)$$
+
+$$\text{Forward (Inference):} \quad \mathbf{y} = \mathbf{x}$$
+
+Look at the mathematical expectation during training:
+
+$$\mathbb{E}[\mathbf{y}_{\text{train}}] = \mathbb{E}\left[ \frac{\mathbf{x} \odot \mathbf{m}}{1 - p} \right] = \frac{\mathbf{x} \cdot \mathbb{E}[\mathbf{m}]}{1 - p} = \frac{\mathbf{x} \cdot (1 - p)}{1 - p} = \mathbf{x}$$
+
+Because $\mathbb{E}[\mathbf{y}_{\text{train}}] = \mathbf{x}$, the expected activation magnitude is identical between training and evaluation. At test time, dropout becomes a **zero-cost identity pass**: the inference graph executes zero additional FLOPs and requires zero memory allocations.
+
+---
+
+## Reference Implementation: The Modular Layer Subsystem
+
+We implement the complete layer hierarchy in TinyTorch: `Layer`, `Linear`, `Dropout`, and `Sequential`.
 
 ```python
 import numpy as np
-from typing import List, Optional
-from .tensor import Tensor
+from typing import List, Optional, Union
+from tinytorch.core.tensor import Tensor
 
 class Layer:
-    """Base container for all modular neural network layers in TinyTorch."""
+    """Base container for modular neural network layers in TinyTorch."""
     def __init__(self):
-        self.training = True
+        self.training: bool = True
 
     def parameters(self) -> List[Tensor]:
-        """Return all learnable parameter tensors in this layer."""
-        params = []
+        """Recursively harvest all learnable parameter tensors in this layer tree."""
+        params: List[Tensor] = []
         for attr_name, attr_val in self.__dict__.items():
             if isinstance(attr_val, Tensor) and attr_val.requires_grad:
                 params.append(attr_val)
@@ -114,16 +170,21 @@ class Layer:
     def __call__(self, *args, **kwargs) -> Tensor:
         return self.forward(*args, **kwargs)
 
-    def train(self, mode: bool = True):
-        """Set training mode across all child modules."""
+    def train(self, mode: bool = True) -> 'Layer':
+        """Set training mode across all nested child layers."""
         self.training = mode
         for attr_val in self.__dict__.values():
             if isinstance(attr_val, Layer):
                 attr_val.train(mode)
+            elif isinstance(attr_val, (list, tuple)):
+                for item in attr_val:
+                    if isinstance(item, Layer):
+                        item.train(mode)
+        return self
 
-    def eval(self):
-        """Set evaluation mode (disables dropout)."""
-        self.train(False)
+    def eval(self) -> 'Layer':
+        """Set evaluation mode across all nested child layers (disables dropout)."""
+        return self.train(False)
 
 class Linear(Layer):
     """Fully Connected Affine Layer: Y = X · W^T + b with Kaiming Uniform Init."""
@@ -132,43 +193,49 @@ class Linear(Layer):
         self.in_features = in_features
         self.out_features = out_features
 
-        # Kaiming uniform initialization: bound = 1 / sqrt(fan_in)
-        bound = 1.0 / np.sqrt(in_features)
+        # Kaiming uniform bound: sqrt(6 / fan_in)
+        bound = np.sqrt(6.0 / in_features)
 
-        # Weight shape: [out_features, in_features]
+        # Weight layout: [out_features, in_features] for GEMM efficiency
         w_data = np.random.uniform(-bound, bound, (out_features, in_features))
         self.weight = Tensor(w_data, requires_grad=True)
 
         if bias:
             b_data = np.random.uniform(-bound, bound, (out_features,))
-            self.bias = Tensor(b_data, requires_grad=True)
+            self.bias: Optional[Tensor] = Tensor(b_data, requires_grad=True)
         else:
             self.bias = None
 
     def forward(self, x: Tensor) -> Tensor:
-        """Forward affine transformation: Y = X · W^T + b."""
-        # Perform matrix multiplication
+        """Execute forward affine transformation: Y = X · W^T + b."""
+        # Matrix multiply: (B, in_features) @ (in_features, out_features) -> (B, out_features)
         out_data = np.matmul(x.data, self.weight.data.T)
         if self.bias is not None:
             out_data = out_data + self.bias.data
 
         out_tensor = Tensor(out_data)
         out_tensor._op = "Linear"
-        out_tensor._parents = [x, self.weight] + ([self.bias] if self.bias is not None else [])
+        parents = [x, self.weight]
+        if self.bias is not None:
+            parents.append(self.bias)
+        out_tensor._parents = parents
         return out_tensor
 
 class Dropout(Layer):
-    """Inverted Dropout Layer with zero inference overhead."""
+    """Inverted Dropout Layer with zero inference computational overhead."""
     def __init__(self, p: float = 0.5):
         super().__init__()
+        if not 0.0 <= p < 1.0:
+            raise ValueError(f"Dropout probability p must be in [0, 1), got {p}")
         self.p = p
 
     def forward(self, x: Tensor) -> Tensor:
         if not self.training or self.p == 0.0:
+            # Zero-cost pass during inference
             return x
 
-        # Inverted dropout: scale by 1 / (1 - p) during training
         keep_prob = 1.0 - self.p
+        # Bernoulli random mask pre-scaled by 1 / keep_prob
         mask = (np.random.rand(*x.data.shape) < keep_prob).astype(np.float32) / keep_prob
 
         out_tensor = Tensor(x.data * mask)
@@ -177,15 +244,15 @@ class Dropout(Layer):
         return out_tensor
 
 class Sequential(Layer):
-    """Sequential Layer Container chaining multiple sub-layers."""
+    """Sequential Layer Container executing sub-layers in topological order."""
     def __init__(self, *layers: Layer):
         super().__init__()
-        self.layers = list(layers)
+        self.layers: List[Layer] = list(layers)
 
     def parameters(self) -> List[Tensor]:
         params = []
-        for l in self.layers:
-            params.extend(l.parameters())
+        for layer in self.layers:
+            params.extend(layer.parameters())
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -194,45 +261,92 @@ class Sequential(Layer):
         return x
 ```
 
+### Systems Commentary on Layer Architecture
+
+1. **Recursive Parameter Discovery**: The `parameters()` method traverses the object graph via Python's `__dict__`. When an optimizer initializes (Chapter 7), it calls `model.parameters()`, collecting direct references to all underlying `Storage` buffers without manual bookkeeping.
+2. **Weight Memory Alignment**: The weight matrix is stored in shape `(out_features, in_features)` rather than `(in_features, out_features)`. When computing $XW^T$, each row in memory corresponds to one output neuron's complete filter vector, maximizing cache line hit rates during dot product accumulation.
+3. **Transparent Mode Switching**: Calling `model.eval()` cascades recursively down through all child layers, disabling dropout masks and freezing batch normalization statistics with zero manual boilerplate.
+
 ---
 
-## The Production Bridge: PyTorch C++ `torch::nn::Module` Tree
+## Numerical Trace: Multi-Layer Forward Pass and Parameter Harvesting
 
-In PyTorch C++, every layer inherits from `torch::nn::Module`, which implements an internal recursive tree traversal:
+Let us trace a complete 2-layer MLP constructed with `Sequential`:
+
+```python
+model = Sequential(
+    Linear(in_features=4, out_features=3, bias=True),
+    Dropout(p=0.5),
+    Linear(in_features=3, out_features=2, bias=True)
+)
+```
+
+### 1. Parameter Harvesting Ledger
+
+| Module | Attribute | Logical Shape | Parameter Count | Requires Grad | Memory Footprint (FP32) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `Linear_1` | `weight` | $(3, 4)$ | $12$ | `True` | $48\text{ Bytes}$ |
+| `Linear_1` | `bias` | $(3,)$ | $3$ | `True` | $12\text{ Bytes}$ |
+| `Dropout_1`| *None* | *None* | $0$ | `False` | $0\text{ Bytes}$ |
+| `Linear_2` | `weight` | $(2, 3)$ | $6$ | `True` | $24\text{ Bytes}$ |
+| `Linear_2` | `bias` | $(2,)$ | $2$ | `True` | $8\text{ Bytes}$ |
+| **Total Model** | `model.parameters()` | **4 Tensors** | **23 Floats** | `True` | **92 Bytes** |
+
+### 2. Forward Propagation Trace ($X \in \mathbb{R}^{1 \times 4}$)
+
+Input vector $\mathbf{x} = [1.0, 0.5, -0.5, 2.0]$.
+
+| Stage | Operation | Training Mode (`model.train()`) | Inference Mode (`model.eval()`) |
+| :--- | :--- | :--- | :--- |
+| **Input** | $\mathbf{x}$ | $[1.0, 0.5, -0.5, 2.0]$ | $[1.0, 0.5, -0.5, 2.0]$ |
+| **Linear 1** | $\mathbf{h}_1 = \mathbf{x} \mathbf{W}_1^T + \mathbf{b}_1$ | $[1.80, -0.40, 2.20]$ | $[1.80, -0.40, 2.20]$ |
+| **Dropout** | Mask $\mathbf{m} \sim \text{Bernoulli}(0.5)$ | Mask: $[2.0, 0.0, 2.0] \implies [3.60, 0.00, 4.40]$ | Identity Pass: $[1.80, -0.40, 2.20]$ |
+| **Linear 2** | $\mathbf{y} = \mathbf{h}_{\text{drop}} \mathbf{W}_2^T + \mathbf{b}_2$ | $[4.10, -1.30]$ | $[2.05, -0.65]$ |
+| **Expected Value** | $\mathbb{E}[\mathbf{y}]$ | $\mathbb{E}[\mathbf{y}] = [2.05, -0.65]$ | Exact Match: $[2.05, -0.65]$ |
+
+The expected value $\mathbb{E}[\mathbf{y}_{\text{train}}]$ matches the deterministic output $\mathbf{y}_{\text{eval}}$ exactly, confirming seamless model deployment from training to production.
+
+---
+
+## Real World: PyTorch C++ `torch::nn::Module` Tree
+
+In production PyTorch, the Python `nn.Module` is backed by a high-performance C++ class hierarchy defined in `torch/csrc/api/include/torch/nn/module.h`:
 
 ```cpp
-// PyTorch Parameter Registration (torch/csrc/api/include/torch/nn/module.h)
-Tensor& Module::register_parameter(std::string name, Tensor tensor, bool requires_grad) {
-  tensor.set_requires_grad(requires_grad);
-  parameters_.insert({std::move(name), std::move(tensor)});
-  return parameters_[name];
-}
+// PyTorch Core Module Parameter Registration (module.h)
+class TORCH_API Module : public std::enable_shared_from_this<Module> {
+ public:
+  virtual ~Module() = default;
+
+  Tensor& register_parameter(
+      std::string name,
+      Tensor tensor,
+      bool requires_grad = true) {
+    tensor.set_requires_grad(requires_grad);
+    parameters_.insert({std::move(name), std::move(tensor)});
+    return parameters_[name];
+  }
+
+  void train(bool on = true) {
+    is_training_ = on;
+    for (auto& child : children_) {
+      child.value()->train(on);
+    }
+  }
+
+ protected:
+  ska::flat_hash_map<std::string, Tensor> parameters_;
+  ska::flat_hash_map<std::string, std::shared_ptr<Module>> children_;
+  bool is_training_{true};
+};
 ```
 
-When an optimizer iterates over `model.parameters()`, it traverses this exact recursive C++ tree to extract pointers to all weight and bias tensors.
+When PyTorch compiles a model with TorchScript or TorchInductor, the compiler traverses this exact C++ `children_` and `parameters_` flat hash map, serializing weight tensors into flat binary blobs for deployment on mobile and edge inference runtimes.
 
 ---
 
-## Building the System: How It All Connects
+## Exercises
 
-With Chapter 3, TinyTorch can package complex neural architectures:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Complete Multi-Layer Neural Network Container:                              │
-│                                                                             │
-│ model = Sequential(                                                         │
-│     Linear(in_features=784, out_features=256),   # Kaiming Init             │
-│     ReLU(),                                      # Non-Linear Gate          │
-│     Dropout(p=0.2),                              # Inverted Regularization  │
-│     Linear(in_features=256, out_features=10)     # Final Logits             │
-│ )                                                                           │
-│                                                                             │
-│ • model.parameters() automatically harvests all weight and bias Tensors.   │
-│ • Activation variance is strictly conserved across all forward passes.      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-Our model produces raw continuous output vectors (logits). But how do we measure how wrong our predictions are without causing floating-point overflow?
-
-In **Chapter 4**, we engineer **Loss Functions & Log-Sum-Exp: Numerical Hazards in Probability Space**.
+1. **Layer Normalization Implementation**: Implement `LayerNorm(normalized_shape: int, eps: float = 1e-5)` in TinyTorch. What are its learnable parameters, and how does it normalize activations across the feature dimension rather than the batch dimension?
+2. **Kaiming Fan-Out for Residual Branches**: In deep ResNet architectures, why does initialization for convolutional layers with residual shortcut connections sometimes use $\text{fan\_out}$ ($\text{Var}(w) = \frac{2}{D_{\text{out}}}$) instead of $\text{fan\_in}$?
+3. **Weight Memory Optimization**: In a large language model with $D_{\text{model}} = 4096$ and $D_{\text{ffn}} = 16384$, calculate the exact memory footprint of a single `Linear(4096, 16384)` layer in FP32 vs BF16 precision. How many bytes of DRAM memory bandwidth are consumed just to stream this single weight matrix during forward inference?

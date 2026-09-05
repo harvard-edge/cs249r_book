@@ -8,7 +8,7 @@ Yet having exact gradients is only half the battle. A gradient is merely a compa
 
 ---
 
-## The Crisis: Ill-Conditioned Ravines and Variance Pollution
+## Systems Problem Motivation: Ill-Conditioned Ravines and Variance Pollution
 
 When optimizing high-dimensional neural networks, the local geometry of the loss landscape is dictated by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \lambda_{\max} / \lambda_{\min}$ measures the ratio between the maximum and minimum eigenvalues of the local curvature.
 
@@ -87,14 +87,42 @@ Notice that weight decay $\lambda \mathbf{\theta}_{t-1}$ is subtracted directly 
 
 ---
 
-## The Pure TinyTorch Construction
+## Mathematical Formulations: Inductive Invariants of Optimizer Dynamics
+
+Let us formally specify the state and transition equations for the optimizer family.
+
+### 1. Classical Momentum vs. Nesterov Accelerated Gradient (NAG)
+In Classical Momentum (Polyak, 1964):
+$$\mathbf{v}_t = \beta \mathbf{v}_{t-1} + \nabla \mathcal{L}(\mathbf{\theta}_{t-1})$$
+$$\mathbf{\theta}_t = \mathbf{\theta}_{t-1} - \eta \mathbf{v}_t$$
+
+In Nesterov Accelerated Gradient (NAG, 1983), the gradient is evaluated at the "look-ahead" parameter position $\mathbf{\theta}_{t-1} - \beta \mathbf{v}_{t-1}$, providing second-order anticipatory braking before overshooting sharp valley turns.
+
+### 2. AdamW Invariance Proof: Decoupling vs $L_2$ Regularization
+Under standard $L_2$ regularization with objective $J(\mathbf{\theta}) = \mathcal{L}(\mathbf{\theta}) + \frac{\lambda}{2} \|\mathbf{\theta}\|^2$, the total gradient is $\tilde{\mathbf{g}}_t = \mathbf{g}_t + \lambda \mathbf{\theta}_{t-1}$.
+
+When substituted into standard Adam:
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) (\mathbf{g}_t + \lambda \mathbf{\theta}_{t-1})^2$$
+$$\mathbf{\theta}_t = \mathbf{\theta}_{t-1} - \frac{\eta}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t$$
+
+For weights with large historical gradients ($\hat{\mathbf{v}}_t \gg 1$), the effective weight decay coefficient becomes $\frac{\lambda}{\sqrt{\hat{\mathbf{v}}_t}} \ll \lambda$. Conversely, weights with small gradients receive disproportionately large decay.
+
+By contrast, in AdamW:
+$$\mathbf{\theta}_t = (1 - \eta \lambda) \mathbf{\theta}_{t-1} - \frac{\eta}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t$$
+
+The weight decay rate $1 - \eta \lambda$ is strictly invariant to gradient scale $\hat{\mathbf{v}}_t$, restoring true mathematical weight shrinkage.
+
+---
+
+## Line-by-Line Reference Implementation
 
 We construct our optimizer hierarchy starting with an abstract `Optimizer` base class that defines the core interface contract: `zero_grad()` and `step()`.
 
 ```python
+# packages/tinytorch/src/tinytorch/optim.py
 import numpy as np
-from typing import List, Optional
-from .tensor import Tensor
+from typing import List, Optional, Tuple
+from .autograd import Tensor
 
 class Optimizer:
     """Base class for all TinyTorch parameter optimizers."""
@@ -120,13 +148,8 @@ class Optimizer:
 
     def step(self):
         raise NotImplementedError("Each optimizer subclass must implement step().")
-```
 
-### Implementing SGD with Momentum
 
-We implement Stochastic Gradient Descent with support for configurable learning rate $\eta$, momentum coefficient $\beta$, and weight decay $\lambda$:
-
-```python
 class SGD(Optimizer):
     """Stochastic Gradient Descent with Heavy-Ball Momentum."""
     def __init__(self, params: List[Tensor], lr: float = 0.01,
@@ -136,21 +159,6 @@ class SGD(Optimizer):
         self.momentum = momentum
         self.weight_decay = weight_decay
         self.momentum_buffers = [None for _ in self.params]
-
-    def has_momentum(self) -> bool:
-        return self.momentum > 0
-
-    def get_momentum_state(self) -> Optional[List]:
-        if not self.has_momentum():
-            return None
-        return [buf.copy() if buf is not None else None for buf in self.momentum_buffers]
-
-    def set_momentum_state(self, state: Optional[List]) -> None:
-        if state is None or not self.has_momentum():
-            return
-        for i, buf in enumerate(state):
-            if buf is not None:
-                self.momentum_buffers[i] = buf.copy()
 
     def step(self):
         """Execute one SGD optimization step with momentum."""
@@ -176,17 +184,12 @@ class SGD(Optimizer):
             param.data = param.data - self.lr * grad_data
 
         self.step_count += 1
-```
 
-### Implementing AdamW with Decoupled Weight Decay
 
-Next, we implement the state-of-the-art `AdamW` optimizer used to train transformers and modern generative models:
-
-```python
 class AdamW(Optimizer):
     """AdamW Optimizer with Decoupled Weight Decay (Loshchilov & Hutter, 2017)."""
     def __init__(self, params: List[Tensor], lr: float = 0.001,
-                 betas: tuple = (0.9, 0.999), eps: float = 1e-8,
+                 betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-8,
                  weight_decay: float = 0.01):
         super().__init__(params)
         self.lr = lr
@@ -198,7 +201,7 @@ class AdamW(Optimizer):
         self.m_buffers = [None for _ in self.params]
         self.v_buffers = [None for _ in self.params]
 
-    def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
+    def _update_moments(self, i: int, grad_data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Update biased first and second moments and compute bias-corrected estimates."""
         if self.m_buffers[i] is None:
             self.m_buffers[i] = np.zeros_like(grad_data)
@@ -243,6 +246,26 @@ class AdamW(Optimizer):
 
 ---
 
+## Concrete Numerical Trace Table: Tracing AdamW vs. Naive Adam
+
+To see why decoupled weight decay is critical, let us trace two steps of optimization by hand on a scalar parameter $\theta_0 = 1.0$ with constant incoming gradient $g = 0.50$, hyper-parameters $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\eta = 0.1$, $\lambda = 0.01$, and $\epsilon = 10^{-8}$.
+
+### Step-by-Step Numerical Walkthrough
+
+| Optimization Step $t$ | Metric / Variable | Raw Value | Bias-Corrected ($\hat{m}, \hat{v}$) | Effective Step $\Delta \theta$ | Updated Parameter $\theta_t$ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Initial State ($t=0$)** | Weight $\theta_0$ | $1.0000$ | $m_0 = 0.0, v_0 = 0.0$ | N/A | $\theta_0 = 1.0000$ |
+| **Step 1 ($t=1, g_1=0.50$)** | $m_1 = 0.1(0.50) = 0.05$ | $0.0500$ | $\hat{m}_1 = \frac{0.05}{1-0.9^1} = 0.5000$ | Adaptive: $-0.1000$ | $\theta_1' = 1.0 - 0.10 = 0.9000$ |
+| | $v_1 = 0.001(0.25) = 0.00025$ | $0.00025$ | $\hat{v}_1 = \frac{0.00025}{1-0.999^1} = 0.2500$ | Decay: $\times (1 - 0.001)$ | $\theta_1 = 0.90 \times 0.999 = \mathbf{0.8991}$ |
+| **Step 2 ($t=2, g_2=0.50$)** | $m_2 = 0.9(0.05) + 0.05 = 0.095$ | $0.0950$ | $\hat{m}_2 = \frac{0.095}{1-0.9^2} = 0.5000$ | Adaptive: $-0.1000$ | $\theta_2' = 0.8991 - 0.10 = 0.7991$ |
+| | $v_2 = 0.999(0.00025) + 0.00025$ | $0.00050$ | $\hat{v}_2 = \frac{0.0004998}{1-0.999^2} = 0.2500$ | Decay: $\times (1 - 0.001)$ | $\theta_2 = 0.7991 \times 0.999 = \mathbf{0.7983}$ |
+
+### Key Observations from the Numerical Trace:
+1. **Bias Correction Normalization**: At $t=1$, raw moment $m_1 = 0.05$ is scaled by $1/(1-0.9) = 10\times$ back to $\hat{m}_1 = 0.50$, preventing sluggish steps during initial iterations.
+2. **Decoupled Decay Scaling**: At every step, the parameter undergoes exact exponential weight shrinkage $(1 - \eta \lambda) = 0.999$, ensuring clean regularization regardless of gradient scale.
+
+---
+
 ## The Production Bridge: PyTorch C++ Fused Kernels and the 16-Byte Footprint
 
 In production frameworks like PyTorch, optimizer execution is bounded not by arithmetic compute (FLOPs), but by **DRAM memory bandwidth**.
@@ -251,20 +274,13 @@ In production frameworks like PyTorch, optimizer execution is bounded not by ari
 
 Consider what memory state must reside in GPU VRAM during FP32 AdamW training of a one-billion parameter model ($N = 10^9$):
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ GPU Memory Allocation per Parameter in FP32 AdamW Training                  │
-├────────────────────────────────┬──────────────────────────┬─────────────────┤
-│ Component                      │ Bytes per Parameter      │ 1B Model Size   │
-├────────────────────────────────┼──────────────────────────┼─────────────────┤
-│ Model Parameter Weights (θ)    │ 4 bytes (FP32)           │ 4.0 GB          │
-│ Gradient Buffers (g)           │ 4 bytes (FP32)           │ 4.0 GB          │
-│ First Moment Buffer (m)        │ 4 bytes (FP32)           │ 4.0 GB          │
-│ Second Moment Buffer (v)       │ 4 bytes (FP32)           │ 4.0 GB          │
-├────────────────────────────────┼──────────────────────────┼─────────────────┤
-│ TOTAL OPTIMIZER RESIDENCY      │ 16 bytes / parameter     │ 16.0 GB         │
-└────────────────────────────────┴──────────────────────────┴─────────────────┘
-```
+| Allocation Component | Precision Format | Bytes per Parameter | 1B Model Total VRAM |
+| :--- | :--- | :--- | :--- |
+| **Model Weights ($\mathbf{\theta}$)** | IEEE 754 Float32 | 4 bytes | 4.0 GB |
+| **Gradient Buffer ($\mathbf{g}$)** | IEEE 754 Float32 | 4 bytes | 4.0 GB |
+| **First Moment Buffer ($\mathbf{m}$)** | IEEE 754 Float32 | 4 bytes | 4.0 GB |
+| **Second Moment Buffer ($\mathbf{v}$)** | IEEE 754 Float32 | 4 bytes | 4.0 GB |
+| **TOTAL OPTIMIZER RESIDENCY** | State Residency | **16 bytes / param** | **16.0 GB** |
 
 Even before allocating memory for activations, KV caches, or batch buffers, an FP32 model requires **sixteen bytes of VRAM for every single parameter**.
 
@@ -280,9 +296,9 @@ In PyTorch C++ / CUDA (`fused=True`), these four passes are fused into a **singl
 
 ---
 
-## Building the System: How It All Connects
+## Chapter Summary: The Complete Optimization Control Invariant
 
-Let us step back and examine how Chapter 7 locks into our expanding framework architecture:
+Let us review how Chapter 7 locks into our expanding framework architecture:
 
 ```
                   ┌─────────────────────────────────┐
@@ -324,7 +340,5 @@ Every fundamental component of deep learning is now alive in TinyTorch:
 - **DataLoaders** feed batches asynchronously.
 - **Autograd** evaluates exact analytical gradients.
 - **Optimizers** guide parameter weights toward loss minima.
-
-Yet these six systems currently exist as separate standalone modules. How do we orchestrate them into a unified, crash-resilient training pipeline that manages epochs, learning rate decay schedules, gradient clipping, and atomic checkpoint serialization?
 
 In **Chapter 8**, we build the master orchestrator: **The Training Engine and the Rigid Five-Step Loop Contract**.
