@@ -218,20 +218,20 @@ class MultiHeadAttention(Layer):
 ## Concrete Numerical Trace Table: Tracing Causal Attention Step-by-Step
 
 Let us trace a concrete 2-token causal attention operation with head dimension $d_k = 2$ ($\sqrt{d_k} = \sqrt{2} \approx 1.4142$):
-- Queries: $\mathbf{Q} = \begin{bmatrix} 1.0 & 0.0 \\ 0.0 & 2.0 \end{bmatrix}$
-- Keys: $\mathbf{K} = \begin{bmatrix} 1.0 & 1.0 \\ 1.0 & 0.0 \end{bmatrix}$
-- Values: $\mathbf{V} = \begin{bmatrix} 2.0 & 1.0 \\ 0.0 & 3.0 \end{bmatrix}$
-- Causal Mask: $\mathbf{M} = \begin{bmatrix} 0.0 & -\infty \\ 0.0 & 0.0 \end{bmatrix}$
+
+$$\mathbf{Q} = \begin{bmatrix} 1.0 & 0.0 \\ 0.0 & 2.0 \end{bmatrix}, \quad \mathbf{K} = \begin{bmatrix} 1.0 & 1.0 \\ 1.0 & 0.0 \end{bmatrix}, \quad \mathbf{V} = \begin{bmatrix} 2.0 & 1.0 \\ 0.0 & 3.0 \end{bmatrix}, \quad \mathbf{M} = \begin{bmatrix} 0.0 & -\infty \\ 0.0 & 0.0 \end{bmatrix}$$
 
 ### Step-by-Step Numerical Walkthrough
 
-| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) | Memory & Cache Reality |
+| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) | Memory & Hardware State |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ | 16 bytes in DRAM (4 FP32 floats in 1 cache line) |
-| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ | Fused in SIMD vector registers without DRAM traffic |
-| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ | In-place register addition, zero memory allocation |
-| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ | Exponentiation and row-sum reduction in L1 cache |
+| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ | 16 bytes in DRAM (4 floats in 1 cache line) |
+| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ | Fused in SIMD registers without DRAM traffic |
+| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ | In-place register addition, zero allocation |
+| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ | Exponentiation and row-sum in L1 cache |
 | **5. Value Projection** | $\mathbf{A} \cdot \mathbf{V}$ | $\sum_j A_{ij} V_{j,:}$ | $1.0[2, 1] + 0.0[0, 3] = \mathbf{[2.0000, 1.0000]}$ | $0.8044[2, 1] + 0.1956[0, 3] = \mathbf{[1.6088, 1.3912]}$ | Output tensor: $2 \times 2$ matrix (16 bytes) |
+
+: Concrete 5-step numerical trace of scaled dot-product attention with causal masking on a 2-token sequence. {#tbl-attention-trace tbl-colwidths="[12,18,14,18,18,20]"}
 
 ```python
 # Hand-Verification Script: Run with standard Python and NumPy

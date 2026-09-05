@@ -93,18 +93,24 @@ demonstrate_linear_collapse()
 
 ### Concrete Numerical Trace: Multi-Layer vs. Collapsed Output
 
-To trace the intermediate numbers through memory, consider a single input vector $\mathbf{x} = [1.0, 2.0]$:
+To trace intermediate states through memory, consider a single input vector $\mathbf{x} = [1.0, 2.0]$. Analytically pre-multiplying the static weight matrices and folding the bias vectors yields the effective single-layer parameters:
 
-| Computation Stage | Mathematical Operation | Evaluated Intermediate Values | Memory Footprint (Floats) |
-| :--- | :--- | :--- | :---: |
-| **Layer 1 Output** ($\mathbf{h}_1$) | $[1, 2] \begin{bmatrix} 2 & 0 \\ 1 & 3 \end{bmatrix} + [0.5, -0.5]$ | $[4.0, 6.0] + [0.5, -0.5] = [4.5, 5.5]$ | 2 floats |
-| **Layer 2 Output** ($\mathbf{h}_2$) | $[4.5, 5.5] \begin{bmatrix} 1 & 2 \\ 3 & 1 \end{bmatrix} + [1.0, 0.0]$ | $[21.0, 14.5] + [1.0, 0.0] = [22.0, 14.5]$ | 2 floats |
-| **Layer 3 Output** ($\mathbf{y}_{\text{deep}}$) | $[22.0, 14.5] \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} + [-1.0, 1.0]$ | $[44.0, 51.0] + [-1.0, 1.0] = \mathbf{[43.0, 52.0]}$ | 2 floats |
-| **Collapsed Weights** ($\mathbf{W}_{\text{eff}}$) | $\mathbf{W}_1 \mathbf{W}_2 \mathbf{W}_3$ | $\begin{bmatrix} 2 & 0 \\ 1 & 3 \end{bmatrix} \begin{bmatrix} 1 & 2 \\ 3 & 1 \end{bmatrix} \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} = \begin{bmatrix} 4 & 10 \\ 20 & 15 \end{bmatrix}$ | 4 floats |
-| **Collapsed Bias** ($\mathbf{b}_{\text{eff}}$) | $((\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2) \mathbf{W}_3) + \mathbf{b}_3$ | $([-1.0, 0.5] \mathbf{W}_3) + [-1.0, 1.0] = [-3.0, 1.0]$ | 2 floats |
-| **Collapsed Output** ($\mathbf{y}_{\text{collapsed}}$) | $[1, 2] \begin{bmatrix} 4 & 10 \\ 20 & 15 \end{bmatrix} + [-3.0, 1.0]$ | $[44.0, 40.0] + [-1.0, 1.0] = \mathbf{[43.0, 52.0]}$ | 2 floats |
+$$\mathbf{W}_{\text{eff}} = \mathbf{W}_1 \mathbf{W}_2 \mathbf{W}_3 = \begin{bmatrix} 2 & 0 \\ 1 & 3 \end{bmatrix} \begin{bmatrix} 1 & 2 \\ 3 & 1 \end{bmatrix} \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} = \begin{bmatrix} 4 & 10 \\ 20 & 15 \end{bmatrix}$$
 
-Both computational paths evaluate to the identical output vector $[43.0, 52.0]$. Stacking linear layers achieves zero increase in model capacity while tripling memory allocations and arithmetic latency.
+$$\mathbf{b}_{\text{eff}} = ((\mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2) \mathbf{W}_3) + \mathbf{b}_3 = [-1.0, 0.5] \begin{bmatrix} 2 & 1 \\ 0 & 2 \end{bmatrix} + [-1.0, 1.0] = [-3.0, 1.0]$$
+
+In @tbl-linear-collapse-trace, we trace the step-by-step tensor evaluation through the three unmerged layers versus the single collapsed layer.
+
+| Stage | Input State | Transformation | Output Vector | Memory Allocated |
+| :--- | :--- | :--- | :--- | :---: |
+| **Layer 1** | $\mathbf{x} = [1.0, 2.0]$ | $\mathbf{x}\mathbf{W}_1 + \mathbf{b}_1$ | $\mathbf{h}_1 = [4.5, 5.5]$ | $2\text{ floats (8 B)}$ |
+| **Layer 2** | $\mathbf{h}_1 = [4.5, 5.5]$ | $\mathbf{h}_1\mathbf{W}_2 + \mathbf{b}_2$ | $\mathbf{h}_2 = [22.0, 14.5]$ | $2\text{ floats (8 B)}$ |
+| **Layer 3** | $\mathbf{h}_2 = [22.0, 14.5]$ | $\mathbf{h}_2\mathbf{W}_3 + \mathbf{b}_3$ | $\mathbf{y}_{\text{deep}} = [43.0, 52.0]$ | $2\text{ floats (8 B)}$ |
+| **Collapsed Pass** | $\mathbf{x} = [1.0, 2.0]$ | $\mathbf{x}\mathbf{W}_{\text{eff}} + \mathbf{b}_{\text{eff}}$ | $\mathbf{y}_{\text{collapsed}} = [43.0, 52.0]$ | $2\text{ floats (8 B)}$ |
+
+: Systems execution trace of 3-layer sequential feedforward evaluation versus folded single-layer collapse on input $\mathbf{x} = [1.0, 2.0]$. Stacking linear transformations without non-linearities preserves exact numerical equivalence while tripling memory allocations and kernel launch overhead. {#tbl-linear-collapse-trace tbl-colwidths="[18,22,25,20,15]"}
+
+Both computational paths evaluate to the identical output vector $[43.0, 52.0]$. Stacking linear layers achieves zero increase in model capacity while tripling intermediate buffer allocations and DRAM round trips.
 
 ### The Production Compiler Bridge: Weight Folding
 
@@ -138,12 +144,14 @@ In a machine learning framework, an activation function must satisfy two strict 
 1. **Mathematical Criterion (Gradient Flow)**: The function must possess well-behaved first derivatives $\sigma'(x)$ that allow gradients (which we formalize alongside objective loss functions in Chapter 4) to propagate backwards through dozens of layers during backpropagation without exploding or decaying to zero.
 2. **Systems Criterion (Arithmetic Efficiency)**: The function should be computable using fast SIMD / vector arithmetic instructions without causing thread divergence or excessive transcendental function stalls on GPU streaming multiprocessors.
 
-| Activation Function | Mathematical Formulation | Derivative $\sigma'(x)$ | Systems & ML Tradeoff |
+| Activation Function | Formulation | Derivative $\sigma'(x)$ | Systems & ML Trade-off |
 | :--- | :--- | :--- | :--- |
-| **1. Sigmoid** | $\sigma(x) = \frac{1}{1 + e^{-x}}$<br>Domain: $(-\infty, +\infty)$, Range: $(0, 1)$ | $\sigma(x)(1 - \sigma(x))$<br>Peak: $0.25$ | Saturated gradients for $\|x\| > 4$; severe vanishing error in deep chains |
-| **2. Tanh** | $\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}$<br>Domain: $(-\infty, +\infty)$, Range: $(-1, +1)$ | $1 - \tanh^2(x)$<br>Peak: $1.0$ | Zero-centered, but saturates for $\|x\| > 3$; expensive transcendental exp |
-| **3. ReLU** | $\max(0, x)$<br>Domain: $(-\infty, +\infty)$, Range: $[0, +\infty)$ | $1$ if $x > 0$ else $0$<br>Binary gate | Zero transcendentals (1 SIMD cycle); risk of permanent "Dying ReLU" |
-| **4. GELU** | $x \cdot \Phi(x) = x \cdot P(X \le x)$<br>Domain: $(-\infty, +\infty)$, Range: $[-0.17, +\infty)$ | $\Phi(x) + x \phi(x)$<br>Continuous | Smooth non-monotonic gating; eliminates dead neurons; modern LLM standard |
+| **Sigmoid** | $\sigma(x) = \frac{1}{1 + e^{-x}}$, range $(0, 1)$ | $\sigma(x)(1 - \sigma(x))$, peak $0.25$ | Saturated gradients for $|x| > 4$; severe vanishing error in deep chains |
+| **Tanh** | $\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}$, range $(-1, +1)$ | $1 - \tanh^2(x)$, peak $1.0$ | Zero-centered, but saturates for $|x| > 3$; expensive transcendental exp |
+| **ReLU** | $\max(0, x)$, range $[0, +\infty)$ | $1$ if $x > 0$ else $0$ | Zero transcendentals (1 SIMD cycle); risk of permanent "Dying ReLU" |
+| **GELU** | $x \cdot \Phi(x)$, range $[-0.17, +\infty)$ | $\Phi(x) + x \phi(x)$ | Smooth non-monotonic gating; eliminates dead neurons; modern LLM standard |
+
+: Mathematical formulations, peak derivatives, and systems trade-offs of core activation functions. {#tbl-activation-zoo tbl-colwidths="[16,28,24,32]"}
 
 ### 1. The Sigmoid Activation & The Vanishing Gradient Crisis
 
@@ -325,6 +333,8 @@ $$\mathbf{x} = [-3.0, -1.0, -0.17, 0.0, 1.0, 3.0]$$
 | **$0.0$** | $0.5000$ | $\mathbf{0.2500}$ *(peak)* | $0.0000$ | $0.0000$ | $0.0000$ | $+0.5000$ |
 | **$+1.0$** | $0.7311$ | $0.1966$ | $1.0000$ | $\mathbf{1.0000}$ | $0.8413$ | $+1.0833$ |
 | **$+3.0$** | $0.9526$ | $0.0452$ *(decay)* | $3.0000$ | $\mathbf{1.0000}$ | $2.9960$ | $+1.0051$ |
+
+: Numerical trace of forward evaluation and local gradient attenuation across activation functions on representative inputs. {#tbl-activation-numerical-trace tbl-colwidths="[12,14,15,14,15,15,15]"}
 
 ```python
 # Pure Python verification of the activation numerical trace:
