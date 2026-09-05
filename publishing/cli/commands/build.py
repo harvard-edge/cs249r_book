@@ -6,6 +6,7 @@ Handles building chapters and full books in different formats (HTML, PDF, EPUB).
 
 import os
 import platform
+import re
 import subprocess
 import signal
 import sys
@@ -713,7 +714,15 @@ class BuildCommand:
             except:
                 pass
 
-    def build_volume(self, volume: str, format_type: str = "pdf", skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
+    def build_volume(
+        self,
+        volume: str,
+        format_type: str = "pdf",
+        skip_hygiene: bool = False,
+        skip_validate: bool = False,
+        no_cover: bool = False,
+        print_marks: bool = False,
+    ) -> bool:
         """Build a specific volume using its dedicated configuration.
 
         This uses the volume-specific config files (e.g., _quarto-pdf-vol1.yml)
@@ -726,6 +735,10 @@ class BuildCommand:
             skip_hygiene: EPUB-only; skip the pre-render hygiene check.
             skip_validate: Skip post-render validation (EPUB smoke/epubcheck;
                 PDF unresolved-ref scan).
+            no_cover: PDF-only; temporarily omit the designed cover page for
+                this full-volume build, then restore the source manifest.
+            print_marks: PDF-only; temporarily enable printer camera/trim marks
+                for this full-volume build, then restore the shared TeX header.
 
         Returns:
             True if build and post-build validation succeeded, False otherwise
@@ -779,6 +792,15 @@ class BuildCommand:
             self._uncomment_all_chapters(config_file)
 
         self._config_restored = False
+        header_file = self.config_manager.book_dir / "tex" / "header-includes.tex"
+        print_marks_original: Optional[str] = None
+
+        def restore_print_marks_header() -> None:
+            nonlocal print_marks_original
+            if print_marks_original is not None:
+                header_file.write_text(print_marks_original, encoding="utf-8")
+                print_marks_original = None
+                console.print("[green]✅ Print-mark setting restored[/green]")
 
         def signal_handler(signum, frame):
             if not self._config_restored and format_type in ("pdf", "epub"):
@@ -786,12 +808,40 @@ class BuildCommand:
                 self._restore_config(config_file)
                 self._config_restored = True
                 console.print("[green]✅ Config restored[/green]")
+            restore_print_marks_header()
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
         try:
+            if no_cover:
+                if format_type != "pdf":
+                    raise ValueError("no_cover is supported only for PDF builds")
+                changed = self._set_pdf_cover(config_file, enabled=False)
+                if changed:
+                    console.print(
+                        f"[yellow]📘 Temporarily omitted the designed cover in "
+                        f"{config_file.name}[/yellow]"
+                    )
+                else:
+                    console.print(
+                        f"[dim]📘 Designed cover already omitted in "
+                        f"{config_file.name}[/dim]"
+                    )
+
+            if print_marks:
+                if format_type != "pdf":
+                    raise ValueError("print_marks is supported only for PDF builds")
+                print_marks_original = header_file.read_text(encoding="utf-8")
+                changed = self._set_pdf_print_marks(header_file, enabled=True)
+                if changed:
+                    console.print(
+                        "[yellow]✂ Temporarily enabled printer camera/trim marks[/yellow]"
+                    )
+                else:
+                    console.print("[dim]✂ Printer camera/trim marks already enabled[/dim]")
+
             # Determine render target
             render_targets = {
                 "html": "html",
@@ -836,6 +886,60 @@ class BuildCommand:
         finally:
             if format_type in ("pdf", "epub") and not self._config_restored:
                 self._restore_config(config_file)
+            restore_print_marks_header()
+
+    @staticmethod
+    def _set_pdf_cover(config_file: Path, enabled: bool) -> bool:
+        """Set the single titlepage PDF cover switch in a build manifest.
+
+        The caller must arrange restoration from the backup created by
+        ``_uncomment_all_chapters``. Returning ``False`` means the switch was
+        already in the requested state and did not need modification.
+        """
+        content = config_file.read_text(encoding="utf-8")
+        pattern = re.compile(
+            r"^(\s{4}coverpage:\s*)(false|true)(\s*(?:#.*)?)$",
+            flags=re.MULTILINE,
+        )
+        matches = list(pattern.finditer(content))
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected exactly one four-space `coverpage:` switch in "
+                f"{config_file}; found {len(matches)}"
+            )
+
+        match = matches[0]
+        desired = "true" if enabled else "false"
+        if match.group(2) == desired:
+            return False
+
+        updated = pattern.sub(rf"\g<1>{desired}\g<3>", content, count=1)
+        config_file.write_text(updated, encoding="utf-8")
+        return True
+
+    @staticmethod
+    def _set_pdf_print_marks(header_file: Path, enabled: bool) -> bool:
+        """Set the one active crop-mark switch in the shared TeX header."""
+        content = header_file.read_text(encoding="utf-8")
+        pattern = re.compile(
+            r"^(\\CropMarks)(true|false)(\s*(?:%.*)?)$",
+            flags=re.MULTILINE,
+        )
+        matches = list(pattern.finditer(content))
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected exactly one active `\\CropMarks` switch in "
+                f"{header_file}; found {len(matches)}"
+            )
+
+        desired = "true" if enabled else "false"
+        match = matches[0]
+        if match.group(2) == desired:
+            return False
+
+        updated = pattern.sub(rf"\g<1>{desired}\g<3>", content, count=1)
+        header_file.write_text(updated, encoding="utf-8")
+        return True
 
     def _build_both_formats(self) -> bool:
         """Build both HTML and PDF formats sequentially."""
