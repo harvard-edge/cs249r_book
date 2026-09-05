@@ -28,18 +28,14 @@ $$S_{\text{overall}} = \frac{1}{(1 - 0.70) + \frac{0.70}{10}} = \frac{1}{0.30 + 
 
 Despite a $10\times$ arithmetic speedup in GEMM, the overall application speedup is capped at $2.7\times$ because the unoptimized $30\%$ of runtime now dominates execution! Even with an infinite acceleration of matrix multiplication ($k \to \infty$), the maximum achievable speedup is $\frac{1}{0.30} \approx 3.33\times$.
 
-```
-The Amdahl's Law Single-Tier Optimization Wall:
+| Optimization Strategy | Acceleration Factor ($k$) | Maximum Overall Speedup ($S_{\text{overall}}$) |
+| :--- | :--- | :--- |
+| **Accelerate MatMul alone** | $2.0\times$ | $1.54\times$ |
+| **Accelerate MatMul alone** | $5.0\times$ | $2.27\times$ |
+| **Accelerate MatMul alone** | $10.0\times$ | $2.70\times$ |
+| **Accelerate MatMul infinitely** | $k \to \infty$ | $\mathbf{3.33\times}$ (Amdahl's hard ceiling) |
 
-┌───────────────────────────────────────────────┬─────────────────────────────┐
-│ Optimization Strategy                         │ Maximum Achievable Speedup  │
-├───────────────────────────────────────────────┼─────────────────────────────┤
-│ Accelerate MatMul alone by 2x                 │ 1.54x                       │
-│ Accelerate MatMul alone by 5x                 │ 2.27x                       │
-│ Accelerate MatMul alone by 10x                │ 2.70x                       │
-│ Accelerate MatMul infinitely (k -> ∞)         │ 3.33x  (HARD CEILING!)      │
-└───────────────────────────────────────────────┴─────────────────────────────┘
-```
+: The single-tier optimization wall under Amdahl's Law ($f = 0.70$). {#tbl-amdahl-single-tier tbl-colwidths="[40,25,35]"}
 
 To achieve an order-of-magnitude leap (such as **$16\times$**), an engineering team cannot optimize a single layer in isolation. The system must attack execution bottlenecks across **four orthogonal tiers of the systems stack simultaneously**:
 
@@ -47,6 +43,25 @@ To achieve an order-of-magnitude leap (such as **$16\times$**), an engineering t
 2. **Tier 2 (Structural Tier — Low-Rank SVD Factorization)**: Reduces matrix parameter count and total floating-point FLOP volume by decomposing large weight matrices into low-rank factor pairs ($W \approx A \cdot B$).
 3. **Tier 3 (Kernel Tier — Fused Operators & Cache Tiling)**: Eliminates intermediate DRAM roundtrips by computing activation functions directly inside CPU/GPU registers and L1 cache lines.
 4. **Tier 4 (Algorithmic Tier — The KV Cache Engine)**: Eliminates the $O(S^2)$ autoregressive recomputation tax by memoizing historical Key and Value representations into pre-allocated memory buffers.
+
+::: {#nbk-capstone-compound-16x-waterfall .callout-notebook title="Compound multiplicative latency waterfall and memory footprint reduction"}
+Consider an end-to-end transformer inference pipeline generating $S_{\text{gen}} = 128$ tokens with baseline per-token latency of $T_0 = 100\text{ ms}$:
+- **Tier 1 (INT8 Quantization)**:
+  Reduces weight streaming bytes by $4\times$. Because memory bandwidth stalls dominate $85\%$ of the decode step:
+  $$T_1 = T_0 \times (0.15 + 0.85 / 4) = 100 \times 0.3625 = 36.25\text{ ms} \quad (2.76\times \text{ speedup})$$
+- **Tier 2 (Low-Rank SVD Pruning)**:
+  Factorizing weights at $r = 128$ cuts parameter count by $2.0\times$:
+  $$T_2 = T_1 \times (0.20 + 0.80 / 2) = 36.25 \times 0.60 \approx 21.75\text{ ms} \quad (1.67\times \text{ marginal speedup})$$
+- **Tier 3 (Operator Fusion & Cache Tiling)**:
+  Fusing pointwise layers into registers eliminates intermediate DRAM stores and loads:
+  $$T_3 = T_2 \times 0.67 \approx 14.57\text{ ms} \quad (1.49\times \text{ marginal speedup})$$
+- **Tier 4 (KV Cache Ring Buffer)**:
+  Eliminates quadratic prefix recomputation across all 128 tokens, slashing average per-token attention latency:
+  $$T_4 = T_3 / 2.38 \approx \mathbf{6.12\text{ ms}} \quad (2.38\times \text{ marginal speedup})$$
+- **Cumulative compounding speedup**:
+  $$S_{\text{cumulative}} = \frac{T_0}{T_4} = \frac{100\text{ ms}}{6.12\text{ ms}} \approx \mathbf{16.34\times \text{ faster}}$$
+  Each individual optimization delivered between $1.5\times$ and $2.8\times$, but because their bottlenecks were orthogonal across the hardware stack, their compound impact achieved an order-of-magnitude breakthrough!
+:::
 
 ---
 
@@ -269,25 +284,13 @@ verify_capstone_waterfall()
 
 ## Production Systems Bridge: PyTorch 2.0 `torch.compile` and Multi-Tier Acceleration
 
-In industrial deep learning deployments, this four-tier compounding architecture is implemented via automated compiler passes:
+In industrial deep learning deployments, this four-tier compounding architecture is implemented via automated compiler passes, as illustrated in @fig-capstone-stack:
 
-```
-Production Multi-Tier Systems Pipeline:
-
-Model Definition (PyTorch / LLaMA-3)
-       │
-       ▼
-[ TensorRT Model Optimizer ] ────► AWQ INT4/INT8 Weight-Activation Quantization (Tier 1)
-       │
-       ▼
-[ SVD Low-Rank Slicer ] ────────► Structural Weight Factorization & Head Pruning (Tier 2)
-       │
-       ▼
-[ TorchInductor Compiler Pass ] ──► In-Register Pointwise & Reduction Kernel Fusion (Tier 3)
-       │
-       ▼
-[ vLLM PagedAttention ] ────────► Virtual-Paged Key-Value Cache Ring Buffers (Tier 4)
-```
+1. **Model Definition**: Standard PyTorch or HuggingFace model representation in FP32/BF16.
+2. **Precision Tier**: AWQ or SmoothQuant INT4/INT8 quantization pass slashes memory traffic.
+3. **Structural Tier**: Low-rank SVD decomposition factorizes parameter matrices and removes redundant attention heads.
+4. **Kernel Tier**: TorchInductor compiles fused elementwise kernels and tiles matrix multiplications directly into GPU SRAM registers.
+5. **Algorithmic Tier**: vLLM PagedAttention or TensorRT-LLM manages key-value activation memory using virtual page tables.
 
 In PyTorch 2.0, invoking `model = torch.compile(model, mode="max-autotune")` automatically triggers `TorchInductor` to perform loop fusion, register allocation, and shared-memory tiling identical to the techniques we engineered in Chapters 14 through 20. Modern frameworks like vLLM and TensorRT-LLM combine this ahead-of-time graph compilation with runtime paged memory managers, reproducing our exact TinyTorch compounding hierarchy at hyperscale (which we explore in Chapter 21: OpenAI Triton compiler and modern domain-specific languages).
 
@@ -324,17 +327,13 @@ def production_capstone_pipeline(model: torch.nn.Module, sample_input: torch.Ten
 
 Every single subsystem we engineered across twenty chapters now operates in unified, mathematical harmony:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    THE 16X CAPSTONE SYSTEMS HARMONY                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Core Runtime   : 1D Contiguous Buffers, N-D Strides, Dynamic Autograd Tape │
-│ 2. Architectures  : Im2Col GEMMs, BPE Merges, Scaled Dot-Product Transformers│
-│ 3. Acceleration   : INT8 Quant, SVD Pruning, Fused Kernels, KV Ring Buffer   │
-│ 4. Verification   : Strict Warmup Cycles, Tail Latencies, MLPerf Invariants  │
-│ 5. End Result     : 16.5x Faster Latency, 4.2x Smaller Memory Footprint!      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="The 16× Capstone Systems Harmony"}
+1. **Core Runtime**: 1D contiguous physical buffers, N-D strided memory layouts, dynamic topological autograd tape.
+2. **Deep Architectures**: `im2col` systolic GEMM transforms, BPE subword compression, multi-head scaled dot-product attention, Pre-LN residual highways.
+3. **Systems Acceleration**: INT8 symmetric quantization, truncated SVD structural factorization, in-register kernel fusion, pre-allocated KV cache ring buffer.
+4. **Statistical Verification**: Strict warmup cycles, empirical P50/P95/P99 tail latency accounting, MLPerf $\ge 99\%$ accuracy retention verification.
+5. **Measured Milestone Result**: **$16.5\times$ overall speedup** with a **$4.2\times$ memory footprint reduction**!
+:::
 
 The mathematical harmony of TinyTorch is expressed by the end-to-end computational throughput invariant:
 $$\text{Throughput}_{\text{system}} = \frac{N_{\text{tokens}}}{\Delta t_{\text{prefill}} + \sum_{t=1}^{T-1} \Delta t_{\text{decode}}(t)}$$

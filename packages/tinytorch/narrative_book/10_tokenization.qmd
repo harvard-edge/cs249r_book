@@ -12,24 +12,17 @@ Before a neural network can perform a single floating-point multiplication on a 
 
 When engineers first attempted to process text in neural networks, they encountered two opposing failure modes:
 
-```
-The Two Extremes of Text Representation:
+::: {.callout-note title="The Two Extremes of Text Representation"}
+1. **Character-Level Tokenization (The Sequence Bloat Wall)**:
+   - **Vocabulary**: 256 raw byte tokens (compact memory footprint).
+   - **Flaw**: A 1,000-word essay expands into $\sim 6,000$ discrete tokens.
+   - **Systems Consequence**: In Chapter 12, we prove that attention memory scales quadratically $O(S^2)$ with sequence length $S$. A $6,000$-token sequence requires $36\times$ more VRAM than a $1,000$-token sequence, exhausting GPU memory.
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. CHARACTER-LEVEL TOKENIZATION: The Sequence Bloat Wall                    │
-│    • Vocabulary: 256 bytes (tiny vocabulary).                               │
-│    • Flaw:       A 1,000-word essay becomes 6,000 discrete tokens.          │
-│    • Reality:    In Chapter 12, we show how attention compute scales        │
-│                  quadratically O(S^2) with sequence length S. 6,000 tokens  │
-│                  consumes 36x more GPU memory! ❌                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 2. WORD-LEVEL TOKENIZATION: The Out-of-Vocabulary (OOV) Wall               │
-│    • Vocabulary: 500,000 words (dictionary lookup).                         │
-│    • Flaw:       Fails completely on typos, slang, compound words, code, or │
-│                  unseen morphological variants (e.g. "un-pre-dict-able").   │
-│    • Reality:    Any unseen word is mapped to <UNK>, destroying meaning! ❌ │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+2. **Word-Level Tokenization (The Out-of-Vocabulary Wall)**:
+   - **Vocabulary**: 500,000+ words (dictionary lookup).
+   - **Flaw**: Fails on typos, morphological variants, technical jargon, or code.
+   - **Systems Consequence**: Unseen words map to an `<UNK>` token, corrupting semantic representations. Furthermore, an embedding matrix of $500,000 \times 4096$ consumes over $8\text{ GB}$ of persistent VRAM before inference even starts.
+:::
 
 #### The Memory Trade-Off: Embedding Tables vs. Sequence Context Windows
 Consider the hardware memory trade-off between vocabulary size $V$ and sequence length $S$ for a modern model with hidden dimension $D = 4,096$:
@@ -74,13 +67,13 @@ Step 1: Count all adjacent token pairs.
         Pair ('l', 'o') appears 3 times.
         Pair ('o', 'w') appears 3 times.
         Pair ('e', 'r') appears 1 time.
-        Merge most frequent pair: ('l', 'o') ──► 'lo'.
+        Merge most frequent pair: ('l', 'o') -> 'lo'.
 
 Step 2: Update vocabulary: Vocab size = 256 + 1 = 257 ('lo').
         Text becomes: ['lo','w'], ['lo','w'], ['lo','w','e','r'], ...
 
 Step 3: Count pairs again: ('lo', 'w') appears 3 times!
-        Merge ('lo', 'w') ──► 'low'.
+        Merge ('lo', 'w') -> 'low'.
         Vocab size = 258 ('low').
 
 Repeat until target vocabulary size V (e.g. 50,257) is reached!
@@ -91,9 +84,9 @@ Runtime Encoding via Merge Priority Ranks:
 Given a new word "lowest":
 1. Split into characters: ['l', 'o', 'w', 'e', 's', 't']
 2. Check merge dictionary for known pairs with lowest merge rank.
-3. Merge ('l','o') ──► ['lo', 'w', 'e', 's', 't']
-4. Merge ('lo','w') ──► ['low', 'e', 's', 't']
-5. Merge ('e','s') ──► ['low', 'es', 't']
+3. Merge ('l','o') -> ['lo', 'w', 'e', 's', 't']
+4. Merge ('lo','w') -> ['low', 'e', 's', 't']
+5. Merge ('e','s') -> ['low', 'es', 't']
 6. Resulting Tokens: [Token('low'), Token('es'), Token('t')] (IDs: [421, 89, 74])
 ```
 
@@ -314,16 +307,31 @@ assert [t.decode('utf-8') for t in encoded] == ["low", "est"], "BPE encoding tra
 
 In production PyTorch language pipelines, tokenization is detached from the Python interpreter to avoid Global Interpreter Lock (GIL) stalls.
 
-```
-Production Tokenization Pipeline:
-┌──────────────────────────────────────────────────────────────┐
-│        PyTorch DataLoader Multi-Process Worker Threads       │
-│  1. Fast Rust BPE Tokenizer (tiktoken / HuggingFace Fast)    │
-│  2. Regex pre-splitting compiles to native SIMD instructions │
-│  3. Token integer IDs mapped directly to PyTorch c10::Tensor │
-│  4. Pinned memory buffers streamed directly to GPU VRAM      │
-└──────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="Production Tokenization Pipeline Architecture"}
+- **PyTorch DataLoader Worker Threads**:
+  1. **Fast Rust BPE Engine** (`tiktoken` / HuggingFace Tokenizers Fast).
+  2. **Regex Pre-Splitting**: Compiles into native SIMD instructions to isolate contractions and punctuation.
+  3. **Direct Tensor Ingestion**: Token integer IDs are mapped directly into contiguous `c10::Tensor` buffers in host pinned memory.
+  4. **Direct Memory Access (DMA)**: Pinned token buffers stream directly across PCIe to GPU VRAM without CPU-bound buffer copying.
+:::
+
+::: {#nbk-tokenization-bpe-compression-entropy .callout-notebook title="BPE compression ratio and sequence length reduction"}
+Consider processing a $100,000$-word technical manuscript ($\sim 600,000$ raw UTF-8 bytes) through a Transformer:
+
+- **Character-Level Ingestion ($V = 256$)**:
+  - Sequence Length: $S = 600,000$ tokens.
+  - Quadratic Attention FLOPs ($4 S^2 D$): For $D = 4096$, $4 \times (600,000)^2 \times 4096 \approx 5.9 \times 10^{15}\text{ FLOPs}$ per layer!
+  - Attention Score Buffer ($S \times S \times 2\text{ bytes}$ in FP16): $(600,000)^2 \times 2\text{ bytes} = 720\text{ GB}$ per layer! This immediately crashes hardware.
+
+- **BPE Subword Tokenization ($V = 50,257$)**:
+  - Compression Ratio: English technical text averages $\approx 3.8\text{ bytes per token}$.
+  - Compressed Sequence Length: $S = 600,000 / 3.8 \approx 157,895$ tokens ($3.8\times$ shorter sequence).
+  - Quadratic Attention Reduction:
+    $$\text{Compute and Memory Reduction} = (3.8)^2 \approx \mathbf{14.44\times}$$
+    Within a standard $S = 2048$ context window, BPE packs $\sim 1500$ full words of context versus only $\sim 350$ words with character-level tokenization.
+
+**Systems Takeaway**: BPE is a lossless prefix compression engine running on CPU prefetchers that slashes the quadratic memory wall ($O(S^2)$) of GPU attention cores by more than an order of magnitude.
+:::
 
 #### Key Differences Between TinyTorch and PyTorch C++ Tokenization:
 1. **Regex Pre-Splitting (`tiktoken`)**: In Python TinyTorch, we pass raw byte sequences. In production GPT-2/GPT-4 tokenizers, a multi-threaded C++/Rust regular expression splits contractions (e.g. `'ll`, `'ve`, `'s`) before pair counting to ensure punctuation doesn't cross token boundaries.
@@ -345,18 +353,10 @@ print(f"Pinned Token Buffer: {token_ids} | Element Size: {token_ids.element_size
 
 Let us examine how BPE tokenization integrates into the global architecture:
 
-```
-Raw Text String: "TinyTorch builds deep learning systems."
-   │
-   ▼
-[ BPETokenizer.encode() ] ──► Compresses byte sequences via merge priority table
-   │
-   ▼
-Integer Token ID Vector: [ 1542, 8921, 230, 4921, 104, 381 ]
-   │
-   ▼ (Next: Chapter 11)
-[ Embedding Lookup Table ] ──► Projects discrete integers into continuous vectors
-```
+1. **Raw Text String**: `"TinyTorch builds deep learning systems."`
+2. **`BPETokenizer.encode()`**: Compresses byte sequences via the learned merge priority table.
+3. **Integer Token ID Vector**: `[1542, 8921, 230, 4921, 104, 381]` (compact int64 buffer).
+4. **Embedding Table (Chapter 11)**: Projects discrete integer IDs into continuous semantic vectors.
 
 From a systems perspective, tokenization reduces the sequence length $S$ by roughly $3\times$ to $4\times$ compared to character-level representations. Because token sequences are stored as compact 64-bit integer buffers ($8\text{ bytes}$ per token), a 2,048-token context window occupies just $2048 \times 8 = 16.384\text{ KB}$ of memory, fitting comfortably into L1 CPU caches or GPU shared memory before entering the embedding pipeline.
 

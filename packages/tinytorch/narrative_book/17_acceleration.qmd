@@ -16,33 +16,36 @@ $$h = \text{Linear}(x), \qquad z = h + b, \qquad a = \text{GELU}(z)$$
 
 In a naive framework runtime, evaluating $h + b$ followed by $\text{GELU}(z)$ executes as **two separate kernel launches**:
 
-```
-The Naive Unfused Memory Roundtrip Nightmare:
+1. **Kernel 1 (Bias Add)**:
+   - Read $h$ from off-chip DRAM ($3.2\text{ MB}$) $\to$ ALUs compute $z = h + b$ $\to$ write $z$ back to off-chip DRAM ($3.2\text{ MB}$).
+2. **Kernel 2 (GELU Activation)**:
+   - Read $z$ from off-chip DRAM ($3.2\text{ MB}$) $\to$ ALUs compute $a = \text{GELU}(z)$ $\to$ write $a$ back to off-chip DRAM ($3.2\text{ MB}$).
 
-Kernel 1 (Bias Add):
-1. Read h from Off-Chip DRAM  (3.2 MB) ──► ALUs compute (h + b) ──► Write z to Off-Chip DRAM (3.2 MB)
+Total DRAM traffic: **$12.8\text{ MB}$** streamed across the slow DRAM bus, spending over $85\%$ of layer execution time stalled on memory transfers.
 
-Kernel 2 (GELU Activation):
-2. Read z from Off-Chip DRAM  (3.2 MB) ──► ALUs compute GELU(z) ──► Write a to Off-Chip DRAM (3.2 MB)
+| Storage Level | Typical Capacity | Access Latency | Transfer Bandwidth |
+| :--- | :--- | :--- | :--- |
+| **SRAM / Registers** | ~256 KB per SM | ~1 nanosecond | ~20.0 Terabytes/s |
+| **L2 Cache** | ~50 MB | ~5 nanoseconds | ~6.0 Terabytes/s |
+| **Off-Chip HBM / DRAM** | 80 GB | ~200 nanoseconds | ~2.0 Terabytes/s |
+| **Host Main RAM (DDR5)** | 512 GB | ~100 nanoseconds | ~100 Gigabytes/s |
 
-Total DRAM Traffic: 12.8 Megabytes transferred across the narrow DRAM bus!
-Time spent waiting on DRAM bus: 88% of total layer execution time! ❌
-```
-
-```
-The Hardware Memory Hierarchy Latency & Bandwidth Gap:
-
-┌──────────────────┬─────────────────┬───────────────────┬────────────────────┐
-│ Storage Level    │ Capacity        │ Latency           │ Bandwidth          │
-├──────────────────┼─────────────────┼───────────────────┼────────────────────┤
-│ SRAM / Registers │ ~256 KB per SM  │ ~1 nanosecond     │ ~20.0 Terabytes/s  │
-│ L2 Cache         │ ~50 MB          │ ~5 nanoseconds    │ ~6.0 Terabytes/s   │
-│ Off-Chip HBM/DRAM│ 80 GB           │ ~200 nanoseconds  │ ~2.0 Terabytes/s   │
-│ Host Main RAM    │ 512 GB          │ ~100 nanoseconds  │ ~100 Gigabytes/s   │
-└──────────────────┴─────────────────┴───────────────────┴────────────────────┘
-```
+: The hardware memory hierarchy latency and bandwidth gap. {#tbl-memory-hierarchy tbl-colwidths="[25,25,25,25]"}
 
 Reading data from off-chip DRAM is **$200\times$ slower** than reading from on-chip SRAM registers. Writing intermediate tensor $z$ back to DRAM only to immediately read it back into registers one microsecond later is pure waste.
+
+::: {#nbk-acceleration-fusion-dram-traffic-cut .callout-notebook title="Fused kernel DRAM traffic reduction and register bandwidth"}
+Consider fusing a sequence of $K = 4$ elementwise operations (BiasAdd $\to$ GELU $\to$ Dropout $\to$ ResidualAdd) on an activation tensor of size $M = 4,096$ tokens and $D = 4,096$ channels ($67.1\text{ MB}$ in FP32):
+- **Unfused DRAM traffic**:
+  Each operation reads $67.1\text{ MB}$ and writes $67.1\text{ MB}$:
+  $$\text{DRAM Traffic}_{\text{unfused}} = 2 \times K \times 67.1\text{ MB} = 8 \times 67.1\text{ MB} \approx 536.8\text{ MB}$$
+- **Fused DRAM traffic**:
+  The kernel loads the input once into SIMD vector registers, executes all four operations directly in registers, and writes the output once:
+  $$\text{DRAM Traffic}_{\text{fused}} = 67.1\text{ MB} (\text{load}) + 67.1\text{ MB} (\text{store}) = 134.2\text{ MB}$$
+  $$\text{DRAM Traffic Reduction} = \frac{536.8}{134.2} = \mathbf{4.0\times}$$
+- **Kernel launch latency savings**:
+  At $4\ \mu\text{s}$ driver dispatch overhead per launch, fusing four kernels into one eliminates $12\ \mu\text{s}$ of CPU-GPU synchronization stalls per layer.
+:::
 
 Furthermore, on modern GPU architectures, launching an independent CUDA kernel incurs a driver dispatch overhead of $3\text{--}5\text{ microseconds}$. When a deep transformer executes dozens of small elementwise layers (LayerNorm, Residual Add, GELU, Softmax), CPU kernel launch overhead accumulates, leaving the GPU arithmetic units starved for work. In addition, when threads in a warp access non-contiguous memory, GPU hardware decomposes a single 128-byte memory transaction into multiple serialized memory requests, causing severe memory bank conflicts and stalling arithmetic pipelines.
 
@@ -50,46 +53,22 @@ Furthermore, on modern GPU architectures, launching an independent CUDA kernel i
 
 ## The Mental Model: Kernel Fusion and Cache Tiling
 
-To overcome the memory wall, systems acceleration relies on two complementary hardware architectural principles: keeping activations inside on-chip register files and tiling memory blocks to maximize cache residency.
+As illustrated in @fig-kernel-fusion, systems acceleration relies on two complementary hardware architectural principles: keeping activations inside on-chip register files and tiling memory blocks to maximize cache residency.
 
 #### Kernel Fusion: SRAM Register Residency
 
 **Kernel Fusion** fuses multiple consecutive elementwise or reduction operations into a **single unified kernel**:
 
-```
-The Fused Kernel Execution Engine:
-1. Load h from DRAM directly into on-chip SRAM registers via coalesced 128-bit vector loads.
-2. In Registers: Compute z = h + b.
-3. In Registers: Compute a = GELU(z) immediately without ever touching DRAM!
-4. Write final activation a to DRAM ONCE.
-
-Total DRAM Traffic: 6.4 Megabytes (Exactly 50% Reduction in DRAM Traffic!)
-Kernel Launch Overhead: Reduced from 2 launches to 1 launch.
-```
+1. **Vector Load**: Load $h$ from DRAM directly into on-chip SRAM registers via coalesced 128-bit vector loads.
+2. **In-Register Arithmetic**: Compute $z = h + b$ directly inside ALU registers.
+3. **Pipelined Activation**: Compute $a = \text{GELU}(z)$ immediately in registers without ever writing intermediate $z$ to DRAM.
+4. **Single Store**: Write final activation $a$ to DRAM once.
 
 #### Cache-Tiled Matrix Multiplication
 
 When multiplying two matrices $C = A \cdot B$, a naive triple-nested loop accesses elements of $B$ in non-contiguous column order, repeatedly evicting cache lines.
 
-**Cache Tiling** partitions matrices $A$ and $B$ into square blocks ($T \times T$, e.g. $64 \times 64$) that fit completely inside the CPU L1/L2 cache or GPU shared SRAM:
-
-```
-Cache-Tiled GEMM:
-Matrix A (M x K)                    Matrix B (K x N)
-┌──────────────┐                   ┌──────────────┐
-│   Tile A_ik  │ (Fits in SRAM)    │  Tile B_kj   │ (Fits in SRAM)
-└──────────────┘                   └──────────────┘
-               ╲                  ╱
-                ▼                ▼
-         [ Fast On-Chip SRAM Matrix Multiply ]
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │  Tile C_ij   │
-                  └──────────────┘
-```
-
-Once a tile is loaded into fast on-chip memory, all $T^3$ multiply-accumulate operations are executed at peak processor speed without stalling on DRAM.
+**Cache Tiling** partitions matrices $A$ and $B$ into square blocks ($T \times T$, e.g., $64 \times 64$) that fit completely inside the CPU L1/L2 cache or GPU shared SRAM. Once a tile is loaded into fast on-chip memory, all $T^3$ multiply-accumulate operations are executed at peak processor speed without stalling on DRAM.
 
 ---
 
@@ -237,14 +216,11 @@ Under the hood, TorchInductor inspects the computational graph, identifies conse
 
 With Chapter 17, our framework eliminates unnecessary DRAM traffic:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Kernel Fusion Systems Win:                                                  │
-│ • Eliminated 50% of intermediate DRAM read/write traffic in Transformer MLP.│
-│ • Cache Tiling delivers 2.8x faster matrix multiplications.                 │
-│ • Total Latency Reduction across Transformer Forward Pass: ~38%.            │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="Kernel Fusion Systems Gains"}
+- **DRAM Traffic**: Eliminated $50\%$ of intermediate DRAM read/write traffic across the transformer MLP block.
+- **Matrix Tiling**: Cache tiling delivers up to $2.8\times$ faster dense matrix multiplications by preserving L1/L2 cache residency.
+- **Latency Reduction**: Total forward-pass latency drops by $\sim 38\%$ across deep transformer stacks.
+:::
 
 From an architectural perspective, fusing $K$ consecutive elementwise layers reduces memory bus transactions from $2K$ transfers down to just $2$ transfers (one load, one store), increasing arithmetic intensity by $K\times$.
 

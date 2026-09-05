@@ -33,17 +33,24 @@ Notice the immediate redundancy: $x_1 W_K^T$ and $x_1 W_V^T$ were already comput
 At step $t = 500$, the input tensor is $[x_1, x_2, \dots, x_{500}]$. The model projects all 500 tokens through $W_Q, W_K, W_V$:
 $$K_{1:500} = \begin{bmatrix} x_1 W_K^T \\ x_2 W_K^T \\ \vdots \\ x_{500} W_K^T \end{bmatrix}, \qquad V_{1:500} = \begin{bmatrix} x_1 W_V^T \\ x_2 W_V^T \\ \vdots \\ x_{500} W_V^T \end{bmatrix}$$
 
-```
-The Naive Autoregressive Recomputation Waste:
+Across all $S$ generation steps, the naive engine performs:
 
-Step 1: Compute Q, K, V for [ Token 1 ]
-Step 2: Compute Q, K, V for [ Token 1, Token 2 ]            (Token 1 computed AGAIN!)
-Step 3: Compute Q, K, V for [ Token 1, Token 2, Token 3 ]   (Tokens 1, 2 computed AGAIN!)
-...
-Step S: Compute Q, K, V for [ Token 1, ..., Token S ]       (Tokens 1..S-1 computed S times!)
+$$\text{Total Projections} = \sum_{t=1}^S t = \frac{S(S + 1)}{2} = O(S^2) \text{ operations}$$
 
-Total Redundant Projections = \sum_{t=1}^S t = \frac{S(S + 1)}{2} = O(S^2) Total FLOPs!
-```
+By step $S$, tokens $1, \dots, S-1$ have been redundantly re-projected up to $S$ times!
+
+::: {#nbk-memoization-kv-cache-vram-traffic .callout-notebook title="KV cache VRAM footprint and memory bandwidth during decode"}
+Consider generating tokens on a 32-layer LLaMA-7B model with sequence length $S = 2,048$, $H = 32$ heads, and head dimension $d_k = 128$:
+- **Per-token KV cache footprint**:
+  Each token produces one Key vector and one Value vector per head per layer:
+  $$\text{KV Bytes per Token} = 2 \times (\text{layers} \times H \times d_k) \times 2\text{ bytes} = 2 \times (32 \times 32 \times 128) \times 2 = 524,288\text{ bytes} \approx 0.50\text{ MB}$$
+- **Full context KV cache size ($S = 2,048$)**:
+  $$\text{VRAM}_{\text{KV}} = 2,048 \times 0.50\text{ MB} \approx 1.05\text{ GB per sequence}$$
+- **DRAM bandwidth saved per decode step**:
+  Without the KV cache, generating token $t = 2,048$ requires recomputing all 2,047 preceding token representations through all 32 layers ($O(S \cdot D^2)$ FLOPs and DRAM loads).
+  With the KV cache, we project **only the single newest token** ($1 \times D$) through $W_Q, W_K, W_V$, append its Key and Value vectors into the cache buffer ($O(1)$ memory allocation), and stream past Keys/Values from DRAM for attention:
+  $$\text{DRAM Traffic Reduction} \approx O(S) \text{ speedup factor!}$$
+:::
 
 ### The Arithmetic Intensity Collapse
 
@@ -55,7 +62,7 @@ During the decode phase, computing the next token using the entire sequence $[x_
 For a weight matrix of size $D \times D$ in FP32 ($4\text{ bytes per element}$), multiplying a single-token vector $\mathbf{x}_t \in \mathbb{R}^{1 \times D}$ performs $2 D^2\text{ FLOPs}$ while transferring $4 D^2\text{ Bytes}$ of weights from DRAM:
 $$I_{\text{decode}} = \frac{2 D^2\text{ FLOPs}}{4 D^2\text{ Bytes}} = 0.5\text{ FLOPs/Byte}$$
 
-On an NVIDIA A100 GPU with a hardware ridge point of $I_{\text{ridge}} \approx 156\text{ FLOPs/Byte}$, an arithmetic intensity of $0.5\text{ FLOPs/Byte}$ utilizes less than $0.32\%$ of the GPU's compute capability! The hardware spend $99.68\%$ of its time stalled waiting for DRAM memory bus transactions.
+On an NVIDIA A100 GPU with a hardware ridge point of $I_{\text{ridge}} \approx 156\text{ FLOPs/Byte}$, an arithmetic intensity of $0.5\text{ FLOPs/Byte}$ utilizes less than $0.32\%$ of the GPU's compute capability! The hardware spends $99.68\%$ of its time stalled waiting for DRAM memory bus transactions.
 
 Recomputing $t$ identical projections on every step compounds this memory stall quadratically, causing generation throughput to collapse.
 
@@ -283,31 +290,16 @@ In high-throughput serving clusters (serving thousands of concurrent users), req
 - A request that finishes after generating 100 tokens wastes $(4,096 - 100) / 4,096 = 97.5\%$ of its allocated VRAM buffer!
 - This internal and external memory fragmentation limits GPU concurrency, causing batch sizes to plummet.
 
-```
-The Contiguous Allocation Fragmentation Problem:
-User 1 (Len 120):  [ 120 Tokens Active | 3,976 Tokens WASTED Reserved DRAM VRAM... ]
-User 2 (Len 500):  [ 500 Tokens Active | 3,596 Tokens WASTED Reserved DRAM VRAM... ]
-User 3 (Len 4096): [ 4,096 Tokens Fully Active                              ]
-
-Result: 60% to 80% of total GPU HBM memory is locked in unused reservation allocations!
-```
+::: {.callout-caution title="The Contiguous Allocation Fragmentation Problem"}
+- **User 1 (Len 120)**: $120$ tokens active, $3,976$ tokens ($97.1\%$) of allocated DRAM wasted.
+- **User 2 (Len 500)**: $500$ tokens active, $3,596$ tokens ($87.8\%$) of allocated DRAM wasted.
+- **User 3 (Len 4096)**: $4,096$ tokens fully active ($0\%$ waste).
+- **Impact**: Up to $60\%\text{--}80\%$ of total GPU VRAM sits locked in unutilized reservations, capping serving concurrency.
+:::
 
 ### vLLM PagedAttention: Virtual Memory for LLM Serving
 
-In 2023, Woosuk Kwon et al. introduced **PagedAttention** (the core engine behind `vLLM`). Inspired by classic operating system virtual memory page tables, PagedAttention breaks the contiguous memory requirement:
-
-```
-vLLM PagedAttention Page-Table Architecture:
-
-Logical Token Sequence:  [ Token 0, Token 1, ... Token 31, Token 32 ... Token 47 ]
-                               │                              │
-                          (Block 0: 16 tokens)           (Block 1: 16 tokens)
-                               │                              │
-                               ▼                              ▼
-Virtual Page Table:      Logical Block 0 ──────────────► Physical DRAM Block #7
-                         Logical Block 1 ──────────────► Physical DRAM Block #42
-                         Logical Block 2 ──────────────► Physical DRAM Block #19
-```
+In 2023, Woosuk Kwon et al. introduced **PagedAttention** (the core engine behind `vLLM`). Inspired by classic operating system virtual memory page tables, PagedAttention eliminates the contiguous memory requirement, as illustrated in @fig-kv-cache:
 
 1. **Fixed-Size Physical Blocks**: KV cache tensors are divided into small physical blocks (e.g., 16 tokens per block).
 2. **Dynamic Non-Contiguous Allocation**: Blocks are allocated on-demand from a global memory pool as new tokens are generated.
@@ -327,15 +319,13 @@ Modern large language models (such as LLaMA-3, Mistral, and Falcon) redesign the
 
 Let us examine the performance impact of integrating `KVCache` into our TinyTorch transformer engine:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ KV Cache Inference Benchmark (128-token generation on TinyGPT):             │
-│ • Naive Autoregression Latency: 1,420 ms                                    │
-│ • With TinyTorch KVCache     : 338 ms  (4.2x Faster Generation Speedup!)    │
-│ • Memory Allocations per Step: Exactly 0 heap allocations during decode.    │
-│ • Peak Memory Footprint       : 2.4 MB total static cache footprint.        │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="KV Cache Inference Benchmark"}
+- **Evaluation**: 128-token generation on TinyGPT.
+- **Naive Autoregression Latency**: $1,420\text{ ms}$.
+- **With TinyTorch KVCache**: **$338\text{ ms}$** ($4.2\times$ faster generation speedup!).
+- **Heap Allocations per Step**: Exactly $0$ dynamic memory allocations during token decoding.
+- **Peak Memory Footprint**: $2.4\text{ MB}$ total static cache buffer footprint.
+:::
 
 With quantization, pruning, kernel fusion, and KV caching active, how do we measure our framework's performance with scientific statistical rigor?
 

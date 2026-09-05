@@ -16,29 +16,35 @@ Milestone II validates the deep architecture suite by integrating **Modules 09 t
 
 When executing large language models in production systems, inference splits into two physically distinct computing regimes:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ The Two Regimes of Large Language Model Inference                           │
-├───────────────────────────────┬─────────────────────────────────────────────┤
-│ 1. PREFILL PHASE (Prompt)     │ 2. DECODE PHASE (Autoregressive Generation) │
-├───────────────────────────────┼─────────────────────────────────────────────┤
-│ • Input: Complete user prompt │ • Input: Exactly ONE token at a time.       │
-│   (e.g., S = 512 tokens).     │ • Execution: Serial token-by-token loop.    │
-│ • Execution: Parallel GEMMs   │ • Arithmetic Intensity: FLOPs/Byte ≈ 0.5.   │
-│   across all S tokens at once.│ • Bottleneck: DRAM/HBM Memory Bandwidth.    │
-│ • Bottleneck: Compute (FLOPs).│ • GPU Status: Tensor Cores sit 90% starved! │
-└───────────────────────────────┴─────────────────────────────────────────────┘
-```
+| Characteristic | Prefill Phase (Prompt Processing) | Decode Phase (Autoregressive Generation) |
+| :--- | :--- | :--- |
+| **Input Shape** | Complete prompt: $S$ tokens at once ($S \in [128, 8192]$) | Exactly **one** token at a time ($S = 1$) |
+| **Execution Pattern** | Parallel dense GEMMs: $[S \times D] \cdot [D \times D]$ | Serial vector-matrix GEMVs: $[1 \times D] \cdot [D \times D]$ |
+| **Arithmetic Intensity** | High: $O(D)$ FLOPs per byte loaded | Very low: $\approx 0.5$ to $1.0\text{ FLOPs/byte}$ |
+| **Hardware Bottleneck** | **Compute bound** (saturates Tensor Cores) | **Memory bandwidth bound** (DRAM/HBM speed) |
+| **Processor Utilization** | High arithmetic unit occupancy ($>75\%$) | Starved execution units ($<10\%$ utilization) |
+
+: The two computing regimes of large language model inference. {#tbl-m2-inference-regimes tbl-colwidths="[22,38,40]"}
 
 During the **Prefill Phase**, the model processes the entire prompt of $S$ tokens in a single forward pass. Because tokens are processed simultaneously in dense $[S \times D] \cdot [D \times D]$ matrix multiplications, the arithmetic intensity is high, fully saturating the GPU's parallel floating-point units.
 
 During the **Decode Phase**, however, the ground truth does not exist. The model must predict token $S+1$, append it to the sequence, and re-run the network to predict token $S+2$. For every single generated token, the hardware must stream **every single weight parameter matrix** ($W_Q, W_K, W_V, W_{\text{out}}, W_{\text{mlp}}$) from off-chip DRAM/HBM into on-chip registers just to multiply a single $[1 \times D]$ row vector!
 
-At batch size 1, decoding a 7-billion parameter FP16 model ($14\text{ GB}$ of weights) at 50 tokens/second requires:
-
-$$\text{Memory Bandwidth Required} = 14\text{ GB/token} \times 50\text{ tokens/sec} = 700\text{ GB/second}$$
-
-Language model generation is strictly **memory bandwidth bound**.
+::: {#nbk-m2-autoregressive-memory-bandwidth .callout-notebook title="Autoregressive decoding memory bandwidth and arithmetic intensity"}
+Consider serving a 7-billion parameter language model in FP16 precision ($2\text{ bytes/param}$):
+- **Model weight size**:
+  $$\text{VRAM}_{\text{weights}} = 7 \times 10^9 \times 2\text{ bytes} = 14\text{ GB}$$
+- **Arithmetic intensity per token**:
+  Multiplying a single $[1 \times D]$ input vector across $7\text{ B}$ parameters requires $2 \times 7 \times 10^9 = 14\text{ GFLOPs}$.
+  $$\text{Arithmetic Intensity} = \frac{14 \times 10^9\text{ FLOPs}}{14 \times 10^9\text{ bytes}} = 1.0\text{ FLOP/byte}$$
+- **Hardware memory wall**:
+  An NVIDIA A100 GPU delivers $312\text{ TFLOPs}$ of FP16 compute but only $2.0\text{ TB/s}$ of HBM2e memory bandwidth:
+  $$\text{Max Token Decode Rate} = \frac{2,000\text{ GB/s}}{14\text{ GB/token}} \approx 142.8\text{ tokens/second}$$
+- **Compute utilization**:
+  At $142.8\text{ tokens/sec}$, the actual compute achieved is:
+  $$\text{Throughput}_{\text{compute}} = 142.8 \times 14\text{ GFLOPs} \approx 2.0\text{ TFLOPs}$$
+  The GPU achieves only $\frac{2.0}{312} \approx \mathbf{0.64\%}$ of its peak compute capability! Over $99\%$ of the GPU's arithmetic units sit idle waiting for weights to travel across the memory bus.
+:::
 
 ---
 
@@ -54,12 +60,9 @@ We divide the raw logits by a positive scalar temperature $T > 0$:
 
 $$P_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}$$
 
-```
-Temperature Control Regimes:
-• T = 1.0 : Standard unbiased model distribution.
-• T → 0.1 : Sharp distribution (approaches argmax; deterministic, factual).
-• T → 2.0 : Flat uniform distribution (high entropy; creative, random).
-```
+- **$T = 1.0$**: Unbiased model distribution as trained.
+- **$T \to 0^+$**: Sharp distribution approaching argmax (greedy, deterministic factual decoding).
+- **$T > 1.0$**: Flat, high-entropy distribution (encourages diversity, creativity, or randomness).
 
 #### Top-$k$ Filtering
 
@@ -267,16 +270,12 @@ print("PyTorch Shaped Probabilities (%):", (probs * 100).round())
 
 ## M2.8 Milestone Synthesis: The Architectural Leap
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MILESTONE II CHECKPOINT REACHED                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Complete Generative Transformer : Pre-LN GPT-2 architecture active.      │
-│ 2. Subword BPE Compression         : Robust text tokenization with zero OOV.│
-│ 3. Autoregressive Sampling Engine  : Temperature & Top-k probability shaping│
-│ 4. End-to-End Language Synthesis   : Trained and generating coherent text.  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-checkpoint title="Milestone II Checkpoint: Generative Autoregressive Synthesis"}
+1. **Complete Generative Transformer**: Pre-LN GPT-2 architecture active with identity residual highways.
+2. **Subword BPE Compression**: Robust subword tokenization with zero out-of-vocabulary fallback.
+3. **Autoregressive Sampling Engine**: Dynamic temperature scaling and top-$k$ probability truncation.
+4. **End-to-End Language Synthesis**: Verified text generation pipeline operating from raw text strings to output tokens.
+:::
 
 Our framework is now mathematically and architecturally complete. We have built everything required to train vision models and generative large language models from scratch.
 

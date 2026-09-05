@@ -19,21 +19,7 @@ An RNN maintains a hidden state vector $\mathbf{h}_t$, updating it one step at a
 
 $$\mathbf{h}_t = \tanh(W_{hh} \mathbf{h}_{t-1} + W_{xh} \mathbf{x}_t)$$
 
-```
-The Fatal Recurrence Bottleneck in GPU Hardware:
-
-Time Step 1        Time Step 2        Time Step 3        Time Step S
-  [ x_1 ]            [ x_2 ]            [ x_3 ]            [ x_S ]
-     │                  │                  │                  │
-     ▼                  ▼                  ▼                  ▼
-  [ h_1 ] ─────────► [ h_2 ] ─────────► [ h_3 ] ─────────► [ h_S ]
-  (Executed 1st)     (Executed 2nd)     (Executed 3rd)     (Executed S-th)
-
-To compute h_S, the GPU MUST wait for S sequential serial steps!
-GPU parallel tensor cores sit 95% idle waiting on serial dependency chains! ❌
-```
-
-Recurrence is fundamentally incompatible with massively parallel GPU accelerators: to compute step $t$, the hardware *must* wait for step $t-1$. We cannot parallelize over time.
+Recurrence is fundamentally incompatible with massively parallel GPU accelerators: to compute hidden state $\mathbf{h}_S$ at time step $S$, the hardware must execute $S$ sequential steps in serial dependency order ($[x_1] \to [h_1] \to [h_2] \dots \to [h_S]$). Massive GPU systolic arrays and tensor cores (capable of executing tens of thousands of arithmetic operations concurrently) sit over $95\%$ idle, starved by serial pointer chasing.
 
 ### The Variance Explosion of Raw Dot Products
 
@@ -49,17 +35,9 @@ $$\mathbb{E}[z] = \sum_{i=1}^{d_k} \mathbb{E}[q_i] \mathbb{E}[k_i] = 0$$
 
 $$\text{Var}(z) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = \sum_{i=1}^{d_k} \text{Var}(q_i) \text{Var}(k_i) = \sum_{i=1}^{d_k} (1)(1) = d_k$$
 
-```
-The Softmax Gradient Cliff (For d_k = 64):
-• Standard Deviation of dot products: σ = √64 = 8.0.
-• Dot product scores range from -24.0 to +24.0.
-• When inputs to Softmax exceed |z| > 10, Softmax saturates:
-  Softmax([24.0, -8.0, 0.0]) ──► [1.0, 0.0, 0.0]
-• Derivative of Softmax: ∂S_i / ∂z_j = S_i (δ_ij - S_j).
-• For saturated probabilities (S_i ≈ 1 or S_i ≈ 0), GRADIENTS BECOME ZERO! ❌
-```
+For $d_k = 64$, the standard deviation of raw dot products is $\sigma = \sqrt{64} = 8.0$. Dot product scores routinely range between $-24.0$ and $+24.0$. When passed to softmax ($\frac{e^{z_i}}{\sum e^{z_j}}$), any score exceeding $|z| > 10$ drives the function into severe saturation: $\text{softmax}([24.0, -8.0, 0.0]) \approx [1.0, 0.0, 0.0]$.
 
-Without scaling, the largest dot product dominates completely, saturating the softmax function and causing **all backpropagation gradients to vanish to zero**.
+Because the derivative of softmax is $\frac{\partial S_i}{\partial z_j} = S_i (\delta_{ij} - S_j)$, saturated probabilities ($S_i \approx 1$ or $S_i \approx 0$) force all backpropagation gradients to vanish to zero. Without scaling, the largest dot product dominates completely, blinding the attention mechanism.
 
 ---
 
@@ -67,22 +45,22 @@ Without scaling, the largest dot product dominates completely, saturating the so
 
 To understand Scaled Dot-Product Attention from an engineering perspective, we conceptualize it as a **differentiable database query**:
 
-```
-The Query-Key-Value Database Analogy:
-1. Queries (Q): What each token is currently searching for ("I am a pronoun looking for my subject").
-2. Keys (K)   : What each token advertises about itself ("I am a singular noun in the subject position").
-3. Values (V) : The actual semantic content retrieved when a Query matches a Key.
-```
+- **Queries ($Q$)**: What each token is searching for (*"I am a pronoun looking for my antecedent"*).
+- **Keys ($K$)**: What each token advertises about itself (*"I am a singular noun in the subject position"*).
+- **Values ($V$)**: The semantic payload retrieved when a Query matches a Key.
 
 The mathematical formula for Scaled Dot-Product Attention is:
 
 $$\text{Attention}(Q, K, V) = \text{Softmax}\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-::: {.callout-note title="Napkin Math: The Quadratic Memory Footprint of Pairwise Affinity"}
-Consider a batch of sequences with length $S = 4$ and head dimension $d_k = 64$.
-- The input representations $Q, K, V$ live in memory as contiguous 2D buffers of shape $(S, d_k) = (4, 64)$, consuming $4 \times 64 \times 4 = 1,024$ bytes of FP32 memory each (spanning sixteen 64-byte L1 cache lines).
-- When the runtime executes the matrix multiplication $Q K^T$, it generates an $S \times S$ ($4 \times 4$) matrix of pairwise affinities.
-- Notice the fundamental memory scaling trade-off: while token vectors scale linearly with sequence length $O(S)$, the attention affinity matrix scales quadratically $O(S^2)$. For $S = 2,048$, this matrix demands $(2048 \times 2048) \times 4 \text{ bytes} = 16.78\text{ MB}$ per attention head. Across 12 heads and 12 layers, materializing this intermediate tensor requires over $2.4\text{ GB}$ of GPU High-Bandwidth Memory (HBM) bandwidth traffic per forward step!
+::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="The quadratic $O(S^2)$ attention memory wall"}
+Consider a batch of sequences with sequence length $S = 2,048$, model dimension $D = 768$, and $H = 12$ heads ($d_k = 64$).
+- **Linear representations**: $Q, K, V \in \mathbb{R}^{B \times H \times S \times d_k}$. For batch size $B = 8$, the activations consume:
+  $$3 \times (8 \times 12 \times 2048 \times 64) \times 4\text{ bytes} \approx 150.99\text{ MB}$$
+- **Pairwise attention matrix**: The matrix product $Q K^T$ generates an affinity tensor of shape $(B, H, S, S)$:
+  $$\text{VRAM}_{\text{scores}} = 8 \times 12 \times 2,048 \times 2,048 \times 4\text{ bytes} = 1.61\text{ GB}$$
+- **Quadratic scaling bottleneck**: If the sequence length doubles to $S = 8,192$, the linear projection activations scale by $4\times$ to $604\text{ MB}$, but the intermediate attention matrix scales by $4^2 = 16\times$ to **$25.77\text{ GB}$**, immediately causing an Out-Of-Memory (OOM) crash on a standard 24 GB GPU!
+- **Bandwidth wall**: Materializing this score tensor requires round-tripping $25.77\text{ GB}$ across the slow high-bandwidth memory (HBM) bus twice (once for writing raw scores, once for reading during softmax), capping operational intensity at under $10\text{ FLOPs/byte}$.
 :::
 
 ### Why $1/\sqrt{d_k}$ Restores Unit Variance: The Hardware Saturation Circuit Breaker
@@ -108,18 +86,11 @@ We enforce this constraint by adding a **Causal Lower-Triangular Mask Matrix** $
 
 $$M_{i, j} = \begin{cases} 0 & \text{if } j \le i \quad \text{(Past and Present: Allowed)} \\ -\infty & \text{if } j > i \quad \text{(Future: Forbidden)} \end{cases}$$
 
-```
-Causal Mask Matrix M (4x4 Sequence):
-              Token 0   Token 1   Token 2   Token 3
-Token 0 (Now) ┌   0       -inf      -inf      -inf   ┐
-Token 1 (Now) │   0         0       -inf      -inf   │
-Token 2 (Now) │   0         0         0       -inf   │
-Token 3 (Now) └   0         0         0         0    ┘
+For a sequence of length $S = 4$, the causal mask matrix $M$ is:
 
-After Softmax: exp(-inf) = 0.0! Future positions receive EXACTLY ZERO attention weight.
-```
+$$M = \begin{pmatrix} 0 & -\infty & -\infty & -\infty \\ 0 & 0 & -\infty & -\infty \\ 0 & 0 & 0 & -\infty \\ 0 & 0 & 0 & 0 \end{pmatrix}$$
 
-In physical memory, $-\infty$ is represented by the maximum negative IEEE 754 floating-point value (`-1e9` or `-np.inf`), ensuring that future positions evaluate to exactly zero probability during the subsequent matrix reduction.
+Upon applying softmax, $\exp(-\infty) = 0.0$, guaranteeing that future positions receive exactly zero attention weight and cannot leak information backward across the sequence. In physical memory, $-\infty$ is represented by the largest negative IEEE 754 floating-point value (`-1e9` or `-np.inf`).
 
 ---
 
@@ -265,27 +236,20 @@ Token 0 attends strictly to itself ($100\%$), while Token 1 attends $80.4\%$ to 
 
 In standard PyTorch, materializing the attention score matrix $S = Q K^T$ requires allocating $O(S^2)$ bytes in GPU HBM (DRAM):
 
-```
-Standard Attention Memory Traffic (DRAM Roundtrips):
-1. Load Q, K from DRAM ──► Compute S = Q K^T ──► Write S to DRAM  (O(S^2) Memory Traffic)
-2. Load S from DRAM    ──► Compute Softmax   ──► Write P to DRAM  (O(S^2) Memory Traffic)
-3. Load P, V from DRAM ──► Compute O = P V   ──► Write O to DRAM  (O(S^2) Memory Traffic)
-```
+1. **Score GEMM**: Load $Q$ and $K$ from DRAM $\to$ compute $S = Q K^T$ $\to$ write $S$ back to DRAM ($O(S^2)$ memory traffic).
+2. **Softmax reduction**: Load $S$ from DRAM $\to$ compute Softmax in SRAM registers $\to$ write normalized weights $P$ back to DRAM ($O(S^2)$ memory traffic).
+3. **Value GEMM**: Load $P$ and $V$ from DRAM $\to$ compute $O = P V$ $\to$ write output $O$ to DRAM ($O(S \cdot d_k)$ memory traffic).
 
 For long sequences ($S = 8,192$), DRAM bandwidth stalls consume $80\%$ of execution time because the operational intensity is low (streaming $O(S^2)$ bytes back and forth across the slow memory bus, an operational trade-off we analyze formally in Chapter 14's Roofline model).
 
 In 2022, Tri Dao introduced **FlashAttention-2**:
 
-```
-FlashAttention-2 SRAM Tiling Engine:
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. Block Tiling: Divide Q, K, V into SRAM-sized blocks (e.g. 128x128).     │
-│ 2. Online Softmax: Compute incremental softmax statistics (m_i, l_i)       │
-│    without ever writing the full S matrix back to DRAM.                     │
-│ 3. Zero DRAM S Matrix: Eliminates O(S^2) memory footprint entirely!         │
-│ 4. Result: 3x to 5x faster attention with O(S) memory footprint.            │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="FlashAttention-2 SRAM Tiling Engine"}
+1. **Block Tiling**: Divide $Q, K, V$ into SRAM-sized blocks (e.g., $128 \times 128$).
+2. **Online Softmax**: Compute incremental softmax statistics ($m_i, \ell_i$) across tiles without ever materializing or writing the full $S$ matrix back to DRAM.
+3. **Zero DRAM $S$ Matrix**: Completely eliminates the $O(S^2)$ memory footprint from DRAM.
+4. **Impact**: $3\times$ to $5\times$ wall-clock speedup with an $O(S)$ peak memory footprint.
+:::
 
 PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attention`, executing inside fast on-chip SRAM with zero DRAM traffic for the intermediate attention weights.
 
@@ -293,25 +257,12 @@ PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attent
 
 ## Building the System: How It All Connects
 
-Let us observe the complete attention transformation pipeline and its systems footprint:
+As illustrated in @fig-attention-engine, the complete multi-head attention dataflow executes through four synchronized stages:
 
-```
-Positional Embeddings X: [Batch, Seq_Len, Embed_Dim] (Contiguous DRAM Buffer)
-   │
-   ├────────────────────────┬────────────────────────┐
-   ▼                        ▼                        ▼
-[ Q Projection ]         [ K Projection ]         [ V Projection ]
-   │                        │                        │
-   └────────────────────────┼────────────────────────┘
-                            ▼
-      [ Scaled Dot-Product Attention + Causal Mask ]  (Complexity: O(S^2))
-                            │
-                            ▼
-              [ Multi-Head Output Projection ]         (Dense GEMM in L1/L2 Cache)
-                            │
-                            ▼ (Next: Chapter 13)
-        [ Complete GPT-2 Transformer Architecture ]
-```
+1. **Input buffer**: Contiguous token activations $X \in \mathbb{R}^{B \times S \times D}$ stream from DRAM.
+2. **Parallel head projection**: $X$ is multiplied by projection weights to produce $Q, K, V$, reshaped into $(B, H, S, d_k)$ in contiguous memory.
+3. **Causal attention core**: For each head, scaled dot-product attention computes softmax weights under causal masking.
+4. **Output projection GEMM**: The concatenated head representations pass through a dense linear layer into L1/L2 cache before reaching the residual stream.
 
 ::: {.callout-note title="Systems Summary: The Operational Profile"}
 - **Memory Footprint**: Input tokens of shape $(B, S, D)$ consume $B \cdot S \cdot D \times 4$ bytes. Multi-head projection preserves this footprint, whereas the unscaled attention matrix momentarily demands $B \cdot H \cdot S^2 \times 4$ bytes.
