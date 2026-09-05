@@ -112,7 +112,7 @@ The hardware floor exposes this physical separation at the interface boundary. A
 
 In heterogeneous Dual-Brain System-on-Chip (SoC) architectures, this physical reality enforces a strict dual-processor design requirement. Deliberate planning and reactive enforcement cannot safely share a processor core, a cache hierarchy, or a common memory bus. The slow, stochastic path requires parallel hardware (Linux host application processors and tensor accelerators) optimized for raw throughput across wide data streams, while the fast, deterministic path requires isolated hardware (bare-metal microcontrollers or FPGA cores) optimized for worst-case execution time and cycle-counted predictability.
 
-::: {#pri-silicon-privilege .callout-principle title="Silicon Privilege Partitioning"}
+::: {#pri-nervous-silicon-privilege .callout-principle title="Silicon Privilege Partitioning"}
 Never allow a high-capacity learned model to execute in the same fault domain, address space, or power rail as the actuator commutation loop. Deliberation is an unprivileged proposal generator; physical register privilege belongs exclusively to cycle-deterministic real-time silicon.
 :::
 
@@ -150,7 +150,7 @@ Because these tiers execute on isolated hardware domains at different frequencie
 
 To prevent blocking, the nervous system implements **lock-free single-producer single-consumer (SPSC) seqlock buffers** in shared static memory.
 
-::: {.callout-definition title="Lock-Free Sequence Lock (`seqlock`)"}
+::: {#dfn-nervous-lock-free-sequence-lock-seqlock .callout-definition title="Lock-Free Sequence Lock (`seqlock`)"}
 A synchronization primitive for single-writer multi-reader shared memory that eliminates reader blocking and priority inversion by coupling an atomic monotonic sequence counter with memory barriers; odd counter values signal active writer mutation, while identical even counter values before and after reading guarantee that payload words were latched without tear or inconsistency.
 :::
 
@@ -160,7 +160,7 @@ When the untrusted application processor prepares a new action chunk proposal, i
 
 On the receiving side, the deterministic real-time microcontroller latches the newest proposal without ever acquiring a lock or stalling execution. At the start of its control cycle, the microcontroller reads the sequence counter with load-acquire semantics (`LDAR`). If the counter is odd, indicating that the producer is midway through updating the buffer, the consumer immediately aborts the read, retaining its existing validated trajectory spline. If the counter is even, the microcontroller copies the payload into its private, tightly-coupled static memory and re-reads the sequence counter. If the counter changed during the copy, a torn read occurred due to a concurrent write, and the frame is safely discarded. If the sequence counter remained identical and even throughout the read, the latch is verified: the microcontroller validates the cyclic redundancy checksum (CRC-32), checks timestamp freshness against its hardware timer, and accepts the proposal. Under this protocol, read latencies on the real-time microcontroller remain strictly bounded below $1.5\ \mu\text{s}$, completely decoupled from the scheduling state or operating system load of the host processor.
 
-::: {.callout-example title="Algorithm 4.1: Lock-Free Trajectory Seqlock Exchange Protocol"}
+::: {#exmp-nervous-algorithm-4-1-lock-free-trajectory .callout-example title="Algorithm 4.1: Lock-Free Trajectory Seqlock Exchange Protocol"}
 **Input (Writer):** Proposal payload $P = \{\text{seq\_id}, \text{timestamp\_ns}, \text{lease\_us}, \mathbf{w}_{1..K}, \text{crc32}\}$.
 **Input (Reader):** Target local buffer $B_{\text{local}}$ in tightly-coupled static SRAM.
 **State:** Shared SRAM mailbox: atomic `uint64` $c_{\text{seq}}$ (init 0), payload slot $\text{Slot}_{\text{shared}}$.
@@ -211,7 +211,7 @@ Rate mismatches introduce three failure modes: phase lag accumulation, aliasing,
 
 Aliasing occurs when high-frequency sensor noise folds into low-rate estimators, which the system prevents through analog anti-aliasing filters and digital decimation within the high-rate microcontroller domain. Following classical nonlinear control results [@slotine1991applied], stability guarantees hold under the assumption that inner-loop execution jitter remains bounded within a narrow fraction of the sampling period and that setpoint updates arrive before the local trajectory buffer drains. The nervous system establishes these assumptions by enforcing cycle-deterministic interrupt timing on the microcontroller and tracking buffer depth. If the planner stalls and the buffer drains to its final valid waypoint, the operational assumption no longer holds. At that moment, the nervous system rejects further planner inputs and executes an autonomous, deterministic stopping trajectory computed locally at $1000\text{ Hz}$, bringing all joints safely to rest.
 
-::: {#pri-cadence-decoupling .callout-principle title="Lock-Free Cadence Decoupling"}
+::: {#pri-nervous-cadence-decoupling .callout-principle title="Lock-Free Cadence Decoupling"}
 Never allow a high-frequency real-time control loop to acquire a mutex or spin on a lock shared with a stochastic process; communicate across clock domains exclusively via lock-free atomic sequence mailboxes or triple-buffers.
 :::
 
@@ -266,7 +266,7 @@ Taming this latency spread requires classifying every source of execution varian
 
 *Unbounded variance sources* encompass non-deterministic software and hardware mechanisms whose maximum latency has no finite upper bound: demand-paged virtual memory page faults, preemptive operating system thread scheduling without priority inheritance,[^fn-inc-mars-pathfinder] dynamic heap allocations traversing fragmented free lists, speculative branch mispredictions that pollute pipeline caches, and unscheduled peripheral direct memory access traffic. A hard real-time safety path must strictly eliminate every mechanism from this third category.
 
-::: {.callout-war-story title="The 1997 Mars Pathfinder Priority Inversion"}
+::: {#ws-nervous-1997-mars-pathfinder-priority-inversion .callout-war-story title="The 1997 Mars Pathfinder Priority Inversion"}
 In July 1997, shortly after the Mars Pathfinder spacecraft touched down on Ares Vallis, the lander's single-board computer began experiencing periodic total system resets, threatening mission survival [@reeves1997pathfinder].
 
 The lander's avionics computer ran the VxWorks real-time operating system with preemptive priority-based scheduling. A high-priority task, `bc_dist`, collected the results of each MIL-STD-1553 bus cycle and distributed that data to the rest of the spacecraft. Science functions, including imaging, image compression, and the `ASI/MET` meteorological task, ran at lower priority. `ASI/MET` read its data through an inter-process pipe, and the mutual exclusion semaphore at the center of the failure was not one the flight software declared. It was created internally by the operating system's own `select()` service.
@@ -285,7 +285,7 @@ A common misconception in real-time software design asserts that dynamic memory 
 
 The choice of physical communication bus directly dictates the magnitude of the interference term $I$ and blocking term $B$ in the worst-case response time equation. As summarized in @tbl-04-fieldbus-comparison, robotics interconnects divide across a trade-off surface spanning raw throughput, transport latency, cycle jitter, and hardware determinism. In industrial robotic platforms, this deterministic physical layer is implemented through dedicated fieldbus hardware architectures (@fig-industrial-ethercat-controller), which couple hard real-time host processors to modular input/output and motor drive terminals over synchronized Ethernet frames using hardware Distributed Clocks (DC).[^fn-hw-ethercat-dc]
 
-::: {.callout-notebook title="Fieldbus Serialization Latency and WCET Schedulability"}
+::: {#nbk-nervous-fieldbus-serialization-latency-wcet-schedulability .callout-notebook title="Fieldbus Serialization Latency and WCET Schedulability"}
 *Practical Engineering Question:* Why can an EtherCAT network synchronize 8 robot arm joint axes within a $1.0\text{ ms}$ control loop with $< 100\text{ ns}$ jitter, whereas a CAN-FD bus experiences severe deadline pressure under the identical workload?
 
 *1. CAN-FD Serialization and Arbitration Latency:*
@@ -368,7 +368,7 @@ To guard against internal hardware faults or microcontroller latch-ups within th
 ![](figures/fig04_real_estop_interlock.jpg){width="85%"}
 :::
 
-::: {#pri-hardware-authority .callout-principle title="Hardware Authority Invariant"}
+::: {#pri-nervous-hardware-authority .callout-principle title="Hardware Authority Invariant"}
 If an unverified learned policy possesses direct memory-mapped write access to actuator gate-driver registers, your system has no safety layer—it has only an accident waiting for an out-of-distribution input.
 :::
 
