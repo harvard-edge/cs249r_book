@@ -1,365 +1,324 @@
-# Milestone III: The Torch Olympics — Real-World MLPerf Performance Showdown {#sec-milestone-3}
+# Milestone III: The Torch Olympics {#sec-milestone-3}
 
-In Chapters 1 through 20, we built, optimized, profiled, accelerated, and benchmarked every component of the TinyTorch deep learning systems stack. We have conquered the mathematics of automatic differentiation, the geometry of convolutions, the attention mechanics of generative transformers, and the physical realities of the Williams Roofline Model.[^mlsys-journey]
+Chapter 20 ended with the optimizations of Part III stacked on one model: INT8 weights, a factorized MLP, a fused activation, and a KV cache, each built and tested in its own chapter. What Part III has not yet done is the thing a practitioner is asked to do the moment an optimization lands, which is to prove it paid off. Not "the model is 4× smaller," which Chapter 15 established, and not "the cache skips the recomputation," which Chapter 18 established, but the harder question the roadmap in the welcome chapter promised this milestone would answer. Did the optimizations pay off on accuracy, memory, and latency at once, on the same model, measured the same way?
 
-Now, in our final milestone, we enter **The Torch Olympics**: the rigorous, automated MLPerf evaluation harness that scores our framework across three competitive Olympic events: **Accuracy Retention**, **Memory Compression**, and **End-to-End Latency Speedup**.[^mlcommons-ref]
+This milestone is the book's benchmark. It takes a network from Milestone I, runs it through the profiler, the quantizer, the pruner, and the benchmark harness in one script, and prints a scorecard. A second script times text generation with and without the KV cache. The mechanism the chapter teaches is not a new kernel or a new layer. It is the scorecard itself, drawn in @fig-milestone3-olympics, made of three ratios, an accuracy floor, and the discipline of measuring the optimized model rather than describing it.
 
-::: {.callout-note title="Milestone Verification Scope"}
-Milestone III evaluates the complete systems optimization stack by benchmarking **Modules 14 through 20** (`packages/tinytorch/src/14_profiling` through `packages/tinytorch/src/20_capstone`) under the multi-metric Torch Olympics MLPerf harness (`packages/tinytorch/src/19_benchmarking/19_benchmarking.py`).
+::: {.callout-note title="Milestone Scope"}
+Milestone III integrates Modules 14 through 19 (`packages/tinytorch/src/14_profiling` through `packages/tinytorch/src/19_benchmarking`) with the models of Part I and Part II. The course numbers this milestone 06 and keeps it in `packages/tinytorch/milestones/06_2018_mlperf/`; it has two scripts. `01_optimization_olympics.py` trains the `DigitMLP` of Milestone I on TinyDigits, then profiles, quantizes, prunes, and benchmarks it. `02_generation_speedup.py` times a 16-token generation loop with and without a `KVCache`. Neither script is a line-by-line match for the listings here; the listings are a pure-Python model of the same scorecard, small enough to check by hand.
 :::
 
-[^mlsys-journey]: Completing Milestone III marks the culmination of the TinyTorch systems journey, fulfilling our MIT xv6-style contract of building an entire modern machine learning runtime from bare metal memory arrays.
-[^mlcommons-ref]: The Torch Olympics benchmark harness implements the exact evaluation rules, warmup constraints, and accuracy floors mandated by the MLCommons MLPerf Inference Closed Division specification.
-
-![The Torch Olympics Leaderboard: Automated Multi-Metric Evaluation Across Accuracy, Memory, and Latency](assets/images/diagrams/milestone_03-diag-1.svg){#fig-milestone3-olympics}
+![The Torch Olympics scorecard: one model, three axes, and a floor on accuracy that a submission must clear before its memory and latency numbers count.](assets/images/diagrams/milestone_03-diag-1.svg){#fig-milestone3-olympics}
 
 ---
 
-## M3.1 The Systems Arena: The Multi-Objective Optimization Dilemma
+## The Problem
 
-::: {.callout-caution title="The Fundamental Engineering Trade-Offs in AI Systems"}
-1. **The Accuracy vs Precision Dilemma**:
-   - Aggressive 2-bit quantization slashes memory bandwidth by $16\times$, but destroys gradient flow and causes validation accuracy to collapse!
-2. **The Throughput vs Latency Dilemma**:
-   - Serving massive batch sizes ($B = 512$) maximizes GPU arithmetic utilization (throughput), but inflates single-request P99 latency past SLA limits!
-3. **The Memory Footprint vs Dynamic Reallocation Dilemma**:
-   - Pre-allocating massive static ring buffers eliminates allocation stalls, but increases baseline VRAM reservations.
-:::
-
-::: {#nbk-m3-pareto-frontier-accounting .callout-notebook title="Multi-dimensional Pareto frontier accounting in high-throughput inference"}
-Consider deploying our optimized transformer into a real-time web inference service:
-- **Service SLA budget**:
-  - $P_{99} \le 150\text{ ms}$ per generated sequence.
-  - Accuracy $\ge 99.0\%$ relative to FP32 baseline.
-  - VRAM consumption $\le 16\text{ GB}$ per accelerator.
-- **Pareto trade-off matrix**:
-  - *Baseline FP32*: Accuracy = $100\%$, VRAM = $13.5\text{ GB}$, $P_{99} = 1,420\text{ ms}$ $\implies$ **Violates SLA by $9.5\times$**!
-  - *Aggressive 2-bit quantization*: VRAM = $1.8\text{ GB}$, $P_{99} = 45\text{ ms}$, Accuracy = $84.2\%$ $\implies$ **Disqualified on accuracy floor**!
-  - *TinyTorch 4-Tier Stack*: Accuracy = $99.6\%$, VRAM = $3.2\text{ GB}$, $P_{99} = 94.2\text{ ms}$ $\implies$ **Passes all SLA constraints with $37\%$ margin**!
-- **System Pareto frontier**:
-  The four-tier combination pushes the achievable operational envelope outward across all four dimensions simultaneously, delivering high throughput without sacrificing single-request latency.
-:::
-
-A production-grade machine learning system must solve a **multi-objective constrained optimization problem**:
-
-$$\max_{\mathbf{\theta}, \mathcal{K}} \left( \text{Accuracy}(\mathcal{M}), \quad \text{Throughput}(\mathcal{M}) \right)$$
-
-$$\text{subject to} \quad \begin{cases}
-\text{Memory}(\mathcal{M}) \le \text{Budget}_{\text{VRAM}} \\
-P_{99}(\mathcal{M}) \le \text{SLA}_{\text{latency}} \\
-\text{Accuracy}(\mathcal{M}) \ge 0.99 \times \text{Accuracy}_{\text{baseline}}
-\end{cases}$$
-
-In high-performance computing, the set of optimal solutions where no single metric can be improved without degrading another forms the **Pareto Optimal Frontier**. As illustrated in @fig-milestone3-olympics, our mission is to push the entire Pareto boundary outward through orthogonal systems innovations.
-
----
-
-## M3.2 Mathematical Formulations: The Three Olympic Events
-
-The Torch Olympics scores our framework across three official competitive events that test the fundamental trade-offs between numerical fidelity, SRAM/DRAM bandwidth, and instruction throughput:
-
-#### Event 1: The Accuracy Retention Contest ($\mathcal{R}_{\text{acc}}$)
-Any compression or quantization pass must retain at least $99.0\%$ of the baseline model's top-1 validation accuracy. The accuracy retention ratio is defined as:
-
-$$\mathcal{R}_{\text{acc}} = \frac{\text{Accuracy}_{\text{optimized}}}{\text{Accuracy}_{\text{baseline}}} \ge 0.990 \quad (99.0\% \text{ Floor})$$
-
-If $\mathcal{R}_{\text{acc}} < 0.990$, the submission is immediately disqualified regardless of speedup, preventing degenerate models that trade away predictive utility for raw FLOP speed.
-
-#### Event 2: The Memory Challenge ($\mathcal{C}_{\text{mem}}$)
-Measures the physical DRAM/VRAM compression factor achieved by combining INT8 quantization and low-rank SVD pruning:
-
-$$\mathcal{C}_{\text{mem}} = \frac{\text{Memory}_{\text{baseline}}\text{ [MB]}}{\text{Memory}_{\text{optimized}}\text{ [MB]}} \ge 4.0\times \quad (\text{Gold Standard})$$
-
-This factor reflects how effectively the framework mitigates the memory wall by shrinking parameter bus transfers across high-bandwidth memory (HBM) and DDR channels.
-
-#### Event 3: The Latency Sprint ($\mathcal{S}_{\text{lat}}$)
-Measures the steady-state median ($P_{50}$) execution speedup on a 100-token autoregressive generation task:
-
-$$\mathcal{S}_{\text{lat}} = \frac{P_{50}(\text{Baseline})\text{ [ms]}}{P_{50}(\text{Optimized})\text{ [ms]}} \ge 10.0\times \quad (\text{Gold Standard})$$
-
-By timing only after the JIT warmup phase, this metric captures pure kernel runtime improvements, cache locality, and KV cache memoization efficiency.
-
-#### The Combined Pareto Performance Score ($\mathcal{P}_{\text{score}}$)
-To evaluate the overall multi-dimensional engineering balance, we define the geometric Pareto score:
-
-$$\mathcal{P}_{\text{score}} = \mathcal{R}_{\text{acc}} \times \sqrt{\mathcal{C}_{\text{mem}} \times \mathcal{S}_{\text{lat}}}$$
-
-A submission that achieves $\mathcal{R}_{\text{acc}} = 0.996$, $\mathcal{C}_{\text{mem}} = 4.25$, and $\mathcal{S}_{\text{lat}} = 16.51$ achieves:
-
-$$\mathcal{P}_{\text{score}} = 0.996 \times \sqrt{4.25 \times 16.51} = 0.996 \times \sqrt{70.1675} \approx \mathbf{8.34}$$
+A benchmark that measures one thing rewards whatever is cheapest on that one thing. Here is the model that wins every latency contest ever held without an accuracy rule.
 
 ```python
-# Trace Verification: Torch Olympics Scoring & Pareto Metric Evaluation
-import math
+class ZeroModel:
+    """Answers every question with the same ten zeros."""
+    def forward(self, x):
+        return [0.0] * 10
 
-def compute_olympic_score(acc_opt, acc_base, mem_opt, mem_base, lat_opt, lat_base):
-    """Verifies the Olympic qualification rules and Pareto score computation."""
-    r_acc = acc_opt / acc_base
-    c_mem = mem_base / mem_opt
-    s_lat = lat_base / lat_opt
+def time_ms(model, x, runs=100):
+    import time
+    best = float("inf")
+    for _ in range(runs):
+        t0 = time.perf_counter()
+        model.forward(x)
+        best = min(best, (time.perf_counter() - t0) * 1000)
+    return best
 
-    # Check 99% accuracy floor
-    is_qualified = r_acc >= 0.990
-    pareto_score = r_acc * math.sqrt(c_mem * s_lat) if is_qualified else 0.0
-
-    return {
-        "qualified": is_qualified,
-        "acc_retention": r_acc,
-        "mem_factor": c_mem,
-        "speedup": s_lat,
-        "pareto_score": pareto_score
-    }
-
-# Test TinyTorch Capstone
-scores = compute_olympic_score(
-    acc_opt=0.9815, acc_base=0.9850,
-    mem_opt=3.34, mem_base=14.20,
-    lat_opt=86.0, lat_base=1420.0
-)
-print(f"TinyTorch Pareto Score: {scores['pareto_score']:.2f} (Qualified: {scores['qualified']})")
-assert scores["qualified"] and scores["pareto_score"] > 8.0
+print("ZeroModel latency (ms):", round(time_ms(ZeroModel(), [0.0] * 64), 5))
 ```
 
----
+On my machine that prints a latency under a microsecond, and no real model will ever beat it. Its weights occupy zero bytes, so it wins the memory contest too. Its accuracy on ten balanced digit classes is 10%, the same as guessing. The model is absurd, but the failure it exposes is not. Every optimization in Part III moves toward `ZeroModel` by a small step. Quantization discards low-order bits. Pruning discards small weights. A 2-bit quantizer discards almost everything, and it would report a 16× memory reduction with a straight face. Each of those steps is a good trade only up to a point, and a single-axis number cannot tell you where that point is.
 
-## M3.3 Line-by-Line Code Commentary: The Pure TinyTorch Olympic Harness
+The opposite failure is quieter. Chapter 16 showed that zeroing half the entries of a weight matrix leaves the dense multiply doing exactly the same work, since a zero still gets multiplied and added. A student who prunes to 50% sparsity and reports "half the parameters removed" has said something true about the count and nothing about the bytes on disk or the milliseconds per call. Whether that pruning paid off depends on how the weights are stored and how the multiply is run, and neither is visible in the sparsity figure.
 
-We implement the complete Torch Olympics evaluation and submission harness in TinyTorch:
-
-```python
-# packages/tinytorch/tinytorch/olympics/evaluation.py
-import time
-import json
-import numpy as np
-from typing import Dict, Any, List
-from ..core.tensor import Tensor
-from ..core.transformers import TinyGPT
-from ..perf.quantization import quantize_linear
-from ..perf.acceleration import fused_gelu
-from ..perf.memoization import KVCache
-from ..perf.benchmarking import Benchmark, BenchmarkResult
-
-class OlympicReport:
-    """Official score container for a Torch Olympics submission."""
-    def __init__(
-        self,
-        name: str,
-        accuracy: float,
-        memory_mb: float,
-        p50_ms: float,
-        p99_ms: float,
-        throughput: float
-    ):
-        self.name = name
-        self.accuracy = accuracy
-        self.memory_mb = memory_mb
-        self.p50_ms = p50_ms
-        self.p99_ms = p99_ms
-        self.throughput = throughput
-
-    def evaluate_against(self, baseline: 'OlympicReport') -> Dict[str, Any]:
-        """Compute relative retention ratios, speedups, and Olympic medal awards."""
-        acc_retention = self.accuracy / baseline.accuracy if baseline.accuracy > 0 else 0.0
-        mem_reduction = baseline.memory_mb / self.memory_mb if self.memory_mb > 0 else 0.0
-        lat_speedup = baseline.p50_ms / self.p50_ms if self.p50_ms > 0 else 0.0
-
-        # Disqualification rule: Accuracy retention floor
-        if acc_retention < 0.990:
-            status = "DISQUALIFIED (Failed 99% Accuracy Floor)"
-            medals = {"accuracy": "NONE", "memory": "NONE", "latency": "NONE"}
-        else:
-            status = "QUALIFIED"
-            medals = {
-                "accuracy": "🥇 GOLD" if acc_retention >= 0.995 else "🥈 SILVER",
-                "memory": "🥇 GOLD" if mem_reduction >= 4.0 else ("🥈 SILVER" if mem_reduction >= 2.0 else "🥉 BRONZE"),
-                "latency": "🥇 GOLD" if lat_speedup >= 10.0 else ("🥈 SILVER" if lat_speedup >= 4.0 else "🥉 BRONZE")
-            }
-
-        pareto_score = acc_retention * np.sqrt(mem_reduction * lat_speedup)
-
-        return {
-            'status': status,
-            'accuracy_retention': float(acc_retention),
-            'memory_reduction_factor': float(mem_reduction),
-            'latency_speedup_factor': float(lat_speedup),
-            'pareto_score': float(pareto_score),
-            'medals': medals
-        }
-
-def run_torch_olympics(
-    baseline_model: TinyGPT,
-    optimized_model: Any,
-    sample_prompt: List[int]
-) -> Dict[str, Any]:
-    """Execute the complete automated Torch Olympics tournament."""
-    bench = Benchmark(num_warmup=10, num_runs=50)
-
-    # 1. Benchmark Baseline Model
-    base_res = bench.run_latency_benchmark(baseline_model, Tensor(np.array([sample_prompt])), name="Baseline FP32")
-    base_report = OlympicReport(
-        name="Baseline FP32",
-        accuracy=0.985,  # Baseline validation accuracy
-        memory_mb=base_res.memory_mb,
-        p50_ms=base_res.percentile(50),
-        p99_ms=base_res.percentile(99),
-        throughput=base_res.throughput(batch_size=1)
-    )
-
-    # 2. Benchmark Fully Optimized Model
-    opt_res = bench.run_latency_benchmark(optimized_model, Tensor(np.array([sample_prompt])), name="TinyTorch Accelerated")
-    opt_report = OlympicReport(
-        name="TinyTorch Accelerated",
-        accuracy=0.981,  # Retained validation accuracy
-        memory_mb=opt_res.memory_mb,
-        p50_ms=opt_res.percentile(50),
-        p99_ms=opt_res.percentile(99),
-        throughput=opt_res.throughput(batch_size=1)
-    )
-
-    # 3. Grade Results
-    return opt_report.evaluate_against(base_report)
-```
-
-#### Architectural Line-by-Line Mechanics
-
-1. **Lines 28--35 (Automated Disqualification Gate)**: In strict compliance with MLPerf rules, if `acc_retention < 0.990`, the submission is marked as disqualified regardless of how fast it executes.
-2. **Lines 36--44 (Medal Criteria)**: To win Gold, a system must achieve $\ge 99.5\%$ accuracy retention, $\ge 4.0\times$ memory reduction, and $\ge 10.0\times$ latency speedup.
-3. **Lines 46--47 (Pareto Multi-Metric Synthesis)**: `pareto_score` computes the geometric mean of memory reduction and speedup, weighted by accuracy retention.
+So the need is concrete. Take one model, apply the optimizations, and report accuracy, bytes, and latency together, against the unoptimized model, with a rule that disqualifies any candidate whose accuracy falls too far. That rule is the difference between a benchmark and a leaderboard for `ZeroModel`.
 
 ---
 
-## M3.4 Concrete Numerical Trace Table: Tournament Leaderboard
+## The Idea
 
-To witness how different engineering approaches fare in the Torch Olympics, let us trace four competing framework configurations on a 100-token language generation benchmark.
+### Three ratios and a floor
 
-In @tbl-olympics-leaderboard, we detail the exact measurements, retention ratios, speedups, and medal outcomes.
+Everything in the scorecard is a ratio of the optimized model against the baseline, so the units cancel and the numbers mean the same thing on any machine. Let $A$ be accuracy on a fixed test set, $M$ the bytes needed to store the parameters, and $t$ the median latency of one forward pass after warmup, with subscripts for the baseline and the candidate. Three numbers summarize a submission:
 
-| Model Candidate | Techniques Applied | Accuracy | Peak VRAM | $P_{50}$ Latency | Standing & Award |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **1. Baseline FP32** | Naive TinyGPT | $98.50\%$ | $14.20\text{ MB}$ | $1,420\text{ ms}$ | **Reference Standard** |
-| **2. Candidate Alpha** | Aggressive 2-Bit INT2 | $84.20\%$ | $1.80\text{ MB}$ | $95\text{ ms}$ | **Disqualified** (Acc < 99%) |
-| **3. Candidate Beta** | INT8 Quantization alone | $98.42\%$ | $4.60\text{ MB}$ | $710\text{ ms}$ | **Bronze Award** ($2.0\times$ Speedup) |
-| **4. Candidate Gamma** | INT8 + Kernel Fusion | $98.38\%$ | $3.10\text{ MB}$ | $364\text{ ms}$ | **Silver Award** ($3.9\times$ Speedup) |
-| **5. TinyTorch Capstone** | Full 4-Tier Stack (INT8+SVD+Fusion+KV) | $\mathbf{98.15\%}$ | $\mathbf{3.34\text{ MB}}$ | $\mathbf{86\text{ ms}}$ | **Triple Gold Champion** ($16.5\times$ Speedup) |
+$$R = \frac{A_{\text{cand}}}{A_{\text{base}}}, \qquad C = \frac{M_{\text{base}}}{M_{\text{cand}}}, \qquad S = \frac{t_{\text{base}}}{t_{\text{cand}}}$$
 
-: Official Torch Olympics Leaderboard comparing multiple optimization candidates. {#tbl-olympics-leaderboard tbl-colwidths="[18,24,12,12,12,22]"}
+$R$ is **accuracy retention**, the fraction of the baseline's accuracy the candidate keeps. $C$ is the size ratio, how many times smaller the candidate is. $S$ is the speedup. All three are better when larger, but only $C$ and $S$ are things to maximize. $R$ is a gate. MLPerf Inference, the industry benchmark this milestone is modeled on, requires a submission to reach a fixed fraction of a reference model's accuracy before its latency or throughput is recorded at all, and for most of its benchmarks that fraction is 99%. The same rule here reads $R \ge 0.99$. `ZeroModel` has $R = 0.11$ and never reaches the starting line.
 
-#### In-Depth Systems Analysis of the Standings
+Why a floor rather than a fourth term in a weighted sum? Because a sum lets one axis buy another. A model that is 100× faster and 20 points less accurate can outscore a careful one under almost any weighting, and the people submitting to a benchmark will find that weighting. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
 
-1. **Candidate Alpha (Aggressive INT2)**: Demonstrates the extreme quantization trap. While INT2 achieved a $14.95\times$ speedup, accuracy collapsed to $84.20\%$ ($\mathcal{R}_{\text{acc}} = 0.855 < 0.990$), leading to automatic disqualification.
-2. **Candidate Beta (Isolated INT8)**: Safely retained accuracy ($98.42\%$) but hit Amdahl's single-tier ceiling, achieving only a $2.0\times$ speedup and earning Bronze.
-3. **Candidate Gamma (INT8 + Fusion)**: Eliminated DRAM roundtrips to achieve a $3.9\times$ speedup and $4.58\times$ memory reduction, earning Silver.
-4. **The TinyTorch Capstone**: Compounding all four orthogonal tiers maintained pristine accuracy ($98.15\%$, $99.6\%$ retention) while smashing the Gold thresholds with a **$4.25\times$ memory reduction** and a **$16.51\times$ latency sprint**, sweeping all three Gold Medals!
+### Events
 
-```python
-# Trace Verification: Tournament Standings & Medals Award Validation
-def verify_tournament_leaderboard():
-    """Formally grades each candidate and confirms TinyTorch Triple Gold victory."""
-    candidates = [
-        {"name": "Baseline FP32", "acc": 0.9850, "mem": 14.20, "lat": 1420.0},
-        {"name": "Candidate Alpha (INT2)", "acc": 0.8420, "mem": 1.80, "lat": 95.0},
-        {"name": "Candidate Beta (INT8)", "acc": 0.9842, "mem": 4.60, "lat": 710.0},
-        {"name": "Candidate Gamma (INT8+Fusion)", "acc": 0.9838, "mem": 3.10, "lat": 364.0},
-        {"name": "TinyTorch Capstone", "acc": 0.9815, "mem": 3.34, "lat": 86.0},
-    ]
-    base = candidates[0]
-    for c in candidates[1:]:
-        r_acc = c["acc"] / base["acc"]
-        c_mem = base["mem"] / c["mem"]
-        s_lat = base["lat"] / c["lat"]
-        disqualified = r_acc < 0.990
-        print(f"{c['name']:<28}: Retention={r_acc*100:.1f}%, MemCut={c_mem:.2f}x, Speedup={s_lat:.2f}x, Disqualified={disqualified}")
-        if c["name"] == "TinyTorch Capstone":
-            assert not disqualified, "TinyTorch must not be disqualified"
-            assert r_acc >= 0.995, "Failed Gold Accuracy Retention"
-            assert c_mem >= 4.0, "Failed Gold Memory Reduction"
-            assert s_lat >= 10.0, "Failed Gold Latency Speedup"
-            print(" -> TRIPLE GOLD MEDAL WINNER CONFIRMED!")
+The benchmark module from Chapter 19 turns this into a set of events, each of which fixes floors on two axes and lets submissions compete on the third. A latency sprint requires accuracy of at least 85% and ranks by speed. A memory challenge has the same floor and ranks by bytes. An accuracy contest caps latency at 100 ms and memory at 10 MB and ranks by accuracy. An "extreme push" lowers the accuracy floor to 80% for anyone willing to go further. The floors are absolute here (85% accuracy, not 99% of a baseline), which suits the course's small models, whose baselines vary from run to run; the structure is what matters, and it is the MLPerf structure in miniature.
 
-verify_tournament_leaderboard()
-```
+The set of candidates that cannot improve on one axis without giving something up on another is called the **Pareto frontier**.[^fn-pareto-frontier-scorecard] A benchmark with floors is a way of asking one question about that frontier at a time. Where on the frontier a deployment should sit is a product decision, not an engineering one, and the scorecard's job is to make the frontier visible so that the decision can be made with numbers.
+
+[^fn-pareto-frontier-scorecard]: **Pareto frontier**: in a trade-off between several objectives, the set of options that no other option beats on every objective at once. A candidate off the frontier is simply worse than some other candidate on all axes; moving along the frontier trades one axis for another, and a benchmark cannot say which trade is right, only where the frontier is.
+
+### What to expect before measuring
+
+A benchmark is more useful when you know what it should print. The `DigitMLP` of Milestone I has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are counts, not measurements, and they are exact.
+
+Napkin math for the rest. INT8 storage keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 20 = 2{,}430$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of Chapter 16 costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. And latency should barely move at all. A multiply of a $1 \times 64$ row against a $64 \times 32$ matrix is a few microseconds of arithmetic under the fixed cost of a Python call, and neither INT8 storage nor zeroed weights changes how many multiplies the dense forward pass performs. If the script reports a large speedup from quantization or pruning on this model, the right reaction is suspicion, not celebration.
 
 ---
 
-## M3.5 Production Systems Bridge: MLPerf Submission Certification
+## The Code
 
-::: {.callout-note title="MLPerf Automated Submission Verification Pipeline"}
-1. **Verification JSON Generation**:
-   - The benchmark harness exports an immutable, cryptographic JSON artifact containing exact hardware CPU/GPU specifications, git commit hashes, and raw millisecond latency traces.
-2. **Audit Compliance Checker**:
-   - An automated compliance auditor parses the submission to verify:
-     - Zero dropped or corrupted tokens during generation.
-     - Strict compliance with the $99\%$ accuracy retention floor.
-     - Continuous temperature and power telemetry remaining strictly within hardware thermal limits.
+The code for this milestone lives in two places, the course's own scripts and this chapter's pure-Python model of what they compute, and the honest relationship between the two is worth stating before reading either.
+
+::: {.callout-note title="Source Code Mapping"}
+This milestone's scripts (`milestones/06_2018_mlperf/01_optimization_olympics.py` and `02_generation_speedup.py`) drive the NumPy-backed modules students build in the TinyTorch course: `Profiler` from Module 14, `Quantizer` from 15, `Compressor` from 16, `vectorized_matmul` from 17, `KVCache` from 18, and `Benchmark` and `MLPerf` from 19. The excerpts below are taken from those scripts and need the exported `tinytorch` package to run. The scorecard and trace listings are a stripped-down pure-Python model of the same three-ratio benchmark, small enough to show every step of scoring a submission, and they run on their own.
 :::
 
-In official MLPerf Inference closed division audits, performance is measured under the strict constraints of the LoadGen traffic generator:
-$$\text{Pass}_{\text{MLPerf}} = \left( \frac{\text{Accuracy}_{\text{eval}}}{\text{Accuracy}_{\text{ref}}} \ge 0.99 \right) \;\land\; \left( P_{99} \le \text{Target}_{\text{latency}} \right) \;\land\; \left( \Delta T_{\text{die}} \le T_{\text{thermal\_throttle}} \right)$$
+### Script 1: profile, quantize, prune, benchmark
+
+The first script trains `DigitMLP` for ten epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes. Profiling comes first because it establishes the "before" that every later ratio divides by.
 
 ```python
-# Industrial Bridge: MLPerf Compliance Verification Engine
-from typing import Dict, Any
+# Excerpt from milestones/06_2018_mlperf/01_optimization_olympics.py (step_1_profile, trimmed)
+profiler = Profiler()
+param_count = profiler.count_parameters(model)
+param_bytes = param_count * 4                        # FP32 = 4 bytes
+flops = profiler.count_flops(model, (1, 64))
 
-def verify_mlperf_compliance(audit_payload: Dict[str, Any]) -> bool:
-    """
-    Simulates the official MLCommons MLPerf Inference verification auditor.
-    Validates accuracy floor, tail latency SLA, and uncorrupted token emission.
-    """
-    acc_ratio = audit_payload["eval_accuracy"] / audit_payload["reference_accuracy"]
-    sla_pass = audit_payload["p99_latency_ms"] <= audit_payload["target_sla_ms"]
-    tokens_intact = audit_payload.get("dropped_tokens", 0) == 0
+sample_input = Tensor(rng.standard_normal((1, 64)).astype(np.float32))
+latency_ms = profiler.measure_latency(model, sample_input, warmup=3, iterations=10)
 
-    is_compliant = (acc_ratio >= 0.990) and sla_pass and tokens_intact
+outputs = model(X_test)
+predictions = np.argmax(outputs.data, axis=1)
+baseline_acc = np.mean(predictions == y_test) * 100
+```
 
-    status_str = "CERTIFIED" if is_compliant else "REJECTED"
-    print(f"[MLPerf Audit] Status: {status_str} | Acc Ratio: {acc_ratio:.4f} | P99: {audit_payload['p99_latency_ms']} ms")
-    return is_compliant
+Three things to notice. The byte count is derived from the parameter count, not measured, which is fine for FP32 and will matter in a moment. The latency is the median of ten timed calls after three warmup calls, which is Chapter 14's protocol with small counts so the script stays quick. And the accuracy is computed over the whole test set in one batch, so it is a real number on real data, unlike anything the profiler returns.
 
-# Validate TinyTorch submission artifact
-test_payload = {
-    "eval_accuracy": 0.9815,
-    "reference_accuracy": 0.9850,
-    "p99_latency_ms": 94.2,
-    "target_sla_ms": 150.0,
-    "dropped_tokens": 0
+Quantization is next, and this is where the script's bookkeeping is worth reading slowly.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_2_quantize, trimmed)
+quant_result = Quantizer.quantize_model(model)
+quant_size = int(param_bytes / quant_result['compression_ratio'])
+```
+
+`Quantizer.quantize_model` quantizes every parameter tensor with the min-max INT8 scheme of Chapter 15 and returns a dictionary holding the codes, the per-tensor scale and zero point, and a `compression_ratio`. That ratio is the original byte count divided by the number of elements, so it is exactly 4.0 by construction; the scales and zero points are not counted. More important, the dictionary is returned and the model is left untouched. The original FP32 weights stay in `model`, the quantized codes never run a forward pass, and when the final table prints an accuracy for the quantized stage it copies the baseline accuracy into that cell. The script's INT8 accuracy is therefore an assumption, not a measurement. Exercise 1 closes that gap.
+
+Pruning does run the pruned model, on a copy so the original survives.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_3_prune, trimmed)
+model_copy = DigitMLP()
+for i, layer in enumerate(model.layers):
+    for j, param in enumerate(layer.parameters()):
+        model_copy.layers[i].parameters()[j].data = param.data.copy()
+
+sparsity_before = Compressor.measure_sparsity(model_copy)
+Compressor.magnitude_prune(model_copy, sparsity=0.5)
+sparsity_after = Compressor.measure_sparsity(model_copy)
+
+outputs_pruned = model_copy(X_test)
+pruned_acc = np.mean(np.argmax(outputs_pruned.data, axis=1) == y_test) * 100
+```
+
+`magnitude_prune` gathers every weight matrix (biases excluded), finds the magnitude at the 50th percentile, and zeroes everything below it in place. `measure_sparsity` counts the zeros. The pruned accuracy is real. The pruned *size*, when the script prints it, is `param_bytes // 2` with a note reading "with sparse storage," which is a napkin estimate that assumes the indices are free. The worked trace below does that arithmetic honestly.
+
+The benchmark step uses Chapter 19's `Benchmark` to time repeated forward passes and report a mean, a standard deviation, and a 95th percentile, which with the default ten samples is the slowest run.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_6_benchmark, trimmed)
+benchmark = Benchmark(models=[model], datasets=[(X_test, y_test)])
+latency_results = benchmark.run_latency_benchmark(input_shape=(1, 64))
+bench_result = list(latency_results.values())[0]
+
+sorted_vals = sorted(bench_result.values)
+p95_latency = sorted_vals[min(int(len(sorted_vals) * 0.95), len(sorted_vals) - 1)]
+```
+
+Notice which model is passed in: `model`, the original. The script benchmarks the baseline with full statistical care and never times the quantized or pruned versions at all. Nothing in its output is a measured speedup, and its summary table has no latency column for the optimized stages for that reason. That is a gap in the script, not a subtlety in the mechanism, and it is the first thing to fix if you extend it (Exercise 2).
+
+### Script 2: generation with and without the cache
+
+The second script builds a one-layer transformer from Chapters 11 and 12 (vocabulary 27, embedding width 32, two heads) and generates 16 tokens two ways. Without a cache, each step runs the full forward pass over every token so far.
+
+```python
+# Excerpt from milestones/06_2018_mlperf/02_generation_speedup.py (trimmed)
+def forward_no_cache(tokens):
+    x = token_embed(tokens)
+    x = pos_encode(x)
+    x = attention(x)
+    return output_proj(x)
+
+for token_idx in range(seq_len):                     # seq_len = 16
+    tokens = Tensor(rng.integers(1, vocab_size, (1, token_idx + 1)))
+    start = time.time()
+    _ = forward_no_cache(tokens)
+    times_no_cache.append((time.time() - start) * 1000)
+```
+
+Step $t$ processes $t$ tokens, so the loop processes $1 + 2 + \dots + 16 = 136$ token positions in total. With a cache, each step should process one new token and read the other keys and values back from storage, 16 positions in all, so the napkin expectation is a ratio near $136 / 16 = 8.5$ on the attention work alone, before the fixed costs that do not shrink. That is where the script's advertised "6 to 10×" comes from.
+
+The cached loop in the script does not reach that far. It embeds the new token, adds its positional encoding, writes the result into the cache with `cache.update`, and stops; it never calls `cache.get` and never runs attention against the cached keys. What it times is embedding alone versus a full forward pass, so the speedup it prints is an upper bound on what a real cached attention could achieve, and a generous one. The `KVCache` class itself does what Chapter 18 said it does. The script simply stops short of using it. Exercise 3 finishes the wiring and measures the real number.
+
+### The scorecard
+
+The rest of the chapter uses a pure-Python scorecard that runs anywhere. It takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the MLPerf-style verdict. A second function checks a candidate against the event floors of Chapter 19's benchmark module.
+
+```python
+EVENTS = {
+    "latency_sprint":   {"min_accuracy": 0.85},
+    "memory_challenge": {"min_accuracy": 0.85},
+    "accuracy_contest": {"max_latency_ms": 100.0, "max_bytes": 10 * 2**20},
+    "extreme_push":     {"min_accuracy": 0.80},
 }
-assert verify_mlperf_compliance(test_payload)
+
+def score(baseline, candidate):
+    """Three ratios, each candidate-vs-baseline, plus the MLPerf-style floor."""
+    retention = candidate["accuracy"] / baseline["accuracy"]
+    return {
+        "retention": retention,
+        "size_ratio": baseline["bytes"] / candidate["bytes"],
+        "speedup": baseline["p50_ms"] / candidate["p50_ms"],
+        "mlperf_ok": retention >= 0.99,
+    }
+
+def qualifies(candidate, event):
+    rules = EVENTS[event]
+    return (candidate["accuracy"] >= rules.get("min_accuracy", 0.0)
+            and candidate["p50_ms"] <= rules.get("max_latency_ms", float("inf"))
+            and candidate["bytes"] <= rules.get("max_bytes", float("inf")))
 ```
+
+There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event rules are a dictionary. The value of the scorecard is not in the code but in what it refuses to do: it will not combine the ratios into a single number, and it will not report a size or a speed for a candidate that has not been run.
 
 ---
 
-## M3.6 Final Milestone Synthesis
+## A Worked Trace
 
-| Olympic Event | Gold Medal Target | TinyTorch Achieved | Award Standing |
-| :--- | :--- | :--- | :--- |
-| **Accuracy Retention** | $\ge 99.0\%$ of baseline | **$99.6\%$** | 🥇 **Gold Medal** |
-| **Memory Footprint** | $\ge 4.0\times$ reduction | **$4.25\times$** ($13.5\text{ GB} \to 3.2\text{ GB}$) | 🥇 **Gold Medal** |
-| **Latency Speedup** | $\ge 10.0\times$ acceleration | **$16.51\times$** ($1,420\text{ ms} \to 86\text{ ms}$) | 🥇 **Gold Medal** |
+The trace has two parts. The first pushes one small weight matrix through the two algorithms that change bytes, so that every number can be checked by hand. The second fills in the scorecard for `DigitMLP`.
 
-: Torch Olympics final victory scorecard across all competitive events. {#tbl-olympics-scorecard tbl-colwidths="[26,26,28,20]"}
+### One matrix, quantized and pruned
 
-The unified scaling law of our completed machine learning engine proves that systematic, vertical stack optimization always outperforms isolated micro-tuning:
-$$\text{Efficiency}_{\text{system}} = \frac{\text{Work}_{\text{useful}}}{\text{Energy}_{\text{consumed}}} \propto \frac{\text{FLOPS}_{\text{effective}}}{\text{DRAM Traffic} + \text{SRAM Overhead}}$$
+Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. Min-max INT8 quantization first widens the range to include zero (it already does), then sets the scale to the range divided by 255 and the zero point to whatever integer maps the minimum onto $-128$.
 
 ```python
-# System-Wide Olympic Victory Verification
-def verify_olympic_victory():
-    """Confirms Triple Gold achievement across all three competitive events."""
-    events = {
-        "Accuracy Retention": (0.996 >= 0.990, "Gold"),
-        "Memory Reduction": (4.25 >= 4.0, "Gold"),
-        "Latency Speedup": (16.51 >= 10.0, "Gold"),
-    }
-    for event, (passed, medal) in events.items():
-        assert passed, f"Failed {event}"
-        print(f"[OLYMPICS] {event:<20}: Awarded {medal} Medal")
-    print("\n[CHAMPION] TinyTorch officially certified as Triple Gold World Champion!")
+def quantize_int8(values):
+    """Asymmetric min-max INT8: returns (codes, scale, zero_point)."""
+    lo, hi = min(min(values), 0.0), max(max(values), 0.0)
+    scale = (hi - lo) / 255
+    zero_point = round(-128 - lo / scale)
+    codes = [max(-128, min(127, round(v / scale + zero_point))) for v in values]
+    return codes, scale, zero_point
 
-verify_olympic_victory()
+def dequantize_int8(codes, scale, zero_point):
+    return [(c - zero_point) * scale for c in codes]
+
+w = [-1.0, 0.0, 2.0, 0.5, 1.5, -0.5]
+codes, scale, zp = quantize_int8(w)
+print(round(scale, 4), zp, codes)
+print([round(v, 4) for v in dequantize_int8(codes, scale, zp)])
 ```
 
-You have successfully designed, built, scaled, and accelerated a modern machine learning framework from raw memory buffers to an Olympic-gold generative AI engine.
+The scale is $3 / 255 = 0.011765$ and the zero point is $\text{round}(-128 + 85) = -43$. @tbl-m3-quant-prune-trace lists each weight's code, its reconstruction, and its fate under 50% magnitude pruning, whose threshold is the median magnitude, $0.75$.
 
-Where does the AI systems frontier go from here?
+| Weight $w$ | Code $\text{round}(w / 0.011765 - 43)$ | Reconstructed | Error | $\lvert w \rvert \ge 0.75$? | After pruning |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| $-1.0$ | $-128$ | $-1.0000$ | $0$ | yes | $-1.0$ |
+| $0.0$ | $-43$ | $0.0000$ | $0$ | no | $0.0$ |
+| $2.0$ | $127$ | $2.0000$ | $0$ | yes | $2.0$ |
+| $0.5$ | $0$ | $0.5059$ | $0.0059$ | no | $0.0$ |
+| $1.5$ | $84$ | $1.4941$ | $0.0059$ | yes | $1.5$ |
+| $-0.5$ | $-86$ | $-0.5059$ | $0.0059$ | no | $0.0$ |
 
-In our concluding chapter, **Chapter 21: The Modern Stack**, we explore **OpenAI Triton, Custom Domain-Specific Silicon (TPUs/NPUs), and Compiler Graph IRs**.
+: Six weights through min-max INT8 quantization (scale $0.011765$, zero point $-43$) and through 50% magnitude pruning (threshold $0.75$). {#tbl-m3-quant-prune-trace tbl-colwidths="[12,24,16,12,18,18]"}
+
+The largest reconstruction error is half a quantization step, $0.0059$, which is what rounding guarantees. The three weights that survive pruning are the three largest in magnitude, and the sparsity is exactly $3/6 = 50\%$. Nothing about either operation depends on the size of the matrix; `DigitMLP`'s 2,368 weights go through the same two rules.
+
+### The scorecard for `DigitMLP`
+
+Now fill in the ledger. Bytes are counted from the architecture; accuracies are the values the milestone's README says to expect (88% baseline, about two points lower after pruning), stated here as an illustration and not as a measurement; and the latency column is deliberately the same napkin figure in every row, because the script never times the optimized models and the arithmetic they perform is unchanged.
+
+```python
+params = 64 * 32 + 32 + 32 * 10 + 10           # 2,410
+weights = 64 * 32 + 32 * 10                     # 2,368, biases excluded
+fp32_bytes = params * 4                         # 9,640
+int8_bytes = params + 4 * (4 + 1)               # codes + (scale, zero point) x 4 tensors
+nnz = weights // 2                              # 1,184 survivors at 50% sparsity
+csr50_bytes = nnz * 2 + (33 + 11) * 2 + 42 + 4 * 5   # value+index, row starts, biases, scales
+
+ledger = {
+    "fp32":   {"accuracy": 0.880, "bytes": fp32_bytes,  "p50_ms": 0.05},
+    "int8":   {"accuracy": 0.880, "bytes": int8_bytes,  "p50_ms": 0.05},
+    "pruned": {"accuracy": 0.860, "bytes": csr50_bytes, "p50_ms": 0.05},
+}
+base = ledger["fp32"]
+for name, cand in ledger.items():
+    s = score(base, cand)
+    print(f"{name:7s} R={s['retention']:.3f} C={s['size_ratio']:.2f}x "
+          f"S={s['speedup']:.2f}x floor={s['mlperf_ok']} "
+          f"events={[e for e in EVENTS if qualifies(cand, e)]}")
+```
+
+The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 33 and 11 row boundaries of the two matrices, 42 bias bytes, and the scales. The loop prints the rows of @tbl-m3-scorecard from those counts.
+
+| Stage | Bytes | Accuracy | $R$ | $C$ | $S$ | $R \ge 0.99$? | Event floors met |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| FP32 baseline | $9{,}640$ | $88.0\%$ | $1.000$ | $1.00\times$ | $1.00\times$ | yes | all four |
+| + INT8 | $2{,}430$ | $88.0\%$ (copied, not run) | $1.000$ | $3.97\times$ | $1.00\times$ | yes | all four |
+| + prune 50%, CSR | $2{,}518$ | $86.0\%$ | $0.977$ | $3.83\times$ | $1.00\times$ | **no** | all four |
+
+: The scorecard for `DigitMLP`. Bytes are exact counts from the architecture; accuracies are the README's expected values; latency is the same napkin figure throughout because the script does not time the optimized models. {#tbl-m3-scorecard tbl-colwidths="[18,10,18,8,10,10,12,14]"}
+
+Three lessons sit in this small table. The INT8 ratio is $3.97\times$, not the $4.0\times$ the script reports, because the script does not count the scales and zero points; on a model with 2,410 parameters and four tensors the difference is trivial, and on a model quantized per channel with thousands of scales it is not. The pruned row is *larger* than the INT8 row, because at 50% sparsity every surviving weight drags a 1-byte index along with it and the two costs cancel; sparse storage starts paying only when sparsity is well above the index overhead, and at 90% the same arithmetic gives about 624 bytes, a $15\times$ ratio. And the pruned model fails the MLPerf floor while passing every event floor in the module, which is not a contradiction. The two floors ask different questions, one relative and strict, one absolute and lenient, and a candidate's standing depends on which question the benchmark asks. The speedup column is $1.00\times$ in every row by construction, which is the honest number until someone measures a different one.
+
+---
+
+## From TinyTorch to Production
+
+The scorecard's three ratios and its accuracy floor are exactly the structure of MLPerf Inference, the benchmark that hardware and software vendors submit to twice a year. What production adds is everything needed to make the numbers trustworthy when the people producing them have a reason to shade them. The differences are worth walking through, because each one answers a question this chapter raised.
+
+The first difference is who holds the stopwatch. In the milestone script, the script's own code decides when the clock starts and stops, and a careless (or clever) submitter can move those lines. MLPerf routes every query through LoadGen,[^fn-loadgen-mlperf-bridge] a load generator maintained by MLCommons that issues inputs to the submitter's system, times the responses itself, and writes a log the submitter cannot edit. The submitter's code is a callback; the timing is not theirs to touch.
+
+The second difference is which number is reported. MLPerf defines scenarios rather than a single latency. Single-stream sends one query at a time and reports the 90th-percentile latency. Server sends queries at a Poisson-distributed rate and asks for the highest rate at which the 99th-percentile latency stays under a fixed bound, which is the p99 rule of Chapter 14 turned into a throughput contest. Offline sends everything at once and reports throughput alone. A single model gets a different number in each scenario, and vendors are expected to publish which one they ran.
+
+The third difference is whether accuracy is measured on the same run. The milestone script runs accuracy once, on the test set, and times something else. MLPerf requires a separate accuracy run over the full validation set, compares it against the reference model's accuracy, and admits the performance run only if the target is met, 99% of reference for most benchmarks and 99.9% for the variants where a tenth of a point matters. The closed division fixes the model and its weights so that submissions compare hardware and software stacks; the open division allows the model to change, which is where quantization-aware retraining and pruning live. The module's `MLPerf` class, with its four small tasks of keyword spotting, visual wake words, anomaly detection, and image classification, is a miniature of MLPerf Tiny,[^fn-mlperf-tiny-bridge] the suite for microcontrollers, down to the task list.
+
+What carries over unchanged is the whole shape of the argument. Three axes against a baseline, an accuracy gate before speed counts, warmup before timing, percentiles rather than means, and the insistence on timing the artifact that will actually ship. Per-tensor min-max quantization is the entry-level version of what a production toolchain does; PyTorch's quantization, TensorRT, and llama.cpp's formats use per-channel or per-group scales chosen from calibration data, which is why the scale-and-zero-point overhead that was trivial in the trace becomes a real line item. Magnitude pruning survives in production with one change the trace already motivated. Unstructured zeros do not speed a dense kernel, so NVIDIA's hardware supports the 2:4 pattern of Chapter 16, in which the zeros sit where the multiply unit can skip them, and the size ratio and the speedup finally move together. The two harnesses differ on six points, set side by side in @tbl-m3-tinytorch-vs-mlperf.
+
+| | Milestone III script | MLPerf Inference |
+| :--- | :--- | :--- |
+| Who times the model | The script itself | LoadGen, an external harness |
+| Latency statistic | Median of 10 runs, p95 over 10 runs | p90 (single-stream) or p99 bound (server) |
+| Accuracy check | One pass over the test set | Separate run over the full validation set |
+| Accuracy floor | 85% absolute (events) | 99% or 99.9% of a reference model |
+| Which model is timed | The FP32 baseline only | The submitted, optimized artifact |
+| Results review | None | Peer review by other submitters before publication |
+
+: What the milestone's benchmark leaves out and what MLPerf adds, and why. {#tbl-m3-tinytorch-vs-mlperf tbl-colwidths="[28,36,36]"}
+
+What a practitioner should now look for is the same short list every time a speedup is announced. Which model was timed, and was it the optimized one? What was its accuracy, on what set, and against what reference? Is the number a median after warmup or a single cold run? Is the size ratio counting the scales, the indices, and the biases? And when a pruning result shows memory shrinking but latency flat, that is not a failed experiment. It is the dense kernel telling you that the zeros were never skipped, which is the trace's second lesson exactly.
+
+[^fn-loadgen-mlperf-bridge]: **LoadGen**: the open-source load generator that every MLPerf Inference submission must run under. It generates queries, delivers them to the system under test, records the response times, and validates the log, so that a submitter's own code never touches the stopwatch.
+
+[^fn-mlperf-tiny-bridge]: **MLPerf Tiny**: the MLCommons benchmark suite for microcontroller-class devices, with four tasks (keyword spotting, visual wake words, anomaly detection, and tiny image classification) measured on latency and, optionally, energy per inference. Its models have tens of thousands of parameters, the same scale as `DigitMLP`, which is why the module's `MLPerf` class borrows its task list.
+
+---
+
+## Summary
+
+This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and events fix floors on two axes to rank on the third. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted `DigitMLP`'s bytes exactly to show that INT8 gives $3.97\times$, that 50% pruning in sparse storage gives slightly less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. Chapter 21 takes for granted that you can measure an optimization honestly on accuracy, memory, and latency at once, and asks what production compilers and custom silicon do to move those numbers further than pure Python can.
+
+---
+
+## Exercises
+
+1. The optimization script copies the baseline accuracy into the INT8 row because it never runs the quantized weights. Fix that. After `Quantizer.quantize_model` returns, dequantize each tensor with `dequantize_int8` and load the results back into a fresh `DigitMLP`, then run the test set through it. Report the measured retention $R$, and state whether it clears the $0.99$ floor. Then repeat with a 4-bit scheme (scale over 15 levels instead of 255) and find the smallest bit width at which the floor still holds.
+
+2. The script benchmarks only the FP32 baseline. Extend `step_6_benchmark` to time the pruned copy as well, using the same `Benchmark` protocol, and report the measured $S$ with its p95. Before running it, write down your prediction using the napkin argument from The Idea. Then replace the dense multiply in the pruned model's `Linear` layers with a loop over nonzero entries only, time it again, and explain why a sparse loop in Python is slower than the dense NumPy multiply even at 90% sparsity.
+
+3. The generation script writes to its `KVCache` but never reads from it, so the speedup it prints compares embedding alone against a full forward pass. Finish the cached path. At each step, embed the new token, project it to a query, key, and value, call `cache.update` with the new key and value, call `cache.get` to retrieve all keys and values so far, and run attention of the single query against them. Time 16 steps both ways with warmup, and compare the measured ratio with the $136 / 16 = 8.5$ napkin bound. Account for the gap in one paragraph.

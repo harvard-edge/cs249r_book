@@ -1,64 +1,116 @@
 # Tensors and Strided Memory {#sec-tensors}
 
-Before a machine learning framework can compute a gradient (Chapter 6), optimize a parameter (Chapter 7), or evaluate an attention head (which we build in Chapter 12), it must establish its most fundamental abstraction: **The Multi-Dimensional Tensor**.
+The introduction described TinyTorch as a small framework you can read in full, and promised that each chapter would start from a concrete problem. This chapter starts from the most basic one. Every model you will build in this book is a pile of matrices, and a computer's memory has no idea what a matrix is. Memory is a flat array of bytes, numbered from zero. Something has to translate "row 2, column 1" into "byte number 20," and the choice of how to do that translation decides which operations are free and which ones cost a full copy.
 
-In mathematical literature, a tensor is often defined as an abstract multi-dimensional array or a multi-linear map over vector spaces. In a physical computing system, however, memory is strictly linear: Dynamic Random-Access Memory (DRAM) and GPU High Bandwidth Memory (HBM) are flat, one-dimensional sequences of byte addresses from $0\text{x}00000000$ to the physical hardware ceiling.
+The practical question is one that every PyTorch user meets sooner or later. Why is `x.T` instantaneous on a matrix with a billion entries, and why does the very next line sometimes fail with `view size is not compatible with input tensor's size and stride`, insisting that you call `.contiguous()` first? The answer is a single small data structure, the strided tensor, and this chapter builds it in about a hundred lines of Python.
 
-This chapter examines how TinyTorch resolves the tension between multi-dimensional mathematical expressions and flat physical hardware. We walk through the implementation of `Storage` and `Tensor`, derive the inductive mathematics of **strides**, analyze how **zero-copy views** and **stride-0 broadcasting** execute in $O(1)$ constant time, and conclude by examining how production frameworks like PyTorch bridge this abstraction to hardware GEMM libraries.
+By the end you will have a `Tensor` class that stores its numbers in one flat buffer, reads and writes any coordinate by arithmetic on a tuple of strides, transposes and broadcasts without copying, and can copy itself back into plain row order when an operation demands it. Every later chapter builds on this idea. Their listings keep the same `Tensor` name and interface, and where they hold numbers in a NumPy array instead of a hand-rolled buffer, they say so.
 
 ![The Multi-Dimensional Tensor Abstraction: Flat 1D Memory Buffers Interpreted Through Coordinate Strides and Shape Descriptors](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-strides}
 
 ---
 
-## The Hardware Memory Interface
+## The Problem
 
-When high-level software manipulates multi-dimensional data using nested object arrays (such as Python's `list[list[float]]`), it introduces severe hardware inefficiencies:
+The obvious way to hold a matrix in Python is a list of lists. It reads well, it indexes as `matrix[row][col]`, and it is how most of us wrote our first matrix multiply.
 
 ```python
-# A 3x3 matrix represented as nested Python lists
+import sys
+
 matrix = [
     [1.0, 2.0, 3.0],
     [4.0, 5.0, 6.0],
-    [7.0, 8.0, 9.0]
+    [7.0, 8.0, 9.0],
 ]
+
+payload = 9 * 4                      # nine 32-bit floats, 4 bytes each
+overhead = (sys.getsizeof(matrix)
+            + sum(sys.getsizeof(row) for row in matrix)
+            + sum(sys.getsizeof(x) for row in matrix for x in row))
+print(f"useful payload: {payload} bytes, actual footprint: {overhead} bytes")
 ```
 
-In memory, this structure is represented as an array of pointers to independent heap allocations. Each floating-point number is wrapped inside a 24-byte `PyObject` header. This layout creates three fundamental systems bottlenecks:
+On my machine (CPython 3.14) that prints `useful payload: 36 bytes, actual footprint: 560 bytes`. The exact figure moves a little between Python versions, but the ratio does not. Each number is a separate `float` object of 24 bytes, each row is a separate list holding pointers to those objects, and the outer list holds pointers to the rows. Nine numbers that should take 36 bytes take roughly fifteen times that, and the nine values are scattered wherever the allocator happened to put them.
 
-1. **Destruction of Spatial Locality**: Sequential matrix elements are scattered across non-contiguous heap addresses. When the processor loads a 64-byte L1 cache line from DRAM, it retrieves arbitrary heap metadata rather than adjacent matrix values, causing continuous cache misses and memory bus stalls.
-2. **Incompatibility with SIMD and Tensor Cores**: Modern vector processing units (AVX-512, ARM Neon) and systolic matrix accelerators require contiguous, aligned byte streams to perform 8 to 64 floating-point operations per cycle. They cannot traverse linked pointer chains.
-3. **Memory Overhead**: Storing nine 32-bit floats (36 bytes of raw payload) in nested Python lists consumes over 300 bytes of pointer tables and object descriptors—an order-of-magnitude memory tax.
+The footprint is the smaller of the two problems. The larger one is that every change of shape is a copy. Transposing this matrix means building three new lists and moving every element. Adding a bias vector to every row means either a Python loop or building a full-size copy of the vector. For a $3 \times 3$ example that is nothing. For the $4096 \times 4096$ weight matrix of a single layer in a language model, a transpose-by-copy moves 64 MB (napkin math: $4096 \times 4096 \times 4$ bytes) to accomplish nothing but bookkeeping, and a training step transposes weights constantly.
 
-| Architectural Dimension | Nested Python Lists (`list[list[float]]`) | TinyTorch Contiguous Tensor (`Tensor`) |
+The two costs share one cause. A list of lists makes the *shape* part of the storage. The rows are physical objects, so changing the rows changes the storage. What we want is the opposite arrangement, in which the numbers sit in one flat run of memory and the shape is a separate, cheap description of how to read them.
+
+| Property | Nested Python lists | TinyTorch `Tensor` |
 | :--- | :--- | :--- |
-| **Physical Memory Layout** | Fragmented pointers across heap memory | Contiguous 1D linear buffer in DRAM / VRAM |
-| **Memory per Float32 Element** | 24–32 bytes (`PyObject` metadata wrapper) | Exactly 4 bytes (IEEE 754 single precision) |
-| **L1/L2 Cache Line Efficiency** | Low (pointer indirection thrashes cache) | Maximum (streaming 64-byte aligned lines) |
-| **Hardware Vectorization** | Impossible (requires sequential pointer chasing) | Optimal (direct load into SIMD/Tensor registers) |
-| **Geometric Views & Slicing** | $O(N)$ memory allocation and copying | $O(1)$ constant-time metadata manipulation |
+| Where the numbers live | Scattered `float` objects, reached through two layers of pointers | One flat buffer, values side by side |
+| Bytes per number | About 32 (24-byte object plus an 8-byte pointer) | 4 |
+| Cost of a transpose | A copy of every element | A change to two small tuples |
+| Cost of adding a vector to every row | A copy of the vector per row, or a Python loop | No copy; the vector is reread through a zero stride |
 
-: Hardware and architectural memory comparison between nested Python lists and contiguous tensor storage. {#tbl-memory-comparison tbl-colwidths="[28,36,36]"}
-
-To achieve peak hardware throughput, a machine learning runtime enforces a fundamental invariant: **Physical tensor storage must be contiguous, linear, and decoupled from dimensional interpretation.**
+: What changes when the shape is separated from the storage. {#tbl-memory-comparison tbl-colwidths="[28,36,36]"}
 
 ---
 
-## Data Structures: Storage vs. Tensor
+## The Idea
+
+Store the numbers in a single flat buffer, in row order, and keep three pieces of metadata alongside it. The **shape** says how many entries each dimension has. The **strides** say how far to move in the buffer when you advance one step along each dimension. The **offset** says where in the buffer the tensor's first element sits. Indexing becomes arithmetic on these three, and reshaping becomes editing them.
+
+### Row-major layout and strides
+
+Take a matrix of shape $(2, 3)$ and write its rows one after another into the buffer, so the buffer is contiguous[^fn-contiguous-flat-buffer] and row-major.[^fn-row-major-strides] Moving one column to the right means moving one slot in the buffer. Moving one row down means skipping a whole row, three slots. The strides are therefore $(3, 1)$.
+
+[^fn-contiguous-flat-buffer]: **Contiguous** memory: a run of consecutive addresses with no gaps, so the element after this one is at the very next slot. It is the layout hardware is built to stream, and every operation in this chapter that avoids a copy does so by reinterpreting a contiguous buffer rather than rearranging it.
+
+[^fn-row-major-strides]: **Row-major** order stores a matrix one complete row after another, so the last index varies fastest as you walk the buffer. C, NumPy, and PyTorch all default to it (Fortran and MATLAB use column-major, the transpose), which is why a PyTorch tensor's last stride is 1 unless someone has transposed it.
+
+The same reasoning extends to any number of dimensions. For a shape $(D_0, D_1, \dots, D_{N-1})$, the stride of the last dimension is $1$, and each earlier stride is the next stride multiplied by the next dimension's size, because advancing one step there has to skip everything nested inside it:
+
+$$S_{N-1} = 1, \qquad S_k = S_{k+1} \times D_{k+1} \quad \text{for } k = N-2, \dots, 0$$
+
+For shape $(2, 3, 4)$ this gives $S_2 = 1$, $S_1 = 4$, and $S_0 = 12$. Advancing one matrix in the batch skips 12 elements, one row skips 4, one column skips 1.
+
+### The coordinate mapping equation
+
+With strides in hand, locating any coordinate $(i_0, i_1, \dots, i_{N-1})$ in the buffer is one dot product:
+
+$$\text{index} = \text{offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
+
+This single equation is the whole mechanism. Everything else in the chapter is a consequence of choosing shape, strides, and offset cleverly while leaving the buffer alone.
+
+### Transposition is a swap
+
+A transpose exchanges rows and columns. In the mapping equation, that is the same as exchanging the roles of $i_0$ and $i_1$, which is the same as swapping the two shape entries and the two stride entries. The matrix with shape $(2, 3)$ and strides $(3, 1)$ becomes a view with shape $(3, 2)$ and strides $(1, 3)$ over the *same* buffer. Nothing is copied. The transposed view walks the buffer in column order because its strides tell it to.
+
+### Broadcasting is a zero stride
+
+The stranger consequence is a stride of zero. Nothing in the mapping equation says a stride has to be positive, so look at what happens when one is not. If a vector of length $D$ is given shape $(B, D)$ and strides $(0, 1)$, then
+
+$$\text{index} = i \times 0 + j \times 1 = j$$
+
+and the row index $i$ has no effect on where we read. Every row maps onto the same $D$ values. The vector now *behaves* as a $(B, D)$ matrix at zero extra memory, and it did so through the same equation that handles every other tensor. NumPy and PyTorch call this **broadcasting**.
+
+Notice the systemic contract this creates for the rest of the framework. If forward execution reads the same storage multiple times by setting a stride to zero, backward automatic differentiation (Chapter 6) cannot simply pass gradients back one-to-one. By the multivariable chain rule, whenever a single stored value feeds multiple computational paths, its total derivative is the sum of the derivatives along all those paths:
+
+$$\frac{\partial \mathcal{L}}{\partial w} = \sum_{i} \frac{\partial \mathcal{L}}{\partial y_i} \frac{\partial y_i}{\partial w}.$$
+
+Because a zero stride causes one physical element to be read $B$ times, the backward engine is mathematically obligated to sum—reduce—the incoming gradients along every dimension that was broadcast. The forward zero-stride view directly mandates the `_reduce_broadcast_grad` backward reduction. Which situation in a framework needs a vector to pose as a matrix, and what the pose saves, is the job of the Broadcast listing in the next section.
+
+### Contiguity is a property you can check
+
+After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. The strides of a transposed matrix run $(1, 3)$ instead of $(3, 1)$; a broadcast view has a zero where a real stride should be. We call a tensor **contiguous** when its strides are exactly the ones the stride formula would have produced for its shape, and non-contiguous otherwise. Non-contiguous views are correct for every read and write, so within TinyTorch you can mostly ignore the distinction. It exists because sooner or later something asks for the plain row-order buffer back, and the `contiguous()` listing is where that request gets paid.
+
+---
+
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 01** in the TinyTorch runtime: `packages/tinytorch/src/01_tensor/01_tensor.py`.
+Module 01 (`src/01_tensor/01_tensor.py`) is the NumPy-backed implementation students build in the TinyTorch course. Its `Tensor` wraps an `np.ndarray`, which already carries shape, strides, and a flat buffer internally. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of stride arithmetic that NumPy performs for the real module behind the scenes.
 :::
 
-To enforce this invariant, TinyTorch splits the representation of numerical data into two separate data structures:
-
-1. **`Storage`**: A raw, contiguous 1D array of bytes or floating-point values allocated on the physical heap.
-2. **`Tensor`**: A lightweight metadata descriptor consisting of a shape tuple ($\mathbf{D}$), a strides tuple ($\mathbf{S}$), a storage offset integer, and a reference to an underlying `Storage` buffer.
+Every number a model owns, weights, activations, gradients, has to live somewhere, and the opening of this chapter priced the obvious somewhere. A list of lists put nine floats in 560 bytes, scattered wherever the allocator felt like putting them, and any change of shape meant rebuilding the lists. What a framework wants is the reverse. It wants one run of memory with the values side by side, and a shape that is a description of that memory rather than a structure built out of it. So the model has two classes. `Storage` is the flat buffer and knows nothing about shape. `Tensor` is the descriptor that interprets a `Storage` through shape, strides, and offset. Here is the buffer.
 
 ```python
-from typing import Tuple, List, Union, Optional
+from itertools import product
+from typing import List, Optional, Tuple, Union
 
 class Storage:
-    """A flat, contiguous 1D array of physical memory."""
+    """A flat, contiguous 1D array of numbers."""
     def __init__(self, size: int):
         self.size = size
         self.data: List[float] = [0.0] * size
@@ -73,440 +125,318 @@ class Storage:
         return self.size
 ```
 
-The `Storage` object manages physical allocation and indexing. It has no concept of dimensions, matrices, shapes, or spatial orientation.
+A Python list is standing in for what would be a block of raw memory in C. Notice that `Storage` has exactly one kind of index, an integer. Everything about dimensions lives one level up. PyTorch's `c10::Storage` is the same object with a reference count and a device attached.
 
-The `Tensor` class layers multi-dimensional coordinate translation on top of a `Storage` buffer:
+### The descriptor
+
+The descriptor is where a framework gets its money's worth from that split. Think about one weight matrix inside a training loop. The forward pass reads it as $\mathbf{W}$, the backward pass (Chapter 6) reads it as $\mathbf{W}^T$, and both happen on every step. If each reading were its own buffer, the $4096 \times 4096$ layer from the opening would spend its 64 MB copy on every step for nothing but a change of viewpoint. We want one buffer and several cheap descriptions of it, which is why the `Tensor` constructor takes a shape and, optionally, an existing storage to share plus the strides and offset with which to read it. When no storage is given it allocates a fresh contiguous one; when no strides are given it computes the row-major strides from the formula above.
 
 ```python
 class Tensor:
-    """Multi-dimensional tensor descriptor with strided coordinate mapping."""
+    """A shape, strides, and offset that interpret a flat Storage."""
     def __init__(
         self,
         shape: Tuple[int, ...],
         storage: Optional[Storage] = None,
         strides: Optional[Tuple[int, ...]] = None,
         storage_offset: int = 0,
-        requires_grad: bool = False
     ):
         self.shape = tuple(shape)
         self.storage_offset = storage_offset
-        self.requires_grad = requires_grad
-        self.grad: Optional['Tensor'] = None
+        self.strides = (tuple(strides) if strides is not None
+                        else self._contiguous_strides(self.shape))
+        self.storage = (storage if storage is not None
+                        else Storage(self._num_elements(self.shape)))
 
-        # Compute standard row-major strides if not explicitly provided
-        if strides is None:
-            self.strides = self._compute_contiguous_strides(self.shape)
-        else:
-            self.strides = tuple(strides)
-
-        # Allocate contiguous storage buffer if not provided
-        if storage is None:
-            num_elements = self._compute_num_elements(self.shape)
-            self.storage = Storage(num_elements)
-        else:
-            self.storage = storage
-```
-
-By separating `Storage` from `Tensor`, multiple `Tensor` instances can point to the *exact same* `Storage` instance simultaneously. Each tensor can interpret the underlying bytes through different dimensional shapes, strides, and offsets without duplicating data in DRAM.
-
----
-
-## Strides and Coordinate Indexing
-
-When a programmer accesses an element at an $N$-dimensional coordinate $(i_0, i_1, \dots, i_{N-1})$, how does the runtime locate the exact physical slot in the 1D `Storage` buffer?
-
-### Strides Inductive Calculation
-
-For a standard C-contiguous (row-major) tensor of shape $(D_0, D_1, \dots, D_{N-1})$, the **stride** $S_k$ represents the number of physical storage elements to skip in memory when advancing by one step along dimension $k$.
-
-In row-major layout, the rightmost dimension ($D_{N-1}$) changes most rapidly in memory, meaning adjacent elements along dimension $N-1$ are stored in adjacent physical memory addresses ($S_{N-1} = 1$). Advancing one step along dimension $N-2$ requires skipping past an entire row of $D_{N-1}$ elements ($S_{N-2} = D_{N-1}$).
-
-Generalizing across all dimensions, strides are calculated inductively from right to left:
-
-$$S_{N-1} = 1, \qquad S_k = S_{k+1} \times D_{k+1} \quad \text{for } k = N-2, \dots, 0$$
-
-For example, consider a 3D tensor with shape $(2, 3, 4)$:
-
-- $S_2 = 1$
-- $S_1 = S_2 \times D_2 = 1 \times 4 = 4$
-- $S_0 = S_1 \times D_1 = 4 \times 3 = 12$
-
-The resulting strides tuple is $(12, 4, 1)$. Advancing one matrix in the batch skips 12 elements; advancing one row within a matrix skips 4 elements; advancing one column skips 1 element.
-
-```python
     @staticmethod
-    def _compute_contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Calculate row-major (C-contiguous) strides from right to left."""
-        if not shape:
-            return ()
+    def _contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        """Row-major strides, computed from the last dimension leftward."""
         strides = [1] * len(shape)
-        for i in range(len(shape) - 2, -1, -1):
-            strides[i] = strides[i + 1] * shape[i + 1]
+        for k in range(len(shape) - 2, -1, -1):
+            strides[k] = strides[k + 1] * shape[k + 1]
         return tuple(strides)
 
     @staticmethod
-    def _compute_num_elements(shape: Tuple[int, ...]) -> int:
+    def _num_elements(shape: Tuple[int, ...]) -> int:
         count = 1
         for dim in shape:
             count *= dim
         return count
 ```
 
-### The Coordinate Mapping Equation
+The loop in `_contiguous_strides` is the stride formula transcribed. It starts at the second-to-last dimension and walks left, each stride the product of the one to its right and that dimension's size. The property of the constructor that matters most is the one that is easy to miss. Two `Tensor` objects may hold a reference to the same `Storage`, and nothing stops them from describing it with different shapes and strides. That is the whole license for everything that follows, and PyTorch's `TensorImpl` grants it with the same four fields.
 
-With shape and strides established, mapping any $N$-dimensional coordinate $(i_0, i_1, \dots, i_{N-1})$ into a physical 1D storage index is computed via the dot product of the coordinate vector and the strides vector:
+### Reading and writing a coordinate
 
-$$\text{Physical Index} = \text{storage\_offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
-
-::: {#nbk-tensors-strided-dram-bandwidth .callout-notebook title="Strided memory access and cache line utilization"}
-Consider a $1024 \times 1024$ FP32 matrix ($4\text{ MB}$ physical storage). When the CPU or GPU reads an element from DRAM, hardware transfers an entire **64-byte cache line** (16 contiguous single-precision floats), not individual numbers.
-
-- **Contiguous Row-Major Traversal** (strides `(1024, 1)`):
-  Iterating along a row accesses consecutive memory addresses. A single 64-byte DRAM burst supplies the next 16 requested values directly into L1 cache:
-  $$\text{Cache Line Utilization} = \frac{16 \times 4\text{ bytes used}}{64\text{ bytes transferred}} = 100\%$$
-
-- **Non-Contiguous Column-Major Traversal** (strides `(1, 1024)` on transposed view):
-  Advancing down a column jumps by 1024 floats ($4096\text{ bytes}$). Every single read misses the current cache line and triggers a fresh 64-byte DRAM fetch, of which only 1 float (4 bytes) is used:
-  $$\text{Cache Line Utilization} = \frac{4\text{ bytes used}}{64\text{ bytes transferred}} = 6.25\%$$
-
-**Systems Takeaway**: Non-contiguous strided access discards **$93.75\%$ of fetched DRAM bandwidth**, causing memory-bound workloads to stall by up to $16\times$ on memory bus queues. This is why tensor runtimes mandate explicit `.contiguous()` copies before dispatching compute-heavy kernels.
-:::
+This is the method that does the translation the chapter opened with, from "row 2, column 1" to a slot number. Every read and write in this chapter and the ones after it goes through it; the `matmul` loop at the end of this section calls it twice per multiply-add. A list of lists answers the same question by chasing two pointers, and its answer is only right for one layout. We want one answer that stays right after a transpose or a broadcast, which is exactly what the mapping equation gives us, and it costs a handful of integer multiplies and no allocation.
 
 ```python
-    def _get_physical_index(self, indices: Tuple[int, ...]) -> int:
-        """Translate logical N-D coordinates into a 1D physical storage index."""
+    def _physical_index(self, indices: Tuple[int, ...]) -> int:
+        """Map an N-D coordinate to a slot in the flat storage."""
         if len(indices) != len(self.shape):
-            raise IndexError(f"Expected {len(self.shape)} indices, got {len(indices)}")
-        offset = self.storage_offset
-        for idx, stride in zip(indices, self.strides):
-            offset += idx * stride
-        return offset
+            raise IndexError(f"expected {len(self.shape)} indices, got {len(indices)}")
+        index = self.storage_offset
+        for i, stride in zip(indices, self.strides):
+            index += i * stride
+        return index
 
     def __getitem__(self, indices: Union[int, Tuple[int, ...]]) -> float:
         if isinstance(indices, int):
             indices = (indices,)
-        return self.storage[self._get_physical_index(indices)]
+        return self.storage[self._physical_index(indices)]
 
     def __setitem__(self, indices: Union[int, Tuple[int, ...]], value: float) -> None:
         if isinstance(indices, int):
             indices = (indices,)
-        self.storage[self._get_physical_index(indices)] = value
+        self.storage[self._physical_index(indices)] = value
+
+    def _all_indices(self):
+        """Every coordinate of this tensor, in row-major order."""
+        return product(*(range(d) for d in self.shape))
 ```
 
-Every item access (`tensor[i, j, k]`) invokes `_get_physical_index`, evaluating the linear stride equation to resolve the exact physical memory location in $O(N)$ operations with zero heap allocation.
+Notice that `_physical_index` never looks at the data and never asks what kind of view it is serving; the strides carry that information, so a transposed or broadcast tensor takes the same path as a fresh one. `_all_indices` is a convenience the later methods use to visit every coordinate. PyTorch's elementwise kernels run the same stride arithmetic, in bulk, through its `TensorIterator`. To make examples easy to write, one more helper turns a nested Python list into a contiguous tensor.
 
----
+```python
+    @classmethod
+    def from_list(cls, values) -> 'Tensor':
+        """Build a contiguous tensor from a (possibly nested) list."""
+        shape, probe = [], values
+        while isinstance(probe, list):
+            shape.append(len(probe))
+            probe = probe[0]
+        tensor = cls(tuple(shape))
+        flat: List[float] = []
+        def flatten(v):
+            if isinstance(v, list):
+                for item in v:
+                    flatten(item)
+            else:
+                flat.append(float(v))
+        flatten(values)
+        for slot, x in enumerate(flat):
+            tensor.storage[slot] = x
+        return tensor
+```
 
-## Zero-Copy Views and Transposition
+### Transpose
 
-In deep learning workloads, geometric tensor transformations are ubiquitous: transposing weight matrices ($Y = XW^T$), permuting multi-head attention projections (which we build in Chapter 12: $(B, S, H, D) \to (B, H, S, D)$), and slicing mini-batches.
-
-In a naive computing system, transposing an $M \times N$ matrix requires allocating a new $N \times M$ array in DRAM and copying all $M \times N$ floating-point values element by element ($O(M \times N)$ memory allocation and bandwidth consumption).
-
-Because TinyTorch decouples dimensional metadata from physical storage, geometric transformations can be executed as **zero-copy views** in $O(1)$ constant time.
-
-### Transposition via Stride Permutation
-
-To transpose a 2D matrix of shape $(D_0, D_1)$ with strides $(S_0, S_1)$, we simply swap its shape dimensions and its corresponding stride values:
-
-$$\text{Original:} \quad \text{Shape} = (D_0, D_1), \quad \text{Strides} = (S_0, S_1)$$
-$$\text{Transposed:} \quad \text{Shape}' = (D_1, D_0), \quad \text{Strides}' = (S_1, S_0)$$
+Transposes are everywhere in a framework. PyTorch's `nn.Linear` stores its weight as $(\text{out}, \text{in})$ and computes $\mathbf{x}\mathbf{W}^T$ on every forward pass, the backward pass multiplies by the transpose of whatever the forward pass used, and multi-head attention (Chapter 12) splits and merges its heads with a reshape and a transpose on every call. The naive transpose is the one from the opening. Allocate a second buffer, move every element, 64 MB for one $4096 \times 4096$ weight, and do it again next step. Does a transpose have to move anything at all? The mapping equation already answered that. Swapping the roles of two indices is swapping two shape entries and two stride entries, so the method does exactly that and hands the *same* storage and offset to a new descriptor.
 
 ```python
     def transpose(self, dim0: int = 0, dim1: int = 1) -> 'Tensor':
-        """Construct a zero-copy transposed view by permuting stride metadata."""
-        new_shape = list(self.shape)
-        new_strides = list(self.strides)
-        new_shape[dim0], new_shape[dim1] = new_shape[dim1], new_shape[dim0]
-        new_strides[dim0], new_strides[dim1] = new_strides[dim1], new_strides[dim0]
-        return Tensor(
-            shape=tuple(new_shape),
-            storage=self.storage,
-            strides=tuple(new_strides),
-            storage_offset=self.storage_offset,
-            requires_grad=self.requires_grad
-        )
+        """A view with two dimensions swapped. No data is copied."""
+        shape, strides = list(self.shape), list(self.strides)
+        shape[dim0], shape[dim1] = shape[dim1], shape[dim0]
+        strides[dim0], strides[dim1] = strides[dim1], strides[dim0]
+        return Tensor(tuple(shape), self.storage, tuple(strides), self.storage_offset)
 ```
 
-### Trace: Why Zero-Copy Transposition Works
+Four lines, and the cost does not depend on the size of the matrix. Writing through the transposed view writes into the original's storage, because there is only one storage. PyTorch's `.t()`, `.transpose()`, and `.permute()` are this same swap performed on a `TensorImpl`.
 
-Consider a $2 \times 3$ matrix with values:
+### Broadcast
 
-$$\mathbf{A} = \begin{bmatrix} 1.0 & 2.0 & 3.0 \\ 4.0 & 5.0 & 6.0 \end{bmatrix}$$
+Here is the case the zero stride exists for. A linear layer (Chapter 3) computes $\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$. With a batch of $B = 256$ examples and an output width of $4096$, the product $\mathbf{X}\mathbf{W}$ has shape $(256, 4096)$, a little over a million entries, and the bias $\mathbf{b}$ has shape $(4096,)$. Mathematically the same 4096 numbers get added to every one of the 256 rows. A naive framework makes that literal. It allocates a fresh $256 \times 4096$ buffer, copies $\mathbf{b}$ into all 256 rows, which is 4 MB of memory holding 16 KB of information, and only then does the addition. Every linear layer pays that on every forward pass, and attention (Chapter 12) has the same shape of problem with its causal mask, one $(S, S)$ pattern that every head of every example in the batch applies.
 
-- **Physical Storage**: `[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]`
-- **Original Descriptor**: $\text{Shape} = (2, 3)$, $\text{Strides} = (3, 1)$, $\text{Offset} = 0$.
-- **Transposed Descriptor**: $\mathbf{A}^T = \text{Tensor}(\text{Shape}=(3, 2), \text{Strides}=(1, 3), \text{Storage}=\mathbf{A}.\text{storage})$.
-
-Now evaluate accessing $\mathbf{A}^T[1, 0]$ (row 1, column 0 of the transposed matrix, which should be $2.0$):
-
-$$\text{Physical Index} = 1 \times S'_0 + 0 \times S'_1 = 1 \times 1 + 0 \times 3 = 1$$
-
-Storage index 1 contains `2.0`.
-
-Next evaluate accessing $\mathbf{A}^T[2, 1]$ (row 2, column 1 of the transposed matrix, which should be $6.0$):
-
-$$\text{Physical Index} = 2 \times S'_0 + 1 \times S'_1 = 2 \times 1 + 1 \times 3 = 2 + 3 = 5$$
-
-Storage index 5 contains `6.0`.
-
-The transposed tensor navigates the exact same 1D storage array in column-major order purely through its inverted strides. Zero bytes are copied in DRAM.
-
----
-
-## Broadcasting: Need, Arithmetic, and Stride-0 Realization
-
-Now that we understand how strides map coordinates to memory, we encounter a recurring challenge in deep learning: **binary operations between tensors of differing shapes**.
-
-### The Systems Problem: Why Do We Need Broadcasting?
-
-In a standard Multi-Layer Perceptron (MLP), a linear layer (which we formalize in Chapter 3) computes:
-
-$$\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$$
-
-If batch size is $B = 256$ and output feature dimension is $D_{\text{out}} = 4096$:
-- The matrix product $\mathbf{X}\mathbf{W}$ has shape $(256, 4096)$ (a matrix of $1{,}048{,}576$ elements).
-- The bias vector $\mathbf{b}$ has shape $(4096,)$ (a 1D vector of $4096$ elements).
-
-Mathematically, we must add the exact same bias vector $\mathbf{b}$ to *every single row* of the activation matrix.
-
-A naive framework implementation would allocate a brand-new $256 \times 4096$ matrix in DRAM, copy the $4096$ floats of $\mathbf{b}$ into all 256 rows ($4\text{ MB}$ of redundant memory allocation), and then execute elementwise addition. In a large transformer model (which we construct in Chapter 13) running token generation steps, copying bias vectors and causal masks across DRAM would saturate memory bus bandwidth and destroy throughput.
-
-### The Stride-0 Mathematical Insight
-
-Can we use our stride coordinate mapping equation to make a 1D vector of size $(D,)$ appear as a 2D matrix of shape $(B, D)$ without copying a single byte?
-
-Recall the coordinate mapping equation for a 2D tensor with coordinates $(i, j)$:
-
-$$\text{Physical Index} = \text{storage\_offset} + i \times S_0 + j \times S_1$$
-
-If the original bias vector has shape $(D,)$ and storage buffer $[b_0, b_1, \dots, b_{D-1}]$, we can view it with:
-
-$$\text{Shape} = (B, D), \qquad \text{Strides} = (0, 1)$$
-
-Look closely at what happens when the runtime computes the physical offset for any coordinate $(i, j)$:
-
-$$\text{Physical Index} = i \times 0 + j \times 1 = j$$
-
-Regardless of whether the row index $i$ is $0, 1, 42,$ or $255$, the term $i \times 0$ evaluates to $0$. The physical address depends *solely* on the column index $j$.
-
-By setting the stride of an expanded dimension to **zero**, the runtime reads the exact same physical storage elements repeatedly across all rows. The expansion is instantaneous ($O(1)$) and consumes **zero additional memory**.
-
-### The Broadcasting Rules
-
-To determine if two tensor shapes are compatible for binary operations (addition, subtraction, multiplication), TinyTorch adopts the standard NumPy/PyTorch broadcasting algorithm:
-
-1. **Right-to-Left Alignment**: Compare the shape dimensions of both tensors starting from the trailing (rightmost) dimension and moving leftward.
-2. **Dimension Prepending**: If one tensor has fewer dimensions than the other, prepend dimensions of size $1$ to its shape until both shapes have equal rank.
-3. **Compatibility Check**: Two dimensions $D_A$ and $D_B$ are compatible if:
-   - $D_A == D_B$, OR
-   - $D_A == 1$, OR
-   - $D_B == 1$.
-4. **Target Dimension Calculation**: The output dimension is $\max(D_A, D_B)$.
-5. **Stride Assignment**: If an input dimension of size $1$ is expanded to size $D_{\text{out}} > 1$, its output stride is set to **$0$**. Otherwise, it retains its existing stride.
-
-### Framework Implementation: Shape and Stride Realization
+Can a vector of size $(D,)$ act as a $(B, D)$ matrix without copying a byte? The previous section showed the trick. Give the vector shape $(B, D)$ and strides $(0, 1)$, and the row index multiplies zero, so every row reads the same $D$ slots. What the code adds is the bookkeeping that decides which shapes may stretch against which. NumPy and PyTorch use the same short rules and TinyTorch copies them. Align the two shapes from the right, treat missing leading dimensions as size 1, and for each pair of dimensions either the sizes match or one of them is 1. A dimension of size 1 that is stretched to match the other gets stride 0. In code that is two halves. A static helper computes the output shape two inputs would broadcast to, and a method produces a view of one tensor at a target shape, assigning stride 0 to each dimension that is being stretched.
 
 ```python
     @staticmethod
     def _broadcast_shapes(shape_a: Tuple[int, ...], shape_b: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Compute the resulting broadcast shape for two input shapes.
-
-        Applies right-to-left alignment rules. Raises ValueError if shapes are incompatible.
-        """
-        len_a, len_b = len(shape_a), len(shape_b)
-        max_len = max(len_a, len_b)
-
-        # Prepend 1s to align ranks
-        pad_a = (1,) * (max_len - len_a) + shape_a
-        pad_b = (1,) * (max_len - len_b) + shape_b
-
-        out_shape = []
+        """Output shape of a binary op on shape_a and shape_b."""
+        rank = max(len(shape_a), len(shape_b))
+        pad_a = (1,) * (rank - len(shape_a)) + shape_a
+        pad_b = (1,) * (rank - len(shape_b)) + shape_b
+        out = []
         for da, db in zip(pad_a, pad_b):
-            if da == db:
-                out_shape.append(da)
+            if da == db or db == 1:
+                out.append(da)
             elif da == 1:
-                out_shape.append(db)
-            elif db == 1:
-                out_shape.append(da)
+                out.append(db)
             else:
-                raise ValueError(f"Incompatible shapes for broadcasting: {shape_a} and {shape_b}")
-        return tuple(out_shape)
+                raise ValueError(f"cannot broadcast {shape_a} with {shape_b}")
+        return tuple(out)
 
-    def broadcast_to(self, target_shape: Tuple[int, ...]) -> 'Tensor':
-        """Create a zero-copy broadcasted view of this tensor with target_shape."""
-        if self.shape == target_shape:
+    def broadcast_to(self, target: Tuple[int, ...]) -> 'Tensor':
+        """A view of this tensor at a larger shape. No data is copied."""
+        if self.shape == target:
             return self
-
-        len_self = len(self.shape)
-        len_target = len(target_shape)
-        if len_self > len_target:
-            raise ValueError(f"Cannot broadcast shape {self.shape} to smaller rank {target_shape}")
-
-        # Prepend 1s to shape and 0s to strides to match target rank
-        pad_count = len_target - len_self
-        padded_shape = (1,) * pad_count + self.shape
-        padded_strides = (0,) * pad_count + self.strides
-
+        pad = len(target) - len(self.shape)
+        shape = (1,) * pad + self.shape
+        strides = (0,) * pad + self.strides
         new_strides = []
-        for orig_dim, orig_stride, target_dim in zip(padded_shape, padded_strides, target_shape):
-            if orig_dim == target_dim:
-                new_strides.append(orig_stride)
-            elif orig_dim == 1:
-                # Stride 0 enables virtual expansion without memory duplication
-                new_strides.append(0)
+        for dim, stride, want in zip(shape, strides, target):
+            if dim == want:
+                new_strides.append(stride)
+            elif dim == 1:
+                new_strides.append(0)      # stretched: reread the same slot
             else:
-                raise ValueError(f"Cannot broadcast dimension {orig_dim} to {target_dim}")
-
-        return Tensor(
-            shape=target_shape,
-            storage=self.storage,
-            strides=tuple(new_strides),
-            storage_offset=self.storage_offset,
-            requires_grad=self.requires_grad
-        )
+                raise ValueError(f"cannot broadcast {self.shape} to {target}")
+        return Tensor(target, self.storage, tuple(new_strides), self.storage_offset)
 ```
 
-### Concrete Numerical Trace
+The padding step prepends size-1 dimensions to the shape and matching zero strides, which is what makes a vector of shape $(3,)$ line up against a matrix of shape $(4, 3)$. After that, the loop only ever writes a real stride or a zero. Notice what `broadcast_to` does not do. It allocates nothing, so the 4 MB the naive version spent is simply gone and the bias is read straight out of its own 16 KB. PyTorch's `.expand()` is this method, and the production section shows the zero stride it reports.
 
-Let us trace broadcasting a vector $\mathbf{v}$ of shape $(3,)$ into a matrix of shape $(4, 3)$:
+### Contiguity
 
-- **Storage Buffer**: `[10.0, 20.0, 30.0]`
-- **Input Tensor**: $\text{Shape} = (3,)$, $\text{Strides} = (1,)$.
-- **Padded Shape & Strides**: $\text{Padded Shape} = (1, 3)$, $\text{Padded Strides} = (0, 1)$.
-- **Target Shape**: $(4, 3)$.
-- **Broadcasted Strides**: Dimension 0 expanded $1 \to 4 \implies S_0 = 0$. Dimension 1 is $3 \implies S_1 = 1$. $\text{Strides} = (0, 1)$.
-
-| Logical Coordinate $(i, j)$ | Stride Calculation ($i \times S_0 + j \times S_1$) | Physical Storage Index | Value Retrieved |
-| :---: | :---: | :---: | :---: |
-| $(0, 0)$ | $0 \times 0 + 0 \times 1 = 0$ | $0$ | `10.0` |
-| $(0, 1)$ | $0 \times 0 + 1 \times 1 = 1$ | $1$ | `20.0` |
-| $(0, 2)$ | $0 \times 0 + 2 \times 1 = 2$ | $2$ | `30.0` |
-| $(1, 0)$ | $1 \times 0 + 0 \times 1 = 0$ | $0$ | `10.0` |
-| $(1, 1)$ | $1 \times 0 + 1 \times 1 = 1$ | $1$ | `20.0` |
-| $(1, 2)$ | $1 \times 0 + 2 \times 1 = 2$ | $2$ | `30.0` |
-| $(2, 0)$ | $2 \times 0 + 0 \times 1 = 0$ | $0$ | `10.0` |
-| $(2, 1)$ | $2 \times 0 + 1 \times 1 = 1$ | $1$ | `20.0` |
-| $(2, 2)$ | $2 \times 0 + 2 \times 1 = 2$ | $2$ | `30.0` |
-| $(3, 0)$ | $3 \times 0 + 0 \times 1 = 0$ | $0$ | `10.0` |
-| $(3, 1)$ | $3 \times 0 + 1 \times 1 = 1$ | $1$ | `20.0` |
-| $(3, 2)$ | $3 \times 0 + 2 \times 1 = 2$ | $2$ | `30.0` |
-
-: Concrete stride arithmetic trace for virtual row expansion via stride-0 indexing. {#tbl-stride0-trace tbl-colwidths="[22,34,22,22]"}
-
-All 12 logical elements are accessible across 4 virtual rows, yet the underlying physical storage buffer occupies only 3 floating-point numbers ($12\text{ bytes}$) in memory.
-
----
-
-## Contiguity and Memory Realization
-
-We have seen that manipulating strides allows both transposition and broadcasting to execute in $O(1)$ time with zero memory allocation.
-
-However, these operations introduce a critical systems consequence: they produce **non-contiguous** tensors.
-
-### The Systems Cost of Non-Contiguity
-
-A tensor is **C-contiguous** (row-major) if its elements are laid out sequentially in physical memory without gaps, inversions, or stride-0 repeats. Formally, a tensor is C-contiguous if its strides satisfy:
-
-$$S_{N-1} = 1, \qquad S_k = S_{k+1} \times D_{k+1}$$
-
-When a tensor undergoes `.transpose()`, its strides are permuted ($S_0 < S_1$). When a tensor undergoes broadcasting, one or more strides are set to $0$.
-
-Why does non-contiguity matter?
-
-1. **Hardware GEMM Libraries (BLAS/cuBLAS)**: Highly tuned assembly kernels for matrix multiplication assume data is stored linearly in memory with standard leading-dimension strides. They cannot ingest arbitrary non-contiguous or zero-strided tensors.
-2. **SIMD Vectorization**: Vector registers (AVX-512, Neon) stream sequential 64-byte chunks. Non-contiguous access forces the processor to execute expensive scatter/gather instructions, reducing memory throughput by up to $80\%$.
-3. **Hardware Storage Contiguity Invariant**: When passing a tensor pointer to C/C++ runtime extensions or GPU CUDA kernels, the pointer must refer to a contiguous, unfragmented sequence of elements.
-
-### Detecting Contiguity
-
-TinyTorch verifies contiguity by comparing a tensor's current strides against the mathematically expected row-major strides:
+Every free view above left the buffer in an order the view does not read it in, and sooner or later something asks for plain row order back. In this model nothing strictly needs it, because `__getitem__` reads any view correctly. In a real framework the request comes from the code that does the arithmetic. A BLAS matrix multiply, a NumPy reduction, a CUDA kernel, each wants a pointer to a run of memory laid out the way the stride formula says, and the `view size is not compatible` error at the top of this chapter is PyTorch telling you the buffer is not in that order and that `view()` will not copy it for you. The naive policy is to copy after every transpose so the layout is always plain, which throws away everything the views just saved. The better policy is to defer. Keep the view, check on demand whether its strides already match the formula, and copy only when they do not and someone actually needs them to. Those are the two methods here. The check compares the strides a tensor has against the strides its shape would get from the formula. The copy allocates a fresh tensor of the same shape and walks every coordinate, reading through the view's strides and writing through row-major ones.
 
 ```python
     def is_contiguous(self) -> bool:
-        """Check if physical storage layout matches standard C-contiguous strides."""
-        expected = self._compute_contiguous_strides(self.shape)
-        return self.strides == expected
-```
+        return self.strides == self._contiguous_strides(self.shape)
 
-### Materializing Contiguity via `.contiguous()`
-
-When an operation requires contiguous layout, the framework must **materialize** the strided view: allocate a brand-new `Storage` buffer of size $\prod D_i$ and copy elements from their strided coordinates into sequential physical addresses.
-
-```python
     def contiguous(self) -> 'Tensor':
-        """Return a contiguous copy of the tensor in newly allocated storage."""
+        """This tensor if already contiguous, otherwise a row-major copy."""
         if self.is_contiguous():
             return self
-
-        new_tensor = Tensor(shape=self.shape, requires_grad=self.requires_grad)
-        self._copy_elements(self, new_tensor)
-        return new_tensor
-
-    @staticmethod
-    def _copy_elements(src: 'Tensor', dst: 'Tensor') -> None:
-        """Recursively copy elements from an arbitrary strided view into contiguous storage."""
-        def recurse(dim: int, src_indices: List[int], dst_indices: List[int]):
-            if dim == len(src.shape):
-                dst[tuple(dst_indices)] = src[tuple(src_indices)]
-                return
-            for i in range(src.shape[dim]):
-                recurse(dim + 1, src_indices + [i], dst_indices + [i])
-        recurse(0, [], [])
+        out = Tensor(self.shape)
+        for idx in self._all_indices():
+            out[idx] = self[idx]
+        return out
 ```
 
-The `contiguous()` method is where the deferred cost of zero-copy views is paid: it executes an $O(N)$ allocation and sequential copy. Systems frameworks design their execution graphs to delay or fuse `.contiguous()` calls until strictly necessary.
+This is the one method in the chapter whose cost grows with the number of elements, and it is the only one that allocates. Everything the views deferred is paid here. Notice that the copy loop reads through `self[idx]`, so the view's own strides do the unscrambling; there is no special case for transposed versus broadcast input. PyTorch's `.contiguous()` is the same check followed by the same copy.
+
+### Elementwise addition and matrix multiplication
+
+The linear layer needs exactly two operations from this class, a matrix multiply and an addition that accepts a bias, and Chapter 2 will call both without looking inside. Written the naive way, `+` would insist on identical shapes and leave the caller to build the 4 MB bias matrix by hand, and `matmul` would be correct only on row-major operands, so every transposed weight would need a copy first. Neither restriction is necessary. Addition broadcasts both operands to a common shape through `broadcast_to`, which allocates nothing, and then walks every coordinate of the output. Matrix multiplication is the textbook triple loop, reading each operand through `__getitem__` so it works unchanged on transposed or broadcast views.
+
+```python
+    def __add__(self, other: 'Tensor') -> 'Tensor':
+        out_shape = self._broadcast_shapes(self.shape, other.shape)
+        a, b = self.broadcast_to(out_shape), other.broadcast_to(out_shape)
+        out = Tensor(out_shape)
+        for idx in out._all_indices():
+            out[idx] = a[idx] + b[idx]
+        return out
+
+    def matmul(self, other: 'Tensor') -> 'Tensor':
+        """(M, K) @ (K, N) -> (M, N), each entry a dot product."""
+        (m, k), (k2, n) = self.shape, other.shape
+        if k != k2:
+            raise ValueError(f"cannot multiply {self.shape} by {other.shape}")
+        out = Tensor((m, n))
+        for i in range(m):
+            for j in range(n):
+                acc = 0.0
+                for p in range(k):
+                    acc += self[i, p] * other[p, j]
+                out[i, j] = acc
+        return out
+
+    def __matmul__(self, other: 'Tensor') -> 'Tensor':
+        return self.matmul(other)
+```
+
+Notice two things. First, `__add__` never asks whether its inputs are contiguous, because indexing through strides is correct either way; that is the payoff of routing every access through `_physical_index`. Second, the inner loop of `matmul` reads `other[p, j]` with `p` advancing, which walks *down a column* of `other`. On a row-major matrix that means jumping a full row's worth of slots on every step. Here it costs nothing beyond the Python loop, and the production section comes back to why it matters on real hardware.
+
+The real Module 01 exposes the same surface (`shape`, `transpose`, `contiguous`, `reshape`, `+`, `@`, and reductions such as `sum` and `mean`) but delegates the arithmetic to NumPy. The reductions are not modeled here; they are ordinary loops over `_all_indices` and add nothing to the stride story.
 
 ---
 
-## Real World: PyTorch `c10::TensorImpl` and Hardware GEMMs
+## A Worked Trace
 
-In production machine learning systems, PyTorch implements this exact separation of concerns in its core C++ foundation library (`c10`):
+The following script exercises every method on a $2 \times 3$ matrix. Run it after the listings above.
 
-```cpp
-// PyTorch Core Tensor Descriptor (c10/core/TensorImpl.h)
-struct TensorImpl : public c10::intrusive_ptr_target {
-    c10::Storage storage_;                 // Pointer to 1D raw memory buffer
-    c10::SmallVector<int64_t, 5> sizes_;   // Shape dimensions tuple
-    c10::SmallVector<int64_t, 5> strides_; // Strides tuple
-    int64_t storage_offset_ = 0;           // Starting element offset
-    caffe2::TypeMeta data_type_;           // Float32, Float16, BFloat16, or Int8 (formalized in Chapter 15)
-};
+```python
+A = Tensor.from_list([[1.0, 2.0, 3.0],
+                      [4.0, 5.0, 6.0]])
+print("storage ", A.storage.data)
+print("A       ", A.shape, A.strides, A.is_contiguous())
+
+At = A.transpose()
+print("A.T     ", At.shape, At.strides, At.is_contiguous())
+print("A.T[1,0]", At[1, 0], " A.T[2,1]", At[2, 1])
+print("shared  ", At.storage is A.storage)
+
+C = At.contiguous()
+print("copy    ", C.storage.data, C.strides)
+
+b = Tensor.from_list([10.0, 20.0, 30.0])
+B = b.broadcast_to((2, 3))
+print("bias    ", B.shape, B.strides, " B[1,2] =", B[1, 2])
+
+Y = A + b
+print("A + b   ", Y.storage.data)
+print("A @ A.T ", (A @ At).storage.data)
 ```
 
-When a PyTorch program executes `y = x.t()`, PyTorch allocates a lightweight `TensorImpl` struct (a few dozen bytes on the heap) while incrementing the reference count on `storage_`.
-
-### The `view()` vs `reshape()` Contract in PyTorch
-
-This architectural split explains why PyTorch maintains two distinct methods for changing tensor shapes:
-
-- `tensor.view(*shape)`: Enforces a strict zero-copy invariant. If the requested shape transformation cannot be realized purely by recomputing strides on the existing storage buffer (for example, attempting to view a transposed non-contiguous matrix), `tensor.view()` throws a runtime error: `RuntimeError: view size is not compatible with input tensor's size and stride`.
-- `tensor.reshape(*shape)`: Attempts zero-copy viewing first; if the tensor is non-contiguous, it automatically calls `tensor.contiguous()` behind the scenes, paying the memory allocation and copying cost transparently.
-
-### Hardware GEMM Leading Dimensions (`LDA`, `LDB`, `LDC`)
-
-Standard BLAS (Basic Linear Algebra Subprograms) and NVIDIA cuBLAS libraries interface with strided memory via **leading dimensions**:
-
-```c
-void cblas_sgemm(
-    const CBLAS_LAYOUT layout,    // CblasRowMajor or CblasColMajor
-    const CBLAS_TRANSPOSE TransA, // CblasNoTrans or CblasTrans
-    const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K,
-    const float alpha,
-    const float *A, const int lda,  // Leading dimension of A (stride between rows)
-    const float *B, const int ldb,  // Leading dimension of B
-    const float beta,
-    float *C, const int ldc
-);
+```
+storage  [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+A        (2, 3) (3, 1) True
+A.T      (3, 2) (1, 3) False
+A.T[1,0] 2.0  A.T[2,1] 6.0
+shared   True
+copy     [1.0, 4.0, 2.0, 5.0, 3.0, 6.0] (2, 1)
+bias     (2, 3) (0, 1)  B[1,2] = 30.0
+A + b    [11.0, 22.0, 33.0, 14.0, 25.0, 36.0]
+A @ A.T  [14.0, 32.0, 32.0, 77.0]
 ```
 
-By passing `TransA = CblasTrans` and configuring `lda` to match the row stride, cuBLAS can compute matrix multiplication on transposed views without an explicit copy step. However, if a tensor has complex striding from multiple slice, permute, or broadcast operations, BLAS cannot parse it: the framework must invoke a contiguous copy kernel before dispatching to hardware matrix engines.
+Each line can be checked by hand against the mapping equation. The transposed view has strides $(1, 3)$, so `At[1, 0]` reads slot $1 \times 1 + 0 \times 3 = 1$, which holds `2.0`, and `At[2, 1]` reads slot $2 \times 1 + 1 \times 3 = 5$, which holds `6.0`. Those are the entries of $\mathbf{A}^T$ at $(1, 0)$ and $(2, 1)$, obtained without touching the buffer. The `shared` line confirms there is still only one buffer. The `contiguous()` call then produces a *second* buffer in which the transposed values sit in row order, `[1, 4, 2, 5, 3, 6]`, with fresh strides $(2, 1)$.
+
+The bias trace is the stride-0 mechanism in the open. After padding, the vector has shape $(1, 3)$ and strides $(0, 1)$; stretching the first dimension from 1 to 2 leaves the zero in place. Every coordinate of the $(2, 3)$ view resolves to one of three slots.
+
+| Coordinate $(i, j)$ | $i \times 0 + j \times 1$ | Slot | Value |
+| :---: | :---: | :---: | :---: |
+| $(0, 0)$ | $0$ | $0$ | `10.0` |
+| $(0, 1)$ | $1$ | $1$ | `20.0` |
+| $(0, 2)$ | $2$ | $2$ | `30.0` |
+| $(1, 0)$ | $0$ | $0$ | `10.0` |
+| $(1, 1)$ | $1$ | $1$ | `20.0` |
+| $(1, 2)$ | $2$ | $2$ | `30.0` |
+
+: Stride-0 broadcast of a length-3 vector to shape $(2, 3)$. Six coordinates, three slots, no copy. {#tbl-stride0-trace tbl-colwidths="[25,35,20,20]"}
+
+The `A + b` line uses exactly that view, and the result `[[11, 22, 33], [14, 25, 36]]` shows each row receiving the same bias. The last line multiplies $\mathbf{A}$ by its own transpose, $\begin{bmatrix} 14 & 32 \\ 32 & 77 \end{bmatrix}$, with `matmul` reading the right operand through the transposed strides and never noticing.
+
+---
+
+## From TinyTorch to Production
+
+PyTorch's tensor is the same four fields with the same jobs. Its C++ core (`c10/core/TensorImpl.h`) holds, in paraphrase, a reference-counted `Storage`, a packed sizes-and-strides record, an integer `storage_offset_`, and a data type. When you write `y = x.t()`, PyTorch allocates a new descriptor of a few dozen bytes, bumps the reference count on the shared storage, and returns. `x.stride()` prints the stride tuple, `x.is_contiguous()` runs the same comparison as ours, and `x.expand(4, 3)` on a length-3 vector reports strides `(0, 1)`, the zero stride made visible. NumPy's `ndarray` carries the same fields too, which is why the real Module 01 can wrap an array and inherit all of this; the only cosmetic difference is that NumPy reports strides in bytes, so a `(2, 3)` array of 32-bit floats shows strides `(12, 4)` and its transpose `(4, 12)`.
+
+What production adds is a hard boundary that TinyTorch does not have. The model in this chapter reads any view correctly through `__getitem__`, so contiguity is a curiosity. In PyTorch the heavy operations are not Python loops; they are calls into tuned libraries, and those libraries are written for hardware that moves memory in fixed-size blocks. A CPU fetches a whole cache line[^fn-cache-line-column-walk] at a time, and its vector units[^fn-simd-contiguous-runs] operate on several adjacent floats in one instruction. Both assumptions hold on a row-major buffer and break on a column walk. Napkin math for a $1024 \times 1024$ matrix of 32-bit floats makes the gap concrete. Walking a row uses all 64 bytes of each line fetched, while walking a column jumps 4096 bytes per step and uses 4 of every 64 bytes it pulls in, about 6 percent. The matrix multiply itself goes to a BLAS[^fn-blas-leading-dimension] routine, typically the general matrix multiply, or GEMM,[^fn-gemm-matmul-name] which accepts a pointer, a transpose flag, and one "leading dimension" per operand (the stride between rows) and nothing more exotic. A plain transpose fits that interface, so `A.T @ B` needs no copy. A view produced by slicing and permuting several dimensions does not fit, and the framework must call `.contiguous()` for you before the library can run. That copy is the deferred cost of the free views.
+
+[^fn-cache-line-column-walk]: **Cache line**: the unit in which a processor moves data between main memory and its on-chip cache, 64 bytes on nearly every current CPU, or 16 single-precision floats. A read of one float pays for the whole line, so a stride that skips a line per element throws away most of what was fetched.
+
+[^fn-simd-contiguous-runs]: **SIMD** (single instruction, multiple data): CPU instructions that apply one operation to a short vector of values held in one wide register, 8 or 16 floats on current x86 chips. They load their operands from consecutive addresses, so a contiguous buffer feeds them directly and a strided one has to be gathered first.
+
+[^fn-blas-leading-dimension]: **BLAS** (Basic Linear Algebra Subprograms): the standard interface for vector and matrix routines that every numerical library calls, with vendor-tuned implementations such as Intel MKL, OpenBLAS, and NVIDIA's cuBLAS. Its matrix arguments are a pointer plus a leading dimension, which is why any layout it cannot express as "rows this far apart" must be copied first.
+
+[^fn-gemm-matmul-name]: **GEMM** (general matrix multiply): the BLAS routine computing $C \leftarrow \alpha AB + \beta C$, the workhorse behind every linear layer and attention product. When a profiler shows a training step spending most of its time in `sgemm` or `cublasGemmEx`, this is the routine it means.
+
+The same boundary appears on the GPU with one extra step. The storage lives in VRAM,[^fn-vram-storage-home] while the descriptor lives in ordinary CPU memory, so a view costs no GPU work at all. A `.contiguous()` on a GPU tensor launches a kernel[^fn-kernel-copy-launch] whose only job is to read every element through the old strides and write it in row order; on a large activation that copy is pure memory traffic and shows up in a profiler as time in a `copy_` operation.
+
+[^fn-kernel-copy-launch]: **Kernel** (GPU sense): a small program that the CPU hands to the GPU to run over many elements at once, one launch per operation. Every PyTorch operation on a GPU tensor is one or more kernel launches, so a `.contiguous()` copy is not free bookkeeping but a real launch with a real trip through GPU memory.
+
+[^fn-vram-storage-home]: **VRAM** (video RAM): the memory soldered onto a GPU board, separate from the CPU's system memory. An A100 has 80 GB of it, and every tensor a GPU computes on must first be copied there over a link roughly 20 times slower than the GPU's own memory, so frameworks go to some length to keep tensors resident and avoid copies once they arrive.
+
+PyTorch exposes the distinction in two pairs of methods. `view()` promises never to copy and raises the error quoted at the top of this chapter when the requested shape cannot be expressed as new strides over the existing buffer; `reshape()` tries a view first and silently falls back to `contiguous()`. Likewise `expand()` builds a stride-0 view, while `repeat()` allocates and fills the repeats. The cheap member of each pair is exactly the operation this chapter implemented.
+
+| Operation | TinyTorch model | PyTorch |
+| :--- | :--- | :--- |
+| Descriptor | `shape`, `strides`, `storage_offset`, `storage` | `sizes()`, `stride()`, `storage_offset()`, `untyped_storage()` |
+| Transpose | swap two shape and stride entries | `.t()`, `.transpose()`, `.permute()`; same swap |
+| Broadcast | `broadcast_to`, stride 0 | `.expand()`, stride 0; `.repeat()` copies |
+| Contiguity check | compare against the stride formula | `.is_contiguous()` |
+| Restore row order | `contiguous()` copies through the view | `.contiguous()`; on GPU, a copy kernel |
+| Matrix multiply | triple loop through `__getitem__` | BLAS or cuBLAS GEMM; needs a leading dimension |
+
+: The same mechanism at two scales. {#tbl-tinytorch-vs-pytorch tbl-colwidths="[22,38,40]"}
+
+What should a practitioner now expect? When an operation fails with the `view` error, the fix is to understand which earlier line produced a non-contiguous view, not to sprinkle `.contiguous()` everywhere, because each one is a full copy. When a profiler shows unexplained `copy_` time, look for a transpose or permute feeding into a library call. When you see memory formats such as "channels last" in a convolution library's documentation, read them as a choice of strides made so that the library's inner loop walks contiguous memory. The mental model from this chapter, one buffer plus a descriptor, is the one production frameworks actually use, and it is enough to reason about all of these.
+
+---
+
+## Summary
+
+You built a `Tensor` that keeps its numbers in one flat `Storage` and interprets them through a shape, a strides tuple, and an offset. One equation, $\text{index} = \text{offset} + \sum_k i_k S_k$, resolves every coordinate. Transposing swaps two strides, broadcasting sets a stride to zero, and neither touches the buffer; `contiguous()` is where that deferred copy is finally paid, and it is the only method here whose cost grows with the data. The invariant to carry forward is that a tensor is a *view* of storage, so several tensors can describe one buffer and a write through any of them is visible through all. Production frameworks keep exactly this design and add a boundary at which contiguous memory is demanded by the hardware libraries underneath. Chapter 2 takes the strided `Tensor`, its broadcasting `+`, and `matmul` for granted and asks what goes wrong when you stack several linear layers with nothing between them.
 
 ---
 
 ## Exercises
 
-1. **Generalized Multi-Axis Permutation**: Extend `Tensor.transpose(dim0, dim1)` to implement `permute(*dims)`. Given a 4D tensor of shape $(B, C, H, W)$ in row-major layout, trace how `permute(0, 2, 3, 1)` recomputes strides to produce a zero-copy Channels-Last $(B, H, W, C)$ view.
-2. **Strided Slicing Invariants**: Implement a zero-copy slicing method `slice(dim: int, start: int, end: int, step: int) -> Tensor`. Prove mathematically how `storage_offset`, `shape[dim]`, and `strides[dim]` must be updated when `step > 1`.
-3. **Reshape Invariant Proof**: Write a function `is_view_possible(tensor: Tensor, new_shape: Tuple[int, ...]) -> bool` that determines whether `new_shape` can be constructed from `tensor` without copying memory. What mathematical condition on adjacent dimension strides must be satisfied when collapsing two dimensions into one?
+1. **Permutation.** Generalize `transpose(dim0, dim1)` to `permute(*dims)`, which reorders all dimensions at once. For a tensor of shape $(B, C, H, W)$ with row-major strides, write out the shape and strides that `permute(0, 2, 3, 1)` produces, and confirm with `is_contiguous()` that the result is a non-contiguous view of the same storage.
+2. **Slicing.** Add a zero-copy `slice(dim, start, end, step)` method. Work out how `storage_offset`, `shape[dim]`, and `strides[dim]` must change, including the case `step > 1`, and check your answer against `contiguous()` on a small example.
+3. **When is a view possible?** Write `can_view(tensor, new_shape) -> bool`, which returns whether `new_shape` can be produced by recomputing strides alone. Two adjacent dimensions can be merged into one only when a certain relation holds between their strides; state it, and use it to explain why the transposed matrix in the worked trace cannot be viewed as a length-6 vector.

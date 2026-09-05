@@ -1,328 +1,343 @@
-# Automatic Differentiation: The Dynamic Tape DAG {#sec-autograd}
+# Automatic Differentiation: Recording the Graph and Walking It Backward {#sec-autograd}
 
-In Chapters 1 through 5, we constructed the complete forward execution pipeline of TinyTorch. We can stream batches of data asynchronously from disk, pass them through deep layers of non-linear transformations, and compute an exact scalar loss $\mathcal{L}$.
+After Chapter 5 the forward path is complete. The loader hands the model a batch, the layers of Chapter 3 turn it into predictions, and the loss of Chapter 4 collapses those predictions into one number. That number tells us how wrong the model is, but not which of its weights to move, or by how much. The question this chapter answers is the one every practitioner eventually asks: when I call `loss.backward()`, how does the framework produce the gradient of that single number with respect to every weight in the model, and why does it cost about as much as one more forward pass rather than thousands of them?
 
-Now we confront the central mathematical engine of all modern artificial intelligence: **Automatic Differentiation (Autograd)**. In this chapter, we explore why numerical and symbolic differentiation fail for deep networks, and construct a **Dynamic Reverse-Mode Tape Directed Acyclic Graph (DAG)** that evaluates exact analytical gradients for millions of parameters in a single reverse sweep.
+The answer is bookkeeping, not calculus. While the forward pass runs, every operation leaves a small record behind: which tensors it read, and how to turn a gradient at its output into gradients at its inputs. The backward pass reads those records in reverse. Each record only knows the derivative of its own operation, yet chaining them produces the exact derivative of the whole model. Everything else in the chapter follows from three ideas: each operation owns one local derivative rule, the records must be replayed in the right order, and a tensor that was used twice receives the sum of two contributions.
 
-![Dynamic Autograd Tape: Forward Tape Recording and Reverse-Mode Topological Accumulation](assets/images/diagrams/06_autograd-diag-1.svg){#fig-autograd-dag}
+We build the whole mechanism in about eighty lines. A `Tensor` gains three fields, four operations learn to leave records, and a `backward()` method walks those records in the reverse of the order that @fig-autograd-dag draws for the forward pass.
 
----
-
-## Systems Problem Motivation: The Derivative Calculation Bottleneck
-
-To train a deep neural network, we must minimize an empirical scalar risk $\mathcal{L}(W)$ using gradient descent. This optimization requires computing the exact partial derivative of the scalar loss with respect to every single parameter weight $w_i \in \mathbb{R}$:
-
-$$\nabla_W \mathcal{L} = \left[ \frac{\partial \mathcal{L}}{\partial w_1}, \frac{\partial \mathcal{L}}{\partial w_2}, \dots, \frac{\partial \mathcal{L}}{\partial w_N} \right]$$
-
-In computer systems history, engineers evaluated three classical methods for computing derivatives before discovering modern reverse-mode automatic differentiation:
-
-### 1. Numerical Finite Differences: The $O(N)$ Compute Wall
-The simplest approach approximates derivatives numerically using Taylor expansion:
-
-$$\frac{\partial \mathcal{L}}{\partial w_i} \approx \frac{\mathcal{L}(w_1, \dots, w_i + \epsilon, \dots, w_N) - \mathcal{L}(w_1, \dots, w_i, \dots, w_N)}{\epsilon}$$
-
-To compute the gradient vector $\nabla_W \mathcal{L}$ for a model with $N$ parameters, finite differences requires $N + 1$ complete forward passes through the entire neural network. For a modest modern transformer with $N = 100\text{M}$ parameters ($10^8$ weights) running at $10\text{ ms}$ per forward pass, a single gradient step would require:
-
-$$\text{Time per Step} = 10^8 \times 10\text{ ms} = 10^9\text{ seconds} \approx 31.7\text{ years}$$
-
-Finite differences is computationally impossible for deep learning. Furthermore, floating-point truncation errors in IEEE 754 float32 arithmetic corrupt the derivative when $\epsilon$ is small ($\epsilon \approx 10^{-5}$).
-
-::: {.callout-note title="Napkin Math: Comparing the Three Differentiation Paradigms"}
-Consider training a standard 100M parameter model with batch size $B = 32$:
-1. **Numerical Finite Differences**: Requires $100,000,001$ forward passes. At 10 ms/pass, a single gradient update takes $10^6$ seconds ($11.5\text{ days}$). Training for 100,000 steps would require over 3,000 years of GPU compute time!
-2. **Symbolic Differentiation**: Applies the product rule algebraically. For a 24-layer transformer, the algebraic expression for $\frac{\partial \mathcal{L}}{\partial W_1}$ contains over $10^{14}$ expanded terms, overflowing host RAM before a single number is evaluated.
-3. **Reverse-Mode Autograd (TinyTorch)**: Records forward tensor operations into a compact linear execution tape ($O(1)$ overhead per operation). A single backward sweep evaluates every parameter gradient in roughly $20\text{ ms}$---making modern AI computationally feasible on physical hardware.
-:::
-
-### The Forward-Backward Memory Asymmetry
-
-The fundamental systems trade-off of reverse-mode autograd is memory consumption. In a pure forward inference pass, intermediate activation buffers $\mathbf{a}_l$ can be immediately overwritten as soon as layer $l+1$ finishes execution ($O(1)$ memory buffer reuse).
-
-In contrast, during training with autograd, every intermediate activation $\mathbf{a}_l$ required to compute the local Jacobian matrix $\mathbf{J}_l = \frac{\partial \mathbf{a}_l}{\partial \mathbf{a}_{l-1}}$ must remain **pinned in DRAM/VRAM** throughout the entire forward pass until the backward pass reaches layer $l$. This creates the memory wall that dominates GPU training cluster architectures.
+![Autograd in two passes: the forward pass records each operation as a node with its inputs; the backward pass visits the nodes in reverse order and accumulates gradients.](assets/images/diagrams/06_autograd-diag-1.svg){#fig-autograd-dag}
 
 ---
 
-## The Mental Model: Dynamic Tape Directed Acyclic Graphs (DAG)
+## The Problem
 
-TinyTorch implements **Dynamic Tape-Based Reverse-Mode Autograd** (the same paradigm popularized by PyTorch and Autograd/JAX).
+Gradient descent, which Chapter 7 turns into a real optimizer, needs one number per weight: the partial derivative of the loss with respect to that weight. For a model with $N$ weights that is a vector of $N$ partial derivatives, and a network has millions of them.
 
-As mathematical operators (`+`, `*`, `matmul`, `relu`) execute during standard Python program interpretation, the runtime dynamically records an operation node (`Op`) onto an execution tape.
-
-Each Node in the computational DAG encapsulates:
-1. **Saved Context Tensors**: The specific forward tensors required to evaluate the backward derivative (e.g., input $X$ for $\text{ReLU}$, or matrices $A$ and $B$ for $\text{MatMul}$).
-2. **Parent Node Pointers**: Directed edges pointing back to the input tensors that generated this result.
-3. **Vector-Jacobian Product (VJP) Kernel**: The backward mathematical routine that maps incoming upstream gradients to input parameter gradients.
-
-During forward evaluation, operations record their dependencies onto the dynamic execution tape:
-- **Forward Step 1 (`MatMulOp`)**: Takes inputs $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$, computes pre-activation $\mathbf{Z} = \mathbf{X}\mathbf{W}$, and saves references to $\mathbf{X}$ and $\mathbf{W}$.
-- **Forward Step 2 (`GeluOp`)**: Applies non-linear activation $\mathbf{A} = \text{GELU}(\mathbf{Z})$ and saves intermediate tensor $\mathbf{Z}$.
-- **Forward Step 3 (`LossOp`)**: Evaluates scalar loss $\mathcal{L} = \text{Loss}(\mathbf{A})$, creating root loss node $\mathcal{L}$.
-
-When `.backward()` is invoked on the scalar loss $\mathcal{L}$, the autograd engine executes the reverse sequence (illustrated in @fig-autograd-dag):
-1. **Seed Gradient**: Initializes the root loss derivative with the identity scalar: $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$.
-2. **Topological Ordering**: Orders all reachable nodes in the computational DAG using Depth-First Search (DFS).
-3. **Reverse Traversal**: Executes each node's registered VJP kernel in reverse topological order:
-   - Evaluates activation derivative: $\frac{\partial \mathcal{L}}{\partial \mathbf{Z}} = \frac{\partial \mathcal{L}}{\partial \mathbf{A}} \odot \text{GELU}'(\mathbf{Z})$.
-   - Evaluates parameter derivatives: $\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{X}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}}$ and $\frac{\partial \mathcal{L}}{\partial \mathbf{X}} = \frac{\partial \mathcal{L}}{\partial \mathbf{Z}} \mathbf{W}^T$.
-4. **In-Place Gradient Accumulation**: Accumulates gradients (`param.grad += grad`) at multi-consumer nodes, satisfying the multivariate chain rule.
-
----
-
-## Mathematical Formulations: Vector-Jacobian Products (VJPs)
-
-Let $\mathbf{y} = f(\mathbf{x})$ be a vector-valued function where $\mathbf{x} \in \mathbb{R}^n$ and $\mathbf{y} \in \mathbb{R}^m$. The full Jacobian matrix $\mathbf{J} \in \mathbb{R}^{m \times n}$ contains all partial derivatives:
-
-$$\mathbf{J}_{ij} = \frac{\partial y_i}{\partial x_j}$$
-
-In deep learning, we never instantiate the full $m \times n$ Jacobian matrix in memory. For a layer with $m = 1024$ and $n = 1024$, storing $\mathbf{J}$ would require $1024 \times 1024 \times 4\text{ bytes} = 4\text{ MB}$ per sample.
-
-Instead, reverse-mode autograd evaluates the **Vector-Jacobian Product (VJP)**: given an incoming upstream row-gradient vector $\mathbf{g} = \frac{\partial \mathcal{L}}{\partial \mathbf{y}} \in \mathbb{R}^{1 \times m}$, the VJP computes the upstream gradient for $\mathbf{x}$ directly:
-
-$$\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{g} \cdot \mathbf{J} \in \mathbb{R}^{1 \times n}$$
-
-::: {.callout-note title="Napkin Math: Transposed GEMM Execution for Matrix Multiplication"}
-For $Y = A \cdot B$ with $A \in \mathbb{R}^{M \times K}$ and $B \in \mathbb{R}^{K \times N}$, the incoming gradient is $G = \frac{\partial \mathcal{L}}{\partial Y} \in \mathbb{R}^{M \times N}$.
-- The gradient with respect to $A$ is $\frac{\partial \mathcal{L}}{\partial A} = G \cdot B^T \in \mathbb{R}^{M \times K}$.
-- The gradient with respect to $B$ is $\frac{\partial \mathcal{L}}{\partial B} = A^T \cdot G \in \mathbb{R}^{K \times N}$.
-- **Systems Consequence**: Neither backward step requires allocating a Jacobian! Both derivatives execute as high-throughput dense matrix multiplications (GEMMs) on flat contiguous memory buffers, achieving near-peak hardware compute utilization.
-:::
-
-When a tensor $X$ is reused across multiple branches in the computational graph (such as a residual skip connection $Y = X + f(X)$ or shared parameter weights, such as token embeddings which we explore in Chapter 11), the total derivative is the sum of partial derivatives along all outgoing paths:
-
-$$\frac{\partial \mathcal{L}}{\partial X} = \sum_{k \in \text{Consumers}(X)} \left( \frac{\partial \mathcal{L}}{\partial Y_k} \frac{\partial Y_k}{\partial X} \right)$$
-
-In software, this mathematical summation requires **gradient accumulation**:
-
-$$\text{param.grad} \leftarrow \text{param.grad} + \delta_{\text{new}}$$
-
-If an autograd engine mistakenly overwrote `param.grad = grad` instead of accumulating with `+=`, gradients flowing from skip connections or recurrent steps would be silently erased, causing catastrophic gradient corruption.
-
----
-
-## Line-by-Line Reference Implementation: The Dynamic Autograd Tape Engine
-
-::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 06** in the TinyTorch runtime: `packages/tinytorch/src/06_autograd/06_autograd.py`.
-:::
-
-Let us inspect the complete, executable TinyTorch autograd engine. Each operation wraps forward execution and attaches a backward closure:
+The obvious way to get a derivative is to nudge a weight and see what happens to the loss. For the small network the rest of the chapter uses (a $1 \times 2$ input, a $2 \times 2$ weight matrix, a ReLU, and a sum), that looks like this:
 
 ```python
-# Reference Implementation: packages/tinytorch/src/06_autograd/06_autograd.py
-from typing import List, Set, Tuple, Optional, Callable
+import numpy as np
+
+x = np.array([[1.0, 2.0]], dtype=np.float32)
+W = np.array([[0.5, -0.5], [1.0, 0.5]], dtype=np.float32)
+
+def loss_fn(W):
+    return np.float32(np.sum(np.maximum(0.0, x @ W)))
+
+eps = np.float32(1e-3)
+numeric = np.zeros_like(W)
+for i in range(W.shape[0]):
+    for j in range(W.shape[1]):
+        W_plus = W.copy()
+        W_plus[i, j] += eps
+        numeric[i, j] = (loss_fn(W_plus) - loss_fn(W)) / eps   # one extra forward pass per weight
+
+print(numeric)
+# [[0.9999 0.9999]
+#  [2.0001 1.9999]]
+```
+
+Two things are wrong with this, and both get worse as the model grows. The first is cost. Estimating four derivatives took five forward passes, one per weight plus a baseline. A model with $N$ weights needs $N + 1$ forward passes for a single gradient, and training needs a fresh gradient at every step. As napkin math, a model with $10^8$ weights whose forward pass takes 10 ms would spend $10^8 \times 10 \text{ ms} = 10^6$ seconds, about twelve days, computing one gradient. Training runs hundreds of thousands of steps.
+
+The second is precision. The printed answer is already off in the fourth decimal place, and shrinking `eps` does not fix it. The numerator subtracts two losses that differ only slightly, and float32 keeps about seven significant digits, so the subtraction throws most of them away.[^fn-cancellation-finite-difference] Choose `eps` too large and the estimate is biased; choose it too small and it is noise. There is no good value.
+
+[^fn-cancellation-finite-difference]: **Catastrophic cancellation**: subtracting two nearly equal floating-point numbers discards the leading digits they share, leaving only the few that differ. With `eps = 1e-5` and losses near 3.0, the two float32 losses agree in their first six digits, so the difference has at most one reliable digit before it is divided by `eps`.
+
+Writing the derivative out as a formula, the way a calculus class does, does not help either. The derivative of a composition of many functions is a product of many derivatives, and each factor reappears in the formula for every weight that sits upstream of it. The expression grows with depth while the numerical work it describes does not. We do not want the formula. We want the numbers, computed once, with every shared piece shared.
+
+---
+
+## The Idea
+
+### One rule per operation
+
+The chain rule says that if $L$ depends on $y$ and $y$ depends on $x$, then
+
+$$\frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \cdot \frac{\partial y}{\partial x}.$$
+
+The point to notice is what each factor needs to know. The first factor, $\partial L / \partial y$, is about everything downstream of $y$ and nothing upstream. The second, $\partial y / \partial x$, is about one operation and nothing else. If every operation can answer the question "given the gradient of the loss with respect to my output, what is the gradient with respect to my inputs," then no operation ever needs to know what the rest of the network looks like.
+
+That question has a short answer for every operation we use. Addition passes the gradient through unchanged to both inputs, because $\partial(a + b)/\partial a = 1$. ReLU passes it through where the input was positive and blocks it where the input was not, because the derivative of $\max(0, z)$ is 1 or 0. Summing a tensor to a scalar sends the same gradient to every element. Each rule needs only what the operation saw during the forward pass: ReLU needs the sign of its input, and matrix multiplication needs both of its inputs.
+
+Matrix multiplication is the one rule worth writing down. For $Y = AB$ with $A$ of shape $M \times K$ and $B$ of shape $K \times N$, let $G = \partial L / \partial Y$ be the incoming gradient, which has the same shape as $Y$. Then
+
+$$\frac{\partial L}{\partial A} = G B^{T}, \qquad \frac{\partial L}{\partial B} = A^{T} G.$$
+
+A shape check is the fastest way to trust this. $G$ is $M \times N$ and $B^T$ is $N \times K$, so $G B^T$ is $M \times K$, the shape of $A$. Likewise $A^T G$ is $K \times N$, the shape of $B$. Both results are themselves matrix multiplications, so the backward pass of a matmul costs two matmuls of the same size as the forward one. That single fact is where the rule of thumb "backward costs about twice forward" comes from.
+
+### Reverse order
+
+During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.
+
+The order matters. A tensor's backward rule turns the gradient at that tensor into gradients at its parents, so the rule must not run until the gradient at that tensor is complete. If the tensor feeds two later operations, both of them must have reported back first. The ordering that guarantees this is a **topological order**: every tensor appears after everything computed from it. A depth-first walk from the loss that lists each tensor only after all of its parents produces the opposite order (parents first), and reversing that list gives us the one we want.
+
+### Used twice means add
+
+When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
+
+$$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
+
+where the $y_k$ are the tensors computed directly from $x$. In code this is an accumulation, `x.grad += contribution`, never an assignment. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that wrote `x.grad = contribution` would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it is why the optimizer in Chapter 7 must clear gradients before every step rather than trusting them to start at zero.
+
+### What the design costs
+
+Every backward rule needs something from the forward pass. ReLU needs its input's sign, matmul needs both operands, and the rule cannot run until the backward pass reaches it, which may be long after the forward pass moved on. In inference, a layer's input can be discarded as soon as the next layer has consumed it. In training it cannot. Every tensor a backward rule will need stays in memory from the moment it is computed until the backward pass releases it, so training holds the whole forward pass in memory at once while inference holds about one layer. This is the reason a model that runs comfortably for prediction can run out of memory the moment training starts, and we return to the size of that cost in the production bridge.
+
+---
+
+## The Code
+
+::: {.callout-note title="Source Code Mapping"}
+Module 06 (`src/06_autograd/06_autograd.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of recording the graph and walking it backward. The real module attaches a `Function` object (`AddBackward`, `MatmulBackward`, and so on) to each result and patches the operations onto Chapter 1's `Tensor` at runtime; the listings here attach a closure instead, which keeps each rule next to the code it differentiates.
+:::
+
+To keep the listings self-contained, this chapter's `Tensor` holds its numbers in a NumPy array called `data` rather than in Chapter 1's hand-built `Storage`. The autograd bookkeeping is identical either way. Chapter 3's layers already mark their weights with `requires_grad=True` and reserve an empty `grad` field; this chapter is where both start doing work.
+
+### A tensor that remembers its parents
+
+Chapter 7's optimizer will call `loss.backward()` at every training step and expect, when it returns, that every weight in the model holds its gradient. For a two-layer MLP that is four tensors. For the transformer of Chapter 13 it is well over a hundred, spread across layers that were written at different times for different reasons. Something has to connect the one scalar at the end of the forward pass to every one of them.
+
+The way frameworks did this before autograd was to hand-write a backward function for the whole network, one that mirrored the forward pass line by line. It worked until the model changed. Add a layer, or add an `if` that skips a block for some inputs, and the backward function is wrong until somebody rewrites it, and nothing tells you it is wrong. The finite-difference route from The Problem avoids that fragility, but at $N + 1$ forward passes per step it is not a training method.
+
+Here is the trick. Instead of writing one backward function for the network, we let every operation record enough about itself, as it runs, that the backward pass can be reconstructed afterward from the records alone. Three fields on the tensor are all it takes: the tensors it was computed from, a function that pushes its gradient into those parents, and a place to accumulate the gradient itself.
+
+```python
 import numpy as np
 
 class Tensor:
-    """
-    Core Tensor data structure with dynamic autograd tape support.
-    """
-    def __init__(self, data, requires_grad: bool = False):
-        if isinstance(data, np.ndarray):
-            self.data = data.astype(np.float32)
-        else:
-            self.data = np.array(data, dtype=np.float32)
-
+    def __init__(self, data, requires_grad=False):
+        self.data = np.array(data, dtype=np.float32)
         self.requires_grad = requires_grad
-        self.grad: Optional[np.ndarray] = None
-        self._prev: Set['Tensor'] = set()
-        self._backward_fn: Optional[Callable[[], None]] = None
+        self.grad = None            # filled in by backward()
+        self._parents = ()          # tensors this one was computed from
+        self._backward_fn = None    # pushes self.grad into the parents
 
     @property
-    def shape(self) -> Tuple[int, ...]:
+    def shape(self):
         return self.data.shape
 
-    def backward(self, gradient: Optional[np.ndarray] = None):
-        """
-        Executes reverse-mode automatic differentiation via topological sort.
-        """
-        if not self.requires_grad:
-            return
-
-        # Seed the root derivative: dL/dL = 1.0 for scalar loss
-        if gradient is None:
-            if self.data.size != 1:
-                raise RuntimeError("Grad can only be implicitly created for scalar outputs")
-            self.grad = np.ones_like(self.data)
-        else:
-            self.grad = np.array(gradient, dtype=np.float32)
-
-        # 1. Construct Topological Ordering of DAG via DFS
-        topo: List['Tensor'] = []
-        visited: Set['Tensor'] = set()
-
-        def _build_topo(v: 'Tensor'):
-            if v not in visited:
-                visited.add(v)
-                for parent in v._prev:
-                    _build_topo(parent)
-                topo.append(v)
-
-        _build_topo(self)
-
-        # 2. Reverse topological traversal: execute backward functions
-        for node in reversed(topo):
-            if node._backward_fn is not None:
-                node._backward_fn()
-
-    def __add__(self, other: 'Tensor') -> 'Tensor':
-        other = other if isinstance(other, Tensor) else Tensor(other)
-        out = Tensor(self.data + other.data, requires_grad=(self.requires_grad or other.requires_grad))
-
-        if out.requires_grad:
-            out._prev = {self, other}
-            def _backward():
-                if self.requires_grad:
-                    # In-place accumulation for multivariate chain rule
-                    self.grad = (self.grad + out.grad) if self.grad is not None else out.grad.copy()
-                if other.requires_grad:
-                    other.grad = (other.grad + out.grad) if other.grad is not None else out.grad.copy()
-            out._backward_fn = _backward
-
-        return out
-
-    def matmul(self, other: 'Tensor') -> 'Tensor':
-        other = other if isinstance(other, Tensor) else Tensor(other)
-        out = Tensor(np.dot(self.data, other.data), requires_grad=(self.requires_grad or other.requires_grad))
-
-        if out.requires_grad:
-            out._prev = {self, other}
-            def _backward():
-                if self.requires_grad:
-                    # dL/dA = G . B^T
-                    grad_a = np.dot(out.grad, other.data.T)
-                    self.grad = (self.grad + grad_a) if self.grad is not None else grad_a
-                if other.requires_grad:
-                    # dL/dB = A^T . G
-                    grad_b = np.dot(self.data.T, out.grad)
-                    other.grad = (other.grad + grad_b) if other.grad is not None else grad_b
-            out._backward_fn = _backward
-
-        return out
-
-    def relu(self) -> 'Tensor':
-        out = Tensor(np.maximum(0.0, self.data), requires_grad=self.requires_grad)
-
-        if out.requires_grad:
-            out._prev = {self}
-            def _backward():
-                if self.requires_grad:
-                    # Local derivative is 1.0 if x > 0 else 0.0
-                    local_grad = (self.data > 0).astype(np.float32) * out.grad
-                    self.grad = (self.grad + local_grad) if self.grad is not None else local_grad
-            out._backward_fn = _backward
-
-        return out
+    def _accumulate(self, g):
+        # Never overwrite: a tensor used twice receives two contributions.
+        self.grad = g if self.grad is None else self.grad + g
 ```
 
----
+`_accumulate` is the "used twice means add" rule in one place. Every backward rule calls it rather than touching `grad` directly, so the accumulation cannot be forgotten. A tensor created directly by the user, such as an input or a weight, has no parents and no backward function; we call it a **leaf**, and so does PyTorch, where `t.is_leaf` is how you check. Leaves are where gradients end up.
 
-### Concrete Numerical Trace Table: Forward Tape to Reverse Topological Sort
+### The broadcast obligation: reducing gradients
 
-To verify the mathematical and algorithmic integrity of our autograd engine, let us trace a concrete 2-node computational graph by hand:
+In Chapter 1, broadcasting made it free to add a bias vector of shape $(D,)$ to an activation batch of shape $(B, D)$ by setting the broadcast dimension's stride to zero. Forward execution copied no bytes. But when the backward pass runs, `out.grad` arrives with the output's broadcast shape $(B, D)$.
 
-$$\mathbf{x} = \begin{bmatrix} 1.0 & 2.0 \end{bmatrix}, \quad \mathbf{W} = \begin{bmatrix} 0.5 & -0.5 \\ 1.0 & 0.5 \end{bmatrix}, \quad \mathbf{z} = \mathbf{x} \mathbf{W}, \quad \mathbf{a} = \text{ReLU}(\mathbf{z}), \quad \mathcal{L} = \sum \mathbf{a}$$
+If the framework blindly pushed `out.grad` into the bias, two things would break. First, the shapes would mismatch, crashing the first elementwise update. Second, and worse, the bias gradient would fail to accumulate the contributions from every example in the batch. By the multivariable chain rule, because $b_j$ was added to every row $i$ of the output, its total gradient is the sum across the batch:
 
-#### Step 1: Forward Pass Computations
+$$\frac{\partial L}{\partial b_j} = \sum_{i=0}^{B-1} \frac{\partial L}{\partial y_{i, j}} \frac{\partial y_{i, j}}{\partial b_j} = \sum_{i=0}^{B-1} \frac{\partial L}{\partial y_{i, j}} \times 1 = \sum_{i=0}^{B-1} (\nabla \mathbf{Y})_{i, j}$$
 
-$$\mathbf{z} = \begin{bmatrix} 1.0 & 2.0 \end{bmatrix} \begin{bmatrix} 0.5 & -0.5 \\ 1.0 & 0.5 \end{bmatrix} = \begin{bmatrix} 1.0(0.5) + 2.0(1.0) & 1.0(-0.5) + 2.0(0.5) \end{bmatrix} = \begin{bmatrix} 2.5 & 0.5 \end{bmatrix}$$
-
-$$\mathbf{a} = \text{ReLU}\left(\begin{bmatrix} 2.5 & 0.5 \end{bmatrix}\right) = \begin{bmatrix} 2.5 & 0.5 \end{bmatrix}$$
-
-$$\mathcal{L} = 2.5 + 0.5 = 3.0$$
-
-#### Step 2: Reverse Topological Sweep Trace Table
-
-Evaluating the vector-Jacobian products backward from the loss scalar down to the input leaf tensors:
-
-$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{x}^T \mathbf{G}_{\mathbf{z}} = \begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$$
-
-$$\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{G}_{\mathbf{z}} \mathbf{W}^T = \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}$$
-
-In @tbl-autograd-trace, we trace the node-by-node reverse topological traversal through the dynamic tape.
-
-| DAG Node | Operation | Upstream $\mathbf{G}$ | VJP Rule | Evaluated Gradient | Memory & Hardware State |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Node 4 ($\mathcal{L}$)** | Root Loss Seed | N/A | Seed $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | $1.0$ | 4-byte scalar register |
-| **Node 3 ($\mathbf{a}$)** | Sum Reduction | $\mathbf{G}_{\mathcal{L}} = [1.0]$ | $\mathbf{G}_{\mathcal{L}} \cdot [1.0, 1.0]$ | $[1.0, 1.0]$ | Broadcast 8-byte buffer |
-| **Node 2 ($\mathbf{z}$)** | $\text{ReLU}(\mathbf{z})$ | $\mathbf{G}_{\mathbf{a}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{a}} \odot \mathbb{I}(\mathbf{z} > 0)$ | $[1.0, 1.0]$ | In-place SIMD bitmask |
-| **Node 1 ($\mathbf{W}$)** | MatMul ($\mathbf{x}\mathbf{W}$) | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\mathbf{x}^T \cdot \mathbf{G}_{\mathbf{z}}$ | $[1.0, 1.0;\, 2.0, 2.0]$ | 16-byte $2 \times 2$ matrix |
-| **Node 0 ($\mathbf{x}$)** | MatMul ($\mathbf{x}\mathbf{W}$) | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{z}} \cdot \mathbf{W}^T$ | $[0.0, 1.5]$ | 8-byte activation buffer |
-
-: Reverse topological sweep trace through the dynamic computation tape DAG during backward backpropagation. {#tbl-autograd-trace tbl-colwidths="[14,14,14,16,22,20]"}
+The mathematical summation across the batch is a physical reduction across the leading axes. TinyTorch enforces this contract with `_reduce_broadcast_grad`, which sums out extra leading dimensions and collapses singleton axes back to the parameter's original shape.
 
 ```python
-# Hand-Verification Script: Run with TinyTorch autograd or standard NumPy
-import numpy as np
-
-x_data = np.array([[1.0, 2.0]])
-W_data = np.array([[0.5, -0.5], [1.0, 0.5]])
-
-# Forward
-z_data = x_data @ W_data
-a_data = np.maximum(0, z_data)
-loss = np.sum(a_data)
-
-# Backward
-grad_loss = 1.0
-grad_a = grad_loss * np.ones_like(a_data)
-grad_z = grad_a * (z_data > 0).astype(np.float64)
-grad_W = x_data.T @ grad_z
-grad_x = grad_z @ W_data.T
-
-print("W Gradient:\n", grad_W)
-print("x Gradient:\n", grad_x)
-# Matches trace table exactly: grad_W = [[1.0, 1.0], [2.0, 2.0]], grad_x = [[0.0, 1.5]]
+def _reduce_broadcast_grad(grad, target_shape):
+    """Reduce an accumulated gradient back to its pre-broadcast shape."""
+    # Step 1: Sum out leading dimensions added during broadcasting (e.g. batch size)
+    while grad.ndim > len(target_shape):
+        grad = grad.sum(axis=0)
+    # Step 2: Sum out dimensions that were stretched from size 1
+    for i, dim in enumerate(target_shape):
+        if dim == 1 and grad.shape[i] > 1:
+            grad = grad.sum(axis=i, keepdims=True)
+    return grad
 ```
 
-Every single arithmetic value matches the exact outputs computed by our TinyTorch autograd engine!
+With this helper in place, `_add` handles scalars, vectors, and broadcast tensors with the exact same closure.
+
+```python
+def _add(self, other):
+    other = other if isinstance(other, Tensor) else Tensor(other)
+    out = Tensor(self.data + other.data,
+                 requires_grad=self.requires_grad or other.requires_grad)
+    if out.requires_grad:
+        out._parents = (self, other)
+        def backward_fn():
+            # d(a + b)/da = 1 and d(a + b)/db = 1, reduced to original operand shapes
+            if self.requires_grad:
+                self._accumulate(_reduce_broadcast_grad(out.grad, self.shape))
+            if other.requires_grad:
+                other._accumulate(_reduce_broadcast_grad(out.grad, other.shape))
+        out._backward_fn = backward_fn
+    return out
+
+Tensor.__add__ = _add
+```
+
+Two details carry weight. First, the `if out.requires_grad` line is the gate. Nothing is recorded when neither input needs a gradient, which is why prediction builds no graph. Second, the closure reads `out.grad` when it is called, not when it is created. That is what makes the ordering rule matter. The closure must not run until every consumer of `out` has finished adding to `out.grad`. PyTorch's version of this closure is the `AddBackward0` node you see when you print `y.grad_fn`.
+
+### Matrix multiplication, ReLU, and sum
+
+Matrix multiplication is where the weights are. Chapter 3's `Linear` layer is `x @ W` plus a bias, so every weight matrix in an MLP, and later every projection in Chapter 12's attention, receives its gradient through the matmul rule. It is also the rule where the naive approach is most obviously unaffordable. In the general case, an operation that maps a vector of length $n$ to a vector of length $m$ has an $m \times n$ matrix of local derivatives called the Jacobian,[^fn-jacobian-vjp] and the textbook way to apply the chain rule is to build it and multiply. For a linear layer with batch 256 and width 4096, the output has about a million entries and $W$ has nearly seventeen million, so $\partial Y / \partial W$ has roughly $1.8 \times 10^{13}$ entries, about 70 TB in float32, for one layer of one training step.
+
+[^fn-jacobian-vjp]: **Jacobian**: the matrix of all partial derivatives $\partial y_i / \partial x_j$ of a vector-valued function. For a layer with 1024 inputs and 1024 outputs it has a million entries per example, which is why autograd computes gradient-times-Jacobian products instead of the Jacobian itself.
+
+Nobody builds it, and the matmul rule from The Idea is why nobody has to. $G B^T$ and $A^T G$ are the products of the incoming gradient with that Jacobian, computed directly as two matrix multiplications the size of the forward one, and the gradient for $W$ comes out at $W$'s own size, 67 MB rather than 70 TB. Frameworks call this a vector-Jacobian product, and every backward rule in this chapter is one; matmul is the case where the saving is largest.
+
+ReLU and sum are simpler, and they are here because the worked trace needs them. ReLU because Chapter 2's activations sit between every pair of layers, and sum because a loss has to end in a scalar for `backward()` to have a place to start. Each of the three computes its forward result, records its parents, and stores a closure holding its local rule. Notice what each closure captures from the forward pass, because that is exactly what has to stay in memory until backward runs: matmul keeps both operands, ReLU keeps its input, and sum keeps only a shape.
+
+```python
+def _matmul(self, other):
+    out = Tensor(self.data @ other.data,
+                 requires_grad=self.requires_grad or other.requires_grad)
+    if out.requires_grad:
+        out._parents = (self, other)
+        def backward_fn():
+            if self.requires_grad:
+                self._accumulate(out.grad @ other.data.T)   # dL/dA = G B^T
+            if other.requires_grad:
+                other._accumulate(self.data.T @ out.grad)   # dL/dB = A^T G
+        out._backward_fn = backward_fn
+    return out
+
+def _relu(self):
+    out = Tensor(np.maximum(0.0, self.data), requires_grad=self.requires_grad)
+    if out.requires_grad:
+        out._parents = (self,)
+        def backward_fn():
+            mask = (self.data > 0).astype(np.float32)       # 1 where relu let the value through
+            self._accumulate(out.grad * mask)
+        out._backward_fn = backward_fn
+    return out
+
+def _sum(self):
+    out = Tensor(self.data.sum(), requires_grad=self.requires_grad)
+    if out.requires_grad:
+        out._parents = (self,)
+        def backward_fn():
+            self._accumulate(out.grad * np.ones_like(self.data))  # every element gets the same share
+        out._backward_fn = backward_fn
+    return out
+
+Tensor.matmul = _matmul
+Tensor.relu = _relu
+Tensor.sum = _sum
+```
+
+The matmul closure is the two-line version of the formula from The Idea, and the shapes work out for the same reason. The ReLU mask is the derivative of $\max(0, z)$ evaluated at the forward input. Sum broadcasts its scalar gradient back to the shape it reduced, which is the one place this listing handles a shape change in the backward direction. PyTorch's names for the same three nodes are `MmBackward0`, `ReluBackward0`, and `SumBackward0`, and what each keeps in `saved_tensors` is the same list.
+
+### Walking the graph backward
+
+The records are in place. What is left is the call the training loop of Chapter 8 will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
+
+The naive walk is recursion. Start at the loss, run its closure, recurse into its parents, run theirs. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. The moment a tensor feeds two operations, say `h = x.relu()` used in two branches of the loss, the recursion reaches `h` through the first branch and runs `h`'s closure while `h.grad` holds only that branch's contribution, pushing a partial gradient into `x`. Whatever the second branch adds to `h.grad` afterward arrives too late. No error, a wrong number, and a model that trains a little worse than it should.
+
+The fix is to run no closure until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. So `backward()` does three things: seeds the gradient at the loss, sorts the graph, and runs the closures in reverse.
+
+```python
+def _backward(self):
+    if self.data.size != 1:
+        raise RuntimeError("backward() needs a scalar loss")
+    self.grad = np.ones_like(self.data)          # seed: dL/dL = 1
+
+    order, seen = [], set()
+    def visit(t):                                # depth-first, parents before children
+        if id(t) in seen:
+            return
+        seen.add(id(t))
+        for p in t._parents:
+            visit(p)
+        order.append(t)
+    visit(self)
+
+    for t in reversed(order):                    # loss first, inputs last
+        if t._backward_fn is not None:
+            t._backward_fn()
+
+Tensor.backward = _backward
+```
+
+`visit` appends a tensor only after visiting all of its parents, so `order` lists parents before children and `reversed(order)` lists the loss first and the leaves last. The `seen` set, keyed by `id()` because tensors are not hashable, makes sure a tensor that is reachable by two paths is placed once. Leaves have no `_backward_fn` and are skipped; their `grad` fields already hold the answer by the time the loop reaches them. Nothing in the loop knows what any operation does. It only knows the order. PyTorch's engine enforces the same invariant with a per-node dependency count instead of a sorted list, and the production bridge says why.
 
 ---
 
-## The Production Systems Bridge: PyTorch C++ `torch::autograd::Engine`
+## A Worked Trace
 
-In production PyTorch, dynamic reverse-mode automatic differentiation is implemented in high-performance C++ within `torch/csrc/autograd/engine.cpp`.
+The network from The Problem is small enough to check by hand. Take an input $\mathbf{x}$, a weight matrix $\mathbf{W}$, and compute a pre-activation, a ReLU, and a scalar loss:
 
-::: {.callout-note title="Production PyTorch Autograd Architecture"}
-- **Python Frontend (`loss.backward()`)**: Initiates graph traversal under the Python Global Interpreter Lock (GIL) and passes the root gradient node pointer to C++.
-- **C++ Core Engine (`torch::autograd::Engine`)**:
-  1. Constructs a concurrent `ReadyQueue` containing executable node tasks.
-  2. Releases the Python GIL, enabling parallel C++ worker threads to execute independent branches concurrently.
-  3. Dispatches Vector-Jacobian Product (VJP) kernels across asynchronous GPU streams.
-  4. Manages an atomic in-place version counter (`c10::TensorImpl::_version`) to prevent silent numerical corruption.
-:::
+$$\mathbf{x} = \begin{bmatrix} 1.0 & 2.0 \end{bmatrix}, \quad \mathbf{W} = \begin{bmatrix} 0.5 & -0.5 \\ 1.0 & 0.5 \end{bmatrix}, \quad \mathbf{z} = \mathbf{x}\mathbf{W}, \quad \mathbf{a} = \text{ReLU}(\mathbf{z}), \quad L = \sum \mathbf{a}.$$
 
-::: {#nbk-autograd-activation-pinning-vram .callout-notebook title="Pinned activation memory wall during backpropagation"}
-During training with automatic differentiation, every intermediate activation tensor required to compute local Jacobian vector products must remain **pinned in DRAM/VRAM** throughout the entire forward pass until the backward pass visits that node.
+The forward pass gives
 
-Consider training an autoregressive model with $L = 32$ Transformer layers, batch size $B = 16$, sequence length $S = 2048$, and hidden dimension $D = 4096$ in FP16 (2 bytes per element):
+$$\mathbf{z} = \begin{bmatrix} 1.0(0.5) + 2.0(1.0) & 1.0(-0.5) + 2.0(0.5) \end{bmatrix} = \begin{bmatrix} 2.5 & 0.5 \end{bmatrix}, \quad \mathbf{a} = \begin{bmatrix} 2.5 & 0.5 \end{bmatrix}, \quad L = 3.0.$$
 
-- **Activation Size Per Layer**:
-  $$\text{Layer Activation} = B \times S \times D \times 2\text{ bytes} = 16 \times 2048 \times 4096 \times 2\text{ bytes} \approx 268.44\text{ MB}$$
+Both entries of $\mathbf{z}$ are positive, so ReLU passes both through and its mask is all ones. As the forward pass runs, three records are created: $\mathbf{z}$ remembers $(\mathbf{x}, \mathbf{W})$, $\mathbf{a}$ remembers $(\mathbf{z})$, and $L$ remembers $(\mathbf{a})$. The depth-first walk from $L$ lists the tensors as $[\mathbf{x}, \mathbf{W}, \mathbf{z}, \mathbf{a}, L]$, and reversing it gives the backward order $[L, \mathbf{a}, \mathbf{z}, \mathbf{W}, \mathbf{x}]$. The order between the two leaves does not matter because leaves have nothing to run, and @tbl-autograd-trace follows the loop through the three closures that do.
 
-- **Total Pinned Activation VRAM Across Depth**:
-  For 32 layers, accounting for attention projections, MLP expansions ($4D$), and LayerNorm buffers ($\sim 3.5\times$ base representation):
-  $$\text{Pinned Activations} \approx 32 \times (3.5 \times 268.44\text{ MB}) \approx 30.06\text{ GB}$$
+| Step | Node | Gradient at this tensor | Local rule | Sent to parents |
+| :--- | :--- | :--- | :--- | :--- |
+| seed | $L$ | $1.0$ | $\partial L / \partial L = 1$ | (none yet) |
+| 1 | $L = \sum \mathbf{a}$ | $1.0$ | broadcast to $\mathbf{a}$'s shape | $\mathbf{a}$ gets $[1.0, 1.0]$ |
+| 2 | $\mathbf{a} = \text{ReLU}(\mathbf{z})$ | $[1.0, 1.0]$ | multiply by mask $[1, 1]$ | $\mathbf{z}$ gets $[1.0, 1.0]$ |
+| 3 | $\mathbf{z} = \mathbf{x}\mathbf{W}$ | $[1.0, 1.0]$ | $\mathbf{x}^T G$ and $G \mathbf{W}^T$ | $\mathbf{W}$ gets $\begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$, $\mathbf{x}$ gets $[0.0, 1.5]$ |
+| 4, 5 | $\mathbf{W}$, $\mathbf{x}$ | (leaves) | no closure | done |
 
-- **Inference vs Training Memory Disparity**:
-  During inference, the runtime does not construct a backward tape DAG. As soon as layer $l+1$ finishes executing, the memory buffer for layer $l$ is immediately overwritten:
-  $$\text{Inference Peak Dynamic Activation} \approx 3.5 \times 268.44\text{ MB} \approx 0.94\text{ GB}$$
+: The backward loop on the four-weight network. Each closure reads the gradient already accumulated at its tensor and pushes the result into its parents. {#tbl-autograd-trace tbl-colwidths="[8,22,20,22,28]"}
 
-**Systems Takeaway**: Training requires **$32\times$ more dynamic activation memory** than inference solely to retain backward tape context. When pinned activations exceed available GPU VRAM, systems engineers must employ **Gradient Checkpointing** (activation rematerialization)—recomputing activations during backward traversal at the cost of $33\%$ additional forward FLOPs.
-:::
+The two matmul results are worth doing by hand once. With $G = [1.0, 1.0]$,
 
-#### Architectural Distinctions: TinyTorch vs. Production PyTorch ATen Engine
-1. **Multithreaded Task Queue (`ReadyQueue`)**: TinyTorch evaluates the topological sort sequentially in a single Python thread. PyTorch maintains a thread pool with a concurrent `ReadyQueue`. Any node whose downstream dependencies are satisfied is immediately scheduled on an idle worker thread, enabling parallel backward execution across independent network branches.
-2. **In-Place Mutation Guarding (`_version` tracking)**: If a tensor's underlying memory is modified in-place (e.g. `x.add_(1)`) after being saved for backward, its values are corrupted. PyTorch maintains an atomic integer `_version` counter inside `c10::TensorImpl`. If the backward pass discovers that `tensor._version != saved_version`, it throws a clear runtime error: `RuntimeError: one of the variables needed for gradient computation has been modified by an in-place operation`.
-3. **Engine Reentrancy and Non-Differentiable Hooks**: PyTorch allows backward hooks (e.g., gradient clipping, DDP all-reduce synchronization) to run seamlessly during graph execution without deadlocking the engine.
+$$\frac{\partial L}{\partial \mathbf{W}} = \mathbf{x}^T G = \begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}, \qquad \frac{\partial L}{\partial \mathbf{x}} = G \mathbf{W}^T = \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}.$$
+
+The zero in $\partial L / \partial \mathbf{x}$ has a plain meaning. Raising $x_0$ by a small amount raises $z_0$ by half that amount and lowers $z_1$ by the same half, and since $L$ is $z_0 + z_1$, the two effects cancel. The gradient with respect to $\mathbf{W}$ matches the finite-difference estimate from The Problem to within its noise, which is the check that matters.
+
+Running the listings on the same inputs reproduces the table. This code depends on the `Tensor` class defined above in this chapter, so run it after the listings in The Code.
+
+```python
+x = Tensor([[1.0, 2.0]], requires_grad=True)
+W = Tensor([[0.5, -0.5], [1.0, 0.5]], requires_grad=True)
+
+z = x.matmul(W)
+a = z.relu()
+L = a.sum()
+print(L.data)          # 3.0
+
+L.backward()
+print(W.grad)          # [[1. 1.]
+                       #  [2. 2.]]
+print(x.grad)          # [[0.  1.5]]
+```
+
+The accumulation rule can be checked with a two-line experiment, and it is worth running because `x + x` is the smallest version of a residual connection, where a tensor is added back to something computed from it. The same tensor is both parents of one addition, so the closure calls `_accumulate` on it twice.
+
+```python
+x = Tensor([[1.0, 2.0]], requires_grad=True)
+(x + x).sum().backward()
+print(x.grad)          # [[2. 2.]]
+```
+
+Replace the `+` inside `_accumulate` with an assignment and this prints `[[1. 1.]]`, with no error to tell you it is wrong.
 
 ---
 
-## Chapter Summary: The Complete Differentiation Invariant
+## From TinyTorch to Production
 
-With dynamic reverse-mode automatic differentiation complete, TinyTorch has acquired the mathematical superpower of modern deep learning:
+PyTorch's autograd is the same three ideas implemented in C++, in `torch/csrc/autograd/engine.cpp`, and the design of the real TinyTorch module is closer to it than the closures above. Instead of a closure, each result carries a node object with a name you have seen in error messages, such as `AddBackward0` or `MmBackward0`, exposed as `y.grad_fn`. The node stores the saved forward tensors and an `apply` method that computes the vector-Jacobian product, which is exactly the real module's `Function` class with its `saved_tensors` and `apply`. The engine does not build a full topological order up front. It counts, for each node, how many consumers still owe it a gradient, and releases the node to a ready queue when that count hits zero. The invariant is the same as our reversed list, but the queue lets independent branches of the graph run on different threads and, on a GPU, on different streams,[^fn-stream-backward] which a single sorted list cannot do.
 
-1. **$O(1)$ Scaling**: We compute exact analytical derivatives for arbitrarily deep architectures in $2\times$ the time of a forward pass, defeating the $O(N)$ finite differences wall.
-2. **In-Place Accumulation**: Multivariate chain rule branching is handled cleanly by accumulating gradients (`+=`) during reverse topological traversal.
-3. **Systems Memory Overhead**: Intermediate forward activations must remain pinned in memory throughout the forward pass, establishing the primary memory bottleneck of deep learning systems.
+[^fn-stream-backward]: **Stream**: a queue of GPU work that executes in order, with different streams free to overlap. PyTorch's backward engine records which stream each forward operation used and runs its backward rule on the same one, so two independent branches of a model can differentiate concurrently.
 
-In Chapter 7, we take these accumulated gradient vectors and construct **Optimizers** (SGD, Momentum, AdamW) to update our parameter tensors in physical memory.
+The memory cost that The Idea described is the constraint that shapes the production engine. Every saved forward tensor is held until its node runs, so peak training memory is the forward pass plus the graph, and PyTorch frees the graph at the end of `backward()` unless you pass `retain_graph=True`. The real TinyTorch module does the same, setting each `_grad_fn` to `None` once the walk completes, a step the listings above leave out. As napkin math for the scale involved, one activation tensor for a batch of 16 sequences of 2048 tokens with a hidden size of 4096, stored in 16-bit floats, is $16 \times 2048 \times 4096 \times 2$ bytes, about 268 MB. A transformer layer saves several such tensors, some of them wider than the hidden size, and a model has tens of layers, so the saved activations reach tens of gigabytes while the parameters of the same model may be a fraction of that. Inference peaks at roughly one layer's worth. When the graph does not fit, the standard remedy is gradient checkpointing,[^fn-checkpointing-activation-memory] which trades memory for a second forward pass.
+
+[^fn-checkpointing-activation-memory]: **Gradient checkpointing** (also called activation rematerialization): save the forward tensors at only a few layers, and recompute the others from those checkpoints when the backward pass needs them. It removes most of the saved-activation memory at the cost of roughly one extra forward pass, about a third more compute for a step whose backward already costs twice its forward.
+
+Two guards in PyTorch exist because of the same saved tensors. If you modify a tensor in place after an operation has saved it for backward, the saved value is wrong, so every tensor carries a version counter and the backward rule checks it; a mismatch produces the familiar `one of the variables needed for gradient computation has been modified by an inplace operation`. And because recording the graph costs memory even when no gradient will be asked for, `torch.no_grad()` turns recording off for inference and for the optimizer's own parameter update. The real TinyTorch module provides that same `no_grad` context manager, while our `_reduce_broadcast_grad` helper mirrors the exact shape reductions that PyTorch's native C++ kernels execute when accumulating gradients into broadcast parameters.
+
+JAX takes a different route to the same rules. Rather than recording a graph while Python runs, it traces the function once into a static graph and hands that to a compiler, which applies the same per-operation vector-Jacobian products, fuses adjacent backward operations, and schedules the memory. The trade is flexibility for optimization. A recorded tape can follow any Python control flow, while a compiled graph can be planned as a whole.
+
+What carries over unchanged is everything you can now reason about. Each operation has one local derivative rule that needs only its own forward inputs. The rules run in an order where every tensor's gradient is complete before it is passed on. A tensor used twice accumulates two contributions. Training memory is dominated by saved activations, not by parameters, which is why the knobs that move it are batch size and sequence length. In your own work, expect the following: `requires_grad=True` on a tensor means every operation touching it will record the graph; `.grad` accumulates across calls to `backward()` until something zeros it; only leaves receive a `.grad` by default, and intermediate tensors need `retain_grad()` if you want theirs; and an out-of-memory error at the first training step, on a model that predicted fine, is almost always the graph.
+
+---
+
+## Summary
+
+The reader now has an autograd engine: a `Tensor` that records its parents and a local backward rule as it is computed, and a `backward()` that seeds the loss with 1, orders the graph so no tensor passes its gradient on before it is complete, and runs the rules in reverse. The invariant to keep is the one about accumulation. A tensor's gradient is the sum of contributions from every operation that consumed it, so backward rules add into `grad` and never assign to it, and whoever runs the training step must clear the gradients before the next backward pass. The cost of the design is that everything a backward rule needs stays in memory until the rule runs, which is why training a model takes far more memory than running it. Chapter 7 takes for granted that after `loss.backward()` every parameter with `requires_grad=True` holds its gradient in `.grad`, accumulated rather than overwritten, and asks how to turn those gradients into parameter updates that converge.
+
+---
+
+## Exercises
+
+1. **A new rule.** Add elementwise multiplication `__mul__` to the `Tensor`, using the rules $\partial(ab)/\partial a = b$ and $\partial(ab)/\partial b = a$. Check it on `L = (x * x).sum()`, whose gradient should be $2\mathbf{x}$, and on `L = (x * x * x).sum()`, where `x` is used three times.
+2. **Why the order matters.** Replace the topological sort in `backward()` with naive recursion that runs each tensor's closure and immediately recurses into its parents. Build a graph in which a tensor that is itself the output of an operation, such as `h = x.relu()`, feeds two different operations (for example `L = h.matmul(W).sum() + (h + h).sum()`) and show that the naive version gives the wrong gradient for `x`. Explain, in terms of when `h.grad` is read, why.
+3. **Gradient checking.** Write a function that compares `W.grad` from `backward()` against the finite-difference estimate from The Problem for a random $\mathbf{x}$ and $\mathbf{W}$. Run it in float32 and float64 for `eps` in $\{10^{-1}, 10^{-2}, \dots, 10^{-6}\}$, and plot the error. Explain why the float32 curve turns back up.

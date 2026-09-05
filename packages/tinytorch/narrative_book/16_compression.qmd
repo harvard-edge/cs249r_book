@@ -1,286 +1,320 @@
 # Model Compression: Pruning, Low-Rank SVD, and Distillation {#sec-compression}
 
-In Chapter 15, we shrunk the bit-width precision of our parameters from 32-bit floats to 8-bit integers, achieving a $4\times$ reduction in memory bandwidth traffic. Yet every matrix still retains its full, original dimensions ($N \times M$).
+After Chapter 15, every weight in the model costs one byte instead of four, and the question there was about the number stored in each cell. The matrices themselves have not changed shape. A $4096 \times 4096$ layer still has 16.8 million cells, and every one of them is read and multiplied on every forward pass, whether or not the value in it matters.
 
-In this chapter, we engineer three structural compression techniques: **Magnitude Pruning**, **Structured Channel Pruning**, and **Low-Rank Singular Value Decomposition (SVD)**. We explore why unstructured sparsity often delivers zero real-world speedup on dense GPU tensor cores, and how structured matrix factorizations physically shrink matrix dimensions for guaranteed hardware acceleration.
+This chapter asks the question a practitioner asks after noticing that most trained weights are tiny. If I set the small ones to zero, or throw whole rows away, or replace the matrix with something smaller that behaves almost the same, does the model get faster, and what do I lose? The answer has a trap in it. Zeros do not make a matrix smaller. Only changing its shape does.
 
-![Model Compression Spectrum: Unstructured Sparsity vs. Structured Column/Row Pruning vs. Low-Rank SVD Factorization](assets/images/diagrams/16_compression-diag-1.svg){#fig-compression-spectrum}
+We build three tools that change the shape, or explain why a popular one does not. **Magnitude pruning** zeros the smallest weights and turns out to save nothing by itself. **Structured pruning** deletes whole neurons so the matrices physically shrink. **Low-rank factorization** replaces one large matrix with two thin ones using the singular value decomposition (SVD). A short fourth section shows **knowledge distillation**, the training trick that recovers the accuracy these surgeries cost, because Module 16 in the course includes it and because a shrunk model is rarely deployed without it.
 
----
-
-## Systems Problem Motivation: The Unstructured Sparsity Mirage
-
-In 1989, Yann LeCun introduced *Optimal Brain Damage*, proving that deep networks are drastically overparameterized: up to $80\%$ of parameter weights can be zeroed out with negligible loss in accuracy.
-
-A developer implements **Unstructured Magnitude Pruning**: they find the smallest $80\%$ of weights in matrix $W$ and set them to zero:
-
-$$W_{\text{sparse}} = W \odot \mathbf{M}, \qquad M_{i,j} = \begin{cases} 1 & \text{if } |W_{i,j}| \ge \theta \\ 0 & \text{if } |W_{i,j}| < \theta \end{cases}$$
-
-::: {.callout-caution title="The Unstructured Sparsity Trap"}
-The matrix is now 80% zeros. The developer deploys the model to an NVIDIA GPU or Intel CPU.
-
-$$\text{Measured Latency} = \textbf{Slower than dense matrix multiplication!}$$
-:::
-
-Why does an $80\%$ sparse matrix run *slower* on modern hardware?
-
-Modern processors are dense systolic engines. They achieve peak performance by streaming contiguous 64-byte cache lines into wide SIMD vector registers and computing uniform $16 \times 16$ tile multiplies.
-
-When zeros are scattered randomly (unstructured sparsity):
-1. The hardware must store an auxiliary **index pointer map** (Compressed Sparse Row / CSR format), adding memory overhead.
-2. Sparse matrix libraries (`spmm`) execute non-contiguous, irregular memory gathers that thrash CPU caches and cause massive instruction branch divergence.
-
-To achieve real-world hardware speedups, compression must be **Structured**.
+![The compression spectrum. Unstructured sparsity leaves the matrix the same size with zeros scattered inside it. Structured pruning deletes whole rows or columns. Low-rank factorization replaces the matrix with two thin factors.](assets/images/diagrams/16_compression-diag-1.svg){#fig-compression-spectrum}
 
 ---
 
-## The Mental Model: Structured Pruning and Low-Rank SVD
+## The Problem
 
-As illustrated in @fig-compression-spectrum, to compress deep models without destroying hardware compute throughput, systems engineers avoid irregular zero patterns and instead reshape weight matrices into smaller dense structures.
+Trained weight matrices are full of small numbers. In 1989, LeCun, Denker, and Solla showed with *Optimal Brain Damage* that most of the weights in a trained network can be removed with little change in accuracy, and later work found that 80 percent or more can go. The obvious move is to find the smallest 80 percent of the entries in $W$ and set them to zero.
 
-#### Structured Channel Pruning
+Do that to a $4096 \times 4096$ layer and then look at what the computer sees. The array still has 16.8 million cells. In FP32 it still occupies 67.1 MB, and after Chapter 15's INT8 conversion it still occupies 16.8 MB. A zero takes the same number of bytes as any other value. The forward pass $Y = XW$ still performs $2 \times 4096 \times 4096 \approx 33.5$ million multiply-adds per token, because the multiply loop does not check for zeros before it multiplies. Nothing about the shape changed, so nothing about the cost changed.
 
-Instead of zeroing individual scalar elements, **Structured Pruning** removes entire neurons, channels, or attention heads:
+```python
+import numpy as np
 
-$$W_{\text{unstructured}} = \begin{pmatrix} 0.0 & 1.2 & 0.0 & 0.0 \\ 0.4 & 0.0 & 0.0 & 3.1 \\ 0.0 & 0.0 & 2.1 & 0.0 \\ 1.1 & 0.0 & 0.0 & 0.0 \end{pmatrix} \quad\longrightarrow\quad W_{\text{structured}} = \begin{pmatrix} 1.2 & 0.0 \\ 0.0 & 3.1 \\ 0.0 & 0.0 \\ 0.0 & 0.0 \end{pmatrix}$$
+W = np.random.randn(4096, 4096).astype(np.float32)
+before = W.nbytes
 
-Because entire rows or columns are deleted, the weight matrix physically shrinks from $W \in \mathbb{R}^{M \times N}$ to $W' \in \mathbb{R}^{M' \times N'}$. The resulting operation is a **pure, dense GEMM** that runs at full hardware throughput on standard tensor cores without any sparse index traversal overhead.
+threshold = np.percentile(np.abs(W), 80)   # 80th percentile of |w|
+W[np.abs(W) < threshold] = 0.0              # zero the smallest 80%
 
-#### Low-Rank SVD Matrix Factorization
+print("zeros:", np.mean(W == 0.0))          # ~0.80
+print("shape:", W.shape, "bytes:", W.nbytes == before)   # unchanged
+```
 
-Any weight matrix $W \in \mathbb{R}^{M \times N}$ can be factorized using **Singular Value Decomposition**:
+To get anything back from the zeros, you have to stop storing them. A sparse format such as compressed sparse row[^fn-csr-sparse-format] keeps only the nonzero values, plus an integer index for each one that says where it belongs. With 20 percent of the entries surviving, that is 3.4 million values at 4 bytes and 3.4 million column indices at 4 bytes, about 26.8 MB. The napkin math says an 80 percent sparse matrix stored sparsely is 2.5 times smaller than the dense one, not 5 times, and the multiply that consumes it now has to follow indices to find its operands instead of walking a contiguous array. I timed it. On my machine, one 4096-float activation row times the dense matrix above, 80 percent zeros and all, takes 0.55 ms. The same product from a CSR copy of the matrix (SciPy's `csr_matrix`) takes 3.5 ms, over six times longer, and with a batch of 256 rows the gap widens to twelve times. The index chasing costs far more than the skipped multiplies save, and that is on a CPU; the hardware this book has been describing since Chapter 1 likes contiguous memory even more. Scattered zeros are the sparsity mirage. The compression has to be *structured*, with the zeros arriving in shapes the hardware can skip without looking.
 
-$$W = U \Sigma V^T$$
-
-If we keep only the top $r$ largest singular values ($r \ll \min(M, N)$):
-
-$$W \approx W_A \cdot W_B$$
-
-where $W_A = U_r \sqrt{\Sigma_r} \in \mathbb{R}^{M \times r}$ and $W_B = \sqrt{\Sigma_r} V_r^T \in \mathbb{R}^{r \times N}$.
-
-::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Low-rank SVD parameter break-even rank and memory reduction"}
-Consider factorizing a dense linear layer $W \in \mathbb{R}^{M \times N}$ into two low-rank matrices $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$:
-- **Original parameter count**: $M \times N$.
-- **Factorized parameter count**: $r \times (M + N)$.
-- **Break-even rank $r_{\text{crit}}$**: Factorization reduces parameters only if:
-  $$r < \frac{M \times N}{M + N}$$
-  For a square layer $M = N = 4,096$, the break-even rank is:
-  $$r_{\text{crit}} = \frac{4,096^2}{2 \times 4,096} = 2,048$$
-- **Concrete compression with $r = 256$**:
-  - Original parameters: $4,096 \times 4,096 = 16,777,216$ ($67.1\text{ MB}$ in FP32).
-  - Factorized parameters: $256 \times (4,096 + 4,096) = 2,097,152$ ($8.39\text{ MB}$ in FP32).
-  - **Memory reduction**: Exactly **$8.0\times$ fewer bytes** transferred over the memory bus!
-- **Compute footprint**:
-  Evaluating $Y = (X W_B^T) W_A^T$ requires $2 \cdot r \cdot (M + N)$ FLOPs per token instead of $2 \cdot M \cdot N$. For $r = 256$, compute drops by $8.0\times$ as well.
-:::
+[^fn-csr-sparse-format]: **Compressed sparse row (CSR)**: a storage format that keeps three arrays, the nonzero values, the column index of each one, and the position where each row starts. It only saves memory once fewer than roughly half the entries are nonzero, because every stored value drags an index along with it.
 
 ---
 
-## Mathematical Formulations: The Eckart-Young-Mirsky Theorem
+## The Idea
 
-Let us formally prove why truncated SVD produces the optimal low-rank matrix approximation.
+There are three ways to shrink a weight matrix, and they differ in whether the shape actually changes.
 
-#### Theorem: Eckart-Young-Mirsky Low-Rank Optimality (1936)
-Let $\mathbf{W} \in \mathbb{R}^{M \times N}$ have singular value decomposition $\mathbf{W} = \sum_{i=1}^{\min(M,N)} \sigma_i \mathbf{u}_i \mathbf{v}_i^T$ with singular values $\sigma_1 \ge \sigma_2 \ge \dots \ge \sigma_{\min(M,N)} \ge 0$.
+### Unstructured pruning: zero the small weights
 
-For any rank $r < \min(M, N)$, the truncated SVD matrix $\mathbf{W}_r = \sum_{i=1}^r \sigma_i \mathbf{u}_i \mathbf{v}_i^T$ is the unique optimal rank-$r$ approximation in both the Frobenius norm and spectral norm:
+Magnitude pruning picks a threshold $\theta$ and replaces every weight with
 
-$$\min_{\text{rank}(\mathbf{A}) \le r} \|\mathbf{W} - \mathbf{A}\|_F = \|\mathbf{W} - \mathbf{W}_r\|_F = \sqrt{\sum_{i=r+1}^{\min(M,N)} \sigma_i^2}$$
+$$W_{\text{sparse}} = W \odot M, \qquad M_{i,j} = \begin{cases} 1 & |W_{i,j}| \ge \theta \\ 0 & |W_{i,j}| < \theta \end{cases}$$
 
-$$\min_{\text{rank}(\mathbf{A}) \le r} \|\mathbf{W} - \mathbf{A}\|_2 = \|\mathbf{W} - \mathbf{W}_r\|_2 = \sigma_{r+1}$$
+where $\odot$ multiplies element by element and $M$ is the binary mask. Choosing $\theta$ as the 80th percentile of $|W|$ zeros 80 percent of the entries. The idea is sound as a *measurement*, since it tells you how much of the model is redundant, and it is the basis for the hardware-friendly 2:4 pattern in the production bridge. On its own it does not change the shape, so it does not change the cost.
 
-This mathematical bound guarantees that truncated SVD captures the maximum possible variance of the weight transformations using the minimal number of parameters.
+### Structured pruning: delete whole neurons
+
+Chapter 3's `Linear` stores its weight as inputs by outputs and computes $y = xW + b$, so a hidden neuron in a two-layer network is one column of the first weight matrix, one entry of its bias, and one row of the second weight matrix. Delete all three together and the network still computes a valid function, just with one fewer hidden unit. If $W_1$ is $D \times H$ and $W_2$ is $H \times K$, removing neuron $j$ turns them into $D \times (H-1)$ and $(H-1) \times K$. Both matrices are now smaller dense arrays, and the ordinary matrix multiply from Chapter 3 runs on them unchanged.
+
+The question is which neurons to delete. The simplest score is the L1 norm of the neuron's incoming weights, the sum of the absolute values in column $j$ of $W_1$. A column of near-zero weights produces a near-constant activation whatever the input, so removing it changes little. Ranking columns by L1 norm and keeping the top fraction is the whole algorithm. It is a crude score, because it ignores how much the next layer relies on that neuron, and the worked trace below shows exactly when it misjudges.
+
+### Low-rank factorization: replace the matrix with two thin ones
+
+The third method does not delete anything. It replaces $W$ with a product of two smaller matrices that reproduce it as closely as possible.
+
+Every $M \times N$ matrix can be written as a sum of simple pieces. The **singular value decomposition** says
+
+$$W = U \Sigma V^T = \sum_{i=1}^{\min(M,N)} \sigma_i \, u_i v_i^T$$
+
+where each $u_i$ is a column of $U$ (length $M$), each $v_i$ is a column of $V$ (length $N$), the columns of $U$ are mutually perpendicular unit vectors and so are the columns of $V$, and $\Sigma$ is a diagonal matrix holding the **singular values** $\sigma_1 \ge \sigma_2 \ge \dots \ge 0$. Each term $u_i v_i^T$ is an outer product, a column times a row, which is an $M \times N$ matrix of rank one. The SVD sorts the pieces so the largest come first.
+
+Keeping only the first $r$ terms gives the rank-$r$ approximation
+
+$$W \approx W_r = \sum_{i=1}^{r} \sigma_i \, u_i v_i^T = W_A W_B, \qquad W_A = U_r \sqrt{\Sigma_r} \in \mathbb{R}^{M \times r}, \quad W_B = \sqrt{\Sigma_r} V_r^T \in \mathbb{R}^{r \times N}$$
+
+where $U_r$ holds the first $r$ columns of $U$, $V_r$ the first $r$ columns of $V$, and $\sqrt{\Sigma_r}$ splits each $\sigma_i$ evenly across the two factors. The split is a convention that keeps the two factors at similar scale. For a `Linear` weight stored as inputs by outputs, $M$ is the input width and $N$ the output width, and the layer becomes two linear layers in sequence, one with weight $W_A$ that maps $M$ inputs to $r$, then one with weight $W_B$ that maps $r$ to $N$ outputs.
+
+Two facts make this useful. First, the Eckart-Young theorem (1936) says $W_r$ is the best rank-$r$ approximation there is, and its error is exactly the part you dropped:
+
+$$\|W - W_r\|_F = \sqrt{\sum_{i=r+1}^{\min(M,N)} \sigma_i^2}$$
+
+where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read the error off the singular values before deciding on $r$. Second, the parameter count changes from $M \times N$ to $r \times (M + N)$, and so does the multiply count, because computing $x W_A$ and then multiplying the result by $W_B$ costs $2r(M+N)$ operations instead of $2MN$.
+
+[^fn-frobenius-svd-error]: **Frobenius norm**: the square root of the sum of the squares of every entry, which is the ordinary vector length applied to a matrix as if it were one long vector. For the $3 \times 3$ matrix in the worked trace it is $\sqrt{18} \approx 4.24$, so a reconstruction error of $1.41$ means about a third of the matrix's "length" was dropped.
+
+### Distillation: teaching the small model from the large one
+
+Pruning and factorization both approximate the original weights, and the approximation costs accuracy. The usual repair is to train the smaller model for a while afterward, and the most effective way to train it is **knowledge distillation** (Hinton, Vinyals, and Dean, 2015). Instead of training the small *student* only on the true labels, you also train it to match the full output distribution of the large *teacher*.
+
+The loss has two parts. The hard part is the ordinary cross-entropy from Chapter 4 between the student's prediction and the true label. The soft part compares the student's and teacher's softmax outputs after both sets of logits are divided by a **temperature** $T > 1$, which flattens the distributions so the small probabilities become visible. The comparison is the Kullback-Leibler divergence, $\sum_k p_k \log (p_k / q_k)$, which is zero when the two distributions agree and grows as they separate. A weight $\alpha$ mixes the two:
+
+$$\mathcal{L} = \alpha \, \mathrm{KL}\!\left(p_{\text{teacher}}^{(T)} \,\|\, p_{\text{student}}^{(T)}\right) + (1 - \alpha)\, \mathrm{CE}\!\left(p_{\text{student}}, y\right)$$
+
+with $T = 3$ and $\alpha = 0.7$ as typical defaults. Everything else about training is exactly Chapter 8.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 16** in the TinyTorch runtime: `packages/tinytorch/src/16_compression/16_compression.py`.
+Module 16 (`src/16_compression/16_compression.py`) is the NumPy-backed implementation students build in the TinyTorch course. It provides `measure_sparsity`, `magnitude_prune`, `structured_prune`, `low_rank_approximate`, `KnowledgeDistillation`, and a `compress_model` driver. The listings in this chapter are a stripped-down model of the same design, written with NumPy like the rest of this book's listings and small enough to show every step of pruning, factorization, and the distillation loss. Where a listing departs from the module's behavior, the text says so.
 :::
 
-We implement structured pruning, magnitude pruning, and low-rank approximation in TinyTorch:
+The listings below take `Tensor` from Chapter 1 and `Linear` and `Sequential` from Chapter 3 as given. Chapter 3's `Linear` keeps its weight as an `(in_features, out_features)` array and computes `x @ weight + bias`, and every shape comment below follows that layout. Any object whose parameters expose a `.data` array and whose layers expose `.weight` and `.bias` in that layout will run them.
+
+### Measuring and creating unstructured sparsity
+
+Every compression claim starts with a number. A paper reports that a model is 80 percent sparse, a pruning pass has to prove it removed what it was asked to, and the 2:4 recipe in the production bridge begins by asking which two weights in every group of four are smallest. All of that needs one function that counts zeros and one that makes them.
+
+The obvious count divides zeros by all parameters, biases included. Chapter 3's `Linear` initializes its biases to zero, so on a fresh two-layer model with 64 inputs, 128 hidden units, and 10 outputs, that count reports 1.4 percent sparsity, 138 zeros out of 9,610 parameters, before anything has been pruned. The number is small, it is wrong, and it sits under every comparison you make afterward. The obvious pruning pass has a subtler flaw. It thresholds each layer on its own, which forces exactly 80 percent out of every layer whether that layer's weights are uniformly tiny or uniformly large.
+
+So we count weight matrices only, and we prune with a single threshold computed across all of them, so that a layer whose weights are small gives up more of them than a layer whose weights are large. That is what the real module does too.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/16_compression/16_compression.py
-import numpy as np
-from typing import Tuple, List, Dict
-from .autograd import Tensor
-from .layers import Linear
-
 def measure_sparsity(model) -> float:
-    """Calculate the exact percentage of zero-valued parameters in a model."""
-    total_elements = 0
-    zero_elements = 0
+    """Fraction of weight-matrix entries that are exactly zero."""
+    total, zeros = 0, 0
     for p in model.parameters():
-        total_elements += p.data.size
-        zero_elements += np.sum(p.data == 0.0)
-    return float(zero_elements / total_elements) if total_elements > 0 else 0.0
+        if p.data.ndim > 1:                 # weight matrices only, not biases
+            total += p.data.size
+            zeros += int(np.sum(p.data == 0.0))
+    return zeros / total if total else 0.0
 
-def magnitude_prune(model, sparsity: float = 0.5):
-    """Apply unstructured magnitude pruning by zeroing the smallest weights."""
-    for p in model.parameters():
-        data = p.data
-        threshold = np.percentile(np.abs(data), sparsity * 100.0)
-        mask = np.abs(data) >= threshold
-        p.data = p.data * mask
-
-def structured_prune(linear: Linear, prune_ratio: float = 0.5) -> Linear:
-    """Physically remove lowest L1-norm input feature columns from a Linear layer."""
-    w = linear.weight.data  # Shape: [out_features, in_features]
-    in_features = w.shape[1]
-
-    # Calculate L1-norm across input channels
-    channel_importance = np.sum(np.abs(w), axis=0)
-    k = int(in_features * (1.0 - prune_ratio))
-    top_indices = np.argsort(channel_importance)[-k:]
-    top_indices = np.sort(top_indices)
-
-    # Physically slice matrix to smaller dense dimensions
-    pruned_weight = w[:, top_indices]
-
-    new_layer = Linear(in_features=k, out_features=linear.out_features)
-    new_layer.weight = Tensor(pruned_weight.copy(), requires_grad=True)
-    if linear.bias is not None:
-        new_layer.bias = Tensor(linear.bias.data.copy(), requires_grad=True)
-
-    return new_layer
-
-def low_rank_approximate(linear: Linear, rank_ratio: float = 0.25) -> Tuple[Linear, Linear]:
-    """Decompose a large Linear layer W into two smaller low-rank Linear layers (W_A, W_B)."""
-    w = linear.weight.data  # Shape: [out_features, in_features]
-    out_dim, in_dim = w.shape
-    r = max(1, int(min(out_dim, in_dim) * rank_ratio))
-
-    # Singular Value Decomposition: W = U · S · V^T
-    U, S, Vt = np.linalg.svd(w, full_matrices=False)
-
-    # Truncate to top-r components
-    U_r = U[:, :r]
-    S_r = np.diag(np.sqrt(S[:r]))
-    Vt_r = Vt[:r, :]
-
-    W_A = np.dot(U_r, S_r)           # Shape: [out_features, r]
-    W_B = np.dot(S_r, Vt_r)          # Shape: [r, in_features]
-
-    layer_B = Linear(in_features=in_dim, out_features=r)
-    layer_B.weight = Tensor(W_B, requires_grad=True)
-    layer_B.bias = None
-
-    layer_A = Linear(in_features=r, out_features=out_dim)
-    layer_A.weight = Tensor(W_A, requires_grad=True)
-    if linear.bias is not None:
-        layer_A.bias = Tensor(linear.bias.data.copy(), requires_grad=True)
-
-    return layer_B, layer_A
+def magnitude_prune(model, sparsity: float = 0.8) -> None:
+    """Zero the smallest |w| across all weight matrices, in place."""
+    weights = [p for p in model.parameters() if p.data.ndim > 1]
+    magnitudes = np.concatenate([np.abs(p.data).ravel() for p in weights])
+    threshold = np.percentile(magnitudes, sparsity * 100.0)
+    for p in weights:
+        p.data = p.data * (np.abs(p.data) >= threshold)
 ```
+
+Notice that `magnitude_prune` ends by multiplying by a mask. The array it writes back has the same shape and the same `nbytes` as the one it read. On the two-layer model above, `measure_sparsity` reports 0.80 after the call and not one byte has left memory. The function is a diagnostic, and it is the first step of the 2:4 pattern in the bridge, but it is not a speedup. PyTorch's `prune.l1_unstructured` is the same mask under a different name.
+
+### Structured pruning: deleting neurons across a layer pair
+
+Take the MLP from Chapter 13 at a production width, $D = 4096$. Its two matrices are $4096 \times 16384$ and $16384 \times 4096$, 67.1 million weights each, and they are where Chapter 14's profiler found the block spending most of its time. Suppose a quarter of the 16,384 hidden units turn out to be useless.
+
+Zeroing their weights is `magnitude_prune` again. Both arrays keep their 67.1 million cells, the multiply still reads every one, and nothing gets faster. The real module's `structured_prune` stops exactly there, on purpose, so that `measure_sparsity` can see its work.
+
+The shape change comes from where a hidden unit lives. It occupies exactly three places, one column of $W_1$, one entry of $b_1$, and one row of $W_2$, and deleting all three leaves a network that still computes a valid function with 12,288 hidden units. Each matrix becomes $4096 \times 12288$, 50.3 million weights, so the pair sheds 33.6 million parameters, 134 MB in FP32, and Chapter 3's matmul runs on the smaller arrays with nothing to decode. The only decision left is which units to delete, and the L1 norm of each unit's incoming column is the score.
+
+The function takes both layers because a deletion touches both. It ranks the columns of the first layer's weight, keeps the highest-scoring `keep` of them, slices the surviving columns out of $W_1$ and $b_1$ and the matching rows out of $W_2$, and copies the slices into fresh `Linear` layers of the smaller size. What comes back is a pair of ordinary dense layers that happen to be narrower.
+
+```python
+def prune_neurons(first: Linear, second: Linear, keep: int):
+    """Delete hidden neurons between two Linear layers; return the new pair."""
+    w1, w2 = first.weight.data, second.weight.data     # [D, H] and [H, K]
+    scores = np.sum(np.abs(w1), axis=0)                # L1 norm of each column
+    survivors = np.sort(np.argsort(scores)[-keep:])    # top-`keep`, in order
+
+    new_first = Linear(first.in_features, keep)
+    new_first.weight = Tensor(w1[:, survivors].copy(), requires_grad=True)
+    if first.bias is not None:
+        new_first.bias = Tensor(first.bias.data[survivors].copy(), requires_grad=True)
+
+    new_second = Linear(keep, second.out_features)
+    new_second.weight = Tensor(w2[survivors, :].copy(), requires_grad=True)
+    new_second.bias = second.bias                       # outputs are untouched
+    return new_first, new_second
+```
+
+`np.sort` on the survivor indices keeps the neurons in their original order, which does not affect the math but makes the trace easier to read. Indexing with an integer array already gives NumPy a fresh array, so the `.copy()` calls are there to make the intent visible; the returned layers own contiguous memory of the new size, not a view into the old matrix. The real module's `structured_prune` scores each layer's output units, the columns of its weight, by L2 norm, then zeros the losing columns and their bias entries without changing the array's shape and without touching the next layer's rows. The listing does the shape change the module leaves as a follow-up. PyTorch has no built-in for this surgery; libraries such as `torch-pruning` do exactly this slicing across layer pairs.
+
+### Low-rank factorization
+
+Structured pruning needs hidden units that are individually useless. Some layers have none, and yet the whole matrix is redundant, because its columns are close to combinations of a few directions. The SVD from The Idea finds those directions, and a matrix whose singular values fall off quickly can be replaced by two thin factors that keep almost all of it. The napkin math says how thin they have to be before the trade pays.
+
+::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Napkin math: the break-even rank"}
+Factorizing $W \in \mathbb{R}^{M \times N}$ into $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$ saves parameters only when
+
+$$r \times (M + N) < M \times N \quad\Longleftrightarrow\quad r < \frac{MN}{M+N}.$$
+
+For a square $4096 \times 4096$ layer the break-even rank is $4096^2 / 8192 = 2048$, half the full rank. At $r = 256$ the count drops from $16{,}777{,}216$ to $256 \times 8192 = 2{,}097{,}152$, an $8\times$ reduction in both bytes and multiply-adds. Whether the accuracy survives depends on how fast the singular values of that particular layer decay, which is a property of the trained weights, not of the method.
+:::
+
+The naive way to choose $r$ is trial. Pick a rank, factorize, retrain, measure, and repeat, with a training run per guess. Eckart-Young removes the guessing from the reconstruction side. One SVD returns every singular value, and the error at every $r$ reads off the tail of that list before a single factor is built. Whether the accuracy survives is still a question for fine-tuning, but you go into it knowing how much of the matrix you dropped.
+
+The mechanism is a slice and a split. Keep the first $r$ singular triples, fold $\sqrt{\sigma_i}$ into both factors, and wrap them as two `Linear` layers in sequence so that $x W_A W_B \approx x W$. `low_rank_factor` does the SVD and truncation on a raw matrix and returns the two thin factors. `factorize_linear` wraps them into two `Linear` layers that replace the original. The bias belongs to the second layer, since the first layer's output is only an intermediate of size $r$.
+
+```python
+def low_rank_factor(w: np.ndarray, r: int):
+    """Split w (M x N) into W_A (M x r) and W_B (r x N) with W_A @ W_B ~= w."""
+    U, S, Vt = np.linalg.svd(w, full_matrices=False)
+    root = np.sqrt(S[:r])
+    W_A = U[:, :r] * root                # scale column i by sqrt(sigma_i)
+    W_B = root[:, None] * Vt[:r, :]      # scale row i by sqrt(sigma_i)
+    return W_A, W_B
+
+def factorize_linear(layer: Linear, r: int):
+    """Replace one Linear(N -> M) with Linear(N -> r) then Linear(r -> M)."""
+    W_A, W_B = low_rank_factor(layer.weight.data, r)   # weight is [N, M]
+    inner = Linear(layer.in_features, r, bias=False)
+    inner.weight = Tensor(W_A, requires_grad=True)     # [N, r]
+    outer = Linear(r, layer.out_features)
+    outer.weight = Tensor(W_B, requires_grad=True)     # [r, M]
+    outer.bias = layer.bias
+    return Sequential(inner, outer)
+```
+
+`np.linalg.svd` returns the singular values already sorted from largest to smallest, so truncation is a slice. Because Chapter 3's weight is inputs by outputs, the first factor is the one the input meets, and `inner` multiplies by $W_A$ ($N \times r$) before `outer` multiplies by $W_B$ ($r \times M$); at $r$ equal to the full rank the pair reproduces the original layer's output to floating-point precision, which is a one-line check worth running. The real module's `low_rank_approximate(weight_matrix, rank_ratio)` stops at the truncated triple `(U_r, S_r, V_r)` and leaves rebuilding the layer to the caller; the listing folds $\sqrt{\Sigma_r}$ into both factors and builds the layers. PyTorch has no factorize call of its own. The two-layer forward pass here is what a LoRA adapter computes in the bridge.
+
+### The distillation loss
+
+Every tool above makes the model worse at the moment it runs. The pruned pair in the worked trace moves its output by $0.1$ on a single input; a $4096 \times 4096$ layer cut to rank 256 loses whatever sits in singular values 257 through 4096. The accuracy comes back through training, and the question is what to train on.
+
+Fine-tuning the small model on the labels alone hands it one number per example, the index of the correct class. The large model knows more than that. Show it a picture and its logits might be $[6, 2, 0]$ for cat, dog, and car, which softmax turns into $0.98$, $0.018$, and $0.002$. The ranking of the wrong answers, dog far ahead of car, is information the label throws away, and at $T = 1$ it is nearly invisible anyway. Divide the logits by $T = 3$ first and the same three become $0.715$, $0.188$, and $0.097$, a distribution a student can actually be trained to match.
+
+So the loss has a soft term and a hard term. The soft term is the KL divergence between the teacher's and the student's tempered softmaxes, the hard term is Chapter 4's cross-entropy, and $\alpha$ mixes them. The only new code is a softmax that takes a temperature. Dividing the logits by $T$ before the exponential is the only change from Chapter 4's version.
+
+```python
+def softmax_t(logits: np.ndarray, T: float = 1.0) -> np.ndarray:
+    z = logits / T
+    e = np.exp(z - z.max(axis=-1, keepdims=True))     # stable, as in Chapter 4
+    return e / e.sum(axis=-1, keepdims=True)
+
+def distillation_loss(student_logits, teacher_logits, labels,
+                      T: float = 3.0, alpha: float = 0.7) -> float:
+    """alpha * KL(teacher || student) at temperature T + (1-alpha) * cross-entropy."""
+    p_teacher = softmax_t(teacher_logits, T)
+    p_student = softmax_t(student_logits, T)
+    soft = np.sum(p_teacher * np.log(p_teacher / p_student))
+    p_hard = softmax_t(student_logits)
+    hard = -np.mean(np.log(p_hard[np.arange(len(labels)), labels]))
+    return alpha * soft + (1.0 - alpha) * hard
+```
+
+Notice what happens when the student's logits equal the teacher's. The soft term is exactly zero and only the cross-entropy remains, which is the sanity check I run first on any distillation code. The soft term is summed over the batch and the hard term is averaged, which matches the real module's `KnowledgeDistillation.distillation_loss`. Hinton's paper also multiplies the soft term by $T^2$ so that its gradient magnitude does not shrink as $T$ grows; the module omits that factor, and so does this listing. The loss is a plain function of logits, so training with it is the Chapter 8 loop with this function in place of cross-entropy. In PyTorch the same two terms are `F.kl_div` on log-softmaxed logits plus `F.cross_entropy`.
 
 ---
 
-## Concrete Numerical Trace Table: Tracing SVD Rank-1 Approximation
+## A Worked Trace
 
-Let us trace a concrete SVD factorization on a $3 \times 3$ weight matrix:
+### Deleting one neuron
 
-$$\mathbf{W} = \begin{bmatrix}
-3.0 & 2.0 & 2.0 \\
-2.0 & 3.0 & -2.0 \\
--2.0 & -2.0 & 3.0
-\end{bmatrix}$$
+Take a two-layer network with two inputs, three hidden neurons, and one output, with ReLU between the layers. In Chapter 3's layout the first weight is $2 \times 3$ with one column per hidden neuron, and the second is $3 \times 1$ with one row per hidden neuron:
 
-Computing full SVD yields singular values: $\sigma_1 = 5.00, \quad \sigma_2 = 3.00, \quad \sigma_3 = 1.00$.
+$$W_1 = \begin{bmatrix} 1.0 & 0.1 & 3.0 \\ -2.0 & 0.2 & 1.0 \end{bmatrix}, \quad b_1 = \begin{bmatrix} 0.5 & 0.0 & -1.0 \end{bmatrix}, \quad W_2 = \begin{bmatrix} 2.0 \\ 0.5 \\ -1.0 \end{bmatrix}, \quad b_2 = 0.1$$
 
-#### Numerical Trace Table for Truncated SVD
+The L1 column norms of $W_1$ are $3.0$, $0.3$, and $4.0$, so `prune_neurons(first, second, keep=2)` deletes neuron 1 (the middle one). For the input $x = [1.0, 0.5]$, the hidden activations before pruning are $h = \mathrm{ReLU}(xW_1 + b_1) = \mathrm{ReLU}([0.5, 0.2, 2.5]) = [0.5, 0.2, 2.5]$ and the output is $y = 2.0(0.5) + 0.5(0.2) - 1.0(2.5) + 0.1 = -1.3$. After pruning, $h' = [0.5, 2.5]$ and $y' = 1.0 - 2.5 + 0.1 = -1.4$. The layers shrank from $2 \times 3$ and $3 \times 1$ to $2 \times 2$ and $2 \times 1$, and the output moved by $0.1$.
 
-Truncating the outer product sum to rank $r=1$ yields the low-rank reconstructed tensor:
+That $0.1$ is the deleted neuron's activation ($0.2$) times its outgoing weight ($0.5$). Had the outgoing weight been $4.0$ instead, the same deletion would have moved the output by $0.8$ while the L1 score stayed at $0.3$. The incoming-weight score is blind to what the next layer does with the neuron, which is why production pruning methods score with gradients or with the effect on the loss rather than with weight magnitude alone.
 
-$$\hat{\mathbf{W}}_{r=1} = \mathbf{u}_1 \sigma_1 \mathbf{v}_1^T \approx \begin{bmatrix} 2.50 & 2.50 & 0.00 \\ 2.50 & 2.50 & 0.00 \\ 0.00 & 0.00 & 2.00 \end{bmatrix}$$
+### Rank-1 approximation of a $3 \times 3$ matrix
 
-In @tbl-svd-trace, we summarize the compression trade-offs and Eckart-Young-Mirsky error bounds for ranks $r \in \{1, 2, 3\}$.
+Now the matrix
 
-| Truncation Rank $r$ | Stored Parameters | Factor Shapes ($W_A, W_B$) | Singular Values Retained | Frobenius Error $\Vert\mathbf{E}\Vert_F$ | Compression Factor |
+$$W = \begin{bmatrix} 2 & 1 & 1 \\ 1 & 2 & 1 \\ 1 & 1 & 2 \end{bmatrix}$$
+
+Its singular values are $\sigma_1 = 4$, $\sigma_2 = 1$, $\sigma_3 = 1$. You can check the first one by hand. $W$ times the vector $[1, 1, 1]$ gives $[4, 4, 4]$, so $u_1 = v_1 = [1,1,1]/\sqrt{3}$ with $\sigma_1 = 4$. Keeping only that term,
+
+$$W_1 = \sigma_1 u_1 v_1^T = \frac{4}{3}\begin{bmatrix} 1 & 1 & 1 \\ 1 & 1 & 1 \\ 1 & 1 & 1 \end{bmatrix}, \qquad W - W_1 = \frac{1}{3}\begin{bmatrix} 2 & -1 & -1 \\ -1 & 2 & -1 \\ -1 & -1 & 2 \end{bmatrix}$$
+
+The Frobenius norm of the residual is $\sqrt{3 \cdot (2/3)^2 + 6 \cdot (1/3)^2} = \sqrt{2} \approx 1.41$, and Eckart-Young predicts $\sqrt{\sigma_2^2 + \sigma_3^2} = \sqrt{2}$. The two factors are $W_A = \sqrt{4} \, u_1 \approx [1.155, 1.155, 1.155]^T$ and $W_B = \sqrt{4} \, v_1^T$, the same three numbers as a row. On my machine `low_rank_factor(W, 1)` returns both with the sign flipped, $-1.155$ in every position, since the SVD only fixes the sign of the product. Each of the three ranks tells a different story about storage, summarized in @tbl-svd-trace.
+
+| Rank $r$ | Stored numbers | Factor shapes | Singular values kept | Frobenius error | Size vs. original |
 | :--- | :---: | :---: | :--- | :---: | :---: |
-| **Full Matrix ($r=3$)**| $9\text{ params}$ | $\mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$ | All: $(\sigma_1, \sigma_2, \sigma_3)$ | $0.00$ | Baseline ($1.0\times$) |
-| **Rank-2 ($r=2$)** | $12\text{ params}$ | $(3 \times 2), (2 \times 3)$ | $(\sigma_1, \sigma_2)$, drop $\sigma_3$ | $\sigma_3 = 1.00$ | $0.75\times$ (Overhead on $3\times 3$) |
-| **Rank-1 ($r=1$)** | $6\text{ params}$ | $(3 \times 1), (1 \times 3)$ | $\sigma_1$, drop $(\sigma_2, \sigma_3)$ | $\sqrt{10} \approx 3.16$ | **$1.5\times$ Reduction** |
+| 3 (full) | 9 | none, store $W$ | all three | $0$ | $1.0\times$ |
+| 2 | 12 | $(3 \times 2), (2 \times 3)$ | $\sigma_1, \sigma_2$ | $\sigma_3 = 1$ | $1.33\times$ (larger) |
+| 1 | 6 | $(3 \times 1), (1 \times 3)$ | $\sigma_1$ | $\sqrt{2} \approx 1.41$ | $0.67\times$ |
 
-: Numerical trace of truncated SVD low-rank factorizations and Eckart-Young-Mirsky reconstruction error bounds. {#tbl-svd-trace tbl-colwidths="[18,16,18,20,16,12]"}
+: Truncated SVD of the $3 \times 3$ example at each rank, with the reconstruction error Eckart-Young predicts from the dropped singular values. {#tbl-svd-trace tbl-colwidths="[14,16,22,20,14,14]"}
 
-On production transformer matrices ($4096 \times 4096$), choosing rank $r = 512$ drops parameters from $16.7\text{M}$ to $4.19\text{M}$ ($4.0\times$ compression) with negligible reconstruction error.
+Rank 2 is worse than storing the matrix, which is the break-even rule from the napkin math ($r < 9/6 = 1.5$) showing up on a tiny matrix. On a $4096 \times 4096$ layer the same rule allows any $r$ below $2048$, and the practical question becomes how quickly that layer's singular values fall off.
+
+Here is the same check in NumPy, so you can confirm the numbers, and the sign flip, on your own machine. The last line is the Eckart-Young theorem as an `assert`.
 
 ```python
-# Pure Python Verification of Truncated SVD Low-Rank Approximation
 import numpy as np
 
-W = np.array([
-    [3.0, 2.0, 2.0],
-    [2.0, 3.0, -2.0],
-    [-2.0, -2.0, 3.0]
-], dtype=np.float32)
+W = np.array([[2.0, 1.0, 1.0],
+              [1.0, 2.0, 1.0],
+              [1.0, 1.0, 2.0]])
 
 U, S, Vt = np.linalg.svd(W)
-print("Computed Singular Values:", np.round(S, 2))
+print("singular values:", np.round(S, 3))          # [4. 1. 1.]
 
-# Rank-1 Truncation
 r = 1
-W_approx = (U[:, :r] * S[:r]) @ Vt[:r, :]
-frob_error = np.linalg.norm(W - W_approx, 'fro')
-
-print("Rank-1 Approximation:\n", np.round(W_approx, 2))
-print(f"Frobenius Norm Error: {frob_error:.2f} (Theoretical: {np.sqrt(S[1]**2 + S[2]**2):.2f})")
-assert np.isclose(frob_error, np.sqrt(S[1]**2 + S[2]**2), atol=1e-2), "SVD error bound mismatch!"
+W_1 = (U[:, :r] * S[:r]) @ Vt[:r, :]
+print("rank-1 reconstruction:\n", np.round(W_1, 3))  # all 1.333
+error = np.linalg.norm(W - W_1)
+predicted = np.sqrt(np.sum(S[r:] ** 2))
+print(f"error {error:.3f}, Eckart-Young predicts {predicted:.3f}")
+assert np.isclose(error, predicted)
 ```
+
+On my machine it prints `error 1.414, Eckart-Young predicts 1.414` and the assertion passes. Change `r` to 2 and both numbers become `1.000`, the last singular value, exactly as the table says.
 
 ---
 
-## The Production Systems Bridge: LoRA and NVIDIA 2:4 Structured Sparsity
+## From TinyTorch to Production
 
-In modern production systems, compression operates across two tiers:
+PyTorch ships pruning as `torch.nn.utils.prune`, and its design confirms the lesson of The Problem. `prune.l1_unstructured(layer, "weight", amount=0.8)` does not shrink anything. It renames the original tensor to `weight_orig`, registers a binary `weight_mask`, and recomputes `weight = weight_orig * weight_mask` on every forward pass. The layer is now doing slightly *more* work than before. `prune.remove` bakes the mask in permanently, and the result is a dense tensor full of zeros that runs at dense speed. Practitioners who report a speedup from unstructured pruning in PyTorch are almost always measuring something else.
 
-```python
-# Production Low-Rank Adaptation (LoRA) Bridge
-import torch
-import torch.nn as nn
+The exception exists because hardware was built for it. NVIDIA's tensor cores from the Ampere generation onward (the units from Chapter 1 that multiply small dense tiles in one instruction) accept a **2:4 sparse** pattern, in which every group of four consecutive weights along a row holds exactly two zeros. The nonzero values are packed to half size, and a 2-bit index per pair records which two positions they came from. Because the pattern is fixed, the hardware can expand it while streaming, without the pointer chasing that a general sparse format needs, and the matrix multiply runs at up to twice the dense rate on half the bytes. The 50 percent sparsity is chosen by exactly the magnitude rule in `magnitude_prune`, applied within each group of four, followed by a short fine-tuning pass. The library that does this is cuSPARSELt, exposed in PyTorch as `torch.sparse.to_sparse_semi_structured`. Structure, not sparsity, is what the silicon rewards.
 
-class LoRALinear(nn.Module):
-    """Production LoRA adapter factorizing rank-r weight updates."""
-    def __init__(self, in_features: int, out_features: int, rank: int = 8):
-        super().__init__()
-        self.base_layer = nn.Linear(in_features, out_features, bias=False)
-        self.base_layer.weight.requires_grad = False  # Freeze base weights
-        self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
-        self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
+Low-rank factorization reached production from a different direction. Compressing a trained layer with SVD, as `factorize_linear` does, works for some layers and not others, because a trained weight matrix is often close to full rank. What turned out to be reliably low-rank is the *update* that fine-tuning makes to a weight. **LoRA** (Hu et al., 2021) freezes the pretrained $W$ and learns $W + \frac{\alpha}{r} BA$ with $B \in \mathbb{R}^{M \times r}$, $A \in \mathbb{R}^{r \times N}$, and $r$ as small as 8. The frozen base is shared, only $r(M+N)$ parameters per layer are trained and stored, and a single 7-billion-parameter base can carry hundreds of adapters of a few tens of megabytes each. The arithmetic is the break-even calculation from the napkin box, and the two-factor forward pass is the same `inner` then `outer` sequence as `factorize_linear`, with the base layer added back.
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Base forward + low-rank branch: Y = X W^T + X A^T B^T
-        return self.base_layer(x) + (x @ self.lora_A.T) @ self.lora_B.T
-```
+Distillation carries over almost unchanged. DistilBERT was trained with a loss of the same shape as `distillation_loss`, and the temperature-scaled softmax is the standard form. Modern usage adds the $T^2$ factor the listing omits, sometimes matches intermediate activations as well as the final logits, and increasingly uses a large model to *generate* training data for a small one, which is distillation with the soft targets replaced by sampled text.
 
-::: {.callout-note title="Production Hardware Compression"}
-1. **NVIDIA 2:4 Sparse Tensor Cores (Ampere & Hopper)**:
-   - In every 4 contiguous elements along a row, exactly 2 must be zero (50% structured sparsity).
-   - The hardware decodes a 2-bit index metadata header per pair on-the-fly, doubling tensor core throughput ($2\times$ GEMM speed) without any CSR sparse pointer table overhead!
-2. **Low-Rank Adaptation (LoRA - Hu et al., 2021)**:
-   - During LLM fine-tuning, weights are factorized into low-rank pairs:
-     $$W_{\text{adapted}} = W_{\text{frozen}} + \frac{\alpha}{r} (B \cdot A)$$
-   - Freezes 99.8% of base model weights, training and storing only 0.2% low-rank adapter parameters in VRAM.
-:::
+What should you now expect in your own work? First, when a compression method claims a speedup, check whether the tensor shapes changed or whether a mask was applied. Only a shape change, or a hardware-recognized pattern like 2:4, will show up in latency. Second, before factorizing a layer, compute its singular values and see where they fall off; Eckart-Young tells you the error for every $r$ at once, before you commit to any. Third, budget for recovery training. Every method in this chapter degrades the model at the moment it is applied, and the accuracy comes back through fine-tuning or distillation, not through a better pruning score.
 
-In PyTorch C++ / CUDA runtimes, `torch.sparse` and `cusparselt` provide direct access to hardware-accelerated structured sparsity.
+| | Unstructured pruning | 2:4 sparsity | Structured pruning | Low-rank / LoRA |
+| :--- | :--- | :--- | :--- | :--- |
+| Shape changes | no | packed to half | yes | one matrix becomes two |
+| Bytes saved | none (dense) | $2\times$ | proportional to neurons removed | $MN \to r(M+N)$ |
+| Speedup source | none | hardware decoder | ordinary dense matmul | two smaller matmuls |
+| Where it lives | `torch.nn.utils.prune` | cuSPARSELt, `torch.sparse` | manual surgery, `torch-pruning` | `peft`, any LoRA library |
+
+: How each compression method behaves in production, and where the speedup comes from when there is one. {#tbl-compression-production tbl-colwidths="[20,20,20,20,20]"}
 
 ---
 
-## Building the System: How It All Connects
+## Summary
 
-Chapter 16 provides the architectural tools to reshape network geometry for maximum hardware efficiency:
+You built four tools, and only two of them change a matrix's shape. `magnitude_prune` zeros the smallest weights and leaves the array exactly as large and exactly as slow as before, which makes it a diagnostic rather than a compression. `prune_neurons` deletes a hidden unit from both layers that touch it and returns two genuinely smaller dense matrices. `low_rank_factor` splits a matrix into two thin factors with the SVD, and the Eckart-Young theorem lets you read the reconstruction error off the singular values before you choose the rank. `distillation_loss` recovers the accuracy any of them cost by training the small model on the large model's soft outputs. The invariant to carry forward is that a zero costs as much as any other number unless the hardware is told, by shape or by a fixed pattern, that it can skip it. Chapter 17 takes for granted that the weights are already as small as quantization and compression can make them, and asks why the forward pass still spends most of its time moving activations to memory and back between one operation and the next.
 
-::: {.callout-note title="Cumulative Compression Wins"}
-1. **INT8 Quantization** (Chapter 15): $4.0\times$ memory bandwidth and storage reduction.
-2. **Low-Rank Factorization** (Chapter 16): $3.2\times$ parameter count reduction.
-3. **Combined Impact**: Up to **$\sim 12.8\times$ total parameter footprint shrinkage**!
-:::
+---
 
-From a systems perspective, low-rank factorization replaces a single large matrix multiplication $[M \times N]$ with two smaller sequential multiplications $[M \times r]$ and $[r \times N]$. For $M = N = 4,096$ and $r = 256$, loading the weights requires transferring only $2\text{ M}$ floats ($8\text{ MB}$) instead of $16.7\text{ M}$ floats ($67.1\text{ MB}$) across the memory bus, shifting execution closer to the compute roofline.
+## Exercises
 
-Yet even when a network is quantized and compressed, consecutive elementwise operations launch separate GPU kernels that waste roundtrips to off-chip DRAM.
+1. A transformer feed-forward layer maps 4096 inputs to 11008 outputs. Compute its break-even rank with the napkin formula, then check whether $r = 1024$ saves parameters and by how much. Repeat for the $4096 \times 4096$ attention projection and explain why the two answers differ.
 
-In **Chapter 17**, we engineer **Hardware Acceleration: Kernel Fusion and SRAM Register Residency**.
+2. Extend `prune_neurons` to a `Sequential` of three `Linear` layers with ReLU between them, pruning both hidden widths. Build a random model, run an input through it, prune with `keep` equal to the full width (so nothing is deleted), and confirm the output is unchanged. Then prune to half width and report how far the output moves.
+
+3. Take a matrix that is exactly rank 2 plus a little noise, for example `np.outer(a, b) + np.outer(c, d) + 0.01 * np.random.randn(8, 8)`. Print its singular values, factorize it at $r = 1, 2, 3$, and compare the measured Frobenius error with the Eckart-Young prediction at each rank. Where does the curve flatten, and what does that tell you about the right $r$?

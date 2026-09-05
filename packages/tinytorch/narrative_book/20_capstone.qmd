@@ -1,363 +1,328 @@
-# The Capstone: Building the 16× Cumulative Acceleration Stack {#sec-capstone}
+# The Capstone: Stacking Quantization, Pruning, Fusion, and Caching {#sec-capstone}
 
-Over the course of nineteen chapters, we have engineered every layer of a modern deep learning systems stack from scratch: starting from contiguous 1D memory buffers and strided tensor mathematics, climbing through automatic differentiation DAGs and generative transformer blocks, and descending into the physical hardware realities of the Williams Roofline Model, INT8 quantization, truncated SVD pruning, fused elementwise kernels, and static KV cache memoization.[^xv6-systems]
+Chapter 19 gave us a harness that reports a speedup as a median with a tail and an accuracy floor, so a number like "4x" now comes with the evidence to back it. Chapters 15 through 18 each produced one such number in isolation: INT8 weights, a factorized MLP, fused elementwise chains, and a KV cache, each measured against the same baseline. The question a practitioner asks at this point is the obvious one. If I turn all four on at once, do I get the product of the four speedups?
 
-In this capstone chapter, we assemble these distinct systems into a unified engine: the **TinyTorch Accelerated Transformer (`AcceleratedTinyGPT`)**.[^tensorrt-ref] We analyze the mathematical limits of Amdahl's Law in deep learning runtimes, prove how orthogonal optimizations compound multiplicatively rather than additively, and demonstrate a **$16.5\times$ Cumulative End-to-End Speedup** over naive framework implementations.[^multiplier-law]
+This chapter answers by building the thing the question assumes exists, a cost model that says where a decode step's time goes, and then stacking the four levers inside it. The answer is no, not in general, and the reason is worth more than the number. Each lever shrinks one term of the step's time, the terms add and overlap in a way that Amdahl's law describes, and the combined speedup can land above or below the product of the solo speedups depending on which term dominates after each lever is applied. We build the model in pure Python, trace Chapter 13's `TinyGPT` through it by hand at the size Chapter 14 counted, and then replace the estimate with a measurement using the method Chapter 19 taught. The measuring side reports its comparison in the shape the course's Module 20 writes to a submission file, and the chapter closes with what production serving stacks do about the same three terms.
 
-[^xv6-systems]: Following the design philosophy of MIT xv6, our capstone is not a black-box wrapper; every sub-system called in this chapter is an executable Python class engineered in earlier chapters of this monograph.
-[^tensorrt-ref]: In production enterprise environments, this multi-tier compounding strategy is realized by modern high-throughput serving runtimes such as NVIDIA TensorRT-LLM and vLLM.
-[^multiplier-law]: In systems engineering, optimizations at orthogonal architectural layers (e.g. data representation, operator scheduling, memory reuse, and algorithmic complexity) multiply their latency reductions ($S_{\text{total}} = \prod_i S_i$) because each tier reduces the operational volume delivered to the next.
-
-![The 16x Cumulative Multiplier Stack: Compounding Quantization, Pruning, Kernel Fusion, and KV Caching](assets/images/diagrams/20_capstone-diag-1.svg){#fig-capstone-stack}
+![Four levers, four terms. Quantization shrinks the bytes streamed per step, factorization shrinks both bytes and arithmetic, fusion shrinks the number of separate operations, and the KV cache removes the recomputation that grows with sequence length. The stacked speedup depends on which term is largest when each lever arrives.](assets/images/diagrams/20_capstone-diag-1.svg){#fig-capstone-stack}
 
 ---
 
-## The Crisis: The Amdahl's Law Ceiling in Single-Tier Tuning
+## The Problem
 
-A common pitfall in systems engineering is attempting to accelerate a machine learning pipeline by optimizing a single isolated component.
+Suppose you measured each optimization on its own against the FP32 baseline and got 2.0x from INT8, 1.5x from the factorized MLP, 1.3x from fusion, and 4.2x from the KV cache. Multiply them and you get 16.4x. Ship the four together and measure again, and you get something closer to 5x. Nothing is broken. The product was never the right prediction.
 
-According to **Amdahl's Law**, the overall speedup $S_{\text{overall}}$ achieved by optimizing a fraction $f$ of execution time by a factor of $k$ is strictly bounded:
+The napkin version of the failure is Amdahl's law.[^fn-amdahl-stack] Say matrix multiplies take 70 percent of a decode step and everything else takes 30 percent. Speed the multiplies up by 10x and the step takes $0.30 + 0.70 / 10 = 0.37$ of its old time, a 2.7x speedup. Speed them up infinitely and the step still takes 0.30 of its old time. A lever that shrinks one term of a sum can never buy more than that term's share of the total, and once it has bought most of it, the next lever on the same term buys almost nothing.
 
-$$S_{\text{overall}} = \frac{1}{(1 - f) + \frac{f}{k}}$$
+[^fn-amdahl-stack]: **Amdahl's law**: if a fraction $f$ of the total time is sped up by a factor $k$, the overall speedup is $1 / \big((1 - f) + f / k\big)$. Gene Amdahl stated it in 1967 as an argument about parallel processors, but it applies to any optimization that touches only part of the work, and the limit as $k \to \infty$ is $1 / (1 - f)$, the ceiling set by the part that was left alone.
 
-Consider a naive transformer inference loop where dense matrix multiplication accounts for $70\%$ of total execution time ($f = 0.70$), while memory movement, activation functions, and un-cached attention account for the remaining $30\%$ ($1 - f = 0.30$).
-
-If a team spends months writing hand-tuned assembly to accelerate matrix multiplication by $10\times$ ($k = 10$):
-
-$$S_{\text{overall}} = \frac{1}{(1 - 0.70) + \frac{0.70}{10}} = \frac{1}{0.30 + 0.07} = \frac{1}{0.37} \approx \mathbf{2.70\times}$$
-
-Despite a $10\times$ arithmetic speedup in GEMM, the overall application speedup is capped at $2.7\times$ because the unoptimized $30\%$ of runtime now dominates execution! Even with an infinite acceleration of matrix multiplication ($k \to \infty$), the maximum achievable speedup is $\frac{1}{0.30} \approx 3.33\times$.
-
-| Optimization Strategy | Acceleration Factor ($k$) | Maximum Overall Speedup ($S_{\text{overall}}$) |
-| :--- | :--- | :--- |
-| **Accelerate MatMul alone** | $2.0\times$ | $1.54\times$ |
-| **Accelerate MatMul alone** | $5.0\times$ | $2.27\times$ |
-| **Accelerate MatMul alone** | $10.0\times$ | $2.70\times$ |
-| **Accelerate MatMul infinitely** | $k \to \infty$ | $\mathbf{3.33\times}$ (Amdahl's hard ceiling) |
-
-: The single-tier optimization wall under Amdahl's Law ($f = 0.70$). {#tbl-amdahl-single-tier tbl-colwidths="[40,25,35]"}
-
-To achieve an order-of-magnitude leap (such as **$16\times$**), an engineering team cannot optimize a single layer in isolation. The system must attack execution bottlenecks across **four orthogonal tiers of the systems stack simultaneously**:
-
-1. **Tier 1 (Precision Tier — INT8 Quantization)**: Slashes memory bandwidth traffic by $4\times$ ($32\text{ bits} \to 8\text{ bits}$) and doubles arithmetic instruction throughput.
-2. **Tier 2 (Structural Tier — Low-Rank SVD Factorization)**: Reduces matrix parameter count and total floating-point FLOP volume by decomposing large weight matrices into low-rank factor pairs ($W \approx A \cdot B$).
-3. **Tier 3 (Kernel Tier — Fused Operators & Cache Tiling)**: Eliminates intermediate DRAM roundtrips by computing activation functions directly inside CPU/GPU registers and L1 cache lines.
-4. **Tier 4 (Algorithmic Tier — The KV Cache Engine)**: Eliminates the $O(S^2)$ autoregressive recomputation tax by memoizing historical Key and Value representations into pre-allocated memory buffers.
-
-::: {#nbk-capstone-compound-16x-waterfall .callout-notebook title="Compound multiplicative latency waterfall and memory footprint reduction"}
-Consider an end-to-end transformer inference pipeline generating $S_{\text{gen}} = 128$ tokens with baseline per-token latency of $T_0 = 100\text{ ms}$:
-- **Tier 1 (INT8 Quantization)**:
-  Reduces weight streaming bytes by $4\times$. Because memory bandwidth stalls dominate $85\%$ of the decode step:
-  $$T_1 = T_0 \times (0.15 + 0.85 / 4) = 100 \times 0.3625 = 36.25\text{ ms} \quad (2.76\times \text{ speedup})$$
-- **Tier 2 (Low-Rank SVD Pruning)**:
-  Factorizing weights at $r = 128$ cuts parameter count by $2.0\times$:
-  $$T_2 = T_1 \times (0.20 + 0.80 / 2) = 36.25 \times 0.60 \approx 21.75\text{ ms} \quad (1.67\times \text{ marginal speedup})$$
-- **Tier 3 (Operator Fusion & Cache Tiling)**:
-  Fusing pointwise layers into registers eliminates intermediate DRAM stores and loads:
-  $$T_3 = T_2 \times 0.67 \approx 14.57\text{ ms} \quad (1.49\times \text{ marginal speedup})$$
-- **Tier 4 (KV Cache Ring Buffer)**:
-  Eliminates quadratic prefix recomputation across all 128 tokens, slashing average per-token attention latency:
-  $$T_4 = T_3 / 2.38 \approx \mathbf{6.12\text{ ms}} \quad (2.38\times \text{ marginal speedup})$$
-- **Cumulative compounding speedup**:
-  $$S_{\text{cumulative}} = \frac{T_0}{T_4} = \frac{100\text{ ms}}{6.12\text{ ms}} \approx \mathbf{16.34\times \text{ faster}}$$
-  Each individual optimization delivered between $1.5\times$ and $2.8\times$, but because their bottlenecks were orthogonal across the hardware stack, their compound impact achieved an order-of-magnitude breakthrough!
-:::
+The multiplication mistake goes the other way too. If two levers each remove half the time on their own and they attack disjoint halves, applying both removes all of it. Each solo speedup is 2x, the product says 4x, and the stack delivers something unbounded. Solo speedups measured against one baseline simply do not carry the information needed to predict what a stack does. What carries that information is a model of the step's time as a sum of named terms, with each lever assigned to the term it shrinks.
 
 ---
 
-## The Mathematical Foundation: Compounding Multiplicative Speedups
+## The Idea
 
-Because each of the four optimization tiers addresses a distinct physical bottleneck, their latency reductions compose multiplicatively rather than additively.
+### Three terms in a decode step
 
-Let $T_0$ denote the baseline execution time of generating $S$ tokens with a naive transformer:
-$$T_0 = T_{\text{proj}}^{(0)} + T_{\text{act}}^{(0)} + T_{\text{attn}}^{(0)} + T_{\text{dram}}^{(0)}$$
+Chapter 14 bounded the time of one operation by the larger of two costs, the bytes it must move divided by memory bandwidth and the arithmetic it must do divided by peak throughput. It then noted a third floor for small operations. Every separate operation costs a few microseconds just to be launched, whether it is a matrix multiply or an add, so a model made of hundreds of tiny operations can be bound by launches rather than by either roofline term. Those three costs are the cost model of this chapter:
 
-We apply our four optimization passes sequentially:
+$$T_{\text{step}} = \max\!\left(\frac{Q}{B_{\text{peak}}},\; \frac{F}{P_{\text{peak}}}\right) + n_{\text{ops}} \cdot c$$
 
-#### 1. The Precision Reduction Factor ($S_{\text{quant}}$)
-Quantizing 32-bit floating-point weights into 8-bit integers scales memory bandwidth throughput:
-$$T_1 = \frac{T_0}{S_{\text{quant}}}, \quad \text{where } S_{\text{quant}} \approx 2.0$$
+Here $Q$ is the bytes streamed in the step, $F$ the arithmetic operations, $B_{\text{peak}}$ and $P_{\text{peak}}$ the machine's two ceilings from Chapter 14, $n_{\text{ops}}$ the number of separate operations the step launches, and $c$ the fixed cost of one launch. The maximum is Chapter 14's roofline; the added term is the launch floor. We add the floor rather than folding it into the maximum because launches happen on the host before any bytes move on the device, so they cannot overlap with either roofline term.
 
-#### 2. The Low-Rank Factorization Factor ($S_{\text{prune}}$)
-Truncated SVD replaces a $D \times D$ dense projection ($2D^2\text{ FLOPs}$) with two matrices $D \times r$ and $r \times D$ ($4Dr\text{ FLOPs}$), reducing arithmetic volume when $r < D/2$:
-$$T_2 = \frac{T_1}{S_{\text{prune}}}, \quad \text{where } S_{\text{prune}} \approx 1.5$$
+Each of the four levers acts on one of the three quantities, and that is the whole reason the model has three terms rather than one. INT8 quantization (Chapter 15) shrinks $Q$, low-rank factorization (Chapter 16) shrinks $Q$ and $F$ together, kernel fusion (Chapter 17) shrinks $n_{\text{ops}}$ and nothing else, and the KV cache (Chapter 18) changes how $F$ grows with the number of tokens already generated. The Code says how much, lever by lever, next to the line that implements each one.
 
-#### 3. The Kernel Fusion Factor ($S_{\text{fuse}}$)
-Fusing GELU and Bias addition eliminates intermediate DRAM writes and reads, keeping activations resident in on-chip SRAM:
-$$T_3 = \frac{T_2}{S_{\text{fuse}}}, \quad \text{where } S_{\text{fuse}} \approx 1.3$$
+### When speedups multiply, and when they do not
 
-#### 4. The KV Cache Memoization Factor ($S_{\text{cache}}$)
-Memoizing historical keys and values replaces quadratic sequence projections ($O(S^2 D)$) with constant single-token projections ($O(S D)$):
-$$T_4 = \frac{T_3}{S_{\text{cache}}}, \quad \text{where } S_{\text{cache}} \approx 4.2$$
+Two levers multiply exactly when the second acts on the whole of what the first left behind. Two levers on the same dominant term do this. If weight bytes dominate and INT8 cuts them by four, then a factorization that halves the weights cuts the remainder by two, and the stack is 8x on that term. Two levers on different terms do not. If launches dominate and INT8 cuts the bytes term by four, the step barely changes, because the bytes term was hiding under the launch floor; the INT8 speedup measured alone rounds to 1.0x. Apply fusion first, so the launch floor drops below the bytes term, and the same INT8 conversion now delivers most of its 4x. The lever did not change. What it was allowed to act on did.
 
-#### The Cumulative Multiplier Law
-The final steady-state execution time $T_4$ and cumulative speedup $S_{\text{total}}$ are given by:
-
-$$T_{\text{final}} = T_0 \cdot \left( \frac{1}{S_{\text{quant}}} \times \frac{1}{S_{\text{prune}}} \times \frac{1}{S_{\text{fuse}}} \times \frac{1}{S_{\text{cache}}} \right)$$
-
-$$S_{\text{total}} = \frac{T_0}{T_{\text{final}}} = S_{\text{quant}} \times S_{\text{prune}} \times S_{\text{fuse}} \times S_{\text{cache}}$$
-
-$$S_{\text{total}} = 2.0 \times 1.5 \times 1.3 \times 4.2 = \mathbf{16.38\times \text{ Cumulative Speedup!}}$$
+That last observation is the practical content of the chapter. The marginal speedup a lever appears to deliver depends on the order in which the levers are applied, while the total for the full stack does not. A team that measures each lever alone will see four numbers that do not multiply to anything meaningful. A team that measures the stack cumulatively in one order will see marginal factors that another team, stacking in a different order, cannot reproduce. Only the model, or a measurement of the complete stack, gives a number that survives.
 
 ---
 
-## Line-by-Line Code Commentary: The Pure TinyTorch Capstone Stack
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 20** in the TinyTorch runtime: `packages/tinytorch/src/20_capstone/20_capstone.py`.
+Module 20 (`src/20_capstone/20_capstone.py`) is the NumPy-backed benchmarking and submission workflow students build at the end of the TinyTorch course. It provides a `BenchmarkReport` that measures a model's parameter count, size, accuracy, and latency, and a `generate_submission` that compares a baseline report against an optimized one and records the speedup, compression ratio, and accuracy change in a JSON file. The listings in this chapter are a stripped-down pure-Python model of that comparison, preceded by a napkin cost model the module does not contain, small enough to show every term that goes into a stacked speedup. They run on their own, without `Tensor` or `TinyGPT`.
 :::
 
-We construct the complete `AcceleratedTinyGPT` system in TinyTorch, unifying every engine built across the monograph.
+The code has three parts. A cost model turns a machine and a model configuration into an estimated decode time. Four one-line levers edit the configuration, and a waterfall prints what each lever does alone and in a stack. A measuring harness then replaces the estimate with timings from real code, using Chapter 19's warmup-and-percentile protocol, and reports the comparison in the shape Module 20's submission uses.
+
+### The machine and the model as a handful of numbers
+
+Picture the moment this code exists for. A team has `TinyGPT` serving and the four levers of Chapters 15 through 18 on the shelf. Each lever takes days to apply properly, and the question on the table is which one to spend those days on first, and what number to promise once all four are in.
+
+The thorough way to answer is to build every variant. Four levers, each on or off, is sixteen configurations, each a model to quantize, factorize, fuse, or cache, and each a run of Chapter 19's warmup-and-percentile protocol. Sixteen builds and sixteen timing runs is days of work, and the answer is only good for one model size, one generation length, and one machine. Change any of the three and the work starts over. The shortcut of measuring each lever alone and multiplying is faster and, as The Problem showed, wrong.
+
+So the real question is how few numbers it takes to predict where a decode step's time goes. Here is the answer I use. Three for the machine, three for the model, and one per lever. The machine numbers are the two ceilings I measured on my laptop in Chapter 14, 33 GB/s and 1.2 TFLOP/s, plus the few microseconds per launch that Chapter 17 described, which I round to 5. They are round figures for a napkin, not a datasheet. The model numbers describe Chapter 13's `TinyGPT` at the size Chapter 14 counted, and the four fields after them are the levers, each starting in the off position.
 
 ```python
-# packages/tinytorch/tinytorch/core/capstone.py
-import numpy as np
-from typing import List, Dict, Any, Optional
-from .tensor import Tensor
-from .transformers import TinyGPT
-from ..perf.quantization import quantize_linear, QuantizedLinear
-from ..perf.compression import low_rank_approximate
-from ..perf.acceleration import fused_gelu
-from ..perf.memoization import KVCache
-from ..perf.benchmarking import Benchmark, BenchmarkResult
+from dataclasses import dataclass, replace
 
-class AcceleratedTinyGPT:
-    """Production-grade accelerated Transformer unifying Quantization,
-    Low-Rank Factorization, Kernel Fusion, and KV Caching.
-    """
-    def __init__(self, base_model: TinyGPT, rank_ratio: float = 0.5):
-        self.model = base_model
-        self.embed_dim = base_model.embed_dim
-        self.num_layers = len(base_model.blocks)
-        self.num_heads = base_model.blocks[0].attn.num_heads
-        self.head_dim = base_model.blocks[0].attn.d_k
+@dataclass
+class Machine:
+    bandwidth_gbs: float = 33.0    # bytes per second the weights stream at
+    peak_gflops: float = 1200.0    # arithmetic operations per second at the ceiling
+    launch_us: float = 5.0         # fixed cost of every separate operation
 
-        # 1. Tier 2: Apply Low-Rank SVD Approximation to MLP projections
-        for block in self.model.blocks:
-            # Factorize MLP expansion layer W1 (D -> 4D)
-            orig_w = block.mlp.fc1.weight.data
-            U, V = low_rank_approximate(orig_w, rank_ratio=rank_ratio)
-            block.mlp.fc1.weight = Tensor(U @ V)
+@dataclass
+class Config:
+    D: int = 128                   # embedding width
+    L: int = 4                     # transformer blocks
+    V: int = 1000                  # vocabulary
+    bytes_per_weight: int = 4      # 4 for FP32, 1 after INT8 quantization
+    mlp_rank: int = 0              # 0 keeps the MLP dense; r factorizes it at rank r
+    fused: bool = False            # elementwise chains folded into their neighbors
+    kv_cache: bool = False         # keys and values kept between steps
 
-        # 2. Tier 1: Apply INT8 Symmetric Quantization to all Linear layers
-        self._quantize_all_layers(self.model)
+def mlp_params(cfg):
+    if cfg.mlp_rank == 0:
+        return 8 * cfg.D * cfg.D                    # D x 4D expand, 4D x D contract
+    return 2 * cfg.mlp_rank * (cfg.D + 4 * cfg.D)   # two factor pairs, r(M + N) each
 
-        # 3. Tier 4: Initialize Pre-allocated KV Cache Engine
-        self.kv_cache = KVCache(
-            max_batch_size=1,
-            max_seq_len=base_model.max_seq_len,
-            num_heads=self.num_heads,
-            head_dim=self.head_dim,
-            num_layers=self.num_layers
-        )
+def matmul_params(cfg):
+    """Weights a decode step multiplies by: the blocks plus the output head."""
+    return cfg.L * (4 * cfg.D * cfg.D + mlp_params(cfg)) + cfg.V * cfg.D
 
-    def _quantize_all_layers(self, module: Any) -> None:
-        """Recursively convert standard float Linear layers to INT8 QuantizedLinear."""
-        if hasattr(module, 'blocks'):
-            for block in module.blocks:
-                # Quantize attention projections
-                block.attn.q_proj = quantize_linear(block.attn.q_proj)
-                block.attn.k_proj = quantize_linear(block.attn.k_proj)
-                block.attn.v_proj = quantize_linear(block.attn.v_proj)
-                block.attn.out_proj = quantize_linear(block.attn.out_proj)
-                # Quantize MLP projections
-                block.mlp.fc1 = quantize_linear(block.mlp.fc1)
-                block.mlp.fc2 = quantize_linear(block.mlp.fc2)
-
-    def generate(self, prompt_tokens: List[int], max_new_tokens: int = 50) -> List[int]:
-        """Autoregressive text generation using complete 16x acceleration stack."""
-        self.kv_cache.reset()
-        output_tokens = list(prompt_tokens)
-
-        # -------------------------------------------------------------
-        # Phase 1: High-Throughput Prompt Prefill
-        # -------------------------------------------------------------
-        prompt_tensor = Tensor(np.array([prompt_tokens], dtype=np.int64))
-        # Forward prompt through model (populates KV cache for tokens 0..P-1)
-        logits = self.model.forward(prompt_tensor)
-
-        # Sample next token from final prompt position
-        next_token = int(np.argmax(logits.data[0, -1, :]))
-        output_tokens.append(next_token)
-        self.kv_cache.advance(len(prompt_tokens))
-
-        # -------------------------------------------------------------
-        # Phase 2: Constant O(1) Memory-Bandwidth Decode Loop
-        # -------------------------------------------------------------
-        for _ in range(max_new_tokens - 1):
-            single_token_tensor = Tensor(np.array([[next_token]], dtype=np.int64))
-
-            # Step forward: Only passes single token [1, 1] into network!
-            step_logits = self.model.forward(single_token_tensor)
-
-            next_token = int(np.argmax(step_logits.data[0, -1, :]))
-            output_tokens.append(next_token)
-            self.kv_cache.advance(1)
-
-        return output_tokens
+def all_params(cfg):
+    """Weights a decode step must stream, adding the token embedding table."""
+    return matmul_params(cfg) + cfg.V * cfg.D
 ```
 
-#### Architectural Line-by-Line Mechanics
+`mlp_params` is the break-even arithmetic from Chapter 16 applied to both MLP matrices at once; at rank $D/4$ the MLP shrinks from $8D^2$ to $2.5D^2$. Notice the split between `matmul_params` and `all_params`. The embedding table is read, one row per token, but never multiplied, so it counts toward $Q$ and not toward $F$, and the two roofline terms have to see different totals. Biases and LayerNorm scales are dropped; they are under one percent of the count in @tbl-tinygpt-params of Chapter 14. Ten numbers is the whole input, and the sixteen configurations now cost microseconds each. This is the napkin a serving engineer fills in before opening a profiler, and the profiler's later job is to correct the three machine numbers.
 
-1. **Lines 23--28 (SVD Matrix Factorization)**: We decompose dense MLP weight matrices into rank-reduced approximations, slashing total parameter FLOP requirements before quantization.
-2. **Lines 31 (INT8 Layer Transformation)**: We recursively replace standard FP32 `Linear` weights with symmetric `QuantizedLinear` instances, reducing parameter memory footprint from $4\text{ bytes}$ to $1\text{ byte}$ per element.
-3. **Lines 34--41 (Static Buffer Reservation)**: We allocate a contiguous 5D numpy array for Key and Value memoization across all layers, guaranteeing zero dynamic memory allocations inside the inner decode loop.
-4. **Lines 73--83 (Prefill vs Decode Bifurcation)**: In Phase 1, prompt tokens are processed as a dense batch. In Phase 2, the decode loop passes only the single latest token `[1, 1]`, converting what was once an $O(t)$ memory bandwidth scan into an $O(1)$ constant-time vector-matrix kernel.
+### The cost of one decode step
 
----
+A decode step is the unit a serving system pays for. Every generated token is one step, so a 128-token reply is 128 steps and the user waits for all of them; whatever one step costs, multiply it by the length of the reply. The cost model's job is to price that one step.
 
-## Concrete Numerical Trace Table: The 16× Waterfall
+The naive price is a FLOP count, and Chapter 14 already showed why it misleads. For `TinyGPT` at this size the miss is worse than it was there. The first step's arithmetic is 1.8 million operations, which at 1.2 TFLOP/s takes 0.0015 ms. The 4.2 MB of weights it has to stream take 0.126 ms, eighty times longer. And the 213 separate operations it launches, at 5 microseconds each, take 1.065 ms, more than eight times longer again. A FLOP count is off by a factor of about 800 on this step, and even Chapter 14's roofline, which fixes the first miss, is off by nine because it does not know about launches.
 
-To scientifically verify the compounding effect of our 4-tier systems architecture, let us trace a 128-token autoregressive generation session on `TinyGPT` ($D=128, L=4, H=4, \text{Vocab}=1,000$).
+So the step is priced by the equation from The Idea. Take the larger of the bytes term and the arithmetic term, then add a launch floor on top, because launches happen on the host before any bytes move and cannot hide under either. Where does 213 come from? From counting the separate operations in an unfused transformer block, which @tbl-capstone-op-count does, before and after fusion folds the elementwise chains into the matrix multiplies they follow.
 
-In @tbl-capstone-waterfall, we detail the step-by-step reduction in memory footprint, compute, and decode latencies as each optimization tier is activated.
+| Piece of one block | Separate operations, unfused | After fusion |
+| :--- | :---: | :---: |
+| Two LayerNorms (mean, subtract, square, mean, add $\epsilon$, square root, divide, scale, shift, each) | 18 | 2 |
+| Attention (three projections with biases, scores, scale, mask, softmax as five steps, weighting, output projection with bias) | 17 | 5 |
+| MLP (expand with bias, GELU as nine elementwise steps, contract with bias) | 13 | 2 |
+| Two residual adds | 2 | 0 |
+| **Per block** | **50** | **9** |
+| Outside the blocks (embedding lookup, position add, final LayerNorm, head with bias) | 13 | 3 |
 
-| Stage | Optimization Stack | Weights | Peak VRAM | 128-Tok Latency | Speedup |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Stage 0** | Baseline FP32 Naive TinyGPT | $12.80\text{ MB}$ | $14.20\text{ MB}$ | $1,420\text{ ms}$ | **$1.00\times$ (Baseline)** |
-| **Stage 1** | + Tier 1: INT8 Quantization | $3.20\text{ MB}$ | $4.60\text{ MB}$ | $710\text{ ms}$ | **$2.00\times$** |
-| **Stage 2** | + Tier 2: Low-Rank SVD Pruning | $2.13\text{ MB}$ | $3.50\text{ MB}$ | $473\text{ ms}$ | **$3.00\times$** |
-| **Stage 3** | + Tier 3: Fused SRAM Kernels | $2.13\text{ MB}$ | $3.10\text{ MB}$ | $364\text{ ms}$ | **$3.90\times$** |
-| **Stage 4** | + Tier 4: The KV Cache Engine | $2.13\text{ MB}$ | $3.34\text{ MB}$ | $\mathbf{86\text{ ms}}$ | **$16.51\times$ Leap!** |
+: Napkin count of the separate operations one decode step launches, before and after fusing elementwise chains into the matrix multiplies they follow. The exact numbers depend on how an implementation splits its work; the ratio is what the model uses. {#tbl-capstone-op-count tbl-colwidths="[56,22,22]"}
 
-: The 16x Cumulative Speedup Waterfall Table across progressive optimization tiers. {#tbl-capstone-waterfall tbl-colwidths="[14,28,14,14,15,15]"}
-
-#### Mathematical Analysis of the Waterfall
-
-1. **Stage 1 (INT8 Quantization)**: Slashes model weight memory by $75\%$ ($12.8\text{ MB} \to 3.2\text{ MB}$) and reduces DRAM bus traffic by $4\times$, dropping latency from $1,420\text{ ms}$ to $710\text{ ms}$ ($2.0\times$ speedup). Total FLOPs remain at $18.43\text{ MFLOPs}$.
-2. **Stage 2 (Low-Rank SVD)**: Slashes floating-point operations by $33\%$ ($18.43\text{ M} \to 12.28\text{ MFLOPs}$), dropping latency from $710\text{ ms}$ to $473\text{ ms}$ ($1.5\times$ speedup).
-3. **Stage 3 (Fused GELU & Tiling)**: Eliminates intermediate memory traffic between LayerNorm and GELU, dropping latency from $473\text{ ms}$ to $364\text{ ms}$ ($1.3\times$ speedup).
-4. **Stage 4 (KV Cache Memoization)**: Eliminates redundant historical projections, collapsing FLOPs from $12.28\text{ MFLOPs}$ to $2.91\text{ MFLOPs}$ ($4.2\times$ drop) and cutting latency from $364\text{ ms}$ down to a blazing **$86\text{ ms}$**!
-
-The overall result is a **$16.51\times$ performance increase** while reducing physical memory consumption from $14.2\text{ MB}$ down to $3.34\text{ MB}$.
+The KV cache is the one lever that does not simply scale a term, so it gets a branch of its own. Without the cache, the step after $t$ tokens re-projects all $t + 1$ tokens through every layer and recomputes attention over all pairs, so $F$ grows linearly with $t$ in the projections and quadratically in attention. With it, the step projects one token and reads the cached keys and values for the other $t$, so $F$ stays flat apart from a small linear attention term while $Q$ picks up a linear term for the cache reads. That branch is the only place the step's position $t$ enters the code.
 
 ```python
-# Trace Verification: Compounding 16.51x Performance Waterfall
-def verify_capstone_waterfall():
-    """
-    Formally verifies the compounding multiplicative speedup across all 4 tiers
-    of the TinyTorch acceleration stack.
-    """
-    # Baseline measurements on TinyGPT (D=128, L=4, H=4, Vocab=1000, 128 tokens)
-    lat_baseline = 1420.0  # ms
-    mem_baseline = 14.20   # MB
-    weights_baseline = 12.80  # MB
+OPS_PER_BLOCK = {False: 50, True: 9}    # unfused, fused
+OPS_OUTSIDE   = {False: 13, True: 3}    # embedding, final LayerNorm, head
 
-    # Tier 1: INT8 Quantization (4x memory reduction, 2x latency reduction)
-    lat_tier1 = lat_baseline / 2.000  # 710.0 ms
-    mem_tier1 = 4.60
-    weights_tier1 = weights_baseline / 4.0  # 3.20 MB
+def step_ms(cfg, m, t):
+    """Napkin time to produce the token after t existing tokens."""
+    n = t + 1                                     # tokens the step must look at
+    if cfg.kv_cache:
+        rows = 1                                  # only the new token is projected
+        attn_flops = 4 * n * cfg.D * cfg.L        # one query against n keys
+        kv_bytes = 2 * n * cfg.D * 4 * cfg.L      # read the cached K and V, FP32
+    else:
+        rows = n                                  # every token is projected again
+        attn_flops = 4 * n * n * cfg.D * cfg.L
+        kv_bytes = 0
+    flops = 2 * matmul_params(cfg) * rows + attn_flops
+    nbytes = all_params(cfg) * cfg.bytes_per_weight + kv_bytes
+    ops = cfg.L * OPS_PER_BLOCK[cfg.fused] + OPS_OUTSIDE[cfg.fused]
 
-    # Tier 2: Low-Rank SVD (slashes matrix FLOPs by 33%, 1.5x latency reduction)
-    lat_tier2 = lat_tier1 / 1.50105   # 473.0 ms
-    mem_tier2 = 3.50
-    weights_tier2 = 2.13
+    memory_ms = nbytes / (m.bandwidth_gbs * 1e9) * 1e3
+    compute_ms = flops / (m.peak_gflops * 1e9) * 1e3
+    launch_ms = ops * m.launch_us / 1e3
+    return max(memory_ms, compute_ms) + launch_ms
 
-    # Tier 3: Fused SRAM Elementwise Kernels (eliminates DRAM stalls, 1.3x latency reduction)
-    lat_tier3 = lat_tier2 / 1.29945   # 364.0 ms
-    mem_tier3 = 3.10
-    weights_tier3 = 2.13
-
-    # Tier 4: KV Cache Engine (collapses historical projections, 4.23x latency reduction)
-    lat_tier4 = lat_tier3 / 4.23255   # 86.0 ms
-    mem_tier4 = 3.34
-    weights_tier4 = 2.13
-
-    speedup_t1 = lat_baseline / lat_tier1
-    speedup_t2 = lat_baseline / lat_tier2
-    speedup_t3 = lat_baseline / lat_tier3
-    speedup_t4 = lat_baseline / lat_tier4
-
-    print(f"Tier 0 (Baseline) : {lat_baseline:.1f} ms | Speedup: 1.00x | VRAM: {mem_baseline:.2f} MB")
-    print(f"Tier 1 (+ INT8)   : {lat_tier1:.1f} ms | Speedup: {speedup_t1:.2f}x | VRAM: {mem_tier1:.2f} MB")
-    print(f"Tier 2 (+ SVD)    : {lat_tier2:.1f} ms | Speedup: {speedup_t2:.2f}x | VRAM: {mem_tier2:.2f} MB")
-    print(f"Tier 3 (+ Fused)  : {lat_tier3:.1f} ms | Speedup: {speedup_t3:.2f}x | VRAM: {mem_tier3:.2f} MB")
-    print(f"Tier 4 (+ KV Cache): {lat_tier4:.1f} ms | Speedup: {speedup_t4:.2f}x | VRAM: {mem_tier4:.2f} MB")
-
-    assert abs(speedup_t4 - 16.51) < 0.05, f"Expected 16.51x speedup, got {speedup_t4:.2f}x"
-    print("\n[PASS] All compounding acceleration tiers mathematically verified!")
-
-verify_capstone_waterfall()
+def generation_ms(cfg, m, n_tokens):
+    return sum(step_ms(cfg, m, t) for t in range(n_tokens))
 ```
 
----
+Notice what the branch does to the two roofline inputs. It removes a factor of $n$ from the projection arithmetic and a factor of $n$ from the attention arithmetic, and in exchange it adds $8nDL$ bytes of cache reads to $Q$. That is the trade Chapter 18 made, arithmetic for bandwidth, and it only pays once $n$ is large enough that the recomputation was the dominant term. `generation_ms` sums the steps, so a generation of 128 tokens is 128 calls with $t$ running from 0 to 127. A profiler on a real serving engine reports the same three terms under the names memory-bound, compute-bound, and launch-bound, and the bridge comes back to that vocabulary.
 
-## Production Systems Bridge: PyTorch 2.0 `torch.compile` and Multi-Tier Acceleration
+### The levers and the waterfall
 
-In industrial deep learning deployments, this four-tier compounding architecture is implemented via automated compiler passes, as illustrated in @fig-capstone-stack:
+The number this code produces is the one that goes in the report. With all four levers on, the model is some factor faster than the FP32 baseline, and everyone who built a lever wants to know how much of that factor is theirs.
 
-1. **Model Definition**: Standard PyTorch or HuggingFace model representation in FP32/BF16.
-2. **Precision Tier**: AWQ or SmoothQuant INT4/INT8 quantization pass slashes memory traffic.
-3. **Structural Tier**: Low-rank SVD decomposition factorizes parameter matrices and removes redundant attention heads.
-4. **Kernel Tier**: TorchInductor compiles fused elementwise kernels and tiles matrix multiplications directly into GPU SRAM registers.
-5. **Algorithmic Tier**: vLLM PagedAttention or TensorRT-LLM manages key-value activation memory using virtual page tables.
+The way that question usually gets answered is the one The Problem took apart. Each lever is measured on its own against the baseline, the four numbers are multiplied, and the product goes on the slide. The other common way is to report each lever's marginal gain in whatever order was convenient, which produces four numbers that another team, applying the same levers in another order, cannot reproduce and will not believe. Both cost the same thing, a number with no meaning outside the run that produced it.
 
-In PyTorch 2.0, invoking `model = torch.compile(model, mode="max-autotune")` automatically triggers `TorchInductor` to perform loop fusion, register allocation, and shared-memory tiling identical to the techniques we engineered in Chapters 14 through 20. Modern frameworks like vLLM and TensorRT-LLM combine this ahead-of-time graph compilation with runtime paged memory managers, reproducing our exact TinyTorch compounding hierarchy at hyperscale (which we explore in Chapter 21: OpenAI Triton compiler and modern domain-specific languages).
-
-The total system speedup is governed by the product of individual optimization factors:
-$$\text{Speedup}_{\text{total}} = \prod_{i=1}^{K} S_i = S_{\text{quant}} \times S_{\text{prune}} \times S_{\text{fuse}} \times S_{\text{kv\_cache}}$$
+Here is the version that survives. Each lever is a one-line edit to the configuration, so a stack is just the levers applied in sequence to one `Config`. INT8 sets `bytes_per_weight` to 1, which divides the weight part of $Q$ by four and leaves $F$ alone. SVD sets `mlp_rank` to $D/4$, which replaces the MLP's $8D^2$ weights with $2.5D^2$ and shrinks $Q$ and $F$ in the same proportion. Fusion flips the operation count from the left column of @tbl-capstone-op-count to the right. The KV cache flips the branch in `step_ms`. `waterfall` then prints all three views at once, each lever alone, the product of the solo numbers, and the cumulative total as the levers stack in a stated order, so that the product and the stack disagree on the same page.
 
 ```python
-# Industrial Bridge: PyTorch 2.0 Compilation and Execution Contract
-import torch
+LEVERS = {
+    "INT8":     lambda c: replace(c, bytes_per_weight=1),
+    "SVD":      lambda c: replace(c, mlp_rank=c.D // 4),
+    "fusion":   lambda c: replace(c, fused=True),
+    "KV cache": lambda c: replace(c, kv_cache=True),
+}
 
-def production_capstone_pipeline(model: torch.nn.Module, sample_input: torch.Tensor):
-    """
-    Demonstrates the production counterpart to our TinyTorch 4-tier stack:
-    1. Dynamic INT8 quantization (torch.ao.quantization)
-    2. Low-rank factorization (torch.linalg.svd)
-    3. Graph-level fusion via TorchInductor (torch.compile)
-    4. Flash/Paged KV caching during autoregressive inference
-    """
-    # Step 1: Ahead-of-time graph capture and kernel fusion
-    compiled_model = torch.compile(model, mode="max-autotune", fullgraph=True)
-
-    # Step 2: Warmup pass to trigger JIT kernel compilation
-    with torch.no_grad():
-        for _ in range(3):
-            _ = compiled_model(sample_input)
-
-    print("[INFO] Production model successfully compiled and warm-cached.")
-    return compiled_model
+def waterfall(cfg, m, n_tokens, order=LEVERS):
+    """Each lever alone against the baseline, then stacked in order."""
+    base = generation_ms(cfg, m, n_tokens)
+    print(f"baseline {base:9.2f} ms")
+    product = 1.0
+    for name, lever in order.items():
+        alone = base / generation_ms(lever(cfg), m, n_tokens)
+        product *= alone
+        print(f"  {name:9s} alone {alone:5.2f}x")
+    print(f"  product of the solo speedups {product:5.2f}x")
+    prev, cur = base, cfg
+    for name, lever in order.items():
+        cur = lever(cur)
+        now = generation_ms(cur, m, n_tokens)
+        print(f"  +{name:8s} {now:9.2f} ms  marginal {prev / now:5.2f}x"
+              f"  cumulative {base / now:5.2f}x")
+        prev = now
 ```
 
----
+Two things to notice. `replace` returns a new configuration and leaves the old one alone, so a lever is a pure function and a stack is function composition; nothing about applying INT8 depends on whether fusion came first, except the number that comes out. And `order` is an argument rather than a constant so that the trace can run the same four levers forward and reversed, and show the cumulative total agreeing while every marginal factor moves. This is the cumulative ablation table a systems paper prints, with the one thing those tables usually leave out, the order, made explicit.
 
-## Building the System: How It All Connects
+### Measuring instead of estimating
 
-Every single subsystem we engineered across twenty chapters now operates in unified, mathematical harmony:
+The cost model predicts. A report needs a measurement, and the course's Module 20 needs it in a specific shape, a JSON file that records what was applied and what it bought, which is what a grader or a reviewer reads instead of the code.
 
-::: {.callout-note title="The 16× Capstone Systems Harmony"}
-1. **Core Runtime**: 1D contiguous physical buffers, N-D strided memory layouts, dynamic topological autograd tape.
-2. **Deep Architectures**: `im2col` systolic GEMM transforms, BPE subword compression, multi-head scaled dot-product attention, Pre-LN residual highways.
-3. **Systems Acceleration**: INT8 symmetric quantization, truncated SVD structural factorization, in-register kernel fusion, pre-allocated KV cache ring buffer.
-4. **Statistical Verification**: Strict warmup cycles, empirical P50/P95/P99 tail latency accounting, MLPerf $\ge 99\%$ accuracy retention verification.
-5. **Measured Milestone Result**: **$16.5\times$ overall speedup** with a **$4.2\times$ memory footprint reduction**!
-:::
+The naive measurement is to time the baseline once, time the optimized model once, and report the ratio. Chapter 19 showed why one timing is noise and why a mean hides the tail. There is a second omission that is easier to miss. A speedup on its own says nothing about what the lever spent to get it. INT8 spends accuracy and the KV cache spends memory, and a report that carries only the speedup lets both bills go unpaid. In the measured trace below the cache nearly quadruples the model's footprint, and a speedup-only line would never show it.
 
-The mathematical harmony of TinyTorch is expressed by the end-to-end computational throughput invariant:
-$$\text{Throughput}_{\text{system}} = \frac{N_{\text{tokens}}}{\Delta t_{\text{prefill}} + \sum_{t=1}^{T-1} \Delta t_{\text{decode}}(t)}$$
-Where $\Delta t_{\text{decode}}(t) = O(1)$ thanks to our pre-allocated Key-Value cache ring buffer.
+So the harness does two things Chapter 19 already taught and one thing Module 20 adds. `measure_ms` is Chapter 19's protocol (warm up, time many runs, sort, read the percentiles) reduced to the two numbers this chapter needs; Chapter 19's `Benchmark.run_latency` keeps the full list and is the version to use when the tail matters. `submission` then compares a baseline against an optimized variant in the shape Module 20's `generate_submission` writes to disk, with the same three keys, so that the bytes and the accuracy travel with the speedup.
 
 ```python
-# System-Wide Invariant Verification
-def verify_tinytorch_system_invariants():
-    """Verifies that the entire 20-chapter stack fulfills its systems contract."""
-    invariants = {
-        "Contiguous 1D Storage": True,
-        "Reverse-Mode Autograd Tape": True,
-        "Symmetric INT8 Quantization": True,
-        "SVD Rank Truncation": True,
-        "In-Register Kernel Fusion": True,
-        "O(1) Memory-Bandwidth KV Cache": True,
+import time
+
+def measure_ms(fn, warmup=5, repeats=50):
+    """p50 and p99 of fn() in milliseconds, after warmup (Chapter 19's protocol)."""
+    for _ in range(warmup):
+        fn()
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        times.append((time.perf_counter() - t0) * 1000.0)
+    times.sort()
+    rank = lambda p: times[min(len(times) - 1, int(p / 100.0 * len(times)))]
+    return {"p50_ms": rank(50), "p99_ms": rank(99)}
+
+def submission(baseline, optimized, techniques):
+    """Compare two measured variants the way Module 20's generate_submission does."""
+    return {
+        "techniques_applied": techniques,
+        "speedup": baseline["p50_ms"] / optimized["p50_ms"],
+        "compression_ratio": baseline["bytes"] / optimized["bytes"],
+        "accuracy_delta": optimized["accuracy"] - baseline["accuracy"],
     }
-    for component, verified in invariants.items():
-        assert verified, f"Invariant broken: {component}"
-    print("[PASS] All 6 TinyTorch architectural invariants fully validated.")
-
-verify_tinytorch_system_invariants()
 ```
 
-We are now ready to put our complete framework to the ultimate test.
+Three things in `submission` deserve a look. The speedup is a ratio of medians, not of means, for the reason Chapter 19 gave. The compression ratio compares bytes, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one; the harness does not hide that. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves.
 
-In **Milestone III: The Torch Olympics**, we submit our fully accelerated engine to an automated, multi-event MLPerf showdown!
+---
+
+## A Worked Trace
+
+The trace has two halves. The first runs `TinyGPT` through the cost model by hand for a 128-token generation and reads the waterfall. The second measures one lever for real.
+
+### The baseline, by hand
+
+Take $D = 128$, $L = 4$, $V = 1000$, and the napkin machine, meaning the three round numbers in `Machine`. The step that produces the first token ($t = 0$) has $n = 1$. It streams $1{,}042{,}432 \times 4 = 4{,}169{,}728$ bytes, which at 33 GB/s takes 0.126 ms. Its arithmetic is $2 \times 914{,}432 + 4 \times 128 \times 4 = 1{,}830{,}912$ operations, the same count Chapter 14 arrived at for one decode row, which at 1.2 TFLOP/s takes 0.0015 ms. The roofline term is the larger of the two, 0.126 ms. Launching $4 \times 50 + 13 = 213$ operations at 5 microseconds each adds 1.065 ms. The step costs 1.191 ms, and nine tenths of that is launches.
+
+The step that produces the last token ($t = 127$) has $n = 128$. The bytes are unchanged. The arithmetic is $1{,}828{,}864 \times 128 + 4 \times 128^2 \times 128 \times 4 = 267{,}649{,}024$ operations, 0.223 ms, which now exceeds the bytes term, so the roofline term is 0.223 ms and the step costs 1.288 ms. Summing all 128 steps gives 155.0 ms for the generation. `step_ms(Config(), Machine(), 0)` and `step_ms(Config(), Machine(), 127)` return 1.1914 and 1.2880, and `generation_ms` returns 155.00.
+
+### The waterfall
+
+Running `waterfall(Config(), Machine(), 128)` produces the numbers in @tbl-capstone-waterfall.
+
+| Stage | Total for 128 tokens | Marginal speedup | Cumulative speedup | Lever alone vs. baseline |
+| :--- | :---: | :---: | :---: | :---: |
+| Baseline FP32, dense, unfused, no cache | 155.00 ms | | 1.00x | |
+| + INT8 weights | 150.42 ms | 1.03x | 1.03x | 1.03x |
+| + MLP factorized at rank 32 | 145.36 ms | 1.03x | 1.07x | 1.04x |
+| + fusion | 34.00 ms | 4.27x | 4.56x | 3.55x |
+| + KV cache | 28.63 ms | 1.19x | 5.41x | 1.01x |
+
+: The four levers stacked in the order the book taught them, on `TinyGPT` and the napkin machine, for a 128-token generation. The product of the four solo speedups is 3.86x; the stack delivers 5.41x. {#tbl-capstone-waterfall tbl-colwidths="[34,17,16,16,17]"}
+
+Read the last column first. Alone, three of the four levers do almost nothing, and the product of the four solo numbers is 3.86x. The stack delivers 5.41x. The reason is in the hand trace above. The launch floor is 1.065 ms of a 1.19 ms step, so INT8, factorization, and the cache are all shrinking terms that hide under it. Fusion is the lever that removes the floor, and it delivers 3.55x alone and 4.27x once the earlier levers have already trimmed the roofline term it exposes. The KV cache then delivers 1.19x, because by the last steps the recomputed arithmetic had climbed above the bytes term, and the cache brings it back down.
+
+Reverse the order and the total is identical while every marginal factor moves. `waterfall(Config(), Machine(), 128, order=dict(reversed(list(LEVERS.items()))))` reports the cache at 1.01x, then fusion at 3.64x, then factorization at 1.15x, then INT8 at 1.28x, for the same 28.63 ms and 5.41x. The INT8 lever that was worth 1.03x in the first order is worth 1.28x in the second. Its byte savings did not change; what changed is that fusion had already removed the floor that hid them.
+
+The same code answers the question of where a 16x-class number would come from. Set `Config(D=768, L=12, V=50257)`, a model the size of GPT-2 small, and generate 1024 tokens. The baseline is 123 seconds, the stack is 5.6 seconds, a 22x speedup, and the KV cache applied last is worth 15.4x on its own margin, because without it each of the last steps re-projects a thousand tokens through some 85 million weights. Generate only 128 tokens from that same model and the stack is worth 5.4x again. There is no 16x property of the four levers. There is a cost model, a model size, a generation length, and a machine, and the number falls out of those.
+
+### Measuring one lever
+
+The pure-Python listings in this book cannot run a million-parameter `TinyGPT` fast enough to time a generation, so for the measured half of the trace I apply one lever, the KV cache, to a small attention loop that has the same shape. The recomputing version projects every token again at every step; the cached version projects each token once and appends. Both produce the same output, so the accuracy delta is zero by construction, and the compression ratio comes out below one because the cache is bytes spent to save arithmetic.
+
+```python
+import math, random
+
+D, T = 16, 64
+rng = random.Random(0)
+def mat(n, m):
+    return [[rng.gauss(0, 1) / math.sqrt(m) for _ in range(m)] for _ in range(n)]
+Wq, Wk, Wv = mat(D, D), mat(D, D), mat(D, D)
+tokens = [[rng.gauss(0, 1) for _ in range(D)] for _ in range(T)]
+
+def matvec(M, v):
+    return [sum(m * vi for m, vi in zip(row, v)) for row in M]
+
+def attend(q, K, V):
+    scores = [sum(qi * ki for qi, ki in zip(q, k)) / math.sqrt(D) for k in K]
+    top = max(scores)
+    w = [math.exp(s - top) for s in scores]
+    z = sum(w)
+    return [sum(wi * v[j] for wi, v in zip(w, V)) / z for j in range(D)]
+
+def generate_recompute():
+    outs = []
+    for t in range(T):
+        K = [matvec(Wk, x) for x in tokens[:t + 1]]   # every step, every token again
+        V = [matvec(Wv, x) for x in tokens[:t + 1]]
+        outs.append(attend(matvec(Wq, tokens[t]), K, V))
+    return outs
+
+def generate_cached():
+    K, V, outs = [], [], []
+    for t in range(T):
+        K.append(matvec(Wk, tokens[t]))               # the new token, once
+        V.append(matvec(Wv, tokens[t]))
+        outs.append(attend(matvec(Wq, tokens[t]), K, V))
+    return outs
+
+worst = max(abs(a - b) for oa, ob in zip(generate_recompute(), generate_cached())
+                       for a, b in zip(oa, ob))
+base = dict(measure_ms(generate_recompute), bytes=3 * D * D * 4, accuracy=1.0)
+fast = dict(measure_ms(generate_cached), bytes=3 * D * D * 4 + 2 * T * D * 4,
+            accuracy=1.0 - worst)
+print(submission(base, fast, ["kv_cache"]))
+```
+
+On my laptop, one run printed a speedup of 9.7x, a compression ratio of 0.27, and an accuracy delta of 0.0; your timing will differ, and the harness is the point rather than the value. The 9.7x is what a count of the multiplies predicts. The recomputing version performs $2 \times T(T+1)/2 + T = 4{,}224$ projections of 256 multiplies each, the cached version performs $3T = 192$, and both perform the same attention arithmetic, about 67,000 multiplies over the whole generation. The ratio of the two totals is 9.9, and the attention work that both versions share is what keeps the lever from delivering the 22x that the projection counts alone would suggest. The 0.27 is the honest price of the lever. Three $16 \times 16$ weight matrices are 3 KB, the cache for 64 tokens is 8 KB, and a submission that reported only the speedup would have hidden that the model's footprint nearly quadrupled.
+
+---
+
+## From TinyTorch to Production
+
+A production serving stack applies the same four levers to the same three terms, and the first thing it does differently is refuse to guess at the waterfall. The order in which the levers pay off depends on the model, the batch size, the sequence length, and the chip, so serving systems measure the full stack under the traffic they expect and tune from there. The cost model in this chapter is what an engineer sketches before that measurement to decide which lever to try first; it is not a substitute for the measurement.
+
+The launch floor that dominated the `TinyGPT` trace is real on GPUs and is attacked directly. Each kernel launch costs a few microseconds of host time, and a decode step for a small model can be several hundred kernels, so the step is bound by the host issuing work rather than by the device doing it. Fusion, through `torch.compile` and TorchInductor, is one answer; CUDA graphs[^fn-cuda-graphs-bridge] are the other, and vLLM and TensorRT-LLM capture the whole decode step as one graph so that the host issues it with a single call. When that floor is gone, the step is memory-bound at batch one exactly as Chapter 14 predicted, and weight-only INT8 and INT4 quantization deliver close to their byte ratio, which is why the quantization schemes Chapter 15's bridge described are the default in every serving engine. The KV cache is universal, and its bytes, not its arithmetic, become the next term to attack, which is where PagedAttention's memory management and the grouped-query attention Chapter 18's bridge mentioned come from. Low-rank factorization of a trained model's weights is the lever production uses least, for the reason Chapter 16 gave; the low-rank idea reached serving through LoRA adapters instead.
+
+[^fn-cuda-graphs-bridge]: **CUDA graph**: a recording of a sequence of GPU kernel launches, with their arguments and dependencies, that the driver can replay as a single unit. Replaying a graph of 500 kernels costs one launch's worth of host overhead rather than 500, so it removes the launch floor for workloads whose kernel sequence does not change from step to step, which is what a decode loop is.
+
+What carries over unchanged is the arithmetic of stacking. Time is a sum of terms, each lever shrinks one, and the stack's speedup is what the sum says, not the product of solo measurements. Production engineers speak of a workload being launch-bound, memory-bound, or compute-bound, and each of those words names which term is largest at the moment and therefore which lever is worth applying next. That vocabulary is this chapter's cost model with the numbers filled in by a profiler.
+
+For your own work, three habits follow. Before optimizing, write down the three terms for your step and estimate each; the lever to try first is the one that acts on the largest. After each lever, re-estimate, because the largest term has probably changed. And when you report a stacked speedup, report it as a stack, measured end to end with Chapter 19's protocol, with the order you applied the levers and the sequence length you measured at, because a reader who tries to reproduce it in another order or at another length will get different marginal factors and should not be surprised by that.
+
+---
+
+## Summary
+
+You built a three-term cost model for a decode step, bytes over bandwidth, arithmetic over peak, and a per-launch floor, and wired the four optimizations of Chapters 15 through 18 into it as edits to a configuration. Tracing `TinyGPT` through it showed that the launch floor hid three of the four levers until fusion removed it, that the stack delivered 5.4x where the product of the solo speedups said 3.9x, and that reversing the order changed every marginal factor while leaving the total alone. The principle to keep is that speedups multiply only when each lever acts on the whole of what the previous one left, which is rare; otherwise the stacked number comes from the cost model or from a measurement of the complete stack, never from multiplying solo results. You also built the measuring side, a harness in Chapter 19's shape that reports a stack as a speedup at the median, a compression ratio that can fall below one, and an accuracy delta, which is the comparison Module 20 writes to a submission file. Milestone III takes the four levers, the cost model's vocabulary of which term dominates, and the `submission` comparison for granted and asks whether one stacked model can clear an accuracy floor, a memory budget, and a latency target at the same time.
+
+---
+
+## Exercises
+
+1. **Which lever first.** Using `Config()` and `Machine()`, find the smallest `launch_us` at which INT8 alone delivers at least 2x for a 128-token generation. Explain the answer in terms of which of the three terms is largest at that launch cost, and check it by printing the three terms for step 0.
+
+2. **The break-even length.** For `Config(D=768, L=12, V=50257)` with the other three levers applied, sweep the generation length from 16 to 1024 tokens and find where the KV cache's marginal speedup crosses 2x. Then change `bytes_per_weight` back to 4 and repeat. Explain why the crossover moves.
+
+3. **Measure a second lever.** Add a `generate_cached_int8` variant to the measured trace that stores `Wk` and `Wv` as Python integers with one scale each, using Chapter 15's `quantize_int8`, and time it. Report the speedup, compression ratio, and accuracy delta the harness gives. Then explain why the speedup is near 1.0x in pure Python even though the bytes term fell, and what the cost model would need to know about the interpreter to predict that.

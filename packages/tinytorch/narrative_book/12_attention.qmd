@@ -1,277 +1,303 @@
-# Attention Mechanisms: Scaled Dot-Product & Causal Masking {#sec-attention}
+# Attention Mechanisms: Scaled Dot-Product and Causal Masking {#sec-attention}
 
-In Chapters 10 and 11, we converted raw human text into continuous semantic vectors infused with temporal positional waveforms. Yet our tokens currently travel through the framework in complete isolation: no token can inspect, communicate with, or gather context from any other token in the sequence.
+Chapter 11 left every token as a vector that carries its own meaning and its own position, and nothing else. The vector for *it* in "the machine crashed because it overheated" knows that it is a pronoun sitting at position five; it has no idea that *machine* exists. The question this chapter answers is the one a practitioner asks the first time they open a transformer's source: how does one token read from the others, and why does that operation turn out to be three matrix multiplies and a softmax?
 
-In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**.[^flash-sram] We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor,[^var-proof] and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation (which we assemble into an interactive text generator in Milestone 2).
+The mechanism is **scaled dot-product attention**, and the layer that packages it is `MultiHeadAttention`. We build both in a few dozen lines of plain Python, trace a two-token example by hand until every decimal is accounted for, and then look at why production systems rewrite the same arithmetic so that its largest intermediate never touches main memory.
 
-[^flash-sram]: Modern kernels like FlashAttention-2 load $Q, K, V$ blocks into fast on-chip SRAM (128–228 KB per streaming multiprocessor on NVIDIA Hopper), computing online softmax scaling without ever allocating the $O(S^2)$ attention matrix in off-chip DRAM.
-[^var-proof]: If $q_i, k_i \sim \mathcal{N}(0, 1)$ are independent with unit variance, then $\mathbb{E}[q_i k_i] = 0$ and $\text{Var}(q_i k_i) = \mathbb{E}[(q_i k_i)^2] = 1$. The sum of $d_k$ independent components has variance $\sum_{i=1}^{d_k} 1 = d_k$. Dividing by $\sqrt{d_k}$ yields $\text{Var}\left(\frac{q \cdot k}{\sqrt{d_k}}\right) = \frac{d_k}{d_k} = 1$.
-
-![The Attention Engine: Query-Key Routing, 1/sqrt(d_k) Variance Scaling, and Causal Lower-Triangular Masking](assets/images/diagrams/12_attention-diag-1.svg){#fig-attention-engine}
+![Attention as routing. Each query scores every key with a dot product, the scores are scaled by $1/\sqrt{d_k}$, future positions are masked out, and the resulting weights mix the values.](assets/images/diagrams/12_attention-diag-1.svg){#fig-attention-engine}
 
 ---
 
-## Systems Problem Motivation: The Recurrence Bottleneck and the Softmax Gradient Cliff
+## The Problem
 
-Before the transformer architecture was discovered, sequential language was processed using **Recurrent Neural Networks (RNNs)** and LSTMs.
+After Chapter 11 a sequence is a matrix $X$ with one row per token and $D$ columns. Every layer we have built so far treats those rows independently. A `Linear` layer multiplies each row by the same weight matrix; an activation squashes each element on its own. Nothing we have mixes one row into another, so the row for *it* comes out of the network knowing exactly as much about *machine* as it did going in, which is nothing.
 
-An RNN maintains a hidden state vector $\mathbf{h}_t$, updating it one step at a time:
+The obvious fix is to let every token see a summary of the whole sequence. The simplest summary is the average of all rows, and it fails immediately.
 
-$$\mathbf{h}_t = \tanh(W_{hh} \mathbf{h}_{t-1} + W_{xh} \mathbf{x}_t)$$
+```python
+X = [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]      # three tokens, two features each
+avg = [sum(col) / len(X) for col in zip(*X)]  # one summary for the whole sequence
+print([avg for _ in X])
+# three identical rows of [0.666..., 0.666...]; every token receives the same vector
+```
 
-Recurrence is fundamentally incompatible with massively parallel GPU accelerators: to compute hidden state $\mathbf{h}_S$ at time step $S$, the hardware must execute $S$ sequential steps in serial dependency order ($[x_1] \to [h_1] \to [h_2] \dots \to [h_S]$). Massive GPU systolic arrays and tensor cores (capable of executing tens of thousands of arithmetic operations concurrently) sit over $95\%$ idle, starved by serial pointer chasing.
+Averaging gives every token the identical vector, so a pronoun receives as much of *because* as of *machine*, and the positional signal we added last chapter is averaged away with everything else. A learned weight for each pair of positions is no better. The token that *it* should read from is whichever noun came before it, and that changes from sentence to sentence; the right weights depend on what the tokens say, not on where they sit. A fixed table of positions also only works for one sequence length.
 
-### The Variance Explosion of Raw Dot Products
-
-When researchers replaced recurrence with all-to-all dot products ($A = Q K^T$), they encountered a second crisis: **vanishing gradients in softmax space**.
-
-Consider two random vectors $\mathbf{q}, \mathbf{k} \in \mathbb{R}^{d_k}$ with components independently sampled with zero mean and unit variance ($q_i, k_i \sim \mathcal{N}(0, 1)$). The dot product is:
-
-$$z = \mathbf{q}^T \mathbf{k} = \sum_{i=1}^{d_k} q_i k_i$$
-
-The mean and variance of $z$ are:
-
-$$\mathbb{E}[z] = \sum_{i=1}^{d_k} \mathbb{E}[q_i] \mathbb{E}[k_i] = 0$$
-
-$$\text{Var}(z) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = \sum_{i=1}^{d_k} \text{Var}(q_i) \text{Var}(k_i) = \sum_{i=1}^{d_k} (1)(1) = d_k$$
-
-For $d_k = 64$, the standard deviation of raw dot products is $\sigma = \sqrt{64} = 8.0$. Dot product scores routinely range between $-24.0$ and $+24.0$. When passed to softmax ($\frac{e^{z_i}}{\sum e^{z_j}}$), any score exceeding $|z| > 10$ drives the function into severe saturation: $\text{softmax}([24.0, -8.0, 0.0]) \approx [1.0, 0.0, 0.0]$.
-
-Because the derivative of softmax is $\frac{\partial S_i}{\partial z_j} = S_i (\delta_{ij} - S_j)$, saturated probabilities ($S_i \approx 1$ or $S_i \approx 0$) force all backpropagation gradients to vanish to zero. Without scaling, the largest dot product dominates completely, blinding the attention mechanism.
+So the operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. And the whole thing must be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in Milestone 2: a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
 
 ---
 
-## The Mental Model: Differentiable Database Retrieval and Memory Flow
+## The Idea
 
-To understand Scaled Dot-Product Attention from an engineering perspective, we conceptualize it as a **differentiable database query**:
+### Queries, keys, and values
 
-- **Queries ($Q$)**: What each token is searching for (*"I am a pronoun looking for my antecedent"*).
-- **Keys ($K$)**: What each token advertises about itself (*"I am a singular noun in the subject position"*).
-- **Values ($V$)**: The semantic payload retrieved when a Query matches a Key.
+Attention is a lookup in which every token both asks a question and offers an answer. From each token's row $x_t$ we compute three vectors with three learned weight matrices:
 
-The mathematical formula for Scaled Dot-Product Attention is:
+- a **query** $q_t = x_t W_q$, what this token is looking for ("I am a pronoun; where is my noun?");
+- a **key** $k_t = x_t W_k$, what this token advertises about itself ("I am a singular noun");
+- a **value** $v_t = x_t W_v$, the content this token hands over if someone selects it.
 
-$$\text{Attention}(Q, K, V) = \text{Softmax}\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
+The score between query $i$ and key $j$ is their dot product $q_i \cdot k_j$, which is large when the two vectors point the same way, near zero when they are unrelated, and negative when they point apart. Stacking the queries into a matrix $Q$ and the keys into $K$ (each of shape $S \times d_k$, where $S$ is the sequence length and $d_k$ the width of a query) gives all $S^2$ scores in one product, $Q K^T$. A softmax across each row turns the scores for query $i$ into proportions that sum to one, exactly the softmax of Chapter 4 applied row by row. The output for token $i$ is the weighted sum of the values, so the whole mechanism is
 
-::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="The quadratic $O(S^2)$ attention memory wall"}
-Consider a batch of sequences with sequence length $S = 2,048$, model dimension $D = 768$, and $H = 12$ heads ($d_k = 64$).
-- **Linear representations**: $Q, K, V \in \mathbb{R}^{B \times H \times S \times d_k}$. For batch size $B = 8$, the activations consume:
-  $$3 \times (8 \times 12 \times 2048 \times 64) \times 4\text{ bytes} \approx 150.99\text{ MB}$$
-- **Pairwise attention matrix**: The matrix product $Q K^T$ generates an affinity tensor of shape $(B, H, S, S)$:
-  $$\text{VRAM}_{\text{scores}} = 8 \times 12 \times 2,048 \times 2,048 \times 4\text{ bytes} = 1.61\text{ GB}$$
-- **Quadratic scaling bottleneck**: If the sequence length doubles to $S = 8,192$, the linear projection activations scale by $4\times$ to $604\text{ MB}$, but the intermediate attention matrix scales by $4^2 = 16\times$ to **$25.77\text{ GB}$**, immediately causing an Out-Of-Memory (OOM) crash on a standard 24 GB GPU!
-- **Bandwidth wall**: Materializing this score tensor requires round-tripping $25.77\text{ GB}$ across the slow high-bandwidth memory (HBM) bus twice (once for writing raw scores, once for reading during softmax), capping operational intensity at under $10\text{ FLOPs/byte}$.
-:::
+$$\text{Attention}(Q, K, V) = \text{softmax}\!\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-### Why $1/\sqrt{d_k}$ Restores Unit Variance: The Hardware Saturation Circuit Breaker
+where $V$ is the $S \times d_v$ matrix of values, $M$ is the mask we come to shortly, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name. Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
 
-By dividing the raw dot product by $\sqrt{d_k}$, the variance of the scaled attention scores becomes:
+### Why divide by $\sqrt{d_k}$
 
-$$\text{Var}\left( \frac{\mathbf{q}^T \mathbf{k}}{\sqrt{d_k}} \right) = \frac{1}{d_k} \text{Var}(\mathbf{q}^T \mathbf{k}) = \frac{d_k}{d_k} = 1.0$$
+Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument Chapter 3 made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a one-hot vector that nothing can learn through. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
-::: {.callout-note title="Napkin Math: Preventing IEEE 754 Floating-Point Underflow in Registers"}
-Why is this scaling factor essential for physical hardware?
-1. **The Variance Explosion**: For a standard head dimension $d_k = 64$, if components $q_i, k_i \sim \mathcal{N}(0, 1)$, their unscaled dot product $\mathbf{q}^T \mathbf{k}$ has standard deviation $\sigma = \sqrt{64} = 8.0$. Scores regularly swing between $-24.0$ and $+24.0$.
-2. **Softmax Saturation**: Evaluating $e^{24.0} \approx 2.6 \times 10^{10}$, while $e^{-24.0} \approx 3.7 \times 10^{-11}$. The softmax probability distribution collapses into an extreme one-hot peak: one token receives probability $1.0$, and all others receive $0.0$.
-3. **The Zero-Gradient Register Lockout**: The backward derivative of softmax is $\frac{\partial S_i}{\partial z_j} = S_i(\delta_{ij} - S_j)$. When probabilities saturate to $1.0$ or $0.0$, the gradient evaluates to $1.0 \times (1 - 1.0) = 0.0$ or $0.0 \times (0 - 0.0) = 0.0$. In IEEE 754 floating-point registers, the gradient underflows directly to bitwise zero! Backpropagation ceases, starving upstream weights of learning signals.
+### Causal masking
 
-Dividing by $\sqrt{64} = 8$ scales a large score of $24.0$ down to $3.0$. Because $e^{3.0} \approx 20.08$, probabilities remain distributed across tokens, keeping gradients alive in hardware registers. In production engines, PyTorch's C++ kernel `torch.nn.functional.scaled_dot_product_attention` (implemented via ATen's `at::_scaled_dot_product_attention`) fuses this division directly into the register pipeline of the forward matrix multiplication to avoid round-trip DRAM stalls.
-:::
+During generation the model predicts token $t+1$ from tokens $1$ through $t$. If it were allowed to read token $t+1$ while training, it would learn to copy rather than predict, and at generation time there would be nothing to copy. The rule is that query $i$ may attend to key $j$ only when $j \le i$, and we enforce it by adding a mask $M$ to the scores before the softmax:
 
-### Causal Masking: Enforcing the Arrow of Time
+$$M_{i,j} = \begin{cases} 0 & j \le i \quad \text{(past and present, allowed)} \\ -\infty & j > i \quad \text{(future, forbidden)} \end{cases}$$
 
-In autoregressive language generation (which we build into our complete generative inference loop in Milestone 2), token $t$ is allowed to attend to past tokens $1, 2, \dots, t$, but is strictly forbidden from "looking into the future" at tokens $t+1, t+2, \dots, S$.
-
-We enforce this constraint by adding a **Causal Lower-Triangular Mask Matrix** $M \in \mathbb{R}^{S \times S}$ to the affinity matrix prior to softmax:
-
-$$M_{i, j} = \begin{cases} 0 & \text{if } j \le i \quad \text{(Past and Present: Allowed)} \\ -\infty & \text{if } j > i \quad \text{(Future: Forbidden)} \end{cases}$$
-
-For a sequence of length $S = 4$, the causal mask matrix $M$ is:
+For four tokens the mask is zero on and below the diagonal and $-\infty$ above it:
 
 $$M = \begin{pmatrix} 0 & -\infty & -\infty & -\infty \\ 0 & 0 & -\infty & -\infty \\ 0 & 0 & 0 & -\infty \\ 0 & 0 & 0 & 0 \end{pmatrix}$$
 
-Upon applying softmax, $\exp(-\infty) = 0.0$, guaranteeing that future positions receive exactly zero attention weight and cannot leak information backward across the sequence. In physical memory, $-\infty$ is represented by the largest negative IEEE 754 floating-point value (`-1e9` or `-np.inf`).
+Because $e^{-\infty} = 0$, a masked position contributes nothing to the softmax denominator and receives exactly zero weight.
+
+### Several heads at once
+
+One attention pattern is one answer to "who looks at whom." A pronoun wants to find its noun; a verb wants its subject; a closing bracket wants its opening one. Multi-head attention runs $H$ of these patterns side by side. It splits the $D$ model dimensions into $H$ slices of width $d_k = D / H$, lets each head attend using only its slice of $Q$, $K$, and $V$, concatenates the $H$ outputs back into a $D$-wide row, and mixes them with one more learned matrix $W_o$. The model gets $H$ independent routing decisions per token instead of one, and the code section shows why the slicing, rather than $H$ full-width copies, is what makes that affordable.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 12** in the TinyTorch runtime: `packages/tinytorch/src/12_attention/12_attention.py`.
+Module 12 (`src/12_attention/12_attention.py`) is the NumPy-backed implementation students build in the TinyTorch course. It exposes `scaled_dot_product_attention(Q, K, V, mask)` and a `MultiHeadAttention(embed_dim, num_heads)` class with `_split_heads`, `_merge_heads`, `forward`, and `parameters`. The listings in this chapter are a stripped-down pure-Python model of the same design, working on one sequence stored as nested lists, small enough to show every step of the score, scale, mask, softmax, and mix pipeline.
 :::
 
-We implement Scaled Dot-Product Attention and Multi-Head Attention in TinyTorch:
+The listings use nested lists rather than the `Tensor` class so that every arithmetic step is visible, and they handle one sequence at a time; the real module runs a whole batch of sequences and all heads at once with array operations, which we return to in the production bridge. We build the pieces in the order the formula applies them. First the score matrix, then the row-wise softmax, then the mask, then the function that strings the three together with the scaling, and finally the layer that supplies the projections and the heads.
+
+### The score matrix
+
+Every token has to compare its query against every key. For GPT-2's context of 1,024 tokens that is $1024^2$, a little over a million scores, in each head of each layer, and every one of them is a 64-long dot product. The design attention replaced, the recurrent network,[^fn-recurrent-network-serial] avoided that all-pairs comparison by carrying one hidden state forward a token at a time, and paid for it with a chain of $S$ dependent steps. Token 1,024 cannot be processed until the 1,023 before it are finished, and no number of multiply units on a GPU can shorten a chain. A nested loop over $(i, j)$ pairs does the attention arithmetic but tells the hardware nothing about which scores are independent of which. The answer is to stack the queries into $Q$ and the keys into $K$, because then $Q K^T$ is one matrix product that produces every score at once, and every entry can be computed at the same time as every other. That is the shape a GPU is built to run, and it is the whole reason a transformer trains in one pass over a sequence.
+
+[^fn-recurrent-network-serial]: **Recurrent network** (RNN): a sequence model that keeps a single hidden state vector and updates it once per token, $h_t = \tanh(W_h h_{t-1} + W_x x_t)$, so the state at position $t$ depends on the state at $t-1$. Poor memory over long distances was one weakness; the one that decided the hardware question is the serial dependency, which forbids processing a whole sequence in one parallel pass.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/12_attention/12_attention.py
-import numpy as np
-from typing import List, Tuple, Optional
-from .autograd import Tensor
-from .layers import Layer, Linear
+import math
 
-def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor,
-                                 mask: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
-    """Compute Scaled Dot-Product Attention: Softmax(QK^T / sqrt(d_k) + Mask) V."""
-    d_k = Q.data.shape[-1]
-    scale = 1.0 / np.sqrt(d_k)
+def matmul(A, B):
+    """Multiply matrices stored as nested lists: (n, k) @ (k, m) -> (n, m)."""
+    out = []
+    for row in A:
+        out.append([sum(a * b for a, b in zip(row, col)) for col in zip(*B)])
+    return out
 
-    # 1. Compute raw affinity scores: Q @ K^T -> [batch, heads, seq_len, seq_len]
-    scores_data = np.matmul(Q.data, np.swapaxes(K.data, -1, -2)) * scale
+def transpose(A):
+    return [list(col) for col in zip(*A)]
+```
 
-    # 2. Apply causal mask if provided
+`matmul` is the textbook triple loop, and `zip(*B)` is the trick that walks the columns of $B$; for two tokens it is plenty. The real module calls `np.matmul` and PyTorch calls a cuBLAS GEMM, which run the same loop on thousands of multiply units at once.
+
+### Softmax by rows
+
+The Problem asked for weights that are proportions, non-negative and summing to one, so a token can commit most of its attention to one source. Each row of the score matrix is one query's scores, so each row needs its own softmax. The naive way is to exponentiate the raw scores. On my machine `math.exp(710)` raises `OverflowError`, because a Python float gives up at $e^{709.78}$; the float32 the real module uses gives up at $e^{88.72}$, which Chapter 4 showed is where the textbook softmax turns a row into `nan`, and Chapter 6's backward then turns every gradient into `nan` with it. Chapter 4's fix carries over unchanged. Subtract the row maximum before exponentiating, so the largest exponential is exactly $e^0 = 1$, nothing overflows, and the denominator is never zero.
+
+```python
+def softmax_rows(S):
+    """Softmax across each row, shifting by the row max so exp() cannot overflow."""
+    out = []
+    for row in S:
+        m = max(row)
+        exps = [math.exp(s - m) for s in row]
+        total = sum(exps)
+        out.append([e / total for e in exps])
+    return out
+```
+
+The function makes three passes over each row, one to find the maximum, one to exponentiate, one to divide. Keep that count in mind for the production bridge, where the row maximum becomes a running statistic so that softmax can finish without ever holding a whole row; PyTorch's name for this step is `softmax(dim=-1)`.
+
+### The causal mask
+
+Milestone 2 trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. Chapter 18 leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives. The tempting shortcut, zeroing the forbidden scores after the fact, produces a wrong number instead. A score of zero is an ordinary score. On my machine `softmax_rows([[0.7071, 0.0]])` returns `[0.67, 0.33]`, so a third of that token's attention would go to a token it is not allowed to see. So the mask is added, not multiplied, and the value it adds is $-\infty$, which the softmax turns into exactly zero weight and drops from the denominator.
+
+```python
+def causal_mask(seq_len):
+    """0.0 where key j <= query i (allowed), -inf where j > i (future)."""
+    return [[0.0 if j <= i else -math.inf for j in range(seq_len)]
+            for i in range(seq_len)]
+```
+
+The mask depends only on `seq_len`, so one mask serves every head and every layer and can be built once per sequence. Python's `math.exp(-math.inf)` returns `0.0` without complaint, so `softmax_rows` needs no special case for masked entries. The real module takes its mask as a matrix of ones and zeros (one means allowed) and converts it to the additive form internally with `(1 - mask) * -1e9`; PyTorch skips the matrix altogether when you pass `is_causal=True`.
+
+### Scores, scale, mask, softmax, mix
+
+The Idea showed that the raw scores have standard deviation $\sqrt{d_k}$. For the $d_k = 64$ that GPT-2 uses, that is 8, and it is worth seeing what 8 does to a softmax. I drew 2,000 random query and key pairs at $d_k = 64$; the measured standard deviation was 8.0 and the largest dot product was 29. Feed scores like that straight in and the softmax is finished before training starts. On my machine `softmax_rows([[24.0, -8.0, 0.0]])` puts $1 - 4 \times 10^{-11}$ on the first entry and $3.8 \times 10^{-11}$ on the last, a one-hot vector to ten decimal places. The derivative of a softmax output with respect to its input is proportional to $p(1 - p)$, which is zero at both ends, so a saturated row passes back no gradient and the $W_q$ and $W_k$ that produced it stop learning. Dividing by $\sqrt{d_k}$ is the fix. The score of 24 becomes 3, $e^{3} \approx 20$ rather than $e^{24} \approx 2.6 \times 10^{10}$, and `softmax_rows([[3.0, -1.0, 0.0]])` gives `[0.936, 0.017, 0.047]`, still decisive but with mass left to move. With the three pieces above in hand, attention is the formula written out in order.
+
+```python
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    """softmax(Q K^T / sqrt(d_k) + mask) V for one sequence."""
+    d_k = len(Q[0])
+    scores = matmul(Q, transpose(K))                              # (S, S)
+    scores = [[s / math.sqrt(d_k) for s in row] for row in scores]
     if mask is not None:
-        scores_data = scores_data + mask.data
+        scores = [[s + m for s, m in zip(row, mrow)]
+                  for row, mrow in zip(scores, mask)]
+    weights = softmax_rows(scores)                                # rows sum to 1
+    return matmul(weights, V), weights
+```
 
-    # 3. Numerically stable softmax across the last dimension
-    max_scores = np.max(scores_data, axis=-1, keepdims=True)
-    exp_scores = np.exp(scores_data - max_scores)
-    attn_weights_data = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
+`d_k` is read from the width of `Q` rather than passed in, so the same function serves a full-width head and a sliced one. The function returns the weights alongside the output because the weights are the thing you inspect when attention misbehaves. The real module splits the same four steps into `_compute_attention_scores`, `_scale_scores`, and `_apply_mask` helpers, and PyTorch's `F.scaled_dot_product_attention` takes the same `(Q, K, V, mask)` arguments.
 
-    # 4. Multiply attention weights by Values: Attn @ V -> [batch, heads, seq_len, d_k]
-    out_data = np.matmul(attn_weights_data, V.data)
+### The projections
 
-    out_tensor = Tensor(out_data)
-    attn_weights = Tensor(attn_weights_data)
-    out_tensor._op = "ScaledDotProductAttention"
-    out_tensor._parents = [Q, K, V]
-    return out_tensor, attn_weights
+The formula takes $Q$, $K$, and $V$ as given, but the sequence only provides $X$. The naive move is to use $X$ for all three. Then the score between tokens $i$ and $j$ is $x_i \cdot x_j$, which equals $x_j \cdot x_i$, so whatever *it* thinks of *machine*, *machine* is forced to think of *it* in the same amount, and one vector has to serve as the question, the advertisement, and the content at once. There is also nothing to train except the embeddings, which every other layer needs for its own purposes. Three learned matrices give the network three different linear views of the same token, and a fourth, $W_o$, mixes the heads back together. That is four $D \times D$ matrices, 2.36 million weights per layer at $D = 768$, the $4D^2$ term in Chapter 13's parameter count.
 
-class MultiHeadAttention(Layer):
-    """Multi-Head Attention Layer with Parallel Projections."""
-    def __init__(self, embed_dim: int, num_heads: int):
-        super().__init__()
+Their initial scale matters as much as their existence. With unit-variance entries in $W_q$, each entry of $q = x W_q$ would sum $D$ unit-variance products and have variance $D$, and the scores would inherit that twice over. I measured it at $D = 768$. Weights drawn straight from `gauss(0, 1)` gave head scores with a standard deviation of about 6,100, and dividing by $\sqrt{64}$ still left 770, which saturates the softmax as surely as no scaling at all. The same weights scaled by $1/\sqrt{D}$ gave 7.3, and 0.9 after the division. That is Chapter 3's $1/\sqrt{D_{\text{in}}}$ rule for `Linear`, applied to all four matrices, with a seeded generator so runs are repeatable.
+
+```python
+import random
+
+class MultiHeadAttention:
+    def __init__(self, embed_dim, num_heads, seed=0):
         if embed_dim % num_heads != 0:
-            raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
-
+            raise ValueError(f"embed_dim {embed_dim} must divide evenly into {num_heads} heads")
         self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.d_k = embed_dim // num_heads
+        self.head_dim = embed_dim // num_heads
+        rng = random.Random(seed)
+        def weight():
+            return [[rng.gauss(0.0, 1.0) / math.sqrt(embed_dim) for _ in range(embed_dim)]
+                    for _ in range(embed_dim)]
+        self.W_q, self.W_k, self.W_v, self.W_o = weight(), weight(), weight(), weight()
 
-        # Linear projections for Q, K, V and Output
-        self.q_proj = Linear(embed_dim, embed_dim)
-        self.k_proj = Linear(embed_dim, embed_dim)
-        self.v_proj = Linear(embed_dim, embed_dim)
-        self.out_proj = Linear(embed_dim, embed_dim)
-
-    def parameters(self) -> List[Tensor]:
-        return (self.q_proj.parameters() + self.k_proj.parameters() +
-                self.v_proj.parameters() + self.out_proj.parameters())
-
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        """Forward multi-head attention over input sequence."""
-        B, S, D = x.data.shape
-        H = self.num_heads
-        d_k = self.d_k
-
-        # 1. Project inputs to Q, K, V
-        Q = self.q_proj.forward(x)  # [B, S, D]
-        K = self.k_proj.forward(x)  # [B, S, D]
-        V = self.v_proj.forward(x)  # [B, S, D]
-
-        # 2. Reshape and transpose for multi-head parallel attention: [B, H, S, d_k]
-        Q_heads = Tensor(Q.data.reshape(B, S, H, d_k).swapaxes(1, 2))
-        K_heads = Tensor(K.data.reshape(B, S, H, d_k).swapaxes(1, 2))
-        V_heads = Tensor(V.data.reshape(B, S, H, d_k).swapaxes(1, 2))
-
-        # 3. Scaled dot-product attention across all heads simultaneously
-        attn_out, _ = scaled_dot_product_attention(Q_heads, K_heads, V_heads, mask)
-
-        # 4. Concatenate heads back into [B, S, D]
-        out_concat_data = attn_out.data.swapaxes(1, 2).reshape(B, S, D)
-        out_concat = Tensor(out_concat_data)
-
-        # 5. Final output projection
-        return self.out_proj.forward(out_concat)
+    def parameters(self):
+        return [self.W_q, self.W_k, self.W_v, self.W_o]
 ```
 
----
+The constructor refuses an `embed_dim` that does not divide into `num_heads`, because the head loop below slices `embed_dim` into `num_heads` equal strips. `parameters` returns the four matrices in the order Chapter 13 expects. PyTorch's `nn.MultiheadAttention` holds the same four, with $W_q$, $W_k$, and $W_v$ stacked into one `in_proj_weight` and $W_o$ as `out_proj`.
 
-## Concrete Numerical Trace Table: Tracing Causal Attention Step-by-Step
+### The head loop
 
-Let us trace a concrete 2-token causal attention operation with head dimension $d_k = 2$ ($\sqrt{d_k} = \sqrt{2} \approx 1.4142$):
-
-$$\mathbf{Q} = \begin{bmatrix} 1.0 & 0.0 \\ 0.0 & 2.0 \end{bmatrix}, \quad \mathbf{K} = \begin{bmatrix} 1.0 & 1.0 \\ 1.0 & 0.0 \end{bmatrix}, \quad \mathbf{V} = \begin{bmatrix} 2.0 & 1.0 \\ 0.0 & 3.0 \end{bmatrix}, \quad \mathbf{M} = \begin{bmatrix} 0.0 & -\infty \\ 0.0 & 0.0 \end{bmatrix}$$
-
-### Step-by-Step Numerical Walkthrough
-
-| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) | Memory & Hardware State |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ | 16 bytes in DRAM (4 floats in 1 cache line) |
-| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ | Fused in SIMD registers without DRAM traffic |
-| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ | In-place register addition, zero allocation |
-| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ | Exponentiation and row-sum in L1 cache |
-| **5. Value Projection** | $\mathbf{A} \cdot \mathbf{V}$ | $\sum_j A_{ij} V_{j,:}$ | $1.0[2, 1] + 0.0[0, 3] = \mathbf{[2.0000, 1.0000]}$ | $0.8044[2, 1] + 0.1956[0, 3] = \mathbf{[1.6088, 1.3912]}$ | Output tensor: $2 \times 2$ matrix (16 bytes) |
-
-: Concrete 5-step numerical trace of scaled dot-product attention with causal masking on a 2-token sequence. {#tbl-attention-trace tbl-colwidths="[12,18,14,18,18,20]"}
+The Idea said a pronoun, a verb, and a closing bracket each want a different routing pattern, and GPT-2 small gives them twelve. The naive way to get twelve patterns is twelve full-width attention layers side by side, each with its own four $768 \times 768$ matrices. That is 28.3 million weights per layer instead of 2.36 million, and twelve times the score arithmetic, $12 \times S^2 \times D$ multiply-adds. The mechanism that makes twelve heads cost what one head costs is the slice. Project once at full width, cut each of $Q$, $K$, and $V$ into twelve strips of 64 columns, run attention on each strip, and concatenate. The score work is $H \times S^2 \times d_k = S^2 \times D$, the same as a single head, and the four matrices are shared by all of them.
 
 ```python
-# Hand-Verification Script: Run with standard Python and NumPy
-import numpy as np
+    def _split_heads(self, X):
+        """(S, D) -> list of H matrices, each (S, head_dim)."""
+        h = self.head_dim
+        return [[row[i * h:(i + 1) * h] for row in X] for i in range(self.num_heads)]
 
-Q = np.array([[1.0, 0.0], [0.0, 2.0]])
-K = np.array([[1.0, 1.0], [1.0, 0.0]])
-V = np.array([[2.0, 1.0], [0.0, 3.0]])
-M = np.array([[0.0, -np.inf], [0.0, 0.0]])
+    def _merge_heads(self, heads):
+        """list of H matrices (S, head_dim) -> (S, D), by concatenating each row."""
+        return [sum((head[t] for head in heads), []) for t in range(len(heads[0]))]
 
-# 1 & 2: Dot product and scale
-scores = (Q @ K.T) / np.sqrt(2.0)
-# 3: Causal Mask
-masked_scores = scores + M
-# 4: Softmax
-weights = np.exp(masked_scores - np.max(masked_scores, axis=-1, keepdims=True))
-weights = weights / np.sum(weights, axis=-1, keepdims=True)
-# 5: Output Projection
-output = weights @ V
-
-print("Attention Weights:\n", np.round(weights, 4))
-print("Attended Output:\n", np.round(output, 4))
-# Output matches trace table exactly: [[2.0, 1.0], [1.6088, 1.3912]]
+    def forward(self, X, mask=None):
+        Q, K, V = matmul(X, self.W_q), matmul(X, self.W_k), matmul(X, self.W_v)
+        outputs = []
+        for Qh, Kh, Vh in zip(self._split_heads(Q), self._split_heads(K), self._split_heads(V)):
+            out_h, _ = scaled_dot_product_attention(Qh, Kh, Vh, mask)
+            outputs.append(out_h)
+        return matmul(self._merge_heads(outputs), self.W_o)
 ```
 
-Token 0 attends strictly to itself ($100\%$), while Token 1 attends $80.4\%$ to Token 0 and $19.6\%$ to itself.
+Three things are worth noticing. The projections are computed once at full width and then sliced, so a head never sees more than its own `head_dim` columns of $Q$, $K$, and $V$. The same mask is handed to every head, because causality is a property of the sequence, not of a head. And `_split_heads` and `_merge_heads` are pure bookkeeping. Here the slices are Python list copies, which is fine for three tokens; in the real module they are a `reshape` followed by a `transpose`, which Chapter 1 showed is a change of strides rather than a copy, so the split costs nothing. The `for` loop over heads is the line the production bridge replaces with one batched multiply.
 
 ---
 
-## The Production Bridge: FlashAttention-2 and SRAM Tiling
+## A Worked Trace
 
-In standard PyTorch, materializing the attention score matrix $S = Q K^T$ requires allocating $O(S^2)$ bytes in GPU HBM (DRAM):
+Two tokens with $d_k = 2$ are enough to see every step. Take
 
-1. **Score GEMM**: Load $Q$ and $K$ from DRAM $\to$ compute $S = Q K^T$ $\to$ write $S$ back to DRAM ($O(S^2)$ memory traffic).
-2. **Softmax reduction**: Load $S$ from DRAM $\to$ compute Softmax in SRAM registers $\to$ write normalized weights $P$ back to DRAM ($O(S^2)$ memory traffic).
-3. **Value GEMM**: Load $P$ and $V$ from DRAM $\to$ compute $O = P V$ $\to$ write output $O$ to DRAM ($O(S \cdot d_k)$ memory traffic).
+$$\mathbf{Q} = \begin{bmatrix} 1 & 0 \\ 0 & 2 \end{bmatrix}, \quad \mathbf{K} = \begin{bmatrix} 1 & 1 \\ 1 & 0 \end{bmatrix}, \quad \mathbf{V} = \begin{bmatrix} 2 & 1 \\ 0 & 3 \end{bmatrix}, \quad \mathbf{M} = \begin{bmatrix} 0 & -\infty \\ 0 & 0 \end{bmatrix}$$
 
-For long sequences ($S = 8,192$), DRAM bandwidth stalls consume $80\%$ of execution time because the operational intensity is low (streaming $O(S^2)$ bytes back and forth across the slow memory bus, an operational trade-off we analyze formally in Chapter 14's Roofline model).
+so that $\sqrt{d_k} = \sqrt{2} \approx 1.4142$. Row 0 belongs to token 0 and may only see itself; row 1 belongs to token 1 and may see both.
 
-In 2022, Tri Dao introduced **FlashAttention-2**:
+| Step | Operation | Token 0 (row 0) | Token 1 (row 1) |
+| :--- | :--- | :--- | :--- |
+| 1 | Scores $Q K^T$ | $[1\cdot1 + 0\cdot1,\ 1\cdot1 + 0\cdot0] = [1.0, 1.0]$ | $[0\cdot1 + 2\cdot1,\ 0\cdot1 + 2\cdot0] = [2.0, 0.0]$ |
+| 2 | Divide by $\sqrt{2}$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0]$ |
+| 3 | Add mask $M$ | $[0.7071, -\infty]$ | $[1.4142, 0.0]$ |
+| 4 | Softmax per row | $[1.0, 0.0]$ | $[\tfrac{4.11325}{5.11325}, \tfrac{1.0}{5.11325}] = [0.80443, 0.19557]$ |
+| 5 | Weights $\cdot V$ | $1.0\,[2, 1] + 0.0\,[0, 3] = [2.0, 1.0]$ | $0.80443\,[2, 1] + 0.19557\,[0, 3] = [1.6089, 1.3911]$ |
 
-::: {.callout-note title="FlashAttention-2 SRAM Tiling Engine"}
-1. **Block Tiling**: Divide $Q, K, V$ into SRAM-sized blocks (e.g., $128 \times 128$).
-2. **Online Softmax**: Compute incremental softmax statistics ($m_i, \ell_i$) across tiles without ever materializing or writing the full $S$ matrix back to DRAM.
-3. **Zero DRAM $S$ Matrix**: Completely eliminates the $O(S^2)$ memory footprint from DRAM.
-4. **Impact**: $3\times$ to $5\times$ wall-clock speedup with an $O(S)$ peak memory footprint.
-:::
+: Scaled dot-product attention with a causal mask on a two-token sequence, one row per token. {#tbl-attention-trace tbl-colwidths="[8,22,35,35]"}
 
-PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attention`, executing inside fast on-chip SRAM with zero DRAM traffic for the intermediate attention weights.
+Token 0's second score was $0.7071$ before masking, a perfectly respectable value, and the mask removed it entirely; that is the $-\infty$ doing its job. Token 1 puts $80\%$ of its weight on token 0 because its query $[0, 2]$ aligns with key $[1, 1]$ and is orthogonal to key $[1, 0]$. Running the listings on the same inputs reproduces the table.
+
+```python
+Q = [[1.0, 0.0], [0.0, 2.0]]
+K = [[1.0, 1.0], [1.0, 0.0]]
+V = [[2.0, 1.0], [0.0, 3.0]]
+M = causal_mask(2)
+
+raw = matmul(Q, transpose(K))
+print("scores:  ", raw)                                       # [[1.0, 1.0], [2.0, 0.0]]
+print("scaled:  ", [[round(s / math.sqrt(2), 4) for s in r] for r in raw])
+out, w = scaled_dot_product_attention(Q, K, V, mask=M)
+print("weights: ", [[round(x, 4) for x in r] for r in w])     # [[1.0, 0.0], [0.8044, 0.1956]]
+print("output:  ", [[round(x, 4) for x in r] for r in out])   # [[2.0, 1.0], [1.6089, 1.3911]]
+```
+
+The layer adds only shapes to this picture. Feeding three tokens of width four through two heads gives per-head matrices of width two, a $3 \times 3$ weight matrix per head whose upper triangle is zero and whose rows sum to one, and an output the same shape as the input.
+
+```python
+mha = MultiHeadAttention(embed_dim=4, num_heads=2)
+X = [[1.0, 0.0, 0.0, 0.0],
+     [0.0, 1.0, 0.0, 0.0],
+     [0.0, 0.0, 1.0, 0.0]]
+Y = mha.forward(X, mask=causal_mask(3))
+print(len(Y), len(Y[0]))                                       # 3 4: same shape as X
+
+Q0 = mha._split_heads(matmul(X, mha.W_q))[0]                   # head 0's queries, (3, 2)
+K0 = mha._split_heads(matmul(X, mha.W_k))[0]
+_, w0 = scaled_dot_product_attention(Q0, K0, Q0, mask=causal_mask(3))
+for row in w0:
+    print([round(x, 3) for x in row], "sum =", round(sum(row), 6))
+# each row sums to 1; entries above the diagonal are exactly 0.0
+```
+
+Two invariants hold in every row of every head: the weights sum to one, and everything above the diagonal is exactly zero. Those are the two checks worth writing as assertions in any attention code you touch.
 
 ---
 
-## Building the System: How It All Connects
+## From TinyTorch to Production
 
-As illustrated in @fig-attention-engine, the complete multi-head attention dataflow executes through four synchronized stages:
+The listings above materialize the $S \times S$ score matrix, run softmax over it, and multiply it by $V$. Production systems compute the identical function but refuse to build that matrix, because for realistic sequence lengths it is the largest object in the whole model.
 
-1. **Input buffer**: Contiguous token activations $X \in \mathbb{R}^{B \times S \times D}$ stream from DRAM.
-2. **Parallel head projection**: $X$ is multiplied by projection weights to produce $Q, K, V$, reshaped into $(B, H, S, d_k)$ in contiguous memory.
-3. **Causal attention core**: For each head, scaled dot-product attention computes softmax weights under causal masking.
-4. **Output projection GEMM**: The concatenated head representations pass through a dense linear layer into L1/L2 cache before reaching the residual stream.
+::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="Napkin math: the quadratic attention memory wall"}
+Take GPT-2 sized attention, $H = 12$ heads of $d_k = 64$ ($D = 768$), a batch of $B = 8$ sequences, and 4-byte floats.
 
-::: {.callout-note title="Systems Summary: The Operational Profile"}
-- **Memory Footprint**: Input tokens of shape $(B, S, D)$ consume $B \cdot S \cdot D \times 4$ bytes. Multi-head projection preserves this footprint, whereas the unscaled attention matrix momentarily demands $B \cdot H \cdot S^2 \times 4$ bytes.
-- **Computational Profile**: Scaled dot-product attention executes $4 B \cdot S^2 \cdot d_k$ floating-point operations while transferring $O(B \cdot S \cdot D + B \cdot H \cdot S^2)$ bytes. For small sequence lengths, attention is memory-bound; for long sequences ($S > 1024$), it shifts toward compute-bound execution (which we accelerate using memory fusion in Chapter 17).
-- **Production Bridge**: TinyTorch's `MultiHeadAttention` class directly mirrors `torch.nn.MultiheadAttention`, using linear projections and batched tensor reshaping to parallelize across all attention heads simultaneously in contiguous memory via C++ ATen operators.
+- **Projections**: $Q$, $K$, and $V$ are each $B \times H \times S \times d_k$. At $S = 2{,}048$ that is $3 \times 8 \times 12 \times 2048 \times 64 \times 4 \approx 151\text{ MB}$, and it grows linearly with $S$.
+- **Score matrix**: $B \times H \times S \times S$. At $S = 2{,}048$ that is $8 \times 12 \times 2048 \times 2048 \times 4 \approx 1.61\text{ GB}$, ten times the projections.
+- **Double the context**: at $S = 8{,}192$ the projections reach $604\text{ MB}$ but the score matrix reaches $16\times$ its former size, about $25.8\text{ GB}$, which no longer fits on a 24 GB GPU alongside the weights.
+- **Traffic**: the naive pipeline writes the score matrix to GPU memory after the first matrix multiply, reads it back for softmax, writes the weights, and reads them again for the multiply by $V$. That is four passes over the largest tensor in the model for an operation whose arithmetic is modest.
 :::
 
-We now have multi-head scaled attention that routes context across tokens with causal discipline.
+The forcing function is the last bullet. GPU main memory (HBM, the high-bandwidth memory stacked next to the chip) is far slower than the small on-chip SRAM each compute unit owns, and the naive pipeline spends its time moving the score matrix between the two rather than doing arithmetic. FlashAttention (Dao and colleagues, 2022) restructures the computation so the score matrix never exists in full. It cuts $Q$, $K$, and $V$ into blocks small enough to sit in SRAM, computes one block of scores at a time, and keeps a running maximum and running sum for each row so that the softmax can be finished incrementally as later blocks arrive. That running-statistics trick is called **online softmax**, and it is the only new mathematics involved; the shifted softmax you built in Chapter 4 is exactly what it computes, accumulated block by block instead of over a whole row at once. The result is the same output with memory that grows linearly in $S$ rather than quadratically, and the paper reports attention running two to four times faster on the GPUs it measured. PyTorch exposes this through `torch.nn.functional.scaled_dot_product_attention`, which dispatches among a FlashAttention kernel (the GPU term for one compiled function that runs on the device), a memory-efficient fallback, and a plain "math" backend equivalent to our listing, depending on the data type, the head width, and the kind of mask you supply. Passing `is_causal=True` instead of an explicit mask lets the kernel skip the upper-triangle blocks entirely rather than computing them and adding $-\infty$.
 
-However, stacking ten layers of raw attention directly on top of each other causes activations to explode and gradients to vanish. How do we stabilize deep transformer stacks and provide non-linear feature transformations?
+The head loop also disappears. The real TinyTorch module and PyTorch both hold $Q$, $K$, and $V$ as four-dimensional arrays of shape $(B, H, S, d_k)$ and issue one batched matrix multiply for all $B \times H$ score matrices at once, which is what keeps the GPU's multiply units busy; `_split_heads` and `_merge_heads` are the reshape-and-transpose views from Chapter 1, and the only copy is a `contiguous()` before the output projection. Position enters at this point too. The rotary encoding described at the end of Chapter 11 is applied to $q$ and $k$ immediately before the score is taken, inside the same kernel. At inference time one more optimization matters more than any of these. Keys and values for past tokens do not change when a new token arrives, so they are cached rather than recomputed, and Chapter 18 builds that cache. Variants such as multi-query and grouped-query attention, in which several heads share one set of keys and values, exist mainly to shrink it.
 
-In **Chapter 13**, we construct **The Transformer: Assembling GPT-2 with Pre-LN Residual Highways**.
+| | This chapter | PyTorch with FlashAttention |
+| :--- | :--- | :--- |
+| Heads | Python loop, one at a time | One batched multiply over $(B, H, S, d_k)$ |
+| Score matrix | Built in full as an $S \times S$ list | Never materialized; computed in SRAM-sized blocks |
+| Softmax | Two passes over a finished row | Online: running max and sum across blocks |
+| Causal mask | Additive $0/-\infty$ matrix | `is_causal=True`; masked blocks are skipped |
+| Precision | Python 64-bit floats | 16-bit inputs, 32-bit accumulation |
+| Memory in $S$ | Quadratic | Linear |
+
+: What changes between the pure-Python model and a production attention kernel. The function computed is the same. {#tbl-attention-bridge tbl-colwidths="[18,38,44]"}
+
+What carries over is everything the reader has just built. Every backend, fused or not, computes $\text{softmax}(Q K^T / \sqrt{d_k} + M)\,V$ with the same $\sqrt{d_k}$, the same additive $-\infty$ convention for forbidden positions, the same head split, and the same $W_o$ mix. The two invariants from the trace still hold in every row of every head on every device. If you print the attention weights from a PyTorch model and a row does not sum to one or has mass above the diagonal, the bug is in your mask, not in the kernel.
+
+In your own work, watch for three things. Attention cost is quadratic in context length, so doubling the context quadruples both the score arithmetic and, on a non-fused path, the memory; if a model that fits at one context length dies at twice that length, this is the first suspect. Check which backend `scaled_dot_product_attention` actually chose, since an unusual mask shape or a head width that is not a multiple of eight silently falls back to the math path and reintroduces the full score matrix. And when attention shows up in a profile as slow despite low arithmetic, it is the memory traffic in the napkin math above that you are seeing; Chapter 14 gives you the tool for telling the two apart.
+
+---
+
+## Summary
+
+You built scaled dot-product attention as four steps, dot-product scores, division by $\sqrt{d_k}$, an additive causal mask, and a row-wise softmax that weights the values, and wrapped it in a `MultiHeadAttention` layer that projects the input into queries, keys, and values, runs $H$ heads on $D/H$-wide slices, and mixes the concatenated result with one more matrix. The principle to keep is that attention is content-addressed mixing. The weights are computed from the tokens themselves, they are proportions, and the whole thing is matrix arithmetic that runs for all tokens at once. Two invariants follow from the construction and are worth asserting everywhere: every row of weights sums to one, and with a causal mask nothing above the diagonal is nonzero. Production kernels change how the arithmetic is scheduled, never what it computes. Chapter 13 takes `MultiHeadAttention(embed_dim, num_heads)` with its `forward(x, mask)` and the additive causal mask for granted and asks how to stack many such layers without the activations blowing up or the gradients vanishing.
+
+---
+
+## Exercises
+
+1. **Bidirectional attention.** Call `scaled_dot_product_attention` on the worked-trace inputs with `mask=None`. Token 0's output changes; explain from the scores why it moves toward $V$'s second row, and state which tasks (such as classification of a whole sentence) can use this unmasked form and which cannot.
+2. **Saturation without scaling.** Draw $Q$ and $K$ with $S = 8$ rows of $d_k = 64$ standard-normal entries using `random.gauss`, compute the softmax weights with and without the $\sqrt{d_k}$ division, and count how many of the eight rows put more than $0.99$ of their weight on a single key in each case. Repeat for $d_k = 4$ and explain the difference.
+3. **Padding mask.** Sequences in a batch are padded to a common length. Write `padding_mask(lengths, seq_len)` that returns, for one sequence of true length $\ell$, an additive mask forbidding every key $j \ge \ell$, combine it with `causal_mask` by elementwise addition, and check that the weight rows still sum to one and that padded keys receive exactly zero.

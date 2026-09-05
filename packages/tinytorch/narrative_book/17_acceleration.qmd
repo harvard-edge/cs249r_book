@@ -1,229 +1,301 @@
-# Hardware Acceleration: Kernel Fusion and SRAM Register Residency {#sec-acceleration}
+# Acceleration: Kernel Fusion and Cache Tiling {#sec-acceleration}
 
-In Chapters 15 and 16, we attacked memory bandwidth from the perspective of data representations: quantizing precision and compressing matrix ranks. Yet when we inspect the instruction execution trace of our transformer block, we find a massive systems inefficiency: **repeated kernel launch overhead and unnecessary DRAM roundtrips**.
+After Chapter 16 the weights are as small as quantization and compression can make them, and the forward pass is still slow. Profile a transformer block with the Chapter 14 tools and the matrix multiplies are not the whole story. A surprising share of the time goes to the cheap operations between them, the bias add, the GELU, the residual add, and the normalization, none of which does much arithmetic. This chapter asks the question a practitioner asks when the profiler shows that. Why does a chain of trivial operations cost as much as the matrix multiply it follows, and what can a framework do about it without changing a single number in the model?
 
-In this chapter, we engineer **Operator Kernel Fusion (`fused_gelu`)** and **Cache-Tiled Matrix Multiplication (`tiled_matmul`)**. We explore why executing elementwise operations separately wastes over $70\%$ of execution time on DRAM memory bus traffic, and how keeping intermediate tensors resident in ultra-fast on-chip **SRAM registers** eliminates memory bottlenecks.
+The answer is that time is not spent on arithmetic. It is spent moving data between the large, slow memory where tensors live and the small, fast memory next to the arithmetic units. An operation's cost is set by how many times its bytes cross that boundary. The two mechanisms in this chapter cut the number of crossings in two different situations. **Kernel fusion** runs a chain of elementwise operations as one pass over the data instead of one pass per operation. **Cache tiling** reorders the loops of a matrix multiply so that each block of the inputs, once fetched into fast memory, is reused many times before it is evicted. The arithmetic is identical before and after; only the traffic changes.
 
-![Hardware Memory Hierarchy and Kernel Fusion: The 100x Bandwidth Gap Between On-Chip SRAM Registers and Off-Chip DRAM](assets/images/diagrams/17_acceleration-diag-1.svg){#fig-kernel-fusion}
-
----
-
-## Systems Problem Motivation: The DRAM Roundtrip Tax in Deep Networks
-
-Consider the standard feed-forward block inside a transformer: an affine transformation followed by bias addition and GELU activation:
-
-$$h = \text{Linear}(x), \qquad z = h + b, \qquad a = \text{GELU}(z)$$
-
-In a naive framework runtime, evaluating $h + b$ followed by $\text{GELU}(z)$ executes as **two separate kernel launches**:
-
-1. **Kernel 1 (Bias Add)**:
-   - Read $h$ from off-chip DRAM ($3.2\text{ MB}$) $\to$ ALUs compute $z = h + b$ $\to$ write $z$ back to off-chip DRAM ($3.2\text{ MB}$).
-2. **Kernel 2 (GELU Activation)**:
-   - Read $z$ from off-chip DRAM ($3.2\text{ MB}$) $\to$ ALUs compute $a = \text{GELU}(z)$ $\to$ write $a$ back to off-chip DRAM ($3.2\text{ MB}$).
-
-Total DRAM traffic: **$12.8\text{ MB}$** streamed across the slow DRAM bus, spending over $85\%$ of layer execution time stalled on memory transfers.
-
-| Storage Level | Typical Capacity | Access Latency | Transfer Bandwidth |
-| :--- | :--- | :--- | :--- |
-| **SRAM / Registers** | ~256 KB per SM | ~1 nanosecond | ~20.0 Terabytes/s |
-| **L2 Cache** | ~50 MB | ~5 nanoseconds | ~6.0 Terabytes/s |
-| **Off-Chip HBM / DRAM** | 80 GB | ~200 nanoseconds | ~2.0 Terabytes/s |
-| **Host Main RAM (DDR5)** | 512 GB | ~100 nanoseconds | ~100 Gigabytes/s |
-
-: The hardware memory hierarchy latency and bandwidth gap. {#tbl-memory-hierarchy tbl-colwidths="[25,25,25,25]"}
-
-Reading data from off-chip DRAM is **$200\times$ slower** than reading from on-chip SRAM registers. Writing intermediate tensor $z$ back to DRAM only to immediately read it back into registers one microsecond later is pure waste.
-
-::: {#nbk-acceleration-fusion-dram-traffic-cut .callout-notebook title="Fused kernel DRAM traffic reduction and register bandwidth"}
-Consider fusing a sequence of $K = 4$ elementwise operations (BiasAdd $\to$ GELU $\to$ Dropout $\to$ ResidualAdd) on an activation tensor of size $M = 4,096$ tokens and $D = 4,096$ channels ($67.1\text{ MB}$ in FP32):
-- **Unfused DRAM traffic**:
-  Each operation reads $67.1\text{ MB}$ and writes $67.1\text{ MB}$:
-  $$\text{DRAM Traffic}_{\text{unfused}} = 2 \times K \times 67.1\text{ MB} = 8 \times 67.1\text{ MB} \approx 536.8\text{ MB}$$
-- **Fused DRAM traffic**:
-  The kernel loads the input once into SIMD vector registers, executes all four operations directly in registers, and writes the output once:
-  $$\text{DRAM Traffic}_{\text{fused}} = 67.1\text{ MB} (\text{load}) + 67.1\text{ MB} (\text{store}) = 134.2\text{ MB}$$
-  $$\text{DRAM Traffic Reduction} = \frac{536.8}{134.2} = \mathbf{4.0\times}$$
-- **Kernel launch latency savings**:
-  At $4\ \mu\text{s}$ driver dispatch overhead per launch, fusing four kernels into one eliminates $12\ \mu\text{s}$ of CPU-GPU synchronization stalls per layer.
-:::
-
-Furthermore, on modern GPU architectures, launching an independent CUDA kernel incurs a driver dispatch overhead of $3\text{--}5\text{ microseconds}$. When a deep transformer executes dozens of small elementwise layers (LayerNorm, Residual Add, GELU, Softmax), CPU kernel launch overhead accumulates, leaving the GPU arithmetic units starved for work. In addition, when threads in a warp access non-contiguous memory, GPU hardware decomposes a single 128-byte memory transaction into multiple serialized memory requests, causing severe memory bank conflicts and stalling arithmetic pipelines.
+![Two ways to cut memory traffic. Kernel fusion (left) keeps the intermediate result of a chain of elementwise operations in fast on-chip memory instead of writing it back to main memory between steps. Cache tiling (right) fetches a block of each matrix once and reuses it for many multiply-adds before moving on.](assets/images/diagrams/17_acceleration-diag-1.svg){#fig-kernel-fusion}
 
 ---
 
-## The Mental Model: Kernel Fusion and Cache Tiling
+## The Problem
 
-As illustrated in @fig-kernel-fusion, systems acceleration relies on two complementary hardware architectural principles: keeping activations inside on-chip register files and tiling memory blocks to maximize cache residency.
+Here is the experiment I start with. Take a large matrix of 32-bit floats and add up all its entries twice. The first time, walk it row by row. The second time, walk it column by column. Both loops perform exactly the same 67 million additions.
 
-#### Kernel Fusion: SRAM Register Residency
+```python
+import numpy as np
+import time
 
-**Kernel Fusion** fuses multiple consecutive elementwise or reduction operations into a **single unified kernel**:
+A = np.random.randn(8192, 8192).astype(np.float32)   # 268 MB
 
-1. **Vector Load**: Load $h$ from DRAM directly into on-chip SRAM registers via coalesced 128-bit vector loads.
-2. **In-Register Arithmetic**: Compute $z = h + b$ directly inside ALU registers.
-3. **Pipelined Activation**: Compute $a = \text{GELU}(z)$ immediately in registers without ever writing intermediate $z$ to DRAM.
-4. **Single Store**: Write final activation $a$ to DRAM once.
+def sum_by_rows(A):
+    total = 0.0
+    for i in range(A.shape[0]):
+        total += A[i, :].sum()      # 8192 values, adjacent in memory
+    return total
 
-#### Cache-Tiled Matrix Multiplication
+def sum_by_cols(A):
+    total = 0.0
+    for j in range(A.shape[1]):
+        total += A[:, j].sum()      # 8192 values, each 32 KB apart
+    return total
 
-When multiplying two matrices $C = A \cdot B$, a naive triple-nested loop accesses elements of $B$ in non-contiguous column order, repeatedly evicting cache lines.
+for f in (sum_by_rows, sum_by_cols):
+    f(A)                             # warm up once
+    t0 = time.perf_counter()
+    f(A)
+    print(f"{f.__name__}: {(time.perf_counter() - t0) * 1e3:.0f} ms")
+```
 
-**Cache Tiling** partitions matrices $A$ and $B$ into square blocks ($T \times T$, e.g., $64 \times 64$) that fit completely inside the CPU L1/L2 cache or GPU shared SRAM. Once a tile is loaded into fast on-chip memory, all $T^3$ multiply-accumulate operations are executed at peak processor speed without stalling on DRAM.
+On my laptop (an Apple M5 Max running NumPy 2.4) the row walk took 16 ms and the column walk took 320 ms. Same data, same arithmetic, twenty times slower. The only thing I changed is the order in which the bytes were visited.
 
----
+The reason is that memory does not deliver single numbers. It delivers fixed-size chunks, the cache lines from Chapter 1, and it delivers them to a small fast memory beside the processor, not to the processor directly. A row of `A` is 8192 floats sitting next to each other, so one fetched line brings 16 or 32 useful values and the next line is already on its way. A column of `A` is 8192 floats spaced 32 KB apart. Every one of them lives in a different line, so the processor fetches a whole line, uses 4 bytes of it, and throws the rest away. The column walk moves roughly 16 to 32 times more bytes across the boundary between main memory and the cache, and the time follows the bytes.
 
-## Mathematical Formulations: DRAM Traffic Derivations for Tiled GEMM
+Now look at what a framework does when you write a GELU. Chapter 2 introduced the tanh form,
 
-Let us formally derive the arithmetic traffic reduction achieved by $T \times T$ cache tiling.
+$$\text{GELU}(x) \approx 0.5\,x\left(1 + \tanh\!\left(\sqrt{2/\pi}\,\left(x + 0.044715\,x^3\right)\right)\right),$$
 
-#### 1. Naive GEMM DRAM Access Analysis
-For matrices $A \in \mathbb{R}^{M \times K}, B \in \mathbb{R}^{K \times N}, C \in \mathbb{R}^{M \times N}$ without caching:
-To compute each element $C_{ij} = \sum_k A_{ik} B_{kj}$, the inner loop reads the entire row $i$ of $A$ and entire column $j$ of $B$. If cache capacity is insufficient to retain $B$:
+and a framework that executes one operation at a time evaluates it as eight separate elementwise steps: cube, scale, add, scale, tanh, add one, multiply by $x$, halve. Each step reads its inputs from memory, produces a fresh temporary array, and writes that array back. For a $4096 \times 4096$ activation in 32-bit floats, which is 67 MB, the napkin math says eight steps read about ten arrays and write eight, roughly 1.2 GB of traffic, to perform about ten floating-point operations per element, or 170 million in total. That is an arithmetic intensity of about 0.14 FLOPs per byte, far below the ridge point of any processor in Chapter 14. The arithmetic units idle while the memory system streams the same 67 MB back and forth eighteen times.
 
-$$\text{DRAM Reads}_{\text{Naive}} = M \cdot K + M \cdot N \cdot K \text{ elements}$$
-
-For $M = N = K = 1024$, total DRAM reads equal $1024^2 + 1024^3 \approx 1.07 \times 10^9\text{ floats} \approx 4.29\text{ GB}$.
-
-#### 2. Tiled GEMM DRAM Access Analysis
-Dividing matrices into square tiles of size $T \times T$ that fit into fast on-chip memory of capacity $S_{\text{cache}} \ge 3 T^2 \times 4\text{ bytes}$:
-Each tile $A_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{N}{T}$ output tile columns.
-Each tile $B_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{M}{T}$ output tile rows.
-
-$$\text{DRAM Reads}_{\text{Tiled}} = \left( \frac{M}{T} \cdot \frac{N}{T} \cdot \frac{K}{T} \right) \times (2 T^2) = 2 \cdot \frac{M \cdot N \cdot K}{T} \text{ elements}$$
-
-The total DRAM traffic is reduced by a factor of:
-
-$$\text{Traffic Reduction Factor} = \frac{M N K}{2 M N K / T} = \frac{T}{2}$$
-
-For tile size $T = 64$, cache tiling achieves a **$32\times$ reduction in DRAM memory traffic**!
+The same disease shows up inside a matrix multiply. Computing $C = AB$ for $1024 \times 1024$ matrices touches only about 12 MB of data but performs a billion multiply-adds, two billion floating-point operations, so it ought to be compute bound. Written as the obvious triple loop, it is not, because each element of $A$ is needed 1024 times and each element of $B$ 1024 times, and the obvious loop order fetches them again on most of those occasions. In both cases the fix is the same. Move the bytes across the boundary fewer times.
 
 ---
 
-## Line-by-Line Reference Implementation
+## The Idea
+
+### One boundary, counted in crossings
+
+Every processor has a small amount of memory that is fast because it sits next to the arithmetic units, and a large amount that is slow because it sits far away. On a CPU the fast side is the registers and the L1 and L2 caches; on a GPU it is the registers and a block of on-chip memory; on both, the slow side is main memory (system RAM or VRAM). The exact numbers vary by machine, but the shape does not, and @tbl-memory-hierarchy gives typical orders of magnitude for a laptop CPU.
+
+| Level | Typical size | Typical latency |
+| :--- | :---: | :---: |
+| Registers and L1 cache | tens of KB | about 1 ns |
+| L2 and L3 cache | MB to tens of MB | a few ns to tens of ns |
+| Main memory | tens of GB | about 100 ns |
+
+: Rough sizes and latencies for the levels of a CPU memory hierarchy. These are napkin figures for a current laptop, not measurements; the point is the hundredfold gap between the top and bottom rows. {#tbl-memory-hierarchy tbl-colwidths="[40,30,30]"}
+
+The model this chapter uses is deliberately simple. Fast memory holds a bounded working set. Anything the arithmetic needs that is not already there must be fetched from slow memory, and anything produced that does not fit must be written back. The cost of an operation is the number of bytes that cross the boundary, and the goal is to do as much arithmetic as possible per crossing. Chapter 14 measured this as arithmetic intensity; here we engineer it.
+
+### Fusion: one pass instead of eight
+
+An elementwise chain has a special structure. Element $i$ of the output depends only on element $i$ of the input. Nothing in the chain needs a neighbor, a row sum, or a second look at the data. There is therefore no reason for the intermediate arrays to exist in slow memory at all. A single pass can read $x_i$, compute all eight steps on it while it sits in a register, and write $y_i$ once.
+
+Counting passes makes the saving exact. A chain of $K$ elementwise operations executed one at a time reads at least $K$ arrays and writes $K$ arrays, so it moves at least $2K$ arrays' worth of bytes. The fused version moves 2, one read of the input and one write of the output, regardless of $K$. Traffic falls by a factor of about $K$, the arithmetic does not change, and so the arithmetic intensity rises by the same factor. For the eight-step GELU that is nearly an order of magnitude.
+
+### Tiling: reuse before eviction
+
+A matrix multiply has the opposite structure. Every output element needs a whole row of $A$ and a whole column of $B$, so the data cannot be consumed in one streaming pass. It can, however, be reused. $C_{ij} = \sum_k A_{ik} B_{kj}$ uses $A_{ik}$ in the computation of every $C_{ij}$ for all $N$ values of $j$, and $B_{kj}$ in every $C_{ij}$ for all $M$ values of $i$. The question is whether those reuses happen while the value is still in fast memory or after it has been evicted and must be fetched again.
+
+Tiling answers by changing the loop order. Instead of computing $C$ one element at a time, compute it one $T \times T$ block at a time. To produce block $(I, J)$ of $C$, walk along $k$ in steps of $T$: fetch the $T \times T$ block of $A$ at $(I, K)$ and the $T \times T$ block of $B$ at $(K, J)$, multiply them, and add the product into the block of $C$. While those two input blocks sit in fast memory, every one of their $T^2$ elements is used $T$ times.
+
+Count the crossings under the simple model where fast memory holds exactly what the current loop body needs. The elementwise loop fetches a row of $A$ and a column of $B$ for each of the $MN$ outputs, $2K$ elements each time, for $2MNK$ element loads in total. The tiled loop performs $(M/T)(N/T)(K/T)$ block products and loads $2T^2$ elements for each, for $2MNK/T$ element loads. Traffic falls by a factor of $T$. A real cache keeps the current row of $A$ around while $j$ advances, which halves the naive count, so the honest range is a factor between $T/2$ and $T$. Either way the saving grows with the tile.
+
+The tile cannot grow without limit. Three blocks must fit in fast memory at once, a block of $A$, a block of $B$, and the block of $C$ being accumulated, so the constraint is
+
+$$3\,T^2 \times 4 \text{ bytes} \le \text{cache size}.$$
+
+For a 32 KB L1 cache that gives $T \le 52$, which is why 32 and 64 are the tile sizes that appear in real code. The napkin math also says what the tile buys. One block product does $2T^3$ floating-point operations on $3T^2 \times 4$ bytes, an arithmetic intensity of $T/6$ FLOPs per byte, so a $64 \times 64$ tile runs at about 10.7 FLOPs per byte, some seventy times the unfused GELU chain and nearly nine times the fused one. That is still short of the ridge point Chapter 14 measured on my laptop, about 36 FLOPs per byte, and further still from a GPU's, which is one reason real libraries tile at more than one level and why the exercises ask you to size a tile for your own caches.
+
+---
+
+## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The reference implementation discussed in this chapter corresponds directly to **Module 17** in the TinyTorch runtime: `packages/tinytorch/src/17_acceleration/17_acceleration.py`.
+Module 17 (`src/17_acceleration/17_acceleration.py`) is the NumPy-backed implementation students build in the TinyTorch course. It exports three functions, `vectorized_matmul`, `fused_gelu`, and `tiled_matmul`, plus an `unfused_gelu` used for comparison, all of which take and return the Chapter 6 `Tensor`. The listings in this chapter are a stripped-down model of the same design that works on the underlying NumPy arrays directly, small enough to show every pass over memory and every tile load. Wrapping the results in a `Tensor` is the only step left out.
 :::
 
-We implement vectorized SIMD arithmetic, fused GELU activation, and cache-tiled matrix multiplication in TinyTorch:
+### The two GELUs
+
+Start with where the GELU sits. In Chapter 13's transformer block the MLP computes $\text{GELU}(xW_1 + b_1)\,W_2 + b_2$, so the GELU lands on the widest activation in the block, the $4D$ hidden. For a model of width 4096 and a batch of 1024 tokens that hidden is $1024 \times 16384$ floats, the same 16.7 million elements as the $4096 \times 4096$ array in The Problem, 67 MB in 32-bit floats. Every layer applies it on every forward pass, and training runs a forward and a matching backward on every step, so whatever the GELU costs is paid once per layer per step for the life of the run.
+
+Run it one operation at a time and you pay the eighteen passes from The Problem. Seven temporaries and the output are each a full 67 MB array, written once and read back, about 1.2 GB of traffic to do 170 million floating-point operations, and the bias add just before the GELU adds two passes of its own. None of those temporaries is ever read by anything except the next step.
+
+So the real question is whether the temporaries need to exist at all. Element $i$ of the output depends only on element $i$ of the input, so all eight steps can run on one value while it sits in a register, and that value crosses the memory boundary twice, once on the way in and once on the way out. I call this register residency. The intermediate lives in a register for the whole chain and never becomes an array. Here is the chain written both ways, first with every temporary visible, which is what a framework does when it dispatches each operation on its own, and then as the single expression a fused pass wants.
 
 ```python
-# Reference Implementation: packages/tinytorch/src/17_acceleration/17_acceleration.py
 import numpy as np
-from typing import Optional, Tuple
-from .autograd import Tensor
 
-def fused_gelu(x: Tensor) -> Tensor:
-    """Fused Gaussian Error Linear Unit (GELU) execution in a single memory pass."""
-    data = x.data
-    sqrt_2_over_pi = np.float32(np.sqrt(2.0 / np.pi))
-    coeff = np.float32(0.044715)
+SQRT_2_OVER_PI = np.float32(np.sqrt(2.0 / np.pi))
+COEFF = np.float32(0.044715)
 
-    # Vectorized register fusion
-    x_cubed = data * data * data
-    inner = sqrt_2_over_pi * (data + coeff * x_cubed)
-    tanh_inner = np.tanh(inner)
-    out_data = 0.5 * data * (1.0 + tanh_inner)
+def unfused_gelu(x):
+    """Eight elementwise passes; every temporary is a full array."""
+    t1 = x ** 3                    # read x,      write t1
+    t2 = COEFF * t1                # read t1,     write t2
+    t3 = x + t2                    # read x, t2,  write t3
+    t4 = SQRT_2_OVER_PI * t3       # read t3,     write t4
+    t5 = np.tanh(t4)               # read t4,     write t5
+    t6 = 1.0 + t5                  # read t5,     write t6
+    t7 = x * t6                    # read x, t6,  write t7
+    return 0.5 * t7                # read t7,     write out
 
-    out_tensor = Tensor(out_data.astype(np.float32), requires_grad=False)
-    out_tensor._op = "FusedGELU"
-    out_tensor._parents = [x]
-    return out_tensor
+def fused_gelu(x):
+    """The same math as one expression, the shape a fused kernel wants."""
+    return 0.5 * x * (1.0 + np.tanh(SQRT_2_OVER_PI * (x + COEFF * x ** 3)))
+```
 
-def tiled_matmul(A: Tensor, B: Tensor, tile_size: int = 64) -> Tensor:
-    """Cache-Tiled General Matrix Multiply (GEMM) optimizing L1/L2 cache residency."""
-    a_data = A.data
-    b_data = B.data
-    M, K = a_data.shape
-    K2, N = b_data.shape
+The comments on `unfused_gelu` are the traffic ledger. Count them and you get ten array reads and eight array writes, the eighteen passes from the napkin math. `fused_gelu` is the same computation written as a single expression, the form a compiler needs in order to generate one pass. In production that one pass is a kernel, one compiled function launched on the accelerator, which is why the technique is called kernel fusion; TorchInductor generates exactly this shape, and the GELU epilogue Chapter 2 mentioned bakes it into the tail of the matrix multiply. The bias add folds into the same expression at no extra traffic, and Chapter 21 does that by hand.
+
+I have to be honest about this listing. NumPy is not that compiler. When Python evaluates the one-line version, it still calls NumPy once per operator, and each call reads its inputs and writes a fresh temporary, exactly as the unfused version does. Measuring both settles it.
+
+```python
+import time
+
+def time_ms(f, x, reps=5):
+    f(x)                                        # warm up
+    best = float("inf")
+    for _ in range(reps):
+        t0 = time.perf_counter()
+        f(x)
+        best = min(best, time.perf_counter() - t0)
+    return best * 1e3
+
+x = np.random.randn(4096, 4096).astype(np.float32)   # 67 MB
+print(f"unfused: {time_ms(unfused_gelu, x):.0f} ms")
+print(f"fused:   {time_ms(fused_gelu, x):.0f} ms")
+assert np.allclose(unfused_gelu(x), fused_gelu(x), atol=1e-6)
+```
+
+On my laptop the unfused version took 160 ms and the fused version 159 ms. To the machine they are the same program. What the fused form buys inside TinyTorch is one `Tensor` and one autograd node instead of eight, and, more importantly, a computation expressed as a unit that a real fusing compiler can turn into a single pass. Seeing the pass count show up as time takes a compiler NumPy does not have, which is where the production bridge picks up.
+
+### Tiled matrix multiply
+
+The matrix multiply is where the rest of the bytes go, and where nearly all of the arithmetic lives. Every `Linear` from Chapter 3 is one, attention's score and weighting products from Chapter 12 are two more per head, and Chapter 13's bridge put the matrix multiplies at nearly all of a transformer block's floating-point operations. A framework that runs them badly runs everything badly, which is why every framework hands them to a tuned library instead of writing the loops itself. To see what the library does, we write the loops.
+
+The obvious triple loop computes each $C_{ij}$ by walking $k$, reading $A_{ik}$ along a row and $B_{kj}$ down a column. For $1024 \times 1024$ matrices of 32-bit floats the column's elements sit 4 KB apart, which is the column walk that ran twenty times slower in The Problem, and the loop repeats it once per output, a million times over. Counted in element loads, the naive order fetches 2.1 billion elements, 8.6 GB of traffic, for a problem whose two inputs occupy 8 MB, because each element of $A$ and $B$ is fetched afresh on most of the 1024 occasions it is needed.
+
+The fix is to arrange for the reuse to happen while the element is still in fast memory. Choose $T$ so that three $T \times T$ blocks fit in cache and compute $C$ one block at a time. Every element of the two input blocks is then used $T$ times before anything is evicted, the $T^3$ multiply-adds on a pair of blocks run without a single trip to main memory, and the loads fall by about a factor of $T$, the count from The Idea. Nothing about the arithmetic changes; only the loop order does. The three outer loops below walk over blocks of rows of $C$, blocks of columns of $C$, and blocks of the shared dimension; the body multiplies one block of $A$ by one block of $B$ and accumulates into one block of $C$. The `min` calls let the last tile along each edge be smaller than `tile_size` when the matrix dimension is not a multiple of it.
+
+```python
+def tiled_matmul(A, B, tile_size=64):
+    """Blocked matrix multiply: same FLOPs as A @ B, different loop order."""
+    M, K = A.shape
+    K2, N = B.shape
     if K != K2:
-        raise ValueError(f"Inner matrix dimensions must match: {K} vs {K2}")
+        raise ValueError(f"inner dimensions must match: {K} vs {K2}")
+    C = np.zeros((M, N), dtype=A.dtype)
+    for i0 in range(0, M, tile_size):
+        i1 = min(i0 + tile_size, M)
+        for j0 in range(0, N, tile_size):
+            j1 = min(j0 + tile_size, N)
+            for k0 in range(0, K, tile_size):
+                k1 = min(k0 + tile_size, K)
+                # three blocks in play: A[i,k], B[k,j], C[i,j]
+                C[i0:i1, j0:j1] += A[i0:i1, k0:k1] @ B[k0:k1, j0:j1]
+    return C
 
-    C = np.zeros((M, N), dtype=np.float32)
+A = np.random.randn(4, 4).astype(np.float32)
+B = np.random.randn(4, 4).astype(np.float32)
+assert np.allclose(tiled_matmul(A, B, tile_size=2), A @ B, atol=1e-4)
 
-    # Loop over square blocks (Tiles)
-    for i_tile in range(0, M, tile_size):
-        i_end = min(i_tile + tile_size, M)
-        for j_tile in range(0, N, tile_size):
-            j_end = min(j_tile + tile_size, N)
-            for k_tile in range(0, K, tile_size):
-                k_end = min(k_tile + tile_size, K)
-
-                # Extract sub-tiles (held in CPU/GPU cache)
-                tile_A = a_data[i_tile:i_end, k_tile:k_end]
-                tile_B = b_data[k_tile:k_end, j_tile:j_end]
-
-                # Accumulate tile product in-place
-                C[i_tile:i_end, j_tile:j_end] += np.dot(tile_A, tile_B)
-
-    out_tensor = Tensor(C, requires_grad=False)
-    out_tensor._op = "TiledMatMul"
-    out_tensor._parents = [A, B]
-    return out_tensor
+A = np.random.randn(300, 500).astype(np.float32)
+B = np.random.randn(500, 200).astype(np.float32)
+assert np.allclose(tiled_matmul(A, B, tile_size=64), A @ B, atol=1e-2)
 ```
+
+Notice what the code does and does not do. It decides which three blocks are in play together; that is the whole mechanism, and it is the same decision cuBLAS, oneDNN, and the BLAS under NumPy's `@` make, except that they make it at several cache levels at once. The multiply inside each block is still NumPy's `@`, which hands the block to that compiled BLAS routine. Writing the inner multiply as scalar Python loops would run thousands of times slower for reasons that have nothing to do with caches, and would teach nothing about them.
+
+The same fact means `tiled_matmul` will not beat `A @ B` on the full matrix. NumPy's `@` already passes the whole matrix to BLAS, and BLAS tiles it in tuned compiled code with more levels than this one, so the Python version adds loop overhead on top of a routine that was already tiled. On my laptop a $512 \times 512$ multiply took 0.3 ms with `@` and 2.8 ms with `tiled_matmul` at `tile_size=64`. The listing exists to show the mechanism BLAS uses, not to compete with it.
 
 ---
 
-## Concrete Numerical Trace Table: Comparing Unfused vs. Fused Kernel Traffic
+## A Worked Trace
 
-Let us trace the exact memory bus traffic for an MLP block activation with batch $B=1$, sequence length $S=4$, and intermediate dimension $4D = 512$ ($4\text{ bytes/float}$):
+### Fusion: eighteen passes against two
 
-| Kernel Strategy | Execution Steps | Intermediate DRAM Writes | Intermediate DRAM Reads | Memory Bus Traffic | Arithmetic Intensity $I$ |
-| :--- | :--- | :--- | :--- | :---: | :---: |
-| **Unfused (Separate Passes)** | 1. Linear; 2. GELU | Write $\mathbf{z}$: $8,192\text{ B}$; Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $8,192\text{ B}$ | $24,576\text{ B}$ | $0.83\text{ FLOPs/B}$ |
-| **Fused (`fused_gelu`)** | 1. Fused Linear+GELU | Write $\mathbf{a}$: $8,192\text{ B}$ | Read $\mathbf{z}$: $0\text{ B}$ (SRAM Registers) | $8,192\text{ B}$ | **$2.50\text{ FLOPs/B}$ ($3\times$)** |
+Run the unfused GELU on five inputs, $x = [-2, -1, 0, 1, 2]$, and record every temporary along with what it costs in array traffic. Values are rounded to five places; the reads and writes are counted in whole arrays, which for five floats means 20 bytes each.
 
-: Memory bus traffic and arithmetic intensity comparison between unfused and fused linear-activation kernels. {#tbl-fusion-traffic-trace tbl-colwidths="[20,18,24,18,10,10]"}
+| Step | Expression | $x = -1$ | $x = 1$ | $x = 2$ | Reads | Writes |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| 1 | $t_1 = x^3$ | $-1.00000$ | $1.00000$ | $8.00000$ | 1 | 1 |
+| 2 | $t_2 = 0.044715\,t_1$ | $-0.04472$ | $0.04472$ | $0.35772$ | 1 | 1 |
+| 3 | $t_3 = x + t_2$ | $-1.04472$ | $1.04472$ | $2.35772$ | 2 | 1 |
+| 4 | $t_4 = \sqrt{2/\pi}\,t_3$ | $-0.83356$ | $0.83356$ | $1.88119$ | 1 | 1 |
+| 5 | $t_5 = \tanh(t_4)$ | $-0.68238$ | $0.68238$ | $0.95460$ | 1 | 1 |
+| 6 | $t_6 = 1 + t_5$ | $0.31762$ | $1.68238$ | $1.95460$ | 1 | 1 |
+| 7 | $t_7 = x\,t_6$ | $-0.31762$ | $1.68238$ | $3.90920$ | 2 | 1 |
+| 8 | $y = 0.5\,t_7$ | $-0.15881$ | $0.84119$ | $1.95460$ | 1 | 1 |
+| | **Unfused total** | | | | **10** | **8** |
+| | **Fused total** | | | | **1** | **1** |
 
-By eliminating intermediate DRAM roundtrips, Kernel Fusion triples the operational intensity and eliminates memory bus stalls.
+: Every temporary in the unfused GELU for three of the five inputs, with the array traffic each step generates. The fused kernel computes the same eight rows per element while the value sits in a register and touches memory only at the first and last. {#tbl-fusion-trace tbl-colwidths="[8,26,14,14,14,12,12]"}
+
+The output column agrees with the value Chapter 2 tabulated for GELU at $x = 1$ to three decimals ($0.841$; Chapter 2 uses the exact form, this chapter the tanh approximation), so the eight steps are the right eight steps. The traffic columns are the point. Eighteen array passes on 20-byte arrays is 360 bytes moved to produce 20 bytes of output; the fused kernel moves 40 bytes. Scale the arrays to $4096 \times 4096$ and the same ratio reads 1.2 GB against 134 MB, a factor of nine, with the arithmetic unchanged. The following script reproduces the table and the byte counts.
 
 ```python
-# Pure Python Verification of Kernel Fusion Memory Traffic
-bytes_per_float = 4
-B, S, hidden_dim = 1, 4, 512
-elements = B * S * hidden_dim  # 2,048 elements = 8,192 bytes
+x = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=np.float32)
+steps = []
+t1 = x ** 3;                    steps.append(("t1", t1, 1, 1))
+t2 = COEFF * t1;                steps.append(("t2", t2, 1, 1))
+t3 = x + t2;                    steps.append(("t3", t3, 2, 1))
+t4 = SQRT_2_OVER_PI * t3;       steps.append(("t4", t4, 1, 1))
+t5 = np.tanh(t4);               steps.append(("t5", t5, 1, 1))
+t6 = 1.0 + t5;                  steps.append(("t6", t6, 1, 1))
+t7 = x * t6;                    steps.append(("t7", t7, 2, 1))
+y = 0.5 * t7;                   steps.append(("y",  y,  1, 1))
 
-# Unfused: Linear writes z, GELU reads z, GELU writes a
-unfused_traffic = (elements * bytes_per_float) * 3
-# Fused: In-register math, only writes final activation a
-fused_traffic = elements * bytes_per_float
+for name, val, r, w in steps:
+    print(f"{name:2s} {np.round(val, 5)}  reads={r} writes={w}")
 
-print(f"Unfused DRAM Traffic: {unfused_traffic:,} bytes")
-print(f"Fused DRAM Traffic:   {fused_traffic:,} bytes")
-traffic_reduction = unfused_traffic / fused_traffic
-print(f"Traffic Reduction:    {traffic_reduction:.1f}x")
-assert traffic_reduction == 3.0, "Kernel fusion traffic reduction mismatch!"
+array_bytes = x.nbytes                                  # 20 bytes
+unfused = sum(r + w for _, _, r, w in steps) * array_bytes
+fused = 2 * array_bytes
+print(f"unfused traffic: {unfused} B, fused traffic: {fused} B, "
+      f"ratio {unfused / fused:.1f}x")
+assert unfused / fused == 9.0
+assert np.allclose(y, fused_gelu(x))
 ```
 
----
+### Tiling: which blocks are loaded
 
-## The Production Systems Bridge: PyTorch TorchInductor and Hardware JIT Compilers
-
-In PyTorch 2.0, operator fusion is automated by the **TorchInductor Compiler**:
+Take $4 \times 4$ matrices and `tile_size=2`. The three loops visit block coordinates $(i_0, j_0, k_0)$ in the order $(0,0,0), (0,0,2), (0,2,0), (0,2,2), (2,0,0), \ldots$, eight block products in all. Each one loads a $2 \times 2$ block of $A$ and a $2 \times 2$ block of $B$, eight elements, so the tiled loop loads 64 elements to finish the multiply. The elementwise loop, fetching a row of $A$ and a column of $B$ for each of the 16 outputs, loads $16 \times 8 = 128$. The ratio is 2, which is $T$. I do not want to take the factor of $T$ on faith at real sizes, so the script below instruments the loop with a counter and checks it at any size.
 
 ```python
-import torch
+def count_tile_loads(M, N, K, T):
+    loads = 0
+    for i0 in range(0, M, T):
+        for j0 in range(0, N, T):
+            for k0 in range(0, K, T):
+                di = min(T, M - i0); dj = min(T, N - j0); dk = min(T, K - k0)
+                loads += di * dk + dk * dj          # one block of A, one of B
+    return loads
 
-# Compile PyTorch model with automated pointwise fusion
-compiled_model = torch.compile(model, backend="inductor")
+def count_naive_loads(M, N, K):
+    return M * N * 2 * K                            # a row and a column per output
+
+for (n, T) in [(4, 2), (4, 4), (1024, 32), (1024, 64)]:
+    naive, tiled = count_naive_loads(n, n, n), count_tile_loads(n, n, n, T)
+    print(f"n={n:5d} T={T:3d}  naive={naive:>12,}  tiled={tiled:>12,}  "
+          f"ratio={naive / tiled:.0f}")
+assert count_naive_loads(4, 4, 4) == 128 and count_tile_loads(4, 4, 4, 2) == 64
 ```
 
-Under the hood, TorchInductor inspects the computational graph, identifies consecutive elementwise operations, and generates specialized JIT kernels (which we explore in Chapter 21: OpenAI Triton compiler, where Triton compiles directly into custom GPU machine assembly where dozens of operations execute in a single CUDA launch with zero intermediate DRAM writes). Data remains strictly inside streaming multiprocessor register files throughout fused sub-graphs.
+At $n = 1024$ and $T = 64$ the naive count is 2.1 billion element loads, 8.6 GB in 32-bit floats for a problem whose inputs occupy 8 MB, and the tiled count is 34 million, 134 MB. The multiply-add count is the same 1.07 billion in both cases.
 
 ---
 
-## Building the System: How It All Connects
+## From TinyTorch to Production
 
-With Chapter 17, our framework eliminates unnecessary DRAM traffic:
+The gap between this chapter and a production framework is a compiler. In PyTorch's default eager mode, every operator in `fused_gelu` is still its own kernel launch, exactly as in NumPy, and on a GPU each launch also carries a fixed cost of a few microseconds for the CPU to dispatch it. A transformer block has dozens of small elementwise operators, so the launch overhead alone can leave the GPU waiting on the CPU. `torch.compile` changes this. It records the graph of operations, finds chains of elementwise operators, and hands each chain to TorchInductor, which generates one kernel per chain in Triton, a Python-like language for writing GPU kernels. The generated kernel reads each input element once, computes the whole chain in registers, and writes the result once, which is the two-pass ledger from the worked trace realized in hardware. JAX and TensorFlow do the same through XLA, their own compiler. The speedups these tools report on memory-bound models come mostly from removing passes, not from faster arithmetic.
 
-::: {.callout-note title="Kernel Fusion Systems Gains"}
-- **DRAM Traffic**: Eliminated $50\%$ of intermediate DRAM read/write traffic across the transformer MLP block.
-- **Matrix Tiling**: Cache tiling delivers up to $2.8\times$ faster dense matrix multiplications by preserving L1/L2 cache residency.
-- **Latency Reduction**: Total forward-pass latency drops by $\sim 38\%$ across deep transformer stacks.
-:::
+What forces production to fuse is the same ratio that the napkin math exposed, made worse by the hardware. An A100 GPU reads its 80 GB of VRAM at about 2 TB/s according to NVIDIA's published specifications, but its arithmetic units can perform on the order of 300 trillion 16-bit operations per second, so the ridge point sits near 150 FLOPs per byte. An unfused elementwise chain at 0.14 FLOPs per byte uses about one part in a thousand of the machine. Tiling is even more deeply built in. Every production matrix multiply library, cuBLAS on NVIDIA GPUs, oneDNN on Intel CPUs, and the BLAS that NumPy called in this chapter, tiles at several levels at once, a large block for the L2 cache or GPU on-chip memory, a smaller block for registers, and on GPUs a fixed inner block for the matrix multiply units, and it chooses the tile sizes per hardware generation. FlashAttention, which Chapter 12 mentioned, is tiling and fusion applied together to attention. It processes query and key blocks that fit in on-chip memory and never writes the full score matrix, one entry per pair of tokens, to VRAM, which is why its memory use is linear in sequence length rather than quadratic.
 
-From an architectural perspective, fusing $K$ consecutive elementwise layers reduces memory bus transactions from $2K$ transfers down to just $2$ transfers (one load, one store), increasing arithmetic intensity by $K\times$.
+| | TinyTorch (this chapter) | PyTorch eager | `torch.compile` / XLA / Triton |
+| :--- | :--- | :--- | :--- |
+| Elementwise chain | one NumPy call per operator | one kernel launch per operator | one generated kernel per chain |
+| Where intermediates live | main memory, as temporaries | VRAM, as temporaries | registers and on-chip memory |
+| Who decides what to fuse | nobody | nobody | the compiler, from the traced graph |
+| Matrix multiply tiling | one level, in Python, calling BLAS per block | cuBLAS or BLAS, several levels | same, or a Triton kernel with explicit tiles |
 
-Yet when generating long text sequences token-by-token, we notice another massive redundancy: why are we recomputing attention Keys and Values for all past tokens on every single generation step?
+: How the two mechanisms are realized at each level. The counting from this chapter applies unchanged in every column; what changes is who does the counting and where the intermediates go. {#tbl-fusion-tiling-production tbl-colwidths="[22,26,26,26]"}
 
-In **Chapter 18**, we construct **The KV Cache: Converting $O(N)$ Generation Bandwidth into $O(1)$**.
+What carries over unchanged is the accounting. A fused kernel is still two passes; a $T \times T$ tile still delivers $T/6$ FLOPs per byte; a chain of $K$ elementwise operators executed separately still moves about $2K$ arrays. When a production profiler reports that a model is memory bound, these are the numbers that explain why, and when `torch.compile` reports a speedup, dividing the eager pass count by the compiled pass count predicts most of it.
+
+Two habits follow for a practitioner. First, when a profile shows many short kernels between the matrix multiplies, the model is a fusion candidate; try `torch.compile`, and if a custom operation blocks the compiler from fusing across it, that operation is the next thing to rewrite. Second, when writing a kernel by hand, in Triton or CUDA, the tile is the unit of design. Choose it from the on-chip memory size with the same $3T^2$ inequality used here, and expect the profile to move along the roofline as the tile grows.
+
+---
+
+## Summary
+
+You built two functions that perform the same arithmetic as their naive counterparts and move far fewer bytes. `fused_gelu` writes the eight-step GELU as one expression, the form a compiler needs to run it as a single pass with one read and one write instead of ten reads and eight writes, and the worked trace counted the ninefold difference. `tiled_matmul` reorders the loops of a matrix multiply so that three $T \times T$ blocks stay in fast memory while every element in them is reused $T$ times, cutting element loads by a factor of about $T$. NumPy could not show the fusion saving as time, because it lacks the compiler, and the tiled multiply could not beat BLAS, because BLAS already tiles; both listings are honest models of what the production code does, not replacements for it. The principle to remember is that an operation's cost is set by how many times its bytes cross the boundary between slow and fast memory, not by how many arithmetic operations it performs, and every acceleration in this chapter is a way of crossing less often. Chapter 18 takes for granted that an operation's cost is set by the bytes it moves rather than the arithmetic it does, and asks why generating text one token at a time keeps recomputing keys and values it has already produced.
+
+---
+
+## Exercises
+
+1. **Count the passes.** Write a layer normalization over the last axis of a $4096 \times 4096$ array as separate NumPy operations (mean, subtract, square, mean, add epsilon, square root, divide, scale, shift) and count the array reads and writes as the worked trace did. What traffic reduction would a fused kernel deliver? Time the unfused version and estimate the effective bandwidth it achieved from the bytes you counted.
+
+2. **Size the tile.** Look up or measure the L1 and L2 cache sizes of your own processor. Using the $3T^2 \times 4$ bytes bound, compute the largest tile that fits at each level, then use `count_tile_loads` to compare the element loads for a $2048 \times 2048$ multiply at each of those tile sizes and at $T = 8$. Explain why production libraries tile at more than one level.
+
+3. **Find the cache.** Repeat the row-versus-column experiment from The Problem for square matrices of 64, 256, 1024, 4096, and 8192 rows. Plot the ratio of column time to row time against matrix size. At what size does the ratio start to climb, and how does that size compare with the cache sizes you found in the previous exercise?
