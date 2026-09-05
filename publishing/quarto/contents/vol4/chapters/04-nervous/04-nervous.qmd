@@ -161,12 +161,12 @@ When the untrusted application processor prepares a new action chunk proposal, i
 On the receiving side, the deterministic real-time microcontroller latches the newest proposal without ever acquiring a lock or stalling execution. At the start of its control cycle, the microcontroller reads the sequence counter with load-acquire semantics (`LDAR`). If the counter is odd, indicating that the producer is midway through updating the buffer, the consumer immediately aborts the read, retaining its existing validated trajectory spline. If the counter is even, the microcontroller copies the payload into its private, tightly-coupled static memory and re-reads the sequence counter. If the counter changed during the copy, a torn read occurred due to a concurrent write, and the frame is safely discarded. If the sequence counter remained identical and even throughout the read, the latch is verified: the microcontroller validates the cyclic redundancy checksum (CRC-32), checks timestamp freshness against its hardware timer, and accepts the proposal. Under this protocol, read latencies on the real-time microcontroller remain strictly bounded below $1.5\ \mu\text{s}$, completely decoupled from the scheduling state or operating system load of the host processor.
 
 ::: {#exmp-nervous-algorithm-4-1-lock-free-trajectory .callout-example title="Algorithm 4.1: Lock-Free Trajectory Seqlock Exchange Protocol"}
-**Input (Writer):** Proposal payload $P = \{\text{seq\_id}, \text{timestamp\_ns}, \text{lease\_us}, \mathbf{w}_{1..K}, \text{crc32}\}$.
-**Input (Reader):** Target local buffer $B_{\text{local}}$ in tightly-coupled static SRAM.
-**State:** Shared SRAM mailbox: atomic `uint64` $c_{\text{seq}}$ (init 0), payload slot $\text{Slot}_{\text{shared}}$.
-**Output (Reader):** Verified action chunk $P_{\text{latched}}$ or status rejection code.
+**Input (Writer)**: Proposal payload $P = \{\text{seq\_id}, \text{timestamp\_ns}, \text{lease\_us}, \mathbf{w}_{1..K}, \text{crc32}\}$.
+**Input (Reader)**: Target local buffer $B_{\text{local}}$ in tightly-coupled static SRAM.
+**State**: Shared SRAM mailbox: atomic `uint64` $c_{\text{seq}}$ (init 0), payload slot $\text{Slot}_{\text{shared}}$.
+**Output (Reader)**: Verified action chunk $P_{\text{latched}}$ or status rejection code.
 
-**Procedure `PUBLISH_ACTION_CHUNK`($P$):**
+**Procedure `PUBLISH_ACTION_CHUNK`($P$)**:
 
 1. $c_{\text{curr}} \leftarrow \text{ATOMIC\_LOAD\_EXPLICIT}(c_{\text{seq}}, \text{memory\_order\_relaxed})$
 2. $\text{ATOMIC\_STORE\_EXPLICIT}(c_{\text{seq}}, c_{\text{curr}} + 1, \text{memory\_order\_relaxed})$ *(Mark odd: write in progress)*
@@ -286,7 +286,7 @@ A common misconception in real-time software design asserts that dynamic memory 
 The choice of physical communication bus directly dictates the magnitude of the interference term $I$ and blocking term $B$ in the worst-case response time equation. As summarized in @tbl-04-fieldbus-comparison, robotics interconnects divide across a trade-off surface spanning raw throughput, transport latency, cycle jitter, and hardware determinism. In industrial robotic platforms, this deterministic physical layer is implemented through dedicated fieldbus hardware architectures (@fig-industrial-ethercat-controller), which couple hard real-time host processors to modular input/output and motor drive terminals over synchronized Ethernet frames using hardware Distributed Clocks (DC).[^fn-hw-ethercat-dc]
 
 ::: {#nbk-nervous-fieldbus-serialization-latency-wcet-schedulability .callout-notebook title="Fieldbus Serialization Latency and WCET Schedulability"}
-*Practical Engineering Question:* Why can an EtherCAT network synchronize 8 robot arm joint axes within a $1.0\text{ ms}$ control loop with $< 100\text{ ns}$ jitter, whereas a CAN-FD bus experiences severe deadline pressure under the identical workload?
+**Practical Engineering Question**: Why can an EtherCAT network synchronize 8 robot arm joint axes within a $1.0\text{ ms}$ control loop with $< 100\text{ ns}$ jitter, whereas a CAN-FD bus experiences severe deadline pressure under the identical workload?
 
 *1. CAN-FD Serialization and Arbitration Latency:*
 Consider an 8-axis manipulator where each joint node exchanges a 64-byte payload (command torques, encoder positions, velocity feedback, error flags). In CAN-FD, frames use a $1\text{ Mbps}$ arbitration phase (header/CRC, $\approx 35\text{ bits}$) and a $5\text{ Mbps}$ data phase ($64\text{ bytes} \times 8\text{ bits} = 512\text{ bits}$ plus stuff bits $\approx 550\text{ bits}$).
@@ -307,7 +307,7 @@ In EtherCAT (100BASE-TX, $100\text{ Mbps}$), a single Ethernet telegram traverse
 - Total 8-node daisy-chain propagation delay: $t_{\text{prop}} \approx 8 \times 1.0\text{ }\mu\text{s} = 8.0\text{ }\mu\text{s}$.
 - Total bus cycle time: $t_{\text{total, EtherCAT}} = 25.6\text{ }\mu\text{s} + 8.0\text{ }\mu\text{s} = 33.6\text{ }\mu\text{s}$.
 
-*Systems Verdict:* EtherCAT finishes the entire 8-axis cycle in $33.6\text{ }\mu\text{s}$ (consuming only $3.4\%$ of the $1.0\text{ ms}$ servo budget) with hardware Distributed Clocks holding synchronization jitter below $100\text{ ns}$. CAN-FD is optimal for asynchronous, distributed chassis management (BMS, thermal pumps, auxiliary grippers), while EtherCAT or TSN is mandatory for multi-axis coordinated kinematic joints. While TSN Ethernet offers the allure of unifying gigabit camera feeds with microsecond servo frames over a single physical link, configuring and formally verifying its IEEE 802.1Qbv Time-Aware Shaper (TAS) gate-control lists (GCL) across asynchronous network switches requires exhaustive network-calculus verification to prevent high-bandwidth video bursts from colliding with time-critical control slots.
+**Systems insight**: EtherCAT finishes the entire 8-axis cycle in $33.6\text{ }\mu\text{s}$ (consuming only $3.4\%$ of the $1.0\text{ ms}$ servo budget) with hardware Distributed Clocks holding synchronization jitter below $100\text{ ns}$. CAN-FD is optimal for asynchronous, distributed chassis management (BMS, thermal pumps, auxiliary grippers), while EtherCAT or TSN is mandatory for multi-axis coordinated kinematic joints. While TSN Ethernet offers the allure of unifying gigabit camera feeds with microsecond servo frames over a single physical link, configuring and formally verifying its IEEE 802.1Qbv Time-Aware Shaper (TAS) gate-control lists (GCL) across asynchronous network switches requires exhaustive network-calculus verification to prevent high-bandwidth video bursts from colliding with time-critical control slots.
 :::
 
 Real-time dependability cannot be achieved by buying faster clock speeds or measuring statistical latency percentiles on an idle bench. Dependability requires structural analysis of the execution path: eliminating all unbounded variance sources ($I_{\text{unbounded}} = 0$), bounding shared hardware blocking ($B$), enforcing zero-allocation static memory layouts, and selecting fieldbuses with cycle-deterministic distributed clocks.
