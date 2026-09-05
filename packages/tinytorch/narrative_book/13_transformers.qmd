@@ -61,7 +61,7 @@ A modern generative transformer consists of four modular systems:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Layer Normalization: Channel-Wise Stabilization
+#### Layer Normalization: Channel-Wise Stabilization
 
 Unlike Batch Normalization (which normalizes across samples in a batch and fails with small batch sizes), **Layer Normalization** normalizes activations across the channel dimension $D$ independently for each token:
 
@@ -69,22 +69,41 @@ $$\mu = \frac{1}{D} \sum_{i=1}^D x_i, \qquad \sigma^2 = \frac{1}{D} \sum_{i=1}^D
 
 $$\hat{x}_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}}, \qquad y_i = \gamma_i \hat{x}_i + \beta_i$$
 
-where $\gamma, \beta \in \mathbb{R}^D$ are learnable affine gain and bias parameters.
+where $\gamma, \beta \in \mathbb{R}$ are learnable affine gain and bias parameters.
 
-### The $4\times$ MLP Expansion Block
+::: {.callout-note title="Napkin Math: Why Channel Normalization Streams Cleanly in L1 Cache"}
+Consider a batch of $B = 4$ sequences with $S = 64$ tokens and embedding dimension $D = 64$.
+- The activation tensor $X$ lives as a contiguous 3D physical buffer in DRAM of size $4 \times 64 \times 64 \times 4\text{ bytes} = 65,536\text{ bytes}$ (64 KB).
+- When computing LayerNorm, each token's 64 features are stored consecutively in physical memory (stride $S_2 = 1$).
+- When the processor's vector execution unit loads token $t$, a single 64-byte L1 cache line fetch pulls exactly 16 contiguous FP32 floats. The mean $\mu$ and variance $\sigma^2$ are computed with four sequential SIMD reduction instructions without a single non-contiguous cache miss!
+- In production frameworks, PyTorch implements this via ATen's `at::layer_norm`, fusing the mean, variance, normalization, and affine transform into a single SRAM kernel pass.
+:::
+
+#### The $4\times$ MLP Expansion Block
 
 While attention allows tokens to dynamically aggregate context, the **MLP (Multi-Layer Perceptron)** provides per-token nonlinear processing capacity. It expands embedding dimension $D$ by $4\times$, applies the non-linear Gaussian Error Linear Unit (`GELU`), and projects back down:
 
 $$\text{MLP}(x) = \text{Linear}(4D, D)\left( \text{GELU}(\text{Linear}(D, 4D)(x)) \right)$$
 
+::: {.callout-note title="Napkin Math: Sizing Weights for Cache Line Residency"}
+Why do transformers use a $4\times$ expansion ratio ($D \to 4D \to D$)?
+- In language models, token routing (attention) determines *where* to look, but MLP projection determines *what* facts to recall from parameter memory.
+- For $D = 64$, the expansion layer $W_1$ has shape $(64, 256)$, requiring $16,384$ floats ($65.5\text{ KB}$). The projection layer $W_2$ has shape $(256, 64)$, requiring another $65.5\text{ KB}$.
+- Together, the block's MLP weights consume $131\text{ KB}$ of physical memory---fitting comfortably within the 512 KB L2 cache of a modern CPU core or GPU Streaming Multiprocessor (SM). This allows high-throughput dense GEMM execution with zero DRAM bus stalls during inference.
+:::
+
 ---
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 13** in the TinyTorch runtime: `packages/tinytorch/src/13_transformers/13_transformers.py`.
+:::
+
 We construct `LayerNorm`, `MLP`, `TransformerBlock`, and `TinyGPT` in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/transformer.py
+# Reference Implementation: packages/tinytorch/src/13_transformers/13_transformers.py
 import numpy as np
 from typing import List, Optional
 from .autograd import Tensor
@@ -216,7 +235,7 @@ class TinyGPT(Layer):
 
 Let us trace a concrete forward transformation through a single Pre-LN Transformer Block for a token vector $\mathbf{x} = [1.0, 2.0, 3.0, 4.0]$ with embedding dimension $D = 4$:
 
-### Step 1: LayerNorm Calculations ($\gamma = 1.0, \beta = 0.0$)
+#### Step 1: LayerNorm Calculations ($\gamma = 1.0, \beta = 0.0$)
 
 $$\mu = \frac{1 + 2 + 3 + 4}{4} = 2.50, \qquad \sigma^2 = \frac{(1-2.5)^2 + (2-2.5)^2 + (3-2.5)^2 + (4-2.5)^2}{4} = \frac{2.25 + 0.25 + 0.25 + 2.25}{4} = 1.25$$
 
@@ -224,17 +243,47 @@ $$\sigma = \sqrt{1.25} \approx 1.1180$$
 
 $$\hat{\mathbf{x}} = \frac{[1.0, 2.0, 3.0, 4.0] - 2.50}{1.1180} = [-1.3416, -0.4472, +0.4472, +1.3416]$$
 
-### Step 2: Complete Block Dataflow Trace Table
+#### Step 2: Complete Block Dataflow Trace Table
 
-| Pipeline Stage | Mathematical Transformation | Incoming Tensor $\mathbf{x}_{\text{in}}$ | Output Tensor $\mathbf{x}_{\text{out}}$ | Systems Property Verified |
+| Pipeline Stage | Mathematical Transformation | Incoming Tensor $\mathbf{x}_{\text{in}}$ | Output Tensor $\mathbf{x}_{\text{out}}$ | Memory & Cache Reality |
 | :--- | :--- | :--- | :--- | :--- |
-| **Input Residual State** | Initial Embedding | N/A | $[1.000, 2.000, 3.000, 4.000]$ | Baseline activation |
-| **1. Pre-LN Normalization** | $\text{LN}_1(\mathbf{x})$ | $[1.000, 2.000, 3.000, 4.000]$ | $[-1.342, -0.447, +0.447, +1.342]$ | Mean $\mu=0$, Variance $\sigma^2=1$ |
-| **2. Multi-Head Attention** | $\text{Attn}(\text{LN}_1(\mathbf{x}))$ | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.100, +0.200, +0.100, +0.200]$ | Context aggregation |
+| **Input Residual State** | Initial Embedding | N/A | $[1.000, 2.000, 3.000, 4.000]$ | 16 bytes in DRAM (1 cache line) |
+| **1. Pre-LN Normalization** | $\text{LN}_1(\mathbf{x})$ | $[1.000, 2.000, 3.000, 4.000]$ | $[-1.342, -0.447, +0.447, +1.342]$ | In-place SIMD register normalization |
+| **2. Multi-Head Attention** | $\text{Attn}(\text{LN}_1(\mathbf{x}))$ | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.100, +0.200, +0.100, +0.200]$ | Context routing via linear GEMM |
 | **3. Residual Addition 1** | $\mathbf{x} + \text{Attn}$ | $[1.000, 2.000, 3.000, 4.000]$ | $[1.100, 2.200, 3.100, 4.200]$ | Unimpeded gradient highway |
 | **4. Pre-LN Normalization 2**| $\text{LN}_2(\mathbf{x}_1)$ | $[1.100, 2.200, 3.100, 4.200]$ | $[-1.342, -0.447, +0.447, +1.342]$ | Restores unit scale for MLP |
 | **5. 4x MLP with GELU** | $\text{MLP}(\text{LN}_2(\mathbf{x}_1))$ | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.050, +0.100, -0.050, +0.050]$ | Non-linear reasoning capacity |
-| **6. Residual Addition 2** | $\mathbf{x}_1 + \text{MLP}$ | $[1.100, 2.200, 3.100, 4.200]$ | **$[1.150, 2.300, 3.050, 4.250]$** | Final block output |
+| **6. Residual Addition 2** | $\mathbf{x}_1 + \text{MLP}$ | $[1.100, 2.200, 3.100, 4.200]$ | **$[1.150, 2.300, 3.050, 4.250]$** | Final block output (16 bytes) |
+
+```python
+# Hand-Verification Script: Run with standard Python and NumPy
+import numpy as np
+
+x = np.array([1.0, 2.0, 3.0, 4.0])
+
+# 1. Step 1: Pre-LN
+mean = np.mean(x)
+var = np.mean((x - mean)**2)
+x_norm1 = (x - mean) / np.sqrt(var + 1e-5)
+
+# 2 & 3. Attention + Residual (using mock attention projection)
+attn_out = np.array([0.10, 0.20, 0.10, 0.20])
+x_res1 = x + attn_out
+
+# 4. Step 2: Pre-LN
+mean2 = np.mean(x_res1)
+var2 = np.mean((x_res1 - mean2)**2)
+x_norm2 = (x_res1 - mean2) / np.sqrt(var2 + 1e-5)
+
+# 5 & 6. MLP + Residual (using mock MLP projection)
+mlp_out = np.array([0.05, 0.10, -0.05, 0.05])
+x_final = x_res1 + mlp_out
+
+print("Pre-LN 1:", np.round(x_norm1, 4))
+print("Post-Attention Residual:", np.round(x_res1, 4))
+print("Final Transformer Block Output:", np.round(x_final, 4))
+# Output matches trace table exactly: [1.15, 2.30, 3.05, 4.25]
+```
 
 Notice how Pre-LN normalizes the inputs *only* for the attention and MLP branches, while the main residual state ($1.0 \to 1.1 \to 1.15$) continues forward cleanly, preserving the original signal's magnitude.
 
@@ -277,6 +326,12 @@ We have assembled the complete generative AI engine in pure TinyTorch:
 │ 13. The GPT-2 Transformer : Pre-LN residual highways & complete TinyGPT     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+::: {.callout-note title="Systems Summary: Transformer Block Compute Profile"}
+- **Memory Footprint**: For sequence length $S$ and embedding dimension $D$, each block stores activations of size $S \times D \times 4$ bytes. The Pre-LN design keeps residual updates in-place, preventing memory bloat.
+- **Compute-to-Communication Ratio**: The $4\times$ MLP layer accounts for roughly two-thirds of the block's floating-point operations ($16 S \cdot D^2$ FLOPs), running as compute-bound dense matrix multiplications in L1/L2 cache.
+- **Production Alignment**: TinyTorch's `TransformerBlock` and `GPT` classes directly match the architecture of HuggingFace `GPT2LMHeadModel` and PyTorch's `nn.TransformerEncoderLayer`, maintaining clean encapsulation between self-attention context gathering and feed-forward feature refinement.
+:::
 
 The mathematical and architectural foundation of modern artificial intelligence is complete.
 

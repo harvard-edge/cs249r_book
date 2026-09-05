@@ -2,7 +2,7 @@
 
 In Chapters 1 through 4, we engineered the compute engine of our deep learning framework: multi-dimensional tensor storage, non-linear activation gates, modular parameter layers, and overflow-safe loss functions.
 
-Yet a compute engine is useless without data. If our training loop reads one sample at a time synchronously from disk during execution, the processor spends $98\%$ of its time stalled waiting for disk I/O, leaving expensive arithmetic ALUs and GPU tensor cores completely starved.
+Yet a compute engine is useless without data. If our training loop (which we formalize as a rigid 5-step state machine in Chapter 8) reads one sample at a time synchronously from disk during execution, the processor spends $98\%$ of its time stalled waiting for disk I/O, leaving expensive arithmetic ALUs and GPU tensor cores completely starved.
 
 This chapter examines how machine learning systems build high-throughput data ingestion pipelines. We analyze the **Producer-Consumer pattern**, derive the mathematics of **random index permutations**, implement the complete TinyTorch data pipeline (`Dataset`, `TensorDataset`, `DataLoader`), and explore how production frameworks like PyTorch leverage **POSIX Shared Memory** and **Page-Locked (Pinned) DMA transfers** to keep compute hardware saturated at $100\%$ capacity.
 
@@ -12,7 +12,7 @@ This chapter examines how machine learning systems build high-throughput data in
 
 ## The Crisis: I/O Starvation and Hardware Underutilization
 
-Consider training a vision model on a dataset of $100{,}000$ high-resolution images stored on an NVMe solid-state drive. A beginner writes the following synchronous training loop:
+Consider training a vision model on a dataset of $100{,}000$ high-resolution images stored on an NVMe solid-state drive. A beginner writes the following synchronous training loop (prior to the formal state machine we construct in Chapter 8):
 
 ```python
 # The Synchronous I/O Starvation Disaster
@@ -85,7 +85,7 @@ Compute Engine (ALU):        ▼               ▼               ▼
 
 ### Why Shuffling Without Replacement Matters (The i.i.d. Invariant)
 
-If a neural network trains on unshuffled data (for example, all class 0 samples, followed by all class 1 samples), the optimizer suffers from **Catastrophic Gradient Bias**: it spends thousands of gradient steps minimizing error exclusively for class 0, overwriting representations learned earlier.
+If a neural network trains on unshuffled data (for example, all class 0 samples, followed by all class 1 samples), the parameter optimization algorithm (formalized in Chapter 7) suffers from **Catastrophic Gradient Bias**: it spends thousands of gradient steps minimizing error exclusively for class 0, overwriting representations learned earlier.
 
 To enforce the fundamental statistical invariant that each mini-batch is an **independent and identically distributed (i.i.d.)** sample of the global data distribution, the pipeline generates a new **Random Permutation** of dataset indices $\pi \in S_N$ at the start of every epoch:
 
@@ -98,6 +98,10 @@ Sampling without replacement guarantees that:
 ---
 
 ## Reference Implementation: The DataLoader Subsystem
+
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 05** in the TinyTorch runtime: `packages/tinytorch/src/05_dataloader/05_dataloader.py`.
+:::
 
 We implement the complete data pipeline in TinyTorch: `Dataset`, `TensorDataset`, and `DataLoader`.
 
@@ -195,7 +199,7 @@ class DataLoader:
 
 Let us trace a dataset with $N = 10$ samples (indices $0 \dots 9$) with batch size $B = 4$:
 
-### Epoch 1 Trace (`shuffle=True`, `drop_last=False`)
+#### Epoch 1 Trace (`shuffle=True`, `drop_last=False`)
 - **Random Permutation $\pi_1$**: $[3, 8, 0, 5, 2, 9, 7, 1, 4, 6]$
 
 | Batch Index | Sliced Indices | Sample IDs Included | Batch Shape | Status |
@@ -204,7 +208,7 @@ Let us trace a dataset with $N = 10$ samples (indices $0 \dots 9$) with batch si
 | **Batch 1** | $4 \dots 8$ | $[2, 9, 7, 1]$ | $(4, D)$ | Full Batch |
 | **Batch 2** | $8 \dots 10$ | $[4, 6]$ | $(2, D)$ | Remainder Batch |
 
-### Epoch 2 Trace (`shuffle=True`, `drop_last=False`)
+#### Epoch 2 Trace (`shuffle=True`, `drop_last=False`)
 - **Random Permutation $\pi_2$**: $[7, 2, 4, 1, 0, 9, 5, 3, 6, 8]$
 
 | Batch Index | Sliced Indices | Sample IDs Included | Batch Shape | Status |
@@ -212,6 +216,25 @@ Let us trace a dataset with $N = 10$ samples (indices $0 \dots 9$) with batch si
 | **Batch 0** | $0 \dots 4$ | $[7, 2, 4, 1]$ | $(4, D)$ | Full Batch |
 | **Batch 1** | $4 \dots 8$ | $[0, 9, 5, 3]$ | $(4, D)$ | Full Batch |
 | **Batch 2** | $8 \dots 10$ | $[6, 8]$ | $(2, D)$ | Remainder Batch |
+
+```python
+# Pure Python trace verification of DataLoader batch generation:
+import numpy as np
+
+N, B = 10, 4
+indices = np.arange(N)
+
+# Epoch 1 permutation
+perm1 = np.array([3, 8, 0, 5, 2, 9, 7, 1, 4, 6])
+batches_ep1 = [perm1[i:i+B].tolist() for i in range(0, N, B)]
+
+# Epoch 2 permutation
+perm2 = np.array([7, 2, 4, 1, 0, 9, 5, 3, 6, 8])
+batches_ep2 = [perm2[i:i+B].tolist() for i in range(0, N, B)]
+
+print("Epoch 1 batch slices:", batches_ep1)
+print("Epoch 2 batch slices:", batches_ep2)
+```
 
 Every sample is visited exactly once per epoch, and the sample pairings change dynamically between epochs, preventing the network from overfitting to specific sample co-occurrences.
 
@@ -221,12 +244,12 @@ Every sample is visited exactly once per epoch, and the sample pairings change d
 
 In production PyTorch (`torch.utils.data.DataLoader(num_workers=8, pin_memory=True, prefetch_factor=2)`):
 
-### 1. Multi-Processing IPC via POSIX Shared Memory (`/dev/shm`)
+#### 1. Multi-Processing IPC via POSIX Shared Memory (`/dev/shm`)
 Python's standard multi-processing queues serialize data by converting Python objects into byte strings (pickling), transferring them over OS pipes, and deserializing them on the main thread. For a batch of 64 high-resolution images ($150\text{ MB}$), pickling consumes hundreds of milliseconds of CPU time.
 
 PyTorch bypasses OS pipes: worker processes write raw tensor buffers directly into Linux **POSIX Shared Memory** (`/dev/shm`). The worker simply passes a lightweight file descriptor to the main process, achieving **zero-copy inter-process communication**.
 
-### 2. Page-Locked (Pinned) Host Memory & Direct Memory Access (DMA)
+#### 2. Page-Locked (Pinned) Host Memory & Direct Memory Access (DMA)
 Standard OS memory is *pageable*: the Linux virtual memory manager can swap memory pages to disk at any time. Because of this, the GPU cannot safely read directly from CPU memory without host CPU coordination.
 
 When `pin_memory=True` is enabled, PyTorch allocates host buffers using `cudaHostAlloc()`. These pages are **locked into physical RAM** and cannot be paged out. The GPU uses **Direct Memory Access (DMA)** controllers to copy pinned host memory directly across the PCIe bus into GPU High Bandwidth Memory (HBM3) while the CPU is entirely free to decode the next batch.

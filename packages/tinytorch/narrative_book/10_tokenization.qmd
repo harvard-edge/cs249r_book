@@ -19,8 +19,9 @@ The Two Extremes of Text Representation:
 │ 1. CHARACTER-LEVEL TOKENIZATION: The Sequence Bloat Wall                    │
 │    • Vocabulary: 256 bytes (tiny vocabulary).                               │
 │    • Flaw:       A 1,000-word essay becomes 6,000 discrete tokens.          │
-│    • Reality:    Attention compute scales quadratically O(S^2) with sequence│
-│                  length S. 6,000 tokens consumes 36x more GPU memory! ❌    │
+│    • Reality:    In Chapter 12, we show how attention compute scales        │
+│                  quadratically O(S^2) with sequence length S. 6,000 tokens  │
+│                  consumes 36x more GPU memory! ❌                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 2. WORD-LEVEL TOKENIZATION: The Out-of-Vocabulary (OOV) Wall               │
 │    • Vocabulary: 500,000 words (dictionary lookup).                         │
@@ -30,15 +31,15 @@ The Two Extremes of Text Representation:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### The Memory Trade-Off: Embedding Tables vs. Attention Context Windows
+#### The Memory Trade-Off: Embedding Tables vs. Sequence Context Windows
 Consider the hardware memory trade-off between vocabulary size $V$ and sequence length $S$ for a modern model with hidden dimension $D = 4,096$:
 
 1. **Word-Level Memory Footprint**: A vocabulary of $V = 1,000,000$ unique words requires an embedding parameter matrix of shape $[1,000,000 \times 4,096]$. In FP32, this single lookup table consumes:
    $$\text{VRAM}_{\text{Embed}} = 10^6 \times 4096 \times 4\text{ bytes} \approx 16.38\text{ GB of VRAM!}$$
    This memory must remain permanently pinned in GPU high-bandwidth memory (HBM) before processing a single word.
-2. **Character-Level Attention Memory Footprint**: A character-level model with $V = 256$ has an embedding table of only $1\text{ MB}$, but an average English word is 5 to 6 characters long. For an input document of 2,048 words, character-level tokenization produces $S \approx 12,000$ tokens. Because self-attention memory scales as $O(S^2)$, the attention score matrix $\mathbf{Q} \mathbf{K}^T$ requires:
+2. **Character-Level Sequence Memory Footprint**: A character-level model with $V = 256$ has an embedding table of only $1\text{ MB}$, but an average English word is 5 to 6 characters long. For an input document of 2,048 words, character-level tokenization produces $S \approx 12,000$ tokens. As we will see in Chapter 12, multi-head attention memory scales quadratically as $O(S^2)$, where the attention score matrix $\mathbf{Q} \mathbf{K}^T$ requires:
    $$\text{Attention Memory} = 12,000^2 \times 4\text{ bytes} \approx 576\text{ MB per attention head!}$$
-   Across 32 attention heads and 32 layers, intermediate attention activations explode into **590 GB of VRAM**, crashing the GPU cluster.
+   Across 32 attention heads and 32 layers (which we build in Chapter 12: attention layers), intermediate activations explode into **590 GB of VRAM**, crashing the GPU cluster.
 
 Modern deep learning demands an optimal middle ground: **Subword Tokenization**. A subword tokenizer must:
 1. Represent common words as single compact tokens (minimizing sequence length $S$).
@@ -53,7 +54,13 @@ That algorithm is **Byte-Pair Encoding (BPE)**.
 
 Originally developed by Philip Gage in 1994 as a data compression technique, BPE was adapted for natural language processing by Rico Sennrich et al. in 2015 and refined by OpenAI for GPT-2 in 2019.
 
-### The BPE Algorithm Lifecycle
+The algorithm identifies the most frequent adjacent pair of symbols across the entire training corpus and replaces all occurrences with a single newly created symbol:
+
+$$\text{Merge}(a, b) \implies c^* = \arg\max_{(u, v) \in \mathcal{V} \times \mathcal{V}} \text{Freq}(u, v)$$
+
+From a systems memory perspective, text initially enters the tokenizer as a contiguous 1D buffer of raw 8-bit unsigned bytes (`uint8_t` in C++). Merging adjacent bytes into a subword token replaces two contiguous 1-byte elements with a single 16-bit (`uint16_t`) or 32-bit (`uint32_t`) integer identifier. This transformation halves the sequence memory footprint and effectively doubles the L1 instruction and data cache hit rate ($32\text{ KB}$ to $64\text{ KB}$ per core), allowing modern batch processors to stream text tokens at multi-gigabyte-per-second memory bandwidth.
+
+#### The BPE Algorithm Lifecycle
 
 BPE operates across two distinct phases: **Vocabulary Induction (Training)** and **Runtime Encoding (Inference)**.
 
@@ -92,13 +99,20 @@ Given a new word "lowest":
 
 Because the base alphabet includes all 256 possible bytes, **no input string can ever produce an `<UNK>` error**. Every sequence of bytes is fully representable.
 
+```python
+# Conceptual pair census over raw byte sequences in memory
+def count_byte_pairs(byte_stream):
+    return {(byte_stream[i], byte_stream[i+1]): byte_stream.count(byte_stream[i:i+2])
+            for i in range(len(byte_stream) - 1)}
+```
+
 ---
 
 ## Mathematical Formulations: Shannon Information Entropy of Token Streams
 
 Let $\mathcal{D} = (c_1, c_2, \dots, c_N)$ be a corpus of $N$ characters over an alphabet $\Sigma$. Let $p(t_i)$ represent the empirical frequency of token $t_i$ in the induced vocabulary $\mathcal{V}$.
 
-### 1. Shannon Entropy and Compression Bound
+#### 1. Shannon Entropy and Compression Bound
 The average information entropy per token is given by:
 
 $$H(\mathcal{V}) = -\sum_{t_i \in \mathcal{V}} p(t_i) \log_2 p(t_i)$$
@@ -109,16 +123,27 @@ $$L(\mathcal{D}, \mathcal{V}) = |\mathcal{T}_{\mathcal{D}}| \cdot H(\mathcal{V})
 
 where $|\mathcal{T}_{\mathcal{D}}|$ is the total number of tokens emitted when encoding $\mathcal{D}$.
 
-Each BPE merge operation replaces the most frequent pair $(t_a, t_b)$ with a new symbol $t_{ab}$, reducing the total sequence length $|\mathcal{T}_{\mathcal{D}}|$ by the count of that pair $\text{Freq}(t_a, t_b)$ while slightly increasing vocabulary entropy $H(\mathcal{V})$. The optimal vocabulary size $V^*$ represents the Pareto frontier that minimizes the product of sequence length and embedding parameter memory.
+Each BPE merge operation replaces the most frequent pair $(t_a, t_b)$ with a new symbol $t_{ab}$, reducing the total sequence length $|\mathcal{T}_{\mathcal{D}}|$ by the count of that pair $\text{Freq}(t_a, t_b)$ while slightly increasing vocabulary entropy $H(\mathcal{V})$.
+
+::: {.callout-note title="Napkin Math: The Pareto Frontier of Vocabulary Size"}
+Consider training a model on $10^9$ words ($10^9 \times 5.5 = 5.5 \times 10^9$ raw bytes):
+- **Raw Bytes ($V=256$)**: Sequence length $|\mathcal{T}| = 5.5 \times 10^9$. Embedding parameters: $256 \times 4,096 \times 4\text{ bytes} \approx 4\text{ MB}$. But sequence length $S$ is bloated, forcing quadratic sequence buffers to overflow GPU VRAM (as we formalize in Chapter 12: attention matrices).
+- **BPE Subwords ($V=50,257$)**: Sequence length $|\mathcal{T}| \approx 1.3 \times 10^9$ tokens ($4.2\times$ compression). Embedding parameters: $50,257 \times 4,096 \times 4\text{ bytes} \approx 823\text{ MB}$ in DRAM.
+- The optimal vocabulary size $V^* \approx 50,000$ represents the Pareto frontier that balances embedding parameter memory in DRAM against quadratic sequence activation memory in GPU SRAM.
+:::
 
 ---
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 10** in the TinyTorch runtime: `packages/tinytorch/src/10_tokenization/10_tokenization.py`.
+:::
+
 We implement the complete BPE Tokenizer engine in TinyTorch, supporting vocabulary training, merge rank generation, encoding, and decoding:
 
 ```python
-# packages/tinytorch/src/tinytorch/bpe.py
+# Reference Implementation: packages/tinytorch/src/10_tokenization/10_tokenization.py
 from typing import List, Dict, Tuple, Optional
 import unicodedata
 
@@ -232,7 +257,7 @@ class BPETokenizer:
 
 Let us trace vocabulary induction step-by-step on the mini-corpus $\mathcal{D} = \{\text{"low"}, \text{"low"}, \text{"lower"}, \text{"newest"}, \text{"widest"}\}$:
 
-### Step 1: Initial Vocabulary and Pair Frequency Census
+#### Step 1: Initial Vocabulary and Pair Frequency Census
 Base alphabet includes special tokens ($0..4$) and 256 byte values ($5..260$).
 
 | Iteration Step | Most Frequent Pair | Occurrence Count | Created Merged Token | New Token ID | Updated Corpus State |
@@ -244,7 +269,7 @@ Base alphabet includes special tokens ($0..4$) and 256 byte values ($5..260$).
 | **Merge 4** | `('es', 't')` | 2 times | `'est'` | $264$ | `[low], [low], [low,e,r], [n,e,w,est], [w,i,d,est]` |
 | **Merge 5** | `('e', 'r')` | 1 time | `'er'` | $265$ | `[low], [low], [low,er], [n,e,w,est], [w,i,d,est]` |
 
-### Step 2: Runtime Encoding Trace on Unseen String `"lowest"`
+#### Step 2: Runtime Encoding Trace on Unseen String `"lowest"`
 Given test string `"lowest"`:
 1. Initial byte list: `['l', 'o', 'w', 'e', 's', 't']`
 2. Apply Merge 1 (`'l'` + `'o'` $\to$ `'lo'`): `['lo', 'w', 'e', 's', 't']`
@@ -252,6 +277,34 @@ Given test string `"lowest"`:
 4. Apply Merge 3 (`'e'` + `'s'` $\to$ `'es'`): `['low', 'es', 't']`
 5. Apply Merge 4 (`'es'` + `'t'` $\to$ `'est'`): `['low', 'est']`
 6. Output Token IDs: `[262, 264]` (2 tokens instead of 6 bytes, a **$3\times$ reduction in sequence length**).
+
+```python
+# Pure Python Verification of BPE Merge Priority Encoding
+corpus = ["low", "low", "lower", "newest", "widest"]
+merges = {
+    (b'l', b'o'): (0, b'lo'),
+    (b'lo', b'w'): (1, b'low'),
+    (b'e', b's'): (2, b'es'),
+    (b'es', b't'): (3, b'est'),
+    (b'e', b'r'): (4, b'er')
+}
+
+def bpe_encode_trace(word: str):
+    tokens = [bytes([b]) for b in word.encode('utf-8')]
+    while len(tokens) >= 2:
+        ranks = [(merges.get((tokens[i], tokens[i+1]), (float('inf'), None))[0], i)
+                 for i in range(len(tokens) - 1)]
+        min_rank, min_idx = min(ranks, key=lambda x: x[0])
+        if min_rank == float('inf'):
+            break
+        merged = merges[(tokens[min_idx], tokens[min_idx+1])][1]
+        tokens = tokens[:min_idx] + [merged] + tokens[min_idx+2:]
+    return tokens
+
+encoded = bpe_encode_trace("lowest")
+print("Encoded 'lowest' tokens:", [t.decode('utf-8') for t in encoded])
+assert [t.decode('utf-8') for t in encoded] == ["low", "est"], "BPE encoding trace mismatch!"
+```
 
 ---
 
@@ -270,10 +323,19 @@ Production Tokenization Pipeline:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Key Differences Between TinyTorch and PyTorch C++ Tokenization:
+#### Key Differences Between TinyTorch and PyTorch C++ Tokenization:
 1. **Regex Pre-Splitting (`tiktoken`)**: In Python TinyTorch, we pass raw byte sequences. In production GPT-2/GPT-4 tokenizers, a multi-threaded C++/Rust regular expression splits contractions (e.g. `'ll`, `'ve`, `'s`) before pair counting to ensure punctuation doesn't cross token boundaries.
 2. **Parallel Rayon Dispatch**: Production tokenizers dispatch chunks of input text across all available CPU worker threads, tokenizing gigabytes of text at over $1,000,000\text{ tokens/second}$ before batching.
 3. **Direct `c10::TensorImpl` Ingestion**: Tokens are converted directly into int64 tensor buffers in shared memory, allowing the GPU DMA pipeline to ingest token streams with zero CPU-GPU copy bottlenecks.
+
+```python
+# Production Tokenization Bridge (tiktoken / PyTorch Tensor)
+import torch
+
+# Simulating production int64 token buffer allocated directly in pinned memory
+token_ids = torch.tensor([262, 264], dtype=torch.int64)
+print(f"Pinned Token Buffer: {token_ids} | Element Size: {token_ids.element_size()} bytes")
+```
 
 ---
 
@@ -293,6 +355,8 @@ Integer Token ID Vector: [ 1542, 8921, 230, 4921, 104, 381 ]
    ▼ (Next: Chapter 11)
 [ Embedding Lookup Table ] ──► Projects discrete integers into continuous vectors
 ```
+
+From a systems perspective, tokenization reduces the sequence length $S$ by roughly $3\times$ to $4\times$ compared to character-level representations. Because token sequences are stored as compact 64-bit integer buffers ($8\text{ bytes}$ per token), a 2,048-token context window occupies just $2048 \times 8 = 16.384\text{ KB}$ of memory, fitting comfortably into L1 CPU caches or GPU shared memory before entering the embedding pipeline.
 
 We can now translate open-ended human text into clean, compact integer token IDs with guaranteed zero out-of-vocabulary failures.
 

@@ -79,7 +79,7 @@ Performance (GFLOPs/s) ▲
                          0        I_ridge              Arithmetic Intensity (FLOPs/Byte)
 ```
 
-### The Ridge Point: The Hardware Boundary
+#### The Ridge Point: The Hardware Boundary
 
 The intersection between the memory bandwidth ceiling and the compute ceiling defines the **Ridge Point**:
 
@@ -92,7 +92,7 @@ Typical Modern Hardware Ridge Points:
 • NVIDIA H100 GPU    : 1,000 TFLOPs / 3.35 TB/s ──► I_ridge = 298 FLOPs/Byte
 ```
 
-If an operator's arithmetic intensity $I < I_{\text{ridge}}$, it is **Memory-Bound**: the only way to make it faster is to **reduce memory traffic** (via quantization, kernel fusion, or caching).
+If an operator's arithmetic intensity $I < I_{\text{ridge}}$, it is **Memory-Bound**: the only way to make it faster is to **reduce memory traffic** (via quantization in Chapter 15, kernel fusion in Chapter 17, or caching in Chapter 18).
 
 If $I > I_{\text{ridge}}$, it is **Compute-Bound**: the only way to make it faster is to **parallelize arithmetic compute** (via Tensor Cores or SIMD vectorization).
 
@@ -100,10 +100,14 @@ If $I > I_{\text{ridge}}$, it is **Compute-Bound**: the only way to make it fast
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 14** in the TinyTorch runtime: `packages/tinytorch/src/14_profiling/14_profiling.py`.
+:::
+
 We implement the complete `Profiler` engine in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/profiling.py
+# Reference Implementation: packages/tinytorch/src/14_profiling/14_profiling.py
 import time
 import numpy as np
 from typing import Dict, Any, Tuple, List, Optional
@@ -206,27 +210,60 @@ Let us profile every sub-operation inside a single Transformer Block forward pas
 
 Every single sub-layer in small-batch autoregressive inference has an arithmetic intensity $I \le 2.0$, sitting orders of magnitude below the GPU hardware ridge point ($I_{\text{ridge}} \approx 156\text{--}298$).
 
+```python
+# Pure Python Verification of Transformer Block Roofline Metrics
+flops = {
+    "LayerNorm 1": 2048,
+    "QKV Proj": 393216,
+    "Attn QK^T": 4096,
+    "Softmax": 48,
+    "MLP Expand": 524288,
+    "GELU": 5120
+}
+bytes_transferred = {
+    "LayerNorm 1": 4096,
+    "QKV Proj": 196608,
+    "Attn QK^T": 4160,
+    "Softmax": 128,
+    "MLP Expand": 262144,
+    "GELU": 4096
+}
+
+total_flops = sum(flops.values())
+total_bytes = sum(bytes_transferred.values())
+total_intensity = total_flops / total_bytes
+
+print(f"Total Block FLOPs: {total_flops:,}")
+print(f"Total Block DRAM Bytes: {total_bytes:,} bytes")
+print(f"Arithmetic Intensity: {total_intensity:.2f} FLOPs/Byte")
+assert np.isclose(total_intensity, 1.97, atol=0.02), "Roofline calculation mismatch!"
+```
+
 ---
 
 ## The Production Systems Bridge: PyTorch Kineto Profiler and Chrome Traces
 
-In production systems, PyTorch integrates the **Kineto Tracing Engine**:
+In production systems, PyTorch integrates the **Kineto Tracing Engine** (built jointly with Meta and NVIDIA), providing hardware-counter visibility into CUDA runtime streams:
 
 ```python
 import torch
 
 with torch.profiler.profile(
-    activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.CUDA
+    ],
     record_shapes=True,
     profile_memory=True,
     with_stack=True
 ) as prof:
     model(inputs)
 
+# Export timeline for interactive visualization
 prof.export_chrome_trace("trace.json")
 ```
 
-Opening `trace.json` inside `chrome://tracing` displays microsecond-level timelines of every CUDA kernel launch, memory copy (`cudaMemcpyAsync`), and CPU thread synchronization barrier.
+Opening `trace.json` inside `chrome://tracing` displays microsecond-level timelines of every CUDA kernel launch, memory copy (`cudaMemcpyAsync`), and CPU thread synchronization barrier. In addition, command-line profiling tools like NVIDIA Nsight Compute (`ncu`) directly report hardware DRAM bus saturation percentages and streaming multiprocessor (SM) active warp occupancy, confirming whether a kernel is bound by the memory wall or compute pipes.
 
 ---
 
@@ -245,6 +282,14 @@ Chapter 14 gives our framework its diagnostic instruments:
 ```
 
 The diagnosis is clear: **our model is suffocating on DRAM memory traffic**.
+
+::: {.callout-note title="Napkin Math: The 4x Memory Bandwidth Dividend"}
+Why does arithmetic intensity dictate our optimization roadmap?
+- At $I = 1.97\text{ FLOPs/Byte}$, an NVIDIA A100 GPU capable of $312\text{ TFLOPs}$ can only achieve:
+  $$\text{Throughput} = I \times B_{\text{peak}} = 1.97\text{ FLOPs/Byte} \times 2,000\text{ GB/s} \approx 3.94\text{ TFLOPs/s}$$
+  The GPU is operating at just **$1.26\%$ of its theoretical arithmetic capability**! Over $98\%$ of the silicon is idle, waiting for float32 numbers to arrive over the memory bus.
+- If we convert FP32 weights ($4\text{ bytes}$) to INT8 integers ($1\text{ byte}$), DRAM traffic drops by exactly $4\times$, boosting operational throughput by $400\%$ without altering a single neural architecture layer!
+:::
 
 How do we slash our memory bandwidth traffic by $4\times$ without retraining our model?
 

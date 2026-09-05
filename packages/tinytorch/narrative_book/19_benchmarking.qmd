@@ -55,7 +55,7 @@ The Three Fatal Benchmarking Flaws:
 
 To replace naive wall-clock timing with scientific systems benchmarking, we establish formal mathematical definitions for latency distributions, tail percentiles, and steady-state convergence.
 
-### Latency Distribution and Sample Moments
+#### Latency Distribution and Sample Moments
 
 Let an evaluation run collect a series of $N$ measured execution times $\mathcal{T} = \{t_1, t_2, \dots, t_N\}$, where each $t_i \in \mathbb{R}^+$ represents the elapsed time of iteration $i$ in milliseconds.
 
@@ -64,7 +64,7 @@ $$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_
 
 However, runtime latency distributions on modern multi-core operating systems are non-Gaussian and heavily right-skewed due to cache evictions, page faults, and hardware interrupts. Consequently, moments like mean and variance provide an incomplete picture.
 
-### Rank-Order Percentiles and Tail Latency
+#### Rank-Order Percentiles and Tail Latency
 
 We sort the recorded latencies in ascending order to obtain the order statistics:
 $$t_{(1)} \le t_{(2)} \le \dots \le t_{(N)}$$
@@ -78,7 +78,7 @@ $$P_k = t_{(r_k)}$$
 - **$P_{50}$ (Median)**: The representative steady-state latency experienced by the typical user. Exactly $50\%$ of requests execute faster than $P_{50}$.
 - **$P_{95}$ & $P_{99}$ (Tail Latency)**: The latency experienced by the slowest $5\%$ and $1\%$ of requests. In production microservices, Service Level Agreements (SLAs) are strictly defined on $P_{99}$.
 
-### Throughput Formulation
+#### Throughput Formulation
 
 Throughput measures the total volume of inference requests processed per unit time across the steady-state window:
 
@@ -86,7 +86,7 @@ $$\text{Throughput} = \frac{N \times B}{\sum_{i=1}^N t_i} \times 1000 \quad \lef
 
 where $B$ is the batch size and $t_i$ is recorded in milliseconds.
 
-### Warmup Convergence Criterion
+#### Warmup Convergence Criterion
 
 To mathematically determine when a system has exited its cold-start phase and entered steady-state execution, we evaluate the rolling window variation:
 
@@ -97,6 +97,10 @@ where $W$ is the sliding window size (e.g., $W = 10$) and $\epsilon_{\text{warmu
 ---
 
 ## Line-by-Line Code Commentary: The Pure TinyTorch Benchmark Engine
+
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 19** in the TinyTorch runtime: `packages/tinytorch/src/19_benchmarking/19_benchmarking.py`.
+:::
 
 We implement the complete, scientifically rigorous `Benchmark` and `BenchmarkResult` suite in TinyTorch.
 
@@ -217,7 +221,7 @@ class Benchmark:
         )
 ```
 
-### Architectural Line-by-Line Mechanics
+#### Architectural Line-by-Line Mechanics
 
 1. **Lines 61--66 (`self.synchronize()` wrapper)**: If running on a CUDA device, `sync_fn` maps to `torch.cuda.synchronize()`. Calling this before `time.perf_counter()` guarantees that past kernel launches do not pollute the current measurement. Calling it after guarantees that the CPU does not record `t_end` until all GPU execution completes.
 2. **Lines 75--78 (The Warmup Loop)**: We execute `num_warmup = 10` iterations completely unmeasured. This ensures that L1/L2 data and instruction caches are primed and any dynamic branch tables are stabilized.
@@ -230,7 +234,7 @@ class Benchmark:
 
 To observe the necessity of warmup filtering and the danger of relying on arithmetic means, let us trace a concrete benchmark run of 10 iterations on a transformer block.
 
-### Raw Data Collection
+#### Raw Data Collection
 Suppose we measure 10 sequential forward passes:
 - **Warmup Iterations (3 passes)**:
   - Iteration 1 (Cold Start): $t_1 = 48.20\text{ ms}$ (triggers memory allocation & cache miss)
@@ -262,7 +266,7 @@ Table @tbl-bench-trace contrasts naive evaluation (which includes cold start) ag
 
 : Concrete comparison of naive vs scientific benchmark sample filtering. {#tbl-bench-trace}
 
-### Statistical Analysis Comparison
+#### Statistical Analysis Comparison
 
 Let us calculate the metrics under both paradigms:
 
@@ -277,6 +281,29 @@ Let us calculate the metrics under both paradigms:
    - **Tail Latency ($P_{95}$)**: Interpolated index $\implies \mathbf{14.44\text{ ms}}$
    - **Tail Latency ($P_{99}$)**: Interpolated index $\implies \mathbf{17.61\text{ ms}}$
    - **Throughput**: $\frac{7 \times 1}{0.0489\text{ s}} = \mathbf{143.1\text{ samples/sec}}$
+
+```python
+# Pure Python Verification of Order-Statistic Benchmarking Metrics
+import numpy as np
+
+raw_runs = [48.20, 14.50, 7.10, 5.12, 5.08, 4.95, 5.20, 5.10, 18.40, 5.05]
+
+# Naive mean (including cold start)
+naive_mean = np.mean(raw_runs)
+
+# TinyTorch Protocol (discarding 3 warmup runs)
+measured = np.array(raw_runs[3:])
+p50 = np.percentile(measured, 50)
+p95 = np.percentile(measured, 95)
+p99 = np.percentile(measured, 99)
+throughput = (len(measured) * 1.0) / (np.sum(measured) / 1000.0)
+
+print(f"Naive Arithmetic Mean: {naive_mean:.2f} ms")
+print(f"TinyTorch P50 Median:  {p50:.2f} ms (Throughput: {throughput:.1f} samples/s)")
+print(f"TinyTorch P95 Tail:    {p95:.2f} ms | P99 Tail: {p99:.2f} ms")
+assert np.isclose(naive_mean, 11.87, atol=0.01), "Naive mean mismatch!"
+assert np.isclose(p50, 5.10, atol=0.01), "Median mismatch!"
+```
 
 The TinyTorch benchmark reports the full reality: typical execution is blazing fast at $5.10\text{ ms}$, but the system experiences occasional $P_{99}$ tail spikes up to $17.61\text{ ms}$.
 
@@ -303,7 +330,7 @@ MLPerf Inference Specification Requirements:
      and exact compiler flags to ensure full reproducibility.
 ```
 
-### Hardware Timestamping via CUDA Events
+#### Hardware Timestamping via CUDA Events
 
 In production PyTorch C++ engines, timing avoids host OS jitter by using GPU hardware timestamps:
 
@@ -346,6 +373,8 @@ Chapter 19 equips TinyTorch with mathematical and scientific honesty:
 │ • MLPerf Accuracy Floor Check: >= 99% accuracy retention enforced.          │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+From a systems engineering perspective, benchmarking is the ultimate arbiter of architectural trade-offs. By synchronizing CPU and GPU streams and computing order statistics across hundreds of iterations, our engine guarantees that reported speedups reflect physical silicon realities rather than asynchronous launch buffering or cold-start noise.
 
 We now possess the complete toolkit: profiling tools, mathematical optimizers, quantization algorithms, pruning routines, kernel fusion passes, memory caches, and statistical benchmark harnesses.
 

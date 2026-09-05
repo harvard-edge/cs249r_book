@@ -27,15 +27,15 @@ $$\text{Time per Step} = 10^8 \times 10\text{ ms} = 10^9\text{ seconds} \approx 
 
 Finite differences is computationally impossible for deep learning. Furthermore, floating-point truncation errors in IEEE 754 float32 arithmetic corrupt the derivative when $\epsilon$ is small ($\epsilon \approx 10^{-5}$).
 
-### 2. Symbolic Differentiation: The Expression Explosion
-Symbolic differentiation systems (such as Mathematica or SymPy) apply algebraic transformation rules (product rule, chain rule) to the mathematical expression of the computation graph.
-
-While symbolic differentiation yields exact closed-form algebraic expressions, the length of the symbolic derivative expression grows exponentially with the depth $L$ of the computational graph. For a composite function $f(x) = f_L(f_{L-1}(\dots f_1(x)))$, expanding $(u \cdot v)' = u'v + uv'$ across dozens of nested matrix operations produces symbolic trees containing billions of redundant terms, consuming gigabytes of memory for algebraic simplification.
-
-### 3. Reverse-Mode Automatic Differentiation: The $O(1)$ Breakthrough
-Reverse-mode automatic differentiation evaluates exact numerical derivatives without algebraic expression expansion. By executing the chain rule backwards from the scalar loss to the leaf parameters, reverse-mode autograd computes the complete gradient vector $\nabla_W \mathcal{L}$ for all $N$ parameters in a **single backward pass**, requiring roughly $2\times$ the compute of a single forward pass ($O(1)$ with respect to parameter count $N$).
+::: {.callout-note title="Napkin Math: Comparing the Three Differentiation Paradigms"}
+Consider training a standard 100M parameter model with batch size $B = 32$:
+1. **Numerical Finite Differences**: Requires $100,000,001$ forward passes. At 10 ms/pass, a single gradient update takes $10^6$ seconds ($11.5\text{ days}$). Training for 100,000 steps would require over 3,000 years of GPU compute time!
+2. **Symbolic Differentiation**: Applies the product rule algebraically. For a 24-layer transformer, the algebraic expression for $\frac{\partial \mathcal{L}}{\partial W_1}$ contains over $10^{14}$ expanded terms, overflowing host RAM before a single number is evaluated.
+3. **Reverse-Mode Autograd (TinyTorch)**: Records forward tensor operations into a compact linear execution tape ($O(1)$ overhead per operation). A single backward sweep evaluates every parameter gradient in roughly $20\text{ ms}$---making modern AI computationally feasible on physical hardware.
+:::
 
 ### The Forward-Backward Memory Asymmetry
+
 The fundamental systems trade-off of reverse-mode autograd is memory consumption. In a pure forward inference pass, intermediate activation buffers $\mathbf{a}_l$ can be immediately overwritten as soon as layer $l+1$ finishes execution ($O(1)$ memory buffer reuse).
 
 In contrast, during training with autograd, every intermediate activation $\mathbf{a}_l$ required to compute the local Jacobian matrix $\mathbf{J}_l = \frac{\partial \mathbf{a}_l}{\partial \mathbf{a}_{l-1}}$ must remain **pinned in DRAM/VRAM** throughout the entire forward pass until the backward pass reaches layer $l$. This creates the memory wall that dominates GPU training cluster architectures.
@@ -46,7 +46,6 @@ In contrast, during training with autograd, every intermediate activation $\math
 
 TinyTorch implements **Dynamic Tape-Based Reverse-Mode Autograd** (the same paradigm popularized by PyTorch and Autograd/JAX).
 
-### Forward Phase: Dynamic Tape Recording
 As mathematical operators (`+`, `*`, `matmul`, `relu`) execute during standard Python program interpretation, the runtime dynamically records an operation node (`Op`) onto an execution tape.
 
 Each Node in the computational DAG encapsulates:
@@ -61,7 +60,6 @@ X [B, D_in]  ───┐
 W [D_in, D_out]─┘
 ```
 
-### Reverse Phase: Topological Traversal & Multivariate Accumulation
 When `.backward()` is invoked on the scalar loss $\mathcal{L}$, the engine:
 1. Seeds the loss gradient with the identity derivative: $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$.
 2. Computes a **Topological Ordering** of all nodes in the DAG using Depth-First Search (DFS).
@@ -89,26 +87,14 @@ Instead, reverse-mode autograd evaluates the **Vector-Jacobian Product (VJP)**: 
 
 $$\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{g} \cdot \mathbf{J} \in \mathbb{R}^{1 \times n}$$
 
-### 1. Matrix Multiplication VJP: $Y = A \cdot B$
-Let $A \in \mathbb{R}^{M \times K}$, $B \in \mathbb{R}^{K \times N}$, and $Y = A B \in \mathbb{R}^{M \times N}$. Let the upstream loss gradient be $G = \frac{\partial \mathcal{L}}{\partial Y} \in \mathbb{R}^{M \times N}$.
+::: {.callout-note title="Napkin Math: Transposed GEMM Execution for Matrix Multiplication"}
+For $Y = A \cdot B$ with $A \in \mathbb{R}^{M \times K}$ and $B \in \mathbb{R}^{K \times N}$, the incoming gradient is $G = \frac{\partial \mathcal{L}}{\partial Y} \in \mathbb{R}^{M \times N}$.
+- The gradient with respect to $A$ is $\frac{\partial \mathcal{L}}{\partial A} = G \cdot B^T \in \mathbb{R}^{M \times K}$.
+- The gradient with respect to $B$ is $\frac{\partial \mathcal{L}}{\partial B} = A^T \cdot G \in \mathbb{R}^{K \times N}$.
+- **Systems Consequence**: Neither backward step requires allocating a Jacobian! Both derivatives execute as high-throughput dense matrix multiplications (GEMMs) on flat contiguous memory buffers, achieving near-peak hardware compute utilization.
+:::
 
-Applying the multivariate chain rule to each component $Y_{ij} = \sum_k A_{ik} B_{kj}$:
-
-$$\frac{\partial \mathcal{L}}{\partial A_{ik}} = \sum_j \frac{\partial \mathcal{L}}{\partial Y_{ij}} \frac{\partial Y_{ij}}{\partial A_{ik}} = \sum_j G_{ij} B_{kj} = \sum_j G_{ij} (B^T)_{jk} = (G \cdot B^T)_{ik}$$
-
-$$\frac{\partial \mathcal{L}}{\partial B_{kj}} = \sum_i \frac{\partial \mathcal{L}}{\partial Y_{ij}} \frac{\partial Y_{ij}}{\partial B_{kj}} = \sum_i (A^T)_{ki} G_{ij} = (A^T \cdot G)_{kj}$$
-
-Thus, the VJP for matrix multiplication consists of two transposed matrix multiplications:
-
-$$\frac{\partial \mathcal{L}}{\partial A} = G \cdot B^T, \qquad \frac{\partial \mathcal{L}}{\partial B} = A^T \cdot G$$
-
-### 2. Elementwise Addition VJP: $Y = A + B$
-For $Y = A + B$, $\frac{\partial Y_i}{\partial A_i} = 1$ and $\frac{\partial Y_i}{\partial B_i} = 1$. The upstream gradient $G$ flows backward unmodified to both inputs:
-
-$$\frac{\partial \mathcal{L}}{\partial A} = G, \qquad \frac{\partial \mathcal{L}}{\partial B} = G$$
-
-### 3. The Multivariate Chain Rule and In-Place Accumulation
-When a tensor $X$ is reused across multiple branches in the computational graph (such as a residual skip connection $Y = X + f(X)$ or shared embedding weights), the total derivative is the sum of partial derivatives along all outgoing paths:
+When a tensor $X$ is reused across multiple branches in the computational graph (such as a residual skip connection $Y = X + f(X)$ or shared parameter weights, such as token embeddings which we explore in Chapter 11), the total derivative is the sum of partial derivatives along all outgoing paths:
 
 $$\frac{\partial \mathcal{L}}{\partial X} = \sum_{k \in \text{Consumers}(X)} \left( \frac{\partial \mathcal{L}}{\partial Y_k} \frac{\partial Y_k}{\partial X} \right)$$
 
@@ -120,15 +106,16 @@ If an autograd engine mistakenly overwrote `param.grad = grad` instead of accumu
 
 ---
 
-## Line-by-Line Reference Implementation
+## Line-by-Line Reference Implementation: The Dynamic Autograd Tape Engine
 
-Let us inspect the complete, executable TinyTorch autograd engine.
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 06** in the TinyTorch runtime: `packages/tinytorch/src/06_autograd/06_autograd.py`.
+:::
 
-### The Dynamic Node and Computational Graph Hook
-Each operation in TinyTorch wraps forward execution and attaches a backward closure:
+Let us inspect the complete, executable TinyTorch autograd engine. Each operation wraps forward execution and attaches a backward closure:
 
 ```python
-# packages/tinytorch/src/tinytorch/autograd.py
+# Reference Implementation: packages/tinytorch/src/06_autograd/06_autograd.py
 from typing import List, Set, Tuple, Optional, Callable
 import numpy as np
 
@@ -236,13 +223,13 @@ class Tensor:
 
 ---
 
-## Concrete Numerical Trace Table
+### Concrete Numerical Trace Table: Forward Tape to Reverse Topological Sort
 
 To verify the mathematical and algorithmic integrity of our autograd engine, let us trace a concrete 2-node computational graph by hand:
 
 $$\mathbf{x} = \begin{bmatrix} 1.0 & 2.0 \end{bmatrix}, \quad \mathbf{W} = \begin{bmatrix} 0.5 & -0.5 \\ 1.0 & 0.5 \end{bmatrix}, \quad \mathbf{z} = \mathbf{x} \mathbf{W}, \quad \mathbf{a} = \text{ReLU}(\mathbf{z}), \quad \mathcal{L} = \sum \mathbf{a}$$
 
-### Step 1: Forward Pass Computations
+#### Step 1: Forward Pass Computations
 
 $$\mathbf{z} = \begin{bmatrix} 1.0 & 2.0 \end{bmatrix} \begin{bmatrix} 0.5 & -0.5 \\ 1.0 & 0.5 \end{bmatrix} = \begin{bmatrix} 1.0(0.5) + 2.0(1.0) & 1.0(-0.5) + 2.0(0.5) \end{bmatrix} = \begin{bmatrix} 2.5 & 0.5 \end{bmatrix}$$
 
@@ -250,15 +237,39 @@ $$\mathbf{a} = \text{ReLU}\left(\begin{bmatrix} 2.5 & 0.5 \end{bmatrix}\right) =
 
 $$\mathcal{L} = 2.5 + 0.5 = 3.0$$
 
-### Step 2: Reverse Topological Sweep Trace Table
+#### Step 2: Reverse Topological Sweep Trace Table
 
-| DAG Node | Operation | Saved Activation | Incoming Upstream Grad $\mathbf{G}$ | VJP Formula | Output Gradient |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Node 4 ($\mathcal{L}$)** | Root Seed | $\mathcal{L} = 3.0$ | N/A | Seed $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ |
-| **Node 3 ($\mathbf{a}$)** | Sum Reduction | $\mathbf{a} = [2.5, 0.5]$ | $\mathbf{G}_{\mathcal{L}} = [1.0]$ | $\mathbf{G}_{\mathbf{a}} = \mathbf{G}_{\mathcal{L}} \cdot [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{a}} = [1.0, 1.0]$ |
-| **Node 2 ($\mathbf{z}$)** | $\text{ReLU}(\mathbf{z})$ | $\mathbf{z} = [2.5, 0.5]$ | $\mathbf{G}_{\mathbf{a}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{z}} = \mathbf{G}_{\mathbf{a}} \odot \mathbb{I}(\mathbf{z} > 0)$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{z}} = [1.0, 1.0]$ |
-| **Node 1 ($\mathbf{W}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{x} = [1.0, 2.0]$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{x}^T \cdot \mathbf{G}_{\mathbf{z}}$ | $\begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$ |
-| **Node 0 ($\mathbf{x}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{W}$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{G}_{\mathbf{z}} \cdot \mathbf{W}^T$ | $\begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}$ |
+| DAG Node | Operation | Saved Activation | Incoming Upstream Grad $\mathbf{G}$ | VJP Formula | Output Gradient | Memory & Cache Reality |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Node 4 ($\mathcal{L}$)** | Root Seed | $\mathcal{L} = 3.0$ | N/A | Seed $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$ | 4-byte float scalar in register |
+| **Node 3 ($\mathbf{a}$)** | Sum Reduction | $\mathbf{a} = [2.5, 0.5]$ | $\mathbf{G}_{\mathcal{L}} = [1.0]$ | $\mathbf{G}_{\mathbf{a}} = \mathbf{G}_{\mathcal{L}} \cdot [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{a}} = [1.0, 1.0]$ | Broadcast into 8-byte contiguous buffer |
+| **Node 2 ($\mathbf{z}$)** | $\text{ReLU}(\mathbf{z})$ | $\mathbf{z} = [2.5, 0.5]$ | $\mathbf{G}_{\mathbf{a}} = [1.0, 1.0]$ | $\mathbf{G}_{\mathbf{z}} = \mathbf{G}_{\mathbf{a}} \odot \mathbb{I}(\mathbf{z} > 0)$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{z}} = [1.0, 1.0]$ | In-place SIMD bitmask filtering |
+| **Node 1 ($\mathbf{W}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{x} = [1.0, 2.0]$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{x}^T \cdot \mathbf{G}_{\mathbf{z}}$ | $\begin{bmatrix} 1.0 \\ 2.0 \end{bmatrix} \begin{bmatrix} 1.0 & 1.0 \end{bmatrix} = \begin{bmatrix} 1.0 & 1.0 \\ 2.0 & 2.0 \end{bmatrix}$ | 16-byte $2 \times 2$ gradient matrix |
+| **Node 0 ($\mathbf{x}$)** | $\mathbf{x} \mathbf{W}$ | $\mathbf{W}$ | $\mathbf{G}_{\mathbf{z}} = [1.0, 1.0]$ | $\frac{\partial \mathcal{L}}{\partial \mathbf{x}} = \mathbf{G}_{\mathbf{z}} \cdot \mathbf{W}^T$ | $\begin{bmatrix} 1.0 & 1.0 \end{bmatrix} \begin{bmatrix} 0.5 & 1.0 \\ -0.5 & 0.5 \end{bmatrix} = \begin{bmatrix} 0.0 & 1.5 \end{bmatrix}$ | 8-byte input activation gradient |
+
+```python
+# Hand-Verification Script: Run with TinyTorch autograd or standard NumPy
+import numpy as np
+
+x_data = np.array([[1.0, 2.0]])
+W_data = np.array([[0.5, -0.5], [1.0, 0.5]])
+
+# Forward
+z_data = x_data @ W_data
+a_data = np.maximum(0, z_data)
+loss = np.sum(a_data)
+
+# Backward
+grad_loss = 1.0
+grad_a = grad_loss * np.ones_like(a_data)
+grad_z = grad_a * (z_data > 0).astype(np.float64)
+grad_W = x_data.T @ grad_z
+grad_x = grad_z @ W_data.T
+
+print("W Gradient:\n", grad_W)
+print("x Gradient:\n", grad_x)
+# Matches trace table exactly: grad_W = [[1.0, 1.0], [2.0, 2.0]], grad_x = [[0.0, 1.5]]
+```
 
 Every single arithmetic value matches the exact outputs computed by our TinyTorch autograd engine!
 
@@ -274,7 +285,7 @@ Production PyTorch Autograd Architecture:
 │                    Python User Frontend                      │
 │                loss.backward() [Python GIL]                  │
 └──────────────────────────────┬───────────────────────────────┘
-                               │ Dispatches into C++
+                                │ Dispatches into C++
 ┌──────────────────────────────▼───────────────────────────────┐
 │              torch::autograd::Engine [C++ Core]              │
 │  1. Constructs ReadyQueue of executable Node tasks           │
@@ -284,7 +295,7 @@ Production PyTorch Autograd Architecture:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Key Differences Between TinyTorch and PyTorch C++ Autograd:
+#### Architectural Distinctions: TinyTorch vs. Production PyTorch ATen Engine
 1. **Multithreaded Task Queue (`ReadyQueue`)**: TinyTorch evaluates the topological sort sequentially in a single Python thread. PyTorch maintains a thread pool with a concurrent `ReadyQueue`. Any node whose downstream dependencies are satisfied is immediately scheduled on an idle worker thread, enabling parallel backward execution across independent network branches.
 2. **In-Place Mutation Guarding (`_version` tracking)**: If a tensor's underlying memory is modified in-place (e.g. `x.add_(1)`) after being saved for backward, its values are corrupted. PyTorch maintains an atomic integer `_version` counter inside `c10::TensorImpl`. If the backward pass discovers that `tensor._version != saved_version`, it throws a clear runtime error: `RuntimeError: one of the variables needed for gradient computation has been modified by an in-place operation`.
 3. **Engine Reentrancy and Non-Differentiable Hooks**: PyTorch allows backward hooks (e.g., gradient clipping, DDP all-reduce synchronization) to run seamlessly during graph execution without deadlocking the engine.

@@ -4,6 +4,10 @@ In Chapters 9 through 13, we expanded TinyTorch from flat perceptrons into state
 
 In this milestone, we take the decisive leap from static classification into **Generative Intelligence**. We assemble our complete Tier 1, Tier 2, and Tier 3 systems to train `TinyGPT` from scratch on a text corpus and construct the **Autoregressive Generation Loop** with temperature scaling and top-$k$ probability filtering.
 
+::: {.callout-note title="Milestone Verification Scope"}
+Milestone II validates the deep architecture suite by integrating **Modules 09 through 13** (`packages/tinytorch/src/09_convolutions` through `packages/tinytorch/src/13_transformers`) into an autoregressive GPT-2 generative language model.
+:::
+
 ![The Generative Inference Loop: Autoregressive Step-by-Step Sampling with Temperature and Top-k Filtering](assets/images/diagrams/milestone_02-diag-1.svg){#fig-milestone2-loop}
 
 ---
@@ -40,9 +44,11 @@ Language model generation is strictly **memory bandwidth bound**.
 
 ## M2.2 The Mental Model: Temperature and Top-$k$ Probability Shaping
 
-Given raw output logits $\mathbf{z} \in \mathbb{R}^V$ for the next token, we shape the probability distribution before sampling:
+Given raw output logits $\mathbf{z} \in \mathbb{R}^V$ for the next token, we shape the probability distribution before sampling to balance predictability against diversity:
 
-### Temperature Scaling ($T$)
+$$\mathbf{z}' = \text{Top-}k\left( \frac{\mathbf{z}}{T} \right)$$
+
+#### Temperature Scaling ($T$)
 
 We divide the raw logits by a positive scalar temperature $T > 0$:
 
@@ -55,7 +61,7 @@ Temperature Control Regimes:
 • T → 2.0 : Flat uniform distribution (high entropy; creative, random).
 ```
 
-### Top-$k$ Filtering
+#### Top-$k$ Filtering
 
 We sort the logits, retain only the top $k$ highest-scoring tokens, and set all remaining logits to $-\infty$:
 
@@ -63,13 +69,23 @@ $$z_i' = \begin{cases} z_i & \text{if } z_i \in \text{Top-}k(z) \\ -\infty & \te
 
 After re-applying Softmax, the bottom $V - k$ tokens have an exact **$0.0\%$ probability** of being sampled, completely preventing low-probability hallucination tails.
 
+```python
+# Pure Python Probability Shaping Snippet
+def shape_logits(logits, temperature=0.8, top_k=2):
+    scaled = logits / max(temperature, 1e-5)
+    indices_to_remove = np.argsort(scaled)[:-top_k]
+    scaled[indices_to_remove] = -np.inf
+    exp_logits = np.exp(scaled - np.max(scaled[scaled > -np.inf]))
+    return exp_logits / np.sum(exp_logits)
+```
+
 ---
 
 ## M2.3 Mathematical Formulations: Sampling Limits and Distribution Properties
 
 Let us formally prove the asymptotic behavior of temperature scaling.
 
-### Theorem: Temperature Limits
+#### Theorem: Temperature Limits
 Let $\mathbf{z} \in \mathbb{R}^V$ with unique maximum $z^* = \max_i z_i$.
 1. **Zero-Temperature Deterministic Limit**:
    $$\lim_{T \to 0^+} P_i(T) = \begin{cases} 1 & \text{if } z_i = z^* \\ 0 & \text{otherwise} \end{cases}$$
@@ -85,12 +101,13 @@ Let $\mathbf{z} \in \mathbb{R}^V$ with unique maximum $z^* = \max_i z_i$.
 We implement the complete autoregressive generation engine in pure TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/generation.py
+# Reference Implementation: Milestone II Autoregressive Generation
+# (Integrates src/06_autograd, src/10_tokenization, src/13_transformers)
 import numpy as np
 from typing import List, Optional
-from .autograd import Tensor
-from .bpe import BPETokenizer
-from .transformer import TinyGPT
+from tinytorch.core.tensor import Tensor
+from tinytorch.tokenization.bpe import BPETokenizer
+from tinytorch.models.transformer import TinyGPT
 
 def generate_text(model: TinyGPT, tokenizer: BPETokenizer, prompt: str,
                   max_new_tokens: int = 50, temperature: float = 0.8,
@@ -151,6 +168,27 @@ Let us trace temperature scaling and Top-$k$ filtering on a 5-token vocabulary w
 
 Notice how $T=0.5$ concentrates $97.9\%$ of the probability mass on the top token, while Top-$k=2$ cleanly eliminates the long tail of irrelevant tokens.
 
+```python
+# Pure Python Verification of Sampling Probabilities
+import numpy as np
+
+z = np.array([4.0, 2.0, 1.0, 0.0, -2.0])
+
+# Cold T=0.5 calculation
+exp_t05 = np.exp(z / 0.5 - np.max(z / 0.5))
+p_t05 = exp_t05 / np.sum(exp_t05)
+print("Cold T=0.5 Probabilities (%):", np.round(p_t05 * 100, 2))
+assert np.isclose(p_t05[0] * 100, 97.9, atol=0.1), "Probability trace mismatch!"
+
+# Top-k=2 with T=0.8 calculation
+z_k = z.copy() / 0.8
+z_k[np.argsort(z_k)[:-2]] = -np.inf
+exp_k = np.exp(z_k - np.max(z_k[z_k > -np.inf]))
+p_k = exp_k / np.sum(exp_k)
+print("Top-k=2 (T=0.8) Probabilities (%):", np.round(p_k * 100, 2))
+assert np.isclose(p_k[0] * 100, 90.51, atol=0.1), "Top-k trace mismatch!"
+```
+
 ---
 
 ## M2.6 End-to-End Training Validation
@@ -205,9 +243,19 @@ print(f"  '{output}'")
 
 In industrial LLM inference serving, naive autoregressive decoding is replaced by specialized systems:
 
+```python
+# Production Probability Shaping Bridge
+import torch
+import torch.nn.functional as F
+
+logits = torch.tensor([4.0, 2.0, 1.0, 0.0, -2.0])
+probs = F.softmax(logits / 0.5, dim=-1)
+print("PyTorch Shaped Probabilities (%):", (probs * 100).round())
+```
+
 | Serving Bottleneck | Production Solution | Systems Mechanism |
 | :--- | :--- | :--- |
-| **DRAM Memory Fragmentation** | **PagedAttention (vLLM)** | Manages KV cache memory in virtual memory pages like an OS. |
+| **DRAM Memory Fragmentation** | **PagedAttention (vLLM)** | In Chapter 18, we build the KV cache; vLLM manages key-value activation memory in virtual pages like an OS. |
 | **DRAM Bandwidth Starvation** | **Speculative Decoding** | Small draft model generates 5 tokens; large model verifies them in 1 parallel pass. |
 | **Weight Loading Latency** | **Continuous Batching** | Dynamically packs new requests into active decode iterations without waiting for sequence completion. |
 
@@ -232,4 +280,4 @@ Yet as our models grow deeper and our sequences grow longer, we confront a bruta
 
 How do systems engineers optimize, compress, accelerate, and profile machine learning frameworks to run $16\times$ faster on real hardware?
 
-Welcome to **Part III: Systems Acceleration & Performance Engineering**.
+Welcome to **Part III: Systems Acceleration & Performance Engineering** (which we build across Chapters 14 through 20: Roofline profiling, quantization, pruning, kernel fusion, memoization, benchmarking, and the 16x accelerated capstone).

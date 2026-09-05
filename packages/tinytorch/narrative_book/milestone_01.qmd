@@ -4,6 +4,10 @@ In Chapters 1 through 8, we engineered the complete Core Engine of TinyTorch fro
 
 Now, we put our engine to the ultimate test. Rather than testing our framework on synthetic toy scripts, we will re-enact the foundational scientific drama that shaped the history of artificial intelligence: **The Journey from Frank Rosenblatt's 1958 Perceptron to Rumelhart, Hinton, and Williams' 1986 Multi-Layer Perceptron**.
 
+::: {.callout-note title="Milestone Verification Scope"}
+Milestone I validates the core compute engine by integrating **Modules 01 through 08** (`packages/tinytorch/src/01_tensor` through `packages/tinytorch/src/08_training`) on non-linear manifold folding (XOR) and real handwritten digit classification.
+:::
+
 ![The AI Winter and Spring: Single-Layer Perceptron Decision Line vs. Two-Layer MLP Non-Linear XOR Manifold](assets/images/diagrams/milestone_01-diag-1.svg){#fig-milestone1-history}
 
 ---
@@ -44,8 +48,11 @@ Their book effectively halted funding and academic research in neural networks f
 The AI winter thawed in 1986 when David Rumelhart, Geoffrey Hinton, and Ronald Williams published their landmark paper, *"Learning representations by back-propagating errors"*.
 
 Their breakthrough rested on two pillars:
-1. **Geometric Manifold Transformation**: By passing inputs through intermediate hidden layers with non-linear activation functions ($\sigma, \text{ReLU}$), the network warps and folds the input coordinate space into a higher-dimensional hidden feature space where previously inseparable patterns **become linearly separable**.
+1. **Geometric Manifold Transformation**: By passing inputs through intermediate hidden layers with non-linear activation functions ($\sigma, \text{ReLU}$), the network warps and folds the input coordinate space into a higher-dimensional hidden feature space where previously inseparable patterns **become linearly separable**:
+   $$\mathbf{h} = \text{ReLU}(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1), \qquad \hat{y} = \mathbf{W}_2 \mathbf{h} + \mathbf{b}_2$$
 2. **Reverse-Mode Chain Rule**: The exact reverse-mode automatic differentiation tape engine we constructed in Chapter 6 allows output prediction errors $\frac{\partial \mathcal{L}}{\partial \hat{y}}$ to propagate backwards through non-linear gates, computing the exact analytical gradients $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{\text{hidden}}}$ for hidden layer parameters.
+
+From a systems perspective, the intermediate activation tensor $\mathbf{h} \in \mathbb{R}^{B \times 4}$ occupies just $4 \times 4 = 16$ bytes per sample in float32. In modern hardware, this vector resides entirely inside CPU L1 cache or GPU streaming multiprocessor register files, enabling backpropagation to compute $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1}$ without ever incurring off-chip DRAM round-trip latency.
 
 ```
 How a 2-Layer MLP Solves XOR:
@@ -61,7 +68,7 @@ Input Space (2D)           Hidden Space (2D Manifold)         Output
 
 Let us formally prove why a single-layer perceptron fails on XOR, and construct the algebraic solution for a two-layer Multi-Layer Perceptron.
 
-### 1. Incompressibility Proof for Single-Layer Perceptron
+#### 1. Incompressibility Proof for Single-Layer Perceptron
 For a single linear threshold unit to classify XOR correctly, there must exist weights $w_1, w_2$ and bias $b$ satisfying all four truth conditions simultaneously:
 
 $$\begin{aligned}
@@ -81,7 +88,7 @@ $$w_1 + w_2 + b < 0 \implies w_1 + w_2 + 2b < b < 0$$
 
 This yields the immediate contradiction $0 \le w_1 + w_2 + 2b < 0$. Therefore, no linear perceptron can solve XOR.
 
-### 2. The 2-Layer MLP Algebraic Solution
+#### 2. The 2-Layer MLP Algebraic Solution
 Consider an MLP with 2 inputs, 2 hidden neurons with $\text{ReLU}$, and 1 linear output neuron:
 
 $$h_1 = \text{ReLU}(x_1 + x_2 - 0.5), \qquad h_2 = \text{ReLU}(x_1 + x_2 - 1.5)$$
@@ -94,7 +101,15 @@ Let us evaluate this exact system across all four XOR inputs:
 - $(1, 0) \implies h_1 = \max(0, 0.5) = 0.5, \quad h_2 = \max(0, -0.5) = 0 \implies y = 0.5 - 0 = \mathbf{0.5}$
 - $(1, 1) \implies h_1 = \max(0, 1.5) = 1.5, \quad h_2 = \max(0, 0.5) = 0.5 \implies y = 1.5 - 2(0.5) = \mathbf{0.5}$
 
-By scaling the output by $2$, we obtain exact binary classification ($0, 1, 1, 0$). The non-linear $\text{ReLU}$ folds the coordinate space, converting the concave XOR problem into a convex decision boundary.
+::: {.callout-note title="Napkin Math: How Non-Linear Activation Folds the 2D Coordinate Plane"}
+Consider the four XOR corners in physical 1D memory ($4$ coordinate pairs, occupying $4 \times 2 \times 4\text{ bytes} = 32\text{ bytes}$ in a single 64-byte L1 cache line):
+- Points $(0, 1)$ and $(1, 0)$ are separated by distance $\sqrt{2} \approx 1.414$, with diagonal points $(0, 0)$ and $(1, 1)$ trapping them between opposite corners.
+- When transformed by hidden neurons $h_1 = \text{ReLU}(x_1 + x_2 - 0.5)$ and $h_2 = \text{ReLU}(x_1 + x_2 - 1.5)$:
+  1. Points $(0, 1)$ and $(1, 0)$ both map to the exact same hidden coordinate $[0.5, 0.0]$.
+  2. Point $(0, 0)$ maps to $[0.0, 0.0]$.
+  3. Point $(1, 1)$ maps to $[1.5, 0.5]$.
+- The non-linear ReLU has physically folded the 2D plane like a sheet of paper! The two target-1 points are now clustered together at $[0.5, 0.0]$, allowing a single final linear hyperplane ($y = h_1 - 2h_2$) to separate them cleanly from both target-0 points.
+:::
 
 ---
 
@@ -102,17 +117,17 @@ By scaling the output by $2$, we obtain exact binary classification ($0, 1, 1, 0
 
 Let us validate our complete Core Engine on both historical milestones using pure TinyTorch.
 
-### Test 1: Demonstrating Single-Layer Linear Failure
+#### Test 1: Demonstrating Single-Layer Linear Failure
 
 ```python
-# packages/tinytorch/tests/milestone_01_xor.py
+# Reference Integration Test: packages/tinytorch/milestones/02_1969_xor
 import numpy as np
-from tinytorch.autograd import Tensor
-from tinytorch.layers import Linear, Sequential
-from tinytorch.activations import ReLU
-from tinytorch.losses import MSELoss
-from tinytorch.optim import SGD, AdamW
-from tinytorch.training import Trainer
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+from tinytorch.core.losses import MSELoss
+from tinytorch.core.optimizers import SGD, AdamW
+from tinytorch.core.training import Trainer
 
 # 1. Define XOR Truth Table Dataset
 X_xor = Tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
@@ -131,7 +146,7 @@ _, acc_single = trainer_single.evaluate([(X_xor, Y_xor)])
 print(f"Single-Layer Perceptron XOR Accuracy: {acc_single * 100:.1f}% (Expected: ~50% failure)")
 ```
 
-### Test 2: Conquering XOR with the 1986 Multi-Layer Perceptron
+#### Test 2: Conquering XOR with the 1986 Multi-Layer Perceptron
 
 ```python
 # 3. Build Multi-Layer Perceptron (2 -> 4 -> 1)
@@ -162,12 +177,33 @@ Within 50 epochs, the loss drops to zero, and the MLP predicts exact outputs: `[
 
 Let us examine the concrete numerical transformation that occurs inside the trained 2-layer MLP for all four XOR input points:
 
-| Input Coordinate $(x_1, x_2)$ | Target Label $y$ | Hidden Pre-Activation $\mathbf{z}_1$ | Hidden Post-ReLU $\mathbf{h}$ | Output Logit $\hat{y}$ | Prediction Rounded |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **$(0.0, 0.0)$** | $0.0$ | $[-0.52, -1.48, -0.81, -0.35]$ | $[0.00, 0.00, 0.00, 0.00]$ | $-0.012$ | **$0$ (Correct ✅)** |
-| **$(0.0, 1.0)$** | $1.0$ | $[+0.49, -0.51, +0.62, +0.12]$ | $[0.49, 0.00, 0.62, 0.12]$ | $+0.994$ | **$1$ (Correct ✅)** |
-| **$(1.0, 0.0)$** | $1.0$ | $[+0.51, -0.49, +0.60, +0.15]$ | $[0.51, 0.00, 0.60, 0.15]$ | $+0.996$ | **$1$ (Correct ✅)** |
-| **$(1.0, 1.0)$** | $0.0$ | $[+1.52, +0.52, +1.84, +0.72]$ | $[1.52, 0.52, 1.84, 0.72]$ | $+0.008$ | **$0$ (Correct ✅)** |
+#### Numerical Verification & Memory Layout
+
+| Input Coordinate $(x_1, x_2)$ | Target Label $y$ | Hidden Pre-Activation $\mathbf{z}_1$ | Hidden Post-ReLU $\mathbf{h}$ | Output Logit $\hat{y}$ | Prediction Rounded | Memory Reality |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **$(0.0, 0.0)$** | $0.0$ | $[-0.52, -1.48, -0.81, -0.35]$ | $[0.00, 0.00, 0.00, 0.00]$ | $-0.012$ | **$0$ (Correct ✅)** | 8 bytes in L1 cache |
+| **$(0.0, 1.0)$** | $1.0$ | $[+0.49, -0.51, +0.62, +0.12]$ | $[0.49, 0.00, 0.62, 0.12]$ | $+0.994$ | **$1$ (Correct ✅)** | 8 bytes in L1 cache |
+| **$(1.0, 0.0)$** | $1.0$ | $[+0.51, -0.49, +0.60, +0.15]$ | $[0.51, 0.00, 0.60, 0.15]$ | $+0.996$ | **$1$ (Correct ✅)** | 8 bytes in L1 cache |
+| **$(1.0, 1.0)$** | $0.0$ | $[+1.52, +0.52, +1.84, +0.72]$ | $[1.52, 0.52, 1.84, 0.72]$ | $+0.008$ | **$0$ (Correct ✅)** | 8 bytes in L1 cache |
+
+```python
+# Hand-Verification Script: Run with standard Python and NumPy
+import numpy as np
+
+X = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+W1 = np.array([[1.0, -1.0], [1.0, -1.0]])
+b1 = np.array([-0.5, 0.5])
+W2 = np.array([[1.0], [1.0]])
+b2 = np.array([0.0])
+
+# Forward pass through 2-layer MLP
+h = np.maximum(0, X @ W1 + b1)
+y = h @ W2 + b2
+
+print("Inputs:\n", X)
+print("Hidden Post-ReLU:\n", h)
+print("MLP Output:\n", y)
+```
 
 Notice how the hidden post-$\text{ReLU}$ state maps both $(0,1)$ and $(1,0)$ to the positive coordinate region around $[0.50, 0.00]$, while $(1,1)$ activates the second neuron ($0.52$) whose negative output weight cancels the sum back down to $0.00$. The non-linear activation physically folds the metric space!
 
@@ -175,12 +211,20 @@ Notice how the hidden post-$\text{ReLU}$ state maps both $(0,1)$ and $(1,0)$ to 
 
 ## M1.6 End-to-End Benchmark: TinyDigits Handwritten Recognition
 
-To conclude Milestone I, we train our complete Core Engine on the `TinyDigits` dataset (8x8 grayscale images of handwritten digits 0 through 9):
+To conclude Milestone I, we train our complete Core Engine on the `TinyDigits` dataset ($8 \times 8$ grayscale images of handwritten digits 0 through 9). Each input vector $\mathbf{x} \in \mathbb{R}^{64}$ represents unrolled 8-bit grayscale pixel intensities normalized to float32 ($64 \times 4\text{ bytes} = 256\text{ bytes}$ per sample).
+
+The model parameter count follows directly from our modular layer architecture:
+$$N_{\text{params}} = (64 \times 128 + 128) + (128 \times 64 + 64) + (64 \times 10 + 10) = 8,320 + 8,256 + 650 = 17,226\text{ parameters}$$
+
+In 32-bit floating point, the entire model occupies $17,226 \times 4\text{ bytes} \approx 68.9\text{ KB}$ of memory, fitting entirely inside the CPU L2 cache ($512\text{ KB}$--$1\text{ MB}$ per core):
 
 ```python
-from tinytorch.losses import CrossEntropyLoss
-from tinytorch.dataloader import Dataset, DataLoader
-from tinytorch.training import CosineSchedule
+from tinytorch.core.losses import CrossEntropyLoss
+from tinytorch.core.dataloader import Dataset, DataLoader
+from tinytorch.core.training import CosineSchedule, Trainer
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+from tinytorch.core.optimizers import AdamW
 
 # 1. Construct Deep Multi-Layer Perceptron for 10-Class Classification
 digit_model = Sequential(
@@ -204,11 +248,25 @@ print("Starting TinyDigits Training Benchmark...")
 
 ## M1.7 The Production Systems Bridge: From PyTorch `nn.Sequential` to Systolic Arrays
 
-In modern production systems, Multi-Layer Perceptrons are executed across high-throughput hardware architectures:
+In modern production systems, Multi-Layer Perceptrons are executed across high-throughput hardware architectures using optimized C++ and CUDA runtimes:
+
+```python
+# Production PyTorch Equivalent Bridge
+import torch
+import torch.nn as nn
+
+torch_mlp = nn.Sequential(
+    nn.Linear(64, 128),
+    nn.ReLU(),
+    nn.Linear(128, 64),
+    nn.ReLU(),
+    nn.Linear(64, 10)
+)
+```
 
 | System Layer | TinyTorch Pure Python | Production PyTorch C++ / CUDA | Hardware Execution Engine |
 | :--- | :--- | :--- | :--- |
-| **Model Hierarchy** | `Sequential([Linear, ReLU])` | `torch::nn::Sequential` | C++ graph traversal |
+| **Model Hierarchy** | `Sequential([Linear, ReLU])` | `torch::nn::Sequential` | C++ graph traversal (`c10::intrusive_ptr`) |
 | **GEMM Kernel** | `np.dot(X, W.T)` | `cublasSgemm` / `cutlass::gemm` | Tensor Core MMA (Matrix-Multiply-Accumulate) |
 | **Activation Fusion** | Separate `ReLU` pass | Fused `gemm_bias_relu` | In-register SRAM arithmetic without DRAM writeback |
 | **Memory Bandwidth** | Unfused memory passes | TorchInductor pointwise fusion | Coalesced 128-bit memory bus transactions |
@@ -228,8 +286,8 @@ In modern production systems, Multi-Layer Perceptrons are executed across high-t
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-We have proven that our from-scratch Core Engine is mathematically sound and capable of training multi-layer neural networks to high accuracy.
+We have proven that our from-scratch Core Engine is mathematically sound and capable of training multi-layer neural networks to high accuracy. Across all four benchmarks, our dynamic reverse-mode tape, numerical invariants, and fused updates operate with zero external machine learning dependencies.
 
-Yet fully connected MLPs suffer from a major limitation: they treat every input feature independently. When dealing with spatial 2D images or sequential human language, flattening inputs into 1D vectors destroys crucial spatial topology and temporal order.
+Yet fully connected MLPs suffer from a fundamental architectural limitation: they treat every input dimension independently through dense weight matrices. When dealing with spatial 2D images or sequential human language, flattening inputs into 1D vectors destroys crucial spatial locality and sequential syntax, forcing the network to spend parameter capacity relearning translational invariance.
 
-In **Part II: Deep Architectures**, we expand TinyTorch into modern deep learning: **Spatial 2D Convolutions, Byte-Pair Tokenization, Embedding Spaces, Multi-Head Scaled Dot-Product Attention, and the full GPT-2 Transformer Architecture**.
+In Part II (which we begin in Chapter 9: Convolutions), we expand TinyTorch into modern deep learning: Spatial 2D Convolutions, Byte-Pair Tokenization, Embedding Spaces, Multi-Head Scaled Dot-Product Attention, and the full GPT-2 Transformer Architecture.
