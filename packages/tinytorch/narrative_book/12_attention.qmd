@@ -2,7 +2,7 @@
 
 In Chapters 10 and 11, we converted raw human text into continuous semantic vectors infused with temporal positional waveforms. Yet our tokens currently travel through the framework in complete isolation: no token can inspect, communicate with, or gather context from any other token in the sequence.
 
-In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**.[^flash-sram] We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor,[^var-proof] and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation.
+In this chapter, we engineer the core mathematical engine of the modern AI revolution: **Scaled Dot-Product Multi-Head Attention (`MultiHeadAttention`)**.[^flash-sram] We explore why recurrence (RNNs) failed the test of systems scalability, why raw dot-product variances explode without the $1/\sqrt{d_k}$ scaling factor,[^var-proof] and how **Causal Lower-Triangular Masking** enforces the arrow of time during autoregressive language generation (which we assemble into an interactive text generator in Milestone 2).
 
 [^flash-sram]: Modern kernels like FlashAttention-2 load $Q, K, V$ blocks into fast on-chip SRAM (128–228 KB per streaming multiprocessor on NVIDIA Hopper), computing online softmax scaling without ever allocating the $O(S^2)$ attention matrix in off-chip DRAM.
 [^var-proof]: If $q_i, k_i \sim \mathcal{N}(0, 1)$ are independent with unit variance, then $\mathbb{E}[q_i k_i] = 0$ and $\text{Var}(q_i k_i) = \mathbb{E}[(q_i k_i)^2] = 1$. The sum of $d_k$ independent components has variance $\sum_{i=1}^{d_k} 1 = d_k$. Dividing by $\sqrt{d_k}$ yields $\text{Var}\left(\frac{q \cdot k}{\sqrt{d_k}}\right) = \frac{d_k}{d_k} = 1$.
@@ -63,9 +63,9 @@ Without scaling, the largest dot product dominates completely, saturating the so
 
 ---
 
-## The Mental Model: Database Retrieval and Causal Masking
+## The Mental Model: Differentiable Database Retrieval and Memory Flow
 
-To understand Scaled Dot-Product Attention, we use the analogy of a **differentiable database query**:
+To understand Scaled Dot-Product Attention from an engineering perspective, we conceptualize it as a **differentiable database query**:
 
 ```
 The Query-Key-Value Database Analogy:
@@ -78,19 +78,33 @@ The mathematical formula for Scaled Dot-Product Attention is:
 
 $$\text{Attention}(Q, K, V) = \text{Softmax}\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-### Why $1/\sqrt{d_k}$ Restores Unit Variance
+::: {.callout-note title="Napkin Math: The Quadratic Memory Footprint of Pairwise Affinity"}
+Consider a batch of sequences with length $S = 4$ and head dimension $d_k = 64$.
+- The input representations $Q, K, V$ live in memory as contiguous 2D buffers of shape $(S, d_k) = (4, 64)$, consuming $4 \times 64 \times 4 = 1,024$ bytes of FP32 memory each (spanning sixteen 64-byte L1 cache lines).
+- When the runtime executes the matrix multiplication $Q K^T$, it generates an $S \times S$ ($4 \times 4$) matrix of pairwise affinities.
+- Notice the fundamental memory scaling trade-off: while token vectors scale linearly with sequence length $O(S)$, the attention affinity matrix scales quadratically $O(S^2)$. For $S = 2,048$, this matrix demands $(2048 \times 2048) \times 4 \text{ bytes} = 16.78\text{ MB}$ per attention head. Across 12 heads and 12 layers, materializing this intermediate tensor requires over $2.4\text{ GB}$ of GPU High-Bandwidth Memory (HBM) bandwidth traffic per forward step!
+:::
 
-By dividing the dot product by $\sqrt{d_k}$, the variance of the scaled attention scores becomes:
+### Why $1/\sqrt{d_k}$ Restores Unit Variance: The Hardware Saturation Circuit Breaker
+
+By dividing the raw dot product by $\sqrt{d_k}$, the variance of the scaled attention scores becomes:
 
 $$\text{Var}\left( \frac{\mathbf{q}^T \mathbf{k}}{\sqrt{d_k}} \right) = \frac{1}{d_k} \text{Var}(\mathbf{q}^T \mathbf{k}) = \frac{d_k}{d_k} = 1.0$$
 
-The inputs to Softmax remain nicely bounded within $[-2, +2]$ regardless of whether head dimension $d_k$ is $64$, $128$, or $512$. Softmax gradients remain healthy and non-vanishing throughout deep training.
+::: {.callout-note title="Napkin Math: Preventing IEEE 754 Floating-Point Underflow in Registers"}
+Why is this scaling factor essential for physical hardware?
+1. **The Variance Explosion**: For a standard head dimension $d_k = 64$, if components $q_i, k_i \sim \mathcal{N}(0, 1)$, their unscaled dot product $\mathbf{q}^T \mathbf{k}$ has standard deviation $\sigma = \sqrt{64} = 8.0$. Scores regularly swing between $-24.0$ and $+24.0$.
+2. **Softmax Saturation**: Evaluating $e^{24.0} \approx 2.6 \times 10^{10}$, while $e^{-24.0} \approx 3.7 \times 10^{-11}$. The softmax probability distribution collapses into an extreme one-hot peak: one token receives probability $1.0$, and all others receive $0.0$.
+3. **The Zero-Gradient Register Lockout**: The backward derivative of softmax is $\frac{\partial S_i}{\partial z_j} = S_i(\delta_{ij} - S_j)$. When probabilities saturate to $1.0$ or $0.0$, the gradient evaluates to $1.0 \times (1 - 1.0) = 0.0$ or $0.0 \times (0 - 0.0) = 0.0$. In IEEE 754 floating-point registers, the gradient underflows directly to bitwise zero! Backpropagation ceases, starving upstream weights of learning signals.
+
+Dividing by $\sqrt{64} = 8$ scales a large score of $24.0$ down to $3.0$. Because $e^{3.0} \approx 20.08$, probabilities remain distributed across tokens, keeping gradients alive in hardware registers. In production engines, PyTorch's C++ kernel `torch.nn.functional.scaled_dot_product_attention` (implemented via ATen's `at::_scaled_dot_product_attention`) fuses this division directly into the register pipeline of the forward matrix multiplication to avoid round-trip DRAM stalls.
+:::
 
 ### Causal Masking: Enforcing the Arrow of Time
 
-In autoregressive language generation, token $t$ is allowed to look at past tokens $1, 2, \dots, t$, but is strictly forbidden from "looking into the future" at tokens $t+1, t+2, \dots, S$.
+In autoregressive language generation (which we build into our complete generative inference loop in Milestone 2), token $t$ is allowed to attend to past tokens $1, 2, \dots, t$, but is strictly forbidden from "looking into the future" at tokens $t+1, t+2, \dots, S$.
 
-We enforce this constraint by adding a **Causal Lower-Triangular Mask Matrix** $M \in \mathbb{R}^{S \times S}$:
+We enforce this constraint by adding a **Causal Lower-Triangular Mask Matrix** $M \in \mathbb{R}^{S \times S}$ to the affinity matrix prior to softmax:
 
 $$M_{i, j} = \begin{cases} 0 & \text{if } j \le i \quad \text{(Past and Present: Allowed)} \\ -\infty & \text{if } j > i \quad \text{(Future: Forbidden)} \end{cases}$$
 
@@ -105,14 +119,20 @@ Token 3 (Now) └   0         0         0         0    ┘
 After Softmax: exp(-inf) = 0.0! Future positions receive EXACTLY ZERO attention weight.
 ```
 
+In physical memory, $-\infty$ is represented by the maximum negative IEEE 754 floating-point value (`-1e9` or `-np.inf`), ensuring that future positions evaluate to exactly zero probability during the subsequent matrix reduction.
+
 ---
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 12** in the TinyTorch runtime: `packages/tinytorch/src/12_attention/12_attention.py`.
+:::
+
 We implement Scaled Dot-Product Attention and Multi-Head Attention in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/attention.py
+# Reference Implementation: packages/tinytorch/src/12_attention/12_attention.py
 import numpy as np
 from typing import List, Tuple, Optional
 from .autograd import Tensor
@@ -205,13 +225,37 @@ Let us trace a concrete 2-token causal attention operation with head dimension $
 
 ### Step-by-Step Numerical Walkthrough
 
-| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ |
-| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ |
-| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ |
-| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ |
-| **5. Value Projection** | $\mathbf{A} \cdot \mathbf{V}$ | $\sum_j A_{ij} V_{j,:}$ | $1.0[2, 1] + 0.0[0, 3] = \mathbf{[2.0000, 1.0000]}$ | $0.8044[2, 1] + 0.1956[0, 3] = \mathbf{[1.6088, 1.3912]}$ |
+| Step | Operation | Formula | Token 0 Output (Row 0) | Token 1 Output (Row 1) | Memory & Cache Reality |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Dot Product** | Raw Scores $\mathbf{Q} \mathbf{K}^T$ | $Q_{i,:} \cdot K_{j,:}^T$ | $[1(1) + 0(1), 1(1) + 0(0)] = [1.00, 1.00]$ | $[0(1) + 2(1), 0(1) + 2(0)] = [2.00, 0.00]$ | 16 bytes in DRAM (4 FP32 floats in 1 cache line) |
+| **2. Variance Scaling** | Scale by $1/\sqrt{2}$ | $\mathbf{S} / 1.4142$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0000]$ | Fused in SIMD vector registers without DRAM traffic |
+| **3. Causal Masking** | Add Mask $\mathbf{M}$ | $\mathbf{S}_{\text{scaled}} + \mathbf{M}$ | $[0.7071, -\infty]$ | $[1.4142, 0.0000]$ | In-place register addition, zero memory allocation |
+| **4. Softmax Weights** | Softmax Row-wise | $\frac{\exp(s_j)}{\sum \exp(s_k)}$ | $[1.0000, 0.0000]$ | $[\frac{4.1132}{5.1132}, \frac{1.0}{5.1132}] = [0.8044, 0.1956]$ | Exponentiation and row-sum reduction in L1 cache |
+| **5. Value Projection** | $\mathbf{A} \cdot \mathbf{V}$ | $\sum_j A_{ij} V_{j,:}$ | $1.0[2, 1] + 0.0[0, 3] = \mathbf{[2.0000, 1.0000]}$ | $0.8044[2, 1] + 0.1956[0, 3] = \mathbf{[1.6088, 1.3912]}$ | Output tensor: $2 \times 2$ matrix (16 bytes) |
+
+```python
+# Hand-Verification Script: Run with standard Python and NumPy
+import numpy as np
+
+Q = np.array([[1.0, 0.0], [0.0, 2.0]])
+K = np.array([[1.0, 1.0], [1.0, 0.0]])
+V = np.array([[2.0, 1.0], [0.0, 3.0]])
+M = np.array([[0.0, -np.inf], [0.0, 0.0]])
+
+# 1 & 2: Dot product and scale
+scores = (Q @ K.T) / np.sqrt(2.0)
+# 3: Causal Mask
+masked_scores = scores + M
+# 4: Softmax
+weights = np.exp(masked_scores - np.max(masked_scores, axis=-1, keepdims=True))
+weights = weights / np.sum(weights, axis=-1, keepdims=True)
+# 5: Output Projection
+output = weights @ V
+
+print("Attention Weights:\n", np.round(weights, 4))
+print("Attended Output:\n", np.round(output, 4))
+# Output matches trace table exactly: [[2.0, 1.0], [1.6088, 1.3912]]
+```
 
 Token 0 attends strictly to itself ($100\%$), while Token 1 attends $80.4\%$ to Token 0 and $19.6\%$ to itself.
 
@@ -228,7 +272,7 @@ Standard Attention Memory Traffic (DRAM Roundtrips):
 3. Load P, V from DRAM ──► Compute O = P V   ──► Write O to DRAM  (O(S^2) Memory Traffic)
 ```
 
-For long sequences ($S = 8,192$), DRAM bandwidth stalls consume $80\%$ of execution time.
+For long sequences ($S = 8,192$), DRAM bandwidth stalls consume $80\%$ of execution time because the operational intensity is low (streaming $O(S^2)$ bytes back and forth across the slow memory bus, an operational trade-off we analyze formally in Chapter 14's Roofline model).
 
 In 2022, Tri Dao introduced **FlashAttention-2**:
 
@@ -243,16 +287,16 @@ FlashAttention-2 SRAM Tiling Engine:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attention`.
+PyTorch natively exposes this via `torch.nn.functional.scaled_dot_product_attention`, executing inside fast on-chip SRAM with zero DRAM traffic for the intermediate attention weights.
 
 ---
 
 ## Building the System: How It All Connects
 
-Let us observe the complete attention transformation pipeline:
+Let us observe the complete attention transformation pipeline and its systems footprint:
 
 ```
-Positional Embeddings X: [Batch, Seq_Len, Embed_Dim]
+Positional Embeddings X: [Batch, Seq_Len, Embed_Dim] (Contiguous DRAM Buffer)
    │
    ├────────────────────────┬────────────────────────┐
    ▼                        ▼                        ▼
@@ -260,14 +304,20 @@ Positional Embeddings X: [Batch, Seq_Len, Embed_Dim]
    │                        │                        │
    └────────────────────────┼────────────────────────┘
                             ▼
-      [ Scaled Dot-Product Attention + Causal Mask ]
+      [ Scaled Dot-Product Attention + Causal Mask ]  (Complexity: O(S^2))
                             │
                             ▼
-              [ Multi-Head Output Projection ]
+              [ Multi-Head Output Projection ]         (Dense GEMM in L1/L2 Cache)
                             │
                             ▼ (Next: Chapter 13)
         [ Complete GPT-2 Transformer Architecture ]
 ```
+
+::: {.callout-note title="Systems Summary: The Operational Profile"}
+- **Memory Footprint**: Input tokens of shape $(B, S, D)$ consume $B \cdot S \cdot D \times 4$ bytes. Multi-head projection preserves this footprint, whereas the unscaled attention matrix momentarily demands $B \cdot H \cdot S^2 \times 4$ bytes.
+- **Computational Profile**: Scaled dot-product attention executes $4 B \cdot S^2 \cdot d_k$ floating-point operations while transferring $O(B \cdot S \cdot D + B \cdot H \cdot S^2)$ bytes. For small sequence lengths, attention is memory-bound; for long sequences ($S > 1024$), it shifts toward compute-bound execution (which we accelerate using memory fusion in Chapter 17).
+- **Production Bridge**: TinyTorch's `MultiHeadAttention` class directly mirrors `torch.nn.MultiheadAttention`, using linear projections and batched tensor reshaping to parallelize across all attention heads simultaneously in contiguous memory via C++ ATen operators.
+:::
 
 We now have multi-head scaled attention that routes context across tokens with causal discipline.
 

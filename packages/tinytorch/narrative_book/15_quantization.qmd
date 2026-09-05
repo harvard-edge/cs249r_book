@@ -49,14 +49,14 @@ Continuous Float Domain:       -α ─────────── 0.0 ──�
 Discrete INT8 Grid:          -127 ───────────  0  ─────────── +127
 ```
 
-### Symmetric vs Asymmetric Mapping
+#### Symmetric vs Asymmetric Mapping
 There are two primary paradigms for uniform quantization:
 1. **Symmetric Uniform Quantization**: The floating-point zero maps exactly to the integer zero ($Z = 0$). The scale factor is determined purely by the maximum absolute magnitude: $S = \frac{\max(|X|)}{127}$. Because zero is unshifted, matrix multiplications require zero additive offset terms ($Y_{\text{int}} = Q_X Q_W^T$), making hardware kernel execution extremely fast and efficient.
 2. **Asymmetric Quantization**: For activation distributions that are strictly non-negative (such as post-$\text{ReLU}$ or post-$\text{GELU}$ activations where $x \ge 0$), symmetric quantization wastes half the integer dynamic range ($[-128, 0]$). Asymmetric quantization maps $[\min(X), \max(X)] \to [-128, 127]$ using both a scale factor $S = \frac{\max(X) - \min(X)}{255}$ and an integer zero-point offset $Z = \text{round}\left(-\frac{\min(X)}{S}\right) - 128$.
 
 In TinyTorch, we implement **Symmetric Quantization for Weights** (which are naturally zero-centered by Kaiming initialization) and **Calibrated Scale Tracking for Activations**.
 
-### The Symmetric Quantization Formula
+#### The Symmetric Quantization Formula
 
 To **Quantize** a floating-point tensor $X$:
 
@@ -68,7 +68,7 @@ To **Dequantize** an 8-bit integer tensor back to floating-point:
 
 $$\hat{X} = q \times S$$
 
-### Quantized Matrix Multiplication Mathematics
+#### Quantized Matrix Multiplication Mathematics
 
 When multiplying a quantized activation matrix $Q_X$ by a quantized weight matrix $Q_W$:
 
@@ -87,7 +87,7 @@ Quantized Integer Matrix Multiplication Pipeline:
 
 Let us formally evaluate the quantization error bound and signal-to-noise ratio (SNR).
 
-### Theorem: Uniform Quantization Error Bound
+#### Theorem: Uniform Quantization Error Bound
 For any continuous value $x \in [-\alpha, +\alpha]$ quantized with scale $S = \frac{\alpha}{127}$:
 
 $$\text{Error } e = x - \hat{x} = x - S \cdot \left\lfloor \frac{x}{S} \right\rceil$$
@@ -98,7 +98,7 @@ $$|e| \le \frac{S}{2} = \frac{\alpha}{254}$$
 
 The maximum absolute error introduced by INT8 symmetric quantization is less than **$0.39\%$** of the dynamic range $\alpha$.
 
-### Quantization-Aware Training (QAT) & The Straight-Through Estimator (STE)
+#### Quantization-Aware Training (QAT) & The Straight-Through Estimator (STE)
 When post-training quantization degrades accuracy on sensitive models, we train with **Quantization-Aware Training (QAT)**. During the forward pass, weights are clamped and rounded to simulate integer discretization. Because the derivative of the rounding function $\lfloor x \rceil$ is zero almost everywhere ($\frac{d\lfloor x \rceil}{dx} = 0$), backpropagation would normally stall.
 
 QAT uses the **Straight-Through Estimator (STE)** (Bengio et al., 2013), which approximates the rounding gradient as identity during the backward pass:
@@ -111,10 +111,14 @@ This allows weight parameters to learn representations that are naturally resili
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 15** in the TinyTorch runtime: `packages/tinytorch/src/15_quantization/15_quantization.py`.
+:::
+
 We implement INT8 quantization and the `QuantizedLinear` layer in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/quantization.py
+# Reference Implementation: packages/tinytorch/src/15_quantization/15_quantization.py
 import numpy as np
 from typing import Tuple, List, Optional, Dict
 from .autograd import Tensor
@@ -187,13 +191,13 @@ Let us trace a concrete matrix multiplication comparing exact FP32 against INT8 
 - Weight Matrix $\mathbf{W} \in \mathbb{R}^{2 \times 2} = \begin{bmatrix} +1.27 & -0.635 \\ +0.254 & -1.016 \end{bmatrix}$
 - Input Vector $\mathbf{x} \in \mathbb{R}^{1 \times 2} = \begin{bmatrix} +0.50 & -0.25 \end{bmatrix}$
 
-### Step 1: Quantization Scale Factors
+#### Step 1: Quantization Scale Factors
 
 $$S_W = \frac{1.27}{127} = 0.0100, \qquad S_x = \frac{0.50}{127} = 0.003937$$
 
 $$Q_W = \begin{bmatrix} +127 & -64 \\ +25 & -102 \end{bmatrix}, \qquad Q_x = \begin{bmatrix} +127 & -64 \end{bmatrix}$$
 
-### Step 2: Numerical Trace Table
+#### Step 2: Numerical Trace Table
 
 | Computation Stage | Mathematical Operation | Exact FP32 Formula & Result | INT8 Integer Simulation | Rescaled Dequantized Output | Quantization Error |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -202,11 +206,52 @@ $$Q_W = \begin{bmatrix} +127 & -64 \\ +25 & -102 \end{bmatrix}, \qquad Q_x = \be
 
 Notice how the integer dot product accurately reproduces the true FP32 output with less than $0.35\%$ error while reducing DRAM weight memory from **16 bytes to 4 bytes**!
 
+```python
+# Pure Python Verification of INT8 Quantized Matmul
+import numpy as np
+
+W = np.array([[1.27, -0.635], [0.254, -1.016]], dtype=np.float32)
+x = np.array([0.50, -0.25], dtype=np.float32)
+
+# Exact FP32
+y_fp32 = x @ W.T
+
+# Quantize weights and activations to symmetric INT8
+s_w = np.max(np.abs(W)) / 127.0
+s_x = np.max(np.abs(x)) / 127.0
+q_w = np.clip(np.round(W / s_w), -128, 127).astype(np.int32)
+q_x = np.clip(np.round(x / s_x), -128, 127).astype(np.int32)
+
+# Heavy integer GEMM
+q_y = q_x @ q_w.T
+
+# Scalar rescaling
+y_int8 = q_y * (s_w * s_x)
+
+print("Exact FP32 Result:     ", np.round(y_fp32, 4))
+print("Quantized INT8 Result: ", np.round(y_int8, 4))
+print("Absolute Error:        ", np.round(np.abs(y_fp32 - y_int8), 4))
+assert np.allclose(y_fp32, y_int8, atol=0.005), "Quantization verification mismatch!"
+```
+
 ---
 
 ## The Production Systems Bridge: PyTorch `torch.ao.quantization` and AWQ
 
 In production deep learning (e.g. `bitsandbytes`, `AutoGPTQ`, `AWQ`):
+
+```python
+# Production PyTorch Dynamic Quantization Bridge
+import torch
+import torch.ao.quantization as quantization
+
+model_fp32 = torch.nn.Sequential(torch.nn.Linear(2, 2, bias=False))
+# Post-training dynamic quantization to INT8
+model_int8 = quantization.quantize_dynamic(
+    model_fp32, {torch.nn.Linear}, dtype=torch.qint8
+)
+print("Quantized Linear Layer:", model_int8)
+```
 
 ```
 Modern Production Quantization Regimes:
@@ -237,6 +282,8 @@ With Chapter 15, we achieve our first massive hardware systems win:
 │ • Accuracy Retention: >99.4% on TinyDigits and TinyGPT language benchmarks. │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+From a systems perspective, compressing weights from 32 bits ($4\text{ bytes}$) to 8 bits ($1\text{ byte}$) achieves an immediate $4\times$ reduction in DRAM traffic. At a memory bus speed of $100\text{ GB/s}$, transferring a $12.8\text{ MB}$ parameter buffer drops from $128\text{ microseconds}$ down to just $32\text{ microseconds}$. Furthermore, the compressed weights now fit inside the CPU L3 cache ($16\text{ MB}$ to $32\text{ MB}$), entirely eliminating off-chip DRAM bus roundtrips for subsequent token decode iterations.
 
 We have cut memory footprint by $4\times$. But can we also physically eliminate redundant weights and dimensions entirely?
 

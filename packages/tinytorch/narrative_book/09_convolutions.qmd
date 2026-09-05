@@ -50,7 +50,7 @@ The output spatial dimensions ($H_{\text{out}}, W_{\text{out}}$) depend on input
 
 $$H_{\text{out}} = \left\lfloor \frac{H + 2P - K_h}{S} \right\rfloor + 1, \qquad W_{\text{out}} = \left\lfloor \frac{W + 2P - K_w}{S} \right\rfloor + 1$$
 
-### The Systems Bottleneck: Why Nested Loops Kill Hardware
+#### The Systems Bottleneck: Why Nested Loops Kill Hardware
 
 A naive software implementation of 2D convolution requires **six nested `for` loops**:
 - Loop 1: Batch index $n \in \{0, \dots, N-1\}$
@@ -62,7 +62,7 @@ A naive software implementation of 2D convolution requires **six nested `for` lo
 
 In modern CPU and GPU hardware, nested loops are disastrous: they cause non-contiguous DRAM memory jumps, destroy CPU branch predictors, and prevent vectorized SIMD arithmetic units from firing at peak throughput.
 
-### The im2col Solution: Unrolling Geometry into GEMM
+#### The im2col Solution: Unrolling Geometry into GEMM
 
 In 2006, Kumar Chellapilla et al. introduced **`im2col` (image-to-column)**, which reorganizes the 4D convolution into a single high-speed General Matrix Multiply (GEMM):
 
@@ -94,7 +94,7 @@ By unrolling receptive fields, the entire convolution is computed by our optimiz
 
 Let us formally specify the spatial transformation equations and padding constraints for 2D convolutions.
 
-### 1. Spatial Dimension Proof
+#### 1. Spatial Dimension Proof
 Let $H$ be input height, $K_h$ kernel height, $P_h$ total vertical padding ($P_{\text{top}} + P_{\text{bottom}}$), and $S_h$ vertical stride. The spatial range of valid sliding receptive windows is the set of starting offsets $k \in \mathbb{N}$ such that the kernel fits completely inside the padded image:
 
 $$k \cdot S_h + K_h \le H + P_h \implies k \cdot S_h \le H + P_h - K_h \implies k \le \left\lfloor \frac{H + P_h - K_h}{S_h} \right\rfloor$$
@@ -103,7 +103,7 @@ Since $k \in \{0, 1, \dots, k_{\max}\}$, the total count of spatial outputs is:
 
 $$H_{\text{out}} = k_{\max} + 1 = \left\lfloor \frac{H + 2P - K_h}{S_h} \right\rfloor + 1$$
 
-### 2. Parameter and FLOP Complexity Comparison
+#### 2. Parameter and FLOP Complexity Comparison
 For an input tensor of shape $[N, C_{\text{in}}, H, W]$ and convolution with $C_{\text{out}}$ filters of size $K \times K$:
 
 $$\text{Parameter Count} = C_{\text{out}} \times (C_{\text{in}} \cdot K^2 + 1)$$
@@ -120,10 +120,14 @@ The convolution reduces total computational complexity by a factor of $\frac{H \
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 09** in the TinyTorch runtime: `packages/tinytorch/src/09_convolutions/09_convolutions.py`.
+:::
+
 We implement `Conv2d` and `MaxPool2d` in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/conv.py
+# Reference Implementation: packages/tinytorch/src/09_convolutions/09_convolutions.py
 import numpy as np
 from typing import List, Tuple, Optional
 from .autograd import Tensor
@@ -242,7 +246,7 @@ Let us trace a concrete 2D spatial convolution step-by-step with real numbers:
   $$\mathbf{W} = \begin{bmatrix} 1.0 & 0.0 \\ -1.0 & 1.0 \end{bmatrix}$$
 - Parameters: $S = 1, P = 0 \implies H_{\text{out}} = \frac{3 - 2}{1} + 1 = 2, \quad W_{\text{out}} = 2$.
 
-### The im2col Matrix Construction and Dot Product Trace
+#### The im2col Matrix Construction and Dot Product Trace
 
 | Spatial Patch Coordinate | Window Slices $[h:h+2, w:w+2]$ | Unrolled `im2col` Row Vector | Kernel Weight Column Vector | Dot Product Sum + Bias | Final Output $Y[0,0,h,w]$ |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -255,11 +259,58 @@ Resulting in output feature map:
 
 $$\mathbf{Y} = \begin{bmatrix} 3.0 & 5.0 \\ 0.0 & 1.0 \end{bmatrix}$$
 
+```python
+# Pure Python Verification of im2col GEMM Equivalence
+import numpy as np
+
+# 1. Physical 3x3 input image and 2x2 kernel
+X = np.array([[1.0, 2.0, 0.0],
+              [0.0, 1.0, 3.0],
+              [2.0, 1.0, 0.0]], dtype=np.float32)
+W = np.array([[1.0, 0.0],
+              [-1.0, 1.0]], dtype=np.float32)
+b = 1.0
+
+# 2. Unroll 2x2 sliding patches into X_col (4 patches, 4 values each)
+X_col = np.array([
+    X[0:2, 0:2].flatten(),  # [1.0, 2.0, 0.0, 1.0]
+    X[0:2, 1:3].flatten(),  # [2.0, 0.0, 1.0, 3.0]
+    X[1:3, 0:2].flatten(),  # [0.0, 1.0, 2.0, 1.0]
+    X[1:3, 1:3].flatten(),  # [1.0, 3.0, 1.0, 0.0]
+])
+
+# 3. Flatten kernel into column vector W_col
+W_col = W.flatten().reshape(4, 1)
+
+# 4. Perform systolic GEMM: Y_col = X_col @ W_col + b
+Y_col = X_col @ W_col + b
+Y_out = Y_col.reshape(2, 2)
+
+print("Constructed im2col Matrix:\n", X_col)
+print("Systolic GEMM Output:\n", Y_out)
+assert np.allclose(Y_out, [[3.0, 5.0], [0.0, 1.0]]), "GEMM verification failed!"
+```
+
 ---
 
 ## The Production Bridge: NVIDIA cuDNN and Tensor Cores
 
 In production deep learning (NVIDIA GPUs), convolution execution is orchestrated by **cuDNN** (CUDA Deep Neural Network library):
+
+```python
+# Production PyTorch Conv2d Bridge
+import torch
+import torch.nn as nn
+
+torch_conv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=2, stride=1, padding=0)
+with torch.no_grad():
+    torch_conv.weight.copy_(torch.tensor([[[[1.0, 0.0], [-1.0, 1.0]]]]))
+    torch_conv.bias.copy_(torch.tensor([1.0]))
+
+x_torch = torch.tensor([[[[1.0, 2.0, 0.0], [0.0, 1.0, 3.0], [2.0, 1.0, 0.0]]]])
+y_torch = torch_conv(x_torch)
+print("PyTorch Conv2d Output:", y_torch.squeeze().numpy())
+```
 
 ```
 cuDNN Convolution Algorithm Dispatch Strategy:
@@ -274,7 +325,7 @@ cuDNN Convolution Algorithm Dispatch Strategy:
 └────────────────────────────────┴────────────────────────────────────────────┘
 ```
 
-Rather than materializing the expanded `im2col` buffer in DRAM (which consumes $K^2 \times$ extra memory), modern cuDNN kernels use **Implicit GEMM**: CUDA threads calculate the input spatial coordinates on-the-fly inside SM registers, achieving peak TensorCore compute throughput with zero DRAM expansion overhead.
+Rather than materializing the expanded `im2col` buffer in DRAM (which consumes $K^2 \times$ extra memory bandwidth, requiring $N \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot C_{\text{in}} \cdot K^2 \times 4\text{ bytes}$ transfers over PCIe or HBM), modern cuDNN kernels use **Implicit GEMM**: CUDA threads calculate the input spatial coordinates on-the-fly inside SM registers, achieving peak TensorCore compute throughput ($>300\text{ TFLOPs}$ on H100) with zero off-chip memory expansion overhead.
 
 ---
 
@@ -300,8 +351,8 @@ With Chapter 9, TinyTorch extends from flat 1D vectors into multi-channel 2D spa
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-We can now process continuous, two-dimensional grids of pixels. But the natural world contains another ubiquitous modality: **discrete, sequential, variable-length symbolic language**.
+From a systems perspective, spatial convolutions achieve high computational throughput by reusing weight parameters $C_{\text{in}} \cdot K^2$ across all $H_{\text{out}} \cdot W_{\text{out}}$ receptive fields, shifting the operational regime toward compute-bound execution (which we formalize in Chapter 14: arithmetic intensity, measuring FLOPs per memory byte transferred).
 
-How do we convert continuous, open-ended human text into discrete mathematical tokens without exploding our vocabulary?
+We can now process continuous, two-dimensional grids of pixels. But modern AI systems must also process discrete, sequential, variable-length symbolic language. How do we convert open-ended human text into discrete mathematical tokens without exploding our vocabulary or blowing out DRAM memory buffers?
 
 In **Chapter 10**, we engineer **Byte-Pair Encoding: Compressing Language into Subword Tokens**.

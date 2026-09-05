@@ -50,7 +50,9 @@ Furthermore, on modern GPU architectures, launching an independent CUDA kernel i
 
 ## The Mental Model: Kernel Fusion and Cache Tiling
 
-### Kernel Fusion: SRAM Register Residency
+To overcome the memory wall, systems acceleration relies on two complementary hardware architectural principles: keeping activations inside on-chip register files and tiling memory blocks to maximize cache residency.
+
+#### Kernel Fusion: SRAM Register Residency
 
 **Kernel Fusion** fuses multiple consecutive elementwise or reduction operations into a **single unified kernel**:
 
@@ -65,7 +67,7 @@ Total DRAM Traffic: 6.4 Megabytes (Exactly 50% Reduction in DRAM Traffic!)
 Kernel Launch Overhead: Reduced from 2 launches to 1 launch.
 ```
 
-### Cache-Tiled Matrix Multiplication
+#### Cache-Tiled Matrix Multiplication
 
 When multiplying two matrices $C = A \cdot B$, a naive triple-nested loop accesses elements of $B$ in non-contiguous column order, repeatedly evicting cache lines.
 
@@ -95,7 +97,7 @@ Once a tile is loaded into fast on-chip memory, all $T^3$ multiply-accumulate op
 
 Let us formally derive the arithmetic traffic reduction achieved by $T \times T$ cache tiling.
 
-### 1. Naive GEMM DRAM Access Analysis
+#### 1. Naive GEMM DRAM Access Analysis
 For matrices $A \in \mathbb{R}^{M \times K}, B \in \mathbb{R}^{K \times N}, C \in \mathbb{R}^{M \times N}$ without caching:
 To compute each element $C_{ij} = \sum_k A_{ik} B_{kj}$, the inner loop reads the entire row $i$ of $A$ and entire column $j$ of $B$. If cache capacity is insufficient to retain $B$:
 
@@ -103,7 +105,7 @@ $$\text{DRAM Reads}_{\text{Naive}} = M \cdot K + M \cdot N \cdot K \text{ elemen
 
 For $M = N = K = 1024$, total DRAM reads equal $1024^2 + 1024^3 \approx 1.07 \times 10^9\text{ floats} \approx 4.29\text{ GB}$.
 
-### 2. Tiled GEMM DRAM Access Analysis
+#### 2. Tiled GEMM DRAM Access Analysis
 Dividing matrices into square tiles of size $T \times T$ that fit into fast on-chip memory of capacity $S_{\text{cache}} \ge 3 T^2 \times 4\text{ bytes}$:
 Each tile $A_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{N}{T}$ output tile columns.
 Each tile $B_{\text{tile}} \in \mathbb{R}^{T \times T}$ is loaded into SRAM once and reused across $\frac{M}{T}$ output tile rows.
@@ -120,10 +122,14 @@ For tile size $T = 64$, cache tiling achieves a **$32\times$ reduction in DRAM m
 
 ## Line-by-Line Reference Implementation
 
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 17** in the TinyTorch runtime: `packages/tinytorch/src/17_acceleration/17_acceleration.py`.
+:::
+
 We implement vectorized SIMD arithmetic, fused GELU activation, and cache-tiled matrix multiplication in TinyTorch:
 
 ```python
-# packages/tinytorch/src/tinytorch/acceleration.py
+# Reference Implementation: packages/tinytorch/src/17_acceleration/17_acceleration.py
 import numpy as np
 from typing import Optional, Tuple
 from .autograd import Tensor
@@ -190,19 +196,38 @@ Let us trace the exact memory bus traffic for an MLP block activation with batch
 
 By eliminating intermediate DRAM roundtrips, Kernel Fusion triples the operational intensity and eliminates memory bus stalls.
 
+```python
+# Pure Python Verification of Kernel Fusion Memory Traffic
+bytes_per_float = 4
+B, S, hidden_dim = 1, 4, 512
+elements = B * S * hidden_dim  # 2,048 elements = 8,192 bytes
+
+# Unfused: Linear writes z, GELU reads z, GELU writes a
+unfused_traffic = (elements * bytes_per_float) * 3
+# Fused: In-register math, only writes final activation a
+fused_traffic = elements * bytes_per_float
+
+print(f"Unfused DRAM Traffic: {unfused_traffic:,} bytes")
+print(f"Fused DRAM Traffic:   {fused_traffic:,} bytes")
+traffic_reduction = unfused_traffic / fused_traffic
+print(f"Traffic Reduction:    {traffic_reduction:.1f}x")
+assert traffic_reduction == 3.0, "Kernel fusion traffic reduction mismatch!"
+```
+
 ---
 
-## The Production Systems Bridge: PyTorch TorchInductor and Triton
+## The Production Systems Bridge: PyTorch TorchInductor and Hardware JIT Compilers
 
 In PyTorch 2.0, operator fusion is automated by the **TorchInductor Compiler**:
 
 ```python
 import torch
 
+# Compile PyTorch model with automated pointwise fusion
 compiled_model = torch.compile(model, backend="inductor")
 ```
 
-TorchInductor inspects the computational graph, identifies consecutive elementwise operations, and generates specialized **OpenAI Triton JIT kernels** that compile into custom assembly where dozens of operations execute in a single CUDA kernel with zero intermediate DRAM writes.
+Under the hood, TorchInductor inspects the computational graph, identifies consecutive elementwise operations, and generates specialized JIT kernels (which we explore in Chapter 21: OpenAI Triton compiler, where Triton compiles directly into custom GPU machine assembly where dozens of operations execute in a single CUDA launch with zero intermediate DRAM writes). Data remains strictly inside streaming multiprocessor register files throughout fused sub-graphs.
 
 ---
 
@@ -218,6 +243,8 @@ With Chapter 17, our framework eliminates unnecessary DRAM traffic:
 │ • Total Latency Reduction across Transformer Forward Pass: ~38%.            │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+From an architectural perspective, fusing $K$ consecutive elementwise layers reduces memory bus transactions from $2K$ transfers down to just $2$ transfers (one load, one store), increasing arithmetic intensity by $K\times$.
 
 Yet when generating long text sequences token-by-token, we notice another massive redundancy: why are we recomputing attention Keys and Values for all past tokens on every single generation step?
 

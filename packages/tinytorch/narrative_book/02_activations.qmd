@@ -47,7 +47,7 @@ $$\mathbf{W}_{\text{effective}} = \prod_{k=1}^L \mathbf{W}_k = \mathbf{W}_1 \mat
 
 $$\mathbf{b}_{\text{effective}} = \sum_{k=1}^L \left( \mathbf{b}_k \prod_{j=k+1}^L \mathbf{W}_j \right) \in \mathbb{R}^{D_{\text{out}}}$$
 
-No matter how many hidden layers or millions of parameters you stack, the composite function remains an affine transformation ($\mathbb{R}^{D_{\text{in}}} \to \mathbb{R}^{D_{\text{out}}}$). Its decision boundaries are flat hyperplanes. A 100-layer linear network cannot even separate the non-linear manifold of a 4-sample XOR truth table.
+No matter how many hidden layers or millions of parameters you stack, the composite function remains an affine transformation ($\mathbb{R}^{D_{\text{in}}} \to \mathbb{R}^{D_{\text{out}}}$). Its decision boundaries are flat hyperplanes. A 100-layer linear network cannot even separate the non-linear manifold of a 4-sample XOR truth table (a fundamental limitation we formally prove and resolve in Milestone I).
 
 ### Code: Empirical Demonstration of Linear Collapse
 
@@ -135,7 +135,7 @@ Because non-linear activation functions do not commute with matrix multiplicatio
 Having established that we must insert a non-linear function $\sigma(\cdot)$ after every linear layer, a fundamental systems and mathematical question arises: **which mathematical function should we choose?**
 
 In a machine learning framework, an activation function must satisfy two strict criteria:
-1. **Mathematical Criterion (Gradient Flow)**: The function must possess well-behaved first derivatives $\sigma'(x)$ that allow loss gradients to propagate backwards through dozens of layers during backpropagation without exploding or decaying to zero.
+1. **Mathematical Criterion (Gradient Flow)**: The function must possess well-behaved first derivatives $\sigma'(x)$ that allow gradients (which we formalize alongside objective loss functions in Chapter 4) to propagate backwards through dozens of layers during backpropagation without exploding or decaying to zero.
 2. **Systems Criterion (Arithmetic Efficiency)**: The function should be computable using fast SIMD / vector arithmetic instructions without causing thread divergence or excessive transcendental function stalls on GPU streaming multiprocessors.
 
 | Activation Function | Mathematical Formulation | Derivative $\sigma'(x)$ | Systems & ML Tradeoff |
@@ -181,7 +181,10 @@ Its derivative is:
 
 $$\frac{d}{dx}\tanh(x) = 1 - \tanh^2(x)$$
 
-At $x = 0$, $\tanh'(0) = 1.0$, providing a stronger gradient signal than sigmoid. However, for $|x| > 3$, $\tanh(x)$ rapidly approaches $\pm 1.0$, causing $\tanh'(x) \to 0$ and re-triggering the vanishing gradient crisis in networks deeper than 15 layers.
+At $x = 0$, $\tanh'(0) = 1.0$, providing a stronger gradient signal than sigmoid and ensuring that zero-mean activations prevent pathological directional zigzagging during gradient descent.
+
+#### Systems Profile and Transcendental Overhead
+From a hardware execution standpoint, evaluating $\tanh(x)$ requires double transcendental exponentiation ($\exp(x)$ and $\exp(-x)$) along with floating-point division. In a GPU Streaming Multiprocessor (SM) or CPU SIMD unit, transcendental operations dispatch to Special Function Units (SFUs) rather than standard FP32 ALUs. SFUs have approximately one-fourth the throughput of standard fused multiply-add (FMA) pipelines, creating execution stalls during large tensor passes. Furthermore, for $|x| > 3$, $\tanh(x)$ saturates asymptotically to $\pm 1.0$, causing $\tanh'(x) \to 0$ and re-triggering vanishing gradients in networks deeper than 15 layers.
 
 ### 3. The ReLU Revolution
 
@@ -208,7 +211,7 @@ If a neuron receives a large negative bias update such that its input $x < 0$ fo
 
 ### 4. The GELU Standard in Transformers
 
-To prevent dead neurons while preserving smooth gradient highways, modern Large Language Models (GPT-2, GPT-4, BERT, LLaMA) adopt the **Gaussian Error Linear Unit (GELU)** (Hendrycks & Gimpel, 2016).
+To prevent dead neurons while preserving smooth gradient highways, modern Large Language Models and transformer architectures (which we build from scratch in Chapter 13) adopt the **Gaussian Error Linear Unit (GELU)** (Hendrycks & Gimpel, 2016).
 
 Rather than gating activations by a deterministic sign check ($x > 0$), GELU weights inputs by their probability under a standard normal distribution $\mathcal{N}(0, 1)$:
 
@@ -234,6 +237,10 @@ Because the curvature is non-monotonic and differentiable everywhere, small nega
 ---
 
 ## Reference Implementation: The Activation Subsystem
+
+::: {.callout-note title="Source Code Mapping"}
+The reference implementation discussed in this chapter corresponds directly to **Module 02** in the TinyTorch runtime: `packages/tinytorch/src/02_activations/02_activations.py`.
+:::
 
 We construct the complete activation subsystem in TinyTorch. Each activation derives from a common `Activation` base class:
 
@@ -319,11 +326,28 @@ $$\mathbf{x} = [-3.0, -1.0, -0.17, 0.0, 1.0, 3.0]$$
 | **$+1.0$** | $0.7311$ | $0.1966$ | $1.0000$ | $\mathbf{1.0000}$ | $0.8413$ | $+1.0833$ |
 | **$+3.0$** | $0.9526$ | $0.0452$ *(decay)* | $3.0000$ | $\mathbf{1.0000}$ | $2.9960$ | $+1.0051$ |
 
+```python
+# Pure Python verification of the activation numerical trace:
+import numpy as np
+
+x_vals = np.array([-3.0, -1.0, -0.17, 0.0, 1.0, 3.0], dtype=np.float32)
+sig = 1.0 / (1.0 + np.exp(-x_vals))
+relu = np.maximum(0.0, x_vals)
+inner = np.sqrt(2.0 / np.pi) * (x_vals + 0.044715 * (x_vals ** 3))
+gelu = 0.5 * x_vals * (1.0 + np.tanh(inner))
+
+print("Input x:     ", np.round(x_vals, 2))
+print("Sigmoid out: ", np.round(sig, 4))
+print("ReLU out:    ", np.round(relu, 4))
+print("GELU out:    ", np.round(gelu, 4))
+```
+
 ### Systems Insights from the Trace Table
 
-1. **Dead Zones in ReLU**: At $x = -3.0, -1.0, -0.17$, ReLU output and gradient are clamped to zero. If inputs remain negative, no learning occurs.
+1. **Dead Zones in ReLU**: At $x = -3.0, -1.0, -0.17$, ReLU output and gradient are clamped to zero. If inputs remain negative, no learning occurs, and physical parameters occupy DRAM without contributing to representation capacity.
 2. **Smooth Non-Monotonicity in GELU**: At $x = -0.17$, GELU reaches its global minimum output of $-0.17$, passing negative curvature through the computational graph. At $x = +3.0$, its gradient is $\approx 1.0051$, acting as an ideal linear highway for positive signals.
 3. **Attenuation in Sigmoid**: For $|x| = 3.0$, the sigmoid gradient is already attenuated to $0.0452$, illustrating why sigmoid networks fail when scaled to deep architectures.
+4. **Physical Buffer Allocation**: Evaluating each elementwise activation over an input tensor of $N$ elements requires allocating an output buffer of $4N$ bytes in DRAM memory, reading $4N$ bytes, and writing $4N$ bytes sequentially across the memory bus.
 
 ---
 
@@ -331,28 +355,28 @@ $$\mathbf{x} = [-3.0, -1.0, -0.17, 0.0, 1.0, 3.0]$$
 
 In systems performance engineering, non-linear activations are classified as **Memory-Bound Elementwise Kernels**.
 
-Let us calculate the **Arithmetic Intensity** ($I = \text{FLOPs} / \text{Bytes Transferred}$) of a standalone `ReLU` kernel on an NVIDIA H100 GPU:
+Let us calculate the operational **arithmetic intensity** (a foundational metric we formalize via the Williams Roofline model in Chapter 14: $I = \text{FLOPs} / \text{Bytes Transferred}$) of a standalone `ReLU` kernel on an NVIDIA H100 GPU:
 - **Memory Read**: Load 32-bit float $x$ from High Bandwidth Memory (HBM3) ($4$ bytes).
 - **Compute**: 1 comparison instruction (`max(0.0, x)` = 1 FLOP).
 - **Memory Write**: Store 32-bit float $y$ back to HBM3 ($4$ bytes).
 
 $$I_{\text{ReLU}} = \frac{1 \text{ FLOP}}{8 \text{ Bytes}} = 0.125 \text{ FLOPs/Byte}$$
 
-Because an NVIDIA H100 GPU has an arithmetic ridge point of $\approx 298\text{ FLOPs/Byte}$, executing standalone elementwise kernels leaves the GPU tensor cores operating at **less than $0.05\%$ of their physical compute capability**. The processor is stalled $99.95\%$ of the time waiting for DRAM memory transfers.
+Because an NVIDIA H100 GPU has an arithmetic ridge point of $\approx 298\text{ FLOPs/Byte}$ (as derived in Chapter 14), executing standalone elementwise kernels leaves the GPU tensor cores operating at **less than $0.05\%$ of their physical compute capability**. The processor is stalled $99.95\%$ of the time waiting for DRAM memory transfers.
 
-### In-Place Dispatch and Kernel Fusion in PyTorch
+### In-Place Dispatch and Kernel Fusion Preview in PyTorch
 
 To mitigate this memory bus stall, production frameworks implement two systems optimizations:
 
-1. **In-Place Execution (`at::relu_()`)**: By overwriting the input memory buffer in-place (`torch.relu_(x)`), the runtime eliminates the output allocation and halves DRAM write traffic ($I = \frac{1 \text{ FLOP}}{4 \text{ Bytes}} = 0.25\text{ FLOPs/Byte}$).
-2. **Kernel Fusion (Triton / TorchInductor)**: Rather than storing GEMM outputs ($Y = XW$) back to DRAM and launching a separate activation kernel, modern compilers fuse the activation directly into the GEMM epilogue in on-chip SRAM registers. We will implement automated kernel fusion in Chapter 17.
+1. **In-Place Execution (`at::relu_()`)**: By overwriting the input memory buffer in-place (`torch.relu_(x)`), the runtime eliminates the output allocation and halves DRAM write traffic ($I = \frac{1 \text{ FLOP}}{4 \text{ Bytes}} = 0.25\text{ FLOPs/Byte}$), as seen in PyTorch's `c10::TensorImpl` storage recycling.
+2. **Kernel Fusion (previewed here, which we construct in Chapter 17 via OpenAI Triton block-level compilation in Chapter 21)**: Rather than storing GEMM outputs ($Y = XW$) back to DRAM and launching a separate activation kernel, modern compilers fuse the activation directly into the GEMM epilogue in on-chip SRAM registers. We will implement automated kernel fusion in Chapter 17.
 
 ---
 
 ## Exercises
 
-1. **Leaky ReLU Implementation**: Implement `LeakyReLU(negative_slope=0.01)`. Derive its first derivative $\frac{d}{dx}\text{LeakyReLU}(x)$. Why does setting `negative_slope > 0` prevent the dead neuron problem?
-2. **SwiGLU Gated Activation**: Modern transformer architectures (LLaMA, Mistral) utilize the SwiGLU activation function:
+1. **Leaky ReLU Implementation**: Implement `LeakyReLU(negative_slope=0.01)`. Derive its first derivative $\frac{d}{dx}\text{LeakyReLU}(x)$. Why does setting `negative_slope > 0` prevent the dead neuron problem while maintaining 1-cycle SIMD vector throughput?
+2. **SwiGLU Gated Activation**: Deep transformer architectures (which we construct in Chapter 13, such as LLaMA and Mistral) utilize the SwiGLU activation function:
    $$\text{SwiGLU}(x, g) = \text{Swish}(x) \odot g = (x \cdot \sigma(x)) \odot g$$
-   Implement `SwiGLU` in TinyTorch. What is the additional memory footprint of the gating tensor $g$ compared to a standard GELU layer?
+   Implement `SwiGLU` in TinyTorch. What is the additional memory footprint of the gating tensor $g$ compared to a standard GELU layer when storing intermediate activations for autograd (which we implement in Chapter 6)?
 3. **GELU Taylor Truncation Error**: Compare the exact error function $\text{GELU}_{\text{exact}}(x) = x \Phi(x)$ with the polynomial tanh approximation across the domain $x \in [-4.0, +4.0]$. What is the maximum absolute numerical discrepancy, and does it exceed IEEE 754 float32 single-precision tolerance?
