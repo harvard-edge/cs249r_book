@@ -40,28 +40,15 @@ To make deep learning reproducible and robust, a framework must formalize the tr
 
 Every robust deep learning framework executes training through an invariant five-step lifecycle:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ The Rigid Five-Step Training Loop Contract                                  │
-├─────────┬───────────────────┬───────────────────────────────────────────────┤
-│ Step    │ Action            │ Systems / Hardware State                      │
-├─────────┼───────────────────┼───────────────────────────────────────────────┤
-│ Step 1  │ optimizer.zero_   │ Clears old .grad references, resetting memory │
-│         │ grad()            │ pointers for new gradient accumulation.       │
-├─────────┼───────────────────┼───────────────────────────────────────────────┤
-│ Step 2  │ outputs = model(  │ Traverses forward DAG; records Op tape in     │
-│         │ inputs)           │ memory; caches intermediate activations.      │
-├─────────┼───────────────────┼───────────────────────────────────────────────┤
-│ Step 3  │ loss = loss_fn(   │ Compares logits to targets; computes scalar L │
-│         │ outputs, targets) │ via numerically stable Log-Sum-Exp.          │
-├─────────┼───────────────────┼───────────────────────────────────────────────┤
-│ Step 4  │ loss.backward()   │ Traverses tape in reverse topological order;  │
-│         │                   │ populates param.grad via VJP accumulation.    │
-├─────────┼───────────────────┼───────────────────────────────────────────────┤
-│ Step 5  │ optimizer.step()  │ Applies momentum/AdamW updates in-place to    │
-│         │                   │ param.data; increments step_count.            │
-└─────────┴───────────────────┴───────────────────────────────────────────────┘
-```
+| Step | Action | Systems & Hardware State Machine Contract |
+| :--- | :--- | :--- |
+| **Step 1** | `optimizer.zero_grad()` | Clears stale `.grad` references, resetting memory pointers for new accumulation. |
+| **Step 2** | `outputs = model(inputs)` | Traverses forward DAG; records Op tape in memory; caches intermediate activations. |
+| **Step 3** | `loss = loss_fn(outputs, targets)` | Compares logits to targets; evaluates scalar $\mathcal{L}$ via numerically stable Log-Sum-Exp. |
+| **Step 4** | `loss.backward()` | Traverses tape in reverse topological order; populates `param.grad` via VJP accumulation. |
+| **Step 5** | `optimizer.step()` | Applies momentum/AdamW updates in-place to `param.data`; increments iteration counter. |
+
+: The rigid non-commutative five-step training lifecycle contract. {#tbl-training-five-step-contract tbl-colwidths="[15,35,50]"}
 
 #### Global Gradient Norm Clipping
 
@@ -81,19 +68,29 @@ Rather than training with a static learning rate, modern models utilize **Cosine
 
 $$\eta_t = \eta_{\min} + \frac{1}{2} (\eta_{\max} - \eta_{\min}) \left( 1 + \cos\left( \frac{\pi \cdot t}{T} \right) \right)$$
 
-```
-Cosine Annealing Learning Rate Decay:
+In early epochs ($t \approx 0$), high learning rates ($\eta_t \approx \eta_{\max}$) allow parameters to escape shallow local saddle points. In later epochs ($t \to T$), infinitesimal learning rates ($\eta_t \to \eta_{\min}$) allow the optimizer to settle into the deepest, sharpest valleys of the loss surface.
 
-  η_max ──┐
-          │╲
-          │ ╲
-          │  ╲
-          │   ╲___
-  η_min ──┴───────┴───────► Epochs (T)
-          0      T/2      T
-```
+::: {#nbk-training-step-vram-accounting .callout-notebook title="Total training step VRAM accounting"}
+A production training framework must statically allocate and dynamically manage five distinct memory categories:
+$$\text{VRAM}_{\text{total}} = \text{VRAM}_{\text{weights}} + \text{VRAM}_{\text{gradients}} + \text{VRAM}_{\text{optimizer}} + \text{VRAM}_{\text{activations}} + \text{VRAM}_{\text{workspace}}$$
 
-In early epochs, high learning rates allow parameters to escape shallow local minima. In later epochs, infinitesimal learning rates allow the optimizer to settle into the deepest, sharpest valleys of the loss surface.
+- **Small Vision MLP (TinyDigits)** ($D_{\text{in}} = 64, D_{\text{hidden}} = 32, D_{\text{out}} = 10, B = 64$ in FP32):
+  - Parameters ($P = 2,410$ floats): $2,410 \times 4\text{ bytes} \approx 9.64\text{ KB}$
+  - Gradients ($P$ floats): $9.64\text{ KB}$
+  - AdamW state ($2P$ floats): $19.28\text{ KB}$
+  - Peak Activations ($B \times D_{\text{hidden}} \times 4\text{ bytes}$): $8.19\text{ KB}$
+  $$\text{Total Step Memory} \approx 46.75\text{ KB}$$
+  The entire training step easily fits inside the CPU L2/L3 cache, yielding maximum cache hit rates.
+
+- **Large Language Model (LLaMA-3 8B)** ($B = 4, S = 4096, D = 4096, L = 32$ in FP16 / FP32 AdamW):
+  - Model Weights (FP16, 2 bytes/param): $8\times 10^9 \times 2 = 16\text{ GB}$
+  - Gradients (FP16, 2 bytes/param): $16\text{ GB}$
+  - AdamW States (FP32 master weights + momentum + variance, 12 bytes/param): $8\times 10^9 \times 12 = 96\text{ GB}$
+  - Activations (without checkpointing, $\sim 3.5 \times B \times S \times D \times L \times 2\text{ bytes}$): $\approx 17.2\text{ GB}$
+  $$\text{Total Step Memory} \approx 145.2\text{ GB}$$
+
+**Systems Takeaway**: Persistent state (weights + grads + optimizer) consumes **$128\text{ GB}$ ($88.1\%$ of VRAM)**, while transient activations consume **$17.2\text{ GB}$ ($11.9\%$)**. This calculation reveals why a single 80 GB GPU cannot train an 8B model without ZeRO sharding or tensor-parallel model decomposition across multiple accelerators.
+:::
 
 ---
 
@@ -393,19 +390,11 @@ for t in range(T + 1):
 
 In distributed training across thousands of GPUs, the training loop contract extends beyond a single node:
 
-```
-Distributed Data Parallel (PyTorch DDP) Gradient Ring AllReduce:
+In distributed training across thousands of GPUs, the training loop contract extends beyond a single node. In PyTorch `DistributedDataParallel` (DDP), the 5-step loop invariant is preserved, but `loss.backward()` triggers an asynchronous **Ring-AllReduce** across GPU interconnects (NVLink / InfiniBand):
 
-GPU 0 (Batch 0) ──► Forward ──► Backward ──► Local dL/dW_0 ─┐
-                                                            │ Ring AllReduce
-GPU 1 (Batch 1) ──► Forward ──► Backward ──► Local dL/dW_1 ─┼──► Synchronized
-                                                            │     dL/dW_avg
-GPU 2 (Batch 2) ──► Forward ──► Backward ──► Local dL/dW_2 ─┤        │
-                                                            │        ▼
-GPU 3 (Batch 3) ──► Forward ──► Backward ──► Local dL/dW_3 ─┘  optimizer.step()
-```
-
-In PyTorch `DistributedDataParallel` (DDP), the 5-step loop invariant is preserved, but `loss.backward()` triggers an asynchronous **Ring-AllReduce** across GPU interconnects (NVLink / InfiniBand). While earlier layers are still computing their backward VJPs, gradients from the final layers are already streaming across the network, overlapping communication with computation:
+1. **Local Forward & Backward**: Each GPU rank evaluates the forward pass and backward gradients on its distinct batch shard.
+2. **Asynchronous Ring-AllReduce**: While earlier layers are still computing their backward VJPs, gradients from the final layers are already streaming across the ring network, overlapping gradient synchronization with backward compute.
+3. **Synchronized Optimization Step**: Once the ring reduces all gradient buffers to their global cross-GPU average ($\frac{1}{R}\sum_{r=0}^{R-1} \mathbf{g}_r$), each rank applies identical parameter updates locally.
 
 ```python
 # PyTorch DistributedDataParallel asynchronous gradient all-reduce hook:
@@ -421,20 +410,16 @@ dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
 
 With the completion of Chapter 8, we have constructed **Part I: The Core Engine** of TinyTorch:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          TINYTORCH PART I: THE CORE ENGINE                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Tensors & Strides      : Contiguous 1D memory buffers & strided views    │
-│ 2. Activations            : Non-linear gates (ReLU, GELU) preventing collapse│
-│ 3. Layers & Parameters    : Parameter encapsulation & Kaiming initialization│
-│ 4. Loss Functions         : Numerical stability via Log-Sum-Exp             │
-│ 5. The DataLoader         : Asynchronous batch streaming & memory pinning   │
-│ 6. Automatic Diff         : Dynamic tape DAG & reverse topological VJPs     │
-│ 7. Optimizers             : Momentum & AdamW decoupled weight decay         │
-│ 8. The Training Engine    : The rigid 5-step loop & atomic checkpointing    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-tip title="TinyTorch Part I: The Core Engine Milestone"}
+1. **Tensors & Strides**: Contiguous 1D memory buffers, strided coordinate mapping, and zero-copy views.
+2. **Activations**: Non-linear gates (ReLU, GELU) preventing deep coordinate collapse.
+3. **Layers & Parameters**: Parameter encapsulation, bias broadcasting, and Kaiming normal variance preservation.
+4. **Loss Functions**: Numerical stability against IEEE 754 float overflow via fused Log-Sum-Exp.
+5. **The DataLoader**: Asynchronous multi-worker batch ingestion, random index permutations, and memory pinning.
+6. **Automatic Differentiation**: Dynamic tape DAG recording and reverse topological VJP accumulation.
+7. **Optimizers**: Momentum dynamics and AdamW decoupled weight decay preventing variance pollution.
+8. **The Training Engine**: The rigid non-commutative 5-step loop and atomic model checkpointing.
+:::
 
 The foundational engine of our machine learning framework is fully assembled, self-contained, and operational.
 

@@ -10,14 +10,7 @@ In this chapter, we engineer **Post-Training INT8 Symmetric Quantization (`Quant
 
 ## Systems Problem Motivation: The 4-Byte DRAM Bandwidth Tax
 
-Every single FP32 floating-point number occupies **32 bits (4 bytes)** of memory:
-
-```
-IEEE 754 32-bit Single-Precision Float:
-┌──────────┬──────────────────┬───────────────────────────────────────────────┐
-│ Sign (1) │ Exponent (8 bits)│ Mantissa Fraction (23 bits)                   │
-└──────────┴──────────────────┴───────────────────────────────────────────────┘
-```
+Every single FP32 floating-point number occupies **32 bits (4 bytes)** of memory under the IEEE 754 standard: 1 sign bit, 8 exponent bits, and 23 mantissa fraction bits.
 
 When evaluating a linear layer $Y = XW^T$ with weight matrix $W \in \mathbb{R}^{4096 \times 4096}$:
 
@@ -31,6 +24,19 @@ $$\text{Arithmetic Intensity} = \frac{33,554,432 \text{ FLOPs}}{67,108,864 \text
 
 At $0.50\text{ FLOPs/Byte}$, our compute hardware is executing at **less than $1\%$ of its peak capability**.
 
+::: {#nbk-quantization-int8-memory-compute-gains .callout-notebook title="INT8 quantization memory bandwidth and compute throughput gains"}
+Consider compressing a $4,096 \times 4,096$ linear layer from FP32 to INT8:
+- **DRAM bus traffic reduction**:
+  - FP32 weight transfer: $67.1\text{ MB}$ per token decode step.
+  - INT8 weight transfer: $4,096 \times 4,096 \times 1\text{ byte} = 16.78\text{ MB}$.
+  - At a memory bandwidth of $100\text{ GB/s}$, parameter streaming latency drops from **$671\ \mu\text{s}$ down to $168\ \mu\text{s}$** ($4\times$ speedup).
+- **Compute unit throughput (DP4A vs FP32)**:
+  Modern GPU Streaming Multiprocessors feature DP4A instructions that compute an 8-bit dot product of four vector elements in a single cycle:
+  $$\text{Throughput}_{\text{INT8}} \approx 2\times \text{ to } 4\times \text{ Throughput}_{\text{FP32}}$$
+- **Cache line density**:
+  A single 64-byte cache line holds $16$ floats in FP32, but holds **$64$ weight parameters** in INT8. Every L1/L2 cache fetch delivers $4\times$ more parameters, drastically reducing cache eviction thrashing.
+:::
+
 If we can compress each 32-bit float into an **8-bit signed integer (`int8`)**, which occupies only **1 byte**:
 1. Memory footprint drops by **$4\times$** ($67.1\text{ MB} \to 16.7\text{ MB}$).
 2. DRAM memory bus traffic drops by **$75\%$**.
@@ -40,14 +46,7 @@ If we can compress each 32-bit float into an **8-bit signed integer (`int8`)**, 
 
 ## The Mental Model: Symmetric Affine Quantization vs Asymmetric Offsets
 
-Quantization is the process of mapping continuous real numbers $x \in [-\alpha, +\alpha]$ into a discrete grid of signed 8-bit integers $q \in [-127, +127]$:
-
-```
-Continuous Float Domain:       -α ─────────── 0.0 ─────────── +α
-                               │               │               │
-                               ▼               ▼               ▼
-Discrete INT8 Grid:          -127 ───────────  0  ─────────── +127
-```
+As illustrated in @fig-quantization-geometry, quantization maps continuous real numbers $x \in [-\alpha, +\alpha]$ into a discrete grid of signed 8-bit integers $q \in [-127, +127]$.
 
 #### Symmetric vs Asymmetric Mapping
 There are two primary paradigms for uniform quantization:
@@ -74,12 +73,11 @@ When multiplying a quantized activation matrix $Q_X$ by a quantized weight matri
 
 $$Y = X W^T = (S_X Q_X) \cdot (S_W Q_W)^T = (S_X \cdot S_W) \cdot \left( Q_X Q_W^T \right)$$
 
-```
-Quantized Integer Matrix Multiplication Pipeline:
-1. Integer Matrix Multiply: Compute integer sum C_int = Q_X @ Q_W^T using INT32 accumulators.
-2. Scalar Rescaling       : Multiply C_int by combined float scale factor S_Y = (S_X * S_W).
-3. Zero Float Multiply   : The heavy matrix multiplication occurs entirely in INT8/INT32 hardware!
-```
+Execution proceeds through three stages:
+
+1. **Integer matrix multiply**: Compute the integer sum $C_{\text{int}} = Q_X Q_W^T$ using high-precision INT32 accumulators to prevent overflow.
+2. **Scalar rescaling**: Multiply $C_{\text{int}}$ by the combined floating-point scale factor $S_Y = S_X \cdot S_W$.
+3. **Hardware efficiency**: The heavy $O(M N K)$ arithmetic occurs entirely within integer execution units.
 
 ---
 
@@ -255,18 +253,15 @@ model_int8 = quantization.quantize_dynamic(
 print("Quantized Linear Layer:", model_int8)
 ```
 
-```
-Modern Production Quantization Regimes:
-
-1. Weight-Only INT8 / INT4 (W8A16, W4A16):
-   • Weights stored in INT4 (0.5 bytes/param) in DRAM.
-   • Dequantized on-the-fly inside GPU SRAM registers during matmul.
-   • Cuts memory footprint by 8x with near-zero perplexity loss!
-
-2. AWQ (Activation-Aware Weight Quantization - Lin et al., 2023):
-   • Discovers that 1% of salient weights protect 99% of model accuracy.
-   • Keeps salient channels in FP16 while quantizing the remaining 99% to INT4.
-```
+::: {.callout-note title="Modern Production Quantization Regimes"}
+1. **Weight-Only INT8 / INT4 (W8A16, W4A16)**:
+   - Weights are stored in INT4 ($0.5\text{ bytes/param}$) in off-chip DRAM.
+   - Dequantized on-the-fly inside fast GPU SRAM registers during matrix multiplication.
+   - Slashes DRAM traffic by up to $8\times$ with minimal degradation in perplexity.
+2. **AWQ (Activation-Aware Weight Quantization - Lin et al., 2023)**:
+   - Identifies that protecting the top 1% of salient weight channels preserves 99% of model accuracy.
+   - Maintains salient channels in FP16 while aggressively quantizing the remaining 99% of weights to INT4.
+:::
 
 In production PyTorch C++ / CUDA kernels, integer matrix multiplication executes via `torch.ops.quantized.linear_dynamic` utilizing hardware SIMD vector instructions (AVX-512 VNNI on CPUs and DP4A / Tensor Cores on GPUs).
 
@@ -276,14 +271,11 @@ In production PyTorch C++ / CUDA kernels, integer matrix multiplication executes
 
 With Chapter 15, we achieve our first massive hardware systems win:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ INT8 Quantization Benchmark Results:                                        │
-│ • Model Parameter Memory: 12.8 MB (FP32) ──► 3.2 MB (INT8) [4.0x Savings!]  │
-│ • DRAM Memory Bus Bandwidth: 75% reduction in bytes transferred per token.  │
-│ • Accuracy Retention: >99.4% on TinyDigits and TinyGPT language benchmarks. │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="INT8 Quantization Benchmark Results"}
+- **Parameter Memory**: $12.8\text{ MB}$ (FP32) $\to$ **$3.2\text{ MB}$** (INT8) — a **$4.0\times$ memory reduction**.
+- **DRAM Bus Bandwidth**: $75\%$ reduction in bytes streamed per token decode step.
+- **Accuracy Retention**: $>99.4\%$ accuracy preserved on TinyDigits and TinyGPT language benchmarks.
+:::
 
 From a systems perspective, compressing weights from 32 bits ($4\text{ bytes}$) to 8 bits ($1\text{ byte}$) achieves an immediate $4\times$ reduction in DRAM traffic. At a memory bus speed of $100\text{ GB/s}$, transferring a $12.8\text{ MB}$ parameter buffer drops from $128\text{ microseconds}$ down to just $32\text{ microseconds}$. Furthermore, the compressed weights now fit inside the CPU L3 cache ($16\text{ MB}$ to $32\text{ MB}$), entirely eliminating off-chip DRAM bus roundtrips for subsequent token decode iterations.
 

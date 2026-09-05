@@ -53,25 +53,18 @@ Each Node in the computational DAG encapsulates:
 2. **Parent Node Pointers**: Directed edges pointing back to the input tensors that generated this result.
 3. **Vector-Jacobian Product (VJP) Kernel**: The backward mathematical routine that maps incoming upstream gradients to input parameter gradients.
 
-```
-Dynamic Forward Tape Construction:
-X [B, D_in]  ───┐
-                ├──>[ MatMulOp ]──> Z [B, D_out] ──>[ GeluOp ]──> A [B, D_out] ──>[ LossOp ]──> L (Scalar)
-W [D_in, D_out]─┘
-```
+During forward evaluation, operations record their dependencies onto the dynamic execution tape:
+- **Forward Step 1 (`MatMulOp`)**: Takes inputs $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$ and $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$, computes pre-activation $\mathbf{Z} = \mathbf{X}\mathbf{W}$, and saves references to $\mathbf{X}$ and $\mathbf{W}$.
+- **Forward Step 2 (`GeluOp`)**: Applies non-linear activation $\mathbf{A} = \text{GELU}(\mathbf{Z})$ and saves intermediate tensor $\mathbf{Z}$.
+- **Forward Step 3 (`LossOp`)**: Evaluates scalar loss $\mathcal{L} = \text{Loss}(\mathbf{A})$, creating root loss node $\mathcal{L}$.
 
-When `.backward()` is invoked on the scalar loss $\mathcal{L}$, the engine:
-1. Seeds the loss gradient with the identity derivative: $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$.
-2. Computes a **Topological Ordering** of all nodes in the DAG using Depth-First Search (DFS).
-3. Traverses the ordered nodes in reverse, executing each node's VJP kernel to push gradients backwards.
-4. **Accumulates gradients in-place** (`param.grad += grad`) at nodes with multiple downstream consumers (satisfying the multivariate chain rule).
-
-```
-Reverse Gradient Propagation:
-dL/dX ◄─────────┐
-                ├──◄[ dMatMul ]◄──── dL/dZ ◄────────[ dGELU ]◄──── dL/dA ◄────────[ dLoss ]◄──── dL/dL = 1.0
-dL/dW ◄─────────┘
-```
+When `.backward()` is invoked on the scalar loss $\mathcal{L}$, the autograd engine executes the reverse sequence (illustrated in @fig-autograd-dag):
+1. **Seed Gradient**: Initializes the root loss derivative with the identity scalar: $\frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0$.
+2. **Topological Ordering**: Orders all reachable nodes in the computational DAG using Depth-First Search (DFS).
+3. **Reverse Traversal**: Executes each node's registered VJP kernel in reverse topological order:
+   - Evaluates activation derivative: $\frac{\partial \mathcal{L}}{\partial \mathbf{Z}} = \frac{\partial \mathcal{L}}{\partial \mathbf{A}} \odot \text{GELU}'(\mathbf{Z})$.
+   - Evaluates parameter derivatives: $\frac{\partial \mathcal{L}}{\partial \mathbf{W}} = \mathbf{X}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}}$ and $\frac{\partial \mathcal{L}}{\partial \mathbf{X}} = \frac{\partial \mathcal{L}}{\partial \mathbf{Z}} \mathbf{W}^T$.
+4. **In-Place Gradient Accumulation**: Accumulates gradients (`param.grad += grad`) at multi-consumer nodes, satisfying the multivariate chain rule.
 
 ---
 
@@ -289,21 +282,33 @@ Every single arithmetic value matches the exact outputs computed by our TinyTorc
 
 In production PyTorch, dynamic reverse-mode automatic differentiation is implemented in high-performance C++ within `torch/csrc/autograd/engine.cpp`.
 
-```
-Production PyTorch Autograd Architecture:
-┌──────────────────────────────────────────────────────────────┐
-│                    Python User Frontend                      │
-│                loss.backward() [Python GIL]                  │
-└──────────────────────────────┬───────────────────────────────┘
-                                │ Dispatches into C++
-┌──────────────────────────────▼───────────────────────────────┐
-│              torch::autograd::Engine [C++ Core]              │
-│  1. Constructs ReadyQueue of executable Node tasks           │
-│  2. Releases Python GIL for parallel C++ worker threads      │
-│  3. Thread pool executes VJP kernels across GPU streams      │
-│  4. Manages in-place version counter (Tensor._version)       │
-└──────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="Production PyTorch Autograd Architecture"}
+- **Python Frontend (`loss.backward()`)**: Initiates graph traversal under the Python Global Interpreter Lock (GIL) and passes the root gradient node pointer to C++.
+- **C++ Core Engine (`torch::autograd::Engine`)**:
+  1. Constructs a concurrent `ReadyQueue` containing executable node tasks.
+  2. Releases the Python GIL, enabling parallel C++ worker threads to execute independent branches concurrently.
+  3. Dispatches Vector-Jacobian Product (VJP) kernels across asynchronous GPU streams.
+  4. Manages an atomic in-place version counter (`c10::TensorImpl::_version`) to prevent silent numerical corruption.
+:::
+
+::: {#nbk-autograd-activation-pinning-vram .callout-notebook title="Pinned activation memory wall during backpropagation"}
+During training with automatic differentiation, every intermediate activation tensor required to compute local Jacobian vector products must remain **pinned in DRAM/VRAM** throughout the entire forward pass until the backward pass visits that node.
+
+Consider training an autoregressive model with $L = 32$ Transformer layers, batch size $B = 16$, sequence length $S = 2048$, and hidden dimension $D = 4096$ in FP16 (2 bytes per element):
+
+- **Activation Size Per Layer**:
+  $$\text{Layer Activation} = B \times S \times D \times 2\text{ bytes} = 16 \times 2048 \times 4096 \times 2\text{ bytes} \approx 268.44\text{ MB}$$
+
+- **Total Pinned Activation VRAM Across Depth**:
+  For 32 layers, accounting for attention projections, MLP expansions ($4D$), and LayerNorm buffers ($\sim 3.5\times$ base representation):
+  $$\text{Pinned Activations} \approx 32 \times (3.5 \times 268.44\text{ MB}) \approx 30.06\text{ GB}$$
+
+- **Inference vs Training Memory Disparity**:
+  During inference, the runtime does not construct a backward tape DAG. As soon as layer $l+1$ finishes executing, the memory buffer for layer $l$ is immediately overwritten:
+  $$\text{Inference Peak Dynamic Activation} \approx 3.5 \times 268.44\text{ MB} \approx 0.94\text{ GB}$$
+
+**Systems Takeaway**: Training requires **$32\times$ more dynamic activation memory** than inference solely to retain backward tape context. When pinned activations exceed available GPU VRAM, systems engineers must employ **Gradient Checkpointing** (activation rematerialization)—recomputing activations during backward traversal at the cost of $33\%$ additional forward FLOPs.
+:::
 
 #### Architectural Distinctions: TinyTorch vs. Production PyTorch ATen Engine
 1. **Multithreaded Task Queue (`ReadyQueue`)**: TinyTorch evaluates the topological sort sequentially in a single Python thread. PyTorch maintains a thread pool with a concurrent `ReadyQueue`. Any node whose downstream dependencies are satisfied is immediately scheduled on an idle worker thread, enabling parallel backward execution across independent network branches.

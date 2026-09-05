@@ -16,13 +16,11 @@ In introductory computer science, performance is measured by algorithmic time co
 
 $$\text{Linear Layer FLOPs} = 2 \times M \times N \times K$$
 
-```
-The Naive Profiling Trap:
-An engineer spends three weeks rewriting an elementwise GELU activation kernel
-to cut its arithmetic instruction count in half (saving 10 million FLOPs).
-They deploy the new kernel to an NVIDIA H100 GPU and measure the latency:
-Speedup: EXACTLY 0.0% FASTER! ❌
-```
+::: {.callout-caution title="The Naive Profiling Trap"}
+An engineer spends three weeks rewriting an elementwise GELU activation kernel to cut its arithmetic instruction count in half (saving 10 million FLOPs). When deployed to an NVIDIA H100 GPU and benchmarked, the measured latency improves by:
+
+$$\text{Speedup} = \mathbf{0.0\%}$$
+:::
 
 Why did saving ten million floating-point operations deliver zero speedup?
 
@@ -53,31 +51,16 @@ $$P = \min\left( P_{\text{peak}}, \; I \times B_{\text{peak}} \right)$$
 
 where:
 - $P$ is achievable performance (in FLOPs/sec or GFLOPs/sec).
-- $P_{\text{peak}}$ is the theoretical peak hardware compute throughput (horizontal ceiling).
-- $B_{\text{peak}}$ is the peak hardware memory bandwidth (slanted ceiling, in Bytes/sec).
-- $I$ is the **Arithmetic Intensity** (in $\text{FLOPs/Byte}$), defined as:
+- $P_{\text{peak}}$ is theoretical peak hardware compute throughput (horizontal ceiling).
+- $B_{\text{peak}}$ is peak hardware memory bandwidth (slanted ceiling, in Bytes/sec).
+- $I$ is **Arithmetic Intensity** (in $\text{FLOPs/Byte}$), defined as:
 
 $$I = \frac{\text{Total Floating Point Operations (FLOPs)}}{\text{Total DRAM Bytes Transferred}}$$
 
-```
-The Williams Roofline Model Diagram:
+As illustrated in @fig-roofline-model, the model partitions operations into two distinct hardware execution regimes:
 
-Performance (GFLOPs/s) ▲
-                       │                  Compute Ceiling (P_peak)
-                       │           ┌───────────────────────────────────
-                       │          ╱│
-                       │         ╱ │  Compute-Bound Regime (GEMMs, Large Convs)
-                       │        ╱  │  (Optimization: Tensor Cores, SIMD)
-                       │       ╱   │
-  Memory-Bound Regime  │      ╱    │
-  (GELU, Softmax,      │     ╱     │
-   LayerNorm, Decodes) │    ╱      │
-                       │   ╱       │
-                       │  ╱ ◄──────┼── Ridge Point I_ridge = P_peak / B_peak
-                       │ ╱         │
-                       └─┴─────────┴──────────────────────────────────►
-                         0        I_ridge              Arithmetic Intensity (FLOPs/Byte)
-```
+1. **Memory-Bound Regime ($I < I_{\text{ridge}}$)**: Performance is strictly bounded by the memory bus ($P = I \cdot B_{\text{peak}}$). Arithmetic units sit starved waiting on DRAM fetches. Optimizations must reduce byte traffic (quantization, caching, fusion).
+2. **Compute-Bound Regime ($I \ge I_{\text{ridge}}$)**: Performance reaches the execution unit limit ($P = P_{\text{peak}}$). Memory bandwidth is saturated. Optimizations must exploit vectorization, Tensor Cores, and instruction parallelism.
 
 #### The Ridge Point: The Hardware Boundary
 
@@ -85,12 +68,9 @@ The intersection between the memory bandwidth ceiling and the compute ceiling de
 
 $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
-```
-Typical Modern Hardware Ridge Points:
-• Apple M-Series CPU : 300 GFLOPs / 100 GB/s    ──► I_ridge = 3.0 FLOPs/Byte
-• NVIDIA A100 GPU    : 312 TFLOPs / 2.0 TB/s   ──► I_ridge = 156 FLOPs/Byte
-• NVIDIA H100 GPU    : 1,000 TFLOPs / 3.35 TB/s ──► I_ridge = 298 FLOPs/Byte
-```
+- **Apple M-Series (M3 Max)**: $300\text{ GFLOPs} / 100\text{ GB/s} \implies I_{\text{ridge}} = 3.0\text{ FLOPs/Byte}$
+- **NVIDIA A100 SXM4**: $312\text{ TFLOPs} / 2.0\text{ TB/s} \implies I_{\text{ridge}} = 156\text{ FLOPs/Byte}$
+- **NVIDIA H100 SXM5**: $1,000\text{ TFLOPs} / 3.35\text{ TB/s} \implies I_{\text{ridge}} = 298\text{ FLOPs/Byte}$
 
 If an operator's arithmetic intensity $I < I_{\text{ridge}}$, it is **Memory-Bound**: the only way to make it faster is to **reduce memory traffic** (via quantization in Chapter 15, kernel fusion in Chapter 17, or caching in Chapter 18).
 
@@ -273,19 +253,16 @@ Opening `trace.json` inside `chrome://tracing` displays microsecond-level timeli
 
 Chapter 14 gives our framework its diagnostic instruments:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Diagnostic Profiler Finding:                                                │
-│ • Model: TinyGPT (vocab=1000, dim=128, layers=4)                            │
-│ • Memory Footprint: 3.2 MB (FP32)                                           │
-│ • Arithmetic Intensity: 1.97 FLOPs/Byte ──► CRITICALLY MEMORY-BOUND!       │
-│ • Bottleneck: 98% of latency is spent transferring weights across DRAM bus. │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-important title="Diagnostic Profiler Finding: The Memory Wall"}
+- **Target Model**: TinyGPT ($V = 1,000, D = 128, L = 4$)
+- **Memory Footprint**: $3.2\text{ MB}$ (FP32 precision)
+- **Arithmetic Intensity**: $1.97\text{ FLOPs/Byte}$ $\implies$ **critically memory-bound** ($I \ll I_{\text{ridge}} = 156$)
+- **Hardware Bottleneck**: $98\%$ of execution latency is spent waiting for memory transfers across the DRAM bus.
+:::
 
 The diagnosis is clear: **our model is suffocating on DRAM memory traffic**.
 
-::: {.callout-note title="Napkin Math: The 4x Memory Bandwidth Dividend"}
+::: {#nbk-profiling-roofline-ridge-point .callout-notebook title="Roofline ridge point and hardware compute efficiency"}
 Why does arithmetic intensity dictate our optimization roadmap?
 - At $I = 1.97\text{ FLOPs/Byte}$, an NVIDIA A100 GPU capable of $312\text{ TFLOPs}$ can only achieve:
   $$\text{Throughput} = I \times B_{\text{peak}} = 1.97\text{ FLOPs/Byte} \times 2,000\text{ GB/s} \approx 3.94\text{ TFLOPs/s}$$

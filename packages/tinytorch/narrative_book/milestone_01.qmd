@@ -18,26 +18,9 @@ In 1958, Frank Rosenblatt introduced the **Perceptron** at the Cornell Aeronauti
 
 $$\hat{y} = \text{step}(\mathbf{w}^T \mathbf{x} + b) = \begin{cases} 1 & \text{if } \sum_{i} w_i x_i + b \ge 0 \\ 0 & \text{otherwise} \end{cases}$$
 
-The invention was hailed in the international press as the dawn of synthetic brains. But in 1969, MIT computer scientists Marvin Minsky and Seymour Papert published their seminal monograph *Perceptrons*. In it, they delivered an indisputable mathematical proof: a single-layer linear threshold unit **cannot solve the Exclusive-OR (XOR) logical function**.
+The invention was hailed in the international press as the dawn of synthetic brains. But in 1969, MIT computer scientists Marvin Minsky and Seymour Papert published their seminal monograph *Perceptrons*. In it, they delivered an indisputable mathematical proof: a single-layer linear threshold unit **cannot solve the Exclusive-OR (XOR) logical function** (illustrated in @fig-milestone1-history).
 
-```
-The Geometric Impossibility of Linear XOR Separation:
-
-      x_2 ▲
-          │
-        1 │   (0,1) = 1       (1,1) = 0
-          │      ●               ○
-          │
-        0 │   (0,0) = 0       (1,0) = 1
-          │      ○               ●
-          └─────────────────────────────► x_1
-              0               1
-
-No single straight line (w_1*x_1 + w_2*x_2 + b = 0) can separate
-the positive classes (●) from the negative classes (○)!
-```
-
-Because XOR is linearly inseparable, a single linear hyperplane cannot partition the input space. Minsky and Papert further proved that single-layer systems could not compute topological connectivity or parity. Crucially, they conjectured that extending networks to multiple layers was computationally intractable because no general mathematical algorithm existed to adjust the weights of hidden layers that did not directly touch the output error.
+Because the XOR truth table produces positive labels ($y=1$) at $(0,1)$ and $(1,0)$ but negative labels ($y=0$) at $(0,0)$ and $(1,1)$, no single linear hyperplane ($w_1 x_1 + w_2 x_2 + b = 0$) can separate the two classes in 2D space. Minsky and Papert further proved that single-layer systems could not compute topological connectivity or parity. Crucially, they conjectured that extending networks to multiple layers was computationally intractable because no general mathematical algorithm existed to adjust the weights of hidden layers that did not directly touch the output error.
 
 Their book effectively halted funding and academic research in neural networks for nearly two decades, triggering the **First AI Winter** (1969--1986).
 
@@ -54,13 +37,7 @@ Their breakthrough rested on two pillars:
 
 From a systems perspective, the intermediate activation tensor $\mathbf{h} \in \mathbb{R}^{B \times 4}$ occupies just $4 \times 4 = 16$ bytes per sample in float32. In modern hardware, this vector resides entirely inside CPU L1 cache or GPU streaming multiprocessor register files, enabling backpropagation to compute $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1}$ without ever incurring off-chip DRAM round-trip latency.
 
-```
-How a 2-Layer MLP Solves XOR:
-
-Input Space (2D)           Hidden Space (2D Manifold)         Output
-[x_1, x_2] ──► Linear(2, 4) ──► ReLU ──► Linear(4, 1) ──► Sigmoid/MSE ──► y ∈ {0, 1}
- (Non-separable)             (Warped space: separable!)
-```
+$$\begin{matrix} \text{Input Space } (2\text{D}) \\ [x_1, x_2] \end{matrix} \xrightarrow{\text{Linear}(2, 4)} \mathbf{z} \xrightarrow{\text{ReLU}} \begin{matrix} \text{Warped Manifold } (4\text{D}) \\ \mathbf{h} \in \mathbb{R}^{B \times 4} \end{matrix} \xrightarrow{\text{Linear}(4, 1)} \begin{matrix} \text{Output Scalar} \\ \hat{y} \in \{0, 1\} \end{matrix}$$
 
 ---
 
@@ -277,18 +254,35 @@ torch_mlp = nn.Sequential(
 
 ---
 
-## M1.8 Milestone Synthesis: The Core Engine Is Complete
+::: {#nbk-m1-xor-arithmetic-intensity .callout-notebook title="Arithmetic intensity of the XOR two-layer perceptron"}
+Consider evaluating a forward-backward training pass on the complete XOR dataset ($B = 4$ samples) through our two-layer network: $\text{Linear}(2, 4) \to \text{ReLU} \to \text{Linear}(4, 1)$:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          MILESTONE I CHECKPOINT REACHED                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Zero External ML Dependencies : Built purely on Python and NumPy buffers.│
-│ 2. Exact Analytical Autograd     : Evaluated reverse topological VJPs.     │
-│ 3. Universal Function Separation : Conquered Minsky's 1969 XOR Crisis.      │
-│ 4. Production Digit Recognition  : Achieved >96% accuracy on TinyDigits.    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+- **Floating-Point Operations (FLOPs)**:
+  - Layer 1 Forward GEMM ($2 \times B \times D_{\text{in}} \times D_{\text{hidden}}$): $2 \times 4 \times 2 \times 4 = 64\text{ FLOPs}$
+  - ReLU non-linear gating: $4 \times 4 = 16\text{ FLOPs}$
+  - Layer 2 Forward GEMM ($2 \times B \times D_{\text{hidden}} \times D_{\text{out}}$): $2 \times 4 \times 4 \times 1 = 32\text{ FLOPs}$
+  - Mean Squared Error Loss: $4 \times 3 = 12\text{ FLOPs}$
+  $$\text{Total Forward Compute} = 124\text{ FLOPs}$$
+
+- **Memory Traffic (Bytes Transferred)**:
+  - Input batch ($4 \times 2$ floats): $32\text{ bytes}$
+  - Layer 1 weights and bias ($2 \times 4 + 4 = 12$ floats): $48\text{ bytes}$
+  - Layer 2 weights and bias ($4 \times 1 + 1 = 5$ floats): $20\text{ bytes}$
+  - Target labels ($4$ floats): $16\text{ bytes}$
+  $$\text{Total DRAM Traffic} = 116\text{ bytes}$$
+
+- **Operational Intensity**:
+  $$I = \frac{124\text{ FLOPs}}{116\text{ bytes}} \approx 1.07\text{ FLOPs/Byte}$$
+
+**Systems Takeaway**: With an operational intensity near $1\text{ FLOP/byte}$, small multi-layer networks operate deep within the **memory-bandwidth bound** regime of modern processors (which require $I \ge 100\text{ FLOPs/byte}$ to saturate compute ALUs). Over $98\%$ of execution time is spent moving data between cache and registers rather than executing arithmetic.
+:::
+
+::: {.callout-checkpoint title="Milestone I Checkpoint: The Core Engine Is Complete"}
+1. **Zero External ML Dependencies**: Built purely on Python and NumPy buffers.
+2. **Exact Analytical Autograd**: Evaluated reverse topological VJPs with zero numerical error.
+3. **Universal Function Separation**: Conquered Minsky's 1969 XOR Crisis via non-linear coordinate warping.
+4. **Production Digit Recognition**: Achieved $>96\%$ test accuracy on TinyDigits handwritten classification.
+:::
 
 We have proven that our from-scratch Core Engine is mathematically sound and capable of training multi-layer neural networks to high accuracy. Across all four benchmarks, our dynamic reverse-mode tape, numerical invariants, and fused updates operate with zero external machine learning dependencies.
 

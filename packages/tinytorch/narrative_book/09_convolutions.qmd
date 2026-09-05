@@ -314,20 +314,31 @@ y_torch = torch_conv(x_torch)
 print("PyTorch Conv2d Output:", y_torch.squeeze().numpy())
 ```
 
-```
-cuDNN Convolution Algorithm Dispatch Strategy:
+| Algorithm | Best Receptive Field & Topology Regime | Hardware Characteristic |
+| :--- | :--- | :--- |
+| **Direct GEMM (`im2col`)** | General-purpose large kernels ($5\times 5, 7\times 7$) | Unrolls spatial patches into standard 2D matrix multiplication. |
+| **Winograd Minimal Filtering** | Small $3\times 3$ kernels ($F(2\times 2, 3\times 3)$) | Reduces elementwise multiplications by $2.25\times$ via polynomial transforms. |
+| **FFT (Fast Fourier Transform)** | Massive $7\times 7, 9\times 9+$ kernels | Frequency-domain multiplication ($O(N \log N)$ vs $O(N^2)$ spatial). |
+| **Implicit GEMM** | Modern Tensor Cores (NVIDIA Hopper/Blackwell) | Generates coordinate offsets on-the-fly inside registers with zero memory expansion. |
 
-┌────────────────────────────────┬────────────────────────────────────────────┐
-│ Algorithm                      │ Best Receptive Field / Topology Regime     │
-├────────────────────────────────┼────────────────────────────────────────────┤
-│ 1. Direct GEMM (im2col)        │ General-purpose large kernels (5x5, 7x7)   │
-│ 2. Winograd Minimal Filtering  │ Small 3x3 kernels (cuts multiplies by 2.25x)│
-│ 3. FFT (Fast Fourier Transform)│ Massive 9x9+ kernels via frequency domain  │
-│ 4. Implicit GEMM               │ Zero-memory footprint on NVIDIA TensorCores│
-└────────────────────────────────┴────────────────────────────────────────────┘
-```
+: Industrial cuDNN 2D convolution algorithm selection strategies. {#tbl-cudnn-conv-algorithms tbl-colwidths="[25,35,40]"}
 
 Rather than materializing the expanded `im2col` buffer in DRAM (which consumes $K^2 \times$ extra memory bandwidth, requiring $N \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot C_{\text{in}} \cdot K^2 \times 4\text{ bytes}$ transfers over PCIe or HBM), modern cuDNN kernels use **Implicit GEMM**: CUDA threads calculate the input spatial coordinates on-the-fly inside SM registers, achieving peak TensorCore compute throughput ($>300\text{ TFLOPs}$ on H100) with zero off-chip memory expansion overhead.
+
+::: {#nbk-convolutions-im2col-memory-expansion .callout-notebook title="The im2col memory expansion inflation factor"}
+In 2D spatial convolution, unrolling an input image tensor $\mathbf{X} \in \mathbb{R}^{B \times C_{\text{in}} \times H \times W}$ into a column matrix $\mathbf{X}_{\text{col}} \in \mathbb{R}^{(B \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (C_{\text{in}} \cdot K_h \cdot K_w)}$ replicates spatial pixels across overlapping receptive fields:
+
+- **Expansion Ratio**:
+  $$\text{Expansion Factor} = \frac{H_{\text{out}} \times W_{\text{out}} \times K_h \times K_w}{H \times W} \approx K_h \times K_w$$
+  For standard $3 \times 3$ filters with stride 1 and padding 1 ($H_{\text{out}} = H, W_{\text{out}} = W$), every input pixel is duplicated into up to 9 separate receptive fields, yielding an exact **$9\times$ memory expansion**.
+
+- **Concrete Footprint Calculation**:
+  Consider an intermediate feature map batch with $B = 32$, $C_{\text{in}} = 64$, and spatial resolution $H = 112, W = 112$ in FP32 (4 bytes per element):
+  $$\text{Original Input Tensor} = 32 \times 64 \times 112 \times 112 \times 4\text{ bytes} \approx 102.76\text{ MB}$$
+  $$\text{Unrolled im2col Matrix} = 102.76\text{ MB} \times 9 \approx \mathbf{924.84\text{ MB}}$$
+
+**Systems Takeaway**: The `im2col` transform trades nearly **$1\text{ GB}$ of transient DRAM allocation** for computational speed, transforming complex 6-deep nested loops into a contiguous matrix multiply that saturates hardware systolic GEMM engines. Modern production engines (like cuDNN) avoid this memory penalty through **Implicit GEMM**, generating the unrolled index coordinates directly in thread registers.
+:::
 
 ---
 
@@ -335,23 +346,13 @@ Rather than materializing the expanded `im2col` buffer in DRAM (which consumes $
 
 With Chapter 9, TinyTorch extends from flat 1D vectors into multi-channel 2D spatial manifolds:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 2D Image Input: [Batch, Channels, Height, Width]                            │
-│   │                                                                         │
-│   ▼                                                                         │
-│ Conv2d(in=1, out=16, k=3) ──► Receptive fields preserve local 2D topology   │
-│   │                                                                         │
-│   ▼                                                                         │
-│ ReLU() ─────────────────────► Non-linear spatial feature gating             │
-│   │                                                                         │
-│   ▼                                                                         │
-│ MaxPool2d(k=2, s=2) ────────► Downsamples spatial grid; expands field of view│
-│   │                                                                         │
-│   ▼                                                                         │
-│ Linear(Flattened, Classes) ─► Final classification logits                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="TinyTorch 2D Vision Pipeline Architecture"}
+1. **Input Tensor**: $[B, C_{\text{in}}, H, W]$ contiguous 4D image buffer.
+2. **`Conv2d(in=1, out=16, k=3)`**: Sliding receptive fields extract spatial features while preserving 2D topology.
+3. **`ReLU()`**: In-place non-linear gating over spatial channels.
+4. **`MaxPool2d(k=2, s=2)`**: Downsamples spatial grid by $2\times$, doubling the effective receptive field of subsequent layers.
+5. **`Linear(Flattened, Classes)`**: Dense affine projection yielding final classification logits.
+:::
 
 From a systems perspective, spatial convolutions achieve high computational throughput by reusing weight parameters $C_{\text{in}} \cdot K^2$ across all $H_{\text{out}} \cdot W_{\text{out}}$ receptive fields, shifting the operational regime toward compute-bound execution (which we formalize in Chapter 14: arithmetic intensity, measuring FLOPs per memory byte transferred).
 

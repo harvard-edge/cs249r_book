@@ -292,21 +292,32 @@ In production GPU runtimes, `nn.Embedding` backward passes use **Sparse Gradient
 
 Let us examine the complete token processing pipeline now active in TinyTorch:
 
-```
-Raw Input Text: "The xv6 of Machine Learning"
-   │
-   ▼
-[ BPETokenizer (Chapter 10) ] ──► Token IDs: [ 464, 1892, 22, 318, 5928, 4821 ]
-   │
-   ▼
-[ Embedding(V=50257, D=768) ] ──► Continuous Semantic Vectors: [ 1, 6, 768 ]
-   │
-   ▼
-[ PositionalEncoding(D=768) ] ──► Superimposes Fourier Waveforms: [ 1, 6, 768 ]
-   │
-   ▼ (Next: Chapter 12)
-[ Scaled Dot-Product Attention ] ──► Tokens dynamically communicate with all other tokens
-```
+1. **Raw Text String**: `"The xv6 of Machine Learning"`
+2. **`BPETokenizer` (Chapter 10)**: Emits token integer IDs: `[464, 1892, 22, 318, 5928, 4821]`.
+3. **`Embedding(V=50257, D=768)`**: Row-pointer gather emits semantic vectors of shape $[1, 6, 768]$.
+4. **`PositionalEncoding(D=768)`**: Superimposes Fourier sinusoidal waveforms across the hidden dimension.
+5. **Attention Engine (Chapter 12)**: Tokens dynamically attend to all historical context positions.
+
+::: {#nbk-embeddings-row-gather-bandwidth .callout-notebook title="Embedding row-gather memory bandwidth ceiling"}
+An embedding lookup is pure pointer arithmetic with zero floating-point arithmetic:
+$$\mathbf{Y}[b, s, :] = \mathbf{W}[\text{token\_id}[b, s], :]$$
+
+Consider embedding a context batch with $B = 8$, sequence length $S = 2048$, and hidden dimension $D = 4096$ in FP16 (2 bytes per float):
+
+- **Memory Ingestion Volume**:
+  $$\text{Data Gathered} = 8 \times 2048 \times 4096 \times 2\text{ bytes} = 134,217,728\text{ bytes} \approx 134.22\text{ MB}$$
+
+- **Arithmetic Intensity**:
+  $$\text{Compute FLOPs} = 0 \implies I = \frac{0\text{ FLOPs}}{134.22\text{ MB}} = \mathbf{0\text{ FLOPs/Byte}}$$
+  The kernel is purely and completely memory-bandwidth bound.
+
+- **Transfer Latency Ceiling**:
+  On an accelerator with $2.0\text{ TB/s}$ high-bandwidth memory (HBM), transferring $134.22\text{ MB}$ ideally takes:
+  $$t_{\text{gather}} = \frac{134.22\text{ MB}}{2000\text{ GB/s}} \approx 67.1\ \mu\text{s}$$
+
+- **Non-Coalesced DRAM Tax**:
+  If token IDs access non-contiguous rows scattered across physical memory banks, the memory controller cannot coalesce access into continuous 128-byte bursts. If each cache line fetch transfers 128 bytes but uses only 32 bytes of aligned data, effective bandwidth drops by $4\times$, extending gather latency to nearly $270\ \mu\text{s}$.
+:::
 
 From a systems engineering perspective, an embedding table of shape $V \times D = 50,257 \times 768$ consumes:
 $$\text{Memory}_{\text{Embed}} = 50,257 \times 768 \times 4\text{ bytes} \approx 154.4\text{ MB of DRAM}$$

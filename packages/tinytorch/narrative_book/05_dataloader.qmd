@@ -28,14 +28,7 @@ $$\text{Total Step Time} = 10.0\text{ ms (Disk I/O)} + 0.21\text{ ms (GPU Comput
 
 $$\text{Hardware Compute Utilization} = \frac{0.21\text{ ms}}{10.21\text{ ms}} = \mathbf{2.05\%}$$
 
-The expensive GPU tensor cores sit **idle $97.95\%$ of the time**. The processor is stalled on PCIe bus and storage controller interrupts.
-
-```
-Synchronous Single-Sample Execution Timeline:
-Disk Read (10ms) ────────► Compute (0.2ms) ──► Disk Read (10ms) ────────► Compute (0.2ms)
-[████████████████████████] [█]                 [████████████████████████] [█]
-▲ GPU sits idle 98% of the time!
-```
+In synchronous execution, reading each sample from disk takes $\sim 10\text{ ms}$, while computing an iteration on accelerator ALUs takes $\sim 0.2\text{ ms}$. Because the execution thread blocks on storage I/O, the expensive GPU tensor cores sit **idle $97.95\%$ of the time**.
 
 ### The Two Systems Bottlenecks of Naive Data Loading
 
@@ -52,36 +45,35 @@ To saturate compute hardware, a systems framework must:
 
 The modern data pipeline separates responsibilities into three distinct architectural layers:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       THE THREE LAYERS OF THE DATA PIPELINE                 │
-├───────────────────┬─────────────────────────────────────────────────────────┤
-│ 1. Dataset        │ Defines the random-access data contract:                │
-│                   │ • __len__(): Returns total sample count N.              │
-│                   │ • __getitem__(idx): Returns the i-th sample (x_i, y_i). │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 2. Sampler        │ Determines the order of indices to visit:               │
-│                   │ • Sequential: [0, 1, 2, ..., N-1]                       │
-│                   │ • Shuffled: Random permutation of {0..N-1} per epoch.   │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 3. DataLoader     │ Manages batching, multi-worker prefetching, and memory: │
-│                   │ • Pulls B samples from Dataset.                         │
-│                   │ • Collates them into contiguous Tensor batches.         │
-│                   │ • Yields batches asynchronously to the compute engine.  │
-└───────────────────┴─────────────────────────────────────────────────────────┘
-```
+| Layer | Architectural Responsibility | Interface Contract |
+| :--- | :--- | :--- |
+| **1. Dataset** | Defines random-access data retrieval | `__len__()` returns total count $N$; `__getitem__(idx)` returns sample $(\mathbf{x}_i, y_i)$. |
+| **2. Sampler** | Determines sequence of sample traversal | Sequential indices $[0, 1, \dots, N-1]$ or epoch random permutation $\pi \in S_N$. |
+| **3. DataLoader** | Manages batch collation and asynchronous IPC | Pulls $B$ samples, collates into contiguous tensors, and streams to compute engine. |
 
-```
-Producer-Consumer Asynchronous Pipelining Timeline:
-Worker Process (I/O):  [ Load Batch 1 ] [ Load Batch 2 ] [ Load Batch 3 ]
-                             │               │               │
-                             ▼               ▼               ▼
-Shared Memory Queue:   ──► [ Queue ] ────► [ Queue ] ────► [ Queue ] ──►
-                             │               │               │
-Compute Engine (ALU):        ▼               ▼               ▼
-                       [ Step Batch 0 ] [ Step Batch 1 ] [ Step Batch 2 ]
-                       ▲ Compute engine NEVER STALLS! Hardware runs at 100% saturation!
-```
+: The three decoupled architectural layers of the machine learning data ingestion pipeline. {#tbl-data-pipeline-layers tbl-colwidths="[20,35,45]"}
+
+In an asynchronous producer-consumer pipeline (illustrated in @fig-dataloader-pipeline), background worker processes decode raw files into shared memory while the GPU trains on previously prepared batches, completely overlapping I/O latency with ALU execution.
+
+::: {#nbk-dataloader-pcie-bandwidth-balance .callout-notebook title="PCIe bandwidth saturation and worker process scaling"}
+Consider training a vision model with batch size $B = 128$, image resolution $3 \times 224 \times 224$ in FP32 (4 bytes per pixel).
+
+- **Batch Ingestion Volume**:
+  $$\text{Batch Bytes} = 128 \times 3 \times 224 \times 224 \times 4\text{ bytes} \approx 77.07\text{ MB}$$
+
+- **Required Host-to-Device Throughput**:
+  If GPU matrix cores complete a forward-backward training step in $t_{\text{step}} = 15\text{ ms}$:
+  $$\text{Required Bandwidth} = \frac{77.07\text{ MB}}{0.015\text{ s}} = 5,138\text{ MB/s} \approx 5.14\text{ GB/s}$$
+  A PCIe Gen4 $\times 16$ slot provides $\sim 31.5\text{ GB/s}$ of unidirectional bandwidth, consuming $\approx 16.3\%$ of the physical bus. The interconnect is not the bottleneck.
+
+- **CPU Worker Scaling Bottleneck**:
+  If an individual CPU worker decodes, crops, and normalizes JPEGs at $200\text{ samples/second}$ ($640\text{ ms}$ for a batch of 128):
+  $$\text{Workers Required} = \frac{640\text{ ms}}{15\text{ ms}} \approx 42.7\text{ CPU cores}$$
+  If fewer than 43 workers are allocated, the GPU compute engine will starve on empty input queues.
+
+- **Queue Depth Sizing**:
+  To absorb transient operating system disk reads (e.g., $100\text{ ms}$ tail latency spikes on storage controllers), the IPC shared-memory queue depth must buffer at least $\lceil 100\text{ ms} / 15\text{ ms} \rceil = 7\text{ batches}$ ($539.5\text{ MB}$ of page-locked pinned RAM).
+:::
 
 ### Why Shuffling Without Replacement Matters (The i.i.d. Invariant)
 

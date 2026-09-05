@@ -14,52 +14,33 @@ When the original 2017 transformer was published (*"Attention Is All You Need"*)
 
 $$x_{l+1} = \text{LayerNorm}(x_l + \text{SubLayer}(x_l))$$
 
-In Post-LN architectures, the normalization operator sits directly on the residual path. As network depth grows beyond twelve layers, gradients passing through dozens of chained normalization operations decay exponentially ($O(1/L)$ decay). Training a 50-layer Post-LN model requires excruciating warm-up schedules and frequently diverges into NaN loss values.
+In Post-LN architectures, the normalization operator sits directly on the residual path:
 
-```
-Post-LN vs. Pre-LN Residual Gradient Pathways:
-
-Post-LN (Original 2017 Transformer - Brittle Gradient Decay):
-x ──► [ Attention ] ──► ( + ) ──► [ LayerNorm ] ──► [ MLP ] ──► ( + ) ──► [ LayerNorm ] ──► Output
-  └──────────────────────┘                          └────────────┘
-  (Gradients must pass through every LayerNorm; decays exponentially in deep stacks! ❌)
-
-Pre-LN (GPT-2 & Modern LLMs - Clean Unimpeded Gradient Highway):
-x ──┬──► [ LayerNorm ] ──► [ Attention ] ──► ( + ) ──┬──► [ LayerNorm ] ──► [ MLP ] ──► ( + ) ──► Output
-    │                                         ▲      │                                   ▲
-    └─────────────────────────────────────────┘      └───────────────────────────────────┘
-    (The residual skip connection provides an UNMODIFIED highway for gradient flow! ✅)
-```
-
-In **Pre-LayerNorm (Pre-LN)**, normalization is applied to the input of each sub-layer *before* the transformation, while the residual skip connection ($x + f(x)$) remains completely clean and unnormalized. The residual connection acts as an **unimpeded gradient superhighway**, allowing loss gradients from layer 100 to propagate directly back to layer 1 with zero attenuation.
+1. **Post-LN (Original 2017 Transformer)**:
+   $$x_{l+1} = \text{LayerNorm}(x_l + \text{SubLayer}(x_l))$$
+   The forward signal and reverse gradient must pass sequentially through every LayerNorm operation. In deep stacks ($L > 12$), the gradient of LayerNorm scales inversely with depth, causing exponential gradient decay ($O(1/L)$) and requiring strict learning rate warmups to avoid diverging.
+2. **Pre-LN (GPT-2 and Modern LLMs)**:
+   $$x_{l+1} = x_l + \text{SubLayer}(\text{LayerNorm}(x_l))$$
+   Normalization is applied to the input of each sub-layer *before* transformation, while the residual connection ($x + f(x)$) remains completely clean and unnormalized. The residual skip connection forms an **unimpeded gradient highway**, allowing loss gradients from the final layer to propagate directly back to early layers with zero attenuation ($\nabla_{x_l} \mathcal{L} = \nabla_{x_{l+1}} \mathcal{L} + \dots$).
 
 ---
 
 ## The Mental Model: The Anatomy of a GPT-2 Block
 
-A modern generative transformer consists of four modular systems:
+As shown in @fig-transformer-arch, a modern generative transformer consists of four modular systems:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Complete GPT-2 Language Model Architecture                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. Token & Positional Embeddings:                                           │
-│    h_0 = Embedding_token(tokens) + PositionalEncoding(seq_len)              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 2. Stack of N Pre-LN Transformer Blocks:                                    │
-│    For layer l = 1 to N:                                                    │
-│      • Communication Sub-Layer:                                             │
-│          h'_l = h_{l-1} + MultiHeadAttention(LayerNorm_1(h_{l-1}))         │
-│      • Computation / Reasoning Sub-Layer:                                   │
-│          h_l  = h'_l    + MLP(LayerNorm_2(h'_l))                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 3. Final Layer Normalization:                                               │
-│    h_final = LayerNorm_final(h_N)                                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 4. Language Modeling Logit Head:                                            │
-│    Logits = Linear(embed_dim, vocab_size)(h_final)                          │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+1. **Token and Positional Embeddings**:
+   $$h_0 = \text{Embedding}_{\text{tok}}(X) + \text{Embedding}_{\text{pos}}(P)$$
+2. **Stack of $N$ Pre-LN Transformer Blocks**:
+   For layer $l = 1, \dots, N$:
+   - *Communication sub-layer (Multi-Head Attention)*:
+     $$h'_l = h_{l-1} + \text{MultiHeadAttention}(\text{LayerNorm}_1(h_{l-1}))$$
+   - *Computation sub-layer ($4\times$ MLP)*:
+     $$h_l = h'_l + \text{MLP}(\text{LayerNorm}_2(h'_l))$$
+3. **Final Layer Normalization**:
+   $$h_{\text{final}} = \text{LayerNorm}_{\text{final}}(h_N)$$
+4. **Language Modeling Logit Head**:
+   $$\text{Logits} = \text{Linear}(D, V)(h_{\text{final}})$$
 
 #### Layer Normalization: Channel-Wise Stabilization
 
@@ -85,11 +66,20 @@ While attention allows tokens to dynamically aggregate context, the **MLP (Multi
 
 $$\text{MLP}(x) = \text{Linear}(4D, D)\left( \text{GELU}(\text{Linear}(D, 4D)(x)) \right)$$
 
-::: {.callout-note title="Napkin Math: Sizing Weights for Cache Line Residency"}
-Why do transformers use a $4\times$ expansion ratio ($D \to 4D \to D$)?
-- In language models, token routing (attention) determines *where* to look, but MLP projection determines *what* facts to recall from parameter memory.
-- For $D = 64$, the expansion layer $W_1$ has shape $(64, 256)$, requiring $16,384$ floats ($65.5\text{ KB}$). The projection layer $W_2$ has shape $(256, 64)$, requiring another $65.5\text{ KB}$.
-- Together, the block's MLP weights consume $131\text{ KB}$ of physical memory---fitting comfortably within the 512 KB L2 cache of a modern CPU core or GPU Streaming Multiprocessor (SM). This allows high-throughput dense GEMM execution with zero DRAM bus stalls during inference.
+::: {#nbk-transformers-flop-parameter-accounting .callout-notebook title="FLOP and parameter memory accounting in a transformer block"}
+Why do transformers allocate roughly two-thirds of their parameters and compute to the feed-forward MLP ($D \to 4D \to D$)?
+
+Consider a GPT-2 style block with embedding dimension $D = 768$, sequence length $S = 1,024$, and $H = 12$ heads ($d_k = 64$).
+- **Parameter accounting**:
+  - Attention projections ($W_q, W_k, W_v, W_o$): $4 \times (D \times D) = 4 \times 768^2 \approx 2.36\text{ M}$ parameters ($9.44\text{ MB}$ in FP32).
+  - MLP projections ($W_1 \in \mathbb{R}^{D \times 4D}, W_2 \in \mathbb{R}^{4D \times D}$): $2 \times (D \times 4D) = 8 \times 768^2 \approx 4.72\text{ M}$ parameters ($18.87\text{ MB}$ in FP32).
+  - The MLP contains exactly **$2\times$ more parameters** than the attention projections.
+- **Compute accounting per token (FLOPs)**:
+  - Attention linear projections: $4 \times 2 D^2 = 8 D^2 \approx 4.72\text{ M FLOPs}$.
+  - Attention matrix multiplications ($Q K^T$ and $\text{Softmax}(S) V$): $2 \times (2 S D) = 4 S D \approx 3.15\text{ M FLOPs}$.
+  - MLP GEMMs: $2 \times (2 \times D \times 4D) = 16 D^2 \approx 9.44\text{ M FLOPs}$.
+- **Hardware residency**:
+  In language models, attention dynamically routes *context* between tokens, whereas the feed-forward MLP acts as a distributed key-value associative memory that retrieves factual knowledge. Because the MLP GEMMs have high arithmetic intensity ($O(D)$ ops/byte), they fully saturate systolic matrix cores on modern accelerators.
 :::
 
 ---
@@ -295,19 +285,15 @@ Notice how Pre-LN normalizes the inputs *only* for the attention and MLP branche
 
 In production architectures (such as GPT-3 and LLaMA), two major systems optimizations are applied:
 
-```
-Production Transformer Optimizations:
-
-1. Weight Tying (Press & Wolf, 2016):
-   • The output language head weight matrix W_head is TIED directly to the input
-     token embedding matrix W_tok: W_head = W_tok^T.
-   • Cuts model parameter count by 30% without sacrificing accuracy.
-
-2. RMSNorm (Root Mean Square Normalization):
-   • Drops the mean subtraction term from LayerNorm:
-     RMSNorm(x) = x / sqrt( (1/D) * sum(x_i^2) + eps ) * gamma
-   • Cuts kernel execution latency by 15% across all layers.
-```
+::: {.callout-note title="Production Transformer Optimizations"}
+1. **Weight Tying** (Press & Wolf, 2016):
+   - The output language head weight matrix $W_{\text{head}}$ is tied directly to the input token embedding matrix: $W_{\text{head}} = W_{\text{tok}}^T$.
+   - Eliminates $V \times D$ parameters (cutting model parameter footprint by up to 30% without sacrificing perplexity).
+2. **RMSNorm (Root Mean Square Normalization)**:
+   - Eliminates the mean-subtraction centering step from LayerNorm:
+     $$\text{RMSNorm}(x) = \frac{x}{\sqrt{\frac{1}{D}\sum_{i=1}^D x_i^2 + \epsilon}} \odot \gamma$$
+   - Eliminates one pass through registers, reducing normalization kernel execution latency by ~15% across all layers.
+:::
 
 In PyTorch C++ / CUDA runtimes, `torch.compile` uses TorchInductor to fuse `LayerNorm + QKV Projection` and `GELU + Linear` into single fused kernel calls, eliminating memory bandwidth bottlenecks across GPU SM registers.
 
@@ -315,19 +301,13 @@ In PyTorch C++ / CUDA runtimes, `torch.compile` uses TorchInductor to fuse `Laye
 
 ## Building the System: How It All Connects
 
-We have assembled the complete generative AI engine in pure TinyTorch:
+We have assembled the complete generative AI engine in pure TinyTorch across Part II:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         TINYTORCH PART II: DEEP ARCHITECTURES               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 9. Spatial Convolutions   : Sliding receptive fields & im2col GEMMs         │
-│ 10. BPE Tokenization      : Subword entropy compression with zero OOV       │
-│ 11. Embeddings & Position : Dense latent space & Fourier positional waves   │
-│ 12. Multi-Head Attention  : Scaled dot-product & causal lower-triangular mask│
-│ 13. The GPT-2 Transformer : Pre-LN residual highways & complete TinyGPT     │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+- **Spatial Convolutions** (Chapter 9): Sliding receptive fields and `im2col` systolic GEMM unrolling.
+- **BPE Tokenization** (Chapter 10): Subword entropy compression with zero out-of-vocabulary fallback.
+- **Embeddings & Position** (Chapter 11): Dense latent lookup tables and sinusoidal Fourier position encoding.
+- **Multi-Head Attention** (Chapter 12): Scaled dot-product routing under causal lower-triangular masking.
+- **The GPT-2 Transformer** (Chapter 13): Pre-LN residual highways and complete TinyGPT language modeling.
 
 ::: {.callout-note title="Systems Summary: Transformer Block Compute Profile"}
 - **Memory Footprint**: For sequence length $S$ and embedding dimension $D$, each block stores activations of size $S \times D \times 4$ bytes. The Pre-LN design keeps residual updates in-place, preventing memory bloat.

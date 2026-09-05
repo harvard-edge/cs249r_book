@@ -27,27 +27,28 @@ t1 = time.time()
 print(f"Latency: {(t1 - t0) * 1000.0:.2f} ms")
 ```
 
-When run on a modern deep learning system, this script produces numbers that are completely detached from physical reality. It suffers from three fatal systems pitfalls:
+::: {.callout-caution title="The Three Fatal Benchmarking Flaws"}
+1. **Cold-Start Contamination**:
+   - First-run execution triggers OS page faults, instruction cache misses, dynamically linked library loading, and dynamic memory allocations (`cudaMalloc`).
+   - Iteration 1 latency is frequently $10\times$ to $50\times$ higher than steady-state performance!
+2. **Asynchronous Queue Timing Trap**:
+   - Accelerators (GPUs, TPUs) use asynchronous command queues. Calling `model.forward(x)` merely enqueues a kernel launch descriptor onto a ring buffer in host memory and returns immediately to Python.
+   - `time.time()` measures CPU kernel queue dispatch time ($\sim 0.01\text{ ms}$), NOT device execution time ($\sim 12.4\text{ ms}$)!
+3. **The Arithmetic Mean Fallacy**:
+   - If 99 inference requests take $5.0\text{ ms}$ and 1 request stalls for $500\text{ ms}$ (due to OS thread preemption or memory garbage collection), the arithmetic mean reports $9.95\text{ ms}$.
+   - Mean latency completely conceals catastrophic tail latency spikes that violate service-level agreements (SLAs)!
+:::
 
-```
-The Three Fatal Benchmarking Flaws:
-
-1. Cold-Start Contamination:
-   • First-run execution triggers OS page faults, instruction cache misses, dynamically
-     linked library loading, and dynamic memory allocations (cudaMalloc).
-   • Iteration 1 latency is frequently 10x to 50x higher than steady-state performance! ❌
-
-2. Asynchronous Queue Timing Trap:
-   • Accelerators (GPUs, TPUs) use asynchronous command streams. Calling model.forward(x)
-     merely enqueues a kernel launch descriptor onto a ring buffer in host memory and
-     returns IMMEDIATELY to Python.
-   • time.time() measures CPU kernel launch time (0.01 ms), NOT device execution time (12.4 ms)! ❌
-
-3. The Arithmetic Mean Fallacy:
-   • If 99 inference requests take 5.0 ms and 1 request stalls for 500 ms (due to OS thread
-     preemption or memory garbage collection), the arithmetic mean reports 9.95 ms.
-   • Mean latency completely conceals catastrophic tail latency spikes that violate SLAs! ❌
-```
+::: {#nbk-benchmarking-sample-size-tail-latencies .callout-notebook title="Sample size requirements for estimating P99 tail latencies"}
+Why does rigorous tail latency estimation require hundreds of measured iterations?
+- **Nonparametric order statistics**:
+  The empirical percentile $P_k$ is the value below which $k\%$ of observations fall. For $P_{99}$, an observation has probability $p = 0.01$ of exceeding the threshold.
+- **Sample size lower bound**:
+  To have at least a $95\%$ probability ($1 - (1 - p)^N \ge 0.95$) that our sample includes *at least one* true tail event exceeding the 99th percentile:
+  $$N \ge \frac{\ln(1 - 0.95)}{\ln(1 - 0.01)} = \frac{\ln(0.05)}{\ln(0.99)} \approx \frac{-2.9957}{-0.01005} \approx 298 \text{ iterations}$$
+- **Cold-start warmup rule**:
+  Discarding the first $10\text{--}20$ iterations allows GPU dynamic clock boosting (p-states) to stabilize and fills CPU instruction and data caches, preventing cold-start outliers from corrupting steady-state distributions.
+:::
 
 ---
 
@@ -313,22 +314,17 @@ The TinyTorch benchmark reports the full reality: typical execution is blazing f
 
 In industry-standard benchmark competitions run by **MLCommons (MLPerf)**, hardware and software vendors (NVIDIA, Google, Intel, AMD) submit audited benchmark logs under strict rules:
 
-```
-MLPerf Inference Specification Requirements:
-
-1. The Accuracy Retention Floor:
-   • Any optimized framework (using INT8, pruning, or fusion) MUST achieve:
-     Accuracy(Optimized) >= 0.99 * Accuracy(FP32 Baseline)
-   • A 10x speedup that degrades accuracy by 2% is disqualified!
-
-2. Server Division SLA Constraints:
-   • The benchmark measures maximum throughput (queries/sec) subject to a strict SLA:
-     P99 Latency <= Latency_Target (e.g. 15 ms)
-
-3. Hardware Audit Telemetry:
-   • Submissions must log GPU clock frequencies, DRAM temperatures, CPU pinning masks,
-     and exact compiler flags to ensure full reproducibility.
-```
+::: {.callout-note title="MLPerf Inference Specification Requirements"}
+1. **Accuracy Retention Floor**:
+   - Any optimized framework (using INT8, pruning, or fusion) must achieve:
+     $$\text{Accuracy}_{\text{optimized}} \ge 0.99 \times \text{Accuracy}_{\text{FP32 baseline}}$$
+   - A $10\times$ speedup that degrades accuracy by more than 1% is immediately disqualified!
+2. **Server Division SLA Constraints**:
+   - The benchmark measures maximum throughput (queries/sec) subject to strict tail latency bounds:
+     $$P_{99} \le \text{Latency Target (e.g., } 15\text{ ms)}$$
+3. **Hardware Audit Telemetry**:
+   - Submissions must log GPU clock frequencies, DRAM temperatures, CPU thread affinity masks, and exact compiler flags to ensure full reproducibility.
+:::
 
 #### Hardware Timestamping via CUDA Events
 
@@ -364,15 +360,12 @@ Hardware CUDA events measure elapsed cycles directly on the GPU's internal clock
 
 Chapter 19 equips TinyTorch with mathematical and scientific honesty:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ TinyTorch Benchmark Verification Suite Active:                              │
-│ • Warmup Cycles: 10 runs discarded (eliminating cold cache artifacts).      │
-│ • Statistical Sampling: 100 steady-state iterations recorded.               │
-│ • Complete Percentiles: P50 (Median), P95, and P99 Tail Latencies.          │
-│ • MLPerf Accuracy Floor Check: >= 99% accuracy retention enforced.          │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {.callout-note title="TinyTorch Benchmark Verification Suite"}
+- **Warmup Cycles**: 10 runs discarded to eliminate cold-cache and JIT compilation artifacts.
+- **Statistical Sampling**: 100 steady-state iterations recorded.
+- **Percentile Tracking**: Full empirical distribution reporting P50 (median), P95, and P99 tail latencies.
+- **MLPerf Accuracy Floor**: Automated verification that optimized models retain $\ge 99\%$ of baseline accuracy.
+:::
 
 From a systems engineering perspective, benchmarking is the ultimate arbiter of architectural trade-offs. By synchronizing CPU and GPU streams and computing order statistics across hundreds of iterations, our engine guarantees that reported speedups reflect physical silicon realities rather than asynchronous launch buffering or cold-start noise.
 

@@ -92,6 +92,27 @@ $$\mathcal{L}_{\text{CE}} = \text{LSE}(\mathbf{z}) - z_t$$
 
 This fused formulation eliminates intermediate probability tensor allocations, halves DRAM memory bandwidth consumption, and guarantees $100\%$ numerical stability across all real inputs.
 
+::: {#nbk-losses-lse-fusion-footprint .callout-notebook title="Log-Sum-Exp numerical headroom and fused memory traffic"}
+Consider computing cross-entropy loss for an autoregressive language model with vocabulary $V = 32,000$, sequence length $S = 2048$, and batch size $B = 4$ in FP32 (4 bytes per element).
+
+- **Logits Tensor Size**:
+  $$\text{Elements} = 4 \times 2048 \times 32,000 = 262,144,000\text{ floats}$$
+  $$\text{Memory} = 262,144,000 \times 4\text{ bytes} = 1,048,576,000\text{ bytes} \approx 1.05\text{ GB}$$
+
+- **Unfused Naive Softmax Allocation Chain**:
+  Evaluating `loss = nll_loss(log(softmax(logits)))` naively allocates three separate intermediate DRAM buffers:
+  1. Numerator exponentials $e^{\mathbf{z}}$: $1.05\text{ GB}$
+  2. Softmax probabilities $\mathbf{p} = e^{\mathbf{z}} / \sum e^{\mathbf{z}}$: $1.05\text{ GB}$
+  3. Logarithm tensor $\log \mathbf{p}$: $1.05\text{ GB}$
+  Total transient DRAM allocations: **$> 3.15\text{ GB}$**!
+
+- **Fused In-Register Log-Sum-Exp Kernel**:
+  $$\mathcal{L}_{\text{CE}} = \text{LSE}(\mathbf{z}) - z_t$$
+  A fused cross-entropy kernel reads the logits once from DRAM, computes the running maximum $c = \max(\mathbf{z})$ and sum $\sum e^{z_j - c}$ entirely in 32-bit registers, subtracts the target logit $z_t$, and directly returns a single scalar float ($4\text{ bytes}$).
+
+**Systems Takeaway**: Fused Log-Sum-Exp slashes peak transient memory allocation from **$3.15\text{ GB}$ down to zero**, eliminating $4.2\text{ GB}$ of DRAM read/write traffic while preventing IEEE 754 float overflow.
+:::
+
 ```python
 # Pure Python demonstration of Softmax overflow vs Log-Sum-Exp stability:
 import numpy as np

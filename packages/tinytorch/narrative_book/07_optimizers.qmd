@@ -12,20 +12,7 @@ Yet having exact gradients is only half the battle. A gradient is merely a compa
 
 When optimizing high-dimensional neural networks, the local geometry of the loss landscape is dictated by the Hessian matrix $\mathbf{H} = \nabla^2 \mathcal{L}(\mathbf{\theta})$. The condition number $\kappa = \lambda_{\max} / \lambda_{\min}$ measures the ratio between the maximum and minimum eigenvalues of the local curvature.
 
-In deep networks, $\kappa$ frequently exceeds $10^4$, creating what optimization theorists call an **ill-conditioned ravine**:
-
-```
-Ill-Conditioned Loss Ravine (Curvature Ratio κ ≫ 1):
-
-     Steep Wall (High Curvature, λ_max)
-     │       ▲
-     │      ╱ ╲     Vanilla SGD: Oscillates violently between walls
-     │     ╱   ╲    while making almost zero progress along the floor!
-     │    ▼     ▲
-     │   ╱       ╲  ───► Momentum: Accumulates velocity along valley floor,
-     │  ▼         ▲      dampening perpendicular cross-ravine oscillations.
-     └────────────────────────► Low Curvature Valley Floor (λ_min)
-```
+In deep networks, $\kappa$ frequently exceeds $10^4$, creating an **ill-conditioned loss ravine** (illustrated in @fig-optimizers-landscape). Along the steep perpendicular walls (governed by $\lambda_{\max}$), the gradient is massive, causing vanilla SGD updates to oscillate violently across the canyon. Along the flat valley floor (governed by $\lambda_{\min}$), the gradient is minuscule, causing forward progress toward the global minimum to crawl at a near standstill.
 
 In an ill-conditioned ravine:
 1. Along the steep perpendicular walls, the gradient $\mathbf{g}_\perp$ is massive, causing vanilla SGD updates ($\mathbf{\theta} \leftarrow \mathbf{\theta} - \eta \mathbf{g}$) to oscillate violently from side to side.
@@ -362,38 +349,32 @@ In PyTorch C++ / CUDA (`fused=True`), these four passes are fused into a **singl
 
 Let us review how Chapter 7 locks into our expanding framework architecture:
 
-```
-                  ┌─────────────────────────────────┐
-                  │   Chapter 5: DataLoader         │
-                  │   (Batches of Data & Labels)    │
-                  └───────────────┬─────────────────┘
-                                  │
-                                  ▼
-                  ┌─────────────────────────────────┐
-                  │   Chapters 1-3: Model Layers    │
-                  │   (Forward Affine Transforms)   │
-                  └───────────────┬─────────────────┘
-                                  │
-                                  ▼
-                  ┌─────────────────────────────────┐
-                  │   Chapter 4: Cross-Entropy Loss │
-                  │   (Scalar Loss Computation L)   │
-                  └───────────────┬─────────────────┘
-                                  │
-                                  ▼
-                  ┌─────────────────────────────────┐
-                  │   Chapter 6: Dynamic Autograd   │
-                  │   (Tape Backward: Populates .grad)│
-                  └───────────────┬─────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Chapter 7: Optimizers (SGD Momentum & AdamW)                                │
-│   • zero_grad() clears stale gradient memory buffers.                       │
-│   • step() executes momentum and decoupled adaptive variance updates.       │
-│   • In-place param.data mutation completes the mathematical learning cycle. │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+1. **DataLoader (Chapter 5)**: Pulls and collates mini-batches asynchronously into host memory.
+2. **Model Layers (Chapters 1–3)**: Executes forward affine transformations and non-linear activations.
+3. **Loss Function (Chapter 4)**: Evaluates scalar objective $\mathcal{L}$ via numerically stable Log-Sum-Exp.
+4. **Dynamic Autograd (Chapter 6)**: Traverses reverse topological tape to populate `param.grad` in-place.
+5. **Optimizer (Chapter 7)**: Executes `zero_grad()` to clear stale buffers, followed by `step()` to update parameters via decoupled weight decay and momentum.
+
+::: {#nbk-optimizers-adamw-16byte-law .callout-notebook title="The 16-bytes-per-parameter law of AdamW state"}
+In deep learning systems, parameter storage during inference represents only a fraction of the memory footprint required during training. For every parameter weight trained with AdamW in single-precision FP32 (4 bytes):
+
+1. **Parameter Weight ($\theta$)**: $4\text{ bytes}$
+2. **Gradient Buffer ($\nabla_\theta \mathcal{L}$)**: $4\text{ bytes}$
+3. **First Moment Vector (Momentum $m_t$)**: $4\text{ bytes}$
+4. **Second Moment Vector (Variance $v_t$)**: $4\text{ bytes}$
+$$\text{Total Persistent State} = 4 + 4 + 4 + 4 = \mathbf{16\text{ bytes per parameter}}$$
+
+- **Real-World Scaling Example**:
+  Consider training a 7-billion parameter language model ($P = 7 \times 10^9$):
+  $$\text{Optimizer + Model VRAM} = 7 \times 10^9 \times 16\text{ bytes} = 112\times 10^9\text{ bytes} \approx 112\text{ GB}$$
+  This persistent state requires at least two 80 GB GPUs before allocating a single byte for forward activations, KV caches, or batch buffers.
+
+- **Mixed-Precision Training (FP16 / BF16)**:
+  Even when model weights and gradients are stored in half precision (2 bytes each), master weights, momentum, and variance accumulators must remain in FP32 (4 bytes each) to avoid underflow:
+  $$\text{Mixed-Precision Footprint} = 2\text{ (FP16 weight)} + 2\text{ (FP16 grad)} + 4\text{ (FP32 master)} + 4\text{ (momentum)} + 4\text{ (variance)} = \mathbf{16\text{ bytes}}$$
+
+**Systems Takeaway**: The 16-bytes-per-parameter law is a physical invariant of adaptive gradient descent. Systems engineers must budget at least $16\times$ the parameter count in persistent VRAM, explaining why ZeRO (Zero Redundancy Optimizer) stage 1, 2, and 3 partition optimizer states across distributed cluster nodes.
+:::
 
 ::: {.callout-note title="Systems Summary: The Optimizer Performance Invariant"}
 - **Memory Overhead**: Optimizers strictly obey the 16-bytes-per-parameter law in FP32 ($4\times$ the parameter footprint for weights, gradients, first moment, and second moment).

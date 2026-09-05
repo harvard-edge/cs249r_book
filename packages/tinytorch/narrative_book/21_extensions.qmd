@@ -19,23 +19,26 @@ This concluding chapter bridges the 20 TinyTorch reference modules (`packages/ti
 
 For a decade following the deep learning revolution (2012--2022), writing high-performance deep learning kernels required authoring thousands of lines of low-level CUDA C++. Systems engineers had to manually manage complex hardware microarchitectures:
 
-```
-The Low-Level CUDA Complexity Nightmare:
+::: {.callout-caution title="The Low-Level CUDA Complexity Nightmare"}
+1. **Warp Divergence**: Managing 32 lockstep threads where conditional branches serialize execution paths and halve arithmetic throughput.
+2. **Shared Memory Bank Conflicts**: Aligning 32 memory banks across 4-byte boundaries to prevent multiport serialization stalls.
+3. **Register Spilling**: Balancing thread occupancy against register pressure to prevent local variables from spilling into high-latency L1/L2 caches.
+4. **Asynchronous Pipeline Synchronization**: Inserting manual `__syncthreads()` and `__syncwarp()` barriers without creating deadlocks or race conditions.
+:::
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. Warp Divergence: Managing 32 lockstep threads where conditional branches │
-│    serialize execution and halve arithmetic throughput.                     │
-│                                                                             │
-│ 2. Shared Memory Bank Conflicts: Aligning 32 memory banks across 4-byte      │
-│    boundaries to prevent multiport serialization stalls.                    │
-│                                                                             │
-│ 3. Register Spilling: Balancing thread occupancy against register pressure  │
-│    to prevent local variables from spilling into high-latency L1/L2 caches. │
-│                                                                             │
-│ 4. Asynchronous Pipeline Synchronization: Inserting manual __syncthreads()  │
-│    and __syncwarp() barriers without creating deadlocks or race conditions. │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+::: {#nbk-extensions-warp-divergence-bank-conflicts .callout-notebook title="Warp divergence penalty and shared memory bank conflict latency"}
+How do low-level hardware divergence and bank conflicts destroy memory bandwidth?
+- **Warp divergence serialization**:
+  A GPU warp executes 32 threads in SIMT lockstep. If a branch statement (`if condition: A else: B`) splits the warp such that 16 threads take path $A$ and 16 take path $B$:
+  $$\text{SIMT Efficiency} = \frac{16\text{ active threads}}{32\text{ warp width}} = 50\%$$
+  The hardware executes both paths serially, masking out inactive threads and doubling wall-clock execution time!
+- **Shared memory bank conflicts**:
+  GPU shared memory (SRAM) is organized into 32 independent memory banks of 4-byte width (128 bytes per cycle). If all 32 threads access distinct banks, throughput is 1 transaction per cycle.
+  If all 32 threads access different addresses within the *same* bank (a 32-way conflict), the hardware must serialize the accesses into 32 separate transactions:
+  $$\text{Latency}_{\text{bank conflict}} = 32\times \text{ slower memory load!}$$
+- **Compiler abstraction (Triton / Inductor)**:
+  Block-level compilers automatically arrange data access layouts with padding (`stride % 32 != 0`) to eliminate bank conflicts and unroll loops to avoid branch divergence entirely.
+:::
 
 #### The Block-Level Programming Paradigm (OpenAI Triton)
 
@@ -234,23 +237,12 @@ simulate_2x2_systolic_array()
 
 In modern production environments, the techniques we constructed by hand throughout TinyTorch are automated by the **PyTorch 2.0 Compiler Stack**:
 
-```
-The Modern PyTorch 2.0 Systems Pipeline:
+As illustrated in @fig-modern-stack, the modern compiler stack orchestrates four coordinated lowering stages:
 
-Python Model Code (e.g. TinyGPT)
-       │
-       ▼
-[ TorchDynamo ] ────────► Intercepts Python Frame Bytecode via PEP 523 and safely extracts FX Graph
-       │
-       ▼
-[ AOTAutograd ] ────────► Traces forward & backward graphs Ahead-of-Time and generates joint VJP graphs
-       │
-       ▼
-[ TorchInductor ] ──────► Fuses memory-bound subgraphs, schedules loop tiles, and compiles custom Triton kernels
-       │
-       ▼
-[ C++/Triton Runtime ] ──► Emits native GPU PTX and CPU AVX-512 binary code for bare-metal execution!
-```
+1. **TorchDynamo (Frontend Graph Capture)**: Intercepts Python frame bytecode via PEP 523 and safely extracts computational Directed Acyclic Graphs (FX Graphs) with guarded fallbacks.
+2. **AOTAutograd (Automatic Differentiation Lowering)**: Traces forward and backward graphs Ahead-of-Time, decomposing high-level operators into primitive joint Vector-Jacobian Product (VJP) graphs.
+3. **TorchInductor (Graph-Level Optimizer & Scheduler)**: Fuses memory-bound subgraphs into single kernel bodies, schedules optimal loop tile dimensions, and generates custom OpenAI Triton kernels.
+4. **C++ / Triton Backend (Bare-Metal Execution)**: Emits native NVIDIA PTX assembly for GPUs and AVX-512 vector binary instructions for CPUs, executing without Python runtime overhead.
 
 The mathematical transformation performed by `TorchInductor` collapses multi-kernel memory roundtrips into optimal loop tiles:
 $$\text{Memory Overhead}_{\text{Inductor}} = \sum_{k \in \mathcal{K}_{\text{fused}}} \text{Size}(\text{Inputs}_k) + \text{Size}(\text{Outputs}_k) \ll \sum_{op \in \text{Unfused}} \left( \text{Read}(op) + \text{Write}(op) \right)$$

@@ -158,6 +158,20 @@ With shape and strides established, mapping any $N$-dimensional coordinate $(i_0
 
 $$\text{Physical Index} = \text{storage\_offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
 
+::: {#nbk-tensors-strided-dram-bandwidth .callout-notebook title="Strided memory access and cache line utilization"}
+Consider a $1024 \times 1024$ FP32 matrix ($4\text{ MB}$ physical storage). When the CPU or GPU reads an element from DRAM, hardware transfers an entire **64-byte cache line** (16 contiguous single-precision floats), not individual numbers.
+
+- **Contiguous Row-Major Traversal** (strides `(1024, 1)`):
+  Iterating along a row accesses consecutive memory addresses. A single 64-byte DRAM burst supplies the next 16 requested values directly into L1 cache:
+  $$\text{Cache Line Utilization} = \frac{16 \times 4\text{ bytes used}}{64\text{ bytes transferred}} = 100\%$$
+
+- **Non-Contiguous Column-Major Traversal** (strides `(1, 1024)` on transposed view):
+  Advancing down a column jumps by 1024 floats ($4096\text{ bytes}$). Every single read misses the current cache line and triggers a fresh 64-byte DRAM fetch, of which only 1 float (4 bytes) is used:
+  $$\text{Cache Line Utilization} = \frac{4\text{ bytes used}}{64\text{ bytes transferred}} = 6.25\%$$
+
+**Systems Takeaway**: Non-contiguous strided access discards **$93.75\%$ of fetched DRAM bandwidth**, causing memory-bound workloads to stall by up to $16\times$ on memory bus queues. This is why tensor runtimes mandate explicit `.contiguous()` copies before dispatching compute-heavy kernels.
+:::
+
 ```python
     def _get_physical_index(self, indices: Tuple[int, ...]) -> int:
         """Translate logical N-D coordinates into a 1D physical storage index."""
