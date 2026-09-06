@@ -139,9 +139,9 @@ The perception subsystem manages the translation between high-dimensional extern
 - **Window Eviction and Compaction:** Monitors the active token count against the maximum context limit $L_{\text{ctx}}$. When capacity is exceeded, it triggers deterministic truncation, sliding-window summarization, or semantic vector offloading.
 
 ### 2. Working Memory and State Store
-The memory subsystem maintains the durable and transient state of the agent across time steps. In classical operating systems, the kernel tracks process state via the Process Control Block (PCB). In an agentic runtime, this role is fulfilled by the **Agent Control Block (ACB)** (detailed in Chapter 2):
+The memory subsystem maintains the durable and transient state of the agent across time steps. In classical operating systems, the kernel tracks process state via the Process Control Block (PCB). In an agentic runtime, this role is fulfilled by the **Agent Control Block (ACB)** (detailed in @sec-vol3-execution-descriptors):
 - **Episodic Execution Log:** An append-only audit trail recording every token emitted, tool invocation dispatched, and observation returned, enabling deterministic post-mortem replay and telemetry analysis.
-- **KV Cache Memory Table:** Tracks the physical GPU High Bandwidth Memory (HBM) allocation of the active Key-Value cache across inference turns, interfacing with prefix-caching layers (Chapter 8) to eliminate redundant prefill computation.
+- **KV Cache Memory Table:** Tracks the physical GPU High Bandwidth Memory (HBM) allocation of the active Key-Value cache across inference turns, interfacing with prefix-caching layers (@sec-vol3-prefix-caching-paging) to eliminate redundant prefill computation.
 - **Structured Knowledge Graph / Variable Store:** Maintains persistent entities, discovered file paths, credentials, and intermediate hypotheses outside the volatile LLM attention window.
 
 ### 3. Neural Policy Engine
@@ -153,7 +153,7 @@ The policy engine is the cognitive core responsible for generating next actions 
 ### 4. Tool Actuation Fabric
 The tool actuation layer represents the effector mechanism that allows the agent to mutate its environment:
 - **Application Binary Interface (ABI):** Exposes typed interfaces to the model via standardized protocols such as the Model Context Protocol (MCP).
-- **Execution Sandboxing:** Dispatches untrusted commands into hardware-isolated environments (e.g., Firecracker microVMs, gVisor sandboxes, or WebAssembly runtimes) to prevent unauthorized privilege escalation (Chapter 11).
+- **Execution Sandboxing:** Dispatches untrusted commands into hardware-isolated environments (e.g., Firecracker microVMs, gVisor sandboxes, or WebAssembly runtimes) to prevent unauthorized privilege escalation (@sec-vol3-sandboxing-isolation).
 - **Idempotency & Capability Enforcers:** Enforces fine-grained capability tokens, step rate limits, and network egress rules.
 
 ### 5. Enforcer and Runtime Verifier
@@ -225,13 +225,13 @@ To position agentic MLSys within computer science, we must systematically contra
 | **Bottleneck Hardware Resource** | CPU Cycles, Network Latency, Disk I/O | Accelerator Compute (Prefill) & Memory Bandwidth (Decode) | GPU HBM Capacity (KV Cache) & Cross-Turn Tool I/O Idle Wait |
 | **Rollback & Recovery** | Deterministic Checkpoint, Write-Ahead Logging (WAL) | Trivial (Drop socket connection, re-issue prompt) | Multi-Level Sagas, Semantic Compensation Actions, Git Reset |
 | **Security / Protection Boundary** | Hardware Rings, Virtual Memory, Kernel Syscall Traps | Input Sanitization, Prompt Token Filtering | Invariant Closure, MicroVM Sandboxes, Capability Tokens |
-: Comparative Taxonomy of Computing Paradigms {#tbl-tripartite-comparison}
+: **Comparative Taxonomy of Computing Paradigms**: Structural comparison across classical POSIX software, passive statistical machine learning, and agentic machine learning systems. {#tbl-tripartite-comparison}
 
 As summarized in @tbl-tripartite-comparison, the transition from passive ML to agentic MLSys breaks every traditional assumption:
 
 - **Statefulness vs. Statelessness:** In passive ML, serving is inherently stateless. Load balancers can route incoming prompts to any available GPU worker using simple round-robin or least-connections algorithms. In agentic MLSys, an agent's execution is deeply stateful: routing step $t+1$ to a different GPU node destroys the benefit of the accumulated KV cache, forcing a full, expensive prefill phase.
 - **Control Flow Inversion:** In classical software, algorithms govern control flow; external data is passive. In agentic systems, the foundation model acts as the central control plane dispatcher, emitting decisions that alter the execution path dynamically. Because neural policies are non-Lipschitz continuous functions, small perturbations in observation strings can cause catastrophic branch divergences.
-- **Recovery Complexity:** In classical databases, Gray's Write-Ahead Logging (WAL) [@gray1978notes] guarantees atomicity: an aborted transaction cleanly rolls back memory pages to their prior state. In an agentic system that has executed real-world side effects—such as sending an email or altering a cloud security group—physical rollbacks are impossible. The runtime must orchestrate **compensating actions** (Chapter 12) to logically offset irreversible changes.
+- **Recovery Complexity:** In classical databases, Gray's Write-Ahead Logging (WAL) [@gray1978notes] guarantees atomicity: an aborted transaction cleanly rolls back memory pages to their prior state. In an agentic system that has executed real-world side effects—such as sending an email or altering a cloud security group—physical rollbacks are impossible. The runtime must orchestrate **compensating actions** (@sec-vol3-verification-recovery) to logically offset irreversible changes.
 
 ## The Reliability Wall {#sec-vol3-intro-the-reliability-wall}
 
@@ -251,7 +251,7 @@ In real-world systems, the independence assumption is strictly optimistic: in pr
 | **$p = 0.80$** | 80.0% | 32.8% | 10.7% | 1.2% | 0.001% |
 | **$p = 0.90$** | 90.0% | 59.0% | 34.9% | 12.2% | 0.51% |
 | **$p = 0.95$** | 95.0% | 77.4% | 59.9% | 35.8% | 7.69% |
-: Trajectory Success Probability as a Function of Horizon $N$ under Compounding Error {#tbl-trajectory-survival}
+: **Trajectory Success Probability under Compounding Error**: Joint survival probability $P_{\text{success}} \le p^N$ across single-step accuracies and horizon depths. {#tbl-trajectory-survival}
 
 As demonstrated in the trajectory survival table above, even a state-of-the-art model with an extraordinary $95\%$ single-step accuracy collapses to a mere $35.8\%$ completion rate across a modest 20-step trajectory. When the horizon reaches 50 steps—typical for complex software engineering tasks in SWE-bench [@jimenez2024swebench]—the trajectory success rate drops to a catastrophic $7.69\%$.
 
@@ -293,9 +293,9 @@ During those 45 seconds, the neural policy engine is completely idle, awaiting t
 :::
 
 Overcoming the Context Accumulation Wall requires systems innovations developed across Part III of this book:
-1. **PagedAttention and Radix Prefix Caching:** Dynamically sharing immutable prefix KV blocks across trajectory turns to eliminate redundant prefill FLOPs (Chapter 8) [@kwon2023].
-2. **Asynchronous Memory Swapping:** Offloading inactive KV cache blocks across PCIe Gen5 or CXL buses to host CPU DRAM during long-running tool execution, freeing GPU HBM for concurrent active trajectories (Chapter 9).
-3. **Context Working Set Compaction:** Employing hierarchical memory architectures that compress stale conversation turns into structured external stores while preserving the immediate working set in L1 context (Chapter 7).
+1. **PagedAttention and Radix Prefix Caching:** Dynamically sharing immutable prefix KV blocks across trajectory turns to eliminate redundant prefill FLOPs (@sec-vol3-prefix-caching-paging) [@kwon2023].
+2. **Asynchronous Memory Swapping:** Offloading inactive KV cache blocks across PCIe Gen5 or CXL buses to host CPU DRAM during long-running tool execution, freeing GPU HBM for concurrent active trajectories (@sec-vol3-trajectory-scheduling).
+3. **Context Working Set Compaction:** Employing hierarchical memory architectures that compress stale conversation turns into structured external stores while preserving the immediate working set in L1 context (@sec-vol3-context-working-sets).
 
 ## The Invariant Closure Principle {#sec-vol3-intro-the-invariant-closure-principle}
 
@@ -348,7 +348,7 @@ A classic example occurs in autonomous coding benchmarks like SWE-bench [@jimene
 ### The Amplification Danger of Naive Retries
 In classical distributed systems, transient failures are mitigated by retrying requests with exponential backoff. In agentic MLSys, **naive retries amplify fail-plausible errors**.
 
-When an agent produces an incorrect action and the raw error output is appended back into the conversation context, the flawed rationale becomes part of the prompt for the next step. Autoregressive models exhibit a strong recency bias: observing its own prior reasoning in context causes the policy to double down on its flawed premises, rationalizing its error and entering an infinite divergence loop. Taming fail-plausible faults requires independent semantic verifiers, ground-truth test oracles, and transactional state rollbacks (Chapter 12).
+When an agent produces an incorrect action and the raw error output is appended back into the conversation context, the flawed rationale becomes part of the prompt for the next step. Autoregressive models exhibit a strong recency bias: observing its own prior reasoning in context causes the policy to double down on its flawed premises, rationalizing its error and entering an infinite divergence loop. Taming fail-plausible faults requires independent semantic verifiers, ground-truth test oracles, and transactional state rollbacks (@sec-vol3-verification-recovery).
 
 ## The H-S-A-C Systems Taxonomy {#sec-vol3-intro-hsac-taxonomy}
 
@@ -435,7 +435,7 @@ This introductory chapter has established the foundational systems engineering p
 * **The Fail-Plausible Fault Model:** Agentic systems suffer from semantically flawed, highly confident actions that evade traditional syntactic parsers and exit codes, necessitating independent test oracles and transactional compensation.
 * **The $H\text{--}S\text{--}A\text{--}C$ Systems Taxonomy:** Horizon, State, Authority, and Closure establish the four-dimensional coordinate space used throughout this book to classify and engineer production autonomous workloads.
 
-With these foundational principles established, **Part I: Foundations of Agency** turns to the core data structures and control abstractions of autonomous runtimes, beginning in Chapter 2 with the design of **Execution Descriptors and the Agent Control Block (ACB)**.
+With these foundational principles established, **Part I: Foundations of Agency** turns to the core data structures and control abstractions of autonomous runtimes, beginning in @sec-vol3-execution-descriptors with the design of **Execution Descriptors and the Agent Control Block (ACB)**.
 
 
 ```{=latex}
