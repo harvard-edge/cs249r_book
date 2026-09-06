@@ -304,46 +304,50 @@ $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}
 
 where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The resulting smoothed waypoints are interpolated via quintic ($C^2$) splines by the downstream real-time nervous system at $1000\text{ Hz}$, ensuring continuous positions, velocities, and accelerations across all actuator joints while preserving valid $SE(3)$ transformations (using Lie algebra $\mathfrak{se}(3)$ exponential mapping or Spherical Linear Interpolation to keep rotation matrices strictly orthonormal).
 
-The complete operational loop spanning intent reasoning, action chunk synthesis, and deterministic safety arbitration is formalized in Algorithm 3.1.
+The complete operational loop spanning intent reasoning, action chunk synthesis, and deterministic safety arbitration is formalized in @algo-two-speed-brain.
 
-::: {#exmp-brain-algorithm-3-1-two-speed-brain .callout-example  title="Algorithm 3.1: Two-Speed Brain Deliberation and Safety Enforcement"}
-**Inputs**: Multi-view visual frames $\mathbf{I}_t \in \mathbb{R}^{H \times W \times C}$, proprioceptive state $(\mathbf{q}_t, \dot{\mathbf{q}}_t)$, mission prompt $M$, spatial corridor $\text{Box}_{\text{safe}}$, stopping distance model $d_{\text{stop}}(v)$.
+```pseudocode
+#| label: algo-two-speed-brain
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
 
-**Outputs**: Real-time motor command $\mathbf{u}_t$ written to hardware PWM registers.
-
-**Structural Invariants**:
-
-1. *Authority Invariant:* No learned proposal $\mathbf{p}_t$ directly modifies actuator registers without passing deterministic safety validation.
-2. *Temporal Freshness Invariant:* If $(t_{\text{now}} - t_{\text{transduction}} > \Delta t_{\text{fresh}})$, candidate proposal is rejected and deterministic holding reflex is engaged.
-3. *Dynamic Clearance Invariant:* Motor torque is energized if and only if $d_{\text{stop}}(v) \le D_{\text{clear}}$.
-
-**Execution Pipeline**:
-
-1. **System 2: Intent Deliberation ($1\text{--}5\text{ Hz}$ on unprivileged Host MPU):**
-   * If ($\text{active\_lease} == \text{NULL}$ or $t_{\text{now}} \ge \text{active\_lease}.t_{\text{expire}}$):
-     * Tokenize visual observation $\mathbf{I}_t$ and query 3D world memory (TSDF / 3DGS).
-     * Evaluate Vision-Language-Action backbone to decompose task prompt $M$ into next subgoal.
-     * Construct Intent Lease $\mathcal{L}_{\text{intent}}$ with spatial corridor $\text{Box}_{\text{safe}}$ and expiration $t_{\text{expire}} = t_{\text{now}} + \tau_{\text{valid}}$.
-     * Cryptographically sign $\mathcal{L}_{\text{intent}}$ and dispatch to System 1.5 trajectory planner.
-2. **System 1.5: Action Chunk Trajectory Synthesis ($20\text{--}50\text{ Hz}$ on Neural Accelerator):**
-   * Ingest joint states $(\mathbf{q}_t, \dot{\mathbf{q}}_t)$ and active unexpired $\mathcal{L}_{\text{intent}}$.
-   * Evaluate Diffusion Policy / ACT backbone to synthesize $H$-step chunk $\mathbf{A}_{t:t+H}$.
-   * Apply temporal ensembling across overlapping chunk horizons:
-     $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}{\sum w_i}, \quad w_i = \exp(-m \cdot i)$$
-
-   * Fit $\mathcal{C}^2$ quintic splines through waypoints and package into $\mathbf{A}_{\text{chunk}}$.
-3. **System 1: Hard Real-Time Deterministic Reflex Gate ($1000\text{ Hz}$ on Bare-Metal MCU):**
-   * On every $1\text{ ms}$ timer interrupt:
-     * Sample calibrated joint encoders and hardware distance sensors.
-     * Fetch candidate setpoint $\mathbf{a}_t$ from active $\mathbf{A}_{\text{chunk}}$.
-     * *Evaluate Rejection Gates:*
-       * If $(t_{\text{now}} > \mathcal{L}_{\text{intent}}.t_{\text{expire}}) \implies \text{REJECT}(\text{LEASE\_EXPIRED})$
-       * If $(\mathbf{a}_t \notin \text{Box}_{\text{safe}} \lor |\dot{\mathbf{q}}| > \dot{\mathbf{q}}_{\max}) \implies \text{REJECT}(\text{KINEMATIC\_LIMIT})$
-       * If $(d_{\text{stop}}(v) > D_{\text{clear}}) \implies \text{REJECT}(\text{COLLISION\_IMMINENT})$
-     * *Arbitration Verdict:*
-       * If all checks pass: Permission **GRANTED** $\implies \mathbf{u}_t = \mathbf{a}_t \to \text{PWM Registers}$.
-       * Else: Permission **DENIED** $\implies \mathbf{u}_t = \text{SafeStopReflex}() \to \text{Controlled Braking}$.
-:::
+\begin{algorithm}
+\caption{Two-Speed Brain Deliberation and Safety Enforcement}
+\begin{algorithmic}
+\Require multi-view visual frames $\mathbf{I}_t$, proprioceptive state $(\mathbf{q}_t, \dot{\mathbf{q}}_t)$, mission prompt $M$, spatial corridor $\text{Box}_{\text{safe}}$, stopping distance model $d_{\text{stop}}(v)$
+\Ensure real-time motor command $\mathbf{u}_t$ written to hardware PWM registers
+\Statex
+\State \textbf{System 2: Intent Deliberation ($1\text{--}5\text{ Hz}$ on Host MPU)}
+\If{$\text{active\_lease} = \text{NULL}$ \textbf{or} $t_{\text{now}} \ge \text{active\_lease}.t_{\text{expire}}$}
+    \State Tokenize visual observation $\mathbf{I}_t$ and query 3D world memory
+    \State Evaluate Vision-Language-Action backbone to decompose task prompt $M$ into next subgoal
+    \State Construct Intent Lease $\mathcal{L}_{\text{intent}}$ with spatial corridor $\text{Box}_{\text{safe}}$ and expiration $t_{\text{expire}} \gets t_{\text{now}} + \tau_{\text{valid}}$
+    \State Cryptographically sign $\mathcal{L}_{\text{intent}}$ and dispatch to System 1.5 trajectory planner
+\EndIf
+\Statex
+\State \textbf{System 1.5: Action Chunk Trajectory Synthesis ($20\text{--}50\text{ Hz}$ on NPU)}
+\State Ingest joint states $(\mathbf{q}_t, \dot{\mathbf{q}}_t)$ and active unexpired $\mathcal{L}_{\text{intent}}$
+\State Evaluate policy backbone to synthesize $H$-step chunk $\mathbf{A}_{t:t+H}$
+\State Apply temporal ensembling: $\mathbf{a}_t \gets \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}{\sum w_i}$ with $w_i = \exp(-m \cdot i)$
+\State Fit $\mathcal{C}^2$ quintic splines through waypoints into $\mathbf{A}_{\text{chunk}}$
+\Statex
+\State \textbf{System 1: Hard Real-Time Deterministic Reflex Gate ($1000\text{ Hz}$ on MCU)}
+\State Sample calibrated joint encoders and hardware distance sensors
+\State Fetch candidate setpoint $\mathbf{a}_t$ from active $\mathbf{A}_{\text{chunk}}$
+\If{$t_{\text{now}} > \mathcal{L}_{\text{intent}}.t_{\text{expire}}$}
+    \State \Return $\Call{SafeStopReflex}{\text{LEASE\_EXPIRED}}$ \Comment{lease underflow fallback}
+\ElsIf{$\mathbf{a}_t \notin \text{Box}_{\text{safe}}$ \textbf{or} $\lVert \dot{\mathbf{q}} \rVert > \dot{q}_{\max}$}
+    \State \Return $\Call{SafeStopReflex}{\text{KINEMATIC\_LIMIT}}$ \Comment{boundary violation}
+\ElsIf{$d_{\text{stop}}(v) > D_{\text{clear}}$}
+    \State \Return $\Call{SafeStopReflex}{\text{COLLISION\_IMMINENT}}$ \Comment{clearance breach}
+\Else
+    \State $\mathbf{u}_t \gets \mathbf{a}_t$ \Comment{permission granted: dispatch to PWM}
+    \State \Return $\mathbf{u}_t$
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+```
 
 ::: {#nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking .callout-notebook title="The LPDDR5 Memory-Wall Bottleneck and Action Chunking Speedup"}
 How does Action Chunking overcome the memory bus bottleneck on an embedded physical AI compute module?
@@ -376,7 +380,7 @@ $$f_{\text{effective}} = \frac{1}{\tau_{\text{step}}} \approx 328\text{ Hz (amor
 The embedded compute module synthesizes a new 32-step chunk every $100\text{ ms}$ ($10\text{ Hz}$ background cadence), providing a continuous stream of overlapping waypoints to the $1000\text{ Hz}$ spline interpolator with over $80\%$ spare processor duty cycle for real-time safety monitoring.
 :::
 
-::: {#pri-brain-embodied-cognition .callout-principle title="Embodied Cognition Guidelines"}
+::: {#pri-brain-embodied-cognition .callout-note title="Embodied Cognition Guidelines"}
 1. **The Autoregressive Actuator Stall:** Never drive physical motor loops directly from single-token autoregressive generation; DRAM streaming latency ($t_{\text{stream}} = M_{\text{weights}}/B_{\text{mem}}$) will starve the actuators below the body's resonant frequency.
 2. **The Arithmetic Intensity Threshold:** If your policy forward pass achieves an arithmetic intensity below $50\text{ FLOP/byte}$ on embedded silicon, you are paying for high-performance tensor cores that spend over $90\%$ of their clock cycles idle in DRAM read queues.
 3. **The Proposal–Permission Boundary:** The learned brain proposes candidate intent and trajectories in unconstrained software coordinates; the deterministic reflex engine grants physical execution permission in verified SI units.
@@ -475,7 +479,7 @@ Treating the learned brain as an unprivileged proposal generator guarantees that
 
 <!-- END -->
 
-## Systems Stress-Tests {#sec-brain-3-6}
+## Fallacies and Pitfalls {#sec-brain-3-6}
 
 <!-- SECTION 3.6 -->
 <!-- claim: Five foundational engineering dilemmas test the balance between learned intelligence and physical reality across the three physical machine archetypes. -->
@@ -484,45 +488,66 @@ Treating the learned brain as an unprivileged proposal generator guarantees that
 <!-- BEGIN -->
 To evaluate whole-system engineering judgment, consider five foundational dilemmas where the cognitive brain confronts the unyielding realities of the physical world across Mobile Systems, Manipulators, and Process/Energy Systems.
 
-### Stress-test 1: The verifiability dilemma on a factory floor {.unnumbered}
+::: {.fallacy-pitfall}
+
+**Fallacy**: *An engineering team must choose entirely between formal classical safety proofs and learned empirical capability.*
 
 *The scenario.* An automotive assembly plant evaluates two competing approaches for installing wiring harnesses into car doors. Approach A uses classical trajectory optimization and explicit CAD models, achieving $100\%$ formal MC/DC safety certification under ISO 26262, but failing on $42\%$ of flexible harness insertions due to unmodeled cable deformations. Approach B uses an end-to-end diffusion policy trained on 5,000 human teleoperation demonstrations, achieving a $96\%$ empirical insertion success rate, but providing zero mathematical proof of worst-case joint velocities or contact forces.
 
-*The systems dilemma.* Plant management cannot deploy Approach A because it stops the production line on nearly half the assembly cycles. However, safety compliance officers refuse to sign off on Approach B because deep neural policies cannot provide formal ISO safety certificates.
+*The dilemma.* Plant management cannot deploy Approach A because it stops the production line on nearly half the assembly cycles. However, safety compliance officers refuse to sign off on Approach B because deep neural policies cannot provide formal ISO safety certificates.
 
-*The systems verdict: Architectural partitioning.* Neither pure extreme is viable. The physical AI solution wraps the high-capacity diffusion policy (Approach B) inside a deterministic Control Barrier Function safety shield (Approach A). The learned brain provides the open-world deformable compliance to seat the harness, while the real-time supervisor deterministically clamps actuator current and joint limits to guarantee physical safety.
+*Systems takeaway: Architectural partitioning.* Neither pure extreme is viable. The physical AI solution wraps the high-capacity diffusion policy (Approach B) inside a deterministic Control Barrier Function safety shield (Approach A). The learned brain provides the open-world deformable compliance to seat the harness, while the real-time supervisor deterministically clamps actuator current and joint limits to guarantee physical safety.
 
-### Stress-test 2: Semantic hallucination under specular reflections {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Allowing a neural model's high confidence to bypass deterministic geometric boundaries.*
 
 *The scenario.* An autonomous mobile manipulator in a cleanroom uses a Vision-Language-Action policy to transport chemical reagent vials. While approaching a transfer station, sunlight reflects off a polished transparent acrylic safety barrier. The visual transformer processes the specular glare as empty traversable space, outputting a high-confidence intent lease and trajectory chunk that commands the arm to reach directly through the physical barrier plane.
 
-*The systems dilemma.* The output tensor satisfies all structural checks: coordinates are within mathematical bounds, values contain no NaNs, and the packet arrives within its $40.0\text{ ms}$ deadline. The learned model operates under the statistical conviction that the path is unobstructed. Because semantic truth cannot be determined from neural activations alone, executing the proposal would shatter the acrylic enclosure and destroy the manipulator payload.
+*The dilemma.* The output tensor satisfies all structural checks: coordinates are within mathematical bounds, values contain no NaNs, and the packet arrives within its $40.0\text{ ms}$ deadline. The learned model operates under the statistical conviction that the path is unobstructed. Because semantic truth cannot be determined from neural activations alone, executing the proposal would shatter the acrylic enclosure and destroy the manipulator payload.
 
-*The systems verdict: Semantic opacity invariant.* A neural network cannot certify its own perceptual truth. In an embodied architecture, all learned trajectory proposals must be checked against independent, deterministic geometric boundary models before actuation permission is granted.
+*Systems takeaway: Semantic opacity invariant.* A neural network cannot certify its own perceptual truth. In an embodied architecture, all learned trajectory proposals must be checked against independent, deterministic geometric boundary models before actuation permission is granted.
 
-### Stress-test 3: Uncalibrated confidence in precision contact {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Raw softmax probabilities or predicted confidence scores reflect true physical success rates.*
 
 *The scenario.* An articulated six-axis robotic manipulator performs precision bin-picking and placement of machined metal castings. The learned grasping policy outputs candidate end-effector poses accompanied by a predicted success probability $\hat{p} \in [0, 1]$. In an analytical evaluation across 100 grasp attempts where the model reports confidence in the narrow range of $\hat{p} \approx 0.90$, physical execution on the fixture yields 64 successful seating operations and 36 dropped or misaligned parts.
 
-*The systems dilemma.* The system supervisor uses predicted confidence to trigger an abstention policy, delegating low-confidence grasps to an operator or an exploratory tactile scan. The $0.26$ calibration gap between reported confidence ($0.90$) and empirical success ($0.64$) destroys the monotonic probability ranking required for selective execution, passing hazardous proposals downstream to mechanical actuators while providing an illusion of safety.
+*The dilemma.* The system supervisor uses predicted confidence to trigger an abstention policy, delegating low-confidence grasps to an operator or an exploratory tactile scan. The $0.26$ calibration gap between reported confidence ($0.90$) and empirical success ($0.64$) destroys the monotonic probability ranking required for selective execution, passing hazardous proposals downstream to mechanical actuators while providing an illusion of safety.
 
-*The systems verdict: Calibration gating law.* Raw softmax outputs and logit scores represent ungrounded network activation states rather than true physical probabilities. A learned model cannot hold selective authority over mechanical actuators without empirical calibration curves validated across the target operational domain.
+*Systems takeaway: Calibration gating law.* Raw softmax outputs and logit scores represent ungrounded network activation states rather than true physical probabilities. A learned model cannot hold selective authority over mechanical actuators without empirical calibration curves validated across the target operational domain.
 
-### Stress-test 4: Covariate shift and perceptual chattering {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Coupling high-frequency semantic classifications directly to motor setpoints without continuous filtering.*
 
 *The scenario.* A visual navigation policy on an automated delivery robot encounters a dynamic construction zone where traffic cones are draped with wet reflective tarps. The perception pipeline reclassifies the scene on every $50.0\text{ ms}$ cycle, alternating rapidly between "static obstacle," "movable drape," and "free pathway."
 
-*The systems dilemma.* Discretized categorization heuristics reset motion planning on every classification change, creating severe chattering setpoints that demand instantaneous direction reversals beyond the torque slew limits of the wheel drive motors. The learned brain oscillates in its semantic hypothesis, injecting high-frequency jerk into the physical chassis.
+*The dilemma.* Discretized categorization heuristics reset motion planning on every classification change, creating severe chattering setpoints that demand instantaneous direction reversals beyond the torque slew limits of the wheel drive motors. The learned brain oscillates in its semantic hypothesis, injecting high-frequency jerk into the physical chassis.
 
-*The systems verdict: Latent continuity invariant.* Physical bodies cannot tolerate discrete cognitive chattering. Robust sensorimotor architectures must use continuous latent representations and multi-step action chunking to maintain kinodynamic trajectory smoothness across ambiguous perceptual states.
+*Systems takeaway: Latent continuity invariant.* Physical bodies cannot tolerate discrete cognitive chattering. Robust sensorimotor architectures must use continuous latent representations and multi-step action chunking to maintain kinodynamic trajectory smoothness across ambiguous perceptual states.
 
-### Stress-test 5: The stale intent dilemma in continuous process operations {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Numerically valid and smooth intent proposals can safely be executed after their lease expires.*
 
 *The scenario.* A learned optimization policy manages reagent feed rates and cooling flows on a continuous exothermic chemical reactor column. The deliberative model generates an intent lease to increase monomer feed by $12\%$ over a validity window of $\tau_{\text{lease}} = 500\text{ ms}$. Due to thread preemption on the application host, the trajectory chunk reaches the deterministic fieldbus gateway $580\text{ ms}$ after generation ($80\text{ ms}$ past expiration). In the intervening interval, an exothermic thermal pulse elevated core temperature near the thermal runaway threshold ($T_{\text{core}} \to T_{\text{crit}}$).
 
-*The systems dilemma.* The proposed feed rate curve is smooth, numerically valid, and would optimize yield under nominal conditions. However, the intent lease is stale. Applying additional monomer feed under an unmonitored thermal excursion would accelerate exothermic heating beyond the cooling jacket's heat dissipation capacity.
+*The dilemma.* The proposed feed rate curve is smooth, numerically valid, and would optimize yield under nominal conditions. However, the intent lease is stale. Applying additional monomer feed under an unmonitored thermal excursion would accelerate exothermic heating beyond the cooling jacket's heat dissipation capacity.
 
-*The systems verdict: Temporal validity invariant.* The real-time safety enforcer evaluates authority and temporal validity, never semantic plausibility. An expired proposal is an invalid proposal; the nervous system must reject late packets deterministically and engage emergency cooling reflux.
+*Systems takeaway: Temporal validity invariant.* The real-time safety enforcer evaluates authority and temporal validity, never semantic plausibility. An expired proposal is an invalid proposal; the nervous system must reject late packets deterministically and engage emergency cooling reflux.
+
+:::
+
 <!-- END -->
 
 ## Summary {#sec-brain-3-7}

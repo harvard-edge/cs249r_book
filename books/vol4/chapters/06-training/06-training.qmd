@@ -1,4 +1,4 @@
-# Policy Synthesis & Training {#sec-training}
+# Policy Training {#sec-training}
 
 ::: {.column-margin}
 
@@ -135,40 +135,46 @@ where $i$ represents the lookback age of the prediction chunk and $m \ge 0$ para
 
 ### Algorithmic formulation: Trajectory diffusion and asynchronous decoupling {.unnumbered}
 
-Deploying generative imitation architectures introduces significant computational latency ($20\text{--}80\text{ ms}$ for multi-step diffusion denoising or multi-head Transformer self-attention on embedded GPUs/NPUs). In a canonical heterogeneous dual-brain edge System-on-Chip (SoC) architecture, this latency requires strict physical decoupling: the unprivileged Linux MPU runs the generative policy asynchronously at a lower rate ($10\text{--}20\text{ Hz}$), populating an action chunk ring buffer. Meanwhile, the deterministic Real-Time MCU samples the chunk buffer at $500\text{--}1000\text{ Hz}$, executing smooth cubic spline interpolation, velocity envelope governor checks, and hard torque-slew limiters ($d\tau/dt \le \dot{\tau}_{\text{max}}$). This complete pipeline is formalized in Algorithm 6.1.
+Deploying generative imitation architectures introduces significant computational latency ($20\text{--}80\text{ ms}$ for multi-step diffusion denoising or multi-head Transformer self-attention on embedded GPUs/NPUs). In a canonical heterogeneous dual-brain edge System-on-Chip (SoC) architecture, this latency requires strict physical decoupling: the unprivileged Linux MPU runs the generative policy asynchronously at a lower rate ($10\text{--}20\text{ Hz}$), populating an action chunk ring buffer. Meanwhile, the deterministic Real-Time MCU samples the chunk buffer at $500\text{--}1000\text{ Hz}$, executing smooth cubic spline interpolation, velocity envelope governor checks, and hard torque-slew limiters ($d\tau/dt \le \dot{\tau}_{\text{max}}$). This complete pipeline is formalized in @algo-diffusion-policy-trajectory.
 
-::: {#exmp-training-algorithm-6-1-diffusion-policy-trajectory .callout-example  title="Algorithm 6.1: Diffusion Policy Trajectory Chunk Denoising and Dual-Rate Actuation"}
-**Inputs**: Observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t) \in \mathbb{R}^{H \times D_{\text{obs}}}$, noise prediction network $\boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}_t, k)$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $K$ (e.g., $16$), action dimension $D_a$, MCU loop period $\Delta t_{\text{mcu}} = 1.0\text{ ms}$.
+```pseudocode
+#| label: algo-diffusion-policy-trajectory
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
 
-**Outputs**: Line-rate joint torque setpoint / action vector $\mathbf{a}_t \in \mathbb{R}^{D_a}$.
-
-**Structural Invariants**:
-
-1. *Slew-Rate Bound:* $\|\mathbf{a}_t - \mathbf{a}_{t-1}\|_2 / \Delta t_{\text{mcu}} \le \dot{\mathbf{a}}_{\max}$.
-2. *Non-Blocking Ring Buffer:* SPSC ring buffer never underflows during nominal steady-state operation.
-
-**Execution Pipeline**:
-
-1. **Linux MPU — Asynchronous Trajectory Chunk Generation ($10\text{--}20\text{ Hz}$):**
-   * Ingest observation history $\mathbf{O}_t$ and compute visual/state embedding: $\mathbf{E}_t \leftarrow \text{VisualEncoder}(\mathbf{O}_t)$.
-   * Initialize reverse diffusion trajectory from Gaussian noise: $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{K \times D_a})$.
-   * For $k = N_{\text{diff}}$ down to $1$:
-     * Predict noise component: $\hat{\boldsymbol{\epsilon}} \leftarrow \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{E}_t, k)$.
-     * Compute mean update: $\boldsymbol{\mu}_k \leftarrow \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \hat{\boldsymbol{\epsilon}} \right)$.
-     * Sample $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ for $k > 1$, else $\mathbf{z} \leftarrow \mathbf{0}$.
-     * Step reverse diffusion: $\mathbf{A}^{k-1} \leftarrow \boldsymbol{\mu}_k + \sigma_k \mathbf{z}$.
-   * Assign synthesized trajectory chunk: $\mathbf{A}_{\text{chunk}} \leftarrow \mathbf{A}^0 \in \mathbb{R}^{K \times D_a}$.
-   * Lock-free deposit $\mathbf{A}_{\text{chunk}}$ into Single-Producer Single-Consumer (SPSC) ring buffer.
-2. **Real-Time MCU — Synchronous Deterministic Actuation ($1000\text{ Hz}$):**
-   * Poll SPSC ring buffer; if new chunk available, update local spline knots.
-   * Compute interpolated nominal action: $\mathbf{a}_{\text{raw}} \leftarrow \text{CubicSplineInterpolate}(\mathbf{A}_{\text{chunk}}, t_{\text{current}})$.
-   * Enforce kinematic slew-rate governor:
-     $$\Delta \mathbf{a} \leftarrow \text{clamp}\left(\mathbf{a}_{\text{raw}} - \mathbf{a}_{\text{prev}}, -\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}, +\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}\right), \quad \mathbf{a}_{\text{clamped}} \leftarrow \mathbf{a}_{\text{prev}} + \Delta \mathbf{a}$$
-
-   * Enforce nervous-system safety envelope: $\mathbf{a}_t \leftarrow \text{SafetyGovernorClamp}(\mathbf{a}_{\text{clamped}})$.
-   * Transmit $\mathbf{a}_t$ to motor bridge PWM / inverter registers via EtherCAT / SPI.
-   * Update state memory: $\mathbf{a}_{\text{prev}} \leftarrow \mathbf{a}_t$.
-:::
+\begin{algorithm}
+\caption{Diffusion Policy Trajectory Chunk Denoising and Dual-Rate Actuation}
+\begin{algorithmic}
+\Require observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t)$, noise prediction network $\boldsymbol{\epsilon}_\theta$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $K$, MCU loop period $\Delta t_{\text{mcu}}$
+\Ensure line-rate joint torque setpoint / action vector $\mathbf{a}_t$
+\Statex
+\State \textbf{Host MPU — Asynchronous Trajectory Chunk Generation ($10\text{--}20\text{ Hz}$)}
+\State $\mathbf{E}_t \gets \Call{VisualEncoder}{\mathbf{O}_t}$
+\State $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{K \times D_a})$ \Comment{initialize reverse diffusion from Gaussian noise}
+\For{$k = N_{\text{diff}}$ \textbf{down to} $1$}
+    \State $\hat{\boldsymbol{\epsilon}} \gets \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{E}_t, k)$
+    \State $\boldsymbol{\mu}_k \gets \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \hat{\boldsymbol{\epsilon}} \right)$
+    \State $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ \textbf{if} $k > 1$ \textbf{else} $\mathbf{z} \gets \mathbf{0}$
+    \State $\mathbf{A}^{k-1} \gets \boldsymbol{\mu}_k + \sigma_k \mathbf{z}$
+\EndFor
+\State $\mathbf{A}_{\text{chunk}} \gets \mathbf{A}^0$
+\State $\Call{DepositSpscRingBuffer}{\mathbf{A}_{\text{chunk}}}$ \Comment{lock-free deposit into shared buffer}
+\Statex
+\State \textbf{Real-Time MCU — Synchronous Deterministic Actuation ($1000\text{ Hz}$)}
+\If{$\Call{HasNewChunk}{\text{SPSC}}$}
+    \State $\Call{UpdateSplineKnots}{\text{SPSC}}$
+\EndIf
+\State $\mathbf{a}_{\text{raw}} \gets \Call{CubicSplineInterpolate}{\mathbf{A}_{\text{chunk}}, t_{\text{current}}}$
+\State $\Delta \mathbf{a} \gets \Call{clamp}{\mathbf{a}_{\text{raw}} - \mathbf{a}_{\text{prev}}, -\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}, +\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}}$ \Comment{kinematic slew-rate governor}
+\State $\mathbf{a}_{\text{clamped}} \gets \mathbf{a}_{\text{prev}} + \Delta \mathbf{a}$
+\State $\mathbf{a}_t \gets \Call{SafetyGovernorClamp}{\mathbf{a}_{\text{clamped}}}$ \Comment{deterministic envelope enforcement}
+\State $\Call{TransmitPwmRegisters}{\mathbf{a}_t}$
+\State $\mathbf{a}_{\text{prev}} \gets \mathbf{a}_t$
+\State \Return $\mathbf{a}_t$
+\end{algorithmic}
+\end{algorithm}
+```
 
 ### Offline reinforcement learning and action distributional shift {.unnumbered}
 
@@ -237,7 +243,7 @@ $$D_{\text{recovery}} = T \epsilon \cdot d_{\text{local}} = 500 \times 0.005 \ti
 **Systems insight**: The ratio between open-loop cloning drift ($2.08\text{ m}$) and closed-loop recovery drift ($0.625\text{ mm}$) exceeds $3300\times$. A $99.5\%$ accurate supervised policy is completely unusable on physical mobile or robotic hardware without active closed-loop recovery training or runtime support monitors.
 :::
 
-::: {#pri-training-imitation-horizon .callout-principle title="The Imitation Horizon Limit"}
+::: {#pri-training-imitation-horizon .callout-note title="The Imitation Horizon Limit"}
 *A behavioral cloning policy cannot safely execute beyond $T \approx 1/\epsilon$ control cycles without active closed-loop support monitoring or recovery demonstrations.*
 :::
 
@@ -292,7 +298,7 @@ Furthermore, physical degradation alters the plant during the training process i
 
 Compounding the physical burden of data collection is the structural fragility of the reward function. In trial-based learning, the scalar reward serves as the formal interface specification between the engineer's operational intent and the policy's numerical optimization. Any behavior, physical constraint, or protective boundary not explicitly measured and penalized in that scalar signal represents an unconstrained degree of freedom that the optimization algorithm will exploit. If a reward function incentivizes rapid setpoint tracking without incorporating high-order penalty terms for instantaneous jerk and winding temperature, the policy converges toward aggressive bang-bang switching that vibrates mounting brackets and overheats drive electronics. If contact force is unmeasured, the policy may discover that driving an actuator to its maximum current against a rigid mechanical stop creates a kinematic brace that artificially eliminates tracking jitter. The learned network does not satisfy the designer's unstated common sense. It satisfies the exact mathematical formula presented to its objective function.
 
-::: {#pri-training-contact-fidelity .callout-principle title="The Contact Fidelity Invariant"}
+::: {#pri-training-contact-fidelity .callout-important title="The Contact Fidelity Invariant"}
 *Never trust a simulated contact policy whose success depends on instantaneous momentum absorption or zero-delay friction engagement; if it penetrates the digital surface, it will shatter the physical workpiece.*
 :::
 
@@ -420,7 +426,7 @@ To prevent domain randomization from degenerating into ad-hoc parameter tuning, 
 4. **Stage 4: Paired-Trace Discrepancy Auditing**: Apply identical open-loop and closed-loop command trajectories to both the simulated digital twin and the physical hardware bench. Evaluate discrepancy metrics across all four channels against declared tolerance budgets: phase lag $\Delta \phi \le 5^\circ$ at $10\text{ Hz}$, contact impulse error $\Delta I \le 0.05\text{ N}\cdot\text{s}$, feature token offset $\le 2.0\text{ mm}$, and latency jitter $\Delta \tau \le 2.0\text{ ms}$. If discrepancies exceed budget, the simulation dynamic model must be updated before policy deployment.
 5. **Stage 5: Dual-Brain Runtime Safety Enclosure**: Because domain randomization cannot protect against omitted physical mechanisms outside the simulation graph, the unprivileged neural policy executing on the Linux MPU must be bounded by deterministic monitors on the Real-Time MCU. The real-time core enforces hardware force-derivative clamps ($dF/dt \le 1.0\times 10^4\text{ N/s}$), torque slew-rate limits ($d\tau/dt \le \dot{\tau}_{\text{max}}$), and velocity governors at $500\text{--}1000\text{ Hz}$, providing guaranteed physical protection regardless of out-of-distribution neural commands.
 
-::: {#pri-training-domain-randomization .callout-principle title="The Domain Randomization Boundary"}
+::: {#pri-training-domain-randomization .callout-note title="The Domain Randomization Boundary"}
 *Randomizing parameters covers uncertainty within the model family, but no distribution over friction or mass will teach a policy to compensate for an omitted physical mechanism.*
 :::
 
@@ -536,7 +542,7 @@ The training record separates empirical optimization results from the declared o
 Downstream engineering teams consume the training record throughout the design, evaluation, and release lifecycle. @Sec-evaluation uses the recorded support boundaries and simulation omissions to construct targeted empirical evaluation suites that probe the specific failure modes predicted by each training regime. Runtime safety monitors and deterministic enforcement layers in @sec-enforcement use the recorded data support bounds to parameterize out-of-distribution detectors and determine when policy authority must be curtailed. Verification frameworks in @sec-verification and the multi-layer safety case in @sec-release draw on the record to establish the provenance of every parameter update and verify that known simulation omissions are bounded by independent physical interlocks. Maintaining this complete record ensures that when a policy achieves high scores across its training benchmarks, engineers do not mistake optimization convergence for physical reliability.
 <!-- END -->
 
-## Systems Stress-Tests {#sec-training-6-9}
+## Fallacies and Pitfalls {#sec-training-6-9}
 
 <!-- SECTION 6.9 -->
 <!-- claim: A policy that is better by every training metric and worse on the machine. -->
@@ -556,31 +562,44 @@ A policy that is better by every training metric can be worse on the physical ma
 ![](figures/fig06_policy_ranking_inversion.svg){width="100%"}
 :::
 
-The following three analytical stress-tests evaluate machines that regulate motion and touch surfaces, demonstrating how nominal training gains convert into physical failure modes:
+The following fallacies and pitfalls evaluate machines that regulate motion and touch surfaces, demonstrating how nominal training gains convert into physical failure modes:
 
-### Stress-test 1: Recovery curation and policy reversal in flow regulation (state support truncation) {.unnumbered}
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Sanitizing recovery episodes to achieve lower offline validation loss.*
 
 *The scenario.* Two behavioral-cloning policies are trained to regulate fluid flow via a proportional valve at $50\text{ Hz}$. Dataset A contains 500 demonstrated runs including 50 recovery maneuvers where an operator corrected for transient supply pressure drops to $120\text{ kPa}$. Dataset B filters out the 50 recovery runs to maximize smoothness, retaining 450 nominal runs near $200\text{ kPa}$. Policy A achieves an offline validation loss of $\text{MSE} = 0.042\text{ (V)}^2$ across the full distribution, while Policy B achieves $\text{MSE} = 0.011\text{ (V)}^2$ on its held-out split, appearing nearly four times more accurate.
 
-*The systems dilemma.* Under a physical supply pressure transient dropping to $130\text{ kPa}$, Policy A restores nominal flow within $140\text{ ms}$ ($\Delta P = 15\text{ kPa}$). Policy B enters an unrecoverable diverging oscillation that breaches the reservoir overflow limit within $800\text{ ms}$. Sanitizing recovery episodes artificially lowers offline validation error by eliminating high-variance, multi-modal demonstration segments, blinding the policy to the off-nominal states its own compounding errors will generate.
+*The dilemma.* Under a physical supply pressure transient dropping to $130\text{ kPa}$, Policy A restores nominal flow within $140\text{ ms}$ ($\Delta P = 15\text{ kPa}$). Policy B enters an unrecoverable diverging oscillation that breaches the reservoir overflow limit within $800\text{ ms}$. Sanitizing recovery episodes artificially lowers offline validation error by eliminating high-variance, multi-modal demonstration segments, blinding the policy to the off-nominal states its own compounding errors will generate.
 
-*The systems verdict: State Support Invariant.* Offline validation error measures agreement with recorded history rather than closed-loop stability. Pruning recovery trajectories improves the training score while removing the negative feedback manifold required to survive physical disturbances.
+*Systems takeaway: State Support Invariant.* Offline validation error measures agreement with recorded history rather than closed-loop stability. Pruning recovery trajectories improves the training score while removing the negative feedback manifold required to survive physical disturbances.
 
-### Stress-test 2: Contact model exploitation in surface touchdown (the simulation energy sink) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating simulator contact solver simplifications as valid physical affordances.*
 
 *The scenario.* A direct-drive vertical actuator ($m = 2.5\text{ kg}$) approaches a rigid fixture at $0.40\text{ m/s}$ to establish a steady normal force $F_N = 10.0\text{ N}$. In simulation, Policy 2 achieves $28\%$ higher return than Policy 1, reaching target force in $12\text{ ms}$ (versus $45\text{ ms}$ for Policy 1) by plunging into the surface at $0.35\text{ m/s}$, exploiting an idealized linear spring-damper contact solver that arrests momentum in a single integration step ($2.0\text{ ms}$).
 
-*The systems dilemma.* On physical hardware, structural compliance ($k = 8.0\times 10^4\text{ N/m}$) and $12\text{ ms}$ sensory lag prevent instantaneous force generation. When Policy 2 strikes the surface at $0.35\text{ m/s}$, physical contact force spikes to $68.0\text{ N}$ before the first sensor measurement arrives, shattering the load-cell flexure. Policy 1 decelerates to $0.06\text{ m/s}$ prior to touchdown, seating safely in $52\text{ ms}$ with a peak force of $11.4\text{ N}$.
+*The dilemma.* On physical hardware, structural compliance ($k = 8.0\times 10^4\text{ N/m}$) and $12\text{ ms}$ sensory lag prevent instantaneous force generation. When Policy 2 strikes the surface at $0.35\text{ m/s}$, physical contact force spikes to $68.0\text{ N}$ before the first sensor measurement arrives, shattering the load-cell flexure. Policy 1 decelerates to $0.06\text{ m/s}$ prior to touchdown, seating safely in $52\text{ ms}$ with a peak force of $11.4\text{ N}$.
 
-*The systems verdict: Simulator Exploitation Law.* Optimization algorithms treat simulator simplifications as physical affordances. When a numerical contact solver permits instantaneous momentum transfer, learned policies develop high-velocity impact strategies that destroy physical hardware.
+*Systems takeaway: Simulator Exploitation Law.* Optimization algorithms treat simulator simplifications as physical affordances. When a numerical contact solver permits instantaneous momentum transfer, learned policies develop high-velocity impact strategies that destroy physical hardware.
 
-### Stress-test 3: Failure migration across regime transitions (data debt vs modeling debt) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Transitioning from human demonstrations to simulation reinforcement learning eliminates operational debt.*
 
 *The scenario.* An assembly arm executes a $200\text{ mm}$ free-space transit at $v = 0.50\text{ m/s}$ before preloading a gasket to $12.0\text{ N}$. Behavioral cloning (Policy A) exhibits $34\%$ task failure due to compounding lateral drift. Replacing cloning with rigid-body reinforcement learning in simulation (Policy B) achieves $100\%$ simulated success and eliminates free-space drift across 100 physical trials.
 
-*The systems dilemma.* To seat the seal rapidly, Policy B learned in simulation to apply high-frequency torque chatter at $65\text{ Hz}$, exploiting the simulator's massless rotor assumption. On hardware, $65\text{ Hz}$ chatter excites drivetrain resonance, heating motor windings from $28^{\circ}\text{C}$ to the $95^{\circ}\text{C}$ thermal limit in $45\text{ s}$ and collapsing physical completion rate to $12\%$.
+*The dilemma.* To seat the seal rapidly, Policy B learned in simulation to apply high-frequency torque chatter at $65\text{ Hz}$, exploiting the simulator's massless rotor assumption. On hardware, $65\text{ Hz}$ chatter excites drivetrain resonance, heating motor windings from $28^{\circ}\text{C}$ to the $95^{\circ}\text{C}$ thermal limit in $45\text{ s}$ and collapsing physical completion rate to $12\%$.
 
-*The systems verdict: Failure Migration Law.* Changing a training regime does not eliminate engineering debt; it converts one failure currency into another. Shifting from human demonstrations to simulation replaces data-support limits with unmodeled physical dynamics limits.
+*Systems takeaway: Failure Migration Law.* Changing a training regime does not eliminate engineering debt; it converts one failure currency into another. Shifting from human demonstrations to simulation replaces data-support limits with unmodeled physical dynamics limits.
+
+:::
+
 <!-- END -->
 
 ## Summary {#sec-training-6-10}

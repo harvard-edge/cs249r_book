@@ -1,4 +1,4 @@
-# The Real-Time Nervous System {#sec-nervous}
+# The Nervous System {#sec-nervous}
 
 ::: {.column-margin}
 
@@ -112,7 +112,7 @@ The hardware floor exposes this physical separation at the interface boundary. A
 
 In heterogeneous Dual-Brain System-on-Chip (SoC) architectures, this physical reality enforces a strict dual-processor design requirement. Deliberate planning and reactive enforcement cannot safely share a processor core, a cache hierarchy, or a common memory bus. The slow, stochastic path requires parallel hardware (Linux host application processors and tensor accelerators) optimized for raw throughput across wide data streams, while the fast, deterministic path requires isolated hardware (bare-metal microcontrollers or FPGA cores) optimized for worst-case execution time and cycle-counted predictability.
 
-::: {#pri-nervous-silicon-privilege .callout-principle title="Silicon Privilege Partitioning"}
+::: {#pri-nervous-silicon-privilege .callout-note title="Silicon Privilege Partitioning"}
 Never allow a high-capacity learned model to execute in the same fault domain, address space, or power rail as the actuator commutation loop. Deliberation is an unprivileged proposal generator; physical register privilege belongs exclusively to cycle-deterministic real-time silicon.
 :::
 
@@ -158,36 +158,52 @@ The shared memory region maintains an atomic 64-bit sequence counter alongside d
 
 When the untrusted application processor prepares a new action chunk proposal, it begins by reading the current sequence counter and atomically incrementing it to an odd value, signalling to the rest of the system that a write operation is actively in progress. It then copies the proposal payload—including a monotonic sequence identifier, timestamp, validity lease duration, multi-step trajectory waypoints, and a cyclic redundancy checksum—into the inactive memory buffer. After enforcing an explicit memory barrier (`DMB ISHST` / `DMB ISH`) to ensure all payload bytes are globally visible across the bus,[^fn-hw-dmb-fence] the processor increments the sequence counter once more to an even value with store-release semantics (`STLR`), atomically publishing the completed frame.
 
-On the receiving side, the deterministic real-time microcontroller latches the newest proposal without ever acquiring a lock or stalling execution. At the start of its control cycle, the microcontroller reads the sequence counter with load-acquire semantics (`LDAR`). If the counter is odd, indicating that the producer is midway through updating the buffer, the consumer immediately aborts the read, retaining its existing validated trajectory spline. If the counter is even, the microcontroller copies the payload into its private, tightly-coupled static memory and re-reads the sequence counter. If the counter changed during the copy, a torn read occurred due to a concurrent write, and the frame is safely discarded. If the sequence counter remained identical and even throughout the read, the latch is verified: the microcontroller validates the cyclic redundancy checksum (CRC-32), checks timestamp freshness against its hardware timer, and accepts the proposal. Under this protocol, read latencies on the real-time microcontroller remain strictly bounded below $1.5\ \mu\text{s}$, completely decoupled from the scheduling state or operating system load of the host processor.
+On the receiving side, the deterministic real-time microcontroller latches the newest proposal without ever acquiring a lock or stalling execution. At the start of its control cycle, the microcontroller reads the sequence counter with load-acquire semantics (`LDAR`). If the counter is odd, indicating that the producer is midway through updating the buffer, the consumer immediately aborts the read, retaining its existing validated trajectory spline. If the counter is even, the microcontroller copies the payload into its private, tightly-coupled static memory and re-reads the sequence counter. If the counter changed during the copy, a torn read occurred due to a concurrent write, and the frame is safely discarded. If the sequence counter remained identical and even throughout the read, the latch is verified: the microcontroller validates the cyclic redundancy checksum (CRC-32), checks timestamp freshness against its hardware timer, and accepts the proposal. Under this protocol, read latencies on the real-time microcontroller remain strictly bounded below $1.5\ \mu\text{s}$, completely decoupled from the scheduling state or operating system load of the host processor, as formalized in @algo-lock-free-trajectory.
 
-::: {#exmp-nervous-algorithm-4-1-lock-free-trajectory .callout-example title="Algorithm 4.1: Lock-Free Trajectory Seqlock Exchange Protocol"}
-**Input (Writer)**: Proposal payload $P = \{\text{seq\_id}, \text{timestamp\_ns}, \text{lease\_us}, \mathbf{w}_{1..K}, \text{crc32}\}$.
-**Input (Reader)**: Target local buffer $B_{\text{local}}$ in tightly-coupled static SRAM.
-**State**: Shared SRAM mailbox: atomic `uint64` $c_{\text{seq}}$ (init 0), payload slot $\text{Slot}_{\text{shared}}$.
-**Output (Reader)**: Verified action chunk $P_{\text{latched}}$ or status rejection code.
+```pseudocode
+#| label: algo-lock-free-trajectory
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
 
-**Procedure `PUBLISH_ACTION_CHUNK`($P$)**:
-
-1. $c_{\text{curr}} \leftarrow \text{ATOMIC\_LOAD\_EXPLICIT}(c_{\text{seq}}, \text{memory\_order\_relaxed})$
-2. $\text{ATOMIC\_STORE\_EXPLICIT}(c_{\text{seq}}, c_{\text{curr}} + 1, \text{memory\_order\_relaxed})$ *(Mark odd: write in progress)*
-3. $\text{HARDWARE\_MEMORY\_BARRIER}(\text{DMB\_ISHST})$ *(Store barrier pushes counter)*
-4. $\text{COPY\_MEMORY}(\text{Slot}_{\text{shared}}.\text{payload}, P, \text{sizeof}(P))$ *(Copy multi-word trajectory)*
-5. $\text{HARDWARE\_MEMORY\_BARRIER}(\text{DMB\_ISH})$ *(Full barrier: payload visible)*
-6. $\text{ATOMIC\_STORE\_EXPLICIT}(c_{\text{seq}}, c_{\text{curr}} + 2, \text{memory\_order\_release})$ *(Mark even: publish committed)*
-
-**Procedure `LATCH_LATEST_ACTION_CHUNK`($B_{\text{local}}, t_{\text{now}}$):**
-
-1. $c_{\text{start}} \leftarrow \text{ATOMIC\_LOAD\_EXPLICIT}(c_{\text{seq}}, \text{memory\_order\_acquire})$ *(Load initial counter)*
-2. **if** $c_{\text{start}}$ is **ODD then return** $\text{STATUS\_WRITER\_ACTIVE}$ *(Writer active; retain prior spline)*
-3. $\text{HARDWARE\_MEMORY\_BARRIER}(\text{DMB\_ISHLD})$ *(Load barrier prevents reordering)*
-4. $\text{COPY\_MEMORY}(B_{\text{local}}, \text{Slot}_{\text{shared}}.\text{payload}, \text{sizeof}(\text{Payload}))$ *(Latch to local SRAM)*
-5. $\text{HARDWARE\_MEMORY\_BARRIER}(\text{DMB\_ISHLD})$ *(Ensure payload reads finish)*
-6. $c_{\text{end}} \leftarrow \text{ATOMIC\_LOAD\_EXPLICIT}(c_{\text{seq}}, \text{memory\_order\_acquire})$ *(Re-read sequence counter)*
-7. **if** $c_{\text{start}} \neq c_{\text{end}}$ **then return** $\text{STATUS\_TORN\_READ}$ *(Concurrent write detected)*
-8. **if** $\text{COMPUTE\_CRC32}(B_{\text{local}}) \neq B_{\text{local}}.\text{crc32}$ **then return** $\text{STATUS\_CHECKSUM\_INVALID}$
-9. **if** $(t_{\text{now}} - B_{\text{local}}.\text{timestamp\_ns}) > B_{\text{local}}.\text{lease\_us} \times 1000$ **then return** $\text{STATUS\_LEASE\_EXPIRED}$
-10. **return** $\text{STATUS\_VALID\_LATCHED}$ *(Proposal verified for spline synthesis)*
-:::
+\begin{algorithm}
+\caption{Lock-Free Trajectory Seqlock Exchange Protocol}
+\begin{algorithmic}
+\Require proposal payload $P = \{\text{seq\_id}, \text{timestamp\_ns}, \text{lease\_us}, \mathbf{w}_{1..K}, \text{crc32}\}$, target local buffer $B_{\text{local}}$ in static SRAM, shared SRAM mailbox $(c_{\text{seq}}, \text{Slot}_{\text{shared}})$, current time $t_{\text{now}}$
+\Ensure verified action chunk $P_{\text{latched}}$ or status rejection code
+\Statex
+\Function{PublishActionChunk}{$P$}
+    \State $c_{\text{curr}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_relaxed}}$
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 1, \text{memory\_order\_relaxed}}$ \Comment{mark odd: write in progress}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_ISHST}}$ \Comment{store barrier pushes counter}
+    \State $\Call{CopyMemory}{\text{Slot}_{\text{shared}}.\text{payload}, P, \text{sizeof}(P)}$ \Comment{copy multi-word trajectory}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_ISH}}$ \Comment{full barrier: payload visible}
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 2, \text{memory\_order\_release}}$ \Comment{mark even: publish committed}
+\EndFunction
+\Statex
+\Function{LatchLatestActionChunk}{$B_{\text{local}}, t_{\text{now}}$}
+    \State $c_{\text{start}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{load initial counter}
+    \If{$c_{\text{start}}$ is odd}
+        \State \Return $\text{STATUS\_WRITER\_ACTIVE}$ \Comment{writer active; retain prior spline}
+    \EndIf
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_ISHLD}}$ \Comment{load barrier prevents reordering}
+    \State $\Call{CopyMemory}{B_{\text{local}}, \text{Slot}_{\text{shared}}.\text{payload}, \text{sizeof}(\text{Payload})}$ \Comment{latch to local SRAM}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_ISHLD}}$ \Comment{ensure payload reads finish}
+    \State $c_{\text{end}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{re-read sequence counter}
+    \If{$c_{\text{start}} \ne c_{\text{end}}$}
+        \State \Return $\text{STATUS\_TORN\_READ}$ \Comment{concurrent write detected}
+    \EndIf
+    \If{$\Call{ComputeCrc32}{B_{\text{local}}} \ne B_{\text{local}}.\text{crc32}$}
+        \State \Return $\text{STATUS\_CHECKSUM\_INVALID}$
+    \EndIf
+    \If{$(t_{\text{now}} - B_{\text{local}}.\text{timestamp\_ns}) > B_{\text{local}}.\text{lease\_us} \times 1000$}
+        \State \Return $\text{STATUS\_LEASE\_EXPIRED}$
+    \EndIf
+    \State \Return $\text{STATUS\_VALID\_LATCHED}$ \Comment{proposal verified for spline synthesis}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+```
 
 The trajectory payload exchanged through this lock-free mailbox follows the strict schema defined in @tbl-04-schema-action-chunk, establishing explicit data types, SI units, and structural invariants.
 
@@ -211,7 +227,7 @@ Rate mismatches introduce three failure modes: phase lag accumulation, aliasing,
 
 Aliasing occurs when high-frequency sensor noise folds into low-rate estimators, which the system prevents through analog anti-aliasing filters and digital decimation within the high-rate microcontroller domain. Following classical nonlinear control results [@slotine1991applied], stability guarantees hold under the assumption that inner-loop execution jitter remains bounded within a narrow fraction of the sampling period and that setpoint updates arrive before the local trajectory buffer drains. The nervous system establishes these assumptions by enforcing cycle-deterministic interrupt timing on the microcontroller and tracking buffer depth. If the planner stalls and the buffer drains to its final valid waypoint, the operational assumption no longer holds. At that moment, the nervous system rejects further planner inputs and executes an autonomous, deterministic stopping trajectory computed locally at $1000\text{ Hz}$, bringing all joints safely to rest.
 
-::: {#pri-nervous-cadence-decoupling .callout-principle title="Lock-Free Cadence Decoupling"}
+::: {#pri-nervous-cadence-decoupling .callout-note title="Lock-Free Cadence Decoupling"}
 Never allow a high-frequency real-time control loop to acquire a mutex or spin on a lock shared with a stochastic process; communicate across clock domains exclusively via lock-free atomic sequence mailboxes or triple-buffers.
 :::
 
@@ -368,7 +384,7 @@ To guard against internal hardware faults or microcontroller latch-ups within th
 ![](figures/fig04_real_estop_interlock.jpg){width="85%"}
 :::
 
-::: {#pri-nervous-hardware-authority .callout-principle title="Hardware Authority Invariant"}
+::: {#pri-nervous-hardware-authority .callout-important title="Hardware Authority Invariant"}
 If an unverified learned policy possesses direct memory-mapped write access to actuator gate-driver registers, your system has no safety layer—it has only an accident waiting for an out-of-distribution input.
 :::
 
@@ -538,7 +554,7 @@ Provenance explicitly records whether a number originates from an analytical fir
 The 5x5 Handoffs-by-Limits Grid is the master architectural contract of the physical AI machine. Every signal crossing must have its latency, bandwidth, thermal dissipation, determinism, and fault domain formally bounded and recorded in the engineering notebook before physical actuators are energized.
 <!-- END -->
 
-## Systems Stress-Tests {#sec-nervous-4-10}
+## Fallacies and Pitfalls {#sec-nervous-4-10}
 
 <!-- SECTION 4.10 -->
 <!-- claim: Five foundational engineering dilemmas expose where block-diagram independence breaks down in physical hardware. -->
@@ -548,50 +564,70 @@ The 5x5 Handoffs-by-Limits Grid is the master architectural contract of the phys
 <!-- BEGIN -->
 A separation that is correct on an architectural block diagram is often absent in the physical machine. In design schematics, functional modules are partitioned by clean margins and labeled arrows, encouraging the assumption that a deliberative compute engine and a real-time safety enforcer occupy independent fault domains. On physical hardware, however, these subsystems share copper traces, power distribution networks, ground planes, interrupt controllers, and diagnostic buses. When electrical and firmware architectures fail to enforce physical isolation down to the circuit board floor, subtle cross-couplings create bypass pathways that disable or circumvent the safety enforcer.
 
-The following five analytical stress-tests evaluate where block-diagram independence breaks down in embodied machines and define the diagnostic protocols required to expose hidden couplings before field deployment:
+The following fallacies and pitfalls evaluate where block-diagram independence breaks down in embodied machines and define the diagnostic protocols required to expose hidden couplings before field deployment:
 
-### Stress-test 1: The shared rail trap (coupled power distribution and brownout resets) {.unnumbered}
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Powering real-time safety microcontrollers from shared, unbuffered compute power rails.*
 
 *The scenario.* An autonomous quadruped robot operates from a nominal $24.0\text{ V}$ lithium-ion battery pack with an internal discharge state yielding an open-circuit bus voltage of $21.6\text{ V}$. The power distribution network routes current across a shared bus bar with trace resistance $R_{\text{bus}} = 35.0\text{ m}\Omega$ and parasitic wiring inductance $L_{\text{bus}} = 120.0\text{ nH}$. The main board supplies both a high-throughput neural accelerator and a hard real-time microcontroller running the $1000\text{ Hz}$ invariant enforcer. The microcontroller is powered through a step-down buck converter with an undervoltage lockout threshold of $V_{\text{uvlo}} = 18.0\text{ V}$. During a dynamic leaping maneuver, the neural accelerator initiates an autoregressive vision burst, drawing a current step of $\Delta I_{\text{gpu}} = 25.0\text{ A}$ with a rise time of $\Delta t = 2.0\text{ }\mu\text{s}$, while twelve joint actuators simultaneously accelerate, drawing a steady $I_{\text{motor}} = 45.0\text{ A}$.
 
-*The systems dilemma.* The total instantaneous voltage drop across the shared power distribution network follows $\Delta V = I_{\text{total}} R_{\text{bus}} + L_{\text{bus}} \frac{di}{dt}$. For $I_{\text{total}} = 70.0\text{ A}$ and $di/dt = 25.0\text{ A} / (2.0\times 10^{-6}\text{ s}) = 1.25\times 10^7\text{ A/s}$, the resistive drop is $2.45\text{ V}$ and the inductive spike is $1.50\text{ V}$, yielding a total transient droop of $\Delta V = 3.95\text{ V}$. This sag pulls bus voltage to $21.6\text{ V} - 3.95\text{ V} = 17.65\text{ V}$, breaching the $18.0\text{ V}$ regulator threshold and causing an uncommanded brownout reset of the safety microcontroller during peak torque delivery.
+*The dilemma.* The total instantaneous voltage drop across the shared power distribution network follows $\Delta V = I_{\text{total}} R_{\text{bus}} + L_{\text{bus}} \frac{di}{dt}$. For $I_{\text{total}} = 70.0\text{ A}$ and $di/dt = 25.0\text{ A} / (2.0\times 10^{-6}\text{ s}) = 1.25\times 10^7\text{ A/s}$, the resistive drop is $2.45\text{ V}$ and the inductive spike is $1.50\text{ V}$, yielding a total transient droop of $\Delta V = 3.95\text{ V}$. This sag pulls bus voltage to $21.6\text{ V} - 3.95\text{ V} = 17.65\text{ V}$, breaching the $18.0\text{ V}$ regulator threshold and causing an uncommanded brownout reset of the safety microcontroller during peak torque delivery.
 
-*The systems verdict: Power Isolation Invariant.* Digital processors must never share unbuffered power rails with high-current switching loads. Real-time safety silicon requires dedicated sub-rail regulation, isolated power domains, or galvanic isolation to prevent compute current spikes from resetting safety enforcers during critical maneuvers.
+*Systems takeaway: Power Isolation Invariant.* Digital processors must never share unbuffered power rails with high-current switching loads. Real-time safety silicon requires dedicated sub-rail regulation, isolated power domains, or galvanic isolation to prevent compute current spikes from resetting safety enforcers during critical maneuvers.
 
-### Stress-test 2: The self-feeding watchdog (interrupt servicing and task starvation) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Servicing a safety watchdog inside a high-priority timer interrupt rather than an application-verified safety loop.*
 
 *The scenario.* An industrial mobile manipulator incorporates an external windowed hardware watchdog timer that de-energizes the main actuator contactor if it does not receive a service pulse every $10.0\text{ ms}$. The engineering team places the watchdog refresh call inside a $1000\text{ Hz}$ hardware timer interrupt service routine (ISR) running at the highest hardware priority on the real-time microcontroller. The safety-critical invariant enforcement task runs as a lower-priority RTOS thread. While evaluating a workspace keep-out boundary, the enforcement task deadlocks on a shared mutex.
 
-*The systems dilemma.* With the enforcement thread blocked, the controller ceases updating joint torque limits, validating obstacle clearance, or checking intent lease timestamps. However, because the hardware timer ISR executes independently of thread scheduling, it continues firing every $1.0\text{ ms}$, consistently petting the watchdog and preventing the supervisor from tripping the emergency power relay while the manipulator moves uncontrolled toward a hardstop.
+*The dilemma.* With the enforcement thread blocked, the controller ceases updating joint torque limits, validating obstacle clearance, or checking intent lease timestamps. However, because the hardware timer ISR executes independently of thread scheduling, it continues firing every $1.0\text{ ms}$, consistently petting the watchdog and preventing the supervisor from tripping the emergency power relay while the manipulator moves uncontrolled toward a hardstop.
 
-*The systems verdict: Execution-Verified Watchdog Law.* A watchdog must monitor the physical completion of safety invariants, not the electrical ticking of a hardware timer. Servicing a watchdog from a timer ISR certifies only that the clock generator is alive while masking application deadlock.
+*Systems takeaway: Execution-Verified Watchdog Law.* A watchdog must monitor the physical completion of safety invariants, not the electrical ticking of a hardware timer. Servicing a watchdog from a timer ISR certifies only that the clock generator is alive while masking application deadlock.
 
-### Stress-test 3: The bypass backdoor (diagnostic interfaces and unmediated authority) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Leaving auxiliary diagnostic or calibration interfaces unmediated in production operation.*
 
 *The scenario.* An autonomous forklift enforces workspace safety through an isolated microcontroller that validates all velocity proposals before dispatching current setpoints over a CAN bus. For factory testing and motor calibration, the wheel drive units include an auxiliary serial diagnostic interface accessible over an internal service socket. During an edge runtime failure on the host computer, a diagnostic daemon writes direct register overrides to the motor drives to read rotor thermal resistance.
 
-*The systems dilemma.* The diagnostic write command overwrites the inverter current target register with an unvalidated test value of $35.0\text{ A}$, commanding forward torque that accelerates the vehicle to $1.8\text{ m/s}$. The primary safety enforcer, reading zero velocity on its command mailbox, detects no safety violation in the proposal stream and leaves its emergency brake relays open, moving the machine without kinematic gating or obstacle avoidance.
+*The dilemma.* The diagnostic write command overwrites the inverter current target register with an unvalidated test value of $35.0\text{ A}$, commanding forward torque that accelerates the vehicle to $1.8\text{ m/s}$. The primary safety enforcer, reading zero velocity on its command mailbox, detects no safety violation in the proposal stream and leaves its emergency brake relays open, moving the machine without kinematic gating or obstacle avoidance.
 
-*The systems verdict: Exclusive Physical Authority Invariant.* Actuation authority is the sum of every physical wire and register that can command power stages. Auxiliary diagnostic ports must be physically interlocked with hardware jumpers, blown fuses, or power disconnect relays during operational mode.
+*Systems takeaway: Exclusive Physical Authority Invariant.* Actuation authority is the sum of every physical wire and register that can command power stages. Auxiliary diagnostic ports must be physically interlocked with hardware jumpers, blown fuses, or power disconnect relays during operational mode.
 
-### Stress-test 4: The phantom feedback loop (command echo versus measured state) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Evaluating safety barrier invariants on commanded trajectory setpoints is equivalent to evaluating physical plant state.*
 
 *The scenario.* A six-axis articulated manipulator ($m = 90.0\text{ kg}$) executes a discrete Control Barrier Function at $1000\text{ Hz}$ to guarantee that the end-effector remains outside a forbidden zone ($h(\mathbf{x}) \ge 0$). To minimize serial bus traffic and filtering latency, the enforcer evaluates the barrier invariant using the commanded joint position vector $\mathbf{q}_{\text{cmd}}$ from the trajectory generator rather than the measured optical encoder vector $\mathbf{q}_{\text{meas}}$ sampled at the load side.
 
-*The systems dilemma.* While carrying a $20.0\text{ kg}$ payload at $\dot{\mathbf{q}} = 1.5\text{ rad/s}$, a cycloidal drive gear tooth fractures, mechanically decoupling the motor rotor from the link. Gravity accelerates the link downward toward an operator workstation at $9.81\text{ m/s}^2$. Because the trajectory interpolator continues generating valid setpoints within bounds, the enforcer evaluates $h(\mathbf{q}_{\text{cmd}}) > 0$ and reports nominal operation, holding emergency brakes disengaged while the physical link falls $0.35\text{ m}$ onto the workstation.
+*The dilemma.* While carrying a $20.0\text{ kg}$ payload at $\dot{\mathbf{q}} = 1.5\text{ rad/s}$, a cycloidal drive gear tooth fractures, mechanically decoupling the motor rotor from the link. Gravity accelerates the link downward toward an operator workstation at $9.81\text{ m/s}^2$. Because the trajectory interpolator continues generating valid setpoints within bounds, the enforcer evaluates $h(\mathbf{q}_{\text{cmd}}) > 0$ and reports nominal operation, holding emergency brakes disengaged while the physical link falls $0.35\text{ m}$ onto the workstation.
 
-*The systems verdict: Physical State Invariant.* An invariant enforcer that evaluates software commands rather than physical sensor telemetry validates its own intentions rather than reality. Safety enforcement requires an unbroken, isolated sensory channel to load-side physical transducers.
+*Systems takeaway: Physical State Invariant.* An invariant enforcer that evaluates software commands rather than physical sensor telemetry validates its own intentions rather than reality. Safety enforcement requires an unbroken, isolated sensory channel to load-side physical transducers.
 
-### Stress-test 5: The diagnostic bench protocol (hardware-in-the-loop fault injection) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Nominal, fault-free operating logs are sufficient to prove physical architectural isolation.*
 
 *The scenario.* An engineering team prepares an autonomous mobile manipulator for factory qualification, executing a four-stage diagnostic fault-injection suite prior to release: power rail transient injection ($di/dt = 150.0\text{ A}/\mu\text{s}$), communication bus packet flooding, memory bit-flips in high-level policy runtimes, and mechanical shaft locking on a dynamometer.
 
-*The systems dilemma.* Nominal operating logs cannot prove physical independence. Pushing the machine across electrical, computational, and mechanical failure boundaries verifies that voltage sag maintains a $20\%$ margin above brownout thresholds, communication flooding induces zero deadline jitter on the safety loop, and locked-rotor divergence exceeding $\Delta \theta = 1.5^\circ$ clamps motor current within $2.0\text{ ms}$.
+*The dilemma.* Nominal operating logs cannot prove physical independence. Pushing the machine across electrical, computational, and mechanical failure boundaries verifies that voltage sag maintains a $20\%$ margin above brownout thresholds, communication flooding induces zero deadline jitter on the safety loop, and locked-rotor divergence exceeding $\Delta \theta = 1.5^\circ$ clamps motor current within $2.0\text{ ms}$.
 
-*The systems verdict: Catastrophic Isolation Law.* A safety case is valid only if the real-time invariant enforcer survives the catastrophic collapse of every surrounding software and electrical component.
+*Systems takeaway: Catastrophic Isolation Law.* A safety case is valid only if the real-time invariant enforcer survives the catastrophic collapse of every surrounding software and electrical component.
 <!-- END -->
 
 {{< pagebreak >}}
+
+:::
 
 ## Summary {#sec-nervous-4-11}
 

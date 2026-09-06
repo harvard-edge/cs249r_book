@@ -1,4 +1,4 @@
-# Conclusion: The Epistemic Frontier {#sec-frontier}
+# The Epistemic Frontier {#sec-frontier}
 
 ::: {.column-margin}
 
@@ -233,46 +233,42 @@ The safety case must document these gaps explicitly rather than concealing them 
 
 ### Active epistemic probing and invariant monitoring {.unnumbered}
 
-To mitigate detectorless failure modes before physical limits are breached, safety-critical nervous systems can execute active epistemic probing. In this pattern, the controller injects a high-frequency, sub-perceptual mechanical or electrical dither $\delta u(t)$ (such as a $125\text{ Hz}$ torque ripple $\delta \tau \le 0.03\,\tau_{\text{max}}$) and measures the dynamic plant impedance response. If the measured transfer function departs from nominal stiffness or flux bounds, the nervous system trips a deterministic fallback before irreversible yield occurs, as formalized in Algorithm 17.1.
+To mitigate detectorless failure modes before physical limits are breached, safety-critical nervous systems can execute active epistemic probing. In this pattern, the controller injects a high-frequency, sub-perceptual mechanical or electrical dither $\delta u(t)$ (such as a $125\text{ Hz}$ torque ripple $\delta \tau \le 0.03\,\tau_{\text{max}}$) and measures the dynamic plant impedance response. If the measured transfer function departs from nominal stiffness or flux bounds, the nervous system trips a deterministic fallback before irreversible yield occurs, as formalized in @algo-active-epistemic-probe.
 
-::: {#exmp-frontier-algorithm-17-1-active-epistemic-probe .callout-example title="Algorithm 17.1: Active Epistemic Probe and Invariant Degradation Monitor"}
-**Inputs**: Hardware telemetry stream $\mathbf{y}_t$, learned action proposal $\mathbf{u}_{\text{policy}}$, nominal plant parameters $\mathcal{M}_{\text{nominal}} = \{k_0, K_{t0}, \mu_0\}$, threshold limits $\{\Delta_{\text{disparity}}, \tau_{\text{deadline}}, E_{\text{kin},\max}\}$.
+```pseudocode
+#| label: algo-active-epistemic-probe
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
 
-**Outputs**: Permitted actuator command $\mathbf{u}_{\text{cmd}}$, hardware trip flag $\text{register\_trip\_flag}$.
-
-**Structural Invariants**:
-
-1. *Synchronous Reaction Bound:* Execution loop strictly periodic at $1000\text{ Hz}$ ($\Delta t = 1.0\text{ ms} \pm 2\,\mu\text{s}$).
-2. *Sub-Threshold Probing:* Injected perturbation energy $\|\delta \mathbf{u}\| \le 0.03 \, \|\mathbf{u}_{\text{nominal}}\|$ (zero operational disruption).
-3. *Fail-Safe Primacy:* If estimated plant disparity exceeds threshold, trip hardware crowbar within $\le 500\,\mu\text{s}$.
-
-**Execution Pipeline**:
-
-1. **Synchronous Sample & Timestamp Acquisition:**
-   * $\mathbf{y}_t \leftarrow \text{ReadAdcsAndEncodersDma}()$; $t_{\text{now}} \leftarrow \text{ReadMonotonicHardwareTimer}()$.
-2. **Epistemic Dither Injection:**
-   * $\delta \mathbf{u}_t \leftarrow \text{GenerateOrthogonalDither}(\text{freq}=125\text{ Hz}, \text{amp}=0.03\,u_{\max}, \phi_t)$.
-   * $\mathbf{u}_{\text{probe}} \leftarrow \mathbf{u}_{\text{policy}} + \delta \mathbf{u}_t$.
-3. **Empirical Transfer Impedance Extraction:**
-   * $\hat{Z}(t) \leftarrow \text{ComputePhaseLockedImpedance}(\delta \mathbf{u}_t, \mathbf{y}_t.\text{high\_rate\_response})$.
-   * $\Delta_{\text{disp}} \leftarrow \|\hat{Z}(t) - \mathcal{M}_{\text{nominal}}.\text{impedance}\|$.
-4. **Observational Boundary & Invariant Evaluation:**
-   * If $\Delta_{\text{disp}} > \Delta_{\text{disparity}}$:
-     * $\mathbf{u}_{\text{cmd}} \leftarrow \text{EnforceDeterministicSafeStop}(\text{profile}=\text{ESTOP\_SPRING\_BRAKE})$.
-     * $\text{register\_trip\_flag} \leftarrow \text{TRUE}$; $\text{SetHardwareFaultRegister}(\text{ACTIVE\_HIGH})$.
-     * $\text{LogClaimsRegisterEvent}(\text{"DEGRADATION\_TRIP"}, \Delta_{\text{disp}}, t_{\text{now}})$.
-     * **return** $(\mathbf{u}_{\text{cmd}}, \text{register\_trip\_flag})$.
-5. **Dynamic Kinematic Authority Clamping:**
-   * $E_{\text{kin}} \leftarrow \frac{1}{2} m \, \|\mathbf{v}_t\|^2$.
-   * If $(E_{\text{kin}} > E_{\text{kin},\max}) \lor (\text{clearance} < d_{\text{stop}}(\mathbf{v}_t, \mu_{\min}))$:
-     * $\mathbf{u}_{\text{cmd}} \leftarrow \text{ProjectControlBarrierFunction}(\mathbf{u}_{\text{probe}}, \mathbf{y}_t, \mathcal{C}_{\text{safe}})$.
-   * Else:
-     * $\mathbf{u}_{\text{cmd}} \leftarrow \mathbf{u}_{\text{probe}}$.
-   * $\text{register\_trip\_flag} \leftarrow \text{FALSE}$.
-6. **Register-Level Actuator Drive Write:**
-   * $\text{WriteHardwarePWMRegisters}(\mathbf{u}_{\text{cmd}})$.
-   * **return** $(\mathbf{u}_{\text{cmd}}, \text{register\_trip\_flag})$.
-:::
+\begin{algorithm}
+\caption{Active Epistemic Probe and Invariant Degradation Monitor}
+\begin{algorithmic}
+\Require telemetry stream $\mathbf{y}_t$, learned proposal $\mathbf{u}_{\text{policy}}$, plant parameters $\mathcal{M}_{\text{nominal}}$, threshold limits $\{\Delta_{\text{disparity}}, \tau_{\text{deadline}}, E_{\text{kin},\max}\}$
+\Ensure permitted actuator command $\mathbf{u}_{\text{cmd}}$, trip flag $\text{register\_trip\_flag}$
+\Statex
+\State $\mathbf{y}_t \gets \Call{ReadAdcsAndEncodersDma}{}$; $t_{\text{now}} \gets \Call{ReadMonotonicHardwareTimer}{}$
+\State $\delta \mathbf{u}_t \gets \Call{GenerateOrthogonalDither}{\text{freq}=125\text{ Hz}, \text{amp}=0.03\,u_{\max}, \phi_t}$
+\State $\mathbf{u}_{\text{probe}} \gets \mathbf{u}_{\text{policy}} + \delta \mathbf{u}_t$
+\State $\hat{Z}(t) \gets \Call{ComputePhaseLockedImpedance}{\delta \mathbf{u}_t, \mathbf{y}_t.\text{high\_rate\_response}}$
+\State $\Delta_{\text{disp}} \gets \lVert \hat{Z}(t) - \mathcal{M}_{\text{nominal}}.\text{impedance} \rVert$
+\If{$\Delta_{\text{disp}} > \Delta_{\text{disparity}}$}
+    \State $\mathbf{u}_{\text{cmd}} \gets \Call{EnforceDeterministicSafeStop}{\text{ESTOP\_SPRING\_BRAKE}}$
+    \State $\Call{SetHardwareFaultRegister}{\text{ACTIVE\_HIGH}}$
+    \State $\Call{LogClaimsRegisterEvent}{\text{"DEGRADATION\_TRIP"}, \Delta_{\text{disp}}, t_{\text{now}}}$
+    \State \Return $(\mathbf{u}_{\text{cmd}}, \text{TRUE})$
+\EndIf
+\State $E_{\text{kin}} \gets \frac{1}{2} m \, \lVert \mathbf{v}_t \rVert^2$
+\If{$E_{\text{kin}} > E_{\text{kin},\max}$ \textbf{or} $\text{clearance} < d_{\text{stop}}(\mathbf{v}_t, \mu_{\min})$}
+    \State $\mathbf{u}_{\text{cmd}} \gets \Call{ProjectControlBarrierFunction}{\mathbf{u}_{\text{probe}}, \mathbf{y}_t, \mathcal{C}_{\text{safe}}}$
+\Else
+    \State $\mathbf{u}_{\text{cmd}} \gets \mathbf{u}_{\text{probe}}$
+\EndIf
+\State $\Call{WriteHardwarePWMRegisters}{\mathbf{u}_{\text{cmd}}}$
+\State \Return $(\mathbf{u}_{\text{cmd}}, \text{FALSE})$
+\end{algorithmic}
+\end{algorithm}
+```
 
 A taxonomy of these unobservable physical failure modes across transduction, contact mechanics, electromagnetic actuation, and learned perception is compiled in @tbl-17-detectorless-modes, highlighting the timing budget deficits and why heuristic software proxies fail.[^fn-hw-motor-thermal]
 
@@ -389,7 +385,7 @@ The complete architectural synthesis across all seventeen chapters and four part
 | **17: Frontier**     | Epistemic Governance *(Part IV)*   | Detectorless physical failure modes & unclosable claims       | Popperian empirical falsification; Observational indistinguishability                               | Residual-claims register closure test; Structural containment                                             | Physical transducer sensitivity limits; Fundamental time-to-harm                                   |
 : **Master Synthesis of Physical AI Across Seventeen Chapters and Four Parts**: Comprehensive architectural blueprint mapping every chapter in the text to its target organ, foundational systems problem, bedrock physical law, governing operational invariant, and non-negotiable hardware floor. The taxonomy illustrates how physical constraints dictate software boundaries from foundational thermodynamic laws to deployment release verdicts. {#tbl-17-master-synthesis}
 
-::: {#pri-frontier-epistemic-containment .callout-principle title="Epistemic Containment and Physical AI Governance"}
+::: {#pri-frontier-epistemic-containment .callout-important title="Epistemic Containment and Physical AI Governance"}
 1. **The Observability Invariant:** If the sensor-to-actuator detection latency exceeds the body's time-to-harm ($\tau_{\text{det}} + \tau_{\text{act}} > t_{\text{harm}}$), delegate safety to passive mechanical compliance, firmware parameter clamps, and scheduled proof-tests; never rely on learned inference or software exception handlers.
 2. **The Exposure Invariant:** Never use operational fleet hours to certify tail safety below the inverse fleet lifetime ($p \le 1/T_{\text{fleet}}$); open-world combinatorial safety cannot be proven by empirical sampling, but must be guaranteed by deterministic nervous-system shields.
 3. **The Proposal–Permission Invariant:** High-capacity learned Brain models may propose complex actions across multi-cadence intent horizons, but the deterministic Nervous System must retain sole and non-overridable authority to permit, clip, or veto commands at the hardware register level.
@@ -412,41 +408,55 @@ When empirical fleet exposure cannot breach the Astronomical Exposure Wall ($n \
 4. **Accountable Human Signatures:** Operational risk cannot be dispersed across an anonymous team. Every release claim with an open residual gap must carry the explicit, legally accountable signature of named engineering leads who verify that the physical containment envelope renders the unknown harmless.
 <!-- END -->
 
-## Systems Stress-Tests {#sec-frontier-17-9}
+## Fallacies and Pitfalls {#sec-frontier-17-9}
 
-With the core epistemic limits, residual-claims register schemas, detectorless failure mechanisms, and master architectural taxonomy established, an engineer must be prepared to audit complex physical systems at the boundary of empirical verification. The following four systems stress-tests serve as capstone analytical exercises, challenging you to diagnose observational indistinguishability, detectorless physical aging, astronomical exposure traps, and latent manifold shortcuts across embodied platforms:
+With the core epistemic limits, residual-claims register schemas, detectorless failure mechanisms, and master architectural taxonomy established, an engineer must be prepared to audit complex physical systems at the boundary of empirical verification. The following fallacies and pitfalls capture common design traps, challenging you to diagnose observational indistinguishability, detectorless physical aging, astronomical exposure traps, and latent manifold shortcuts across embodied platforms:
 
-### Stress-test 1: The oily surface gradient (observational indistinguishability) {.unnumbered}
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Relying on vision-based perception alone when the physical hazard is observationally indistinguishable.*
 
 *The scenario.* An autonomous $600\text{ kg}$ pallet-transport robot navigates a smooth concrete warehouse concourse at $2.2\text{ m/s}$. An unmapped spill of transparent synthetic hydraulic fluid ($\mu = 0.10$) covers a $3\text{ m}$ patch of floor directly ahead, presenting zero visual contrast to onboard RGB-D and LiDAR sensors.
 
-*The systems dilemma.* Before the drive wheels enter the slick, sensor telemetry is identical to clean dry concrete ($y_A(t) \equiv y_B(t)$). By the time wheel encoders detect differential angular slip, the kinematic stopping distance on $\mu = 0.10$ has expanded from $0.45\text{ m}$ to $2.51\text{ m}$, breaching the $0.80\text{ m}$ obstacle clearance buffer before the vehicle can halt.
+*The dilemma.* Before the drive wheels enter the slick, sensor telemetry is identical to clean dry concrete ($y_A(t) \equiv y_B(t)$). By the time wheel encoders detect differential angular slip, the kinematic stopping distance on $\mu = 0.10$ has expanded from $0.45\text{ m}$ to $2.51\text{ m}$, breaching the $0.80\text{ m}$ obstacle clearance buffer before the vehicle can halt.
 
-*The systems verdict: Law of Physical Causality and Irreversibility.* Safe stopping cannot be certified through vision-based perception alone when the physical observable (friction coefficient $\mu$) is unmeasurable prior to contact. The engineering authority must derate maximum velocity to $v \le 0.8\text{ m/s}$ ($E_{\text{kin}} \le 192\text{ J}$) in mixed-traffic zones or install forward polarimetric scatterometry, recording the unobservable surface condition in the residual-claims register.
+*Systems takeaway: Law of Physical Causality and Irreversibility.* Safe stopping cannot be certified through vision-based perception alone when the physical observable (friction coefficient $\mu$) is unmeasurable prior to contact. The engineering authority must derate maximum velocity to $v \le 0.8\text{ m/s}$ ($E_{\text{kin}} \le 192\text{ J}$) in mixed-traffic zones or install forward polarimetric scatterometry, recording the unobservable surface condition in the residual-claims register.
 
-### Stress-test 2: Silent thermal demagnetization (detectorless actuator aging) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Stator temperature and current measurements are sufficient to detect rotor magnet flux degradation.*
 
 *The scenario.* A 6-DoF robotic manipulator performs high-cadence pick-and-place operations with heavy steel payloads. Over repeated duty cycles, rotor eddy currents heat the NdFeB permanent magnets in Joint 3's motor past $145^\circ\text{C}$, exceeding the magnet's thermal ceiling and causing an irreversible $30\%$ reduction in remanent magnetic flux ($B_r$) and torque constant $K_t$.
 
-*The systems dilemma.* Stator resistance temperature detectors (RTDs) report nominal stator temperatures ($75^\circ\text{C}$), and motor inverter current shunts report full commanded quadrature current ($I_q = 25\text{ A}$). However, actual output electromagnetic torque ($\tau = K_t I_q$) silently drops from $50\text{ N}\cdot\text{m}$ to $35\text{ N}\cdot\text{m}$. When the arm transitions to cantilevered gravity holding, the joint sags uncontrollably, striking a human operator station in $t_{\text{harm}} = 45\text{ ms}$.
+*The dilemma.* Stator resistance temperature detectors (RTDs) report nominal stator temperatures ($75^\circ\text{C}$), and motor inverter current shunts report full commanded quadrature current ($I_q = 25\text{ A}$). However, actual output electromagnetic torque ($\tau = K_t I_q$) silently drops from $50\text{ N}\cdot\text{m}$ to $35\text{ N}\cdot\text{m}$. When the arm transitions to cantilevered gravity holding, the joint sags uncontrollably, striking a human operator station in $t_{\text{harm}} = 45\text{ ms}$.
 
-*The systems verdict: Law of Governed Change and Defensible Release.* Stator-only thermal telemetry cannot detect rotor magnet flux degradation at runtime. The machine must incorporate high-Curie-temperature magnets ($T_C > 310^\circ\text{C}$), spring-applied fail-safe friction brakes (de-energize to lock via hardware interlock lines), and mandatory scheduled offline torque-constant proof-tests on a dynamometer every 500 operating hours.
+*Systems takeaway: Law of Governed Change and Defensible Release.* Stator-only thermal telemetry cannot detect rotor magnet flux degradation at runtime. The machine must incorporate high-Curie-temperature magnets ($T_C > 310^\circ\text{C}$), spring-applied fail-safe friction brakes (de-energize to lock via hardware interlock lines), and mandatory scheduled offline torque-constant proof-tests on a dynamometer every 500 operating hours.
 
-### Stress-test 3: The astronomical exposure trap (certifying open-world edge cases) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Empirical fleet testing can statistically validate ultra-rare catastrophic failure rates in open-world environments.*
 
 *The scenario.* An autonomous delivery vehicle developer logs 10 million accident-free operational miles ($500{,}000\text{ hours}$) across multiple urban deployments and submits a safety case claiming a catastrophic collision probability $p \le 10^{-8}/\text{hour}$ at $95\%$ statistical confidence for its end-to-end multimodal foundation model.
 
-*The systems dilemma.* Under the zero-failure exposure bound $n \ge \frac{\ln(1/\alpha)}{p}$, certifying $p \le 10^{-8}/\text{hour}$ at $95\%$ confidence ($\alpha = 0.05$) mathematically requires $n \ge 3.0 \times 10^8\text{ hours}$ (over 34,200 machine-years) of independent, identically distributed exposure. Furthermore, periodic over-the-air neural weight updates and correlated weather patterns across the fleet continuously reset and invalidate sample independence.
+*The dilemma.* Under the zero-failure exposure bound $n \ge \frac{\ln(1/\alpha)}{p}$, certifying $p \le 10^{-8}/\text{hour}$ at $95\%$ confidence ($\alpha = 0.05$) mathematically requires $n \ge 3.0 \times 10^8\text{ hours}$ (over 34,200 machine-years) of independent, identically distributed exposure. Furthermore, periodic over-the-air neural weight updates and correlated weather patterns across the fleet continuously reset and invalidate sample independence.
 
-*The systems verdict: Law of Information Freshness & Zero-Failure Exposure Bound.* Empirical black-box fleet testing is mathematically and logically insufficient to certify ultra-rare tail safety in open combinatorial environments. The release claim must be rejected unless safety is guaranteed by an independent deterministic nervous-system shield (CBF-QP enforcer running on an isolated MCU) holding exclusive hardware veto authority over motor inverters.
+*Systems takeaway: Law of Information Freshness & Zero-Failure Exposure Bound.* Empirical black-box fleet testing is mathematically and logically insufficient to certify ultra-rare tail safety in open combinatorial environments. The release claim must be rejected unless safety is guaranteed by an independent deterministic nervous-system shield (CBF-QP enforcer running on an isolated MCU) holding exclusive hardware veto authority over motor inverters.
 
-### Stress-test 4: The latent manifold shortcut (specular glare in brittle grasping) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Assuming high-capacity learned models can evaluate their own perceptual and mechanical limits.*
 
 *The scenario.* A high-precision dual-arm manipulator employs an end-to-end Vision-Language-Action (VLA) model to insert thin glass pharmaceutical ampoules into packaging trays. Direct late-afternoon sunlight reflects off a stainless-steel workbench, casting caustic specular glares across the camera sensor array.
 
-*The systems dilemma.* The high-dimensional visual encoder projects the out-of-distribution optical flare onto the nominal latent manifold ($\mathbf{z} \in \mathcal{Z}_{\text{nom}}$). The policy commands a rapid downward plunging trajectory with near-zero softmax entropy ($H(\pi) \approx 0$). Latent-space Mahalanobis distance uncertainty estimators fail to flag the anomaly because the model is confident in its corrupted representation. The gripper drives the glass ampoule into the metal tray at $300\text{ mm/s}$, shattering the vial in $14\text{ ms}$.
+*The dilemma.* The high-dimensional visual encoder projects the out-of-distribution optical flare onto the nominal latent manifold ($\mathbf{z} \in \mathcal{Z}_{\text{nom}}$). The policy commands a rapid downward plunging trajectory with near-zero softmax entropy ($H(\pi) \approx 0$). Latent-space Mahalanobis distance uncertainty estimators fail to flag the anomaly because the model is confident in its corrupted representation. The gripper drives the glass ampoule into the metal tray at $300\text{ mm/s}$, shattering the vial in $14\text{ ms}$.
 
-*The systems verdict: Law of Proposal and Permission Privilege.* High-capacity learned models cannot serve as their own safety supervisors. Actuator commands must pass through a Proposal–Permission boundary where a deterministic bare-metal nervous-system enforcer monitors hardware load cells and laser proximity rangefinders at $1000\text{ Hz}$, backed by mechanical spring detents that decouple force before glass fracture limits are reached.
+*Systems takeaway: Law of Proposal and Permission Privilege.* High-capacity learned models cannot serve as their own safety supervisors. Actuator commands must pass through a Proposal–Permission boundary where a deterministic bare-metal nervous-system enforcer monitors hardware load cells and laser proximity rangefinders at $1000\text{ Hz}$, backed by mechanical spring detents that decouple force before glass fracture limits are reached.
 
 <!-- BEGIN -->
 The final frontier of physical AI is not algorithmic perfection, but epistemic governance: establishing rigorous institutional and architectural controls over what cannot be known. When an engineering team acknowledges that open-world complexity, catastrophic tail risks, and detectorless failure modes preclude absolute empirical certainty, the safety argument does not collapse into paralysis. Instead, it transitions from inductive confidence to deductive structural containment. The governing instrument of this discipline is the **Residual-Claims Register**—an immutable ledger that explicitly records every unclosable claim, unmodeled physical parameter, and unobservable state transition, pairing each with a permanent, hardware-enforced containment boundary.
@@ -476,6 +486,8 @@ To close the curriculum, we revisit the Three Archetypes introduced in earlier c
    - *The Failure Mode:* An adaptive neural optimization policy adjusts reactant feed rates to maximize yield. A sudden supply batch variance introduces an unmodeled catalytic promoter, initiating thermal runaway with temperature rising at $\dot{T} = 12.5^\circ\text{C/s}$.
    - *The Systems Defense:* The neural optimizer misinterprets the rapid temperature rise as a productive yield surge. However, an independent Control Barrier Function running on an isolated lockstep safety controller continuously evaluates the thermal-hydraulic barrier $h(T, P) = T_{\max} - T - \tau_{\text{cool}}\dot{T}$. The moment $h(T, P) \le 0$, the enforcer asserts hardwired Safe Torque Off (STO) to the feed pumps and commands 100 percent duty cycle to the emergency quench coolant valve via direct memory-mapped PWM registers, bypassing the Linux optimizer entirely.
    - *The Systems Verdict: Law of Proposal and Permission Privilege.* High-capacity learned models cannot serve as their own safety supervisors. Actuator commands must pass through a Proposal–Permission boundary where a deterministic bare-metal nervous-system enforcer monitors hardware load cells and laser proximity rangefinders at $1000\text{ Hz}$, backed by mechanical spring detents that decouple force before glass fracture limits are reached.
+
+:::
 
 ## Summary {#sec-frontier-17-10}
 
