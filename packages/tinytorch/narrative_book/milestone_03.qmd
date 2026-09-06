@@ -1,6 +1,6 @@
 # Milestone III: The Torch Olympics {#sec-milestone-3}
 
-Chapter 20 ended with the optimizations of Part III stacked on one model: INT8 weights, a factorized MLP, a fused activation, and a KV cache, each built and tested in its own chapter. What Part III has not yet done is the thing a practitioner is asked to do the moment an optimization lands, which is to prove it paid off. Not "the model is 4× smaller," which Chapter 15 established, and not "the cache skips the recomputation," which Chapter 18 established, but the harder question the roadmap in the welcome chapter promised this milestone would answer. Did the optimizations pay off on accuracy, memory, and latency at once, on the same model, measured the same way?
+Chapter 20 ended with the optimizations of Part III stacked on one model: INT8 weights, a factorized MLP, a fused activation, and a KV cache, each built and tested in its own chapter. What Part III has not yet done is the thing a practitioner is asked to do the moment an optimization lands, which is to prove it paid off. Not "the model is 4× smaller," which Chapter 15 established, and not "the cache skips the recomputation," which Chapter 18 established, but the harder question the roadmap in the introduction promised this milestone would answer. Did the optimizations pay off on accuracy, memory, and latency at once, on the same model, measured the same way?
 
 This milestone is the book's benchmark. It takes a network from Milestone I, runs it through the profiler, the quantizer, the pruner, and the benchmark harness in one script, and prints a scorecard. A second script times text generation with and without the KV cache. The mechanism the chapter teaches is not a new kernel or a new layer. It is the scorecard itself, drawn in @fig-milestone3-olympics, made of three ratios, an accuracy floor, and the discipline of measuring the optimized model rather than describing it.
 
@@ -52,8 +52,6 @@ $$R = \frac{A_{\text{cand}}}{A_{\text{base}}}, \qquad C = \frac{M_{\text{base}}}
 
 $R$ is **accuracy retention**, the fraction of the baseline's accuracy the candidate keeps. $C$ is the size ratio, how many times smaller the candidate is. $S$ is the speedup. All three are better when larger, but only $C$ and $S$ are things to maximize. $R$ is a gate. MLPerf Inference, the industry benchmark this milestone is modeled on, requires a submission to reach a fixed fraction of a reference model's accuracy before its latency or throughput is recorded at all, and for most of its benchmarks that fraction is 99%. The same rule here reads $R \ge 0.99$. `ZeroModel` has $R = 0.11$ and never reaches the starting line.
 
-Why a floor rather than a fourth term in a weighted sum? Because a sum lets one axis buy another. A model that is 100× faster and 20 points less accurate can outscore a careful one under almost any weighting, and the people submitting to a benchmark will find that weighting. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
-
 ### Events
 
 The benchmark module from Chapter 19 turns this into a set of events, each of which fixes floors on two axes and lets submissions compete on the third. A latency sprint requires accuracy of at least 85% and ranks by speed. A memory challenge has the same floor and ranks by bytes. An accuracy contest caps latency at 100 ms and memory at 10 MB and ranks by accuracy. An "extreme push" lowers the accuracy floor to 80% for anyone willing to go further. The floors are absolute here (85% accuracy, not 99% of a baseline), which suits the course's small models, whose baselines vary from run to run; the structure is what matters, and it is the MLPerf structure in miniature.
@@ -61,12 +59,6 @@ The benchmark module from Chapter 19 turns this into a set of events, each of wh
 The set of candidates that cannot improve on one axis without giving something up on another is called the **Pareto frontier**.[^fn-pareto-frontier-scorecard] A benchmark with floors is a way of asking one question about that frontier at a time. Where on the frontier a deployment should sit is a product decision, not an engineering one, and the scorecard's job is to make the frontier visible so that the decision can be made with numbers.
 
 [^fn-pareto-frontier-scorecard]: **Pareto frontier**: in a trade-off between several objectives, the set of options that no other option beats on every objective at once. A candidate off the frontier is simply worse than some other candidate on all axes; moving along the frontier trades one axis for another, and a benchmark cannot say which trade is right, only where the frontier is.
-
-### What to expect before measuring
-
-A benchmark is more useful when you know what it should print. The `DigitMLP` of Milestone I has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are counts, not measurements, and they are exact.
-
-Napkin math for the rest. INT8 storage keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 20 = 2{,}430$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of Chapter 16 costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. And latency should barely move at all. A multiply of a $1 \times 64$ row against a $64 \times 32$ matrix is a few microseconds of arithmetic under the fixed cost of a Python call, and neither INT8 storage nor zeroed weights changes how many multiplies the dense forward pass performs. If the script reports a large speedup from quantization or pruning on this model, the right reaction is suspicion, not celebration.
 
 ---
 
@@ -80,7 +72,9 @@ This milestone's scripts (`milestones/06_2018_mlperf/01_optimization_olympics.py
 
 ### Script 1: profile, quantize, prune, benchmark
 
-The first script trains `DigitMLP` for ten epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes. Profiling comes first because it establishes the "before" that every later ratio divides by.
+The first script trains `DigitMLP` for ten epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes.
+
+Profiling comes first, and it has to. Every ratio on the scorecard compares a candidate against a baseline number, so before we touch a single weight we need the unoptimized model's parameter count, its bytes, its FLOPs, its latency, and its accuracy, written down where nothing later can overwrite them. The tempting shortcut is to skip the ceremony, wrap one forward pass in `time.time()`, and call that the baseline latency. Chapter 14 showed why that one call is the wrong number. The first call of anything pays costs that never recur, and any single call can land on a bad moment, so a cold single reading would inflate every later speedup before any optimization had run. The profiler's answer is the one Chapter 14 built, warm up, repeat, and keep the median.
 
 ```python
 # Excerpt from milestones/06_2018_mlperf/01_optimization_olympics.py (step_1_profile, trimmed)
@@ -97,9 +91,9 @@ predictions = np.argmax(outputs.data, axis=1)
 baseline_acc = np.mean(predictions == y_test) * 100
 ```
 
-Three things to notice. The byte count is derived from the parameter count, not measured, which is fine for FP32 and will matter in a moment. The latency is the median of ten timed calls after three warmup calls, which is Chapter 14's protocol with small counts so the script stays quick. And the accuracy is computed over the whole test set in one batch, so it is a real number on real data, unlike anything the profiler returns.
+Three things to notice. The byte count is derived from the parameter count, not measured, which is fine for FP32 and will matter in a moment. The latency is the median of ten timed calls after three warmup calls, which is Chapter 14's protocol with small counts so the script stays quick, and the same warmup-then-repeat that PyTorch's `torch.utils.benchmark.Timer` performs before it reports a median. And the accuracy is computed over the whole test set in one batch, so it is a real number on real data, unlike anything the profiler returns.
 
-Quantization is next, and this is where the script's bookkeeping is worth reading slowly.
+Quantization is next, and it owns the memory axis. A model that ships to a phone or a microcontroller has a byte budget before it has anything else, and INT8 weights are the first thing every deployment toolchain reaches for, because they cut the bytes by 4 without touching the shape of the forward pass. The lazy way to fill in $C$ is to divide the FP32 byte count by 4 and write down $4.0\times$. That takes one line, and it skips the one thing we actually need to know, which is whether the model still works with each weight rounded to one of 256 levels. Chapter 15's quantizer maps a tensor's range onto those levels with a scale and a zero point, and the script's bookkeeping around that call is worth reading slowly, because it takes the lazy way on exactly the half that matters.
 
 ```python
 # Excerpt from 01_optimization_olympics.py (step_2_quantize, trimmed)
@@ -107,9 +101,9 @@ quant_result = Quantizer.quantize_model(model)
 quant_size = int(param_bytes / quant_result['compression_ratio'])
 ```
 
-`Quantizer.quantize_model` quantizes every parameter tensor with the min-max INT8 scheme of Chapter 15 and returns a dictionary holding the codes, the per-tensor scale and zero point, and a `compression_ratio`. That ratio is the original byte count divided by the number of elements, so it is exactly 4.0 by construction; the scales and zero points are not counted. More important, the dictionary is returned and the model is left untouched. The original FP32 weights stay in `model`, the quantized codes never run a forward pass, and when the final table prints an accuracy for the quantized stage it copies the baseline accuracy into that cell. The script's INT8 accuracy is therefore an assumption, not a measurement. Exercise 1 closes that gap.
+`Quantizer.quantize_model` quantizes every parameter tensor with the min-max INT8 scheme of Chapter 15 and returns a dictionary holding the codes, the per-tensor scale and zero point, and a `compression_ratio`. That ratio is the original byte count divided by the number of elements, so it is exactly 4.0 by construction; the scales and zero points are not counted. More important, the dictionary is returned and the model is left untouched. The original FP32 weights stay in `model`, the quantized codes never run a forward pass, and when the final table prints an accuracy for the quantized stage it copies the baseline accuracy into that cell. The script's INT8 accuracy is therefore an assumption, not a measurement. Exercise 1 closes that gap. PyTorch's `quantize_per_tensor` is this same one-scale-per-tensor scheme, with the difference that a PyTorch quantized module then runs on the codes.
 
-Pruning does run the pruned model, on a copy so the original survives.
+Pruning is the second byte-cutter, and it is the one step in this script that destroys its input. `magnitude_prune` zeroes weights in place, and a zero has no memory of what it replaced. If the script pruned `model` itself, the FP32 baseline would be gone. The accuracy retention $R$ would then be a pruned model divided by a pruned model, which is $1.000$ no matter how much damage was done, and the only way to get the denominator back would be another ten epochs of training. So the script copies first, tensor by tensor, and prunes the copy. Unlike the quantized stage, the pruned copy then actually runs.
 
 ```python
 # Excerpt from 01_optimization_olympics.py (step_3_prune, trimmed)
@@ -126,9 +120,9 @@ outputs_pruned = model_copy(X_test)
 pruned_acc = np.mean(np.argmax(outputs_pruned.data, axis=1) == y_test) * 100
 ```
 
-`magnitude_prune` gathers every weight matrix (biases excluded), finds the magnitude at the 50th percentile, and zeroes everything below it in place. `measure_sparsity` counts the zeros. The pruned accuracy is real. The pruned *size*, when the script prints it, is `param_bytes // 2` with a note reading "with sparse storage," which is a napkin estimate that assumes the indices are free. The worked trace below does that arithmetic honestly.
+`magnitude_prune` gathers every weight matrix (biases excluded), finds the magnitude at the 50th percentile, and zeroes everything below it in place. `measure_sparsity` counts the zeros. The pruned accuracy is real. The pruned *size*, when the script prints it, is `param_bytes // 2` with a note reading "with sparse storage," which is a napkin estimate that assumes the indices are free. The worked trace below does that arithmetic honestly. PyTorch's `prune.l1_unstructured` applies the same magnitude rule, and it keeps the original tensor alongside the mask as `weight_orig` for the same reason this script keeps a copy.
 
-The benchmark step uses Chapter 19's `Benchmark` to time repeated forward passes and report a mean, a standard deviation, and a 95th percentile, which with the default ten samples is the slowest run.
+The benchmark step owns the latency axis, and it asks a different question from the profiler's. The profiler wanted a typical number for the baseline. A serving team wants to know how slow the slow calls are, because a user waits on the tail, not the median, and Chapter 14's p99 rule exists for that reason. A single timed call cannot answer either question; it picks one point on the latency distribution at random and reports it as if it were the whole. Chapter 19's `Benchmark` runs the forward pass repeatedly, keeps every timing, and reports a mean, a standard deviation, and a 95th percentile, which with the default ten samples is the slowest run.
 
 ```python
 # Excerpt from 01_optimization_olympics.py (step_6_benchmark, trimmed)
@@ -140,11 +134,13 @@ sorted_vals = sorted(bench_result.values)
 p95_latency = sorted_vals[min(int(len(sorted_vals) * 0.95), len(sorted_vals) - 1)]
 ```
 
-Notice which model is passed in: `model`, the original. The script benchmarks the baseline with full statistical care and never times the quantized or pruned versions at all. Nothing in its output is a measured speedup, and its summary table has no latency column for the optimized stages for that reason. That is a gap in the script, not a subtlety in the mechanism, and it is the first thing to fix if you extend it (Exercise 2).
+Notice which model is passed in: `model`, the original. The script benchmarks the baseline with full statistical care and never times the quantized or pruned versions at all. Nothing in its output is a measured speedup, and its summary table has no latency column for the optimized stages for that reason. That is a gap in the script, not a subtlety in the mechanism, and it is the first thing to fix if you extend it (Exercise 2). MLPerf reports p90 and p99 for the same reason this step reports a p95, and the bridge section says who holds the stopwatch there.
 
 ### Script 2: generation with and without the cache
 
-The second script builds a one-layer transformer from Chapters 11 and 12 (vocabulary 27, embedding width 32, two heads) and generates 16 tokens two ways. Without a cache, each step runs the full forward pass over every token so far.
+The second script measures the one Part III optimization whose speedup comes from doing less arithmetic rather than from storing fewer bytes. A language model generates one token at a time, and every new token attends over every token before it. The naive loop, the one Milestone II ran, reruns the full forward pass over the whole sequence at every step. For 16 tokens that means step $t$ processes $t$ positions and the loop processes $1 + 2 + \dots + 16 = 136$ positions in all. At a 4,096-token context the same sum is over 8 million positions to produce 4,096 tokens, almost all of it recomputing keys and values that have not changed since the previous step. Chapter 18's cache keeps those keys and values, so each step processes one new token and reads the rest back, 16 positions for 16 tokens. The napkin expectation is a ratio near $136 / 16 = 8.5$ on the attention work alone, before the fixed costs that do not shrink, and that is where the script's advertised "6 to 10×" comes from.
+
+The script builds a one-layer transformer from Chapters 11 and 12 (vocabulary 27, embedding width 32, two heads) and generates 16 tokens two ways. Here is the uncached loop.
 
 ```python
 # Excerpt from milestones/06_2018_mlperf/02_generation_speedup.py (trimmed)
@@ -161,13 +157,13 @@ for token_idx in range(seq_len):                     # seq_len = 16
     times_no_cache.append((time.time() - start) * 1000)
 ```
 
-Step $t$ processes $t$ tokens, so the loop processes $1 + 2 + \dots + 16 = 136$ token positions in total. With a cache, each step should process one new token and read the other keys and values back from storage, 16 positions in all, so the napkin expectation is a ratio near $136 / 16 = 8.5$ on the attention work alone, before the fixed costs that do not shrink. That is where the script's advertised "6 to 10×" comes from.
-
-The cached loop in the script does not reach that far. It embeds the new token, adds its positional encoding, writes the result into the cache with `cache.update`, and stops; it never calls `cache.get` and never runs attention against the cached keys. What it times is embedding alone versus a full forward pass, so the speedup it prints is an upper bound on what a real cached attention could achieve, and a generous one. The `KVCache` class itself does what Chapter 18 said it does. The script simply stops short of using it. Exercise 3 finishes the wiring and measures the real number.
+The cached loop in the script does not reach that far. It embeds the new token, adds its positional encoding, writes the result into the cache with `cache.update`, and stops; it never calls `cache.get` and never runs attention against the cached keys. What it times is embedding alone versus a full forward pass, so the speedup it prints is an upper bound on what a real cached attention could achieve, and a generous one. The `KVCache` class itself does what Chapter 18 said it does, and it is the same object Hugging Face's `generate` threads through every decode step as `past_key_values`. The script simply stops short of using it. Exercise 3 finishes the wiring and measures the real number.
 
 ### The scorecard
 
-The rest of the chapter uses a pure-Python scorecard that runs anywhere. It takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the MLPerf-style verdict. A second function checks a candidate against the event floors of Chapter 19's benchmark module.
+The three numbers now come from three different tools, and nothing in the script ties them together. The profiler knows the baseline, the quantizer knows a byte count, the benchmark knows a latency distribution, and the final table prints them side by side and leaves the verdict to the reader. Anyone reading that table wants one verdict, and the naive way to produce one is a weighted sum, so much weight on accuracy, so much on size, so much on speed. I tried it against the FP32 baseline from the trace below, with half the weight on retention and a quarter each on the other two ratios. A careful INT8 candidate that keeps 99.4% of the accuracy, is 3.97× smaller, and runs at the same speed scores 1.7. A reckless one that keeps 68% of the accuracy, is 7.9× smaller, and runs 100× faster scores 27. A sum lets one axis buy another, and the people submitting to a benchmark will find the weighting that lets them buy the most. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
+
+So the rest of the chapter uses a pure-Python scorecard that runs anywhere and refuses to add. It takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the MLPerf-style verdict. A second function checks a candidate against the event floors of Chapter 19's benchmark module.
 
 ```python
 EVENTS = {
@@ -194,7 +190,7 @@ def qualifies(candidate, event):
             and candidate["bytes"] <= rules.get("max_bytes", float("inf")))
 ```
 
-There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event rules are a dictionary. The value of the scorecard is not in the code but in what it refuses to do: it will not combine the ratios into a single number, and it will not report a size or a speed for a candidate that has not been run.
+There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event rules are a dictionary. The value of the scorecard is not in the code but in what it refuses to do. It will not combine the ratios into a single number, and it will not report a size or a speed for a candidate that has not been run. MLPerf calls the floor an accuracy target, and the bridge section covers what it builds around one.
 
 ---
 
@@ -204,7 +200,7 @@ The trace has two parts. The first pushes one small weight matrix through the tw
 
 ### One matrix, quantized and pruned
 
-Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. Min-max INT8 quantization first widens the range to include zero (it already does), then sets the scale to the range divided by 255 and the zero point to whatever integer maps the minimum onto $-128$.
+Script 1 left a hole. Its $4.0\times$ is true by construction and its INT8 accuracy is a copy of the baseline, so nothing it prints says what rounding every weight to one of 256 levels does to the model. The comfortable assumption is that it does nothing, since the codes decode back into weights. They decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. Min-max INT8 quantization first widens the range to include zero (it already does), then sets the scale to the range divided by 255 and the zero point to whatever integer maps the minimum onto $-128$.
 
 ```python
 def quantize_int8(values):
@@ -237,9 +233,13 @@ The scale is $3 / 255 = 0.011765$ and the zero point is $\text{round}(-128 + 85)
 
 : Six weights through min-max INT8 quantization (scale $0.011765$, zero point $-43$) and through 50% magnitude pruning (threshold $0.75$). {#tbl-m3-quant-prune-trace tbl-colwidths="[12,24,16,12,18,18]"}
 
-The largest reconstruction error is half a quantization step, $0.0059$, which is what rounding guarantees. The three weights that survive pruning are the three largest in magnitude, and the sparsity is exactly $3/6 = 50\%$. Nothing about either operation depends on the size of the matrix; `DigitMLP`'s 2,368 weights go through the same two rules.
+The largest reconstruction error is half a quantization step, $0.0059$, which is what rounding guarantees. The three weights that survive pruning are the three largest in magnitude, and the sparsity is exactly $3/6 = 50\%$. Nothing about either operation depends on the size of the matrix; `DigitMLP`'s 2,368 weights go through the same two rules, and PyTorch's name for the first of them is per-tensor affine quantization.
 
 ### The scorecard for `DigitMLP`
+
+A benchmark is more useful when you know what it should print, so the prediction comes before the ledger. `DigitMLP` has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are counts, not measurements, and they are exact.
+
+Napkin math for the rest. INT8 storage keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 20 = 2{,}430$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of Chapter 16 costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. And latency should barely move at all. A multiply of a $1 \times 64$ row against a $64 \times 32$ matrix is a few microseconds of arithmetic under the fixed cost of a Python call, and neither INT8 storage nor zeroed weights changes how many multiplies the dense forward pass performs. If the script reports a large speedup from quantization or pruning on this model, the right reaction is suspicion, not celebration.
 
 Now fill in the ledger. Bytes are counted from the architecture; accuracies are the values the milestone's README says to expect (88% baseline, about two points lower after pruning), stated here as an illustration and not as a measurement; and the latency column is deliberately the same napkin figure in every row, because the script never times the optimized models and the arithmetic they perform is unchanged.
 
@@ -319,6 +319,6 @@ This milestone built the scorecard that turns Part III's separate optimizations 
 
 1. The optimization script copies the baseline accuracy into the INT8 row because it never runs the quantized weights. Fix that. After `Quantizer.quantize_model` returns, dequantize each tensor with `dequantize_int8` and load the results back into a fresh `DigitMLP`, then run the test set through it. Report the measured retention $R$, and state whether it clears the $0.99$ floor. Then repeat with a 4-bit scheme (scale over 15 levels instead of 255) and find the smallest bit width at which the floor still holds.
 
-2. The script benchmarks only the FP32 baseline. Extend `step_6_benchmark` to time the pruned copy as well, using the same `Benchmark` protocol, and report the measured $S$ with its p95. Before running it, write down your prediction using the napkin argument from The Idea. Then replace the dense multiply in the pruned model's `Linear` layers with a loop over nonzero entries only, time it again, and explain why a sparse loop in Python is slower than the dense NumPy multiply even at 90% sparsity.
+2. The script benchmarks only the FP32 baseline. Extend `step_6_benchmark` to time the pruned copy as well, using the same `Benchmark` protocol, and report the measured $S$ with its p95. Before running it, write down your prediction using the napkin argument from the worked trace. Then replace the dense multiply in the pruned model's `Linear` layers with a loop over nonzero entries only, time it again, and explain why a sparse loop in Python is slower than the dense NumPy multiply even at 90% sparsity.
 
 3. The generation script writes to its `KVCache` but never reads from it, so the speedup it prints compares embedding alone against a full forward pass. Finish the cached path. At each step, embed the new token, project it to a query, key, and value, call `cache.update` with the new key and value, call `cache.get` to retrieve all keys and values so far, and run attention of the single query against them. Time 16 steps both ways with warmup, and compare the measured ratio with the $136 / 16 = 8.5$ napkin bound. Account for the gap in one paragraph.

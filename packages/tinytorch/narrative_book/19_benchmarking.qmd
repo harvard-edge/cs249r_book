@@ -6,6 +6,8 @@ The answer is a small discipline rather than a large piece of code. Run the mode
 
 ![Warmup runs are discarded, measured runs are collected, and the sorted collection yields the median and the tail.](assets/images/diagrams/19_benchmarking-diag-1.svg){#fig-benchmarking-pipeline}
 
+---
+
 ## The Problem
 
 The script below is how most people time a model the first time, and it is wrong in three separate ways. The model is a stand-in that sleeps instead of multiplying, so the numbers are predictable and you can run it without any other TinyTorch class.
@@ -41,6 +43,8 @@ The second flaw is that one measurement is one sample. Even after warmup, the sa
 The third flaw appears once you do repeat the measurement and average it. The napkin version is enough to feel it. If 99 requests take 5.0 ms and one stalls for 500 ms, the mean is 9.95 ms, a number no single request ever experienced. The mean is pulled up by the one outlier and tells you neither what a typical request costs nor how bad the worst ones are. Latency is not symmetric noise around a center; it has a floor and a long right tail, and the average hides both.
 
 There is a fourth problem that the toy model cannot show because it runs on a CPU. On a GPU, the call that launches the work returns before the work is done, so a script like the one above can time the launch, a few hundredths of a millisecond, instead of a 15 ms computation, and report a latency that is wrong by a factor of a thousand. TinyTorch never meets that problem, since NumPy finishes each operation before returning. The bridge at the end of the chapter covers what production code does about it.
+
+---
 
 ## The Idea
 
@@ -91,6 +95,8 @@ A batch of 32 that takes 40 ms has a worse latency than a batch of 1 that takes 
 
 One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Compare a median against a mean, or a warm run against a cold one, and the ratio you get is a property of the measurement rather than of the models.
 
+---
+
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
@@ -121,7 +127,7 @@ Notice that `pos` runs from 0 to `len(s) - 1`, so $P_0$ is the minimum and $P_{1
 
 Chapter 20 measures a baseline and four optimized models and asks, for each pair, how the median moved and how the tail moved. Both answers come from the same list of timings, and so does the verdict at the end of this chapter. A report that someone else will read has to be able to show that list.
 
-The profiler from Chapter 14 collapsed its timings to a mean the moment it finished measuring. That is the naive container, and what it throws away cannot be bought back. Once a hundred timings have become one number there is no median to compute, no $P_{99}$ to check, and no way to tell whether a high mean came from a slow model or from four stalls. On the toy model the mean is 6.5 ms and the median 6.3 ms, and the quarter millisecond between them is the whole story of the stalls, a story only the raw list can tell. Keeping a hundred floats costs nothing anyone would notice.
+The real module's `Profiler` collapses its timings to a single number the moment it finishes measuring (Chapter 14's `measure_latency` kept the list, and this is why). That is the naive container, and what it throws away cannot be bought back. Once a hundred timings have become one number there is no median to compute, no $P_{99}$ to check, and no way to tell whether a high mean came from a slow model or from four stalls. On the toy model the mean is 6.5 ms and the median 6.3 ms, and the quarter millisecond between them is the whole story of the stalls, a story only the raw list can tell. Keeping a hundred floats costs nothing anyone would notice.
 
 So `BenchmarkResult` keeps the raw list and computes every summary from it on demand. Nothing is lost between measuring and reporting, and a reader who distrusts the summary can look at the data.
 
@@ -169,7 +175,7 @@ The mean and standard deviation are still reported. They are not useless, only i
 
 The harness is what Chapter 20 calls on every model it compares, and what you should call on the Chapter 18 decoder before believing that its step cost stopped growing. Its job is to make sure the list handed to `BenchmarkResult` was drawn from the steady-state distribution and is long enough to have a tail.
 
-The naive script from the problem section fails on both counts. Its one timing includes the 40 ms cold start, so it reports a 5 ms model at 50 ms, and if the baseline is measured cold and the optimized model warm, setup alone shows up as a 9x speedup. Here is the fix. Run the model several times and throw those timings away; the profiler in Chapter 14 already did this with a handful of passes, and here the count is a parameter, defaulting to 10, which is enough for allocators to settle and caches to fill on any model in this book. Then run the model 100 more times and record every one, discarding nothing, so the tail is in the list for the percentile function to find.
+The naive script from the problem section fails on both counts. Its one timing includes the 40 ms cold start, so it reports a 5 ms model at 50 ms, and the phantom 9x speedup from the problem section follows from that one number. Here is the fix. Run the model several times and throw those timings away; the profiler in Chapter 14 already did this with a handful of passes, and here the count is a parameter, defaulting to 10, which is enough for allocators to settle and caches to fill on any model in this book. Then run the model 100 more times and record every one, discarding nothing, so the tail is in the list for the percentile function to find.
 
 ```python
 import time
@@ -196,7 +202,7 @@ class Benchmark:
 
 Two details matter. The clock is `time.perf_counter()`, which counts steadily forward from an arbitrary origin and is never adjusted by the system, so a difference of two readings is a duration even if the wall clock jumped in between. And the same input `x` is used for every run, so the timings differ only because of the machine, not because of the data. `torch.utils.benchmark.Timer` has the same two loops inside it, with a warmup before it starts recording.
 
-Running the harness on the toy model from the problem section shows the shape of the output. I ran this exact script once on my laptop. You will see slightly different values and the same pattern, and the pattern is the point.
+Running the harness on the toy model from the problem section shows the shape of the output. I ran this exact script on my laptop while nothing else was competing for the CPU. Your values will differ, and the paragraph after the output says how.
 
 ```python
 bench = Benchmark(warmup_runs=10, measurement_runs=100)
@@ -207,6 +213,8 @@ print(result.summary())
 ```
 
 The 40 ms cold start never appears because warmup absorbed it. The median sits just above the 5 ms sleep, the gap being what `time.sleep` itself costs on my machine. The four stalls in the 100 measured runs occupy the top four positions of the sorted list, so $P_{95}$, which reads position 94, never sees them, while $P_{99}$ lands squarely on one. Four stalls is 4 percent, and a percentile only reports what lies at its position. The mean, meanwhile, sits above the median because the same four runs drag it up.
+
+Run the same script while a browser or a build is competing for the CPU and the picture changes in an instructive way. I tried it. The median stayed within a few tenths of a millisecond of 6.3 ms, while $P_{95}$ jumped to somewhere between 10 and 15 ms, because the operating system was adding stalls of its own on top of the four the toy schedules. That is not the harness misbehaving. It is the second flaw from the problem section showing up in the data, and the tail percentile is the number that caught it while the median slept through it.
 
 ### The verdict
 
@@ -236,6 +244,8 @@ def compare(baseline, optimized, baseline_acc, optimized_acc, retain=0.99):
 ```
 
 Notice that `check_compliance` reads $P_{99}$ and never the mean, so a model that is fast on average but stalls too often fails. `compare` reports the speedup twice, at the median and at the tail, because an optimization can improve one without the other; a KV cache shortens the typical decode step, while a change that removes allocations mostly shortens the tail. Both bars come from MLPerf's inference rules, the 99 percent accuracy target and the $P_{99}$ latency constraint of its server scenario, and the bridge below says what else those rules demand.
+
+---
 
 ## A Worked Trace
 
@@ -286,6 +296,8 @@ assert abs(protocol.percentile(99) - 17.61) < 0.01
 
 Read as a report, the protocol says the model costs 5.10 ms per step and that one step in a hundred can take up to 17.61 ms. Both statements are true and useful. The naive script's 11.87 ms is neither.
 
+---
+
 ## From TinyTorch to Production
 
 The largest difference between this harness and a production one is the clock, and the reason is that a GPU runs asynchronously. When PyTorch code calls `model(x)` on a CUDA tensor, the CPU places kernel launches into the GPU's work queue and returns while the GPU is still computing, so `perf_counter` around the call measures the cost of queueing, often tens of microseconds, rather than the cost of the work. Production timing either calls `torch.cuda.synchronize()` before reading the clock, which blocks the CPU until the queue drains, or records CUDA events[^fn-cuda-event-gpu-timer] into the queue itself and asks the GPU how much time passed between them. `torch.utils.benchmark.Timer` does the synchronization automatically and is the tool to reach for; a hand-rolled `perf_counter` loop around a CUDA model is one of the most common benchmarking bugs in published speedups.
@@ -317,9 +329,13 @@ What carries over unchanged is everything in the middle of the table. Warmup, re
 
 [^fn-hoefler-twelve-ways]: Torsten Hoefler and Roberto Belli, "Scientific Benchmarking of Parallel Computing Systems: Twelve Ways to Tell the Whole Story," *SC*, 2015. Its rules, such as reporting the number of runs and never comparing a mean against a median, are the long form of this chapter.
 
+---
+
 ## Summary
 
 You built a benchmark harness that discards warmup runs, times the model many times with a steady clock, keeps every timing, and reports the median, the tail percentiles, and throughput rather than a single average. You also built the verdict that sits on top of it, a check that a model meets a latency bound at $P_{99}$ and keeps at least 99 percent of the baseline's accuracy. The principle to carry forward is that a latency is a sample from a skewed distribution, so the honest report is the distribution's shape, and the honest comparison holds everything else fixed. Chapter 20 takes `Benchmark`, `BenchmarkResult`, and the 99 percent accuracy floor for granted and asks how the four optimizations of Chapters 15 through 18 compound when they are stacked in one model.
+
+---
 
 ## Exercises
 
