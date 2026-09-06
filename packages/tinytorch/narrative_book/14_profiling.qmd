@@ -96,7 +96,7 @@ The profiler is four short pieces: two counters, a timer, and a roofline that co
 
 The first number a framework needs about a model is its size in bytes, and it needs it twice. The number decides whether the model fits at all. A seven-billion-parameter model in 16-bit floats is 14 GB, which will not load on a GPU with 12 GB of memory, and knowing that before loading is better than finding out during. And for the workload that closed Milestone II, the number is $Q$. A decode step of TinyGPT reads every weight once and does almost nothing with it, so the weight bytes divided by the memory bandwidth is the floor on that step's time, whatever the arithmetic.
 
-The tempting shortcut is to work the count out from the architecture. The worked trace below does exactly that for TinyGPT and needs a seven-row table to reach 1,050,344, and that is a model with four blocks; a production model has dozens, plus the bias vectors, normalization gains, and embedding tables that a back-of-envelope count leaves out. The other shortcut is to trust the parameter count printed beside the model, which someone else's counter produced. We want our own, and it should not be work. Every parameter is already a `Tensor` around a NumPy array, and a NumPy array knows its own element count and its own byte size, so both counts are one sum over the list Chapter 3's `parameters()` already builds.
+The tempting shortcut is to work the count out from the architecture. The worked trace below does exactly that for TinyGPT and needs an eight-row table to reach 1,082,112, for a model with only four blocks; a production model has dozens, plus the bias vectors, normalization gains, and embedding tables that a back-of-envelope count leaves out. The other shortcut is to trust the parameter count printed beside the model, which someone else's counter produced. We want our own, and it should not be work. Every parameter is already a `Tensor` around a NumPy array, and a NumPy array knows its own element count and its own byte size, so both counts are one sum over the list Chapter 3's `parameters()` already builds.
 
 ```python
 import time
@@ -176,7 +176,7 @@ def measure_latency(fn, *args, warmup=5, repeats=50):
     }
 ```
 
-`time.perf_counter` is the right clock for this job. It has sub-microsecond resolution and is not affected by the system clock being adjusted. Each call is timed on its own rather than timing the whole loop and dividing, because the per-call list is what makes the p99 possible. The minimum is worth keeping too. It is the closest you will get to the operation's cost with nothing else interfering. PyTorch's `torch.utils.benchmark.Timer` is this function with a warmup built in and a median instead of a mean, plus the GPU synchronization the production bridge explains.
+`time.perf_counter` is the right clock for this job. It has sub-microsecond resolution and is not affected by the system clock being adjusted. Each call is timed on its own rather than timing the whole loop and dividing, because the per-call list is what makes the p99 possible. The minimum is worth keeping too. It is the closest you will get to the operation's cost with nothing else interfering. PyTorch's `torch.utils.benchmark.Timer` is this function with the warmup and the median built in, plus the GPU synchronization the production bridge explains.
 
 ### The roofline and the profiler
 
@@ -235,22 +235,23 @@ The trace has two halves. The first counts a TinyGPT by hand and checks the coun
 
 ### Counting TinyGPT
 
-Take Chapter 13's `TinyGPT(vocab_size=1000, embed_dim=128, num_heads=4, num_layers=4)`. Its parameters come from five places, and each is a product of shapes plus a bias.
+Take the `TinyGPT` that Milestone II trained, which is Module 13's NumPy `GPT` under the name the milestone gave it, at `TinyGPT(vocab_size=1000, embed_dim=128, num_heads=4, num_layers=4, max_seq_len=256)`. Its parameters live in two lookup tables, four identical blocks, a final LayerNorm, and the head, and each entry is a product of shapes plus a bias where the layer has one.
 
 | Component | Shape arithmetic | Parameters |
 | :--- | :--- | ---: |
 | Token embedding | $1000 \times 128$ | 128,000 |
+| Position table | $256 \times 128$ | 32,768 |
 | Per block: two LayerNorms | $2 \times (128 + 128)$ | 512 |
 | Per block: Q, K, V, output projections | $4 \times (128 \times 128 + 128)$ | 66,048 |
 | Per block: MLP expand and contract | $(128 \times 512 + 512) + (512 \times 128 + 128)$ | 131,712 |
 | Four blocks | $4 \times 198{,}272$ | 793,088 |
 | Final LayerNorm | $128 + 128$ | 256 |
-| Output head | $128 \times 1000 + 1000$ | 129,000 |
-| **Total** | | **1,050,344** |
+| Output head | $128 \times 1000$, no bias | 128,000 |
+| **Total** | | **1,082,112** |
 
-: Parameter count of a four-block TinyGPT with $D = 128$ and a 1,000-token vocabulary. The sinusoidal positional encoding has no parameters. {#tbl-tinygpt-params tbl-colwidths="[34,44,22]"}
+: Parameter count of a four-block TinyGPT with $D = 128$, a 1,000-token vocabulary, and a 256-position table, counted as Module 13 builds it, with a learned position table, biases on the four projections, and none on the head. {#tbl-tinygpt-params tbl-colwidths="[34,44,22]"}
 
-At four bytes per parameter that is 4,201,376 bytes, or 4.2 MB, and this is $Q$ up to the small activation terms.
+At four bytes per parameter that is 4,328,448 bytes, or 4.3 MB, and this is $Q$ up to the small activation terms.
 
 FLOPs depend on the row count. Each block has six Linear layers whose in-times-out products sum to $4 \times 128^2 + 2 \times 128 \times 512 = 196{,}608$, so one row through one block costs $2 \times 196{,}608 = 393{,}216$ FLOPs in Linear layers, plus the attention products. One row through the head costs $2 \times 128 \times 1000 = 256{,}000$. The two cases that matter are one token of decoding ($B = 1$, $S = 1$) and a 64-token prompt ($B = 1$, $S = 64$).
 
@@ -260,32 +261,32 @@ FLOPs depend on the row count. Each block has six Linear layers whose in-times-o
 | Attention products, $4 \times 4 \times S^2 \times 128$ | 2,048 | 8,388,608 |
 | Head FLOPs | 256,000 | 16,384,000 |
 | **Total FLOPs** | **1,830,912** | **125,435,904** |
-| Bytes (weights + input + logits) | 4,205,384 | 4,457,888 |
-| **Arithmetic intensity** | **0.44** | **28.1** |
+| Bytes (weights + input + logits) | 4,332,452 | 4,584,704 |
+| **Arithmetic intensity** | **0.42** | **27.4** |
 
 : FLOPs, bytes, and arithmetic intensity for one forward pass of the same TinyGPT at two sequence lengths. {#tbl-tinygpt-intensity tbl-colwidths="[46,27,27]"}
 
-The prompt pass does 68 times the arithmetic of the decode step and moves six percent more bytes. Its intensity is about 64 times higher, the row-count rule from The Idea. Decoding sits at 0.44 FLOPs per byte, which is below the ridge of every machine you will meet in this book; the byte count even flatters it slightly, since the embedding lookup reads one row of its 512 KB table rather than all of it. The counters agree with the hand arithmetic, which the following check confirms without needing the model itself.
+The prompt pass does 68 times the arithmetic of the decode step and moves six percent more bytes. Its intensity is about 64 times higher, the row-count rule from The Idea. Decoding sits at 0.42 FLOPs per byte, which is below the ridge of every machine you will meet in this book; the byte count even flatters it slightly, since each lookup reads one row of its table rather than all of it, and the token table alone is 512 KB. The counters agree with the hand arithmetic, which the following check confirms without needing the model itself.
 
 ```python
-D, V, L = 128, 1000, 4
+D, V, L, P = 128, 1000, 4, 256
 per_block_linear = 2 * (4 * D * D + 2 * D * 4 * D)     # six Linear layers, one row
 head = 2 * D * V
-params = V * D + L * (4 * D + 4 * (D * D + D) + (D * 4 * D + 4 * D) + (4 * D * D + D)) + 2 * D + (D * V + V)
-assert params == 1_050_344
+params = V * D + P * D + L * (4 * D + 4 * (D * D + D) + (D * 4 * D + 4 * D) + (4 * D * D + D)) + 2 * D + D * V
+assert params == 1_082_112
 
 for S in (1, 64):
     flops = L * S * per_block_linear + L * 4 * S * S * D + S * head
-    nbytes = 4 * params + 8 * S + 4 * S * V           # int64 ids in, float32 logits out
+    nbytes = 4 * params + 4 * S + 4 * S * V           # float32 ids in, float32 logits out
     print(f"S={S:3d}  FLOPs={flops:>12,}  bytes={nbytes:>10,}  I={flops / nbytes:5.2f}")
 ```
 
 ```
-S=  1  FLOPs=   1,830,912  bytes= 4,205,384  I= 0.44
-S= 64  FLOPs= 125,435,904  bytes= 4,457,888  I=28.14
+S=  1  FLOPs=   1,830,912  bytes= 4,332,452  I= 0.42
+S= 64  FLOPs= 125,435,904  bytes= 4,584,704  I=27.36
 ```
 
-Running `count_parameters` and `count_flops` on the actual Chapter 13 model returns the same three numbers; the arithmetic above is the version you can check on paper.
+Running `count_parameters` and `count_flops` on the model itself returns the same three numbers, and the walker finds all 25 Linear layers on the way (I checked). `profile` reports the same byte counts too, which is why the input term above is four bytes per token rather than eight. Chapter 6's `Tensor` stores token IDs as float32 like everything else. The arithmetic above is the version you can check on paper.
 
 ### Measuring a machine's ceilings
 
@@ -324,7 +325,7 @@ Read the table from the top. From 2 to 16 rows the time is flat at about 2 ms wh
 
 Two caveats on the data. The single-row case is faster than the two-row case because NumPy hands a single row to a dedicated matrix-vector routine that streams the weights at nearly four times the rate of the general routine; that difference is a property of the library, not the hardware, and it is exactly the kind of thing a profiler exists to surface. And the 33 GB/s ceiling is what this routine achieves, not what the memory system can deliver; the one-row case shows the chip can do at least 118 GB/s. A roofline built from measured ceilings describes the machine as your code sees it, which is the one that matters.
 
-Now put TinyGPT on this roofline. Decoding at 0.44 FLOPs per byte is eighty times left of the ridge. The profiler's `bound_ms` for one decode step is $4.2\text{ MB} / 33\text{ GB/s} \approx 0.13$ ms; the arithmetic would need $1.83\text{ MFLOP} / 1.2\text{ TFLOP/s} \approx 0.0015$ ms. Every optimization in the next four chapters that works on this model works by lowering the first number.
+Now put TinyGPT on this roofline. Decoding at 0.42 FLOPs per byte is eighty-five times left of the ridge. The profiler's `bound_ms` for one decode step is $4.3\text{ MB} / 33\text{ GB/s} \approx 0.13$ ms; the arithmetic would need $1.83\text{ MFLOP} / 1.2\text{ TFLOP/s} \approx 0.0015$ ms. Every optimization in the next four chapters that works on this model works by lowering the first number.
 
 ---
 
@@ -334,7 +335,7 @@ The profiler you built reads two counts off shapes and one time off a clock. Pro
 
 PyTorch's `torch.profiler` (built on a tracing library called Kineto) records every operator the model runs, with its shapes, its time on the CPU, and its time on the GPU, and exports a timeline that Chrome's `chrome://tracing` page or Perfetto can display. `torch.utils.flop_counter.FlopCounterMode` does what `count_flops` does, but for every operator PyTorch knows, by intercepting the calls rather than by walking attributes. What forces the extra machinery is that a GPU runs asynchronously from the CPU that drives it. The CPU queues up work, called kernels, and returns immediately; wrap `time.perf_counter` around a GPU call and you time the queueing, not the work. Production timers use events recorded on the GPU's own stream, or call `torch.cuda.synchronize()` before reading the clock.
 
-NVIDIA's Nsight Compute reads the hardware's own counters and reports, per kernel, how much of the memory bandwidth and how much of the arithmetic throughput the kernel used, and it draws the kernel on a roofline for you. The ceilings it uses are steep. An A100 delivers 312 TFLOP/s of FP16 matrix arithmetic from its Tensor Cores against 2.0 TB/s from its HBM (the high-bandwidth memory stacked beside the GPU die), for a ridge near 156 FLOPs per byte; an H100 delivers 989 TFLOP/s against 3.35 TB/s, a ridge near 295 (both from NVIDIA's datasheets). At 0.44 FLOPs per byte, a single-token decode step can use less than one percent of either chip. That is the arithmetic behind Milestone II's observation that decoding starves the GPU, and it is why every production serving system batches many requests into one forward pass. Batching raises the row count, and the row count is the intensity.
+NVIDIA's Nsight Compute reads the hardware's own counters and reports, per kernel, how much of the memory bandwidth and how much of the arithmetic throughput the kernel used, and it draws the kernel on a roofline for you. The ceilings it uses are steep. An A100 delivers 312 TFLOP/s of FP16 matrix arithmetic from its Tensor Cores against 2.0 TB/s from its HBM (the high-bandwidth memory stacked beside the GPU die), for a ridge near 156 FLOPs per byte; an H100 delivers 989 TFLOP/s against 3.35 TB/s, a ridge near 295 (both from NVIDIA's datasheets). At 0.42 FLOPs per byte, a single-token decode step can use less than one percent of either chip. That is the arithmetic behind Milestone II's observation that decoding starves the GPU, and it is why every production serving system batches many requests into one forward pass. Batching raises the row count, and the row count is the intensity.
 
 What carries over unchanged is the whole model. The time bound is a maximum of two terms; intensity is FLOPs per byte; the ridge is the ratio of two peaks; warmup and percentiles are how you time anything. Production rooflines add rows to the table rather than replacing it. A GPU has a separate compute ceiling for each precision (FP32, FP16 on Tensor Cores, INT8), so a chip has several roofs and quantization moves an operation to a higher one as well as cutting its bytes. Caches complicate $Q$. Bytes that are reused from on-chip memory never cross the bus, so a fused sequence of operations can move far fewer bytes than the sum of its parts. And for small operations a third floor appears below both ceilings. Each kernel costs a few microseconds just to launch, so a model made of thousands of tiny kernels is bound by launch overhead rather than by either roofline term. Chapters 15, 17, and 18 are each a way of attacking one of those three: fewer bytes per weight, fewer separate kernels, and fewer bytes recomputed.
 

@@ -36,7 +36,7 @@ Each of the four levers acts on one of the three quantities, and that is the who
 
 Two levers multiply exactly when the second acts on the whole of what the first left behind. Two levers on the same dominant term do this. If weight bytes dominate and INT8 cuts them by four, then a factorization that halves the weights cuts the remainder by two, and the stack is 8x on that term. Two levers on different terms do not. If launches dominate and INT8 cuts the bytes term by four, the step barely changes, because the bytes term was hiding under the launch floor; the INT8 speedup measured alone rounds to 1.0x. Apply fusion first, so the launch floor drops below the bytes term, and the same INT8 conversion now delivers most of its 4x. The lever did not change. What it was allowed to act on did.
 
-That last observation is the practical content of the chapter. The marginal speedup a lever appears to deliver depends on the order in which the levers are applied, while the total for the full stack does not. A team that measures each lever alone will see four numbers that do not multiply to anything meaningful. A team that measures the stack cumulatively in one order will see marginal factors that another team, stacking in a different order, cannot reproduce. Only the model, or a measurement of the complete stack, gives a number that survives.
+That last observation is the practical content of the chapter. The marginal speedup a lever appears to deliver depends on the order in which the levers are applied, while the total for the full stack does not. Only the model, or a measurement of the complete stack, gives a number that survives, and the rest of the chapter builds both.
 
 ---
 
@@ -50,7 +50,7 @@ The code has three parts. A cost model turns a machine and a model configuration
 
 ### The machine and the model as a handful of numbers
 
-Picture the moment this code exists for. A team has `TinyGPT` serving and the four levers of Chapters 15 through 18 on the shelf. Each lever takes days to apply properly, and the question on the table is which one to spend those days on first, and what number to promise once all four are in.
+Picture the moment this code exists for. A team has `TinyGPT` serving and the four levers of Chapters 15 through 18 on the shelf. Each lever takes days to apply properly, and the question on the table is which one to spend those days on first, and what number to promise once all four are in. Milestone III asks the same question with an accuracy floor and a latency target attached.
 
 The thorough way to answer is to build every variant. Four levers, each on or off, is sixteen configurations, each a model to quantize, factorize, fuse, or cache, and each a run of Chapter 19's warmup-and-percentile protocol. Sixteen builds and sixteen timing runs is days of work, and the answer is only good for one model size, one generation length, and one machine. Change any of the three and the work starts over. The shortcut of measuring each lever alone and multiplying is faster and, as The Problem showed, wrong.
 
@@ -97,7 +97,7 @@ A decode step is the unit a serving system pays for. Every generated token is on
 
 The naive price is a FLOP count, and Chapter 14 already showed why it misleads. For `TinyGPT` at this size the miss is worse than it was there. The first step's arithmetic is 1.8 million operations, which at 1.2 TFLOP/s takes 0.0015 ms. The 4.2 MB of weights it has to stream take 0.126 ms, eighty times longer. And the 213 separate operations it launches, at 5 microseconds each, take 1.065 ms, more than eight times longer again. A FLOP count is off by a factor of about 800 on this step, and even Chapter 14's roofline, which fixes the first miss, is off by nine because it does not know about launches.
 
-So the step is priced by the equation from The Idea. Take the larger of the bytes term and the arithmetic term, then add a launch floor on top, because launches happen on the host before any bytes move and cannot hide under either. Where does 213 come from? From counting the separate operations in an unfused transformer block, which @tbl-capstone-op-count does, before and after fusion folds the elementwise chains into the matrix multiplies they follow.
+So the step is priced by the equation from The Idea. Take the larger of the bytes term and the arithmetic term, then add the launch floor on top, since a launch cannot hide under either roofline term. Where does 213 come from? From counting the separate operations in an unfused transformer block, which @tbl-capstone-op-count does, before and after fusion folds the elementwise chains into the matrix multiplies they follow.
 
 | Piece of one block | Separate operations, unfused | After fusion |
 | :--- | :---: | :---: |
@@ -177,7 +177,7 @@ def waterfall(cfg, m, n_tokens, order=LEVERS):
         prev = now
 ```
 
-Two things to notice. `replace` returns a new configuration and leaves the old one alone, so a lever is a pure function and a stack is function composition; nothing about applying INT8 depends on whether fusion came first, except the number that comes out. And `order` is an argument rather than a constant so that the trace can run the same four levers forward and reversed, and show the cumulative total agreeing while every marginal factor moves. This is the cumulative ablation table a systems paper prints, with the one thing those tables usually leave out, the order, made explicit.
+Two things to notice. `replace` returns a new configuration and leaves the old one alone, so a lever is a pure function and a stack is function composition; nothing about applying INT8 depends on whether fusion came first, except the number that comes out. And `order` is an argument rather than a constant so that the trace can run the same four levers forward and reversed, and show the cumulative total agreeing while every marginal factor moves. This is the cumulative ablation table a systems paper prints, and the row of feature switches a serving engine's launch command exposes, with the one thing both usually leave out, the order, made explicit.
 
 ### Measuring instead of estimating
 
@@ -213,7 +213,7 @@ def submission(baseline, optimized, techniques):
     }
 ```
 
-Three things in `submission` deserve a look. The speedup is a ratio of medians, not of means, for the reason Chapter 19 gave. The compression ratio compares bytes, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one; the harness does not hide that. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves.
+Three things in `submission` deserve a look. The speedup is a ratio of medians, not of means, for the reason Chapter 19 gave. The compression ratio compares bytes, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one; the harness does not hide that. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves. The timing half is the shape `torch.utils.benchmark.Timer` reports too, a median over warmed-up runs; the two fields beside it are what Module 20 adds.
 
 ---
 
@@ -245,11 +245,11 @@ Read the last column first. Alone, three of the four levers do almost nothing, a
 
 Reverse the order and the total is identical while every marginal factor moves. `waterfall(Config(), Machine(), 128, order=dict(reversed(list(LEVERS.items()))))` reports the cache at 1.01x, then fusion at 3.64x, then factorization at 1.15x, then INT8 at 1.28x, for the same 28.63 ms and 5.41x. The INT8 lever that was worth 1.03x in the first order is worth 1.28x in the second. Its byte savings did not change; what changed is that fusion had already removed the floor that hid them.
 
-The same code answers the question of where a 16x-class number would come from. Set `Config(D=768, L=12, V=50257)`, a model the size of GPT-2 small, and generate 1024 tokens. The baseline is 123 seconds, the stack is 5.6 seconds, a 22x speedup, and the KV cache applied last is worth 15.4x on its own margin, because without it each of the last steps re-projects a thousand tokens through some 85 million weights. Generate only 128 tokens from that same model and the stack is worth 5.4x again. There is no 16x property of the four levers. There is a cost model, a model size, a generation length, and a machine, and the number falls out of those.
+The same code answers the question of where a 16x-class number would come from. Set `Config(D=768, L=12, V=50257)`, a model the size of GPT-2 small, and price a 1024-token generation on the napkin machine. The model puts the baseline at 123 seconds and the stack at 5.6 seconds, a 22x speedup, and the KV cache applied last is worth 15.4x on its own margin, because without it each of the last steps re-projects a thousand tokens through some 85 million weights. Price only 128 tokens from that same model and the stack is worth 5.4x again. There is no 16x property of the four levers. There is a cost model, a model size, a generation length, and a machine, and the number falls out of those.
 
 ### Measuring one lever
 
-The pure-Python listings in this book cannot run a million-parameter `TinyGPT` fast enough to time a generation, so for the measured half of the trace I apply one lever, the KV cache, to a small attention loop that has the same shape. The recomputing version projects every token again at every step; the cached version projects each token once and appends. Both produce the same output, so the accuracy delta is zero by construction, and the compression ratio comes out below one because the cache is bytes spent to save arithmetic.
+The cache exists for the decode phase of a serving loop, the part that runs once per generated token after the prompt has been processed, and every decode step needs the keys and values of every token before it. The naive step projects all of them again; the cached step projects only the newest token and appends. The pure-Python listings in this book cannot run a million-parameter `TinyGPT` fast enough to time a generation, so for the measured half of the trace I apply that one lever to a small attention loop with the same shape, 64 steps, each attending over every token before it. Both versions produce the same output, so the accuracy delta is zero by construction, and the compression ratio comes out below one because the cache is bytes spent to save arithmetic.
 
 ```python
 import math, random

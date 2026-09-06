@@ -6,6 +6,8 @@ The answer is a small class called `Trainer`. Its core is five calls in a fixed 
 
 ![The five-step training loop: zero_grad, forward, loss, backward, step](assets/images/diagrams/08_training-diag-1.svg){#fig-training-pipeline}
 
+---
+
 ## The Problem
 
 Chapter 6 built `backward()` so that it *adds* into `param.grad` rather than overwriting it. That choice was forced. When two branches of a network share a parameter, its gradient is the sum of both contributions, and adding is how the sum happens. The price is that nothing ever clears `.grad` on its own. If you forget to clear it, the second batch's gradient lands on top of the first, the third on top of both, and the optimizer steps along the running total.
@@ -43,6 +45,8 @@ The correct column walks steadily toward the minimum at zero. The forgotten colu
 
 Two other bugs belong to the same family. Calling `optimizer.step()` before `loss.backward()` updates the parameters with whatever gradient is in the buffer, which is either nothing or last batch's. Forgetting to switch the model into evaluation mode leaves dropout (Chapter 3) zeroing half the activations while you measure test accuracy. None of these crash. The defense is not cleverness. It is a fixed order, written once, in one place, that every epoch runs through the same way.
 
+---
+
 ## The Idea
 
 ### Five steps, and why the order is forced
@@ -66,6 +70,8 @@ The whole contract fits in one sentence. *Every optimizer step must see gradient
 The five steps handle one batch. Around them sit two more loops, one over the batches in a dataset (one pass is an epoch) and one over epochs. The `Trainer` owns the state that outlives a single batch: how many epochs and optimizer steps have completed, the current learning rate, and a history of losses for plotting. It also owns the `training` flag from Chapter 3, setting it to `True` before a training pass and `False` before evaluation, so layers like dropout behave correctly without the caller remembering.
 
 That is the whole model. A fixed order for one batch, and a little state that carries from one batch to the next. The four conveniences from the opening (the schedule, the clip, the evaluation switch, and the checkpoint) each attach to that state at one point in the loop, and I introduce each of them beside its code, where the reason for it is easiest to see.
+
+---
 
 ## The Code
 
@@ -332,6 +338,8 @@ Trainer.load_checkpoint = load_checkpoint
 
 Notice what the optimizer entry does *not* contain. Only the learning rate is saved; the momentum buffer of `SGD` and the two moment buffers of `AdamW` from Chapter 7 are not. A run resumed from this checkpoint starts those buffers from zero, so its first few steps after the restart differ from the steps an uninterrupted run would have taken. That is a real gap, and the exercises ask you to close it. `torch.save` writes a dictionary much like this one, and the training frameworks built on top of it add the rename.
 
+---
+
 ## A Worked Trace
 
 The smallest run that exercises all five steps is a model with one weight, one training sample, and mean squared error. Take $w = 0.5$, input $x = 1$, target $y = 1$, and plain gradient descent at $\eta = 0.1$. The loss is $(wx - y)^2$ and its gradient with respect to $w$ is $2(wx - y)\,x$.
@@ -397,6 +405,8 @@ for t in range(5):
     print(f"epoch {t}: lr = {lr_t:.4f}")
 ```
 
+---
+
 ## From TinyTorch to Production
 
 PyTorch ships no `Trainer` in its core library. The five calls are written by hand in nearly every PyTorch script in existence, in exactly this order, and libraries such as PyTorch Lightning and the Hugging Face `Trainer` exist to write them for you with the same conveniences this chapter added. What changes in production is not the contract but the cost of each step, and most of the differences below are responses to that cost.
@@ -424,9 +434,13 @@ Across many GPUs the contract holds without modification. Under `DistributedData
 
 What to look for in your own work follows from the table. Find the five calls in any script you inherit and check their order, especially `zero_grad`, which is the one most often misplaced. Log the number `clip_grad_norm_` returns; a sudden jump in the pre-clip norm is the earliest sign of a run going wrong. When resuming from a checkpoint, confirm the optimizer state was saved, not only the weights. And when a loss curve looks wrong with no error in sight, suspect the loop before the model.
 
+---
+
 ## Summary
 
-You built a `Trainer` that runs the five-step loop (zero_grad, forward, loss, backward, step) in a fixed order and keeps the state that outlives a batch: epoch and step counters, the learning rate, and a loss history. Around the loop you added gradient accumulation by seeding `backward()` with $1/k$, global-norm clipping that shortens the step without turning it, a cosine schedule that lowers the learning rate as training settles, an evaluation pass that never touches `.grad`, and a checkpoint written atomically so a crash cannot corrupt it. The principle to keep is the contract behind the order: every optimizer step must see gradients from exactly one loss, computed on the current parameters, and every misordering violates it silently. Milestone I takes the `Trainer`, `train_epoch`, and `evaluate` for granted and asks whether the engine you have assembled since Chapter 1 can, run end to end, learn XOR and classify handwritten digits.
+You built a `Trainer` that runs the five-step loop (zero_grad, forward, loss, backward, step) in a fixed order and keeps the state that outlives a batch: epoch and step counters, the learning rate, and a loss history. Around the loop you added gradient accumulation by seeding `backward()` with $1/k$, global-norm clipping that shortens the step without turning it, a cosine schedule that lowers the learning rate as training settles, an evaluation pass that never touches `.grad`, and a checkpoint written atomically so a crash cannot corrupt it. The principle to keep is the contract behind the order: every optimizer step must see gradients from exactly one loss, computed on the current parameters, and every misordering violates it silently. Milestone I takes the five-step loop, the evaluation pass, and every class the `Trainer` wraps for granted and asks whether the engine you have assembled since Chapter 1 can, run end to end, learn XOR and classify handwritten digits.
+
+---
 
 ## Exercises
 
