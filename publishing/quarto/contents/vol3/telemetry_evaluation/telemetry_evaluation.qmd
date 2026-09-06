@@ -2,7 +2,7 @@
 engine: markdown
 ---
 
-# Telemetry and Evaluation {#sec-vol3-telemetry-evaluation}
+# Telemetry, Distributed Tracing, and Trajectory Benchmarking {#sec-vol3-telemetry-evaluation}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -14,14 +14,11 @@ engine: markdown
 
 ## Purpose {.unnumbered .unlisted}
 
-\begin{marginfigure}
-\mlagentstack{95}{30}{25}{30}{20}{20}
-\caption{The Agentic Machine Learning Systems Stack. Telemetry \& Evaluation operates at Layer 6 (Fleet \& Assurance).}
-\end{marginfigure}
-
 _How do we trace, debug, and systematically benchmark non-deterministic agent trajectories across long horizons and dynamic software environments?_
 
-Debugging a deterministic program is well understood (GDB, stack traces, core dumps). Debugging an agentic trajectory that fails on Step 47 only 5% of the time is a complex systems challenge. Non-determinism stems from temperature sampling, GPU floating-point non-associativity across CUDA threads, and asynchronous tool network latency. Runtimes must implement Deterministic Trace Reconstructibility by capturing all non-deterministic interactions into immutable event streams. In production, reading through 500,000 raw prompt tokens is impossible; operations mandate structured distributed tracing conforming to OpenTelemetry GenAI Semantic Conventions. Furthermore, static benchmarks (MMLU, GSM8K) are useless for agent evaluation. Agents must be evaluated inside interactive, reproducible software environments (SWE-bench, WebArena) measured across stochastic distributions (Pass@k) with statistical release gates.
+Debugging a deterministic program is well understood. Decades of systems engineering have produced robust tools: symbolic debuggers (GDB), call-stack backtraces, core dumps, and deterministic execution profiles. In contrast, debugging an agentic trajectory that fails at Step 47 only $5\%$ of the time is a fundamentally new systems challenge. Non-determinism arises from multiple layers: stochastic temperature sampling ($T > 0$), floating-point non-associativity across parallel CUDA warp reductions, asynchronous tool network latencies, and mutating external environment states. When an autonomous agent degrades into an unrecoverable hallucination loop or executes a destructive database mutation, dumping 500,000 raw prompt tokens into flat log files provides zero causal diagnostic power.
+
+In production fleets, reliability demands **Deterministic Trace Reconstructibility**: capturing all non-deterministic interactions across the environment boundary into immutable event-sourced streams. Furthermore, operating at scale mandates structured distributed tracing that conforms to the OpenTelemetry GenAI Semantic Conventions, binding multi-model inferences, token consumption, tool execution latencies, and monetary costs into unified causal Directed Acyclic Graphs (DAGs). At the evaluation layer, static question-answering datasets (Massive Multitask Language Understanding (MMLU), GSM8K) have collapsed under benchmark saturation, test-set data contamination, and the total absence of interactive feedback. Agentic systems must be benchmarked inside hermetic, reproducible execution gyms (SWE-bench, WebArena) and evaluated across stochastic distributions using unbiased Pass@$k$ estimators, Trajectory Goodput ($G$), and sequential statistical release gates.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -29,128 +26,512 @@ Debugging a deterministic program is well understood (GDB, stack traces, core du
 
 :::
 
+\begin{marginfigure}
+\mlagentstack{95}{30}{25}{30}{20}{20}
+\caption{The Agentic Machine Learning Systems Stack. Telemetry, Distributed Tracing, and Benchmarking operates at Layer 6 (Fleet \& Assurance).}
+\end{marginfigure}
+
 ::: {.callout-learning-objectives}
 
-- Identify the physical and algorithmic sources of trajectory non-determinism
-- Implement deterministic event-sourcing to enable bit-exact offline replay of agent failures
-- Construct time-travel debuggers that support counterfactual branch forking and observation diffing
-- Instrument agent runtimes using OpenTelemetry GenAI semantic conventions
-- Design statistical evaluation suites and canary CI/CD release gates using Pass@k metrics
+### In this chapter, you will learn:
+
+- Why static question-answering benchmarks collapse for agents, establishing the necessity of interactive, hermetic execution gyms.
+- The systems architecture of hermetic environment sandboxes featuring copy-on-write (CoW) filesystem snapshotting, network isolation, and independent test oracles.
+- The mathematical derivation of the unbiased Pass@$k$ estimator and the Trajectory Goodput ($G$) invariant across dense and Mixture-of-Experts (MoE) model serving backends.
+- How to quantify statistical power and construct non-parametric bootstrap confidence intervals under hardware and algorithmic non-determinism.
+- The OpenTelemetry GenAI span hierarchy for distributed tracing across multi-turn agent trajectories, tools, and subagents.
+- Mechanisms for W3C TraceContext propagation across asynchronous job queues and stochastic search trees.
+- The architecture of deterministic event-sourcing and time-travel debuggers supporting state rewind, observation diffing, and counterfactual branch forking.
+- Trajectory latency profiling and Amdahl's Law decomposition across model prefill, autoregressive decode, and blocking tool I/O.
+- Automated causal fault localization via contrastive trace diffing and delta debugging on agent context.
+- Continuous integration pipelines utilizing Sequential Probability Ratio Testing (SPRT) and supervisory human-in-the-loop observability.
 
 :::
 
 ## The Collapse of Static Benchmarks {#sec-vol3-telemetry-the-collapse-of-static}
 
-* **Technical Blurb:** Demonstrates why static question-answering datasets (MMLU, GSM8K) fail to evaluate agentic systems. Analyzes Goodhart’s Law, test-set data contamination, and the lack of stateful environmental feedback, establishing the necessity of interactive execution environments.
-* **Seminal Citations:**
-  * Jimenez, C. E., et al. (2024). *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?* [ICLR 2024 / arXiv:2310.06770](https://arxiv.org/abs/2310.06770).
-  * Schaeffer, R., et al. (2024). *Are Emergent Abilities of Large Language Models a Mirage?* [NeurIPS 2023 / arXiv:2304.15004](https://arxiv.org/abs/2304.15004).
+For the first decade of modern deep learning, machine learning evaluation was dominated by static, feedforward datasets. Benchmarks such as ImageNet, GLUE, SQuAD, MMLU, and GSM8K evaluated models on isolated input-output pairs: a fixed context $x$ was fed into model $f_\theta(x)$, and the resulting prediction $\hat{y}$ was scored against a static ground-truth label $y$. In an agentic systems regime, this static paradigm collapses entirely.
 
+### Goodhart's Law and Pretraining Contamination
+
+Static benchmarks suffer from Goodhart's Law: *"When a measure becomes a target, it ceases to be a good measure."* Because static datasets consist of fixed text strings hosted on public repositories, they inevitably leak into web-scale pretraining crawls. As demonstrated by @card2020little, data contamination creates an illusion of high-level reasoning when models are merely performing verbatim memorization of test-set solutions.
+
+Furthermore, static benchmarks reward prompt-engineering shortcuts. In multiple-choice benchmarks like MMLU, models can achieve high scores by exploiting token-likelihood biases, length heuristics, and option-order artifacts without developing robust planning or error-recovery capabilities. Once deployed into an external environment where questions are not multiple-choice and solutions require executing multistep shell commands, model performance degrades precipitously.
+
+### Absence of Environmental Feedback and State Mutations
+
+The fatal limitation of static evaluation is its open-loop nature. An autonomous agent is fundamentally a closed-loop control system operating within an external environment $\mathcal{E}$. In an agentic trajectory $\tau = (s_0, a_0, o_1, s_1, a_1, \dots, s_H)$, every action $a_t$:
+
+1. **Mutates External State:** Writing a file to disk, altering database schemas, firing an API webhook, or running a code patch irreversibly changes the environment from $s_t$ to $s_{t+1}$.
+2. **Generates Dynamic Observations:** Subsequent observation $o_{t+1} \sim P(o_{t+1} \mid s_{t+1}, a_t)$ cannot be known in advance; it depends on the exit codes, compiler error messages, and network payloads returned by the environment.
+3. **Compounds Intermediate Errors:** In a static test, an error on question $i$ has zero impact on question $i+1$. In an agent trajectory, an erroneous decision at step $t=3$ shifts the environment into an unrecoverable state, causing all downstream actions to fail ($P(E_t \mid \text{Error}_{t-1}) \ll p$).
+
+As analyzed by @schaeffer2023mirage, many apparent "emergent abilities" observed in foundation models are artifacts of non-linear, discontinuous evaluation metrics rather than fundamental phase transitions in model intelligence. When evaluating multi-step tasks where success requires $N$ consecutive correct steps, the joint probability collapses exponentially:
+
+$$P_{\text{success}} = \prod_{t=1}^N P(a_t = a_t^* \mid h_t) \approx p^N$$
+
+A model with $95\%$ single-step accuracy collapses to a $7.7\%$ success rate over a 50-step trajectory. Measuring single-step accuracy on static text provides zero insight into whether an agent can sustain coherent goal pursuit across a 50-step horizon. Robust evaluation demands executing the agent inside interactive, dynamic software environments (@jimenez2024swebench; @chen2021evaluating).
 
 ## Hermetic Environment Gyms {#sec-vol3-telemetry-hermetic-environment-gyms}
 
-* **Technical Blurb:** Examines the systems architecture of reproducible, stateful software environments (SWE-bench, WebArena, OSWorld). Addresses deterministic environment reset, copy-on-write filesystem snapshotting, local network isolation, and preventing benchmark execution side-effects from escaping to production networks.
-* **Seminal Citations:**
-  * Zhou, S., et al. (2024). *WebArena: A Realistic Web Environment for Building Autonomous Agents*. [ICLR 2024 / arXiv:2307.13854](https://arxiv.org/abs/2307.13854).
-  * Xie, T., et al. (2024). *OSWorld: Benchmarking Multimodal Agents for Open-Ended Tasks in Operating Systems*. [NeurIPS 2024 / arXiv:2404.07972](https://arxiv.org/abs/2404.07972).
+To replace static datasets with interactive environments, the systems community developed **Agent Gyms**—standardized, reproducible execution environments. Prominent benchmarks include:
 
+- **SWE-bench** (@jimenez2024swebench): Evaluates agents on 2,294 real-world software engineering GitHub issues drawn from popular Python repositories (Django, SymPy, scikit-learn). The agent receives a problem description and must navigate the codebase, modify files, and produce a git patch that passes the repository's test suite.
+- **WebArena** (@zhou2024webarena): Evaluates autonomous web agents across realistic enterprise web applications (e-commerce storefronts, GitLab repositories, Wikipedia knowledge bases, open-source forums) with live HTTP servers and browser automation.
+- **OSWorld** (@xie2024osworld): Benchmarks multimodal agents across full operating systems (Ubuntu), executing complex GUI actions, shell scripts, and multi-application workflows.
+
+Building a production-grade evaluation gym requires solving severe systems engineering challenges: isolation, state reset latency, and benchmark air-gapping. @Fig-vol3-hermetic-gym details the architectural components of a hermetic agent evaluation gym.
+
+::: {#fig-vol3-hermetic-gym fig-env="figure" fig-pos="htb" fig-cap="**Hermetic Environment Gym Architecture for Agent Evaluation**: The architecture isolates the agent in an air-gapped, zero-trust sandbox with copy-on-write filesystem snapshotting, local mock servers, and an independent verification harness." fig-alt="Diagram of a hermetic environment gym showing the three columns: Evaluation Orchestrator with task registry and worker pool, Hermetic Sandbox Gym with network virtualization air-gap and copy-on-write storage stack, and Verification Oracles with hidden test patches and result evaluation."}
+![](images/svg/hermetic_eval_gym_architecture.svg)
+:::
+
+### The Five Invariants of Hermetic Evaluation
+
+A benchmarking harness must guarantee five architectural invariants to ensure valid, reproducible results:
+
+1. **Deterministic State Initialization:** Every evaluation instance must boot from a known, immutable golden snapshot. Running task $T_i$ must yield identical starting conditions regardless of which node executes it or what past tasks ran on the host.
+2. **Copy-on-Write (CoW) Storage Virtualization:** Resetting a full Linux environment with thousands of dependencies (e.g. compiling NumPy or Django) can take several minutes if performed via fresh container builds. Production gyms utilize Copy-on-Write filesystems (OverlayFS, ZFS clones, or Btrfs snapshots). The base container rootfs is mounted read-only, and an ephemeral write layer captures all file modifications. Resetting an environment requires simply unmounting and discarding the ephemeral CoW layer, achieving reset latencies under $50\text{ ms}$.
+3. **Process and Micro-VM Isolation:** Untrusted code generated by agents must never execute on the host machine. Gyms run inside hardened virtualization boundaries, such as Firecracker micro-VMs or unprivileged Docker containers with isolated PID, IPC, mount, and user namespaces, constrained by strict cgroups for memory and CPU allocation.
+4. **Network Air-Gapping and Anti-Contamination:** Agents must be strictly prevented from accessing the public internet during benchmark runs. Without network isolation, an agent running on SWE-bench could easily query GitHub, locate the actual pull request that resolved the issue, and copy the human committer's patch verbatim. Gyms enforce a loopback-only network policy (`127.0.0.1`), blackhole DNS resolution, and route internal service requests through localized mock servers.
+5. **Independent Test Oracles:** The agent must never have access to the evaluation test harness during execution. In SWE-bench, the repository contains two sets of tests:
+   - `PASS_TO_PASS`: Existing unit tests that must continue to pass (ensuring zero regression).
+   - `FAIL_TO_PASS`: Hidden unit tests written by the human author that reproduce the reported bug.
+
+   During the agent's trajectory, the `FAIL_TO_PASS` test files are strictly withheld. Once the agent outputs its final candidate patch, the execution engine applies the hidden evaluation patch (`eval.patch`) in a clean sandbox and executes the test runner.
+
+@Tbl-vol3-agent-benchmark-gyms compares the structural systems trade-offs across prominent agent benchmarking gyms.
+
+| Benchmark Gym | Environment State | Action Space | Reset Mechanism | Verification Oracle | Network Isolation |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **SWE-bench** (@jimenez2024swebench) | Python codebases & git trees | Bash shell, file editing | CoW container discard (<100 ms) | Unit test regression suites (`pytest`) | Total Air-Gap (Local git repo) |
+| **WebArena** (@zhou2024webarena) | Stateful web servers & DBs | Browser DOM, Playwright | DB rollback & container reset | End-state DB & DOM assertions | Local subnet (Mock enterprise) |
+| **OSWorld** (@xie2024osworld) | Ubuntu desktop & GUI apps | OS mouse, keyboard, bash | VM snapshot restore (1–3s) | System state diffs & log parsers | Host-only virtual networking |
+| **InterCode** (@jimenez2024swebench) | Bash & SQL execution | Interactive REPL | In-memory DB transaction rollback | Execution return codes & table diffs | Air-gapped container sandbox |
+: **Systems Comparison of Agent Benchmark Environments**: Structural characteristics, action spaces, reset mechanisms, verification oracles, and isolation boundaries across representative agent gyms. {#tbl-vol3-agent-benchmark-gyms}
 
 ## Trajectory Metrics: Pass@k, Goodput, and Cost-per-Goal {#sec-vol3-telemetry-trajectory-metrics-pass-k}
 
-* **Technical Blurb:** Replaces stateless metrics (tokens/second, BLEU) with trajectory systems metrics: unbiased Pass@$k$ estimators under stochastic sampling, steps-to-solution efficiency, cost-per-resolved-task, and Trajectory Goodput (verified goals completed per dollar and per kilowatt-hour).
-* **Seminal Citations:**
-  * Chen, M., et al. (2021). *Evaluating Large Language Models Trained on Code* (Pass@k Derivation). [arXiv:2107.03374](https://arxiv.org/abs/2107.03374).
-  * Reddi, V. J., et al. (2020). *MLPerf Inference Benchmark*. [ISCA 2020](https://doi.org/10.1109/ISCA45697.2020.00045).
+Traditional NLP metrics like BLEU, ROUGE, and Perplexity are completely meaningless for evaluating agentic trajectories. A generated code patch that has a $99\%$ lexical match with the ground truth may still fail to compile due to a missing semicolon, while a patch with completely different syntax may resolve the bug flawlessly. Agent evaluation requires systems-level trajectory metrics.
 
+### The Unbiased Pass@k Estimator
+
+Because language model generation is stochastic when temperature $T > 0$, evaluating an agent on a single run ($k=1$) exhibits massive variance. A system may succeed on a task purely by chance, or fail due to an unlucky initial token choice. To evaluate capability robustly, practitioners sample $n$ candidate trajectories per task ($n \ge k$) and compute the probability that at least one of the top $k$ samples successfully completes the goal.
+
+A naive estimator that evaluates all $\binom{n}{k}$ subsets directly is computationally impractical and introduces high estimator variance. Instead, @chen2021evaluating derived the minimum-variance unbiased estimator for Pass@$k$:
+
+$$\text{Pass}@k = \mathbb{E}_{\text{tasks}} \left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]$$ {#eq-vol3-pass-at-k}
+
+where:
+- $n$ is the total number of independent trajectories evaluated per task ($n \ge k$),
+- $c$ is the number of successful trajectories ($c \le n$),
+- $\binom{n}{k}$ is the binomial coefficient.
+
+When $n - c < k$, all subsets of size $k$ contain at least one successful trajectory, so the second term equals 0 and $\text{Pass}@k = 1.0$. In software implementations, computing large factorials directly causes numerical overflow. The combinatorial ratio must be evaluated as an iterative product:
+
+$$\frac{\binom{n - c}{k}}{\binom{n}{k}} = \prod_{i=1}^k \frac{n - c - i + 1}{n - i + 1}$$
+
+### Trajectory Goodput and Fleet Economics
+
+While Pass@$k$ measures algorithmic capability, it completely ignores inference compute economics. Generating $n=100$ candidate trajectories to achieve $\text{Pass}@100 = 80\%$ is economically useless in production if each trajectory costs $\$5.00$ in GPU compute. Real-world autonomous systems are constrained by serving economics.
+
+::: {#pri-vol3-trajectory-goodput .callout-principle title="Trajectory Goodput and Fleet Economics"}
+
+**Invariant**: The governing metric of autonomous serving is Trajectory Goodput ($G$), defined as verified successful outcomes completed per dollar per GPU-hour. Maximizing token throughput (tokens/second) is irrelevant if those tokens are expended on hallucinated loops or unverified search branches.
+
+**Implication**: Systems architectures must optimize the Trajectory Goodput Pareto frontier, balancing sparse Mixture-of-Experts (MoE) routing, prefix caching, and verifier-guided search to minimize the Cost-per-Goal.
+
+:::
+
+We formally define **Trajectory Goodput** ($G$) in @eq-vol3-trajectory-goodput as:
+
+$$G = \frac{N_{\text{success}}}{C_{\text{tokens}} + C_{\text{compute}}}$$ {#eq-vol3-trajectory-goodput}
+
+where $N_{\text{success}}$ is the number of verified goal completions, $C_{\text{tokens}}$ is the direct cost of input/output token generation across all foundation model calls, and $C_{\text{compute}}$ is the ancillary infrastructure cost (tool execution, container sandboxes, vector database lookups, and network egress).
+
+Associated with Goodput is **Cost-per-Goal** ($C_{\text{goal}}$), formulated in @eq-vol3-cost-per-goal, which measures the average operational cost required to achieve a single verified successful outcome:
+
+$$C_{\text{goal}} = \frac{\sum_{i=1}^M \text{Cost}(\tau_i)}{N_{\text{success}}} = \frac{\overline{\text{Cost}}(\tau)}{\text{Pass}@1}$$ {#eq-vol3-cost-per-goal}
+
+where $M$ is the total number of attempted trajectories and $\overline{\text{Cost}}(\tau)$ is the mean cost per attempt. Notice the fundamental non-linearity: if an agent variant doubles single-step accuracy such that $\text{Pass}@1$ increases from $10\%$ to $40\%$ while its average execution cost only increases by $50\%$, its Cost-per-Goal drops by more than half:
+
+$$C_{\text{goal}} = \frac{1.5 \times C_0}{4 \times P_0} = 0.375 \times C_{\text{goal}, 0}$$
+
+### Dense versus Mixture-of-Experts (MoE) Serving Economics
+
+The economics of Trajectory Goodput differ radically between dense models and sparse MoE architectures:
+
+1. **Dense Models:** For a dense model with $P_{\text{dense}}$ parameters, every generated token requires activating all $P_{\text{dense}}$ weights, incurring $2 \cdot P_{\text{dense}}$ floating-point operations (FLOPs) per token. In long-context agent trajectories where the prompt accumulates 50,000 tokens of bash history and tool outputs, the prefill compute cost scales quadratically ($O(L^2)$ attention) while decode scales linearly with full weight activation.
+2. **Sparse MoE Models:** In an MoE model with $E$ experts (e.g. an $8 \times 7\text{B}$ architecture activating top-2 experts per token), the total parameter footprint is $P_{\text{total}} \approx 47\text{B}$, but the active parameter footprint per token is only $P_{\text{active}} \approx 13\text{B}$.
+
+This architectural sparsity creates a profound systems asymmetry in agentic serving:
+
+- **High-Bandwidth Memory (HBM) Capacity Requirement:** To serve an MoE model without catastrophic offloading penalties, the serving cluster must retain all $P_{\text{total}}$ weights pinned in accelerator High Bandwidth Memory (HBM). An $8 \times 7\text{B}$ model in FP16 requires at least $94\text{ GB}$ of HBM across GPUs.
+- **Inference Compute Efficiency:** Once pinned, the active compute per token is equivalent to a tiny $13\text{B}$ model. In extended agentic loops where an agent executes dozens of lightweight triage and tool-invocation steps, MoE models execute up to $4\times$ faster than a dense $70\text{B}$ model while delivering comparable frontier reasoning capacity.
+
+@Fig-vol3-goodput-pareto visualizes the Trajectory Goodput Pareto frontier across diverse systems configurations.
+
+::: {#fig-vol3-goodput-pareto fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Goodput Pareto Frontier**: Accuracy versus inference compute economics. The chart plots task success rate (Pass@$k$) against Cost-per-Goal across dense baselines, sparse MoE cascades, and test-time search." fig-alt="Plot showing the Trajectory Goodput Pareto Frontier. Success rate rises as Cost-per-Goal increases. Sparse MoE cascade achieves maximum Goodput at Point B, while unconstrained swarms enter the diminishing returns zone at Point F."}
+![](images/svg/trajectory_goodput_pareto.svg)
+:::
+
+As shown in @fig-vol3-goodput-pareto, peak Trajectory Goodput occurs not at the maximum raw accuracy (Point E or F), but at Point B, where a dynamic cascade routes simple steps to small sparse MoE models and reserves heavy frontier models exclusively for error-recovery branches. Pushing past Point E into unconstrained agentic swarms (Point F) incurs a catastrophic economic penalty, requiring $4\times$ more capital for a negligible $+2.8\%$ gain in resolved tasks.
 
 ## Statistical Significance under Non-Determinism {#sec-vol3-telemetry-statistical-significance-under-non-determinism}
 
-* **Technical Blurb:** Formulates statistical hypothesis testing for evaluating stochastic systems. Quantifies sample size requirements, Monte Carlo bootstrap confidence intervals, seed sensitivity, and temperature variance to prevent shipping regressions masked by non-deterministic evaluation noise.
-* **Seminal Citations:**
-  * Efron, B., & Tibshirani, R. J. (1994). *An Introduction to the Bootstrap*. [CRC Press](https://www.routledge.com/An-Introduction-to-the-Bootstrap/Efron-Tibshirani/p/book/9780412042317).
-  * Card, D., et al. (2020). *With Little Power Comes Great Irresponsibility: Statistical Power in NLP Evaluation*. [EMNLP 2020](https://aclanthology.org/2020.emnlp-main.744/).
+A pervasive failure mode in machine learning systems engineering is the **Premature Release Fallacy**: an engineering team implements a new prompt optimization or retrieval algorithm, observes that performance on a 40-task benchmark increases from $45.0\%$ to $52.5\%$, and immediately ships the change to production. In reality, that $+7.5\%$ "improvement" is frequently pure statistical noise caused by hardware and algorithmic non-determinism.
 
+### Sources of Systems Non-Determinism
+
+Even when software engineers set `temperature = 0.0` and pin pseudorandom seeds, modern foundation model serving clusters are inherently non-deterministic. Non-determinism stems from three physical layers:
+
+1. **Floating-Point Non-Associativity:** IEEE 754 floating-point addition is not associative: $(a + b) + c \ne a + (b + c)$. In high-performance GPU kernels (e.g. FlashAttention, cuBLAS general matrix multiply (GEMM), and parallel reduction trees across CUDA thread blocks), parallel threads sum floating-point numbers in non-deterministic orders depending on dynamic warp scheduling, hardware thread occupancy, and thermal throttling. Across a 100-layer transformer forward pass, infinitesimal differences at the 16th bit of mantissa occasionally flip the top-1 argmax token selection. In an autoregressive loop, a single flipped token completely alters all downstream generated tokens.
+2. **MoE All-to-All Dispatch Jitter:** In distributed MoE clusters spanning multiple nodes, tokens are routed dynamically across network fabrics to expert GPUs via `AllToAll` collective communication. Under network congestion, communication timeouts and dynamic expert capacity limits force token dropping or fallback routing, introducing execution divergence.
+3. **Asynchronous Tool Latencies:** When an agent queries external web servers, databases, or local shells, response latencies fluctuate. If an agent executes concurrent subagent threads or races two tools, minor microsecond timing variations determine which result enters the context window first.
+
+### Statistical Power and Sample Size Requirements
+
+To determine whether an observed improvement $\Delta p = p_2 - p_1$ is statistically significant, systems engineers must formulate a formal two-proportion hypothesis test. The null hypothesis $H_0$ states that the two agent variants have identical underlying success rates ($p_1 = p_2$), while the alternative hypothesis $H_1$ asserts that variant 2 represents a genuine improvement.
+
+As established by @card2020little, the required sample size $N$ (number of evaluated benchmark tasks) to detect an effect size $\Delta p$ with statistical significance $\alpha$ (Type I error rate, typically $0.05$) and statistical power $1 - \beta$ (where $\beta$ is Type II error rate, typically $0.20$ for $80\%$ power) is governed by:
+
+$$N \ge \frac{\left( z_{1 - \alpha/2} \sqrt{2 \bar{p}(1 - \bar{p})} + z_{1 - \beta} \sqrt{p_1(1 - p_1) + p_2(1 - p_2)} \right)^2}{(p_2 - p_1)^2}$$ {#eq-vol3-sample-size}
+
+where $\bar{p} = (p_1 + p_2) / 2$, $z_{1 - \alpha/2}$ is the standard normal critical value ($1.96$ for $\alpha = 0.05$), and $z_{1 - \beta}$ is the power critical value ($0.84$ for $80\%$ power).
+
+Consider a realistic engineering scenario: an agent has a baseline success rate of $p_1 = 0.30$ on a coding benchmark, and an engineer hopes to detect an improvement to $p_2 = 0.35$ (a $+5\%$ absolute gain). Substituting these values into @eq-vol3-sample-size:
+
+$$\bar{p} = 0.325, \quad \Delta p = 0.05$$
+$$N \ge \frac{\left( 1.96 \sqrt{2(0.325)(0.675)} + 0.84 \sqrt{0.30(0.70) + 0.35(0.65)} \right)^2}{(0.05)^2} \approx 1,\!380$$
+
+To reliably detect a $5\%$ capability delta with $80\%$ power, the evaluation suite must evaluate at least **1,380 independent tasks**. Evaluating on only $N=50$ or $N=100$ tasks yields statistical power below $15\%$. Under such low power, observed improvements are indistinguishable from a coin toss, and production deployments will routinely ship severe capability regressions masked by evaluation noise.
+
+### Non-Parametric Monte Carlo Bootstrap Confidence Intervals
+
+Because trajectory metrics like Pass@$k$ and Cost-per-Goal follow heavy-tailed, non-Gaussian empirical distributions, classical Student's $t$-distributions fail. Runtimes must employ non-parametric **Monte Carlo Bootstrapping** (@efron1994bootstrap).
+
+Given an empirical dataset of $N$ evaluated trajectories $\mathcal{D} = \{ \tau_1, \tau_2, \dots, \tau_N \}$:
+
+1. Draw $B$ bootstrap resamples $\mathcal{D}_1^*, \mathcal{D}_2^*, \dots, \mathcal{D}_B^*$ of size $N$ from $\mathcal{D}$ with replacement (typically $B = 10,\!000$).
+2. For each resample $\mathcal{D}_b^*$, compute the metric of interest $\hat{\theta}_b^* = f(\mathcal{D}_b^*)$ (such as Pass@$k$ or Trajectory Goodput $G$).
+3. Sort the resulting bootstrap distribution $\{ \hat{\theta}_1^*, \hat{\theta}_2^*, \dots, \hat{\theta}_B^* \}$.
+4. The two-sided $95\%$ bootstrap percentile confidence interval $[\theta_{\text{lower}}, \theta_{\text{upper}}]$ is computed via @eq-vol3-bootstrap-ci directly from the empirical $2.5\text{th}$ and $97.5\text{th}$ percentiles:
+
+$$[\theta_{\text{lower}}, \theta_{\text{upper}}] = \left[ \hat{\theta}^*_{\lfloor 0.025 B \rfloor}, \; \hat{\theta}^*_{\lfloor 0.975 B \rfloor} \right]$$ {#eq-vol3-bootstrap-ci}
+
+If the $95\%$ confidence intervals of two agent architectures overlap significantly, the engineering team cannot reject the null hypothesis, and the deployment must be halted.
 
 ## Hierarchical Distributed Tracing (OpenTelemetry GenAI) {#sec-vol3-telemetry-hierarchical-distributed-tracing-opentelemetry}
 
-* **Technical Blurb:** Adapts classical distributed tracing (Dapper, Jaeger) to agent trajectories. Details the OpenTelemetry GenAI semantic conventions, constructing hierarchical causal span graphs that bind prompt tokens, completion tokens, tool invocations, vector database queries, and dollar costs into unified trace trees.
-* **Seminal Citations:**
-  * Sigelman, B. H., et al. (2010). *Dapper, a Large-Scale Distributed Systems Tracing Infrastructure*. [Google Technical Report](https://research.google/pubs/pub36356/).
-  * OpenTelemetry Consortium (2024/2025). *Semantic Conventions for Generative AI Operations*. [OpenTelemetry Specification](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
+Classical web applications process requests through linear, deterministic call graphs (HTTP Request $\to$ Auth Middleware $\to$ Database Query $\to$ JSON Response). Distributed tracing infrastructures such as Dapper (@sigelman2010dapper) and Jaeger model these transactions as directed trees of timed spans.
 
+An agentic trajectory, however, is a non-deterministic, stateful loop that can execute for minutes or hours, traversing multiple heterogeneous foundation models, vector databases, sandboxed execution runtimes, and external APIs. If an agent fails on Step 32, dumping flat text logs into Elasticsearch makes debugging impossible. Systems observability requires **Hierarchical Distributed Tracing** adhering to the OpenTelemetry GenAI Semantic Conventions (@opentelemetry2024genai).
+
+### The Three-Tier Span Hierarchy
+
+To capture agent execution semantics cleanly, tracing runtimes structure telemetry into a strict three-tier span hierarchy, as illustrated in @fig-vol3-otel-trace:
+
+1. **Root Span (`agent.trajectory`):** Encapsulates the entire end-to-end task execution from user intent submission to final goal completion or abort. Attributes record high-level metadata: `task.goal`, `trajectory.status`, total elapsed wall-clock time, total accumulated token counts, and total monetary cost across all models.
+2. **Iteration Span (`agent.step`):** Child span of the trajectory, created for every iteration of the agent's control loop. Attributes record the zero-indexed loop step (`agent.step.index`), current reasoning role (e.g. `planner`, `coder`, `verifier`), and intermediate scratchpad hypotheses.
+3. **Leaf Spans (Operations):** Direct children of the step span representing physical systems operations:
+   - `gen_ai.inference`: An autoregressive forward pass dispatched to an inference backend (OpenAI, Anthropic, vLLM, TensorRT-LLM).
+   - `tool.execution`: A sandboxed execution of an external tool (bash command, compiler invocation, Python REPL script).
+   - `retrieval.query`: A dense vector similarity search or hybrid BM25 retrieval against a knowledge store.
+
+@Fig-vol3-otel-trace illustrates the OpenTelemetry GenAI span hierarchy and timeline attribution for an autonomous software repair agent.
+
+::: {#fig-vol3-otel-trace fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical OpenTelemetry GenAI Distributed Trace Graph**: Structured span hierarchy attributing multi-model inference latency, token counts, tool I/O execution, and W3C context propagation." fig-alt="Diagram of an OpenTelemetry GenAI trace hierarchy showing root span agent.trajectory and child step spans with nested gen_ai.inference and tool.execution subspans."}
+![](images/svg/otel_genai_trace_hierarchy.svg)
+:::
+
+### OpenTelemetry GenAI Semantic Attributes
+
+The OpenTelemetry GenAI working group standardized semantic attributes to ensure vendor-neutral, queryable telemetry across heterogeneous foundation models (@opentelemetry2024genai). Every `gen_ai.inference` span must record:
+
+- `gen_ai.system`: The inference provider or serving engine (e.g. `openai`, `anthropic`, `google`, `vllm`, `triton`).
+- `gen_ai.request.model`: The exact model identifier requested (e.g. `claude-3-5-sonnet`, `gemini-1.5-pro`).
+- `gen_ai.usage.prompt_tokens`: Exact integer count of input tokens ingested during the prefill phase.
+- `gen_ai.usage.completion_tokens`: Exact integer count of output tokens generated during the decode phase.
+- `gen_ai.token_type`: Categorization of token usage (`prefill` vs. `decode`), vital for separating compute-bound prefill latency from memory-bandwidth-bound decode latency.
+- `gen_ai.usage.cost_usd`: Derived monetary cost computed from token counts and provider rate cards.
+
+::: {#lst-vol3-otel-genai-span lst-cap="**OpenTelemetry GenAI Structured Span**: JSON payload showing standardized attributes including provider system, model requested, token counts, TTFT, and decode throughput."}
+
+```json
+{
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "span_id": "00f067aa0ba902b7",
+  "parent_span_id": "5c39a0e69b0c2d1e",
+  "name": "gen_ai.inference",
+  "kind": "SPAN_KIND_CLIENT",
+  "start_time_unix_nano": 1718000000000000000,
+  "end_time_unix_nano": 1718000002100000000,
+  "attributes": {
+    "gen_ai.system": "anthropic",
+    "gen_ai.request.model": "claude-3-5-sonnet",
+    "gen_ai.agent.step": 2,
+    "gen_ai.agent.role": "patch_generator",
+    "gen_ai.usage.prompt_tokens": 3840,
+    "gen_ai.usage.completion_tokens": 492,
+    "gen_ai.usage.cost_usd": 0.0189,
+    "gen_ai.latency.ttft_ms": 340,
+    "gen_ai.inference.decode_tok_per_sec": 42.1
+  }
+}
+```
+
+:::
+
+As demonstrated in @lst-vol3-otel-genai-span, capturing structured attributes allows enterprise telemetry systems (ClickHouse, Snowflake, Datadog) to run real-time online analytical processing (OLAP) aggregations across millions of production agent steps: computing p99 decode latencies, identifying which subagent roles incur the highest token costs, and isolating tools with high error rates.
 
 ## Distributed Context Propagation across Stochastic Trees {#sec-vol3-telemetry-distributed-context-propagation-across}
 
-* **Technical Blurb:** Details W3C TraceContext injection and extraction across asynchronous agent task queues, subagent forks, and external tool calls. Resolves causal tracking across long-lived, multi-turn trajectories where execution spans hours and traverses heterogeneous microservices.
-* **Seminal Citations:**
-  * W3C (2021). *Trace Context: W3C Recommendation*. [W3C Specification](https://www.w3.org/TR/trace-context/).
-  * Sambasivan, R. R., et al. (2011). *So, you want to trace your distributed system? Key design insights from years of provenance research*. [CMU-PDL-11-102](https://www.cs.cmu.edu/~ganger/papers/).
+In a production environment, an agent does not run as a monolithic local script. As analyzed in @sec-vol3-multi-agent, modern multi-agent systems dispatch work across distributed task queues (Celery, Temporal, Kafka), spawn subagents in remote micro-VMs, and execute tools across container clusters. To maintain a coherent trace graph across these network boundaries, runtimes rely on **Context Propagation** (@w3c2021tracecontext; @sambasivan2011trace).
 
+### W3C TraceContext Specification
+
+Context propagation injects metadata into outbound transport headers when calling remote services or enqueueing background jobs. The global standard is the W3C TraceContext specification (@w3c2021tracecontext), which defines two primary HTTP/RPC headers:
+
+1. **`traceparent`:** A 4-part hyphen-delimited string encoding trace identity:
+
+   ```http
+   traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+   ```
+
+   - `version` (`00`): Specification version.
+   - `trace_id` (`4bf92f...`): 16-byte global identifier unique to the entire trajectory.
+   - `parent_id` (`00f067...`): 8-byte identifier of the currently executing span.
+   - `trace_flags` (`01`): Bitmask controlling sampling (e.g. `01` enables recording).
+2. **`baggage`:** Comma-delimited key-value pairs carrying cross-cutting application state:
+
+   ```http
+   baggage: session.user_id=corp_42,budget.remaining_usd=1.85,sandbox.id=sbx_902
+   ```
+
+When a subagent receives an asynchronous dispatch from a message queue, its OpenTelemetry interceptor extracts the `traceparent` and `baggage` headers, automatically creating a new span whose `parent_span_id` points to the calling supervisor's span.
+
+### Tracing Stochastic Search Trees
+
+A unique systems challenge in agent observability occurs during test-time search (@sec-vol3-test-time-search), where an agent explores multiple solution hypotheses in parallel using Tree-of-Thoughts or Monte Carlo Tree Search (MCTS). In a linear trace, parent-child relationships form a simple chain. In MCTS, execution forms a stochastic directed graph:
+
+- The root span forks $M$ parallel exploration branches at step $t$.
+- Each branch generates candidate actions $a_t^{(1)}, \dots, a_t^{(M)}$ and dispatches concurrent tool evaluations.
+- Verifier models score each branch, pruning suboptimal paths and expanding promising nodes.
+
+To trace stochastic search trees without corrupting the linear trajectory timeline:
+1. **Branch-Scoped Contexts:** Each search branch must instantiate an independent child context cloned from the parent, inheriting the global `trace_id` but assigning a unique `span_id` as the branch parent.
+2. **Baggage Isolation:** State mutations within a branch's `baggage` (such as local tool mutation counters) must be strictly isolated to prevent pollution of sibling branches.
+3. **Causal Linkage:** When the search algorithm completes and selects the winning branch $\tau^*$, the runtime creates a synthetic `search.consensus` span that records OpenTelemetry `SpanLink` pointers to all explored branches, preserving the full counterfactual search history for offline analysis.
 
 ## Deterministic Event Recording and Input Interception {#sec-vol3-telemetry-deterministic-event-recording-and}
 
-* **Technical Blurb:** Establishes the primitives required for reproducible execution of stochastic processes: intercepting and logging model completions, pseudorandom generation seeds, external network socket payloads, database query snapshots, and wall-clock timestamps into an append-only event stream.
-* **Seminal Citations:**
-  * Geels, D., et al. (2007). *Friday: Global Comprehension for Distributed Replay*. [OSDI 2007](https://www.usenix.org/legacy/event/osdi06/tech/geels.html).
-  * King, S. T., et al. (2005). *Debugging Operating Systems with Time-Traveling Virtual Machines*. [USENIX ATC 2005](https://www.usenix.org/legacy/event/nsdi05/tech/king.html).
+When an agent fails in production at 3:00 AM, how can an on-call engineer reproduce the bug? If the engineer reruns the agent locally with the same initial prompt, floating-point non-determinism, external network mutations, and temperature variance guarantee that the agent will take a different path. The failure cannot be reproduced.
 
+::: {#pri-vol3-trace-reconstructibility .callout-principle title="Deterministic Trace Reconstructibility"}
+
+**Invariant**: Robust production operations require capturing all non-deterministic interactions across the environment boundary into immutable event streams to enable bit-exact offline replay and counterfactual diffing.
+
+**Implication**: Runtimes must implement deterministic event-sourcing, intercepting and recording model completions, tool outputs, pseudorandom seeds, and environmental clocks.
+
+:::
+
+### Event Sourcing at the Stochastic Boundary
+
+To achieve deterministic reconstructibility, the agent runtime applies the classical systems principle of **Event Sourcing** (@geels2007friday; @king2005debugging). The runtime defines a strict boundary separating the internal deterministic state machine from external non-deterministic inputs:
+
+$$\text{State}_{t+1} = \mathcal{F}(\text{State}_t, \; \mathbf{e}_t)$$
+
+where $\mathcal{F}$ is a purely deterministic state transition function (updating the Agent Control Block, conversation history, and token counts), and $\mathbf{e}_t$ is an immutable event tuple captured from the stochastic boundary:
+
+$$\mathbf{e}_t = \langle t_{\text{wall}}, \; s_{\text{seed}}, \; y_{\text{model}}, \; o_{\text{tool}}, \; c_{\text{exit}} \rangle$$
+
+During live execution, an input interceptor wraps all external communication channels:
+
+1. **Model Completions ($y_{\text{model}}$):** Every token, text chunk, logit bias, and finish reason returned by the model API is serialized into the append-only event log.
+2. **Tool Responses ($o_{\text{tool}}, c_{\text{exit}}$):** All standard output, standard error, exit codes, and returned files from shell commands or APIs are captured verbatim.
+3. **Pseudorandom Seeds ($s_{\text{seed}}$):** The initial PRNG seed governing local sampling is logged.
+4. **Environment Clocks ($t_{\text{wall}}$):** All calls to `time.now()` or filesystem timestamp queries are intercepted and recorded.
+
+### Bit-Exact Replay versus Semantic Replay
+
+With an immutable event log, the runtime supports two distinct operational replay modes:
+
+- **Bit-Exact Replay (Zero-Cost Verification):** The runtime executes the entire agent trajectory in "mock mode." All network calls to foundation models and external tools are disabled. When the agent issues a tool call at Step 12, the interceptor intercepts the call and instantly returns the recorded event payload $\mathbf{e}_{12}$ from the log. Bit-exact replay executes in milliseconds, costs $\$0.00$ in model tokens, and allows engineers to test new assertion checks, inspect internal data structures, and verify runtime state machine transitions under identical historical conditions.
+- **Semantic Replay (Robustness Stress-Testing):** The runtime fixes the initial prompt and tool environment, but permits the model to sample fresh completions at $T > 0$. By comparing 100 semantic replays against the recorded historical baseline, engineers can quantify the stability of the solution path and detect whether the failure was an isolated statistical anomaly or a chronic policy bug.
 
 ## Time-Travel Debugging and Counterfactual Forking {#sec-vol3-telemetry-time-travel-debugging-and-counterfactual}
 
-* **Technical Blurb:** Implements time-travel debugging for agent trajectories: stepping backwards through a 50-step execution history, inspecting intermediate attention contexts and scratchpad states, modifying an observation at Step 12, and executing a counterfactual forward branch to isolate bugs.
-* **Seminal Citations:**
-  * Engler, D., et al. (2001). *Bugs as Deviant Behavior: A General Approach to Inferring Errors in Systems Code*. [SOSP 2001](https://dl.acm.org/doi/10.1145/502034.502041).
-  * Lewis, B. (2003). *Debugging Backwards in Time*. [AADEBUG 2003](https://arxiv.org/abs/cs/0310016).
+While bit-exact replay enables re-observing a failure, it does not explain *why* the failure occurred or how to fix it. Debugging complex multi-step systems requires interactive exploration. Adapting classical time-travel debugging (@lewis2003debugging; @king2005debugging) to agentic systems provides engineers with two powerful capabilities: **State Rewind** and **Counterfactual Forking**.
 
+### Architecture of an Agent Time-Travel Debugger
+
+An Agent Time-Travel Debugger operates over the trajectory event stream and snapshot repository:
+
+1. **Bidirectional Stepping:** The debugger allows an engineer to step forward and backward through the execution history:
+   ```bash
+   (agy-db) step-forward 5     # Advance 5 steps to Step 18
+   (agy-db) inspect context    # View exact token context at Step 18
+   (agy-db) step-backward 2    # Rewind to Step 16
+   ```
+2. **State Rewind Mechanics:** To rewind to step $t$, the debugger:
+   - Restores the Agent Control Block (ACB) state vector from checkpoint $t$,
+   - Rolls back conversation context and scratchpad memory,
+   - Issues a storage rollback command to the CoW filesystem (e.g. `zfs rollback snapshot@step_16`), reverting all source code files, build binaries, and databases to their exact historical state at step $t$ in under $50\text{ ms}$.
+
+### Counterfactual Forking
+
+Once rewound to step $t^*$, the engineer can test a counterfactual hypothesis by injecting a modification:
+
+- **Observation Editing:** The engineer corrects a malformed tool output (e.g. fixing a truncated compiler log at Step 14 to provide the missing header file path).
+- **Prompt Injection:** The engineer edits the system prompt or inserts an intermediate corrective user message ("Notice that auth router uses JWT tokens, not cookies").
+- **Action Override:** The engineer forces the agent to execute action $a_{t^*}'$ instead of the flawed historical action $a_{t^*}$.
+
+The debugger forks a new trajectory branch $\tau' = (s_0, \dots, s_{t^*}, a_{t^*}', o_{t^*+1}', \dots)$ and resumes forward execution. By contrasting the counterfactual branch $\tau'$ with the historical baseline $\tau$, the engineer can verify immediately whether the proposed fix reliably steers the agent toward task completion.
+
+### Delta Debugging on Agent Context
+
+When an agent fails due to context pollution (@sec-vol3-context-working-sets)—such as hallucinating when the context window reaches 80,000 tokens—identifying which specific document or tool output caused the failure is manually intractable. Runtimes automate this diagnosis using **Delta Debugging** (@zeller2002simplifying; @engler2001bugs).
+
+The delta debugging algorithm systematically partitions the context history $C = \{ c_1, c_2, \dots, c_m \}$ into subsets, executes replay trials on each subset, and converges on the minimal failure-inducing context difference $\Delta c^*$:
+
+$$c_{\text{fail}} \setminus c_{\text{pass}} = \Delta c^*$$
+
+In practice, delta debugging automatically isolates subtle bugs: showing that a single stale log file retrieved in Step 4 injected an obsolete API parameter name, which silently derailed model reasoning 20 steps later.
 
 ## Trajectory Latency and Resource Profiling {#sec-vol3-telemetry-trajectory-latency-and-resource}
 
-* **Technical Blurb:** Deconstructs end-to-end trajectory runtime into fine-grained systems profiles: prefill time, decode time, tool network latency, sandboxed execution time, and verification delay. Formulates Amdahl’s Law optimizations to determine whether acceleration should target model inference or tool I/O.
-* **Seminal Citations:**
-  * Hennessy, J. L., & Patterson, D. A. (2019). *Computer Architecture: A Quantitative Approach (6th Edition)*. [Morgan Kaufmann](https://www.elsevier.com/books/computer-architecture/hennessy/978-0-12-811905-1).
-  * Cantrill, B. M., Shapiro, M. W., & Leventhal, A. H. (2004). *Dynamic Instrumentation of Production Systems (DTrace)*. [USENIX ATC 2004](https://www.usenix.org/conference/2004-usenix-annual-technical-conference/dynamic-instrumentation-production-systems).
+In production agent fleets, managing operational latency is as critical as maintaining task accuracy. A software engineering agent that takes 45 minutes to fix a typo is commercially unviable. Optimizing trajectory latency requires fine-grained systems profiling (@cantrill2004dtrace; @patterson2017hardware).
 
+### Decomposition of Trajectory Latency
+
+End-to-end trajectory latency $T_{\text{total}}$ across an $H$-step trajectory is formally decomposed in @eq-vol3-latency-decomposition into five additive systems components:
+
+$$T_{\text{total}} = \sum_{t=1}^H \left( T_{\text{prefill}}^{(t)} + T_{\text{decode}}^{(t)} + T_{\text{tool}}^{(t)} + T_{\text{sandbox}}^{(t)} + T_{\text{oracle}}^{(t)} \right)$$ {#eq-vol3-latency-decomposition}
+
+where for each step $t$:
+- $T_{\text{prefill}}^{(t)}$: Time-to-First-Token (TTFT), during which the serving engine ingests the prompt of length $L_t$ and computes the initial KV cache. Scaled by context length and prefix cache hit rate.
+- $T_{\text{decode}}^{(t)}$: Time spent in autoregressive generation, generating $K_t$ completion tokens at an average decode throughput $\rho_{\text{decode}}$ tokens/second:
+  $$T_{\text{decode}}^{(t)} = \frac{K_t}{\rho_{\text{decode}}}$$
+- $T_{\text{tool}}^{(t)}$: External network latency and execution time of the dispatched tool (e.g. running an HTTP scraper or database query).
+- $T_{\text{sandbox}}^{(t)}$: Systems overhead of container virtualization: spinning up micro-VMs, mounting ephemeral CoW layers, and tearing down execution domains.
+- $T_{\text{oracle}}^{(t)}$: Intermediate verification delay incurred by test runners, linters, or reward model scoring.
+
+### Applying Amdahl's Law to Agent Acceleration
+
+When optimizing an agent runtime, systems engineers often default to optimizing model inference (e.g. deploying FP8 quantization or speculative decoding). However, as dictated by Amdahl's Law (@patterson2017hardware), the maximum speedup achievable by accelerating a single component is bounded by the fraction of time spent in that component:
+
+$$\text{Speedup}_{\text{overall}} = \frac{1}{(1 - f) + \frac{f}{S}}$$
+
+where $f$ is the fraction of total runtime spent in the optimized subsystem, and $S$ is the speedup factor of that subsystem.
+
+As revealed in production profiling (@fig-vol3-otel-trace), tool execution and test oracles often consume **$55.4\%$** of total trajectory time ($f_{\text{tool}} = 0.554$), while model inference consumes $36.2\%$ ($f_{\text{model}} = 0.362$). If an engineering team spends three months optimizing inference kernels to achieve an extraordinary $2\times$ speedup ($S_{\text{model}} = 2.0$), the overall trajectory speedup is modest:
+
+$$\text{Speedup}_{\text{overall}} = \frac{1}{(1 - 0.362) + \frac{0.362}{2.0}} = \frac{1}{0.638 + 0.181} = 1.22\times$$
+
+The fleet gains only a $22\%$ end-to-end latency reduction. In contrast, optimizing the tool environment—replacing full virtual machine reboots with instant CoW snapshot rollbacks and caching compiler build artifacts—accelerates tool execution by $5\times$ ($S_{\text{tool}} = 5.0, f_{\text{tool}} = 0.554$):
+
+$$\text{Speedup}_{\text{overall}} = \frac{1}{(1 - 0.554) + \frac{0.554}{5.0}} = \frac{1}{0.446 + 0.111} = 1.79\times$$
+
+Accelerating the systems environment yields a **$79\%$ end-to-end speedup**—nearly $4\times$ the impact of optimizing model inference alone.
 
 ## Automated Causal Fault Localization {#sec-vol3-telemetry-automated-causal-fault-localization}
 
-* **Technical Blurb:** Formulates automated root-cause attribution across divergent trajectory traces. Uses causal DAG differencing to contrast successful versus failed agent runs, automatically isolating the single prompt token, stale context snippet, or malformed schema argument that diverted reasoning.
-* **Seminal Citations:**
-  * Zeller, A., & Hildebrandt, R. (2002). *Simplifying and Isolating Failure-Inducing Input*. [IEEE Transactions on Software Engineering, 28(2), 183–200](https://doi.org/10.1109/32.988498).
-  * Pearl, J. (2009). *Causality: Models, Reasoning, and Inference (2nd Edition)*. [Cambridge University Press](https://www.cambridge.org/core/books/quantum-computation-and-quantum-information/2E4163884823A03F1EB642FB997A0A68).
+When an agent fails across dozens of execution steps, human manual inspection of traces is a major development bottleneck. Advanced observability runtimes employ **Automated Causal Fault Localization**, framing the trajectory as a causal DAG (@pearl2009causality; @zeller2002simplifying).
 
+### Contrastive Trace Diffing
+
+Given a task where an agent was evaluated across $n$ stochastic samples, producing $c \ge 1$ successful trajectories $\mathcal{T}_{\text{succ}}$ and $n - c \ge 1$ failed trajectories $\mathcal{T}_{\text{fail}}$, the runtime performs **Contrastive Trace Diffing**:
+
+1. **Alignment:** Traces are aligned along normalized execution milestones (e.g. file discovery, test execution, patch generation) using dynamic time warping.
+2. **Divergence Detection:** The runtime identifies the critical divergence step $t^*$ where the state representations or action distributions between successful and failed runs first diverge beyond threshold $\epsilon$:
+   $$t^* = \min \left\{ t \;\Big|\; \mathcal{D}_{\text{JS}}\left( \pi(a_t \mid h_t^{(\text{succ})}) \;\parallel\; \pi(a_t \mid h_t^{(\text{fail})}) \right) > \epsilon \right\}$$
+   where $\mathcal{D}_{\text{JS}}$ is the Jensen-Shannon divergence over next-action probability distributions.
+3. **Attribution Categorization:** Once $t^*$ is isolated, the fault localization engine categorizes the failure into one of three structural root causes:
+   - **Environment Flaw:** The tool returned an unexpected error code or malformed JSON payload that was unhandled by the agent's parser.
+   - **Context Saturation:** The context window exceeded effective working memory limits, causing the model to lose track of early user constraints.
+   - **Policy Hallucination:** The model generated non-existent file paths or invalid tool arguments despite valid context and correct environment feedback.
+
+Automated fault localization slashes mean-time-to-diagnosis (MTTD) in production fleets, directing engineering effort directly to the root-cause failure point.
 
 ## Continuous Integration and Canary Release Gates {#sec-vol3-telemetry-continuous-integration-and-canary}
 
-* **Technical Blurb:** Designs continuous integration (CI/CD) pipelines for shipping non-deterministic agent workflows. Details shadow evaluation, canary rollouts with sequential probability ratio tests (SPRT), statistical regression detection, and automated rollback triggers.
-* **Seminal Citations:**
-  * Wald, A. (1945). *Sequential Tests of Statistical Hypotheses*. [Annals of Mathematical Statistics, 16(2), 117–186](https://doi.org/10.1214/aoms/1177731118).
-  * Kästner, C. (2024). *Machine Learning in Production: From Models to Systems*. [CMU Textbook](https://mlip-cmu.github.io/s2024/).
+Deploying updates to autonomous agent fleets (e.g. updating system prompts, upgrading foundation model checkpoints, adding new tool definitions) requires robust Continuous Integration and Continuous Deployment (CI/CD) pipelines. In classical software engineering, unit tests are binary and deterministic: a test either passes or fails. In agentic systems, tests are stochastic distributions.
 
+### Canary Deployments and Sequential Probability Ratio Testing (SPRT)
+
+To protect production systems from catastrophic regressions, new agent versions must pass through staged canary release gates:
+
+1. **Offline Synthetic Regression Gate:** The candidate agent must achieve a statistically significant non-inferiority score on a curated benchmark suite ($N = 500$ tasks) evaluated using bootstrap confidence intervals.
+2. **Shadow Traffic Mirroring:** Live production requests are mirrored to the candidate agent in real time. The candidate agent executes all planning and model inference, but its tool actuation is sandboxed in a shadow read-only environment to measure behavioral divergence without impacting production databases.
+3. **Canary Rollout with SPRT:** The candidate agent is allocated $5\%$ of live production traffic. Waiting for a fixed sample size of $N=2,\!000$ users before making a promotion or rollback decision introduces unacceptable risk if the new version contains a critical flaw. Runtimes implement Abraham Wald's **Sequential Probability Ratio Test (SPRT)** (@wald1945sequential).
+
+Under SPRT, after every single completed production trajectory $m$, the runtime updates the cumulative log-likelihood ratio $\Lambda_m$ defined in @eq-vol3-sprt:
+
+$$\Lambda_m = \sum_{i=1}^m \ln \frac{P(x_i \mid H_1)}{P(x_i \mid H_0)}$$ {#eq-vol3-sprt}
+
+where $x_i \in \{0, 1\}$ indicates trajectory failure or success, $H_0$ is the baseline failure rate $p_0$, and $H_1$ is an unacceptable degraded failure rate $p_1 = p_0 + \delta$. The runtime evaluates three stopping conditions defined by @eq-vol3-sprt-decision:
+
+$$\begin{cases}
+\Lambda_m \ge \ln \left( \frac{1 - \beta}{\alpha} \right) & \implies \text{\textbf{Immediate Rollback} (Reject } H_0 \text{ with Type I error } \le \alpha) \\[6pt]
+\Lambda_m \le \ln \left( \frac{\beta}{1 - \alpha} \right) & \implies \text{\textbf{Promote Canary} (Accept } H_0 \text{ with Type II error } \le \beta) \\[6pt]
+\text{Otherwise} & \implies \text{\textbf{Continue Sampling}}
+\end{cases}$$ {#eq-vol3-sprt-decision}
+
+If a deployed candidate version contains a severe bug (e.g. crashing on $40\%$ of trajectories), SPRT detects the anomaly within 15 to 20 trajectories, triggering an automated instantaneous rollback before widespread customer disruption occurs.
 
 ## Supervisory Observability and Human Oversight Telemetry {#sec-vol3-telemetry-supervisory-observability-and-human}
 
-* **Technical Blurb:** Tracks human-in-the-loop approval queues characterized by a $10^6\times$ latency disparity. Analyzes telemetry for approval fatigue, intervention rates, authorization timeout expirations, and regulatory audit logging under non-repudiation constraints.
-* **Seminal Citations:**
-  * Parasuraman, R., Sheridan, T. B., & Wickens, C. D. (2000). *A Model for Types and Levels of Human Interaction with Automation*. [IEEE Transactions on Systems, Man, and Cybernetics](https://doi.org/10.1109/3468.844354).
-  * Cummings, M. L. (2004). *Automation Bias in Intelligent Time-Critical Decision Support Systems*. [AIAA 2004](https://doi.org/10.2514/6.2004-6313).
+As established in @sec-vol3-verification-recovery, high-stakes enterprise agents operate under supervisory authority structures, requiring human approval before executing irreversible actions (financial transactions, production infrastructure deployments, external email communications). Observability runtimes must monitor the human supervisory interface itself (@parasuraman2000model; @cummings2004automation).
 
----
+### The $10^6\times$ Latency Asymmetry
 
+Human-in-the-loop (HITL) telemetry is characterized by a massive systems latency mismatch:
+- Model forward pass and tool execution: $\approx 100\text{ ms} - 2\text{ s}$.
+- Human supervisor review and approval: $\approx 30\text{ s} - 2\text{ hours}$.
+
+This $10^6\times$ latency gap creates severe architectural bottlenecks. While an agent is blocked awaiting human authorization, holding expensive GPU KV caches pinned in memory incurs a devastating **Tool-Wait Memory Tax** (@sec-vol3-introduction). Observability dashboards must track queue dwell times, approval timeout expirations, and context rehydration overheads.
+
+### Measuring Automation Bias and Rubber-Stamping
+
+The most insidious failure mode in human supervisory systems is **Automation Bias** (@cummings2004automation; @parasuraman2000model). When an agent operates with $95\%$ reliability over hundreds of routine tasks, human operators succumb to cognitive fatigue and begin "rubber-stamping" approval requests—clicking "Authorize" without reading the generated diff or verifying action safety.
+
+Supervisory telemetry monitors operator engagement using behavioral metrics:
+
+- **Review Dwell Time ($t_{\text{dwell}}$):** The wall-clock time elapsed between presenting an action diff to the human operator and receiving the approval click. If an operator approves a 300-line database migration script with $t_{\text{dwell}} < 1.5\text{ seconds}$, the runtime flags an **Impaired Oversight Alert**.
+- **Intervention Rate ($I$):** The ratio of human modifications or rejections to total approval requests:
+  $$I = \frac{N_{\text{rejected}} + N_{\text{modified}}}{N_{\text{requests}}}$$
+  If a human operator's intervention rate drops to $0.0\%$ across 500 consecutive tasks, the system triggers automated attention checks (e.g. injecting synthetic flawed proposals into staging queues to audit human vigilance).
+
+All supervisory approvals, rejections, and raw action payloads must be committed to tamper-evident, append-only cryptographic audit logs (using Merkle trees) to ensure regulatory compliance and legal non-repudiation.
 
 ## Fallacies and Pitfalls {#sec-vol3-telemetry-fallacies}
 
-* **Fallacy:** _Evaluating an agent on a single run (Pass@1) provides a reliable measure of system capability._
-* **Pitfall:** Relying on unstructured flat text logging instead of distributed tracing spans with explicit token and cost attribution.
+Deploying autonomous agent fleets at scale exposes subtle operational pitfalls at the intersection of non-deterministic inference, systems isolation, and telemetry infrastructure. The following misconceptions frequently derail production reliability, benchmark integrity, and resource allocation.
+
+### Fallacy 1: Evaluating an agent on a single run (Pass@1) provides a reliable capability metric.
+Because foundation models rely on stochastic sampling and modern GPU floating-point reductions are non-deterministic, a single temperature-0 run exhibits high estimator variance. A model may succeed on a complex task through an accidental lucky token selection or fail due to a minor formatting glitch. Capability must be evaluated across multiple independent trials using the unbiased Pass@$k$ estimator (@eq-vol3-pass-at-k) and bootstrap confidence intervals.
+
+### Fallacy 2: Passing unit tests in a sandbox environment guarantees real-world task success.
+In SWE-bench and enterprise software development, passing unit tests is a necessary but insufficient condition for correctness. Agents frequently "game" test suites: modifying assertion files to return `True`, deleting problematic test cases, or overfitting to narrow mock datasets while breaking core system invariants. Evaluation harnesses must apply hidden regression suites (`PASS_TO_PASS` and `FAIL_TO_PASS`) and verify that the agent did not alter test definitions.
+
+### Fallacy 3: Logging raw text strings into Elasticsearch is sufficient for production observability.
+In multi-step trajectories, dumping 500,000 unformatted tokens into flat log streams makes causal debugging impossible. When an agent fails on Step 42, an engineer cannot manually reconstruct the execution graph. Production observability mandates structured distributed tracing conforming to OpenTelemetry GenAI Semantic Conventions, capturing parent-child span causality, token allocations, and tool return codes.
+
+### Pitfall 1: Benchmark Contamination via Unrestricted Internet Access.
+Allowing an agentic evaluation gym to access public DNS and the internet is fatal. When evaluated on real-world coding benchmarks, an unconstrained agent will search the web, locate the canonical GitHub pull request that originally resolved the issue, and copy the human committer's patch verbatim. Evaluation gyms must enforce complete network air-gapping with loopback-only interfaces and local mock servers.
+
+### Pitfall 2: The Tool-Wait Profiling Trap.
+Engineering teams frequently spend months optimizing foundation model inference (deploying FP8 quantization or custom CUDA kernels to shave 200 ms off decode latency) while ignoring tool execution overhead. If an agent spends 15 seconds compiling code inside an un-optimized virtual machine at every step, model optimization yields negligible overall speedup. Systems engineering must be guided by Amdahl's Law profiling across the complete end-to-end trajectory.
+
+### Pitfall 3: Shipping regressions masked by statistical power failure.
+Comparing two agent architectures on small benchmark samples (e.g. $N = 30$ tasks) provides less than $20\%$ statistical power. Under such noisy conditions, a $+6\%$ observed gain is statistically indistinguishable from randomness. Deploying based on unpowered benchmarks routinely introduces severe production degradations. Release gates must enforce formal sample size requirements and sequential hypothesis testing (SPRT).
 
 ## Chapter Summary {#sec-vol3-telemetry-summary}
 
-* **Environment-grounded evaluation:** Agent systems must be evaluated inside interactive environments measured across stochastic distributions (Pass@k).
-* **OpenTelemetry GenAI conventions:** Distributed tracing must adopt OpenTelemetry GenAI semantic conventions to attribute cost and latency.
-* **Deterministic event sourcing:** Event-sourcing enables bit-exact offline replay of non-deterministic trajectory failures.
-* **Time-travel debugging:** Counterfactual branch diffing allows engineers to diagnose causal semantic drift.
-
-
-
-```{=latex}
-\part{key:synthesis}
-```
+- **Interactive Hermetic Gyms:** Static question-answering benchmarks have collapsed under data contamination and open-loop limitations. Agents must be evaluated inside interactive, stateful software environments (SWE-bench, WebArena) featuring Copy-on-Write filesystem snapshotting, micro-VM isolation, and complete network air-gapping.
+- **Trajectory Goodput and Fleet Economics:** Algorithmic capability is measured by the unbiased Pass@$k$ estimator, while serving economics are governed by Trajectory Goodput ($G = N_{\text{success}} / (C_{\text{tokens}} + C_{\text{compute}})$). Sparse MoE architectures maximize Goodput by reducing active compute per token by $3.6\text{--}5.4\times$ during long-context agent loops.
+- **Statistical Significance under Non-Determinism:** Hardware floating-point non-associativity, MoE collective routing jitter, and tool latencies make agent execution stochastic. Detecting meaningful capability deltas requires formal sample size sizing ($N \ge 1,\!000$) and non-parametric Monte Carlo bootstrap confidence intervals.
+- **OpenTelemetry GenAI Tracing:** Production observability requires structured distributed tracing conforming to OpenTelemetry GenAI conventions, organizing telemetry into a three-tier span hierarchy (`agent.trajectory` $\to$ `agent.step` $\to$ `gen_ai.inference` / `tool.execution`) with W3C TraceContext propagation across asynchronous queues and stochastic search trees.
+- **Deterministic Event Sourcing and Time Travel:** Capturing non-deterministic boundary interactions into immutable event streams enables bit-exact offline replay at zero token cost. Time-travel debuggers empower engineers to rewind state vectors, restore CoW filesystem checkpoints, and fork counterfactual exploration branches to isolate root causes.
+- **Trajectory Profiling and Causal Localization:** Profiling decomposes total latency across prefill, decode, and tool I/O, applying Amdahl's Law to target true systems bottlenecks. Automated contrastive trace diffing isolates the exact failure-inducing step and context snippet.
+- **Canary Gates and Supervisory Oversight:** Automated CI/CD pipelines utilize Sequential Probability Ratio Testing (SPRT) to detect regressions within 20 canary trajectories. Supervisory telemetry tracks the $10^6\times$ human-tool latency asymmetry, monitoring dwell times and intervention rates to prevent catastrophic rubber-stamping automation bias.
