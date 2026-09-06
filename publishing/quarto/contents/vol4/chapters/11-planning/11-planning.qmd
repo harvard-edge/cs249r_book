@@ -142,6 +142,24 @@ When a generative policy serves as the planner, iterative score evaluation and d
 ![](figures/fig11_real_action_chunking_trace.png){width="100%"}
 :::
 
+### The planning execution delay gap and future-state conditioning
+
+In a receding-horizon planning framework—whether executing a score-based diffusion policy, an action chunking transformer, or trajectory optimization—replanning requires a finite end-to-end computational latency $\Delta t_{\text{plan}} = L$ (spanning sensing, DMA transfer, neural inference, and constraint validation, typically $50\text{--}150\text{ ms}$). A widespread design error in robot learning architectures is conditioning the planner on the *current* measured physical state sampled at the request epoch $t_0$:
+$$\mathbf{x}_{\text{meas}}(t_0) = \begin{bmatrix} \mathbf{q}(t_0) \\ \dot{\mathbf{q}}(t_0) \end{bmatrix}$$
+By the time neural inference, safety validation, and buffer admission finish at $t_{\text{admit}} = t_0 + \Delta t_{\text{plan}}$, the physical robot has already moved under the previously active trajectory chunk ($A$) over the entire interval $\Delta t_{\text{plan}}$. The newly arrived trajectory chunk ($B$) begins at the historical state $\mathbf{x}_{\text{meas}}(t_0)$, but the physical plant is now located at $\mathbf{x}_A(t_0 + \Delta t_{\text{plan}})$. Attempting to execute chunk $B$ immediately injects an unmodeled step displacement into the tracking loop:
+$$\Delta \mathbf{x}_{\text{gap}} = \mathbf{x}_A(t_0 + \Delta t_{\text{plan}}) - \mathbf{x}_{\text{meas}}(t_0) \approx \int_{t_0}^{t_0 + \Delta t_{\text{plan}}} \dot{\mathbf{q}}_A(t) \, dt$$
+For an industrial arm moving at joint velocity $\dot{q} = 0.50\text{ rad/s}$ across a planning latency $\Delta t_{\text{plan}} = 80\text{ ms}$, this execution delay gap creates an instantaneous step error of $\Delta q_{\text{gap}} = (0.50\text{ rad/s})(0.080\text{ s}) = 0.040\text{ rad}$ ($2.29^\circ$). When streamed to high-gain joint controllers, this step demands peak restoring torque ($\tau_{\text{step}} = K_p \Delta q_{\text{gap}}$), causing violent mechanical jerk, acoustic thumping, and overcurrent inverter trips.
+
+To eliminate the planning execution delay gap, high-performance physical AI architectures implement **future-state conditioning**. Instead of conditioning inference on the stale measured state $\mathbf{x}_{\text{meas}}(t_0)$, the upstream planner conditions its trajectory rollout on the *forward-simulated terminal state* of the currently executing trajectory chunk evaluated at the exact anticipated admission epoch $t_{\text{admit}} = t_0 + \Delta t_{\text{plan}}$:
+$$\mathbf{x}_{\text{cond}} = \hat{\mathbf{x}}_A(t_0 + \Delta t_{\text{plan}}) = \begin{bmatrix} \mathbf{q}_A(t_0 + \Delta t_{\text{plan}}) \\ \dot{\mathbf{q}}_A(t_0 + \Delta t_{\text{plan}}) \\ \ddot{\mathbf{q}}_A(t_0 + \Delta t_{\text{plan}}) \end{bmatrix}$$
+Because the low-level MCU tracks the active chunk $A$ deterministically, $\hat{\mathbf{x}}_A(t_0 + \Delta t_{\text{plan}})$ accurately predicts the robot's physical configuration at the handoff instant. When chunk $B$ arrives and is admitted at $t_{\text{admit}}$, its initial boundary values match the executing trajectory's position, velocity, and acceleration to machine precision:
+$$\mathbf{q}_B(0) = \mathbf{q}_A(t_{\text{admit}}), \quad \dot{\mathbf{q}}_B(0) = \dot{\mathbf{q}}_A(t_{\text{admit}}), \quad \ddot{\mathbf{q}}_B(0) = \ddot{\mathbf{q}}_A(t_{\text{admit}})$$
+This future-state conditioning guarantees that the replacement seam maintains strict $C^2$ continuity, eliminating the execution delay gap without requiring the machine to pause, decelerate, or suffer impulsive torque spikes.
+
+::: {#dfn-planning-future-state-conditioning .callout-definition title="Future-State Conditioning"}
+**Future-state conditioning** is the real-time planning protocol wherein an upstream trajectory optimizer or generative action policy conditions its temporal rollout on the forward-simulated kinematic state ($\hat{\mathbf{x}}_A(t_0 + \Delta t_{\text{plan}})$) of the currently executing plan evaluated at the anticipated replacement admission epoch, eliminating the spatial execution delay gap ($\Delta \mathbf{x}_{\text{gap}}$) caused by finite neural inference latency.
+:::
+
 <!-- END -->
 
 ## Feasibility and Continuity {#sec-planning-11-4}

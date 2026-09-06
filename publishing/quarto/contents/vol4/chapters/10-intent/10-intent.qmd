@@ -152,6 +152,27 @@ Across all three paradigms, transforming raw visual observations and language to
 ![](figures/fig10_real_open_vocab_grounding.jpg){width="95%"}
 :::
 
+### Direct coordinate tokenization and metric unprojection
+
+In direct spatial token heads and end-to-end Vision-Language-Action backbones (such as RT-2, OpenVLA, and PaliGemma), continuous 3D target coordinates are mapped directly into the model's discrete language vocabulary. Rather than outputting unconstrained floating-point vectors, the model discretizes each spatial axis into a fixed number of uniform bins (typically $B = 1000$ bins, represented as special tokens `<loc000>` through `<loc999>`).
+
+When prompted with a physical directive such as `"pick up the red mug"`, the model outputs a sequence of discrete coordinate tokens designating the target grasping centroid:
+$$\text{Tokens} = [\langle\text{loc350}\rangle, \langle\text{loc420}\rangle, \langle\text{loc180}\rangle]$$
+corresponding to normalized spatial coordinates $[\tilde{u}, \tilde{v}, \tilde{z}] = [0.350, 0.420, 0.180] \in [0, 1]^3$.
+
+To convert these dimensionless tokens into an executable intent record, the nervous system unprojects them through calibrated optical intrinsics and platform extrinsics:
+
+1. **Denormalization:** The normalized coordinates are mapped to pixel coordinates $(u, v)$ and optical range $z$:
+   $$u = u_{\min} + \tilde{u}(u_{\max} - u_{\min}), \quad v = v_{\min} + \tilde{v}(v_{\max} - v_{\min}), \quad z = z_{\min} + \tilde{z}(z_{\max} - z_{\min})$$
+2. **Camera Frame Ray Unprojection:** Using the calibrated camera intrinsic matrix $\mathbf{K}$:
+   $$\mathbf{p}_{\text{cam}} = z \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \begin{bmatrix} (u - c_x) z / f_x \\ (v - c_y) z / f_y \\ z \end{bmatrix}$$
+3. **Rigid Extrinsic Transformation:** Mapping the optical point to the robot base frame $\mathcal{F}_{\text{base}}$:
+   $$\mathbf{p}_{\text{base}} = \mathbf{R}_{\text{base}\leftarrow\text{cam}} \mathbf{p}_{\text{cam}} + \mathbf{t}_{\text{base}\leftarrow\text{cam}}$$
+
+Crucially, bin discretization introduces an irreducible spatial quantization uncertainty. For a workspace dimension of width $L_{\text{span}} = 1.0\text{ m}$ divided into $B = 1000$ bins, the bin width is $\Delta_{\text{bin}} = L_{\text{span}} / B = 1.0\text{ mm}$. Modeling quantization error as a uniform random variable across $[-\frac{\Delta_{\text{bin}}}{2}, \frac{\Delta_{\text{bin}}}{2}]$ yields a quantization variance:
+$$\sigma_{\text{quant}}^2 = \frac{\Delta_{\text{bin}}^2}{12} = \frac{(1.0\text{ mm})^2}{12} \approx 0.0833\text{ mm}^2 \implies \sigma_{\text{quant}} \approx 0.289\text{ mm}$$
+Along the depth axis $z$, where range spans $0.2\text{--}2.0\text{ m}$ ($\Delta_{\text{bin}, z} = 1.8\text{ mm}$), quantization compounds with quadratic stereo or ToF ranging variance ($\sigma_{\text{total}}^2 = \sigma_{\text{sensor}}^2 + \sigma_{\text{quant}}^2$). The intent generation front-end must synthesize this combined variance into the oriented spatial covariance matrix $\mathbf{\Sigma}_p$ before handing the intent lease $\mathcal{L}_{\text{intent}}$ over to the real-time execution core.
+
 To prevent an unverified neural network output from masquerading as a deterministic setpoint, the grounded proposal must satisfy a formal interface contract. The proposal cannot consist solely of an isolated Cartesian pose. It must carry the referent identity, the perceptual evidence that selected it, a spatial tolerance volume, and an expiration lease. The referent identity specifies the semantic class and instance identifier assigned by the upstream model. The selection evidence records the bounding box coordinates, cross-attention weights, and posterior class probabilities that justified the match. The spatial tolerance volume, parameterized by an oriented covariance ellipsoid, defines the physical region within which the referent is estimated to lie. The expiration lease establishes an absolute deadline after which the target coordinate is automatically discarded. In a physical workcell, an object can shift, roll, or be occluded milliseconds after a camera frame is exposed. A target coordinate detached from its perceptual evidence and its expiration lease becomes an open-loop hazard, directing mechanical power toward coordinates that no longer contain the target.
 
 When a vision-language model processes an ambiguous request in an environment containing multiple candidate objects, its mathematical objective encourages it to output an argmax prediction. In digital applications, choosing the top-ranked candidate when two options exhibit near-equal probabilities of $0.51$ and $0.49$ produces a harmless user-interface recommendation. In a physical machine, breaking an evidential tie silently produces an arbitrary trajectory. If two identical mechanical components sit on an assembly bench separated by $180\text{ mm}$, an ungrounded model that guesses between them commits the manipulator to a ballistic approach trajectory that passes through the clearance volume of the adjacent part. Ambiguity must therefore be treated as an explicit, first-class output state. When the posterior entropy across $K$ candidate referents,
