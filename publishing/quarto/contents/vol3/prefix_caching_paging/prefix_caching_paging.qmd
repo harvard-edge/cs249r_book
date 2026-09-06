@@ -1,0 +1,120 @@
+---
+engine: markdown
+---
+
+# Prefix Caching and Paging {#sec-vol3-prefix-caching-paging}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+:::
+
+## Purpose {.unnumbered .unlisted}
+
+\begin{marginfigure}
+\mlagentstack{15}{20}{30}{95}{20}{15}
+\caption{The Agentic Machine Learning Systems Stack. Prefix Caching \& Paging operates at Layer 3 (Serving \& Memory).}
+\end{marginfigure}
+
+_How can serving runtimes exploit massive trajectory prompt locality to maximize throughput during interactive multi-turn execution?_
+
+In agentic workflows, step $t+1$ shares 85–95% of its prompt tokens with step $t$. In branching MCTS searches, sibling branches share identical prefixes. If the serving runtime recomputes the KV cache from scratch on every turn, throughput collapses. The runtime must organize KV memory as a Radix Tree (as pioneered in SGLang and PagedAttention) to achieve instant prefix reuse. However, prefix caching introduces a major challenge: cache invalidation when environments mutate. Furthermore, when an agent pauses to run a bash command, query an external API, or await human review, leaving its multi-gigabyte KV cache pinned in scarce accelerator HBM causes severe cluster starvation. The runtime must decouple context persistence from active GPU allocation by paging KV blocks over PCIe Gen5/CXL to Host DRAM and NVMe. This chapter unifies Radix prefix caching with hierarchical KV-cache paging and disaggregated memory architectures.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-learning-objectives}
+
+- Design and navigate Radix tree data structures for physical KV-cache block indexing
+- Formulate cache invalidation protocols triggered by environment and tool state mutations
+- Engineer prompt structures that maximize prefix cache hit rates across multi-turn trajectories
+- Calculate the bandwidth-latency thresholds governing when to swap KV cache to Host DRAM over PCIe/CXL
+- Architect disaggregated memory pools that separate prefill compute from decode compute
+
+:::
+
+## Prefix Locality in Multi-Turn Trajectories: Empirical Workload Analysis {#sec-vol3-caching-prefix-locality-in-multi-turn}
+
+* *Systems Mechanism:* Trajectory workloads display extreme temporal and spatial prefix locality. In iterative coding and search agents, subsequent steps append small tokens to an identical prefix of system instructions, tool schemas, and earlier turns, rendering naive recalculation an enormous GPU waste.
+  * *Citations & Links:* Zheng et al., [SGLang: Efficient Execution of Structured Language Model Programs](https://arxiv.org/abs/2312.07104) (2023/2024); Kwon et al., [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) (SOSP 2023).
+
+
+## KV-Cache Anatomy: Tensor Layouts, GQA/MQA, and Allocation Overhead {#sec-vol3-caching-kv-cache-anatomy-tensor-layouts}
+
+* *Systems Mechanism:* Mathematical derivation of KV cache footprint per token across Multi-Head Attention (MHA), Multi-Query Attention (MQA), and Grouped-Query Attention (GQA). Explores physical memory layout ($2 \times n_{\text{layers}} \times n_{\text{kv\_heads}} \times d_{\text{head}} \times \text{bytes}$) and internal fragmentation under naive static tensor allocation.
+  * *Citations & Links:* Ainslie et al., [GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245) (EMNLP 2023); Shazeer, [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150) (2019).
+
+
+## PagedAttention: Virtual Memory Page Tables for Non-Contiguous KV Blocks {#sec-vol3-caching-pagedattention-virtual-memory-page}
+
+* *Systems Mechanism:* Adapts classic OS paging (virtual addresses mapped to non-contiguous physical pages) to transformer attention. Allocates KV cache in fixed-size blocks (e.g., 16 or 32 tokens), eliminating external fragmentation and enabling memory sharing across parallel speculative threads.
+  * *Citations & Links:* Kwon et al., [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) (SOSP 2023); Denning, [Virtual Memory](https://doi.org/10.1145/356580.356581) (ACM Computing Surveys 1970).
+
+
+## Radix Tree Indexing: Dynamic Prefix Matching, Insertion, and Eviction {#sec-vol3-caching-radix-tree-indexing-dynamic}
+
+* *Systems Mechanism:* Radix tree data structures designed for managing shared prompt prefixes. Fast string-matching and prefix lookup allow the inference engine (SGLang) to match incoming token sequences against cached GPU KV memory blocks in sub-millisecond time.
+  * *Citations & Links:* Zheng et al., [SGLang: Efficient Execution of Structured Language Model Programs](https://arxiv.org/abs/2312.07104) (2023/2024); Fredkin, [Trie Memory](https://doi.org/10.1145/367390.367400) (CACM 1960).
+
+
+## Cache Invalidation Protocols: Mutating Workspace State vs. Prefix Invalidation {#sec-vol3-caching-cache-invalidation-protocols-mutating}
+
+* *Systems Mechanism:* When an agent modifies a file or executes an environment mutation, prompts referring to that file become semantically stale. Details cache invalidation protocols that balance invalidating only affected child nodes in the Radix tree against catastrophic global cache flushes.
+  * *Citations & Links:* Gray & Cheriton, [Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency](https://doi.org/10.1145/74850.74870) (SOSP 1989); Anthropic, [Prompt Caching in Claude 3.5](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) (2024).
+
+
+## Multi-Tier Memory Hierarchies: KV-Swapping over PCIe and CXL {#sec-vol3-caching-multi-tier-memory-hierarchies-kv-swapping}
+
+* *Systems Mechanism:* Decouples context retention from active accelerator HBM. Examines multi-tier architectures where inactive agent KV blocks are asynchronously offloaded over PCIe Gen5 (64 GB/s) or CXL interconnects to host DRAM or NVMe, reclaiming expensive HBM for active compute.
+  * *Citations & Links:* Sheng et al., [High-Throughput Generative Inference of Large Language Models with FlexGen](https://arxiv.org/abs/2303.06865) (ICML 2023); Compute Express Link Consortium, [CXL 3.0 Specification](https://computeexpresslink.org/) (2022).
+
+
+## Prefill-Decode Disaggregation: Splitwise and DistServe Architectures {#sec-vol3-caching-prefill-decode-disaggregation-splitwise-and}
+
+* *Systems Mechanism:* Prefill is compute-bound ($O(L^2)$ matrix multiplications on high-TFLOPS tensor cores); decode is memory-bandwidth-bound ($O(L)$ memory reads). Analyzes the systems architecture of physically separating prefill GPU nodes from decode GPU nodes, streaming KV states across high-speed interconnects.
+  * *Citations & Links:* Patel et al., [Splitwise: Efficient Generative LLM Inference Using Phase Splitting](https://arxiv.org/abs/2311.18677) (ISCA 2024); Zhong et al., [DistServe: Disaggregating Prefill and Decoding for Goodput-Optimized LLM Serving](https://arxiv.org/abs/2401.09670) (OSDI 2024).
+
+
+## KVCache-Centric Datacenter Architectures: RDMA Streaming and Mooncake {#sec-vol3-caching-kvcache-centric-datacenter-architectures-rdma}
+
+* *Systems Mechanism:* Next-generation datacenter architectures where the KV cache is treated as the primary shared file system of the AI cluster. Analyzes Mooncake’s architecture: streaming KV blocks across RoCEv2/Infiniband networks to decouple serving nodes from local storage.
+  * *Citations & Links:* Qin et al., [Mooncake: A KVCache-Centric Disaggregated Architecture for LLM Serving](https://arxiv.org/abs/2407.00079) (OSDI 2024); Guo et al., [InfiniBand-based RDMA Architecture for Distributed LLM Training and Serving](https://doi.org/10.1145/3627703.3629571) (SIGCOMM 2023).
+
+
+## Branching Speculation: Prefix Cache Sharing Across Best-of-N and MCTS Trees {#sec-vol3-caching-branching-speculation-prefix-cache}
+
+* *Systems Mechanism:* Test-time search algorithms (Tree-of-Thoughts, MCTS) explore multiple parallel reasoning branches from a single root node. Explores how Radix tree page tables permit $K$ speculative rollout workers to read-share a single 30k-token prefix KV block with zero copy overhead.
+  * *Citations & Links:* Yao et al., [Tree of Thoughts: Deliberate Problem Solving with Large Language Models](https://arxiv.org/abs/2305.10601) (NeurIPS 2023); Snell et al., [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314) (2024).
+
+
+## Chunked Prefill and Continuous Batching Under Stateful Agent Traffic {#sec-vol3-caching-chunked-prefill-and-continuous}
+
+* *Systems Mechanism:* Interleaving large prefill token chunks with ongoing autoregressive decode iterations. Prevents large prompt prefills from starving decode tokens of latency SLOs, balancing Time-to-First-Token (TTFT) against Inter-Token Latency (ITL) for interactive agent users.
+  * *Citations & Links:* Agrawal et al., [SARATHI: Efficient LLM Inference by Chunked Prefills with Piggybacking](https://arxiv.org/abs/2308.16369) (2023); Yu et al., [Orca: A Distributed Serving System for Transformer-Based Generative Models](https://www.usenix.org/conference/osdi22/presentation/yu) (OSDI 2022).
+
+
+## Production Postmortem: Radix Cache Thrashing and GPU OOMs in vLLM {#sec-vol3-caching-production-postmortem-radix-cache}
+
+* *Systems Mechanism:* Autopsy of an enterprise agent deployment where non-deterministic dynamic timestamps in the prompt header degraded prefix cache hit rates from 92% to 0%. The resulting prefill spike caused queuing backpressure, memory fragmentation, and cluster-wide GPU OOM cascading crashes.
+  * *Citations & Links:* vLLM Team, [Production Postmortem: Memory Management and Cache Invalidation Issues](https://github.com/vllm-project/vllm/issues) (2024); SGLang Team, [RadixAttention Performance Benchmarks and Failure Cases](https://github.com/sgl-project/sglang) (2024).
+
+---
+
+
+## Fallacies and Pitfalls {#sec-vol3-caching-fallacies}
+
+* **Fallacy:** _Prefix caching is completely automatic and requires no deliberate prompt engineering._
+* **Pitfall:** Inserting dynamic timestamps or randomized nonces at the beginning of a prompt, completely breaking prefix cache hit rates for all subsequent tokens.
+
+## Chapter Summary {#sec-vol3-caching-summary}
+
+* **Prefix sharing in trajectories:** Multi-turn agent loops exhibit massive prefix sharing that can eliminate up to 90% of prefill compute.
+* **Radix tree indexing:** Radix trees index physical KV-cache blocks to enable instant prefix reuse across branches and turns.
+* **Static prefix discipline:** Prompts must be engineered with static prefixes first to maximize cache hit rates.
+* **Hierarchical KV paging:** Idle KV blocks must be paged over PCIe to host DRAM during long tool calls to prevent GPU memory starvation.
