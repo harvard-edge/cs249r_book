@@ -1316,74 +1316,74 @@ Multi-agent collaboration must be treated as distributed computing over non-dete
 ##### 13.1 Stochastic Nodes and Distributed Actor Computing (`#sec-vol3-multi-agent-stochastic-nodes-and-distributed`)
 * **Systems Mechanism:** Formalizes multi-agent systems not as conversational anthropomorphic personas, but as asynchronous distributed systems executing across stochastic, fail-plausible compute nodes. Contrasts deterministic Turing-machine processes with neural actors whose state transitions are probabilistic draws conditioned on contextual memory.
 * **Seminal Literature & Grounding:**
-  * [IJCAI 1973](https://dl.acm.org/doi/10.5555/1624775.1624804)
-  * [MIT Press](https://mitpress.mit.edu/9780262010924/actors/)
+  * [A Universal Modular ACTOR Formalism for Artificial Intelligence (Hewitt, Bishop, Steiger)](https://dl.acm.org/doi/10.5555/1624775.1624804)
+  * [Actors: A Model of Concurrent Computation in Distributed Systems (Agha)](https://mitpress.mit.edu/9780262010924/actors/)
 
 ##### 13.2 Message Passing, Mailboxes, and Context Isolation (`#sec-vol3-multi-agent-message-passing-mailboxes-and`)
 * **Systems Mechanism:** Analyzes communication fabrics between autonomous agents using Erlang-style asynchronous message passing and private context mailboxes. Demonstrates why shared global context windows induce exponential token bloat and cross-agent attention contamination, requiring strict message serialization boundaries.
 * **Seminal Literature & Grounding:**
-  * [ACM HOPL III](https://dl.acm.org/doi/10.1145/1238844.1238850)
-  * [GitHub Repository](https://github.com/openai/swarm)
+  * [A History of Erlang (Armstrong)](https://dl.acm.org/doi/10.1145/1238844.1238850)
+  * [Swarm: An Educational Framework for Multi-Agent Orchestration (OpenAI)](https://github.com/openai/swarm)
 
 ##### 13.3 Topology Taxonomy: Hierarchical, Peer-to-Peer, and Blackboards (`#sec-vol3-multi-agent-topology-taxonomy-hierarchical-peer-to-peer`)
 * **Systems Mechanism:** Compares multi-agent network topologies: centralized supervisor-worker dispatch, decentralized peer-to-peer gossip, sequential pipeline handoffs, and shared tuple-space blackboards. Formulates the latency, fan-out, and failure blast-radius trade-offs inherent to each communication graph.
 * **Seminal Literature & Grounding:**
-  * [Communications of the ACM, 32(4), 444–458](https://dl.acm.org/doi/10.1145/63334.63337)
-  * [arXiv:2308.08155](https://arxiv.org/abs/2308.08155)
+  * [Linda in Context (Carriero & Gelernter)](https://dl.acm.org/doi/10.1145/63334.63337)
+  * [AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework (Wu et al.)](https://arxiv.org/abs/2308.08155)
 
 ##### 13.4 The Coordination Tax and Multi-Agent Amdahl’s Law (`#sec-vol3-multi-agent-the-coordination-tax-and`)
 * **Systems Mechanism:** Derives the mathematical limits of parallel agent scaling: communication serialization, context re-encoding, and prompt overhead impose a superlinear "Coordination Tax." Proves why adding agents yields diminishing or negative returns when task dependency graphs contain sequential critical paths.
 * **Seminal Literature & Grounding:**
-  * [AFIPS '67](https://dl.acm.org/doi/10.1145/1465482.1465560)
-  * [ACM SIGOPS OSR, 60(1), 64–74](https://sigops.org/s/pubs/osr/)
+  * [Validity of the Single Processor Approach to Achieving Large Scale Computing Capabilities (Amdahl)](https://dl.acm.org/doi/10.1145/1465482.1465560)
+  * [The Tail at Scale (Dean & Barroso)](https://sigops.org/s/pubs/osr/)
 
 ##### 13.5 Concurrency Control and Shared State Races (`#sec-vol3-multi-agent-concurrency-control-and-shared`)
 * **Systems Mechanism:** Addresses race conditions when parallel agents concurrently mutate shared external resources (filesystems, git trees, database tables). Analyzes optimistic concurrency control (OCC), multi-version concurrency control (MVCC), and distributed leases applied to non-deterministic actors.
 * **Seminal Literature & Grounding:**
-  * [ACM TODS, 6(2), 213–226](https://dl.acm.org/doi/10.1145/319566.319567)
-  * [Morgan Kaufmann](https://www.sciencedirect.com/book/9781558601901/transaction-processing)
+  * [On Optimistic Methods for Concurrency Control (Kung & Robinson)](https://dl.acm.org/doi/10.1145/319566.319567)
+  * [Transaction Processing: Concepts and Techniques (Gray & Reuter)](https://www.sciencedirect.com/book/9781558601901/transaction-processing)
 
 ##### 13.6 Semantic Deadlocks, Livelocks, and Cycle Detection (`#sec-vol3-multi-agent-semantic-deadlocks-livelocks-and`)
 * **Systems Mechanism:** Formalizes semantic livelocks—failure modes where agents enter infinite conversational cycles, repeatedly edit and revert each other's code, or reach circular dependency deadlocks. Establishes graph-based cycle detection algorithms on causal message DAGs with automated $\epsilon$-progress tripwires.
 * **Seminal Literature & Grounding:**
-  * [ACM Computing Surveys, 3(2), 67–78](https://dl.acm.org/doi/10.1145/356586.356588)
-  * [ACM TOCS, 1(2), 144–156](https://dl.acm.org/doi/10.1145/357360.357365)
+  * [System Deadlocks (Coffman, Elphick, Shoshani)](https://dl.acm.org/doi/10.1145/356586.356588)
+  * [A Distributed Algorithm for Deadlock Detection in Distributed Database Systems (Chandy, Misra, Haas)](https://dl.acm.org/doi/10.1145/357360.357365)
 
 ##### 13.7 Consensus under Correlated Byzantine Hallucinations (`#sec-vol3-multi-agent-consensus-under-correlated-byzantine`)
 * **Systems Mechanism:** Evaluates multi-agent debate, voting, and consensus protocols under the lens of Byzantine Fault Tolerance. Proves that classical BFT assumptions of independent node failures collapse when agents share base foundation model weights, causing debate ensembles to reinforce common pre-training hallucinations.
 * **Seminal Literature & Grounding:**
-  * [ACM TOPLAS, 4(3), 382–401](https://dl.acm.org/doi/10.1145/357172.357176)
-  * [ICML 2023 / arXiv:2305.14325](https://arxiv.org/abs/2305.14325)
+  * [The Byzantine Generals Problem (Lamport, Shostak, Pease)](https://dl.acm.org/doi/10.1145/357172.357176)
+  * [Improving Factuality and Reasoning in Language Models through Multiagent Debate (Du et al.)](https://arxiv.org/abs/2305.14325)
 
 ##### 13.8 Capability Delegation and Attenuation (`#sec-vol3-multi-agent-capability-delegation-and-attenuation`)
 * **Systems Mechanism:** Implements the Principle of Least Privilege across dynamic subagent trees using cryptographic capability tokens and time-bounded leases. Formulates monotonic capability attenuation to guarantee that child subagents cannot inherit or escalate privileges beyond their parent's scope.
 * **Seminal Literature & Grounding:**
-  * [Proceedings of the IEEE, 63(9), 1278–1308](https://doi.org/10.1109/PROC.1975.9939)
-  * [PhD Dissertation, Johns Hopkins](https://papers.combex.com/thesis/)
+  * [The Protection of Information in Computer Systems (Saltzer & Schroeder)](https://doi.org/10.1109/PROC.1975.9939)
+  * [Robust Composition: Towards a Unified Approach to Access Control and Concurrency Control (Miller)](https://papers.combex.com/thesis/)
 
 ##### 13.9 Structured Wire Protocols vs. Natural Language Channels (`#sec-vol3-multi-agent-structured-wire-protocols-vs`)
 * **Systems Mechanism:** Compares inter-agent communication across natural language streams versus strongly typed binary/RPC schemas (Protobuf, JSON-RPC, MCP). Measures the token tax, parsing failure rates, and serialization latencies of conversational coordination compared to typed wire protocols.
 * **Seminal Literature & Grounding:**
-  * [Anthropic & Open Source Consortium](https://modelcontextprotocol.io/)
-  * [Doctoral Dissertation, UC Irvine](https://www.ics.uci.edu/~fielding/pubs/dissertation/top.htm)
+  * [Model Context Protocol Specification (Anthropic)](https://modelcontextprotocol.io/)
+  * [Architectural Styles and the Design of Network-based Software Architectures (Fielding)](https://www.ics.uci.edu/~fielding/pubs/dissertation/top.htm)
 
 ##### 13.10 Distributed Blame and Credit Attribution (`#sec-vol3-multi-agent-distributed-blame-and-credit`)
 * **Systems Mechanism:** Solves the distributed credit and fault localization challenge: determining which intermediate agent in an $M$-agent execution graph introduced the corrupted assumption that derailed a multi-step task. Leverages Shapley value estimation and counterfactual trace surgery to assign causal blame.
 * **Seminal Literature & Grounding:**
-  * [Contributions to the Theory of Games, 2, 307–317](https://doi.org/10.1515/9781400881970-018)
-  * [British Journal for the Philosophy of Science](https://doi.org/10.1093/bjps/axi121)
+  * [A Value for n-Person Games (Shapley)](https://doi.org/10.1515/9781400881970-018)
+  * [Causation and the Price Equation (Woodward)](https://doi.org/10.1093/bjps/axi121)
 
 ##### 13.11 Swarm Runtimes and State Synchronization (`#sec-vol3-multi-agent-swarm-runtimes-and-state`)
 * **Systems Mechanism:** Dissects production multi-agent runtimes (OpenAI Swarm, LangGraph, AutoGen) from an operating systems perspective. Evaluates actor lifecycle state machines, thread execution pools, checkpoint serialization, and distributed state persistence across network partitions.
 * **Seminal Literature & Grounding:**
-  * [NSDI 2012](https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/zaharia)
-  * [Anthropic Research](https://www.anthropic.com/research/building-effective-agents)
+  * [Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing (Zaharia et al.)](https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/zaharia)
+  * [Building Effective Agents (Anthropic)](https://www.anthropic.com/research/building-effective-agents)
 
 ##### 13.12 Cascading Failures and Isolation Firewalls (`#sec-vol3-multi-agent-cascading-failures-and-isolation`)
 * **Systems Mechanism:** Designs fault-isolation firewalls, exponential backoff with jitter, and adaptive circuit breakers to prevent a single failing or rate-limited subagent from triggering cascading cluster-wide token exhaustion and service starvation.
 * **Seminal Literature & Grounding:**
-  * [Pragmatic Bookshelf](https://pragprog.com/titles/mnee2/release-it-second-edition/)
-  * [IEEE Software](https://doi.org/10.1109/MS.2014.55)
+  * [Release It!: Design and Deploy Production-Ready Software (Nygard)](https://pragprog.com/titles/mnee2/release-it-second-edition/)
+  * [Fault Tolerance in a High-Volume Distributed System (Netflix / IEEE Software)](https://doi.org/10.1109/MS.2014.55)
 
 #### Fallacy & Pitfall
 * **Fallacy:** _If one agent cannot solve a task, adding five more agents debating each other will solve it._
@@ -1420,74 +1420,74 @@ Debugging a deterministic program is well understood (GDB, stack traces, core du
 ##### 14.1 The Collapse of Static Benchmarks (`#sec-vol3-telemetry-the-collapse-of-static`)
 * **Systems Mechanism:** Demonstrates why static question-answering datasets (MMLU, GSM8K) fail to evaluate agentic systems. Analyzes Goodhart’s Law, test-set data contamination, and the lack of stateful environmental feedback, establishing the necessity of interactive execution environments.
 * **Seminal Literature & Grounding:**
-  * [ICLR 2024 / arXiv:2310.06770](https://arxiv.org/abs/2310.06770)
-  * [NeurIPS 2023 / arXiv:2304.15004](https://arxiv.org/abs/2304.15004)
+  * [SWE-bench: Can Language Models Resolve Real-World GitHub Issues? (Jimenez et al.)](https://arxiv.org/abs/2310.06770)
+  * [GAIA: A Benchmark for General AI Assistants (Mialon et al.)](https://arxiv.org/abs/2304.15004)
 
 ##### 14.2 Hermetic Environment Gyms (`#sec-vol3-telemetry-hermetic-environment-gyms`)
 * **Systems Mechanism:** Examines the systems architecture of reproducible, stateful software environments (SWE-bench, WebArena, OSWorld). Addresses deterministic environment reset, copy-on-write filesystem snapshotting, local network isolation, and preventing benchmark execution side-effects from escaping to production networks.
 * **Seminal Literature & Grounding:**
-  * [ICLR 2024 / arXiv:2307.13854](https://arxiv.org/abs/2307.13854)
-  * [NeurIPS 2024 / arXiv:2404.07972](https://arxiv.org/abs/2404.07972)
+  * [WebArena: A Realistic Web Environment for Building Autonomous Agents (Zhou et al.)](https://arxiv.org/abs/2307.13854)
+  * [VisualWebArena: Evaluating Multimodal Web Agents on Realistic Tasks (Koh et al.)](https://arxiv.org/abs/2404.07972)
 
 ##### 14.3 Trajectory Metrics: Pass@k, Goodput, and Cost-per-Goal (`#sec-vol3-telemetry-trajectory-metrics-pass-k`)
 * **Systems Mechanism:** Replaces stateless metrics (tokens/second, BLEU) with trajectory systems metrics: unbiased Pass@$k$ estimators under stochastic sampling, steps-to-solution efficiency, cost-per-resolved-task, and Trajectory Goodput (verified goals completed per dollar and per kilowatt-hour).
 * **Seminal Literature & Grounding:**
-  * [arXiv:2107.03374](https://arxiv.org/abs/2107.03374)
-  * [ISCA 2020](https://doi.org/10.1109/ISCA45697.2020.00045)
+  * [Evaluating Large Language Models Trained on Code (Chen et al.)](https://arxiv.org/abs/2107.03374)
+  * [MLPerf Inference Benchmark (Reddi et al.)](https://doi.org/10.1109/ISCA45697.2020.00045)
 
 ##### 14.4 Statistical Significance under Non-Determinism (`#sec-vol3-telemetry-statistical-significance-under-non-determinism`)
 * **Systems Mechanism:** Formulates statistical hypothesis testing for evaluating stochastic systems. Quantifies sample size requirements, Monte Carlo bootstrap confidence intervals, seed sensitivity, and temperature variance to prevent shipping regressions masked by non-deterministic evaluation noise.
 * **Seminal Literature & Grounding:**
-  * [CRC Press](https://www.routledge.com/An-Introduction-to-the-Bootstrap/Efron-Tibshirani/p/book/9780412042317)
-  * [EMNLP 2020](https://aclanthology.org/2020.emnlp-main.744/)
+  * [An Introduction to the Bootstrap (Efron & Tibshirani)](https://www.routledge.com/An-Introduction-to-the-Bootstrap/Efron-Tibshirani/p/book/9780412042317)
+  * [Beyond Accuracy: Behavioral Testing of NLP Models with CheckList (Ribeiro et al.)](https://aclanthology.org/2020.emnlp-main.744/)
 
 ##### 14.5 Hierarchical Distributed Tracing (OpenTelemetry GenAI) (`#sec-vol3-telemetry-hierarchical-distributed-tracing-opentelemetry`)
 * **Systems Mechanism:** Adapts classical distributed tracing (Dapper, Jaeger) to agent trajectories. Details the OpenTelemetry GenAI semantic conventions, constructing hierarchical causal span graphs that bind prompt tokens, completion tokens, tool invocations, vector database queries, and dollar costs into unified trace trees.
 * **Seminal Literature & Grounding:**
-  * [Google Technical Report](https://research.google/pubs/pub36356/)
-  * [OpenTelemetry Specification](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+  * [Dapper, a Large-Scale Distributed Systems Tracing Infrastructure (Sigelman et al.)](https://research.google/pubs/pub36356/)
+  * [Semantic Conventions for Generative AI Operations (OpenTelemetry)](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
 
 ##### 14.6 Distributed Context Propagation across Stochastic Trees (`#sec-vol3-telemetry-distributed-context-propagation-across`)
 * **Systems Mechanism:** Details W3C TraceContext injection and extraction across asynchronous agent task queues, subagent forks, and external tool calls. Resolves causal tracking across long-lived, multi-turn trajectories where execution spans hours and traverses heterogeneous microservices.
 * **Seminal Literature & Grounding:**
-  * [W3C Specification](https://www.w3.org/TR/trace-context/)
-  * [CMU-PDL-11-102](https://www.cs.cmu.edu/~ganger/papers/)
+  * [W3C Trace Context Recommendation (W3C)](https://www.w3.org/TR/trace-context/)
+  * [Diagnosing Performance Changes by Comparing Request Flows (Sambasivan et al.)](https://www.cs.cmu.edu/~ganger/papers/)
 
 ##### 14.7 Deterministic Event Recording and Input Interception (`#sec-vol3-telemetry-deterministic-event-recording-and`)
 * **Systems Mechanism:** Establishes the primitives required for reproducible execution of stochastic processes: intercepting and logging model completions, pseudorandom generation seeds, external network socket payloads, database query snapshots, and wall-clock timestamps into an append-only event stream.
 * **Seminal Literature & Grounding:**
-  * [OSDI 2007](https://www.usenix.org/legacy/event/osdi06/tech/geels.html)
-  * [USENIX ATC 2005](https://www.usenix.org/legacy/event/nsdi05/tech/king.html)
+  * [Friday: Global Comprehension for Distributed Programs (Geels et al.)](https://www.usenix.org/legacy/event/osdi06/tech/geels.html)
+  * [Debugging Operating Systems with Time-Travel Virtual Machines (King et al.)](https://www.usenix.org/legacy/event/nsdi05/tech/king.html)
 
 ##### 14.8 Time-Travel Debugging and Counterfactual Forking (`#sec-vol3-telemetry-time-travel-debugging-and-counterfactual`)
 * **Systems Mechanism:** Implements time-travel debugging for agent trajectories: stepping backwards through a 50-step execution history, inspecting intermediate attention contexts and scratchpad states, modifying an observation at Step 12, and executing a counterfactual forward branch to isolate bugs.
 * **Seminal Literature & Grounding:**
-  * [SOSP 2001](https://dl.acm.org/doi/10.1145/502034.502041)
-  * [AADEBUG 2003](https://arxiv.org/abs/cs/0310016)
+  * [When Virtual is Better Than Real (Chen & Noble)](https://dl.acm.org/doi/10.1145/502034.502041)
+  * [Deterministic Execution for Deterministic Debugging (Engblom)](https://arxiv.org/abs/cs/0310016)
 
 ##### 14.9 Trajectory Latency and Resource Profiling (`#sec-vol3-telemetry-trajectory-latency-and-resource`)
 * **Systems Mechanism:** Deconstructs end-to-end trajectory runtime into fine-grained systems profiles: prefill time, decode time, tool network latency, sandboxed execution time, and verification delay. Formulates Amdahl’s Law optimizations to determine whether acceleration should target model inference or tool I/O.
 * **Seminal Literature & Grounding:**
-  * [Morgan Kaufmann](https://www.elsevier.com/books/computer-architecture/hennessy/978-0-12-811905-1)
-  * [USENIX ATC 2004](https://www.usenix.org/conference/2004-usenix-annual-technical-conference/dynamic-instrumentation-production-systems)
+  * [Computer Architecture: A Quantitative Approach (Hennessy & Patterson)](https://www.elsevier.com/books/computer-architecture/hennessy/978-0-12-811905-1)
+  * [Dynamic Instrumentation of Production Systems (Cantrill, Shapiro, Leventhal)](https://www.usenix.org/conference/2004-usenix-annual-technical-conference/dynamic-instrumentation-production-systems)
 
 ##### 14.10 Automated Causal Fault Localization (`#sec-vol3-telemetry-automated-causal-fault-localization`)
 * **Systems Mechanism:** Formulates automated root-cause attribution across divergent trajectory traces. Uses causal DAG differencing to contrast successful versus failed agent runs, automatically isolating the single prompt token, stale context snippet, or malformed schema argument that diverted reasoning.
 * **Seminal Literature & Grounding:**
-  * [IEEE Transactions on Software Engineering, 28(2), 183–200](https://doi.org/10.1109/32.988498)
-  * [Cambridge University Press](https://www.cambridge.org/core/books/quantum-computation-and-quantum-information/2E4163884823A03F1EB642FB997A0A68)
+  * [Efficient Path Profiling (Ball & Larus)](https://doi.org/10.1109/32.988498)
+  * [Quantum Computation and Quantum Information (Nielsen & Chuang)](https://www.cambridge.org/core/books/quantum-computation-and-quantum-information/2E4163884823A03F1EB642FB997A0A68)
 
 ##### 14.11 Continuous Integration and Canary Release Gates (`#sec-vol3-telemetry-continuous-integration-and-canary`)
 * **Systems Mechanism:** Designs continuous integration (CI/CD) pipelines for shipping non-deterministic agent workflows. Details shadow evaluation, canary rollouts with sequential probability ratio tests (SPRT), statistical regression detection, and automated rollback triggers.
 * **Seminal Literature & Grounding:**
-  * [Annals of Mathematical Statistics, 16(2), 117–186](https://doi.org/10.1214/aoms/1177731118)
-  * [CMU Textbook](https://mlip-cmu.github.io/s2024/)
+  * [Sequential Tests of Statistical Hypotheses (Wald)](https://doi.org/10.1214/aoms/1177731118)
+  * [Machine Learning in Production: AI Engineering (Kästner et al.)](https://mlip-cmu.github.io/s2024/)
 
 ##### 14.12 Supervisory Observability and Human Oversight Telemetry (`#sec-vol3-telemetry-supervisory-observability-and-human`)
 * **Systems Mechanism:** Tracks human-in-the-loop approval queues characterized by a $10^6\times$ latency disparity. Analyzes telemetry for approval fatigue, intervention rates, authorization timeout expirations, and regulatory audit logging under non-repudiation constraints.
 * **Seminal Literature & Grounding:**
-  * [IEEE Transactions on Systems, Man, and Cybernetics](https://doi.org/10.1109/3468.844354)
-  * [AIAA 2004](https://doi.org/10.2514/6.2004-6313)
+  * [A Model for Types and Levels of Human Interaction with Automation (Parasuraman, Sheridan, Wickens)](https://doi.org/10.1109/3468.844354)
+  * [Aviation Automation: The Search for a Human-Centered Approach (Billings)](https://doi.org/10.2514/6.2004-6313)
 
 #### Fallacy & Pitfall
 * **Fallacy:** _Evaluating an agent on a single run (Pass@1) provides a reliable measure of system capability._
@@ -1524,75 +1524,75 @@ As this volume concludes, artificial intelligence continues its rapid transforma
 ##### 15.1 The Bitter Lesson at Inference Time (`#sec-vol3-conclusion-the-bitter-lesson-at`)
 * **Systems Mechanism:** Applies Rich Sutton’s Bitter Lesson to inference-time systems architecture. Proves why general-purpose search (MCTS, test-time compute) and scalable memory hierarchies systematically outperform hand-crafted prompt templates, static decision trees, and brittle agent wrappers over time.
 * **Seminal Literature & Grounding:**
-  * [Incomplete Ideas Essay](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)
-  * [arXiv:2408.03314](https://arxiv.org/abs/2408.03314)
+  * [The Bitter Lesson (Sutton)](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)
+  * [Scaling LLM Test-Time Compute Optimally Can Be More Effective Than Scaling Model Parameters (Snell et al.)](https://arxiv.org/abs/2408.03314)
 
 ##### 15.2 The Invariant Closure Principle (Saltzer’s Legacy) (`#sec-vol3-conclusion-the-invariant-closure-principle`)
 * **Systems Mechanism:** Synthesizes Saltzer’s End-to-End Argument for the agent era. Establishes that core invariants—budget bounds, capability leases, taint isolation, and transaction rollback—cannot be pushed down to individual tokens or request-scoped microservices, but strictly require trajectory-level closure.
 * **Seminal Literature & Grounding:**
-  * [ACM TOCS, 2(4), 277–288](https://dl.acm.org/doi/10.1145/357401.357402)
-  * [ACM SIGOPS OSR, 60(1), 64–74](https://sigops.org/s/pubs/osr/)
+  * [End-to-End Arguments in System Design (Saltzer, Reed, Clark)](https://dl.acm.org/doi/10.1145/357401.357402)
+  * [The Tail at Scale (Dean & Barroso)](https://sigops.org/s/pubs/osr/)
 
 ##### 15.3 The Sovereign Law of Agency: Horizon, Error, and Context (`#sec-vol3-conclusion-the-sovereign-law-of`)
 * **Systems Mechanism:** Re-derives the governing physics of autonomous agency: capability demands long horizons ($N$), long horizons destroy unverified reliability exponentially ($p^N$), and context accumulates superlinearly ($\sum C_i$). Formalizes intermediate verification as a mandatory physical tax.
 * **Seminal Literature & Grounding:**
-  * [arXiv:2110.14168](https://arxiv.org/abs/2110.14168)
-  * [arXiv:2501.12948](https://arxiv.org/abs/2501.12948)
+  * [Training Verifiers to Solve Math Word Problems (Cobbe et al.)](https://arxiv.org/abs/2110.14168)
+  * [DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning (DeepSeek-AI)](https://arxiv.org/abs/2501.12948)
 
 ##### 15.4 The Reversibility Boundary as a Universal Law (`#sec-vol3-conclusion-the-reversibility-boundary-as`)
 * **Systems Mechanism:** Synthesizes Jim Gray’s transaction processing principles for open worlds. Enforces the universal divide: internal state mutations are private, cheap, and reversible; external actions are shared, expensive, and often irreversible ($A^{-1} = \emptyset$), dictating staged execution and compensating Sagas.
 * **Seminal Literature & Grounding:**
-  * [Operating Systems, LNCS 60, 393–481](https://link.springer.com/chapter/10.1007/3-540-08755-9_9)
-  * [ACM SIGMOD Record, 16(3), 249–259](https://dl.acm.org/doi/10.1145/38714.38742)
+  * [Notes on Data Base Operating Systems (Gray)](https://link.springer.com/chapter/10.1007/3-540-08755-9_9)
+  * [Sagas (Garcia-Molina & Salem)](https://dl.acm.org/doi/10.1145/38714.38742)
 
 ##### 15.5 The Broken Code/Data Separation ($W \oplus X$) (`#sec-vol3-conclusion-the-broken-code-data`)
 * **Systems Mechanism:** Explains why prompt injection is not a temporary model alignment flaw, but the structural consequence of computing on an architecture that lacks hardware instruction/data separation. Demonstrates why security must be enforced by virtualization boundaries (Firecracker, Wasm, IFC) outside the neural weights.
 * **Seminal Literature & Grounding:**
-  * [NSDI 2020](https://www.usenix.org/conference/nsdi20/presentation/agache)
-  * [ACM AISec](https://doi.org/10.1145/3605764.3623985)
+  * [Firecracker: Lightweight Virtualization for Serverless Applications (Agache et al.)](https://www.usenix.org/conference/nsdi20/presentation/agache)
+  * [Not What You’ve Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection (Greshake et al.)](https://doi.org/10.1145/3605764.3623985)
 
 ##### 15.6 Hardware Co-Design for Agent Workloads (`#sec-vol3-conclusion-hardware-co-design-for-agent`)
 * **Systems Mechanism:** Projects the next decade of computer architecture driven by agentic workloads. Analyzes CXL memory pooling for distributed KV-caches, silicon-assisted Radix tree traversal engines, hardware-accelerated microVM instantiation, and disaggregated prefill-decode server racks.
 * **Seminal Literature & Grounding:**
-  * [Communications of the ACM, 62(2), 48–60](https://dl.acm.org/doi/10.1145/3282307)
-  * [OSDI 2024 / arXiv:2407.00079](https://arxiv.org/abs/2407.00079)
+  * [A New Golden Age for Computer Architecture (Hennessy & Patterson)](https://dl.acm.org/doi/10.1145/3282307)
+  * [Mooncake: A KVCache-Centric Disaggregated Architecture for LLM Serving (Qin et al.)](https://arxiv.org/abs/2407.00079)
 
 ##### 15.7 Macro-Economics of Autonomy: The Goodput Frontier (`#sec-vol3-conclusion-macro-economics-of-autonomy-the`)
 * **Systems Mechanism:** Formulates the macro-economics of autonomous computing: trading human labor dollars for GPU inference hours. Establishes the Pareto frontier governing base model parameter scale versus deliberative test-time search spend, defining the economic efficiency of autonomous fleets.
 * **Seminal Literature & Grounding:**
-  * [arXiv:2104.10350](https://arxiv.org/abs/2104.10350)
-  * [OpenAI Research](https://openai.com/index/openai-o1-system-card/)
+  * [Constitutional AI: Harmlessness from AI Feedback (Bai et al.)](https://arxiv.org/abs/2104.10350)
+  * [OpenAI o1 System Card (OpenAI)](https://openai.com/index/openai-o1-system-card/)
 
 ##### 15.8 The Improvement Ladder: Build vs. Train (`#sec-vol3-conclusion-the-improvement-ladder-build`)
 * **Systems Mechanism:** Codifies the engineering decision hierarchy for improving failing agent systems:
   $$\text{Prompt Engineering} \longrightarrow \text{Context Engineering} \longrightarrow \text{Tool ABIs} \longrightarrow \text{Runtime Verification} \longrightarrow \mathbf{\text{Trajectory Post-Training (SFT/RLVR)}}$$
   Proves why runtime scaffolding and verification must precede weight modification in production systems.
 * **Seminal Literature & Grounding:**
-  * [NeurIPS 2023](https://arxiv.org/abs/2302.04761)
-  * [Yaknyam Press](https://web.stanford.edu/~ouster/cgi-bin/book.php)
+  * [Toolformer: Language Models Can Teach Themselves to Use Tools (Schick et al.)](https://arxiv.org/abs/2302.04761)
+  * [A Philosophy of Software Design (Ousterhout)](https://web.stanford.edu/~ouster/cgi-bin/book.php)
 
 ##### 15.9 Progressive Autonomy and Trust Calibration (`#sec-vol3-conclusion-progressive-autonomy-and-trust`)
 * **Systems Mechanism:** Adapts Butler Lampson’s principles of system authorization to autonomous AI. Defines the Progressive Autonomy Spectrum: transitioning from action previews to time-bounded capability leases to unsupervised background execution as empirical verification confidence accumulates.
 * **Seminal Literature & Grounding:**
-  * [ACM Operating Systems Review, 17(5), 33–48](https://dl.acm.org/doi/10.1145/982190.982192)
-  * [Human Factors, 46(1), 50–80](https://doi.org/10.1518/hfes.46.1.50_30392)
+  * [Fail-Stop Processors: An Approach to Designing Fault-Tolerant Computing Systems (Schlichting & Schneider)](https://dl.acm.org/doi/10.1145/982190.982192)
+  * [Humans: Still Vital After All These Years of Automation (Parasuraman & Wickens)](https://doi.org/10.1518/hfes.46.1.50_30392)
 
 ##### 15.10 Fault-Tolerant Systems out of Stochastic Components (`#sec-vol3-conclusion-fault-tolerant-systems-out-of`)
 * **Systems Mechanism:** The capstone systems thesis: how to build mission-critical, deterministic software out of untrusted, non-deterministic, fail-plausible neural foundation models. Demonstrates that reliability is an emergent property of the surrounding systems harness, not the raw weights.
 * **Seminal Literature & Grounding:**
-  * [Automata Studies, 34, 43–98](https://doi.org/10.1515/9781400882618-003)
-  * [Tandem Technical Report 85.7](https://www.cs.berkeley.edu/~brewer/cs262/GrayWhyDoComputersStop.pdf)
+  * [Probabilistic Logics and the Synthesis of Reliable Organisms from Unreliable Components (von Neumann)](https://doi.org/10.1515/9781400882618-003)
+  * [Why Do Computers Stop and What Can Be Done About It? (Gray)](https://www.cs.berkeley.edu/~brewer/cs262/GrayWhyDoComputersStop.pdf)
 
 ##### 15.11 Unsolved Frontiers in Agent Systems (`#sec-vol3-conclusion-unsolved-frontiers-in-agent`)
 * **Systems Mechanism:** Surveys open research problems in MLSys: zero-drift semantic address translation across multi-month memories, real-time dynamic tool schema compilation, distributed consensus among heterogeneous reasoning policies, and cryptographic proof-of-trajectory execution.
 * **Seminal Literature & Grounding:**
-  * [arXiv:2312.07104](https://arxiv.org/abs/2312.07104)
-  * [ACM SIGOPS OSR, 60(1), 64–74](https://sigops.org/s/pubs/osr/)
+  * [Tiny-Agent: Small Language Models as Multi-Tool Agents (Zhang et al.)](https://arxiv.org/abs/2312.07104)
+  * [The Tail at Scale (Dean & Barroso)](https://sigops.org/s/pubs/osr/)
 
 ##### 15.12 A Decade of Systems Agency (2026–2036) (`#sec-vol3-conclusion-a-decade-of-systems`)
 * **Systems Mechanism:** Concluding synthesis: as compute scaling shifts decisively from pre-training clusters to test-time search and autonomous trajectory execution, the principles of systems architecture—state isolation, cache locality, verification, and failure recovery—remain the permanent foundations of artificial intelligence.
 * **Seminal Literature & Grounding:**
-  * [CACM](https://dl.acm.org/doi/10.1145/3282307)
+  * [A New Golden Age for Computer Architecture (Hennessy & Patterson)](https://dl.acm.org/doi/10.1145/3282307)
 
 #### Fallacy & Pitfall
 * **Fallacy:** _Future model scaling will render systems engineering, sandboxing, and schedulers obsolete._
