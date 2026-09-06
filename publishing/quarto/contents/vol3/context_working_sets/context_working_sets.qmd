@@ -1,0 +1,121 @@
+---
+engine: markdown
+---
+
+# Context Working Sets {#sec-vol3-context-working-sets}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+:::
+
+## Purpose {.unnumbered .unlisted}
+
+\begin{marginfigure}
+\mlagentstack{15}{25}{35}{95}{20}{15}
+\caption{The Agentic Machine Learning Systems Stack. Context Working Sets operate at Layer 3 (Serving \& Memory).}
+\end{marginfigure}
+
+_How do we manage the finite, quadratic attention capacity of neural accelerators as an L1 working-set cache over expanding trajectory histories?_
+
+Denning's 1968 Working Set theory is the foundational model of memory hierarchy in computer systems. In neural computing, the context window is the L1 cache. It provides zero-retrieval-latency access to tokens, but it is physically constrained by accelerator High Bandwidth Memory (HBM) and computationally bound by quadratic attention ($O(C_i^2)$) and memory bandwidth during autoregressive decode. Developers often treat million-token context windows as infinite trash bins. In production, unmanaged context accumulation causes catastrophic Time-To-First-Token (TTFT) explosion, degrades attention accuracy ('lost-in-the-middle'), and burns astronomical money. Context must be actively managed as an eviction-driven working set. This chapter formalizes token working-set dynamics, sliding-window attention, token eviction algorithms (LRU, attention-score pruning), structured semantic context compaction, and persistent L3 episodic memory.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-learning-objectives}
+
+- Apply Denning's Working Set theory to active transformer attention context
+- Quantify the latency and financial cost of quadratic attention and linear KV-cache HBM growth
+- Implement token eviction policies (LRU, attention pruning) that maintain critical working sets
+- Analyze the 'Lost-in-the-Middle' phenomenon as an architectural memory locality failure
+- Construct semantic context compaction pipelines that preserve decision state while discarding noise
+- Design persistent L3 episodic memory subsystems using HNSW vector indexing and temporal decay
+
+:::
+
+## The Physics of Context Windows: Quadratic Attention and High-Bandwidth Memory (HBM) Walls {#sec-vol3-context-the-physics-of-context}
+
+* *Systems Mechanism:* Self-attention scales quadratically ($O(L^2)$) in compute and linearly in memory per layer ($2 \cdot b \cdot s \cdot h \cdot l$ bytes). On modern accelerators (NVIDIA H100/B200), High Bandwidth Memory (80–192 GB HBM3e) forms an unyielding capacity ceiling that makes boundless context expansion economically and physically impossible.
+  * *Citations & Links:* Dao et al., [FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning](https://arxiv.org/abs/2307.08691) (ICLR 2024); Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762) (NeurIPS 2017).
+
+
+## Autoregressive Decode Economics: Memory Bandwidth vs. Compute Intensity {#sec-vol3-context-autoregressive-decode-economics-memory}
+
+* *Systems Mechanism:* Evaluates the Roofline model transition between compute-bound prompt prefill and memory-bandwidth-bound autoregressive decoding ($Operational\ Intensity \ll 1\ \text{FLOP/byte}$). In long agent trajectories, fetching multi-gigabyte KV tensors from HBM for every generated token throttles throughput to memory bus bandwidth limits.
+  * *Citations & Links:* Williams, Waterman, & Patterson, [Roofline: An Insightful Visual Performance Model for Multicore Architectures](https://doi.org/10.1145/1498765.1498785) (CACM 2009); DeepSeek-AI, [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437) (2024, Multi-Head Latent Attention [MLA] memory compression).
+
+
+## Denning’s Working Set Theory for Neural Agent Trajectories {#sec-vol3-context-denning-s-working-set}
+
+* *Systems Mechanism:* Extends Peter Denning's 1968 virtual memory working set theory to token sequences. An agent’s active working set $W(t, \Delta t)$ consists only of the subset of instructions, tool schemas, and environment state references strictly necessary for the immediate reasoning transition, rather than the entire cumulative history.
+  * *Citations & Links:* Denning, [The Working Set Model for Program Behavior](https://doi.org/10.1145/363095.363141) (CACM 1968); Anthropic, [Effective Context Engineering for Claude](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview) (2025).
+
+
+## Structural Context Packing: Instructions, Tool Schemas, and State Layouts {#sec-vol3-context-structural-context-packing-instructions}
+
+* *Systems Mechanism:* Principles for serializing heterogeneous data into a unified prompt layout without causing cross-attention interference. Contrasts append-only conversational logs with structured, compartmentalized context topologies (static system prompts, read-only documentation, dynamic workspace scratchpads).
+  * *Citations & Links:* Meta AI, [The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783) (2024, Section 4.3: Tool Calling Context Formatting); Anthropic, [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) (2024).
+
+
+## Codebase and State Representation: Tree-Sitter ASTs, Repomaps, and Inverted Indexes {#sec-vol3-context-codebase-and-state-representation}
+
+* *Systems Mechanism:* Production coding agents (Claude Code, Devin, Cursor) cannot dump whole files into context. Instead, they extract Abstract Syntax Tree (AST) symbol graphs, skeleton signatures, and ctags-based repo maps, allowing agents to navigate millions of lines of code within a 32k-token active budget.
+  * *Citations & Links:* Aider, [Repository Maps using Tree-Sitter and PageRank](https://aider.chat/docs/repomap.html) (2024); Jimenez et al., [SWE-bench: Can Language Models Resolve Real-World GitHub Issues?](https://arxiv.org/abs/2310.06770) (ICLR 2024).
+
+
+## Dynamic Context Pruning: Attention-Guided Sparsification and Token Eviction {#sec-vol3-context-dynamic-context-pruning-attention-guided}
+
+* *Systems Mechanism:* Algorithmic strategies for dropping non-essential tokens from active context mid-flight. Implements token-level LRU, sliding-window attention with sink tokens, and pruning low-norm KV cache entries without degrading task performance.
+  * *Citations & Links:* Xiao et al., [Efficient Streaming Language Models with Attention Sinks](https://arxiv.org/abs/2309.17453) (ICLR 2024); Ge et al., [Model Tells You What to Discard: Adaptive KV Cache Compression](https://arxiv.org/abs/2310.01801) (ICML 2024).
+
+
+## Compaction via Recursive Summarization and Hierarchical Condensation {#sec-vol3-context-compaction-via-recursive-summarization}
+
+* *Systems Mechanism:* When active history exceeds token ceilings, intermediate turns are condensed into structured state summaries. Examines recursive summarization algorithms that preserve decision rationale and invariant constraints while discarding raw tool output payloads.
+  * *Citations & Links:* Packer et al., [MemGPT: Towards LLMs as Operating Systems](https://arxiv.org/abs/2310.08560) (2023); OpenAI, [Long-Context Prompt Summarization Strategies](https://platform.openai.com/docs/guides/prompt-engineering) (2024).
+
+
+## Semantic Drift: Quantifying Information Loss and Entropy in Iterative Compaction {#sec-vol3-context-semantic-drift-quantifying-information}
+
+* *Systems Mechanism:* Formulates the mathematical and empirical decay of semantic fidelity when an agent repeatedly reads its own lossy summaries. Quantifies entropy accumulation, constraint mutation, and hallucinated drift across 50+ compaction cycles.
+  * *Citations & Links:* Zhang et al., [Cumulative Reasoning with Large Language Models](https://arxiv.org/abs/2308.04371) (2023); Shinn et al., [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366) (NeurIPS 2023).
+
+
+## Positional Attention Biases: The "Lost-in-the-Middle" Locality Failure {#sec-vol3-context-positional-attention-biases-the}
+
+* *Systems Mechanism:* Analyzes U-shaped attention distribution curves where models exhibit high retrieval fidelity at the immediate beginning and end of the context window, but suffer severe retrieval degradation in the middle 60%. Maps this failure directly to positional encoding decay (RoPE) and teaches prompt-packing mitigations.
+  * *Citations & Links:* Liu et al., [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172) (TACL 2024); Su et al., [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864) (Neurocomputing 2024).
+
+
+## Ephemeral Scratchpads: In-Flight Reasoning Tokens vs. Committed State Transitions {#sec-vol3-context-ephemeral-scratchpads-in-flight-reasoning}
+
+* *Systems Mechanism:* Decouples chain-of-thought (CoT) scratchpad tokens from permanent trajectory history. Teaches runtime architectures that allocate temporary context for step-level deliberation, execute the tool action, and commit only the structured action-observation pair to persistent context.
+  * *Citations & Links:* Nye et al., [Show Your Work: Scratchpads for Intermediate Computation with Language Models](https://arxiv.org/abs/2112.00114) (2021); DeepSeek-AI, [DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning](https://arxiv.org/abs/2501.12948) (2025).
+
+
+## Production Case Study: Context Budgeting and Compaction in Claude Code & Devin {#sec-vol3-context-production-case-study-context}
+
+* *Systems Mechanism:* End-to-end trace dissection of frontier software agents managing a 120-step debugging session. Details the automated `git diff` compaction, terminal output truncation (head/tail slicing), and subagent context isolation patterns that prevent context exhaustion.
+  * *Citations & Links:* Anthropic, [Claude Code Technical Overview & Architecture](https://www.anthropic.com/news/claude-3-7-sonnet) (Feb 2025); Cognition AI, [Devin Architecture & Performance on SWE-bench](https://www.cognition.ai/blog/introducing-devin) (2024).
+
+---
+
+
+## Fallacies and Pitfalls {#sec-vol3-context-fallacies}
+
+* **Fallacy:** _Because modern models support million-token context windows, context management is obsolete._
+* **Pitfall:** Stuffing raw file contents and verbose tool outputs into context, triggering the Lost-in-the-Middle effect and 10x TTFT latency penalties.
+
+## Chapter Summary {#sec-vol3-context-summary}
+
+* **Context as L1 cache:** Context capacity is the L1 cache of neural computing: fast, strictly finite, and quadratically expensive.
+* **The context accumulation wall:** Unmanaged context accumulation leads to Time-To-First-Token (TTFT) explosion and attention degradation.
+* **Active working set eviction:** Token eviction policies (LRU, attention pruning) must actively preserve the working set required for step $t$.
+* **Structured semantic compaction:** Context compaction must be structured (diffs, AST repomaps) to prevent hallucination drift.

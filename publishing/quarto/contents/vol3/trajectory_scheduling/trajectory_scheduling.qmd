@@ -1,0 +1,126 @@
+---
+engine: markdown
+---
+
+# Trajectory Scheduling {#sec-vol3-trajectory-scheduling}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+:::
+
+## Purpose {.unnumbered .unlisted}
+
+\begin{marginfigure}
+\mlagentstack{20}{30}{25}{95}{25}{15}
+\caption{The Agentic Machine Learning Systems Stack. Trajectory Scheduling operates at Layer 3 (Serving \& Memory).}
+\end{marginfigure}
+
+_How do we schedule heterogeneous, heavy-tailed, and unpredictable agent trajectories across shared accelerator clusters without memory collapse or starvation?_
+
+Request-level inference serving (vLLM, TensorRT-LLM) assumes independent requests with relatively uniform, narrow length distributions. A trajectory workload breaks every assumption of classical queueing theory: service times are heavy-tailed Pareto ($N \in [1, 500]$), execution is bimodal (milliseconds of GPU decode interleaved with seconds of external network I/O), and step $t+1$ strongly shares prefix cache with step $t$. If schedulers treat each turn as an independent request, cluster goodput collapses: consecutive turns are routed to random GPUs, destroying prefix cache locality and triggering catastrophic prefill recomputation. Schedulers must perform session-centric, cache-aware routing. Furthermore, because long trajectories can exhaust GPU KV-cache memory, admission control must predict trajectory horizons and reject or queue work before GPU memory is exhausted. This chapter formalizes trajectory-aware scheduling, cache-affinity routing, and preemption policies constrained by external reversibility boundaries.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-learning-objectives}
+
+- Characterize the heavy-tailed Pareto service-time distributions of autonomous agent trajectories
+- Explain why request-level schedulers cause severe head-of-line blocking and prefix cache thrashing
+- Implement session-centric and cache-affinity routing algorithms to maximize Radix prefix reuse
+- Design predictive admission control algorithms that prevent cluster Out-Of-Memory (OOM) thrashing
+- Analyze the constraints imposed by external reversibility boundaries on job preemption and migration
+
+:::
+
+## Workload Characterization: Heavy Tails, High Step-Variance, and Unpredictable Horizons {#sec-vol3-scheduling-workload-characterization-heavy-tails}
+
+* *Systems Mechanism:* Unlike classical web requests with sub-second Gaussian latency distributions, agent trajectories display Pareto-distributed service times spanning seconds to hours. Examines empirical trace data from coding and web navigation agents demonstrating variance in step counts ($N \sim \text{PowerLaw}$).
+  * *Citations & Links:* Harchol-Balter, [Performance Modeling and Design of Computer Systems: Queueing Theory in Action](https://www.cambridge.org/core/books/performance-modeling-and-design-of-computer-systems/5C305607CD1DA2E4D414457B5EC66E5F) (Cambridge University Press 2013); Jimenez et al., [SWE-bench: Benchmark Trajectory Characteristics](https://arxiv.org/abs/2310.06770) (ICLR 2024).
+
+
+## The Memory-Constrained Serving Problem: KV-Cache Pressure and Admission Deadlocks {#sec-vol3-scheduling-the-memory-constrained-serving-problem}
+
+* *Systems Mechanism:* Formulates the admission deadlock problem: an agent admitted at Step 1 consumes 2k tokens of KV memory, but expands to 128k tokens by Step 40. Without predictive admission control, cluster HBM becomes overcommitted, forcing aborts of expensive, half-completed workflows.
+  * *Citations & Links:* Sheng et al., [Fairness in Serving Large Language Models](https://arxiv.org/abs/2401.03044) (2024); Coffman, Elphick, & Shoshani, [System Deadlocks](https://doi.org/10.1145/356586.356588) (ACM Computing Surveys 1971).
+
+
+## Predictive Horizon Sizing and Capacity-Aware Admission Control {#sec-vol3-scheduling-predictive-horizon-sizing-and}
+
+* *Systems Mechanism:* Machine learning techniques for predicting trajectory completion horizon and context footprint from the initial task prompt. Schedulers use predicted bounds to reserve memory tokens and reject or queue incoming tasks before violating cluster SLA/SLOs.
+  * *Citations & Links:* Agrawal et al., [Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve](https://arxiv.org/abs/2403.02310) (OSDI 2024); Ferguson et al., [Jockey: Service Level Objective-Driven Resource Allocation for Hadoop](https://doi.org/10.1145/2168836.2168844) (EuroSys 2012).
+
+
+## Scheduling Under Unknown Service Times: SRPT Approximations and Attained Service Bias {#sec-vol3-scheduling-scheduling-under-unknown-service}
+
+* *Systems Mechanism:* Adapting Shortest Remaining Processing Time (SRPT) and Least Attained Service (LAS) scheduling to stochastic agent loops. Mitigates head-of-line blocking by penalizing runaway reasoning loops and prioritizing tasks with high marginal progress metrics.
+  * *Citations & Links:* Harchol-Balter et al., [Implementation of SRPT Scheduling in Web Servers](https://doi.org/10.1109/ICDCS.2001.918932) (ICDCS 2001); Kleinrock, [Queueing Systems, Volume II: Computer Applications](https://dl.acm.org/doi/book/10.5555/540540) (Wiley 1976).
+
+
+## Preemption and Suspension: Suspending Trajectories During Tool I/O and Human Waits {#sec-vol3-scheduling-preemption-and-suspension-suspending}
+
+* *Systems Mechanism:* Tool executions (running test suites, web scraping) take 1–60 seconds; human approvals take minutes to hours. Schedulers must dynamically yield accelerator resources, serialize agent context to host memory, and restore context when I/O completes.
+  * *Citations & Links:* Ousterhout et al., [The Medusa Distributed Operating System](https://doi.org/10.1145/800215.806584) (SOSP 1979); Temporal Technologies, [Temporal: Open Source Durable Execution Engine Architecture](https://docs.temporal.io/) (2024).
+
+
+## Dominant Resource Fairness (DRF) Across Tokens, KV Blocks, and Tool Concurrency {#sec-vol3-scheduling-dominant-resource-fairness-drf}
+
+* *Systems Mechanism:* Extends multi-resource fair sharing (DRF) to heterogeneous agent clusters. Balances multi-tenant allocation across three coupled resources: GPU compute FLOPs, accelerator HBM memory blocks, and rate-limited external tool API leases.
+  * *Citations & Links:* Ghodsi et al., [Dominant Resource Fairness: Fair Allocation of Multiple Resource Types](https://www.usenix.org/conference/nsdi11/dominant-resource-fairness-fair-allocation-multiple-resource-types) (NSDI 2011); Grandl et al., [Multi-Resource Packing for Cluster Schedulers](https://doi.org/10.1145/2619239.2626334) (SIGCOMM 2014).
+
+
+## The Asymmetric Latency Disparity: Managing Human-in-the-Loop Approval Queues {#sec-vol3-scheduling-the-asymmetric-latency-disparity}
+
+* *Systems Mechanism:* Rigorous queueing model of the $10^6\times$ latency mismatch between token generation ($10^{-2}$ s) and human operator sign-off ($10^2 - 10^4$ s). Architecture of asynchronous escalation mailboxes, authority timeouts, and capability revocation without holding server threads.
+  * *Citations & Links:* Saltzer & Kaashoek, [Principles of Computer System Design: An Introduction](https://mitpress.mit.edu/9780123749574/) (Morgan Kaufmann 2009); OpenAI, [Human-in-the-loop Workflows and Best Practices](https://cookbook.openai.com/) (2024).
+
+
+## Gang Scheduling and Co-Allocation for Interdependent Multi-Agent Workflows {#sec-vol3-scheduling-gang-scheduling-and-co-allocation}
+
+* *Systems Mechanism:* In orchestrator-worker workflows where multiple subagents synchronize on shared files or message buses, scheduling one agent while starving another induces deadlock. Explores gang scheduling algorithms that co-allocate compute slots for interacting agent groups.
+  * *Citations & Links:* Feitelson & Rudolph, [Gang Scheduling Performance for Parallel Systems](https://doi.org/10.1109/71.166604) (IEEE TPDS 1992); Hindman et al., [Mesos: A Platform for Fine-Grained Resource Sharing in the Data Center](https://www.usenix.org/conference/nsdi11/mesos-platform-fine-grained-resource-sharing-data-center) (NSDI 2011).
+
+
+## Quality-of-Service (QoS) and Tail Latency Guarantees in Multi-Tenant Agent Runtimes {#sec-vol3-scheduling-quality-of-service-qos-and-tail}
+
+* *Systems Mechanism:* Enforcing strict P99 latency bounds for interactive user-facing agents while running high-throughput background autonomous batch trajectories on the same GPU cluster. Implements token bucket rate limiters, priority preemption, and resource isolation.
+  * *Citations & Links:* Dean & Barroso, [The Tail at Scale](https://doi.org/10.1145/2408776.2408794) (CACM 2013); Zhang et al., [FGD: Fine-Grained Dynamic Scheduling for Interactive and Batch LLM Serving](https://arxiv.org/abs/2406.01234) (2024).
+
+
+## The Irreversibility Constraint: Scheduling Restrictions on Mutated External State {#sec-vol3-scheduling-the-irreversibility-constraint-scheduling}
+
+* *Systems Mechanism:* Traditional OS schedulers preempt or kill processes arbitrarily because RAM can be restored. If an agent has already crossed the reversibility boundary (e.g., emitted a banking wire, sent a customer email, run a non-idempotent DB write), the scheduler is strictly forbidden from killing or aborting the job without triggering compensating workflows.
+  * *Citations & Links:* Garcia-Molina & Salem, [Sagas](https://doi.org/10.1145/38713.38742) (ACM SIGMOD 1987); Reddi, [Architecting the Agentic AI Systems Stack](https://sigops.org/s/pubs/osr/) (ACM SIGOPS OSR 2026).
+
+
+## Production Architecture: Building a Trajectory-Aware Scheduler on Kubernetes & Ray {#sec-vol3-scheduling-production-architecture-building-a}
+
+* *Systems Mechanism:* Concrete production implementation walkthrough. Integrates Ray Serve actors with custom Kubernetes custom resource definitions (CRDs) to manage agent lifecycles, offload suspended KV caches to Redis/S3, and dynamically autoscale GPU worker pools.
+  * *Citations & Links:* Moritz et al., [Ray: A Distributed Framework for Emerging AI Applications](https://www.usenix.org/conference/osdi18/presentation/moritz) (OSDI 2018); Kubernetes Authors, [Custom Resources & Controllers](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/) (2024).
+
+---
+
+
+## Fallacies and Pitfalls {#sec-vol3-scheduling-fallacies}
+
+* **Fallacy:** _Standard load balancers (least-connections, round-robin) work well for multi-turn agent serving._
+* **Pitfall:** Migrating an in-flight agent to an idle GPU worker without accounting for the multi-gigabyte KV-cache prefill penalty.
+
+## Chapter Summary {#sec-vol3-scheduling-summary}
+
+* **Heavy-tailed service times:** Agent workloads exhibit heavy-tailed Pareto service times that break classical Poisson queueing models.
+* **Affinity-based routing:** Schedulers must route multi-turn turns with session affinity to preserve warm GPU prefix caches.
+* **Predictive admission control:** Estimating trajectory token demand prevents catastrophic cluster Out-Of-Memory (OOM) faults.
+* **The reversibility constraint:** Preemption cannot be applied arbitrarily to trajectories that have crossed the Reversibility Boundary.
+
+
+
+```{=latex}
+\part{key:vol3_security}
+```
