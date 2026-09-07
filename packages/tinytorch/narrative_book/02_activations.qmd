@@ -23,9 +23,11 @@ The right-hand side has the form $\mathbf{x}\mathbf{W}_{\text{eff}} + \mathbf{b}
 Here is the collapse in code, using the `Tensor` from Chapter 1 with its `@` and `+`, and two-element vectors so that every number can be checked by hand. The input and the biases are written as $1 \times 2$ matrices (one row) so that `@` applies to them directly.
 
 ```python
-x = Tensor.from_list([[1.0, 2.0]])
-W1, b1 = Tensor.from_list([[2.0, 0.0], [1.0, 3.0]]), Tensor.from_list([[0.5, -0.5]])
-W2, b2 = Tensor.from_list([[1.0, 2.0], [3.0, 1.0]]), Tensor.from_list([[1.0, 0.0]])
+from tinytorch.core.tensor import Tensor
+
+x = Tensor([[1.0, 2.0]])
+W1, b1 = Tensor([[2.0, 0.0], [1.0, 3.0]]), Tensor([[0.5, -0.5]])
+W2, b2 = Tensor([[1.0, 2.0], [3.0, 1.0]]), Tensor([[1.0, 0.0]])
 
 # Two layers, one after the other.
 h = x @ W1 + b1
@@ -36,9 +38,9 @@ W_eff = W1 @ W2
 b_eff = b1 @ W2 + b2
 y_folded = x @ W_eff + b_eff
 
-print("two layers:", y_deep.storage.data)     # [22.0, 14.5]
-print("one layer: ", y_folded.storage.data)   # [22.0, 14.5]
-print("W_eff:", W_eff.storage.data, " b_eff:", b_eff.storage.data)
+print("two layers:", y_deep.data.tolist())    # [[22.0, 14.5]]
+print("one layer: ", y_folded.data.tolist())  # [[22.0, 14.5]]
+print("W_eff:", W_eff.data.tolist(), " b_eff:", b_eff.data.tolist())
 ```
 
 The two paths agree to the last digit, for this input and for every other input, at any depth. In @tbl-linear-collapse-trace the intermediate values sit side by side so you can confirm the fold by hand. The middle row shows what the second layer receives; the last row shows that the folded weights $\mathbf{W}_{\text{eff}} = \begin{bmatrix} 2 & 4 \\ 10 & 5 \end{bmatrix}$ and $\mathbf{b}_{\text{eff}} = [0, 0.5]$ land on the same answer in one step.
@@ -111,130 +113,101 @@ The **error function** $\text{erf}$ is the integral of the Gaussian bell curve, 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 02 (`src/02_activations/02_activations.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every element-by-element step of an activation. The real module also implements `Softmax`; this book builds the softmax it needs in Chapter 4, as `log_softmax`, alongside the loss it belongs with.
+The listings in this section are extracted from Module 02 (`src/02_activations/02_activations.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. Module 02 also implements `Softmax`; this book meets the softmax it needs in Chapter 4, as `log_softmax`, alongside the loss it belongs with.
 :::
 
-### The base class
+### Two classes per activation
 
 Here is where an activation sits in a real network. Chapter 3 builds a linear layer that turns a batch of 256 inputs into a $256 \times 4096$ output, and `nn.Sequential` hands that output straight to a `ReLU()` and then on to the next linear layer. The activation runs once per element, for every example, on every training step, and it has to accept whatever the layer before it produced: a $256 \times 4096$ matrix in Chapter 3, a four-dimensional batch of images in Chapter 9, a three-dimensional batch of token sequences in Chapter 13. Nothing about the function depends on the shape.
 
-The naive way to build four of them is four `forward` methods, each with its own loop over the tensor and its own handling of shapes and layouts. That is four copies of the same walk, and every layout bug gets fixed four times. What actually changes from one activation to the next is a single scalar function. Everything else, the walk over the elements, the fresh output buffer, the fact that there is nothing to learn, is the same for all of them. So I put the walk in one base class and leave each subclass exactly one job, saying what happens to one number.
+Module 02 writes each activation as a pair of classes, and the pair is the pattern every later module follows. The first is an *operation*, a subclass of Chapter 1's `Function` whose `forward` takes a NumPy array and returns one. It is the object that Chapter 6 will record in the graph and complete with a `backward`. The second is a *layer*, a plain class that Chapter 3's containers can hold: it reports no parameters, its `forward` takes a `Tensor` and hands it to the operation through `apply`, and `__call__` makes `y = f(x)` work. Here is the sigmoid pair, the layer first.
 
-The listings below use the `Tensor` and `Storage` classes from Chapter 1 and do not run without them.
+{{< include _listings/02_activations/Sigmoid.qmd >}}
 
-```python
-import math
+Three things to notice. `parameters()` returns an empty list because Chapter 3's containers will ask every component for its learnable parameters, and an activation has none. `forward` contains no arithmetic at all; `SigmoidFunction.apply` unwraps the tensor, runs the operation on the array, and wraps the result in a fresh `Tensor`, exactly as Chapter 1 showed for `Add`. And nothing in either class looks at a shape. An elementwise function does not care whether the array is a vector or a four-dimensional batch of images, and NumPy walks whatever strides the array has, so a transposed input needs no special handling. PyTorch files all four activations under elementwise (it also says pointwise) operations and runs every one of them through a single shared iterator.
 
-class Activation:
-    """Apply a scalar function to every element of a tensor."""
+### The four operations
 
-    def fn(self, v: float) -> float:
-        raise NotImplementedError
+With the wrapping settled, each operation's `forward` is its formula written on an array. ReLU and tanh are one NumPy call each.
 
-    def parameters(self):
-        return []          # activations have nothing to learn
+{{< include _listings/02_activations/ReLUFunction.qmd >}}
 
-    def forward(self, x: Tensor) -> Tensor:
-        x = x.contiguous()               # walk the buffer in order (Chapter 1)
-        out = Tensor(shape=x.shape)      # fresh buffer, same shape, row-major
-        for i in range(len(out.storage)):
-            out.storage[i] = self.fn(x.storage[x.storage_offset + i])
-        return out
-
-    def __call__(self, x: Tensor) -> Tensor:
-        return self.forward(x)
-```
-
-Three things to notice. The loop never looks at `x.shape`. An elementwise function does not care whether the buffer is a vector or a four-dimensional batch of images, only that it visits every element once, and `len(out.storage)` is all it needs to know for that. The call to `contiguous()` is what makes that indifference safe, and I come back to it once we have something to call. And `parameters()` returns an empty list because Chapter 3's containers will ask every component for its learnable parameters, and an activation has none. PyTorch files all four of these under elementwise (it also says pointwise) operations and runs every one of them through a single shared iterator, which is this loop with the Python taken out.
-
-### The four functions
-
-Four subclasses, one method each. With the walk already written, `ReLU`, `Tanh`, and `GELU` are their formulas typed in. GELU uses `math.erf` because the definition is $x\,\Phi(x)$ and the error function is what $\Phi$ is made of; cheaper stand-ins exist, and the production section says why anyone bothers with them.
+{{< include _listings/02_activations/TanhFunction.qmd >}}
 
 Sigmoid is the one that needs its why before you see the code. The formula $1 / (1 + e^{-v})$ asks for $e^{-v}$, and a hidden unit's input can be any size at all, especially early in training when the weights are still wild. Feed it $v = -1000$ and the naive transcription computes $e^{1000}$, far beyond the largest number a 64-bit float can hold. Python's `math.exp` raises `OverflowError` on the spot. NumPy returns `inf` with a warning and then evaluates $1 / (1 + \infty) = 0$, which is the right answer arriving by accident, and a network that trains on accidents is one you cannot debug. Here is the trick. The same function has a second form, $e^{v} / (1 + e^{v})$, whose exponent is $+v$, so it overflows for large positive $v$ instead. Choose whichever form keeps the exponent non-positive, the first when $v \ge 0$ and the second when $v < 0$, and neither branch can overflow for any input.
 
-```python
-class ReLU(Activation):
-    def fn(self, v: float) -> float:
-        return v if v > 0.0 else 0.0
+{{< include _listings/02_activations/SigmoidFunction.qmd >}}
 
-class Tanh(Activation):
-    def fn(self, v: float) -> float:
-        return math.tanh(v)
+The `np.where` selects per element, so one call handles a whole array with both signs in it. It also evaluates both branches for every element before selecting, which is why the overflow that the discarded branch produces has to be silenced with `errstate`; the value it overflows to is thrown away. For $v < 0$, $e^v$ sits between $0$ and $1$, so the chosen division is safe, and both branches compute the same value wherever they overlap. The sigmoid kernel in every production framework makes the same selection.
 
-class GELU(Activation):
-    def fn(self, v: float) -> float:
-        return 0.5 * v * (1.0 + math.erf(v / math.sqrt(2.0)))
+GELU is defined as $x\,\Phi(x)$, and the Idea section computed it from the error function. Module 02 does not. It uses the approximation $x\,\sigma(1.702x)$, the sigmoid form, because it reuses the operation just written and costs one exponential per element instead of an `erf`.
 
-class Sigmoid(Activation):
-    def fn(self, v: float) -> float:
-        if v >= 0.0:
-            return 1.0 / (1.0 + math.exp(-v))
-        e = math.exp(v)                  # v < 0, so exp(v) < 1: no overflow
-        return e / (1.0 + e)
-```
+{{< include _listings/02_activations/GELUFunction.qmd >}}
 
-The comment on the negative branch is the whole proof. For $v < 0$, $e^v$ sits between $0$ and $1$, so the division is safe, and both branches compute the same value wherever they overlap. The real TinyTorch module makes the same selection with `np.where`, and so does the sigmoid kernel in every production framework.
+The approximation is off by at most about $0.02$ from the exact function, in the corner near $x = -0.75$, and the production section says why anyone tolerates that. Notice that the call is `SigmoidFunction().forward`, the array-level method, not `Sigmoid()` on a tensor. Inside an operation everything is NumPy; tensors and graph records exist only at the boundary that `apply` guards.
 
 ### Calling one
 
-Chapter 3's `Sequential` will call an activation exactly the way it calls a layer, `y = f(x)`, without knowing or caring which one it is holding. That is why `__call__` forwards to `forward`, and why using an activation looks like calling a function. There is one more case I want to see work before Chapter 3 depends on it. The tensor that reaches an activation is not always laid out in buffer order. Chapter 1's `transpose()` returns a view with permuted strides, and the attention code in Chapter 12 transposes constantly. A loop that walked `x.storage` from index 0 to the end and wrote each value to the same index of the output would return a tensor whose shape said $(3, 2)$ but whose elements were arranged for the $(2, 3)$ original, a silent bug that shows up three layers later as a wrong number with no traceback. That is what the `contiguous()` call in `forward` buys. It materializes the view in its own row-major order first, then walks the copy.
+Chapter 3's `Sequential` will call an activation exactly the way it calls a layer, `y = f(x)`, without knowing or caring which one it is holding. There is one more case I want to see work before Chapter 3 depends on it. The tensor that reaches an activation is not always laid out in buffer order. Chapter 1's `transpose()` returns a tensor whose buffer holds the values in column order, and the attention code in Chapter 12 transposes constantly. A loop that walked the buffer from slot 0 to the end and wrote each value to the same slot of a row-major output would return a tensor whose shape said $(3, 2)$ but whose elements were arranged for the $(2, 3)$ original, a silent bug that shows up three layers later as a wrong number with no traceback. NumPy walks the strides, so `np.maximum` reads the transposed buffer in its own order and the result lands where the shape says it should.
 
-The example builds a $2 \times 3$ tensor, applies `ReLU`, and then applies it again to a transposed view.
+The example builds a $2 \times 3$ tensor, applies `ReLU`, and then applies it again to the transpose.
 
 ```python
-x = Tensor.from_list([[-3.0, -1.0, -0.75],
-                      [ 0.0,  1.0,  3.0]])
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.activations import ReLU
+
+x = Tensor([[-3.0, -1.0, -0.75],
+            [ 0.0,  1.0,  3.0]])
 
 relu = ReLU()
 y = relu(x)
-print(y.shape, y.storage.data)           # (2, 3) [0.0, 0.0, 0.0, 0.0, 1.0, 3.0]
+print(y.shape, y.data.tolist())           # (2, 3) [[0.0, 0.0, 0.0], [0.0, 1.0, 3.0]]
 
-yt = relu(x.transpose())                 # non-contiguous input is fine
-print(yt.shape, yt.storage.data)         # (3, 2) [0.0, 0.0, 0.0, 1.0, 0.0, 3.0]
-print(x.storage.data)                    # input untouched
+yt = relu(x.transpose())                  # column-order input is fine
+print(yt.shape, yt.data.tolist())         # (3, 2) [[0.0, 0.0], [0.0, 1.0], [0.0, 3.0]]
+print(x.data.tolist())                    # input untouched
 ```
 
-On my machine that prints exactly the three lines in the comments. The transposed call's output is in a different order because the view was walked in its own row-major order after `contiguous()` copied it, which is what Chapter 1 promised a view would do, and the shape follows the input. The input buffer is never modified. Notice one more thing. Each call allocates a new `Storage` the size of the input. On a $2 \times 3$ tensor that is six floats and nobody cares. On a transformer's hidden layer it is a couple of hundred megabytes written and then read back by the next layer, on every step, and that allocation, harmless here, turns out to be the whole story in the production section.
+On my machine that prints exactly the three lines in the comments. The transposed call's output is the transpose of the first, because the strides did the bookkeeping, and the input buffer is never modified. Notice one more thing. Each call produces a new array the size of the input, because `apply` wraps the operation's result in a fresh `Tensor`. On a $2 \times 3$ tensor that is six floats and nobody cares. On a transformer's hidden layer it is a couple of hundred megabytes written and then read back by the next layer, on every step, and that allocation, harmless here, turns out to be the whole story in the production section.
 
 ---
 
 ## A Worked Trace
 
-Chapter 6 builds the backward pass, and for an activation the backward pass is nothing but a per-element multiply by $\sigma'(x)$ at the value the forward pass saw. So before I trust any of these four inside a deep network, I want to see the derivative numbers, not just the curves. The trace runs six inputs through three of the four functions and records both the output and the local derivative that backpropagation will multiply by. I picked the inputs to hit the interesting spots: deep in each tail, the origin, and the point near $-0.75$ where GELU bottoms out. Tanh is left out because its columns would look like sigmoid's, one unit further out. GELU's derivative needs $\Phi$ and $\phi$, the standard normal distribution function and density, which Python does not ship directly, so the two helpers build them from `math.erf` and `math.exp`.
+Chapter 6 builds the backward pass, and for an activation the backward pass is nothing but a per-element multiply by $\sigma'(x)$ at the value the forward pass saw. So before I trust any of these four inside a deep network, I want to see the derivative numbers, not just the curves. The trace runs six inputs through three of the four operations and records both the output and the local derivative that backpropagation will multiply by. I picked the inputs to hit the interesting spots: deep in each tail, the origin, and the point near $-0.75$ where GELU bottoms out. Tanh is left out because its columns would look like sigmoid's, one unit further out. The operations are called on a plain array, the way `apply` calls them, and the derivatives come from the formulas: $\sigma' = \sigma(1 - \sigma)$, a step for ReLU, and for the sigmoid-form GELU $\sigma(1.702x) + 1.702\,x\,\sigma'(1.702x)$.
 
 ```python
-import math
+import numpy as np
+from tinytorch.core.activations import SigmoidFunction, ReLUFunction, GELUFunction
 
-def Phi(v):                      # standard normal CDF
-    return 0.5 * (1.0 + math.erf(v / math.sqrt(2.0)))
+v = np.array([-3.0, -1.0, -0.75, 0.0, 1.0, 3.0])
+s = SigmoidFunction().forward(v)
+r = ReLUFunction().forward(v)
+g = GELUFunction().forward(v)
+s_in = SigmoidFunction().forward(1.702 * v)            # the sigmoid inside GELU
+g_prime = s_in + 1.702 * v * s_in * (1 - s_in)
 
-def phi(v):                      # standard normal density
-    return math.exp(-0.5 * v * v) / math.sqrt(2.0 * math.pi)
-
-sigmoid, relu, gelu = Sigmoid(), ReLU(), GELU()
 print("    x   sig   sig'  relu relu'    gelu   gelu'")
-for v in [-3.0, -1.0, -0.75, 0.0, 1.0, 3.0]:
-    s = sigmoid.fn(v)
-    print(f"{v:5.2f} {s:.4f} {s * (1 - s):.4f}"
-          f" {relu.fn(v):5.2f} {1.0 if v > 0 else 0.0:5.1f}"
-          f" {gelu.fn(v):7.4f} {Phi(v) + v * phi(v):7.4f}")
+for i in range(len(v)):
+    print(f"{v[i]:5.2f} {s[i]:.4f} {s[i] * (1 - s[i]):.4f}"
+          f" {r[i]:5.2f} {1.0 if v[i] > 0 else 0.0:5.1f}"
+          f" {g[i]:7.4f} {g_prime[i]:7.4f}")
 ```
 
 The same numbers, rounded to four places, appear in @tbl-activation-numerical-trace with the cells that matter most set in bold: the sigmoid derivative's peak, GELU's minimum, and the ReLU derivatives that are exactly one.
 
 | Input $x$ | $\sigma(x)$ | $\sigma'(x)$ | $\text{ReLU}(x)$ | $\text{ReLU}'(x)$ | $\text{GELU}(x)$ | $\text{GELU}'(x)$ |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| $-3.00$ | $0.0474$ | $0.0452$ | $0$ | $0$ | $-0.0040$ | $-0.0119$ |
-| $-1.00$ | $0.2689$ | $0.1966$ | $0$ | $0$ | $-0.1587$ | $-0.0833$ |
-| $-0.75$ | $0.3208$ | $0.2179$ | $0$ | $0$ | $\mathbf{-0.1700}$ (minimum) | $0.0008$ |
+| $-3.00$ | $0.0474$ | $0.0452$ | $0$ | $0$ | $-0.0181$ | $-0.0245$ |
+| $-1.00$ | $0.2689$ | $0.1966$ | $0$ | $0$ | $-0.1542$ | $-0.0678$ |
+| $-0.75$ | $0.3208$ | $0.2179$ | $0$ | $0$ | $\mathbf{-0.1636}$ (minimum) | $0.0004$ |
 | $0.00$ | $0.5000$ | $\mathbf{0.2500}$ (peak) | $0$ | $0$ | $0.0000$ | $0.5000$ |
-| $1.00$ | $0.7311$ | $0.1966$ | $1$ | $\mathbf{1}$ | $0.8413$ | $1.0833$ |
-| $3.00$ | $0.9526$ | $0.0452$ | $3$ | $\mathbf{1}$ | $2.9960$ | $1.0119$ |
+| $1.00$ | $0.7311$ | $0.1966$ | $1$ | $\mathbf{1}$ | $0.8458$ | $1.0678$ |
+| $3.00$ | $0.9526$ | $0.0452$ | $3$ | $\mathbf{1}$ | $2.9819$ | $1.0245$ |
 
-: Outputs and local derivatives of sigmoid, ReLU, and GELU on six inputs. {#tbl-activation-numerical-trace tbl-colwidths="[12,14,16,14,14,16,14]"}
+: Outputs and local derivatives of sigmoid, ReLU, and Module 02's sigmoid-form GELU on six inputs. {#tbl-activation-numerical-trace tbl-colwidths="[12,14,16,14,14,16,14]"}
 
-Read the derivative columns as "how much of the gradient gets through this element." The sigmoid column never exceeds $0.25$ and is under $0.05$ at $\pm 3$, so a signal crossing several such elements is attenuated at each one. The ReLU column holds only $1$ and $0$, full pass-through for the three positive inputs and nothing at all for the three non-positive ones, including the input at exactly $0$. The GELU column looks like ReLU's for $\lvert x \rvert \ge 3$ and fills in the corner smoothly between, and its small non-zero values at $-1$ and $-0.75$ are precisely the leak that keeps a GELU unit alive where a ReLU unit would be dead.
+Read the derivative columns as "how much of the gradient gets through this element." The sigmoid column never exceeds $0.25$ and is under $0.05$ at $\pm 3$, so a signal crossing several such elements is attenuated at each one. The ReLU column holds only $1$ and $0$, full pass-through for the three positive inputs and nothing at all for the three non-positive ones, including the input at exactly $0$. The GELU column looks like ReLU's for $\lvert x \rvert \ge 3$ and fills in the corner smoothly between, and its small non-zero values at $-1$ and $-0.75$ are precisely the leak that keeps a GELU unit alive where a ReLU unit would be dead. Set the GELU column against the exact values from the Idea section, $-0.1587$ at $-1$ and a minimum of $-0.1700$, and you can see the approximation's error with your own eyes: a few hundredths in the corner, nothing in the tails.
 
 One last hand computation ties the table to the depth argument. Take the best-case sigmoid derivative $0.25$ from the table and a best-case ReLU derivative of $1$, and imagine ten layers of each in series. The sigmoid path passes $0.25^{10} \approx 9.5 \times 10^{-7}$ of the gradient to the first layer; the ReLU path passes all of it.
 
@@ -242,7 +215,7 @@ One last hand computation ties the table to the depth argument. Take the best-ca
 
 ## From TinyTorch to Production
 
-PyTorch's `torch.relu`, `torch.sigmoid`, `torch.tanh`, and `torch.nn.functional.gelu` compute the same formulas as the four classes above, including the two-branch sigmoid. What differs is how the elements are visited. Our `forward` runs a Python loop; PyTorch dispatches one kernel (the GPU term for a single function launched across many threads at once) that assigns every element to its own thread, or on a CPU a vectorized loop that handles several elements per instruction. PyTorch also never calls `contiguous()` first. Its iterator walks the input's strides directly, so a transposed view is processed as it is, without a copy. Our version copies because the loop is simpler to read that way, and nothing about the result changes.
+PyTorch's `torch.relu`, `torch.sigmoid`, `torch.tanh`, and `torch.nn.functional.gelu` compute the same formulas as the four operations above, including the two-branch sigmoid. What differs is how the elements are visited. Our `forward` is one NumPy call, a loop in C over every element that returns a new array; PyTorch dispatches one kernel (the GPU term for a single function launched across many threads at once) that assigns every element to its own thread, or on a CPU a vectorized loop that handles several elements per instruction. PyTorch also never calls `contiguous()` first. Its iterator walks the input's strides directly, so a transposed view is processed as it is, without a copy. Our version copies because the loop is simpler to read that way, and nothing about the result changes.
 
 The reason activations get outsized attention in production, given how little arithmetic they do, is that they do so little arithmetic. A ReLU reads a 4-byte float, does one comparison, and writes a 4-byte float, which is one FLOP[^fn-flop-activation-intensity] per 8 bytes moved. A GPU can do roughly twenty floating-point operations in the time it takes to bring one byte in from memory, so an operation that does one FLOP per eight bytes leaves the arithmetic units idle more than 99 percent of the time. Operations like this are **memory-bound**: their cost is the bytes they touch, not the math they do. The callout works the number for a realistic tensor.
 
@@ -265,18 +238,18 @@ Frameworks respond to that arithmetic in two ways, both visible from Python. The
 
 [^fn-epilogue-gemm-fusion]: **Epilogue**: the last stage of a matrix-multiply kernel, after the sums are complete but before results are written to memory. Anything computed there, a bias add or a ReLU, costs no extra memory traffic, which is why libraries expose it as a hook.
 
-The GELU story has one more production wrinkle. `nn.GELU()` uses the exact error function by default, and `nn.GELU(approximate='tanh')` uses $0.5x\left(1 + \tanh\left(\sqrt{2/\pi}\,(x + 0.044715x^3)\right)\right)$, the form GPT-2 and BERT trained with, which matches the exact function to within about $5 \times 10^{-4}$. The real TinyTorch module uses a third form, $x\,\sigma(1.702x)$, which is off by up to $0.02$ and was chosen because it reuses the `Sigmoid` class. All three exist because exp, tanh, and erf are not built from adds and multiplies; a GPU routes them to a smaller pool of special function units, so they cost several times what a comparison costs. That still leaves them far cheaper than the memory traffic, which is why the exact form is now the default.
+The GELU story has one more production wrinkle. `nn.GELU()` uses the exact error function by default, and `nn.GELU(approximate='tanh')` uses $0.5x\left(1 + \tanh\left(\sqrt{2/\pi}\,(x + 0.044715x^3)\right)\right)$, the form GPT-2 and BERT trained with, which matches the exact function to within about $5 \times 10^{-4}$. Module 02's `GELUFunction` uses a third form, $x\,\sigma(1.702x)$, which is off by up to $0.02$ and was chosen because it reuses `SigmoidFunction`.702x)$, which is off by up to $0.02$ and was chosen because it reuses the `Sigmoid` class. All three exist because exp, tanh, and erf are not built from adds and multiplies; a GPU routes them to a smaller pool of special function units, so they cost several times what a comparison costs. That still leaves them far cheaper than the memory traffic, which is why the exact form is now the default.
 
 What carries over from TinyTorch unchanged is everything about the function itself. An activation is elementwise, shape-preserving, and parameter-free; its derivative is a per-element lookup; sigmoid and tanh saturate, ReLU units can die, GELU leaks a little on the negative side. Those facts decide which one a model uses, and none of them change on hardware. What changes is the cost model, summarized in @tbl-activation-tinytorch-vs-pytorch.
 
 | Concern | TinyTorch (this chapter) | PyTorch on a GPU |
 | :--- | :--- | :--- |
-| Visiting elements | Python `for` loop | One thread per element in a single kernel launch |
-| Non-contiguous input | Copy via `contiguous()`, then walk | Walk the strides directly, no copy |
-| Output buffer | Always a fresh `Storage` | New tensor by default; in-place or fused into the producing kernel when asked |
-| What the time goes to | Python interpreter overhead | Memory bandwidth (about $100\times$ the arithmetic) |
-| GELU formula | Exact, via `math.erf` | Exact by default, tanh approximation on request |
-| Sigmoid overflow | Two branches on the sign of the input | Same two branches, inside the kernel |
+| Visiting elements | One NumPy call per operation, a C loop over the array | One thread per element in a single kernel launch |
+| Non-contiguous input | NumPy walks the strides; the result is a fresh row-major array | Walk the strides directly, no copy |
+| Output buffer | Always a fresh array, wrapped by `apply` | New tensor by default; in-place or fused into the producing kernel when asked |
+| What the time goes to | One full pass over memory per operation, plus a second for each branch `np.where` evaluates | Memory bandwidth (about $100\times$ the arithmetic) |
+| GELU formula | Sigmoid form $x\,\sigma(1.702x)$, reusing `SigmoidFunction` | Exact by default, tanh approximation on request |
+| Sigmoid overflow | Two branches selected by `np.where`, the discarded one silenced | Same two branches, inside the kernel |
 
 : The activation design carried from TinyTorch to PyTorch, and where the cost model diverges. {#tbl-activation-tinytorch-vs-pytorch tbl-colwidths="[24,36,40]"}
 
@@ -286,12 +259,12 @@ Two habits follow for a practitioner. When a profiler shows an activation taking
 
 ## Summary
 
-You built the four activation functions as one base class that walks every element of a tensor and four one-line scalar functions, and you saw why the sigmoid needs a two-branch implementation to avoid overflow. The principle behind all of it is that a stack of linear layers folds into a single linear layer by associativity, and an elementwise non-linear function between them is what prevents the fold. The choice among non-linear functions is governed by their derivatives, because training multiplies one local derivative per layer along the path from the loss to each weight. A derivative capped at $0.25$ vanishes in ten layers, a derivative of $1$ does not, and a derivative that is never exactly zero keeps every unit alive. In production the same four functions become memory-bound kernels whose cost is the bytes they move, which is why frameworks compute them in place or fuse them into the matrix multiply that feeds them. Chapter 3 takes for granted that an activation is a shape-preserving, parameter-free function that can be dropped between any two linear layers, and asks how those linear layers should be built and initialized so the signal passing through them neither explodes nor vanishes.
+Module 02 builds each activation as a pair, an operation class whose `forward` is one NumPy expression on an array and a layer class that Chapter 3's containers can hold, and you saw why the sigmoid needs a two-branch implementation to avoid overflow. The principle behind all of it is that a stack of linear layers folds into a single linear layer by associativity, and an elementwise non-linear function between them is what prevents the fold. The choice among non-linear functions is governed by their derivatives, because training multiplies one local derivative per layer along the path from the loss to each weight. A derivative capped at $0.25$ vanishes in ten layers, a derivative of $1$ does not, and a derivative that is never exactly zero keeps every unit alive. In production the same four functions become memory-bound kernels whose cost is the bytes they move, which is why frameworks compute them in place or fuse them into the matrix multiply that feeds them. Chapter 3 takes for granted that an activation is a shape-preserving, parameter-free function that can be dropped between any two linear layers, and asks how those linear layers should be built and initialized so the signal passing through them neither explodes nor vanishes.
 
 ---
 
 ## Exercises
 
-1. **Leaky ReLU.** Implement `LeakyReLU` as an `Activation` subclass with `fn(v) = v if v > 0 else 0.01 * v`, and write down its derivative. Explain, in terms of the derivative columns of @tbl-activation-numerical-trace, why a unit with this activation cannot die, and what it costs compared with plain ReLU (count the operations per element).
-2. **Depth and the gradient.** Using only the scalar functions from this chapter, feed the input $x = 0.5$ through a chain of $L$ identical activations (each output becomes the next input) and multiply the local derivatives along the way. Tabulate the product for $L = 1, 5, 10, 20$ with sigmoid, tanh, and ReLU. At what depth does each drop below $10^{-3}$, and which never does?
-3. **GELU approximations.** The exact GELU uses `math.erf`. Two cheaper forms are in use: the tanh form from the production section, and the $x\,\sigma(1.702x)$ form used by the real TinyTorch module. Evaluate all three on a grid of inputs from $-4$ to $4$ in steps of $0.01$, report the largest absolute error of each approximation, and say where on the axis the worst error occurs.
+1. **Leaky ReLU.** Implement `LeakyReLUFunction` with `forward` returning `np.where(x > 0, x, 0.01 * x)`, plus its `LeakyReLU` layer class, and write down its derivative. Explain, in terms of the derivative columns of @tbl-activation-numerical-trace, why a unit with this activation cannot die, and what it costs compared with plain ReLU (count the operations per element).
+2. **Depth and the gradient.** Using the operation classes from this chapter on a one-element array, feed the input $x = 0.5$ through a chain of $L$ identical activations (each output becomes the next input) and multiply the local derivatives along the way. Tabulate the product for $L = 1, 5, 10, 20$ with sigmoid, tanh, and ReLU. At what depth does each drop below $10^{-3}$, and which never does?
+3. **GELU approximations.** The exact GELU uses `math.erf`. Two cheaper forms are in use: the tanh form from the production section, and the $x\,\sigma(1.702x)$ form that `GELUFunction` implements. Evaluate all three on a grid of inputs from $-4$ to $4$ in steps of $0.01$, report the largest absolute error of each approximation, and say where on the axis the worst error occurs.
