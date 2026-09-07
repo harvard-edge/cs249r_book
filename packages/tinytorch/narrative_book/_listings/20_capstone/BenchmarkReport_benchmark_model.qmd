@@ -4,27 +4,18 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     """
     Benchmark model performance comprehensively.
     """
-    # Count parameters
+    # Count parameters and stored size (see measure_memory)
     param_count = model.count_parameters()
-    model_size_mb = (param_count * 4) / (1024 * 1024)  # Assuming FP32
+    model_size_mb = self.measure_memory(model)
 
     # Measure accuracy
     predictions = model.forward(X_test)
     pred_labels = np.argmax(predictions.data, axis=1)
     accuracy = np.mean(pred_labels == y_test)
 
-    # Warm up first: the first calls pay allocation and cache costs that a
-    # steady-state latency should not include (Module 19)
-    for _ in range(min(5, num_runs)):
-        _ = model.forward(X_test[:1])
-
-    # Measure latency over multiple runs, each timed on its own
+    # Latency: untimed warmup, then num_runs single-sample calls timed one by one
     # Why multiple runs? See "Variance" section in Foundations
-    latencies = []
-    for _ in range(num_runs):
-        start = time.perf_counter()
-        _ = model.forward(X_test[:1])  # Single sample inference
-        latencies.append((time.perf_counter() - start) * 1000)  # Convert to ms
+    latencies = self.measure_latency(model, X_test, num_runs)
 
     avg_latency = np.mean(latencies)
     std_latency = np.std(latencies)
