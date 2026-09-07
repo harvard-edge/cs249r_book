@@ -901,7 +901,8 @@ class Profiler:
         APPROACH:
         1. Identify model type by class name
         2. Dispatch to count_linear_flops, self._count_conv_flops, or self._count_sequential_flops
-        3. Fall back to 1 FLOP per element for activations
+        3. A GPT-style model (it has .blocks and .embed_dim) goes to self._count_transformer_flops
+        4. Fall back to 1 FLOP per element for activations
 
         EXAMPLE:
         >>> linear = Linear(128, 64)
@@ -921,9 +922,33 @@ class Profiler:
             return _count_conv_flops(model, input_shape)
         elif model_name == 'Sequential' or hasattr(model, 'layers'):
             return self._count_sequential_flops(model, input_shape)
+        elif hasattr(model, 'blocks') and hasattr(model, 'embed_dim'):
+            return self._count_transformer_flops(model, input_shape)
         else:
             return int(np.prod(input_shape))
         ### END SOLUTION
+
+    def _count_transformer_flops(self, model, input_shape: Tuple[int, ...]) -> int:
+        """
+        Count FLOPs for one sequence through a GPT-style model (Module 13).
+
+        input_shape is (batch, seq_len) of token ids. Like the other counters this
+        is per sample: every Linear layer costs 2 * in * out per token, so a
+        sequence of seq_len tokens pays seq_len times that, and each block adds the
+        two attention products Q K^T and weights V, 4 * seq_len^2 * embed_dim.
+        Embeddings, LayerNorm, GELU, and softmax are a few operations per element
+        and are left out.
+        """
+        seq_len = input_shape[-1]
+        embed_dim = model.embed_dim
+        flops = 0
+        for block in model.blocks:
+            attn, mlp = block.attention, block.mlp
+            for layer in (attn.q_proj, attn.k_proj, attn.v_proj, attn.out_proj, mlp.linear1, mlp.linear2):
+                flops += seq_len * _count_linear_flops(layer, (1, layer.in_features))
+            flops += 4 * seq_len * seq_len * embed_dim
+        flops += seq_len * _count_linear_flops(model.lm_head, (1, embed_dim))
+        return flops
 
     def _calculate_parameter_memory(self, model) -> float:
         """
@@ -946,6 +971,17 @@ class Profiler:
         param_count = self.count_parameters(model)
         return (param_count * BYTES_PER_FLOAT32) / MB_TO_BYTES
         ### END SOLUTION
+
+    def _dummy_input(self, model, input_shape: Tuple[int, ...]) -> Tensor:
+        """
+        Build an input the model can consume, for timing and memory runs.
+
+        A token model (anything with a vocab_size, like Module 13's GPT) takes
+        integer ids; every other layer in TinyTorch takes float activations.
+        """
+        if hasattr(model, 'vocab_size'):
+            return Tensor(rng.integers(0, model.vocab_size, size=input_shape))
+        return Tensor(rng.standard_normal(input_shape))
 
 
     def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float]:
@@ -974,7 +1010,7 @@ class Profiler:
 
         parameter_memory_mb = self._calculate_parameter_memory(model)
 
-        dummy_input = Tensor(rng.standard_normal(input_shape))
+        dummy_input = self._dummy_input(model, input_shape)
         activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
 
         _ = model.forward(dummy_input)
@@ -1068,7 +1104,7 @@ class Profiler:
         """
         ### BEGIN SOLUTION
         # Create dummy input for latency measurement
-        dummy_input = Tensor(rng.standard_normal(input_shape))
+        dummy_input = self._dummy_input(layer, input_shape)
 
         # Gather all measurements
         params = self.count_parameters(layer)
