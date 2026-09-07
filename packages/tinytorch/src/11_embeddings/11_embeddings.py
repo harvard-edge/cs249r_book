@@ -51,7 +51,7 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 **Why this matters:**
 - **Learning:** Complete embedding system for converting discrete tokens to continuous representations
 - **Production:** Essential component matching PyTorch's torch.nn.Embedding with positional encoding patterns
-- **Consistency:** All embedding operations and positional encodings in text.embeddings
+- **Consistency:** All embedding operations and positional encodings in core.embeddings
 - **Integration:** Works seamlessly with tokenizers for complete text processing pipeline
 """
 
@@ -67,10 +67,9 @@ from typing import List, Optional, Tuple
 # Import from previous modules - following dependency chain
 from tinytorch.core.tensor import Tensor
 
-# Enable autograd for gradient tracking (required for learnable embeddings)
+# Module 06: Function base class and autograd, so embedding lookups record their backward pass
 from tinytorch.core.tensor import Function
 import tinytorch.core.autograd  # completes every operation with its backward half
-from tinytorch.core.autograd import is_grad_enabled
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -88,13 +87,14 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `math` (for mathematical constants and functions)
 
 **TinyTorch Dependencies**:
-- `tinytorch.core.tensor.Tensor` (from Module 01)
+- `tinytorch.core.tensor.Tensor` and `Function` (from Modules 01 and 06)
+- `tinytorch.core.autograd` (from Module 06) so embedding lookups get gradients
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → Module 11 (Embeddings)
-     ↓                       ↓
-  Foundation        Token-to-Vector
+Module 01 (Tensor) + Module 06 (Autograd) → Module 11 (Embeddings)
+              ↓                                    ↓
+         Foundation                         Token-to-Vector
 ```
 
 Students completing this module will have built the embedding system
@@ -336,7 +336,8 @@ class EmbeddingFunction(Function):
         EXAMPLE:
         >>> vocab = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], requires_grad=True)  # 3 words, 2D
         >>> indices = Tensor([0, 2, 0])  # Select words 0, 2, 0
-        >>> output = vocab[indices]  # [[0.1, 0.2], [0.5, 0.6], [0.1, 0.2]]
+        >>> output = EmbeddingFunction.apply(vocab, indices=indices.data.astype(int))
+        >>> # output = [[0.1, 0.2], [0.5, 0.6], [0.1, 0.2]]
         >>> # During backward: grad_output = [[1, 1], [1, 1], [1, 1]]
         >>> # grad_vocab[0] accumulates twice: [1, 1] + [1, 1] = [2, 2]
         >>> # grad_vocab[2] once: [1, 1]
@@ -351,7 +352,7 @@ class EmbeddingFunction(Function):
         weight, = self.inputs
         grad_weight = None
 
-        if isinstance(weight, Tensor) and weight.requires_grad:
+        if weight.requires_grad:
             # Initialize gradient with zeros
             grad_weight = np.zeros_like(weight.data)
 
@@ -443,8 +444,8 @@ class Embedding:
 
         APPROACH:
         1. Validate indices are within [0, vocab_size)
-        2. Perform lookup using numpy advanced indexing: weight[indices]
-        3. Run the lookup through EmbeddingFunction.apply so it is recorded for backward
+        2. Run the lookup through EmbeddingFunction.apply: its forward does the
+           numpy advanced indexing weight[indices], and apply() records it for backward
 
         HINTS:
         - EmbeddingFunction.apply(self.weight, indices=indices.data.astype(int))
@@ -695,7 +696,7 @@ class PositionalEncoding:
                 f"Sequence runs past the maximum: positions {start_pos}..{start_pos + seq_len - 1} with max_seq_len={self.max_seq_len}\n"
                 f"  ❌ Input has {seq_len} positions starting at {start_pos}, but only {self.max_seq_len} are available\n"
                 f"  💡 Learned positional encodings have a fixed maximum length set at initialization\n"
-                f"  🔧 Either truncate input to {self.max_seq_len} tokens, or create a new PositionalEncoding(max_seq_len={seq_len}, ...)"
+                f"  🔧 Either truncate input to {self.max_seq_len} tokens, or create a new PositionalEncoding(max_seq_len={start_pos + seq_len}, ...)"
             )
 
         if embed_dim != self.embed_dim:
@@ -1028,7 +1029,6 @@ ready for use in embedding pipelines.
 
 # %% nbgrader={"grade": false, "grade_id": "sinusoidal-function", "solution": true}
 #| export
-
 def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
     """
     Create sinusoidal positional encodings as used in "Attention Is All You Need".
@@ -1053,7 +1053,6 @@ def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
     HINT: The heavy lifting is done by _compute_sinusoidal_table. This function
     just wraps the result as a Tensor for use in the embedding pipeline.
     """
-
     ### BEGIN SOLUTION
     pe = _compute_sinusoidal_table(max_seq_len, embed_dim)
     return Tensor(pe)
@@ -1460,7 +1459,7 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
 
     # Remove batch dimension if it was added
     if squeeze_batch:
-        # Use Tensor slicing (now supported in Module 01)
+        # Tensor slicing from Module 01
         output = output[0]
 
     return output
@@ -1651,10 +1650,10 @@ def analyze_embedding_memory_scaling():
     print(f"\n📊 Positional Encoding Memory Comparison (embed_dim=512, max_seq_len=2048):")
 
     learned_params = 2048 * 512
-    learned_memory = learned_params * 4 / (1024 * 1024)
+    learned_memory = learned_params * BYTES_PER_FLOAT32 / MB_TO_BYTES
 
-    print(f"Learned PE:     {learned_memory:.1f} MB ({learned_params:,} parameters)")
-    print(f"Sinusoidal PE:  0.0 MB (0 parameters - computed on-the-fly)")
+    print(f"Learned PE:     {learned_memory:.1f} MB ({learned_params:,} trainable parameters)")
+    print(f"Sinusoidal PE:  {learned_memory:.1f} MB stored table, 0 trainable parameters")
     print(f"No PE:          0.0 MB (0 parameters)")
 
     print("\n🚀 Production Implications:")
@@ -1696,13 +1695,13 @@ def analyze_embedding_performance():
                 _ = embed.forward(tokens)
 
             # Time the lookup
-            start_time = time.time()
+            start_time = time.perf_counter()
             iterations = 100
 
             for _ in range(iterations):
                 output = embed.forward(tokens)
 
-            end_time = time.time()
+            end_time = time.perf_counter()
 
             # Calculate metrics
             total_time = end_time - start_time
@@ -1737,11 +1736,11 @@ def analyze_positional_encoding_strategies():
 
     # Analyze memory footprint
     learned_params = max_seq_len * embed_dim
-    learned_memory = learned_params * 4 / (1024 * 1024)  # MB
+    learned_memory = learned_params * BYTES_PER_FLOAT32 / MB_TO_BYTES
 
     print(f"📈 Memory Comparison:")
-    print(f"Learned PE:     {learned_memory:.2f} MB ({learned_params:,} parameters)")
-    print(f"Sinusoidal PE:  0.00 MB (0 parameters)")
+    print(f"Learned PE:     {learned_memory:.2f} MB ({learned_params:,} trainable parameters)")
+    print(f"Sinusoidal PE:  {learned_memory:.2f} MB stored table, 0 trainable parameters")
 
     # Analyze encoding patterns
     print(f"\n📈 Encoding Pattern Analysis:")
@@ -1766,12 +1765,13 @@ def analyze_positional_encoding_strategies():
     print(f"\n📈 Extrapolation Analysis:")
     extended_length = max_seq_len + 100
 
+    # Learned PE has a hard ceiling: its table has no rows past max_seq_len
+    too_long = Tensor(rng.standard_normal((1, extended_length, embed_dim)))
     try:
-        # Learned PE cannot handle longer sequences
-        extended_learned = PositionalEncoding(extended_length, embed_dim)
-        print(f"Learned PE: Requires retraining for sequences > {max_seq_len}")
-    except:
-        print(f"Learned PE: Cannot handle sequences > {max_seq_len}")
+        learned_pe.forward(too_long)
+        print(f"Learned PE: unexpectedly accepted {extended_length} positions")
+    except ValueError:
+        print(f"Learned PE: raises ValueError for sequences > {max_seq_len} (a bigger table needs retraining)")
 
     # Sinusoidal can extrapolate
     extended_sin = create_sinusoidal_embeddings(extended_length, embed_dim)
