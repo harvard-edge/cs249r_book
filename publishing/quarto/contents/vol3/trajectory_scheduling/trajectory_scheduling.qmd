@@ -16,7 +16,7 @@ engine: markdown
 
 _How do we schedule heterogeneous, heavy-tailed, and unpredictable agent trajectories across shared accelerator clusters without memory collapse or starvation?_
 
-Classical large language model serving runtimes (such as vLLM and TensorRT-LLM) are engineered around request-level abstractions: each request arrives independently, consumes a relatively predictable number of prefill tokens, decodes autoregressively, and exits. Autonomous agent workloads break every fundamental assumption of this classical queueing paradigm. An agent session is not an isolated query; it is an extended, stateful control loop spanning tens to hundreds of discrete turns.
+Classical large language model (LLM) serving runtimes (such as vLLM and TensorRT-LLM) are engineered around request-level abstractions: each request arrives independently, consumes a relatively predictable number of prefill tokens, decodes autoregressively, and exits. Autonomous agent workloads break every fundamental assumption of this classical queueing paradigm. An agent session is not an isolated query; it is an extended, stateful control loop spanning tens to hundreds of discrete turns.
 
 Trajectory workloads exhibit three pathological systems characteristics: service times follow heavy-tailed Pareto distributions where a tiny fraction of runaway tasks consume the majority of cluster resources; execution is bimodal, interleaving sub-second GPU decode bursts with multi-second external tool pauses; and consecutive turns exhibit massive prefix cache locality. If the cluster scheduler treats each turn as an independent request, cluster goodput collapses: consecutive turns are routed randomly across GPU workers, destroying prefix cache hit rates and triggering redundant prefill recomputations. Furthermore, because an agent admitted at Step 1 with a 2k-token prompt can expand to a 128k-token context by Step 50, oblivious admission control causes catastrophic accelerator memory exhaustion.
 
@@ -55,7 +55,7 @@ Classical accelerator serving runtimes—such as vLLM, TensorRT-LLM, and Triton 
 Autonomous agent workloads dismantle every foundational assumption of this classical queueing paradigm. An agent session is not an isolated request; it is an extended, stateful, and non-deterministic trajectory spanning tens or hundreds of discrete interaction turns. Operating clusters under this post-request regime exposes four acute systems challenges:
 
 1. **Heavy-Tailed Pareto Service Times:** Unlike stateless queries with well-behaved, narrow latency distributions, agent trajectories exhibit extreme service-time variance ($1.0 < \alpha < 1.4$). A tiny fraction ($3\%\text{--}5\%$) of complex debugging tasks expand into massive multi-step journeys that consume the majority of cluster compute resources.
-2. **Bimodal Execution and Blocking Tool Delays:** Agent execution alternates between sub-second GPU decode bursts and lengthy external tool delays (compiling codebases, executing integration test suites, or awaiting human approval). Holding multi-gigabyte KV caches pinned in high-cost GPU High Bandwidth Memory (HBM) during these blocking delays induces severe memory starvation.
+2. **Bimodal Execution and Blocking Tool Delays:** Agent execution alternates between sub-second GPU decode bursts and lengthy external tool delays (compiling codebases, executing integration test suites, or awaiting human approval). Holding multi-gigabyte KV caches pinned in high-cost GPU high-bandwidth memory (HBM) during these blocking delays induces severe memory starvation.
 3. **Expanding Memory Footprints and Admission Deadlocks:** An agent admitted at Step 1 with a compact $2\text{k}$-token context may expand to $64\text{k}$ or $128\text{k}$ tokens by Step 30. Oblivious schedulers that admit sessions based only on current context size suffer catastrophic out-of-memory (OOM) thrashing and deadlock.
 4. **Irreversible Actions under Preemption:** In classical batch clusters, an interrupted job can be killed and restarted from scratch. In an agent trajectory, intermediate actions perform real mutations on external filesystems, databases, and network APIs. Schedulers cannot simply abort an in-flight trajectory without executing compensating actions or preserving checkpointed event streams.
 
@@ -79,8 +79,8 @@ Unlike stateless LLM requests which follow predictable Gaussian or Poisson arriv
 
 In real-world agent clusters, empirical measurements reveal tail indices that dictate that the theoretical variance of the service time distribution is infinite:
 
-- **Short Trajectories (The Bulk):** Approximately 70% to 80% of tasks resolve quickly in fewer than 5 steps (e.g., simple file queries, targeted linting fixes, straightforward factual answers).
-- **Heavy-Tailed Long Trajectories (The Heavy Tail):** A critical 3% to 5% of tasks expand into massive multi-step reasoning journeys exceeding 80 to 500 steps (e.g., complex architectural refactoring, subtle race condition debugging, multi-repository migrations).
+- **Short Trajectories (The Bulk):** Approximately 70 to 80 percent of tasks resolve quickly in fewer than 5 steps (e.g., simple file queries, targeted linting fixes, straightforward factual answers).
+- **Heavy-Tailed Long Trajectories (The Heavy Tail):** A critical 3 to 5 percent of tasks expand into massive multi-step reasoning journeys exceeding 80 to 500 steps (e.g., complex architectural refactoring, subtle race condition debugging, multi-repository migrations).
 
 This infinite variance fundamentally invalidates traditional scheduling mechanisms.
 
@@ -96,7 +96,7 @@ Under heavy-tailed Pareto workloads, this variance approaches infinity. In pract
 | **Software Engineering** | SWE-bench Verified | 24.8 | 142.0 | 812.6 | 84.1% | 820 tokens | 22.4 GB |
 | **Deep Research** | GAIA / Research Fleets | 38.2 | 260.0 | 1,440.0 | 88.6% | 1,400 tokens | 34.8 GB |
 
-: Empirical workload characteristics and systems variance metrics across stateless text generation, multi-turn chat, and autonomous agent trajectories. {#tbl-vol3-scheduling-workload-comparison}
+: **Empirical Workload Characteristics across Serving Regimes**: Mean and tail step counts, step variance, tool wait fraction, context growth, and peak KV memory across stateless text generation, multi-turn chat, and autonomous agent trajectories. {#tbl-vol3-scheduling-workload-comparison}
 
 ### Bimodal temporal execution dynamics
 
@@ -106,7 +106,7 @@ Beyond step-count variance, the temporal profile of each individual step is inte
 2. **Tool I/O Wait Phase ($1\text{ s -- } 60\text{ s}$):** The agent halts token generation while an external sandbox executes bash commands, runs test suites, queries databases, or scrapes web pages.
 3. **Human Approval Wait Phase ($1\text{ minute -- } 24\text{ hours}$):** If the agent requires supervisory consent for a privileged action, execution pauses indefinitely in an external mailbox queue.
 
-As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend between 70% and 90% of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization plummets to single-digit percentages.
+As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend between 70 and 90 percent of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization plummets to single-digit percentages.
 
 ### Human-in-the-loop (HITL) suspend and resume
 
@@ -173,15 +173,17 @@ $$\sum_{j \in \mathcal{A}_{\text{active}}} S_{\text{reserved}}^{(j)} + S_{\text{
 
 If this condition is violated, the scheduler refuses to admit trajectory $k$ to the active GPU pool. Instead, the task is enqueued in a priority admission queue in host memory. By enforcing this strict capacity invariant, the cluster mathematically guarantees that admitted workflows can expand to their predicted horizons without ever triggering memory-exhaustion deadlocks or OOM worker crashes.
 
-![Trajectory-Aware Serving and Scheduling Architecture. Incoming heavy-tailed agent tasks undergo horizon prediction and capacity-aware admission control before being dispatched via cache-affinity routing to GPU workers maintaining warm Radix tree prefixes.](images/svg/trajectory_scheduling_architecture.svg){#fig-vol3-scheduling-architecture}
+::: {#fig-vol3-scheduling-architecture fig-env="figure" fig-pos="htb" fig-cap="**Trajectory-Aware Serving and Scheduling Architecture**: Incoming heavy-tailed agent tasks undergo horizon prediction and capacity-aware admission control before being dispatched via cache-affinity routing to GPU workers maintaining warm Radix tree prefixes." fig-alt="Diagram of a trajectory-aware serving and scheduling architecture in three stacked bands. The top band lists three agent workload properties: heavy-tailed Pareto service times, bimodal compute versus tool I/O, and multi-turn prefix redundancy. The middle band shows the trajectory scheduling controller with four numbered stages: predictive horizon and memory sizing, capacity-aware admission gate, cache-affinity session routing, and preemption and suspension coordination. The bottom band shows three GPU workers, one running an active session against a warm radix tree cache, one with its key-value cache swapped to host memory while it waits on a tool, and one balanced by dominant resource fairness."}
+![](images/svg/trajectory_scheduling_architecture.svg)
+:::
 
 ## Scheduling Under Unknown Service Times {#sec-vol3-scheduling-scheduling-under-unknown-service}
 
-Because horizon predictors cannot achieve 100% precision on open-ended creative tasks, the scheduler must also implement queueing disciplines that behave robustly under unknown, stochastic service times.
+Because horizon predictors cannot achieve 100 percent precision on open-ended creative tasks, the scheduler must also implement queueing disciplines that behave robustly under unknown, stochastic service times.
 
 ### Shortest remaining processing time (SRPT)
 
-In classical scheduling theory, Shortest Remaining Processing Time (SRPT) is mathematically proven to minimize mean response time and queue waiting time across arbitrary workloads [@harchol2001srpt; @harchol-balter2013]. Under SRPT, the job with the smallest remaining work is always scheduled first.
+In classical scheduling theory, shortest remaining processing time (SRPT) is mathematically proven to minimize mean response time and queue waiting time across arbitrary workloads [@harchol2001srpt; @harchol-balter2013]. Under SRPT, the job with the smallest remaining work is always scheduled first.
 
 However, true SRPT requires exact knowledge of remaining service time, which is unavailable in autonomous agent execution. If a scheduler relies naively on an imperfect predictor $\widehat{N}_{\text{rem}}$, tasks that exceed their predicted horizon risk starvation.
 
@@ -220,7 +222,7 @@ The fit is checkable, because those same two parameters must also reproduce the 
 
 $$\mathbb{P}(N > 142) = \left( \frac{2.25}{142} \right)^{1.1} = (0.01585)^{1.1} = 0.010$$
 
-The fitted distribution places 1.0% of tasks beyond 142 steps, which is exactly what a P99 of $142$ asserts, so the tail index and the table agree. Conditioning on 50 attained steps is then a ratio of survival probabilities, and the scale parameter cancels:
+The fitted distribution places 1.0 percent of tasks beyond 142 steps, which is exactly what a P99 of $142$ asserts, so the tail index and the table agree. Conditioning on 50 attained steps is then a ratio of survival probabilities, and the scale parameter cancels:
 
 $$\mathbb{P}(N > 100 \mid N > 50) = \frac{(x_{\min}/100)^{1.1}}{(x_{\min}/50)^{1.1}} = \left( \frac{50}{100} \right)^{1.1} = 0.467$$
 
@@ -236,12 +238,12 @@ $$\frac{50}{1.1 - 1} = \frac{50}{0.1} = 500\text{ steps}$$
 
 By prioritizing jobs with low attained service, LAS delivers profound systems advantages:
 
-- **Instantaneous Fast-Path for Simple Queries:** The 80% of agent tasks that require fewer than 5 steps achieve near-zero waiting time, completing almost instantaneously.
+- **Instantaneous Fast-Path for Simple Queries:** The 80 percent of agent tasks that require fewer than 5 steps achieve near-zero waiting time, completing almost instantaneously.
 - **Natural Looping Protection:** If an agent enters a pathological reasoning loop (e.g., repeatedly editing a file, triggering a syntax error, and failing to diagnose the cause), its attained service rapidly accumulates. LAS automatically penalizes the runaway job, downgrading its priority and preventing it from monopolizing the GPU cluster.
 
 ## Preemption and Suspension {#sec-vol3-scheduling-preemption-and-suspension-suspending}
 
-Because agents spend up to 90% of wall-clock time waiting for external environments, holding physical HBM frames during I/O stalls destroys serving throughput. Schedulers must actively preempt and suspend trajectories across I/O boundaries [@ousterhout1980medusa].
+Because agents spend up to 90 percent of wall-clock time waiting for external environments, holding physical HBM frames during I/O stalls destroys serving throughput. Schedulers must actively preempt and suspend trajectories across I/O boundaries [@ousterhout1980medusa].
 
 ### The three-phase suspension lifecycle
 
@@ -250,7 +252,7 @@ When an agent issues a tool execution call (e.g., `bash(pytest tests/)`), the sc
 1. **Phase 1: Yield and Mark Inactive:** The model decodes the tool call token sequence and emits an end-of-turn delimiter. The scheduler detects the tool invocation, removes the session from the active GPU dispatch ring, and flags its status as `SUSPENDED_IO`.
 2. **Phase 2: Asynchronous Memory Evacuation:**
    - If cluster HBM pressure is low ($M_{\text{free}} > 30\%$), the runtime leaves the session's physical KV blocks in HBM, simply decrementing their reference counts in the Radix tree (@sec-vol3-prefix-caching-paging) to allow lazy LRU eviction if needed.
-   - If cluster HBM pressure is high ($M_{\text{free}} \le 30\%$), the scheduler issues an asynchronous DMA swap command over PCIe Gen5 x16, offloading the session's physical KV blocks to Host DRAM. The freed HBM page frames are returned to the global allocator for immediate use by active requests.
+   - If cluster HBM pressure is high ($M_{\text{free}} \le 30\%$), the scheduler issues an asynchronous direct memory access (DMA) swap command over PCIe Gen5 x16, offloading the session's physical KV blocks to Host DRAM. The freed HBM page frames are returned to the global allocator for immediate use by active requests.
 3. **Phase 3: Event-Driven Prefetch and Resumption:** The tool execution completes in its isolated sandbox container. The sandbox runtime posts an event containing stdout and exit code to the scheduler's completion queue. The scheduler signals the memory manager to prefetch the cached KV blocks from Host DRAM back to GPU HBM, restores the session's logical page table, and places the session in the ready queue for its next token generation step.
 
 By overlapping DMA transfers with tool execution termination, the scheduler completely masks transfer latency, ensuring zero perceived pause when the agent resumes execution.
@@ -283,7 +285,7 @@ Suppose tenant $i$ requires a resource demand vector $\mathbf{r}_i = (r_{i,\text
 
 $$u_{i,r} = \frac{U_{i,r}}{C_r}$$
 
-::: {.callout-definition}
+::: {.callout-definition title="Dominant resource"}
 The **dominant resource** of tenant $i$ is the resource type for which tenant $i$ has the largest normalized share:
 
 $$s_i = \max_{r \in \mathcal{R}} \{ u_{i,r} \} = \max \left\{ \frac{U_{i,\text{compute}}}{C_{\text{compute}}}, \, \frac{U_{i,\text{mem}}}{C_{\text{mem}}}, \, \frac{U_{i,\text{tool}}}{C_{\text{tool}}} \right\}$$
@@ -299,16 +301,18 @@ and allocates the next agent task or execution quantum to tenant $i^*$, updating
 
 ### Four classical systems guarantees
 
-As proven by Ghodsi et al., DRF satisfies four vital properties essential for multi-tenant agent infrastructures [@ghodsi2011]:
+As proven by @ghodsi2011, DRF satisfies four vital properties essential for multi-tenant agent infrastructures:
 
 1. **Sharing Incentive:** Each of $n$ active tenants is guaranteed to receive at least a $1/n$ share of its dominant resource. No tenant is ever worse off sharing the multi-resource cluster than having a dedicated partition of $1/n$ of all resources.
 2. **Strategy-Proofness:** A tenant cannot manipulate the scheduler to acquire more resources by falsely inflating its demand for resources it does not actually use.
 3. **Envy-Freeness:** No tenant prefers the resource allocation bundle given to any other tenant.
 4. **Pareto Efficiency:** It is impossible to allocate more resources to any tenant without reducing the allocation of another tenant.
 
-By packing complementary agent workloads together—co-locating compute-heavy MCTS agents with memory-heavy coding agents and tool-heavy research agents—DRF increases aggregate cluster utilization by **40% to 65%** compared to static partitioning [@grandl2014].
+By packing complementary agent workloads together—co-locating compute-heavy MCTS agents with memory-heavy coding agents and tool-heavy research agents—DRF increases aggregate cluster utilization by **40 to 65 percent** compared to static partitioning [@grandl2014].
 
-![Dominant Resource Fairness Across Coupled Agent Resources. Max-min fair allocation balancing GPU Compute FLOPs, HBM KV blocks, and external tool API leases across heterogeneous agent personas to maximize cluster packing efficiency.](images/svg/drf_multi_resource_agent_allocation.svg){#fig-vol3-scheduling-drf}
+::: {#fig-vol3-scheduling-drf fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation balancing GPU Compute FLOPs, HBM KV blocks, and external tool API leases across heterogeneous agent personas to maximize cluster packing efficiency." fig-alt="Diagram of dominant resource fairness across three cluster resource pools: GPU compute, device memory holding key-value blocks, and external tool API leases. Three agent tenant profiles are shown with their resource share vectors, a speculative search agent dominated by compute, a software engineering agent dominated by memory, and a web research orchestrator dominated by tool leases, each reaching the same dominant share. A final panel lists the sharing incentive, strategy-proofness, envy-freeness, and Pareto efficiency properties."}
+![](images/svg/drf_multi_resource_agent_allocation.svg)
+:::
 
 ## Human-in-the-Loop Approval Latency {#sec-vol3-scheduling-the-asymmetric-latency-disparity}
 
@@ -359,7 +363,7 @@ The scheduling runtime stratifies traffic into discrete Quality-of-Service (QoS)
 
 - **Tier 1: Interactive Real-Time (Latency-Critical):** Demands strict tail latency bounds (Time-to-First-Token $\text{TTFT} \le 300\text{ ms}$, Inter-Token Latency $\text{ITL} \le 25\text{ ms}$ at P99).
 - **Tier 2: Interactive Asynchronous:** User-initiated workflows that tolerate moderate initial queuing ($\text{TTFT} \le 3\text{ s}$, $\text{ITL} \le 50\text{ ms}$).
-- **Tier 3: Autonomous Batch (Throughput-Oriented):** Unattended background jobs with zero real-time SLOs (evaluated strictly on completed tasks per dollar per hour).
+- **Tier 3: Autonomous Batch (Throughput-Oriented):** Unattended background jobs with zero real-time service-level objectives (SLOs) (evaluated strictly on completed tasks per dollar per hour).
 
 ### Fine-grained priority preemption
 
@@ -381,7 +385,7 @@ In agentic systems, this fundamental systems invariant is completely destroyed. 
 
 As formalized in @fig-vol3-scheduling-preemption-matrix, agent operations partition into four distinct execution zones based on their side effects:
 
-1. **Zone 1: Pure LLM Compute (100% Fully Reversible):** In-GPU prompt prefill, token decoding, and internal scratchpad reasoning. State exists solely as ephemeral activations and KV tensors in GPU memory. Preemption policy: **Instantaneous Preemption / Kill**. The scheduler may evict or discard the job at any moment with zero external side effects.
+1. **Zone 1: Pure LLM Compute (Fully Reversible):** In-GPU prompt prefill, token decoding, and internal scratchpad reasoning. State exists solely as ephemeral activations and KV tensors in GPU memory. Preemption policy: **Instantaneous Preemption / Kill**. The scheduler may evict or discard the job at any moment with zero external side effects.
 2. **Zone 2: Idempotent Tool Reads (Safe Preemption):** Read-only operations (`read_file`, `grep_search`, `web_search`, database `SELECT`). By definition of idempotency ($f(x) = f(f(x))$), executing the action multiple times produces identical results without altering environment state. Preemption policy: **Safe Preemption**. The scheduler can abort an in-flight network call; restarting simply re-executes the query.
 3. **Zone 3: Reversible Writes with Compensating Actions (Semi-Reversible):** Operations that alter environment state but possess a formally defined compensating inverse operation $C_i$ (e.g., committing changes to a temporary Git branch, writing temporary scratch files, executing an SQL transaction within a database rollback log). Preemption policy: **Conditional Preemption**. The scheduler cannot simply kill the agent; it must trigger the compensating workflow $C_i$ (e.g., executing `git reset --hard` or `ROLLBACK`, see @sec-vol3-recovery-distributed-sagas-for-agent) before reclaiming cluster resources.
 4. **Zone 4: Irreversible Real-World Actions (Strictly Non-Preemptible):** Operations that produce permanent, non-undoable real-world state changes (e.g., transferring funds via banking API, sending an external email or Slack message, deploying code to production servers, actuating a physical robotic arm). Preemption policy: **Strictly Non-Preemptible (Pinned Execution)**. Preemption is legally and architecturally forbidden. The scheduler is strictly barred from aborting or migrating the job until the transaction confirms terminal status.
@@ -393,7 +397,7 @@ As formalized in @fig-vol3-scheduling-preemption-matrix, agent operations partit
 | **Zone 3** | Reversible Write | Git commit, SQL transaction | Workspace filesystem / DB | Semi-Reversible ($C_i$ inverse) | Conditional (Compensating) | Execute compensating action $C_i$; revert |
 | **Zone 4** | Irreversible Side Effect | Wire transfer, email, live deploy | External physical world | 0% Non-Reversible | Strictly Forbidden | Pin execution; allocate emergency HBM |
 
-: Preemption, suspension, and eviction policies across the four execution zones governed by external irreversibility. {#tbl-vol3-scheduling-policy-matrix}
+: **Preemption Policy across the Four Execution Zones**: Action types, state residency, reversibility guarantees, and scheduler behavior under memory shortage, governed by the reversibility of external side effects. {#tbl-vol3-scheduling-policy-matrix}
 
 ### Scheduling invariant under irreversible actions
 
@@ -401,7 +405,9 @@ If an agent trajectory enters Zone 4, the scheduling controller must elevate the
 
 If cluster-wide memory pressure reaches emergency thresholds while a Zone 4 action is in flight, the scheduler must shed load exclusively from Zone 1 and Zone 2 tasks, preserving the integrity of irreversible physical world operations.
 
-![The Preemption Decision Matrix. Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated, or must remain strictly pinned to completion.](images/svg/reversibility_boundary_preemption_matrix.svg){#fig-vol3-scheduling-preemption-matrix}
+::: {#fig-vol3-scheduling-preemption-matrix fig-env="figure" fig-pos="htb" fig-cap="**The Preemption Decision Matrix**: Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated, or must remain strictly pinned to completion." fig-alt="Diagram of four execution zones arranged along a reversibility spectrum, running from pure compute through idempotent reads, then across a marked boundary to reversible writes and irreversible actions. Each zone panel gives its state residency, its degree of reversibility, and its preemption policy, which moves from instant preemption to safe suspend, then to conditional preemption with a compensating action, and finally to strictly non-preemptible pinned execution."}
+![](images/svg/reversibility_boundary_preemption_matrix.svg)
+:::
 
 ## Production Scheduler Architecture {#sec-vol3-scheduling-production-architecture-building-a}
 
@@ -442,7 +448,7 @@ To provide robust systems reliability, schedulers implement **Event Sourcing** b
 
 **Fallacy**: *Standard HTTP load balancers (Round-Robin, Least-Connections) are adequate for multi-turn agent clusters.*
 
-Standard load balancers possess zero awareness of accelerator memory state. In a multi-turn agent session, routing Turn $t+1$ to a different GPU than Turn $t$ destroys prefix cache locality, forcing a 100% redundant prefill recomputation that wastes gigabytes of memory and seconds of Tensor Core compute. Multi-turn schedulers must enforce strict session-affinity routing.
+Standard load balancers possess zero awareness of accelerator memory state. In a multi-turn agent session, routing Turn $t+1$ to a different GPU than Turn $t$ destroys prefix cache locality, forcing a 100 percent redundant prefill recomputation that wastes gigabytes of memory and seconds of Tensor Core compute. Multi-turn schedulers must enforce strict session-affinity routing.
 
 :::
 
@@ -486,6 +492,6 @@ Principle \ref{pri-vol3-heavy-tailed-scheduling} is the reason the classical sch
 - **Predictive Admission Control:** Multi-turn agent contexts expand by $10\times$ to $20\times$ over their lifetimes. Capacity-aware admission control predicts trajectory horizons and peak memory demand, mathematically preventing Coffman deadlocks and cluster OOM crashes.
 - **Least Attained Service (LAS) Scheduling:** By prioritizing sessions with the least cumulative service, LAS provides an instantaneous fast-path for short tasks while automatically throttling runaway reasoning loops.
 - **Preemption Across Bimodal I/O Gaps:** Decoupling active compute from tool waits allows schedulers to asynchronously swap idle KV caches to Host DRAM over PCIe Gen5, freeing scarce HBM page frames during multi-second tool stalls.
-- **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65%.
+- **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65 percent.
 - **Irreversible Side Effects:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating workflows, and irreversible actions must remain pinned to completion.
 - **Fault Tolerance via WAL:** Schedulers treat agent contexts as append-only event ledgers. Using Write-Ahead Logging ensures that if a worker crashes, the trajectory can be deterministically rehydrated via a single chunked prefill without re-executing non-idempotent side effects.

@@ -121,7 +121,7 @@ In large-scale distributed training, the Critic network introduces severe system
 
 - **Synchronization Barriers:** Every rollout step requires forward and backward passes across both networks, introducing communication barriers across tensor-parallel ranks.
 
-**Group Relative Policy Optimization (GRPO)**, pioneered by Shao et al. [@shao2024deepseekmath] and popularized by DeepSeek-R1 [@deepseekai2025deepseekr1], eliminates the Critic network entirely by computing advantage estimates across a group of candidate outputs sampled for the same prompt.
+**Group Relative Policy Optimization (GRPO)**, pioneered by @shao2024deepseekmath and popularized by DeepSeek-R1 [@deepseekai2025deepseekr1], eliminates the Critic network entirely by computing advantage estimates across a group of candidate outputs sampled for the same prompt.
 
 ::: {#fig-vol3-grpo-algorithm fig-env="figure" fig-pos="htb" fig-cap="**Group Relative Policy Optimization (GRPO) Architecture**: For each input query $q$, the policy samples a group of $G$ outputs. The deterministic oracle grades each output, and relative advantages $\hat{A}_i$ are computed by normalizing rewards within the group. Eliminating the Critic model cuts training GPU VRAM requirements by approximately 50 percent." fig-alt="Detailed algorithmic diagram showing group rollout generation, in-group reward normalization, and the clipped surrogate loss update without a critic."}
 ![](images/svg/grpo_algorithm.svg){width=100%}
@@ -163,7 +163,7 @@ Whether that reclaimed capacity amounts to the clean halving quoted above is a q
 
 **Problem**: In a 70B parameter agent training cluster, how much high-bandwidth memory does eliminating the Critic network reclaim, and does the saving reach the 50 percent figure quoted for GRPO?
 
-**Variables**: $P = 70 \times 10^9$ parameters, with $1\text{ GB} = 10^9$ bytes. Mixed-precision Adam holds, per trainable parameter, $2\text{ bytes}$ of BF16 weights, $2\text{ bytes}$ of BF16 gradients, $4\text{ bytes}$ of FP32 master weights, and $4\text{ bytes} + 4\text{ bytes}$ of FP32 momentum and variance. The frozen reference model holds BF16 weights only, at $2\text{ bytes}$ per parameter. Accelerators carry $80\text{ GB}$ of HBM each, eight to a node. Two values are scenario assumptions: the Critic matches the Actor in parameter capacity, and the byte budget counts persistent state only, excluding activations and KV cache, so every total below is a floor.
+**Variables**: $P = 70 \times 10^9$ parameters, with $1\text{ GB} = 10^9$ bytes. Mixed-precision Adaptive Moment Estimation (Adam) holds, per trainable parameter, $2\text{ bytes}$ of BF16 weights, $2\text{ bytes}$ of BF16 gradients, $4\text{ bytes}$ of FP32 master weights, and $4\text{ bytes} + 4\text{ bytes}$ of FP32 momentum and variance. The frozen reference model holds BF16 weights only, at $2\text{ bytes}$ per parameter. Accelerators carry $80\text{ GB}$ of HBM each, eight to a node. Two values are scenario assumptions: the Critic matches the Actor in parameter capacity, and the byte budget counts persistent state only, excluding activations and KV cache, so every total below is a floor.
 
 **Math**: A trainable model costs $2 + 2 + 4 + 4 + 4 = 16\text{ bytes}$ per parameter, so the Actor occupies $70 \times 10^9 \times 16 = 1120\text{ GB}$ and a Critic of equal capacity occupies another $1120\text{ GB}$. The frozen reference model, carrying no gradients and no optimizer states, costs $70 \times 10^9 \times 2 = 140\text{ GB}$. PPO therefore holds $1120 + 1120 + 140 = 2380\text{ GB}$ of persistent state against GRPO's $1120 + 140 = 1260\text{ GB}$, and the fraction reclaimed is $1120 / 2380 = 0.471$. Converting to hardware, $2380 / 80 = 29.75$ rounds up to $30$ accelerators, while $1260 / 80 = 15.75$ rounds up to $16$.
 
@@ -237,7 +237,7 @@ $$r_{\text{PRM}}(s_t, a_t) = \begin{cases} +1.0 & \text{if step } a_t \text{ rep
 
 PRMs solve the credit assignment problem by assigning immediate, low-variance reward signals to the exact decision boundary where an error occurred. Furthermore, as we will explore in @sec-vol3-test-time-search, during inference-time search (such as Monte Carlo Tree Search or Best-of-$N$ sampling), PRMs enable **Early Branch Pruning**: the moment a candidate branch receives $r_{\text{PRM}} < 0$, the runtime terminates the rollout immediately, saving up to 70 percent of inference tokens compared to evaluating complete trajectories.
 
-@tbl-vol3-reward-architectures summarizes the structural systems trade-offs between reward modeling architectures.
+@Tbl-vol3-reward-architectures summarizes the structural systems trade-offs between reward modeling architectures.
 
 | Reward Architecture | Supervision Granularity | Reward Source | Sample Efficiency | Systems Annotation Cost | Search Pruning Capability |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -246,7 +246,7 @@ PRMs solve the credit assignment problem by assigning immediate, low-variance re
 | **PRM (Learned)** | Step-level | Neural process verifier | High (dense credit assignment) | Extreme (step-by-step labeling) | High (immediate step pruning) |
 | **RLVR (Hybrid PRM)** | Step-level | Compiler / linter per step | Very High (dense verifiable signals) | Low (automated step assertions) | High (early termination on syntax error) |
 
-: Architectural Comparison of Reward Mechanisms in Agentic Reinforcement Learning. {#tbl-vol3-reward-architectures}
+: **Reward Mechanisms in Agentic Reinforcement Learning**: Supervision granularity, reward source, sample efficiency, annotation cost, and search pruning capability across four reward architectures. {#tbl-vol3-reward-architectures}
 
 ## The Environment Rollout Pipeline {#sec-vol3-rl-the-environment-rollout-pipeline}
 
@@ -274,7 +274,7 @@ If workers synchronize synchronously after every rollout batch, fast workers sit
 - Training workers sample mini-batches continuously from the buffer without waiting for batch-level barrier synchronization.
 - To prevent policy lag (off-policy divergence), trajectories older than $K$ gradient update steps are evicted automatically.
 
-**The Replay Memory Bottleneck:** In classical RL, replay buffers store small state-action vectors (e.g., a pixel array and an integer). In agentic RL, a single trajectory $\tau$ can span 32,000 tokens of dense shell output and reasoning chains. Storing an off-policy buffer of 100,000 such trajectories requires hundreds of gigabytes of RAM. Production systems implement distributed replay buffers backed by fast NVMe SSD arrays or distributed object stores (e.g., Ray Object Store), serializing trajectories using zero-copy formats like Apache Arrow to avoid I/O bottlenecks during training data sampling.
+**The Replay Memory Bottleneck:** In classical RL, replay buffers store small state-action vectors (e.g., a pixel array and an integer). In agentic RL, a single trajectory $\tau$ can span 32,000 tokens of dense shell output and reasoning chains. Storing an off-policy buffer of 100,000 such trajectories requires hundreds of gigabytes of RAM. Production systems implement distributed replay buffers backed by fast Non-Volatile Memory Express (NVMe) SSD arrays or distributed object stores (e.g., Ray Object Store), serializing trajectories using zero-copy formats like Apache Arrow to avoid I/O bottlenecks during training data sampling.
 
 ## Credit Assignment Across Long Horizons {#sec-vol3-rl-credit-assignment-across-long}
 
@@ -336,19 +336,19 @@ Through hundreds of thousands of multi-turn episodes, the policy internalizes a 
 
 ## Distributed Training Infrastructure for Agentic RL {#sec-vol3-rl-distributed-training-infrastructure-for}
 
-At datacenter scale, training agent policies requires orchestrating thousands of heterogeneous compute units spanning GPU servers, CPU clusters, and network storage fabrics.
+At data center scale, training agent policies requires orchestrating thousands of heterogeneous compute units spanning GPU servers, CPU clusters, and network storage fabrics.
 
 ### Memory partitioning and 3D parallelism
 
 For a 70B parameter agent model, training infrastructure leverages **ZeRO-3 (Zero Redundancy Optimizer)** [@rajbhandari2020] and **Megatron-LM 3D Parallelism** [@shoeybi2019megatron]:
 
-- **Tensor Parallelism ($TP = 4$ or $8$):** Partitions individual weight matrices (QKV projections, MLP layers) across GPUs within a single NVLink server node, reducing per-GPU activation memory.
+- **Tensor Parallelism ($TP = 4$ or $8$):** Partitions individual weight matrices, including QKV projections and multilayer perceptron layers, across GPUs within a single NVLink server node, reducing per-GPU activation memory.
 - **Pipeline Parallelism ($PP = 4$):** Splits the Transformer layers across multiple server nodes connected via high-bandwidth InfiniBand (IB) switches.
 - **ZeRO-3 Data Parallelism ($DP$):** Shards optimizer states, gradients, and model parameters across all data-parallel ranks. During forward and backward passes, parameters are gathered on demand via high-speed all-gather operations and discarded immediately after computation.
 
 ### Asymmetric rollout batching
 
-In standard LLM training, sequences are packed into uniform rectangular tensors of shape $(B, S)$ where $B$ is the batch size and $S$ is the context length.
+In standard large language model (LLM) training, sequences are packed into uniform rectangular tensors of shape $(B, S)$ where $B$ is the batch size and $S$ is the context length.
 
 In agent RL, however, trajectory lengths $T_i$ are highly asymmetric: one agent trace finishes in 1,200 tokens, while another spans 28,000 tokens. Packing these into fixed-width 2D tensors wastes over 60 percent of GPU compute on zero-padding.
 

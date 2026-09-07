@@ -16,7 +16,7 @@ engine: markdown
 
 _How do we manage the finite, quadratic attention capacity of neural accelerators as an L1 working-set cache over expanding trajectory histories?_
 
-Denning's 1968 Working Set theory is the foundational model of memory hierarchy in computer systems. In neural computing, the context window is the L1 cache. It provides zero-retrieval-latency access to tokens, but it is physically constrained by accelerator High Bandwidth Memory (HBM) and computationally bound by quadratic attention ($O(L^2)$) and memory bandwidth during autoregressive decode. Developers often treat million-token context windows as infinite trash bins. In production, unmanaged context accumulation causes catastrophic Time-To-First-Token (TTFT) explosion, degrades attention accuracy ("lost-in-the-middle"), and burns astronomical money. Context must be actively managed as an eviction-driven working set. This chapter formalizes token working-set dynamics, sliding-window attention, token eviction algorithms (LRU, attention-score pruning), and structured semantic context compaction.
+Denning's 1968 Working Set theory is the foundational model of memory hierarchy in computer systems. In neural computing, the context window is the L1 cache. It provides zero-retrieval-latency access to tokens, but it is physically constrained by accelerator high-bandwidth memory (HBM) and computationally bound by quadratic attention ($O(L^2)$) and memory bandwidth during autoregressive decode. Developers often treat million-token context windows as infinite trash bins. In production, unmanaged context accumulation causes catastrophic Time-To-First-Token (TTFT) explosion, degrades attention accuracy ("lost-in-the-middle"), and burns astronomical money. Context must be actively managed as an eviction-driven working set. This chapter formalizes token working-set dynamics, sliding-window attention, token eviction algorithms (LRU, attention-score pruning), and structured semantic context compaction.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -41,25 +41,25 @@ Denning's 1968 Working Set theory is the foundational model of memory hierarchy 
 
 ## Memory Hierarchies in Autonomous Agents {#sec-vol3-context-intro}
 
-In classical computer architecture, the memory hierarchy spans registers, L1/L2/L3 SRAM caches, host DRAM, and persistent NVMe storage, balancing access latency against bit density and physical cost [@hennessy2011computer]. In an agentic machine learning system, the **context window** serves as the primary computational substrate—the "L1 cache" of the autonomous agent. Every decision, tool invocation, environment observation, and intermediate reasoning thought must reside within this active sequence for the neural policy to attend to it during autoregressive inference.
+In classical computer architecture, the memory hierarchy spans registers, L1/L2/L3 SRAM caches, host DRAM, and persistent Non-Volatile Memory Express (NVMe) storage, balancing access latency against bit density and physical cost [@hennessy2011computer]. In an agentic machine learning system, the **context window** serves as the primary computational substrate—the "L1 cache" of the autonomous agent. Every decision, tool invocation, environment observation, and intermediate reasoning thought must reside within this active sequence for the neural policy to attend to it during autoregressive inference.
 
 Unlike stateless inference serving where input prompts are brief and independent, an autonomous agent accumulates state over extended multi-step trajectories. As an agent inspects files, runs shell commands, parses compiler diagnostics, and reflects on intermediate errors, its prompt history expands monotonically. Developers and framework builders frequently treat modern long-context windows (128k to 1M+ tokens) as elastic, unbounded repositories. In production systems engineering, this append-only approach precipitates three severe failures:
 
 1. **Quadratic Prefill Latency and TTFT Explosion:** Prefill computation scales quadratically with sequence length ($O(N^2)$), causing Time-to-First-Token (TTFT) to expand from milliseconds to tens of seconds and stalling interactive execution loops.
-2. **Key-Value Cache Memory Exhaustion:** The Key-Value (KV) cache footprint expands linearly with every token across all model layers and attention heads, rapidly consuming scarce accelerator High Bandwidth Memory (HBM) and inducing cluster-wide memory thrashing.
+2. **Key-Value Cache Memory Exhaustion:** The Key-Value (KV) cache footprint expands linearly with every token across all model layers and attention heads, rapidly consuming scarce accelerator HBM and inducing cluster-wide memory thrashing.
 3. **Cognitive Degradation ("Lost in the Middle"):** Expanding contexts dilute transformer self-attention distributions, degrading retrieval precision and causing models to hallucinate tool parameters or overlook critical constraints [@liu2024lost].
 
 To resolve this bottleneck, context cannot be treated as an unmanaged log; it must be engineered as an active, eviction-driven **working set**. Scalable agentic runtimes organize memory across three distinct architectural tiers:
 
 - **Tier 1 (L1 Context Working Set):** The active transformer attention window holding pinned system instructions, active tool schemas (see @sec-vol3-tool-interfaces), and the immediate operational working set $W(t, \Delta t)$.
 - **Tier 2 (L2 KV-Cache Prefix Store and Paging):** High-speed Radix tree caches residing in GPU HBM and host DRAM, enabling sub-millisecond prefix reuse across multi-turn steps and branching search trees (detailed in @sec-vol3-prefix-caching-paging).
-- **Tier 3 (L3 Episodic and External Memory):** Persistent vector indices, relational state stores, and AST repomaps supporting semantic retrieval over long-term histories without polluting the active attention window .
+- **Tier 3 (L3 Episodic and External Memory):** Persistent vector indices, relational state stores, and abstract syntax tree (AST) repomaps supporting semantic retrieval over long-term histories without polluting the active attention window.
 
 This chapter establishes the systems foundations of context working sets. We derive the physical silicon limits of self-attention and HBM memory walls in @sec-vol3-context-the-physics-of-context, formulate autoregressive decode economics under the Roofline model in @sec-vol3-context-autoregressive-decode-economics-memory, apply Denning's Working Set theory to neural trajectories in @sec-vol3-context-denning-s-working-set, and develop structured eviction algorithms and semantic compaction pipelines across the subsequent sections.
 
 ## The Physics of Context Windows {#sec-vol3-context-the-physics-of-context}
 
-In autonomous agent systems, the context window serves as the primary computational substrate where reasoning, environmental observations, tool execution schemas, and intermediate plans reside. While contemporary software interfaces treat context windows as elastic, append-only streams spanning hundreds of thousands of tokens, underlying accelerator hardware enforces rigid mathematical and thermodynamic limits. Every token appended to an agent's context imposes a dual penalty: quadratic computational growth during the prompt prefill phase and linear capacity exhaustion of accelerator High Bandwidth Memory (HBM) during autoregressive token generation.
+In autonomous agent systems, the context window serves as the primary computational substrate where reasoning, environmental observations, tool execution schemas, and intermediate plans reside. While contemporary software interfaces treat context windows as elastic, append-only streams spanning hundreds of thousands of tokens, underlying accelerator hardware enforces rigid mathematical and thermodynamic limits. Every token appended to an agent's context imposes a dual penalty: quadratic computational growth during the prompt prefill phase and linear capacity exhaustion of accelerator HBM during autoregressive token generation.
 
 To understand why unconstrained context accumulation degrades agent performance, consider the standard multi-head self-attention formulation (@vaswani2017). Given an input sequence $X \in \mathbb{R}^{N \times d_{\text{model}}}$, where $N$ denotes sequence length and $d_{\text{model}}$ represents hidden dimensionality, projection matrices $W_Q, W_K, W_V \in \mathbb{R}^{d_{\text{model}} \times d_k}$ map $X$ to Query ($Q$), Key ($K$), and Value ($V$) tensors across $h$ attention heads:
 
@@ -84,9 +84,9 @@ When combined with feed-forward projection networks ($8 L N d_{\text{model}}^2$ 
 | **3** | **Ephemeral CoT** | Chain-of-Thought Scratchpad, Trial Invocations | Discarded immediately upon step commitment |
 | **4** | **Compacted State** | Structured Git Diffs, Condensed Execution State | Lossless code hunks + high-level rationale |
 
-: The Context Attention Hierarchy across execution layers. {#tbl-vol3-context-attention-hierarchy}
+: **The Context Attention Hierarchy**: Content, budget, and eviction policy for each of the four attention layers an agent runtime maintains. {#tbl-vol3-context-attention-hierarchy}
 
-Beyond raw arithmetic complexity, memory input/output (IO) across accelerator memory hierarchies forms an even steeper bottleneck. Naive implementations of @eq-vol3-context-attention materialize the intermediate $N \times N$ attention matrix $S = Q K^T / \sqrt{d_k}$ and its softmax normalization $P$ in accelerator High Bandwidth Memory (HBM). For an agent running a 128k sequence across 32 attention heads in 16-bit precision, materializing $S$ requires:
+Beyond raw arithmetic complexity, memory input/output (IO) across accelerator memory hierarchies forms an even steeper bottleneck. Naive implementations of @eq-vol3-context-attention materialize the intermediate $N \times N$ attention matrix $S = Q K^T / \sqrt{d_k}$ and its softmax normalization $P$ in accelerator HBM. For an agent running a 128k sequence across 32 attention heads in 16-bit precision, materializing $S$ requires:
 
 $$\text{Memory}_{S} = 32 \times (131{,}072)^2 \times 2\ \text{bytes} \approx 1{,}099.5\ \text{GB}$$
 
@@ -98,9 +98,11 @@ $$\mathcal{M}_{\text{KV}} = 2 \times b \times L \times h_{\text{kv}} \times d_{\
 
 where $b$ is batch size, $L$ is layer depth, $h_{\text{kv}}$ is the number of key-value heads, $d_{\text{head}}$ is head dimensionality, and $\text{sizeof(dtype)}$ is 2 for FP16/BF16. In standard Multi-Head Attention (MHA), $h_{\text{kv}} = h_q$. In modern architectures employing Grouped-Query Attention (GQA, @dubey2024llama), $h_{\text{kv}} = h_q / g$, where $g$ is the group ratio (typically 8), reducing KV cache size by a factor of 8.
 
-![Denning's Working Set Applied to Neural Agent Context. Contrasting unbounded append-only context accumulation against active eviction-driven working set management $W(t, \Delta t)$.](images/svg/context_working_set_dynamics.svg){#fig-vol3-context-working-set-dynamics}
+::: {#fig-vol3-context-working-set-dynamics fig-env="figure" fig-pos="htb" fig-cap="**Denning's Working Set Applied to Neural Agent Context**: Unbounded append-only accumulation drives the trajectory into the HBM capacity and TTFT wall, whereas eviction-driven management of the working set $W(t, \Delta t)$ holds the active context inside a bounded budget at constant time-to-first-token." fig-alt="Two-panel diagram. The upper panel plots tokens against trajectory steps for an unmanaged append-only context; the curve climbs past 32k, 96k, and 128k markers and crosses a labeled HBM capacity and time-to-first-token wall, annotated with quadratic prefill explosion, memory-wall decode, and lost-in-the-middle attention dispersion. The lower panel shows a layered active working set: a pinned anchor holding system invariants and tool contracts, a bounded dynamic window holding the active turn, a sliding recent-context window and an ephemeral scratchpad, an eviction and compaction gate, and a structured compaction and episodic storage tier beneath it."}
+![](images/svg/context_working_set_dynamics.svg)
+:::
 
-As illustrated in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged, append-only repository inexorably drives the system toward the High-Bandwidth Memory capacity ceiling. On an NVIDIA H100 SXM5 GPU with 80 GB of HBM3 (yielding 3.35 TB/s bandwidth), model weights for a 70-billion-parameter model in 8-bit precision consume 70 GB, leaving barely 10 GB for KV cache and scratchpad activations. How long an unmanaged agent survives inside that residual budget depends entirely on what a single token of KV cache costs under the model's attention scheme.
+As illustrated in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged, append-only repository inexorably drives the system toward the HBM capacity ceiling. On an NVIDIA H100 SXM5 GPU with 80 GB of HBM3 (yielding 3.35 TB/s bandwidth), model weights for a 70-billion-parameter model in 8-bit precision consume 70 GB, leaving barely 10 GB for KV cache and scratchpad activations. How long an unmanaged agent survives inside that residual budget depends entirely on what a single token of KV cache costs under the model's attention scheme.
 
 ::: {#nbk-context-kv-headroom-ceiling .callout-notebook title="How far the residual HBM headroom goes"}
 
@@ -161,7 +163,7 @@ In autonomous agent workloads, the execution lifecycle oscillates between two fu
 
 ### The prompt prefill phase (compute-bound)
 
-When the agent receives a new prompt, tool output, or environment observation, it processes all $N$ context tokens in parallel. Attention computation evaluates $Q K^T$ as a dense Matrix-Matrix multiplication (GEMM). For sequence length $N$ and hidden size $d$, arithmetic operations scale as $O(N^2 d)$, while memory traffic transfers the weights and inputs once:
+When the agent receives a new prompt, tool output, or environment observation, it processes all $N$ context tokens in parallel. Attention computation evaluates $Q K^T$ as a dense general matrix multiplication (GEMM). For sequence length $N$ and hidden size $d$, arithmetic operations scale as $O(N^2 d)$, while memory traffic transfers the weights and inputs once:
 
 $$I_{\text{prefill}} \approx \frac{4 L N^2 d + 2 P N}{2 P \cdot \text{sizeof(weight)} + 2 N d \cdot \text{sizeof(act)}} \propto N$$
 
@@ -171,7 +173,7 @@ For sequences where $N > 2{,}048$, operational intensity $I_{\text{prefill}}$ ea
 
 Once the prefill phase populates the KV cache, token generation occurs strictly sequentially: token $t+1$ depends on the output of token $t$. Generating a single token requires projecting a single query vector $q_t \in \mathbb{R}^{1 \times d_{\text{model}}}$, computing its dot product against all cached historical keys $K_{1:t}$, and accumulating across cached values $V_{1:t}$.
 
-This computation is a Matrix-Vector multiplication (GEMV). The floating-point work per generated token scales linearly with history length $t$:
+This computation is a general matrix-vector multiplication (GEMV). The floating-point work per generated token scales linearly with history length $t$:
 
 $$\text{FLOPs}_{\text{decode}} = 4 L h_{\text{kv}} d_{\text{head}} t = 4 L d_{\text{model}} t$$
 
@@ -183,7 +185,7 @@ Evaluating operational intensity reveals a catastrophic collapse:
 
 $$I_{\text{decode}} = \frac{4 L d_{\text{model}} t}{8 L h_{\text{kv}} d_{\text{head}} t \times \text{sizeof(FP16)}} \approx \frac{2 \cdot g}{2 \times 2} \approx \frac{g}{2} \approx 1 \text{ to } 4\ \text{FLOPs/Byte}$$ {#eq-vol3-context-decode-intensity}
 
-Even under Grouped-Query Attention with $g = 8$, operational intensity during decode rarely exceeds $4\ \text{FLOPs/Byte}$—two orders of magnitude below the machine balance point $I^* = 295.4\ \text{FLOPs/Byte}$. Autoregressive decode utilizes less than 2% of the H100's raw arithmetic capacity. The time to generate a single token is entirely dominated by the memory transfer latency of reading multi-gigabyte KV caches off HBM:
+Even under Grouped-Query Attention with $g = 8$, operational intensity during decode rarely exceeds $4\ \text{FLOPs/Byte}$—two orders of magnitude below the machine balance point $I^* = 295.4\ \text{FLOPs/Byte}$. Autoregressive decode utilizes less than 2 percent of the H100's raw arithmetic capacity. The time to generate a single token is entirely dominated by the memory transfer latency of reading multi-gigabyte KV caches off HBM:
 
 $$T_{\text{token}} \approx \frac{\text{Model Weights Size} + \mathcal{M}_{\text{KV}}(t)}{\mathcal{B}_{\text{mem}}}$$ {#eq-vol3-context-token-time}
 
@@ -196,15 +198,15 @@ $$T_{\text{token}} \approx \frac{\text{Model Weights Size} + \mathcal{M}_{\text{
 | **131,072** | 38.12 | 1,420 | 16.78 | 21.4 | 99.4% |
 | **524,288** | 294.50 | 9,840 | 67.11 | 5.2 | 99.8% |
 
-: Latency, memory footprint, and decode throughput across context lengths for a 70B parameter model on an NVIDIA H100 GPU (80 GB HBM3). {#tbl-vol3-context-decode-economics}
+: **Decode Economics across Context Lengths**: Prefill compute, time-to-first-token, KV cache footprint, decode throughput, and HBM bandwidth saturation for a 70B parameter model on an NVIDIA H100 GPU with 80 GB of HBM3. {#tbl-vol3-context-decode-economics}
 
-As detailed in @tbl-vol3-context-decode-economics, expanding context from 4k to 524k tokens increases Time-To-First-Token (TTFT) by over 230x and collapses decode throughput from 84 tokens per second to 5 tokens per second. In multi-step agent loops where an agent executes 50 to 100 tool cycles, maintaining an unmanaged 500k context turns an interactive system into an economically non-viable crawl.
+As detailed in @tbl-vol3-context-decode-economics, expanding context from 4k to 524k tokens increases Time-To-First-Token (TTFT) by over 230$\times$ and collapses decode throughput from 84 tokens per second to 5 tokens per second. In multi-step agent loops where an agent executes 50 to 100 tool cycles, maintaining an unmanaged 500k context turns an interactive system into an economically non-viable crawl.
 
 To mitigate this decode bandwidth wall, modern architectures explore architectural compression. The DeepSeek-V3 architecture (@deepseek2024v3) introduces Multi-Head Latent Attention (MLA), which compresses keys and values into a low-rank latent vector $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$ (where $d_c \ll d_{\text{model}}$) prior to caching:
 
 $$\mathbf{c}_t^{KV} = W_{DKV} X_t, \quad K_t^C = W_{UK} \mathbf{c}_t^{KV}, \quad V_t^C = W_{UV} \mathbf{c}_t^{KV}$$
 
-During decode, only $\mathbf{c}_t^{KV}$ and a decoupled rotary position key $k_t^R$ are stored in HBM, reducing KV cache memory bandwidth by over 80% compared to standard GQA.
+During decode, only $\mathbf{c}_t^{KV}$ and a decoupled rotary position key $k_t^R$ are stored in HBM, reducing KV cache memory bandwidth by over 80 percent compared to standard GQA.
 
 ## Denning’s Working Set Theory {#sec-vol3-context-denning-s-working-set}
 
@@ -224,7 +226,7 @@ where $S$ is the total address space, $t$ is execution time, and $\tau$ is the w
 | **Page Fault / Thrashing** | Context Overflow / Attention Dispersion | Memory exhaustion, high TTFT, lost-in-the-middle |
 | **Swap Space (Secondary Storage)** | L3 Episodic Store (Vector / Disk DB) | Persistent external storage with indexed retrieval |
 
-: Mapping classical virtual memory concepts to neural agent context architectures. {#tbl-vol3-context-virtual-memory-mapping}
+: **Virtual Memory Mapped onto Neural Agent Context**: Each classical construct from Denning's 1968 model has a direct counterpart in agent context architecture, including the failure mode that follows from exhausting it. {#tbl-vol3-context-virtual-memory-mapping}
 
 This classical operating systems principle maps directly onto the physics of agentic language models:
 
@@ -242,8 +244,8 @@ $$W_\epsilon(t, \Delta t) = \left\{ x_i \in \mathcal{T}_t \mid \frac{1}{\Delta t
 
 Empirical measurements of transformer attention patterns during complex software engineering tasks (such as SWE-bench, @jimenez2024swebench) demonstrate that token access distributions follow extreme power-law (Zipfian) dynamics:
 
-- Less than 8% of historical tokens account for over 85% of total attention mass.
-- More than 70% of historical tokens (such as verbose build logs, repetitive directory listings, and discarded trial code) receive less than 0.001% of aggregate attention mass after their initial consumption.
+- Less than 8 percent of historical tokens account for over 85 percent of total attention mass.
+- More than 70 percent of historical tokens (such as verbose build logs, repetitive directory listings, and discarded trial code) receive less than 0.001 percent of aggregate attention mass after their initial consumption.
 
 ```
 Cumulative Attention Mass (%)
@@ -266,14 +268,14 @@ When an agent runtime fails to manage its working set, it suffers from what Denn
 
 $$\text{Thrashing: } \sum_{i=1}^M w_i(t, \tau) > S_{\text{physical}}$$
 
-In virtual memory, thrashing occurs when the sum of working sets exceeds physical RAM, causing the OS to spend 99% of its time swapping pages between disk and memory rather than executing code. In neural agent systems, thrashing manifests as **Context Overflow and Attention Dispersion**: the context window is flooded with irrelevant historical noise, causing TTFT to explode, diluting attention heads, and leading to catastrophic retrieval failure.
+In virtual memory, thrashing occurs when the sum of working sets exceeds physical RAM, causing the OS to spend 99 percent of its time swapping pages between disk and memory rather than executing code. In neural agent systems, thrashing manifests as **Context Overflow and Attention Dispersion**: the context window is flooded with irrelevant historical noise, causing TTFT to explode, diluting attention heads, and leading to catastrophic retrieval failure.
 
 To prevent thrashing, the agent system must enforce an explicit **Context Working Set Architecture**:
 
 1. **L0 Anchor (Pinned Set):** System prompt, invariant security enclosures (see @sec-vol3-sandboxing-isolation), tool interface contracts (MCP) (see @sec-vol3-tool-interfaces), and user task definition. Pinned permanently with zero eviction.
 2. **L1 Dynamic Working Set ($W(t, \Delta t)$):** Immediate observations, live workspace state, and active chain-of-thought tokens required for the current reasoning step. Bounded by a strict budget ($C_{\text{active}} \le 32\text{k}$ tokens).
 3. **L2 Prefix Cache (Host RAM / HBM Radix Tree):** Invariant system prompts and reusable trajectory branches cached via RadixAttention for zero-latency reuse (see @sec-vol3-prefix-caching-paging).
-4. **L3 Episodic Memory (External Vector / Structured Store):** Evicted trajectory epochs, historical tool outputs, and long-term knowledge indexed in vector stores (HNSW) or relational ledgers, retrievable on-demand via search tools .
+4. **L3 Episodic Memory (External Vector / Structured Store):** Evicted trajectory epochs, historical tool outputs, and long-term knowledge indexed in vector stores (HNSW) or relational ledgers, retrievable on-demand via search tools.
 
 ## Structural Context Packing {#sec-vol3-context-structural-context-packing-instructions}
 
@@ -325,7 +327,7 @@ The serialization syntax used to demarcate functional zones directly impacts mod
 | **Trajectory Turns** | Ephemeral / Sliding | 8,000 – 16,000 | Sliding Window / H2O | HBM $\to$ L3 Vector Store |
 | **Ephemeral CoT** | Volatile | 1,000 – 8,000 | Evict post-action | Discarded |
 
-: Context zone partitioning, budgeting, and eviction policies for autonomous agent execution. {#tbl-vol3-context-layout-comparison}
+: **Context Zone Partitioning and Eviction Policy**: Volatility, token budget, eviction policy, and target memory tier for each functional zone of a structured agent context. {#tbl-vol3-context-layout-comparison}
 
 ## Codebase and State Representation {#sec-vol3-context-codebase-and-state-representation}
 
@@ -339,7 +341,7 @@ The structural codebase processing pipeline proceeds across three stages:
 2. **Symbol Dependency Graphing:** The system constructs a directed graph $G = (V, E)$ where vertices represent extracted symbols and directed edges capture function calls, class inheritance, and module imports.
 3. **Topological Ranking:** Personalized PageRank calculates centrality over the symbol graph, prioritizing symbols related to the immediate issue context and packing the top-ranked signatures into a compact repository map ($\le 3{,}000$ tokens).
 
-### Abstract syntax tree (AST) skeletonization
+### AST skeletonization
 
 Rather than ingesting implementation bodies, runtime preprocessors utilize Tree-Sitter parsers to extract language-accurate structural skeletons. For every file, the parser strips function bodies and internal loops, preserving only:
 
@@ -347,7 +349,7 @@ Rather than ingesting implementation bodies, runtime preprocessors utilize Tree-
 - Function and method signatures with complete type annotations
 - Module-level docstrings and exported constants
 
-A 1,500-line Python module ($7{,}500$ tokens) condenses into a 60-line structural skeleton ($350$ tokens)—a 95.3% reduction in token overhead with zero loss of API structural information.
+A 1,500-line Python module ($7{,}500$ tokens) condenses into a 60-line structural skeleton ($350$ tokens)—a 95.3 percent reduction in token overhead with zero loss of API structural information.
 
 ### PageRank symbol graphing (repomaps)
 
@@ -364,17 +366,19 @@ Symbols are sorted in descending order of this PageRank centrality score and gre
 
 When an agent's active trajectory exceeds hardware or latency thresholds, runtime systems must evict non-critical tokens from the KV cache. However, naive eviction policies (such as simple sliding-window truncation) trigger catastrophic failure in auto-regressive transformers.
 
-![Dynamic KV Cache Sparsification & Eviction Topologies. Contrasting dense unconstrained attention against Attention Sinks (StreamingLLM) and Heavy-Hitter retention (H2O / FastGen).](images/svg/attention_sinks_and_eviction.svg){#fig-vol3-context-attention-sinks}
+::: {#fig-vol3-context-attention-sinks fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: A dense cache grows as $O(N)$ until it exhausts HBM, StreamingLLM bounds it to sink tokens plus a rolling window at the cost of middle amnesia, and heavy-hitter retention (H2O, FastGen) additionally keeps the intermediate tokens carrying most of the attention mass." fig-alt="Three-panel comparison of key-value cache retention policies. The first panel shows a dense unbounded cache retaining every token from the prompt to the current position, with an order-N footprint, memory-bound decode, and out-of-memory failure. The second panel shows StreamingLLM retaining roughly four sink tokens plus a rolling window of about 1,024 recent tokens, giving a bounded footprint and stable softmax but discarding the middle of the trajectory. The third panel shows heavy-hitter retention keeping sink tokens, three ranked heavy hitters, and a sliding window, tracked by a running cumulative attention score."}
+![](images/svg/attention_sinks_and_eviction.svg)
+:::
 
 ### The attention sink phenomenon
 
-In 2024, Xiao et al. discovered the **Attention Sink** phenomenon (@xiao2024streamingllm). When evaluating window-based attention—where tokens outside a local sliding window of length $W$ are discarded—the model's language modeling perplexity does not degrade gracefully. Instead, the moment the very first token ($t=0$, often `[BOS]`) drops out of the sliding window, perplexity explodes to $>10^3$, rendering generated text complete gibberish.
+@xiao2024streamingllm discovered the **Attention Sink** phenomenon. When evaluating window-based attention—where tokens outside a local sliding window of length $W$ are discarded—the model's language modeling perplexity does not degrade gracefully. Instead, the moment the very first token ($t=0$, often `[BOS]`) drops out of the sliding window, perplexity explodes to $>10^3$, rendering generated text complete gibberish.
 
 The mathematical root cause lies in the softmax normalization operator. The softmax function requires that attention weights across all historical positions sum to 1:
 
 $$\sum_{j=1}^t \text{softmax}(S_{t, j}) = 1.0$$
 
-Even when an attention head at step $t$ finds none of the historical tokens semantically relevant to its current prediction, it is mathematically forced to allocate a total probability mass of 1.0. During pre-training, transformers learn to dump this surplus, unneeded attention mass onto the initial tokens ($t \in \{0, 1, 2, 3\}$). These initial tokens act as an **attention sink**, absorbing massive attention weights (often $>50\%$ of total head mass) regardless of their semantic content.
+Even when an attention head at step $t$ finds none of the historical tokens semantically relevant to its current prediction, it is mathematically forced to allocate a total probability mass of 1.0. During pretraining, transformers learn to dump this surplus, unneeded attention mass onto the initial tokens ($t \in \{0, 1, 2, 3\}$). These initial tokens act as an **attention sink**, absorbing massive attention weights (often $>50\%$ of total head mass) regardless of their semantic content.
 
 If an eviction algorithm discards these initial sink tokens, the softmax normalization is violently disrupted: subsequent heads are forced to reallocate massive unneeded probability mass across remaining arbitrary tokens, corrupting intermediate representations.
 
@@ -401,11 +405,11 @@ When the KV cache reaches a predetermined budget $C_{\text{budget}}$, H2O partit
 - Local Window tokens: Recent $W$ positions.
 - Heavy-Hitter tokens: Top-$k$ tokens from the intermediate history ranked by cumulative score $s_i^{(t)}$, where $k = C_{\text{budget}} - |S| - |W|$.
 
-All remaining intermediate tokens with low cumulative attention scores are evicted from HBM. Empirically, retaining just 20% of the KV cache using H2O preserves over 98% of full-attention task accuracy on multi-turn reasoning benchmarks while delivering a 3x to 5x reduction in decode memory footprint.
+All remaining intermediate tokens with low cumulative attention scores are evicted from HBM. Empirically, retaining just 20 percent of the KV cache using H2O preserves over 98 percent of full-attention task accuracy on multi-turn reasoning benchmarks while delivering a 3$\times$ to 5$\times$ reduction in decode memory footprint.
 
 ### SnapKV: Prompt-guided sparsification
 
-While H2O relies on online cumulative scores, **SnapKV** (@li2024snapkv) identifies that for many agentic prompts, the crucial tokens can be statically predicted by the structure of the prompt itself. SnapKV isolates the attention weights of a specific "observation" window at the end of the prompt and uses those weights to select the most important tokens from the preceding context, aggressively dropping up to 80% of the KV cache before the autoregressive decode loop even begins. This provides a massive prefill acceleration that H2O cannot achieve.
+While H2O relies on online cumulative scores, **SnapKV** (@li2024snapkv) identifies that for many agentic prompts, the crucial tokens can be statically predicted by the structure of the prompt itself. SnapKV isolates the attention weights of a specific "observation" window at the end of the prompt and uses those weights to select the most important tokens from the preceding context, aggressively dropping up to 80 percent of the KV cache before the autoregressive decode loop even begins. This provides a massive prefill acceleration that H2O cannot achieve.
 
 ## OS-Level Memory Management: PagedAttention and RadixAttention {#sec-vol3-context-os-level-memory}
 
@@ -433,16 +437,18 @@ As agent trajectories expand, binding an agent to a single physical GPU node bec
 
 This architecture treats the KV cache not as a hardware-bound artifact, but as a migratable operating state:
 
-1. **Hardware Specialization:** The compute-heavy prefill phase is routed to a cluster of **Prefill Nodes** optimized for high batch size and dense compute. Once materialized, the KV cache is transmitted over high-bandwidth RDMA networks to memory-heavy **Decode Nodes** optimized for low-latency autoregressive generation.
+1. **Hardware Specialization:** The compute-heavy prefill phase is routed to a cluster of **Prefill Nodes** optimized for high batch size and dense compute. Once materialized, the KV cache is transmitted over high-bandwidth remote direct memory access (RDMA) networks to memory-heavy **Decode Nodes** optimized for low-latency autoregressive generation.
 2. **Distributed KV Tiering:** Rather than trapping the KV cache in GPU HBM, the cluster manages it as a tiered asset across GPU HBM (active), host DRAM (paused agents), and a cluster-wide distributed memory pool (idle state). When a background task awakens an agent, its KV cache is dynamically routed to the least-loaded decode node.
 
 By decoupling the physical context state from the inference execution hardware, ML systems achieve elastic load balancing, multiplexing thousands of concurrent asynchronous agents over a finite GPU cluster without triggering catastrophic OOM thrashing.
 
 ## Recursive Context Compaction {#sec-vol3-context-compaction-via-recursive-summarization}
 
-While KV-cache eviction algorithms operate at the sub-token tensor level inside the inference engine, autonomous agent runtimes also require **Semantic Context Compaction** operating at the application layer. When an agent engages in extended tasks spanning 50 to 100 turns, token accumulation inevitably approaches the model's context threshold $\theta_{\text{compact}}$ (typically 75% of maximum context capacity).
+While KV-cache eviction algorithms operate at the sub-token tensor level inside the inference engine, autonomous agent runtimes also require **Semantic Context Compaction** operating at the application layer. When an agent engages in extended tasks spanning 50 to 100 turns, token accumulation inevitably approaches the model's context threshold $\theta_{\text{compact}}$ (typically 75 percent of maximum context capacity).
 
-![Hierarchical Semantic Context Compaction Pipeline. Multi-stage pipeline transforming verbose trajectory history into deterministic diffs, AST repomaps, and synthesized state.](images/svg/context_compaction_pipeline.svg){#fig-vol3-context-compaction-pipeline}
+::: {#fig-vol3-context-compaction-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical Semantic Context Compaction Pipeline**: Verbose trajectory history passes through deterministic structural pruning and state synthesis, then a drift-verification gate, before it is committed to a compacted working set of pinned anchor, state ledger, git diff, and repomap." fig-alt="Four-stage pipeline diagram. Stage one shows trajectory bloat from verbose tool output, raw file payloads, and in-flight reasoning scratchpads, with a compaction trigger at 75 percent of the token budget. Stage two shows two parallel engines: deterministic structural pruning using head and tail slicing, Tree-Sitter repomaps, and git diffs, and state synthesis that distills reasoning turns into a state ledger, evicts scratchpad tokens, and locks an invariant enclosure. Stage three shows a semantic entropy check, a state consistency gate against git status, and an archival flush to an external vector store. Stage four shows the compacted working set holding a pinned system anchor, condensed state ledger, structured git diff, repomap, and the immediate turn window."}
+![](images/svg/context_compaction_pipeline.svg)
+:::
 
 As shown in @fig-vol3-context-compaction-pipeline, context compaction transforms an unmanageably bloated trajectory buffer into a compact, semantically dense state representation. The pipeline operates across four discrete stages:
 
@@ -461,7 +467,7 @@ The system processes reducible tokens through two complementary engines:
 #### Pathway A: Deterministic structural slicing
 
 - **Head/Tail Output Slicing:** For tool executions emitting large text buffers (e.g., test runners or build outputs of $>500$ lines), the engine extracts the first 25 lines (initialization/command), the last 25 lines (summary/result), and regex-matched failure lines (`grep -E 'ERROR|FAIL|Exception'`), replacing the intermediate lines with an omission token: `[... 450 lines truncated; exit code 1 ...]`.
-- **Git Delta Representation:** When an agent inspects files it subsequently edits, the runtime discards the original raw file reads and substitutes the compact unified git diff (`git diff -U3`), preserving exact state change semantics with an 85% token reduction.
+- **Git Delta Representation:** When an agent inspects files it subsequently edits, the runtime discards the original raw file reads and substitutes the compact unified git diff (`git diff -U3`), preserving exact state change semantics with an 85 percent token reduction.
 
 #### Pathway B: Semantic state synthesis
 
@@ -530,7 +536,7 @@ $$\mathcal{C}_{\text{packed}} = \mathcal{I}_{\text{immutable}} \cup S_{\text{com
 
 ## Positional Attention Biases {#sec-vol3-context-positional-attention-biases-the}
 
-In 2024, Liu et al. documented a pervasive architectural failure in long-context language models: the **"Lost-in-the-Middle"** phenomenon (@liu2024lost). When models are tasked with retrieving factual information or following instructions placed at varying relative depths within a long context window, performance follows a severe U-shaped curve:
+@liu2024lost documented a pervasive architectural failure in long-context language models, the **"Lost-in-the-Middle"** phenomenon. When models are tasked with retrieving factual information or following instructions placed at varying relative depths within a long context window, performance follows a severe U-shaped curve:
 
 ```
 Retrieval Accuracy (%)
@@ -549,7 +555,7 @@ Retrieval Accuracy (%)
                              Relative Position in Context
 ```
 
-Models achieve near 100% retrieval accuracy when critical information is placed at the extreme beginning (first 10%) or extreme end (last 10%) of the context window. However, when the relevant information resides in the middle 60% ($0.2 < \text{pos} < 0.8$), retrieval accuracy plunges to below 30%—even in models explicitly trained and marketed for 128k or 1M token contexts.
+Models achieve near 100 percent retrieval accuracy when critical information is placed at the extreme beginning (first 10 percent) or extreme end (last 10 percent) of the context window. However, when the relevant information resides in the middle 60 percent ($0.2 < \text{pos} < 0.8$), retrieval accuracy plunges to below 30 percent—even in models explicitly trained and marketed for 128k or 1M token contexts.
 
 ### Mathematical root: Positional encoding decay
 
@@ -609,7 +615,7 @@ Production agent architectures implement a **Two-Phase Commit** for reasoning to
 
   $$\mathcal{C}_{t+1} = \mathcal{C}_t \cup \{(a_t, o_t)\}$$
 
-This pruning policy reduces trajectory memory growth by 75% to 90%. Across a 30-step trajectory, an unpruned agent accumulates over 240,000 tokens of dead reasoning scratchpad, whereas a two-phase commit architecture maintains an active working set under 25,000 tokens.
+This pruning policy reduces trajectory memory growth by 75 to 90 percent. Across a 30-step trajectory, an unpruned agent accumulates over 240,000 tokens of dead reasoning scratchpad, whereas a two-phase commit architecture maintains an active working set under 25,000 tokens.
 
 ## Context Budgeting Case Study {#sec-vol3-context-production-case-study-context}
 
@@ -651,7 +657,7 @@ A benchmark task on SWE-bench requires an agent to navigate an unfamiliar reposi
 
 A dangerous misconception in modern AI engineering is that models supporting 1M+ token context windows render context management obsolete. While modern models *can* ingest a million tokens without crashing, the laws of physics and economics remain immutable:
 
-- Prefill latency scales quadratically with sequence length, surging TTFT from 100ms to tens of seconds.
+- Prefill latency scales quadratically with sequence length, surging TTFT from 100 ms to tens of seconds.
 - Autoregressive decode is memory-bandwidth bound: streaming a 1M-token KV cache off HBM for every generated token collapses throughput to single-digit tokens per second.
 - Attention dispersion and "Lost-in-the-Middle" positional degradation drastically reduce instruction adherence and reasoning accuracy over long sequences.
 
@@ -677,7 +683,7 @@ While simple sliding-window attention preserves low latency and bounded memory, 
 
 **Pitfall**: *Storing in-flight reasoning tokens in persistent history.*
 
-Allowing chain-of-thought scratchpad tokens to accumulate in persistent trajectory history wastes up to 90% of available context capacity. Chain-of-thought tokens are ephemeral execution registers. Implement a **Two-Phase Commit** that strips scratchpad deliberation once a concrete tool action is executed, committing only the resulting action and observation to the persistent context ledger.
+Allowing chain-of-thought scratchpad tokens to accumulate in persistent trajectory history wastes up to 90 percent of available context capacity. Chain-of-thought tokens are ephemeral execution registers. Implement a **Two-Phase Commit** that strips scratchpad deliberation once a concrete tool action is executed, committing only the resulting action and observation to the persistent context ledger.
 
 :::
 
@@ -687,10 +693,10 @@ Principle \ref{pri-vol3-attention-working-set} earns the cache analogy in this c
 
 - **Context as L1 Cache:** The accelerator context window is the L1 cache of neural computing: zero-retrieval-latency access, but physically bounded by High Bandwidth Memory (HBM) and computationally bound by quadratic attention ($O(L^2)$).
 - **Decode Economics:** While prompt prefill is compute-bound, autoregressive decode is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\ \text{FLOP/Byte}$). Generating tokens over multi-gigabyte KV caches throttles throughput and explodes inference cost.
-- **Denning's Working Set for Agents:** Peter Denning's 1968 Working Set theory applies directly to token sequences. Agents do not access history uniformly; less than 8% of tokens capture over 85% of attention mass. Active working set management $W(t, \Delta t)$ prevents memory thrashing.
+- **Denning's Working Set for Agents:** Peter Denning's 1968 Working Set theory applies directly to token sequences. Agents do not access history uniformly; less than 8 percent of tokens capture over 85 percent of attention mass. Active working set management $W(t, \Delta t)$ prevents memory thrashing.
 - **Attention Sinks and Sparsification:** Window-based attention collapses unless initial **Attention Sinks** ($S \approx 4$ tokens) are retained to absorb surplus softmax probability mass. Dynamic sparsification algorithms (H2O, FastGen) track cumulative attention scores to retain heavy-hitter tokens.
 - **OS-Level and Distributed Scheduling:** PagedAttention prevents memory fragmentation by virtualizing the KV cache, while Chunked Prefill and Prefill-Decode Disaggregation decouple context state from physical execution hardware for cluster-wide load balancing.
-- **Structural Codebase Representation:** Production coding agents navigate large codebases by replacing raw file ingestion with Tree-Sitter Abstract Syntax Tree (AST) skeletonization and PageRank-ordered symbol repomaps.
+- **Structural Codebase Representation:** Production coding agents navigate large codebases by replacing raw file ingestion with Tree-Sitter AST skeletonization and PageRank-ordered symbol repomaps.
 - **Hierarchical Compaction:** When context exceeds budget thresholds ($\theta_{\text{compact}}$), runtimes combine deterministic structural pruning (head/tail slicing, git diffs) with structured state synthesis.
 - **Invariant Enclosures:** To prevent semantic drift and entropy collapse across multi-step compaction, immutable user constraints, security boundaries, and test criteria must be anchored verbatim.
 - **Ephemeral Scratchpads:** Chain-of-thought tokens must be treated as transient deliberation registers and pruned post-action via a Two-Phase Commit, preserving only committed actions and observations in persistent history.
