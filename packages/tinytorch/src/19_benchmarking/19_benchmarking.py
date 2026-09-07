@@ -387,6 +387,10 @@ class BenchmarkResult:
         else:
             self.ci_lower = self.ci_upper = self.mean
 
+    def percentile(self, p: float) -> float:
+        """The value p percent of the way through the sorted measurements (NumPy's linear rule)."""
+        return float(np.percentile(self.values, p))
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -799,23 +803,12 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
         from tinytorch.core.tensor import Tensor
         input_tensor = Tensor(rng.standard_normal(input_shape).astype(np.float32))
 
-        # Use Profiler to measure latency with proper warmup and iterations
-        latency_ms = self.profiler.measure_latency(
-            model,
-            input_tensor,
-            warmup=self.warmup_runs,
-            iterations=self.measurement_runs
-        )
-
-        # Profiler returns single median value
-        # For BenchmarkResult, we need multiple measurements
-        # Run additional measurements for statistical analysis
+        # Warm up through the Profiler (that one timing is discarded), then
+        # record every measured run on its own so BenchmarkResult sees the tail
+        self.profiler.measure_latency(model, input_tensor, warmup=self.warmup_runs, iterations=1)
         latencies = []
         for _ in range(self.measurement_runs):
-            single_latency = self.profiler.measure_latency(
-                model, input_tensor, warmup=0, iterations=1
-            )
-            latencies.append(single_latency)
+            latencies.append(self.profiler.measure_latency(model, input_tensor, warmup=0, iterations=1))
 
         results[model_name] = BenchmarkResult(
             f"{model_name}_latency_ms",
