@@ -69,7 +69,7 @@ Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability af
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 13 (`src/13_transformers/13_transformers.py`) is the NumPy-backed implementation students build in the TinyTorch course. Its `GPT` class (aliased `TinyGPT`) carries a `generate` method that samples with temperature only; it has no top-$k$ and does not crop the context. The course's integration script for this part of the book, `milestones/05_2017_transformer/01_vaswani_attention.py`, trains a small transformer on sequence reversal and copying tasks rather than on free text. The listings in this chapter are a stripped-down NumPy model of the same design, small enough to show every step of sampling and of next-token training; they call the `TinyGPT` and `BPETokenizer` classes as this book defined them in Chapters 13 and 10.
+Module 13 (`src/13_transformers/13_transformers.py`) is the transformer students build in the TinyTorch course, and its `GPT` class, which this book calls `TinyGPT`, carries a `generate` method and a `_sample_next_token` helper. Both are quoted below, and both sample with temperature only, with no top-$k$ and no cropping of the context. The course's integration script for this part of the book, `milestones/05_2017_transformer/01_vaswani_attention.py`, trains a small transformer on sequence reversal and copying tasks rather than on free text, and its training step is quoted from the script. The sampler, the generation loop, the window builder, and the training run are book code, labelled as such; they call the real `TinyGPT`, `BPETokenizer`, `CrossEntropyLoss`, and `AdamW`, and the training run was measured.
 :::
 
 ### Picking one token
@@ -97,7 +97,11 @@ def sample_next_token(logits, temperature=1.0, top_k=None, rng=None):
     return int(rng.choice(len(probs), p=probs))
 ```
 
-Two lines do the work. `np.partition(z, -top_k)[-top_k]` finds the $k$-th largest value in one pass over the vector (about 47 microseconds on the same 50,257 entries, a 30-fold gap over the sort), and the `np.where` sends everything below it to $-\infty$, which is the equation from The Idea written out. The cast to float64 on the first line moves the overflow cliff from 88.7 to about 709 but does not remove it; the subtraction of `np.max(z)` does, by making the largest exponent $\exp(0) = 1$, so nothing overflows however cold the temperature gets. That is also what makes the `max(temperature, 1e-5)` floor safe: a caller can pass `temperature=0` to ask for greedy decoding, the logits are divided by $10^{-5}$ instead of by zero, and the shift keeps the enormous result finite. Hugging Face's `TemperatureLogitsWarper` and `TopKLogitsWarper` are these same lines with a class around each.
+This is book code, and it is the module's sampler with two additions. Two lines do the work. `np.partition(z, -top_k)[-top_k]` finds the $k$-th largest value in one pass over the vector (about 47 microseconds on the same 50,257 entries, a 30-fold gap over the sort), and the `np.where` sends everything below it to $-\infty$, which is the equation from The Idea written out. The cast to float64 on the first line moves the overflow cliff from 88.7 to about 709 but does not remove it; the subtraction of `np.max(z)` does, by making the largest exponent $\exp(0) = 1$, so nothing overflows however cold the temperature gets. That is also what makes the `max(temperature, 1e-5)` floor safe: a caller can pass `temperature=0` to ask for greedy decoding, the logits are divided by $10^{-5}$ instead of by zero, and the shift keeps the enormous result finite. Hugging Face's `TemperatureLogitsWarper` and `TopKLogitsWarper` are these same lines with a class around each. The module's own sampler is the same softmax without the additions.
+
+{{< include _listings/milestone_02/GPT_sample_next_token.qmd >}}
+
+It divides by the temperature, takes the shifted softmax, and draws, and that is all. There is no top-$k$, so the tail is always in play, and there is no floor on the temperature, so `temperature=0` divides by zero. It reads `probs[0]`, the first row, so it samples for one sequence at a time. Everything `sample_next_token` adds is a guard on this function.
 
 ### The loop
 
@@ -122,7 +126,11 @@ def generate_text(model, tokenizer, prompt, max_new_tokens=50,
     return tokenizer.decode(token_ids)
 ```
 
-Notice what the loop does not do. It never looks at any logit row except the last one, even though the model computed all $S$ rows; that waste is the 430-row number above. It re-encodes nothing; token IDs accumulate as integers and are decoded once at the end. And it crops the context to `max_context`, which must equal the `max_seq_len` the model was built with, because the positional table has exactly that many rows. Hugging Face's `generate` is this loop with the sampler's knobs as keyword arguments and the cache of Chapter 18 already inside it.
+Notice what the loop does not do. It never looks at any logit row except the last one, even though the model computed all $S$ rows; that waste is the 430-row number above. It re-encodes nothing; token IDs accumulate as integers and are decoded once at the end. And it crops the context to `max_context`, which must equal the `max_seq_len` the model was built with, because the positional table has exactly that many rows. Hugging Face's `generate` is this loop with the sampler's knobs as keyword arguments and the cache of Chapter 18 already inside it. The module's loop is the same shape without the two guards.
+
+{{< include _listings/milestone_02/GPT_generate.qmd >}}
+
+It takes and returns a `Tensor` of token IDs, so the caller does the encoding and decoding. It feeds the whole history every step with no crop, so a prompt plus `max_new_tokens` longer than `max_seq_len` is an index error in the position table. And it concatenates a fresh array each step, the allocation Chapter 18 removes. `generate_text` is this loop with the crop, the top-$k$, and the tokenizer at both ends.
 
 ### Building the training pairs
 
@@ -160,12 +168,11 @@ corpus = [
     "Attention lets tokens exchange information across a sequence.",
 ]
 
-tokenizer = BPETokenizer(vocab_size=320)          # 5 special + 256 bytes + 59 merges
+tokenizer = BPETokenizer(vocab_size=320)          # the corpus's characters, then merges while pairs remain
 tokenizer.train(corpus)
-eos = tokenizer.special_tokens['<eos>']
 stream = []
 for line in corpus:
-    stream += tokenizer.encode(line) + [eos]      # one long stream, sentences separated by <eos>
+    stream += tokenizer.encode(line)              # one long stream; the end-of-word markers keep words apart
 
 SEQ_LEN, BATCH = 32, 16
 inputs, targets = make_windows(stream, SEQ_LEN)
@@ -181,8 +188,7 @@ for epoch in range(200):
         y = Tensor(targets[start:start + BATCH])
         logits = model.forward(x)                                   # [B, S, V]
         B, S, V = logits.data.shape
-        loss = loss_fn(Tensor(logits.data.reshape(B * S, V)),       # every position is an example
-                       Tensor(y.data.reshape(B * S)))
+        loss = loss_fn(logits.reshape(B * S, V), y.reshape(B * S))  # every position is an example
         loss.backward()
         opt.step()
         opt.zero_grad()
@@ -192,26 +198,17 @@ print(generate_text(model, tokenizer, "TinyTorch is", max_new_tokens=20, max_con
 
 The one line that is new relative to Milestone I is the reshape. A classifier hands the loss $B$ rows and $B$ labels; a language model hands it $B \cdot S$ of each. Nothing else in the loop changes, and that is the point: the engine of Part I did not know it was training a classifier, and it does not need to know it is training a language model now. PyTorch's `F.cross_entropy` accepts the same $[N, C]$ matrix and the same flat label vector, and the reshape in every GPT training script, `logits.view(-1, V)`, is this line.
 
-I have not measured this run, so I make no claim about the loss it reaches. There is one number you can check without measuring anything. A model that has learned nothing assigns each of the $V$ tokens probability $1/V$, and its cross-entropy is $\ln V = \ln 320 \approx 5.77$ per token. The first thing to watch is the loss dropping below that line.
+Two ways to write that reshape look the same and are not. `logits.reshape(B * S, V)` is a `Tensor` method from Chapter 1, so the reshaped logits stay on the autograd graph and the loss reaches the weights. `Tensor(logits.data.reshape(B * S, V))` wraps the raw array in a fresh `Tensor` with no history, so `loss.backward()` finds nothing behind the loss, the optimizer moves nothing, and the loss prints the same number every epoch. I wrote the second one first. The loss sat at 5.62 for ten epochs before I noticed, and that flat line is the failure to check for when a language model refuses to learn.
+
+One number is worth knowing before the run starts. A model that has learned nothing assigns each of the $V$ tokens probability $1/V$, and with the 200-entry vocabulary this corpus produces (its characters, plus every merge the trainer could find before the pairs ran out) that is $\ln 200 \approx 5.30$ per token. On my laptop the loss is 5.73 after the first epoch, 1.10 after ten, 0.02 after fifty, and 0.01 after two hundred, and the whole run takes under three seconds, because the five sentences encode to 43 tokens and yield only 11 windows. That is memorization, not language. Ask the trained model for twenty tokens after "TinyTorch is" and it recites its corpus, `TinyTorch is the xv6 of machine learning systems. A machine learning framework is built from first principles. Tensors store contiguous memory buffers`, at temperature 0.8 and at 0.3 alike, because a model that has seen 43 tokens has one continuation for every prefix and the sampler's knobs have nothing to reshape. The knobs matter on a distribution with a tail, which takes a corpus with more than one way to continue a phrase, and the third exercise is the first step toward one.
 
 ### What the course script actually runs
 
-The course's integration script for these modules, `01_vaswani_attention.py`, does not train on prose. It builds an `AttentionTransformer` from the Module 11 through 13 pieces (a Post-LN block with a ReLU feed-forward layer and no causal mask, since its tasks need every position to see every other) and puts the attention mechanism through three tests: reverse a six-letter sequence, copy it, and do either depending on a prefix token. Its pass thresholds are 95 percent sequence accuracy on reversal, 95 percent on copying, and 90 percent on the mixed task. The core of its training step is the same reshape this chapter just used.
+The course's integration script for these modules, `01_vaswani_attention.py`, does not train on prose. It builds an `AttentionTransformer` from the Module 11 through 13 pieces (a Post-LN block with a ReLU feed-forward layer and no causal mask, since its tasks need every position to see every other) and puts the attention mechanism through three tests: reverse a six-letter sequence, copy it, and do either depending on a prefix token. Its pass thresholds are 95 percent sequence accuracy on reversal, 95 percent on copying, and 90 percent on the mixed task. Its training step, quoted from the script, is the same reshape this chapter just used, with the sequence accuracy counted beside the loss and Chapter 5's `DataLoader` handing out the batches.
 
-```python
-# Excerpt from milestones/05_2017_transformer/01_vaswani_attention.py (train_epoch)
-logits = model(input_batch)                          # [B, S, V]
-logits_2d = logits.reshape(-1, model.vocab_size)     # [B*S, V]
-target_1d = target_batch.reshape(-1)                 # [B*S]
-loss = loss_fn(logits_2d, target_1d)
-loss.backward()
-optimizer.step()
-optimizer.zero_grad()
+{{< include _listings/milestone_02/train_epoch.qmd >}}
 
-pred = np.argmax(logits.data, axis=-1)               # greedy is fine for a fixed-answer task
-```
-
-The last line is worth a pause, because it is the argmax that The Problem warned against, and here it is exactly right. Reversal has one correct output, so the argmax is the answer and sampling would only add errors. Temperature and top-$k$ exist for open-ended generation, where many continuations are acceptable and the goal is to pick a good one, not the one.
+The `np.argmax` that scores each batch is worth a pause, because it is the argmax that The Problem warned against, and here it is exactly right. Reversal has one correct output, so the argmax is the answer and sampling would only add errors. Temperature and top-$k$ exist for open-ended generation, where many continuations are acceptable and the goal is to pick a good one, not the one.
 
 ---
 
