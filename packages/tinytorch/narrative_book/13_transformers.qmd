@@ -6,7 +6,7 @@ The answer is a repeating unit called the transformer block, built from attentio
 
 ![The transformer architecture: residual stream, pre-normalized attention and MLP sub-layers, and the vocabulary projection that turns the final hidden state into next-token logits](assets/images/diagrams/13_transformers-diag-1.svg){#fig-transformer-arch}
 
-By the end of the chapter you will have `TinyGPT`, which takes a sequence of $S$ token IDs and returns an $S \times V$ matrix of logits, one row of next-token scores for every position. Milestone 2 trains it and samples text from it.
+By the end of the chapter you will have `GPT` (Module 13 also names it `TinyGPT`), which takes a sequence of $S$ token IDs and returns an $S \times V$ matrix of logits, one row of next-token scores for every position. Milestone 2 trains it and samples text from it.
 
 ---
 
@@ -106,136 +106,43 @@ With the block defined, the whole model is a short list. Tokens $t_1, \dots, t_S
 
 $$h_0 = E_{\text{tok}}[t] + P, \qquad h_l = \text{Block}_l(h_{l-1}) \;\text{ for } l = 1, \dots, N, \qquad \text{logits} = \text{LN}_{\text{final}}(h_N)\, W_{\text{head}}$$
 
-Here $E_{\text{tok}}$ is the $V \times D$ embedding table, $P$ the position vectors, and $W_{\text{head}}$ a $D \times V$ matrix that turns a $D$-dimensional hidden state into one score per vocabulary entry, the logits of Chapter 4. The output has one row of $V$ scores per position, and the `TinyGPT` listing explains why one row per position, rather than one row per pass, is the whole point.
+Here $E_{\text{tok}}$ is the $V \times D$ embedding table, $P$ the position vectors, and $W_{\text{head}}$ a $D \times V$ matrix that turns a $D$-dimensional hidden state into one score per vocabulary entry, the logits of Chapter 4. The output has one row of $V$ scores per position, and the `GPT` listing explains why one row per position, rather than one row per pass, is the whole point.
 
 ---
 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 13 (`src/13_transformers/13_transformers.py`) is the NumPy-backed implementation students build in the TinyTorch course. It exposes `LayerNorm`, `MLP`, `TransformerBlock`, and a `GPT` class (aliased `TinyGPT`) with `forward`, `generate`, and `parameters`. The listings in this chapter are a stripped-down pure-Python model of the same design, working on one sequence stored as nested lists, small enough to show every step of a Pre-LN transformer block and the GPT that stacks them. The real module runs whole batches with array operations, uses learned positional embeddings, and carries its own backward function for LayerNorm; the listings simplify all three.
+The listings in this section are extracted from Module 13 (`src/13_transformers/13_transformers.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. Module 13 exposes `LayerNorm` with its operation `LayerNormFunction`, `MLP`, `TransformerBlock`, and `GPT` with `forward`, `generate`, and `parameters`; `generate` and its sampling helper belong to Milestone 2 and are elided here.
 :::
 
-The listings continue Chapter 12's conventions. A sequence is a list of $S$ rows, each a list of $D$ floats; `matmul`, `causal_mask`, and `MultiHeadAttention` come from Chapter 12 unchanged, and weights are plain nested lists drawn from a seeded generator. What this chapter adds that Chapter 12 never needed is elementwise work. A block adds an $S \times D$ update into the stream twice, and the MLP pushes every one of its $S \times 4D$ hidden values through a nonlinearity. Three helpers cover it. `add_rows` is the residual addition, `gelu` is Chapter 2's tanh approximation for one number, and `weight` draws a matrix at the $1/\sqrt{\text{rows}}$ scale Chapter 3 chose so that a fresh layer neither inflates nor shrinks what passes through it.
-
-```python
-import math, random
-
-def add_rows(A, B):
-    """Elementwise sum of two (S, D) matrices: the residual addition."""
-    return [[a + b for a, b in zip(ra, rb)] for ra, rb in zip(A, B)]
-
-def gelu(x):
-    """GELU, tanh form (Chapter 2), for one number."""
-    return 0.5 * x * (1.0 + math.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * x ** 3)))
-
-def weight(rows, cols, rng):
-    """A rows x cols matrix with entries scaled by 1/sqrt(rows), as in Chapter 12."""
-    return [[rng.gauss(0.0, 1.0) / math.sqrt(rows) for _ in range(cols)] for _ in range(rows)]
-```
+The listings continue Chapter 12's conventions. A batch is a tensor of shape $(B, S, D)$, `MultiHeadAttention` comes from Chapter 12 unchanged, and every weight matrix is a Chapter 3 `Linear`, so it arrives at the $1/\sqrt{D_{\text{in}}}$ scale that keeps a fresh layer from inflating or shrinking what passes through it. What this chapter adds that Chapter 12 never needed is elementwise work. A block adds a $(B, S, D)$ update into the stream twice, and the MLP pushes every one of its $B \times S \times 4D$ hidden values through a nonlinearity. Neither needs new code. The residual addition is Chapter 1's `+`, and the nonlinearity is Chapter 2's `GELU`, in the sigmoid form that module implements.
 
 Start with `LayerNorm`, and with what a model needs it for. Every sub-layer in the stack, twelve blocks deep in GPT-2 small and forty-eight in GPT-2 XL, reads the stream as its input, and the Problem section showed what the stream's scale does when nothing holds it. At a gain of only $1.2$ per layer it reached 84 times the starting scale by layer 24. A weight matrix that Chapter 3 initialized for unit-scale inputs is then fed values eighty times too large, and the softmax inside attention saturates on scores that big. So each sub-layer has to standardize its input, and the question is what statistics to standardize with. The obvious choice, pooling the mean and variance across the batch the way many vision networks do, breaks exactly where a language model lives. Milestone 2 trains on batches of sequences and then generates with a batch of one, a single token at a time. A layer whose numbers depend on which other examples share the batch behaves differently in those two settings and needs separate training and evaluation modes to paper over the gap. Can we normalize a token using nothing but its own $D$ numbers? That is layer normalization. The statistics come from one row, so nothing depends on the batch or on the other positions in the sequence, and the layer gives the same answer for a batch of one and for a single token as it does mid-training. That property is what lets Milestone 2 generate text with the same code it trained on.
 
-```python
-class LayerNorm:
-    """Normalize each row across its features, then scale and shift."""
-    def __init__(self, dim, eps=1e-5):
-        self.eps = eps
-        self.gamma = [1.0] * dim     # scale, starts at identity
-        self.beta = [0.0] * dim      # shift, starts at zero
+{{< include _listings/13_transformers/LayerNormFunction_forward.qmd >}}
 
-    def parameters(self):
-        return [self.gamma, self.beta]
+{{< include _listings/13_transformers/LayerNorm.qmd >}}
 
-    def forward(self, X):
-        out = []
-        for row in X:
-            mean = sum(row) / len(row)
-            var = sum((x - mean) ** 2 for x in row) / len(row)
-            inv_std = 1.0 / math.sqrt(var + self.eps)
-            out.append([g * (x - mean) * inv_std + b
-                        for x, g, b in zip(row, self.gamma, self.beta)])
-        return out
-```
-
-The loop over rows makes the per-token property visible; nothing computed for one row touches any other. The layer owns exactly $2D$ parameters, `gamma` and `beta`, however long the sequence. Notice what is absent: no running averages, no dependence on other rows, nothing that behaves differently in training and evaluation. PyTorch's `nn.LayerNorm` is the same three lines of arithmetic, and its `normalized_shape` argument is our `dim`.
+Every statistic is taken along the last axis with `keepdims=True`, so `mean_data` has shape $(B, S, 1)$ and broadcasts back across the $D$ features of its own row; nothing computed for one token touches any other. The layer owns exactly $2D$ parameters, `gamma` and `beta`, however long the sequence. Notice what is absent: no running averages, no dependence on other rows, nothing that behaves differently in training and evaluation. Notice also what the operation keeps. It stores the standardized rows and the per-row standard deviation on itself, because the module writes `LayerNormFunction.backward` by hand as one closed-form step rather than letting Chapter 6's tape route the gradient through a mean, a subtraction, a square, another mean, and a division; the formula is in the module, and it returns the three gradients for `x`, `gamma`, and `beta` in one pass. PyTorch's `nn.LayerNorm` is the same arithmetic, and its `normalized_shape` argument is our `normalized_shape`.
 
 `MLP` answers the first problem from the start of the chapter. Attention's output for a token is a weighted average of value vectors, so however many attention layers you stack, a token's vector stays a blend of linear projections of other tokens' vectors, and nothing in the stack computes a per-token nonlinear function. The naive response is to stack more attention and hope. Each extra attention layer costs $4D^2$ weights and an $S \times S$ score matrix per head, and what it buys is another blend, not the missing nonlinearity. What we want is what every network in Part I had between its linear layers, a nonlinearity applied to each token on its own. The mechanism is a two-layer network applied at every position with the same weights. Widen from $D$ to $4D$, apply GELU, project back to $D$. The $4\times$ width is a convention inherited from the 2017 paper, and it decides where a block spends its budget. Attention's four projection matrices hold $4D^2$ weights; the MLP's two hold $8D^2$. Two thirds of a block's weights sit in the MLP, and since every weight is used once per token, most of the block's arithmetic does too.
 
-```python
-class MLP:
-    """Per-token feed-forward network: D -> 4D -> GELU -> D."""
-    def __init__(self, embed_dim, seed=0):
-        rng = random.Random(seed)
-        self.W1 = weight(embed_dim, 4 * embed_dim, rng)
-        self.b1 = [0.0] * (4 * embed_dim)
-        self.W2 = weight(4 * embed_dim, embed_dim, rng)
-        self.b2 = [0.0] * embed_dim
+{{< include _listings/13_transformers/MLP.qmd >}}
 
-    def parameters(self):
-        return [self.W1, self.b1, self.W2, self.b2]
+Because `Linear` multiplies every row of $X$ by the same matrix, every position is handled by the same weights without any per-token loop. The hidden tensor has $4D$ columns, four times the width of the stream. It is the largest activation in the block, which matters when Chapter 14 starts counting where the memory goes. The constructor accepts a `dropout_prob` that the module does not use; GPT-2 applied dropout of $0.1$ here, and the production section says where. GPT-2's released code names the same two layers `c_fc` and `c_proj`.
 
-    def forward(self, X):
-        H = [[gelu(h + b) for h, b in zip(row, self.b1)] for row in matmul(X, self.W1)]   # (S, 4D)
-        return [[o + b for o, b in zip(row, self.b2)] for row in matmul(H, self.W2)]      # (S, D)
-```
+`TransformerBlock` is the unit a framework repeats, and the repetition is what it has to survive. GPT-2 small stacks 12 of these, GPT-2 XL 48, Llama 2 7B 32, and every one of them must pass a token's vector along without wrecking its scale on the way forward or its gradient on the way back. The Problem section priced the naive stack, where each layer replaces the signal. The forward scale reached 84 times its start after 24 layers, and the chain rule multiplies 24 Jacobians together for the gradient on the way back. The 2017 arrangement, Post-LN, repairs the forward scale by normalizing the stream after each addition, but that leaves $N$ rescalings sitting on the gradient path. Xiong et al. (2020) showed that Post-LN transformers need a learning-rate warmup (a few thousand early steps at a tiny learning rate) to avoid diverging, and that Pre-LN transformers train without one. So the block does what The Idea's equation says. Normalize a copy of the stream, run the sub-layer on the copy, add the result back. The stream itself is never touched by a LayerNorm, and the gradient reaching the block's input is the gradient at its output plus a correction. The two additions are `Tensor` additions that Chapter 6 records, so the input reaches the output by two paths and their gradients accumulate as that chapter described.
 
-Because `matmul` multiplies every row of $X$ by the same matrix, every position is handled by the same weights without any per-token loop. The hidden matrix `H` has $4D$ columns, four times the width of the stream. It is the largest activation in the block, which matters when Chapter 14 starts counting where the memory goes. GPT-2's released code names the same two layers `c_fc` and `c_proj`.
+{{< include _listings/13_transformers/TransformerBlock.qmd >}}
 
-`TransformerBlock` is the unit a framework repeats, and the repetition is what it has to survive. GPT-2 small stacks 12 of these, GPT-2 XL 48, Llama 2 7B 32, and every one of them must pass a token's vector along without wrecking its scale on the way forward or its gradient on the way back. The Problem section priced the naive stack, where each layer replaces the signal. The forward scale reached 84 times its start after 24 layers, and the chain rule multiplies 24 Jacobians together for the gradient on the way back. The 2017 arrangement, Post-LN, repairs the forward scale by normalizing the stream after each addition, but that leaves $N$ rescalings sitting on the gradient path. Xiong et al. (2020) showed that Post-LN transformers need a learning-rate warmup (a few thousand early steps at a tiny learning rate) to avoid diverging, and that Pre-LN transformers train without one. So the block does what The Idea's equation says. Normalize a copy of the stream, run the sub-layer on the copy, add the result back. The stream itself is never touched by a LayerNorm, and the gradient reaching the block's input is the gradient at its output plus a correction. In the real module the two additions are `Tensor` additions that autograd records, so the input reaches the output by two paths and their gradients accumulate as Chapter 6 described; here they are plain list additions.
+Two additions do the work. Read them against the Problem section's loop: `ln1` is the `s / rms(stream)`, the sub-layer is the `apply(W, ...)`, and `x + attention_out` is the running total. The input and output have the same shape, which is what lets blocks stack without any adapter between them. PyTorch's `nn.TransformerEncoderLayer` selects this same arrangement with `norm_first=True`.
 
-```python
-class TransformerBlock:
-    """One Pre-LN block: x + Attn(LN(x)), then x + MLP(LN(x))."""
-    def __init__(self, embed_dim, num_heads, seed=0):
-        self.ln1 = LayerNorm(embed_dim)
-        self.attn = MultiHeadAttention(embed_dim, num_heads, seed=seed)
-        self.ln2 = LayerNorm(embed_dim)
-        self.mlp = MLP(embed_dim, seed=seed + 1)
+`GPT` exists to give Milestone 2 a training signal. The label at every position of a text is the next token, so a sequence of $S$ tokens holds $S$ training examples. The naive way to collect them is one forward pass per example. Feed tokens $1$ through $s$, read one prediction, advance $s$, repeat. A window of 1,024 tokens, GPT-2's context length, would cost 1,024 forward passes, and every early prefix would be recomputed inside every later one. The causal mask from Chapter 12 collapses this to a single pass. Because the mask lets position $s$ see only tokens $1$ through $s$, the logits at position $s$ are a prediction of token $s+1$ made without peeking, and one forward pass returns all $S$ predictions as an $S \times V$ matrix per sequence. Every position of every sequence is a training example, all computed at once. So the model stacks the blocks and adds the two ends. The front end is Chapter 11's `EmbeddingLayer`, with its default learned position table, the form GPT-2 uses (the sinusoidal table works equally well here, and the block does not care which). The mask is built once per forward pass from the actual sequence length and handed to every block, since causality belongs to the sequence and not to any block.
 
-    def parameters(self):
-        return (self.ln1.parameters() + self.attn.parameters() +
-                self.ln2.parameters() + self.mlp.parameters())
+{{< include _listings/13_transformers/GPT.qmd >}}
 
-    def forward(self, X, mask=None):
-        X = add_rows(X, self.attn.forward(self.ln1.forward(X), mask))   # tokens exchange context
-        X = add_rows(X, self.mlp.forward(self.ln2.forward(X)))          # each token transforms itself
-        return X
-```
-
-Two lines do the work. Read them against the Problem section's loop: `ln1` is the `s / rms(stream)`, the sub-layer is the `apply(W, ...)`, and `add_rows` is the running total. The input and output have the same shape, which is what lets blocks stack without any adapter between them. PyTorch's `nn.TransformerEncoderLayer` selects this same arrangement with `norm_first=True`.
-
-`TinyGPT` exists to give Milestone 2 a training signal. The label at every position of a text is the next token, so a sequence of $S$ tokens holds $S$ training examples. The naive way to collect them is one forward pass per example. Feed tokens $1$ through $s$, read one prediction, advance $s$, repeat. A window of 1,024 tokens, GPT-2's context length, would cost 1,024 forward passes, and every early prefix would be recomputed inside every later one. The causal mask from Chapter 12 collapses this to a single pass. Because the mask lets position $s$ see only tokens $1$ through $s$, the logits at position $s$ are a prediction of token $s+1$ made without peeking, and one forward pass returns all $S$ predictions as an $S \times V$ matrix. Every position of every sequence is a training example, all computed at once. So the model stacks the blocks and adds the two ends. The token table is Chapter 11's embedding; the position table is a second lookup indexed by position, the learned form GPT-2 and the real module use (Chapter 11's sinusoidal table works equally well here, and the block does not care which). The mask is built once per forward pass from the actual sequence length and handed to every block, since causality belongs to the sequence and not to any block.
-
-```python
-class TinyGPT:
-    """Token IDs (length S) -> next-token logits (S, V)."""
-    def __init__(self, vocab_size=1000, embed_dim=128, num_heads=4, num_layers=3,
-                 max_seq_len=256, seed=0):
-        rng = random.Random(seed)
-        self.tok_emb = [[rng.gauss(0.0, 1.0) for _ in range(embed_dim)] for _ in range(vocab_size)]
-        self.pos_emb = [[rng.gauss(0.0, 1.0) for _ in range(embed_dim)] for _ in range(max_seq_len)]
-        self.blocks = [TransformerBlock(embed_dim, num_heads, seed=seed + 10 * i)
-                       for i in range(num_layers)]
-        self.ln_final = LayerNorm(embed_dim)
-        self.W_head = weight(embed_dim, vocab_size, rng)    # (D, V), no bias
-
-    def parameters(self):
-        params = [self.tok_emb, self.pos_emb]
-        for block in self.blocks:
-            params.extend(block.parameters())
-        return params + self.ln_final.parameters() + [self.W_head]
-
-    def forward(self, tokens):
-        mask = causal_mask(len(tokens))
-        X = [[t + p for t, p in zip(self.tok_emb[tok], self.pos_emb[i])]
-             for i, tok in enumerate(tokens)]                 # (S, D)
-        for block in self.blocks:
-            X = block.forward(X, mask)                        # (S, D), N times
-        return matmul(self.ln_final.forward(X), self.W_head)  # (S, V)
-```
-
-Three things to notice. The loop over `self.blocks` is the entire depth of the model; making GPT deeper is a change to one integer, and Chapter 14 walks this same list when it counts what the model costs. The final `LayerNorm` is the only normalization applied to the stream itself, in keeping with Pre-LN. And `W_head` is $D \times V$, which for a real vocabulary is a large matrix. With $D = 768$ and $V = 50{,}257$ it holds 38.6 million weights, close to a third of a GPT-2 small model on its own. The production bridge returns to that number. GPT-2's code calls these five pieces `wte`, `wpe`, `h`, `ln_f`, and `lm_head`, and the mapping to ours is one to one.
+Three things to notice. The loop over `self.blocks` is the entire depth of the model; making GPT deeper is a change to one integer, and Chapter 14 walks this same list when it counts what the model costs. The final `LayerNorm` is the only normalization applied to the stream itself, in keeping with Pre-LN. And `lm_head` is a bias-free `Linear(D, V)`, which for a real vocabulary is a large matrix. With $D = 768$ and $V = 50{,}257$ it holds 38.6 million weights, close to a third of a GPT-2 small model on its own. The production bridge returns to that number. The `start_pos` argument does nothing here and everything in Chapter 18, where the cache feeds one token at a time and needs to say which position it holds. GPT-2's code calls these five pieces `wte`, `wpe`, `h`, `ln_f`, and `lm_head`, and the mapping to ours is one to one.
 
 ---
 
@@ -253,7 +160,7 @@ The attention and MLP outputs depend on random weights and, for attention, on th
 | :--- | :--- | :--- | :--- |
 | Stream in | | | $[1.000, 2.000, 3.000, 4.000]$ |
 | 1. `ln1` | $\text{LN}(\mathbf{x})$ | $[1.000, 2.000, 3.000, 4.000]$ | $[-1.342, -0.447, +0.447, +1.342]$ |
-| 2. `attn` | $\text{Attn}(\text{LN}(\mathbf{x}))$ (fixed) | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.100, +0.200, +0.100, +0.200]$ |
+| 2. `attention` | $\text{Attn}(\text{LN}(\mathbf{x}))$ (fixed) | $[-1.342, -0.447, +0.447, +1.342]$ | $[+0.100, +0.200, +0.100, +0.200]$ |
 | 3. add | $\mathbf{x}_1 = \mathbf{x} + \text{Attn}$ | $[1.000, 2.000, 3.000, 4.000]$ | $[1.100, 2.200, 3.100, 4.200]$ |
 | 4. `ln2` | $\text{LN}(\mathbf{x}_1)$ | $[1.100, 2.200, 3.100, 4.200]$ | $[-1.358, -0.394, +0.394, +1.358]$ |
 | 5. `mlp` | $\text{MLP}(\text{LN}(\mathbf{x}_1))$ (fixed) | $[-1.358, -0.394, +0.394, +1.358]$ | $[+0.050, +0.100, -0.050, +0.050]$ |
@@ -263,20 +170,24 @@ The attention and MLP outputs depend on random weights and, for attention, on th
 
 Two details in the table carry the lesson. The stream ($1.0 \to 1.1 \to 1.15$ in the first feature) is never normalized; only the copies fed to the sub-layers are. And the second normalization is not a repeat of the first: $\mathbf{x}_1$ has mean $2.65$ and variance $1.3025$, so its standardized form differs in every entry from $\hat{\mathbf{x}}$. Each sub-layer standardizes whatever the stream holds at that moment.
 
-Running the chapter's own `LayerNorm` and `add_rows` on the same numbers reproduces the table. On my machine it prints the following.
+Running the module's `LayerNorm` on the same numbers, with the stream held as a batch of one sequence of one token, reproduces the table. On my machine it prints the following.
 
 ```python
-ln = LayerNorm(4)
-x = [[1.0, 2.0, 3.0, 4.0]]
-attn_out = [[0.10, 0.20, 0.10, 0.20]]      # stands in for attn(ln1(x))
-mlp_out = [[0.05, 0.10, -0.05, 0.05]]      # stands in for mlp(ln2(x1))
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.transformers import LayerNorm
 
-n1 = ln.forward(x)
-x1 = add_rows(x, attn_out)
-n2 = ln.forward(x1)
-x2 = add_rows(x1, mlp_out)
+ln = LayerNorm(4)
+x = Tensor([[[1.0, 2.0, 3.0, 4.0]]])                 # (B=1, S=1, D=4)
+attn_out = Tensor([[[0.10, 0.20, 0.10, 0.20]]])      # stands in for attention(ln1(x))
+mlp_out = Tensor([[[0.05, 0.10, -0.05, 0.05]]])      # stands in for mlp(ln2(x1))
+
+n1 = ln(x)
+x1 = x + attn_out
+n2 = ln(x1)
+x2 = x1 + mlp_out
 for name, M in [("ln1", n1), ("x1 ", x1), ("ln2", n2), ("x2 ", x2)]:
-    print(name + ":", [round(v, 4) for v in M[0]])
+    print(name + ":", np.round(M.data[0, 0], 4).tolist())
 ```
 
 ```
@@ -286,41 +197,43 @@ ln2: [-1.3581, -0.3943, 0.3943, 1.3581]
 x2 : [1.15, 2.3, 3.05, 4.25]
 ```
 
-The same block, seen from the point of view of shapes rather than values, is the second half of the trace. A `TinyGPT` with $D = 8$, two heads, two blocks, and a vocabulary of 16 tokens, given a sequence of three token IDs, moves the following matrices:
+The same block, seen from the point of view of shapes rather than values, is the second half of the trace. A `GPT` with $D = 8$, two heads, two blocks, and a vocabulary of 16 tokens, given one sequence of three token IDs, moves the following tensors; the leading batch axis of 1 is left off.
 
-| Stage | Matrix | Shape (rows $\times$ columns) |
+| Stage | Tensor | Shape (rows $\times$ columns) |
 | :--- | :--- | :--- |
 | Input | token IDs | $3$ integers |
-| `tok_emb` + `pos_emb` | stream $h_0$ | $3 \times 8$ |
+| `embedding_layer` | stream $h_0$ | $3 \times 8$ |
 | Block 1, `ln1` output | normalized copy | $3 \times 8$ |
-| Block 1, `attn`, per head | $Q, K, V$ | $3 \times 4$ each, 2 heads |
-| Block 1, `attn`, per head | scores $QK^{\top}/\sqrt{4}$ + mask | $3 \times 3$ |
-| Block 1, `mlp` hidden | after `W1` and `gelu` | $3 \times 32$ |
+| Block 1, `attention`, per head | $Q, K, V$ | $3 \times 4$ each, 2 heads |
+| Block 1, `attention`, per head | scores $QK^{\top}/\sqrt{4}$ + mask | $3 \times 3$ |
+| Block 1, `mlp` hidden | after `linear1` and `gelu` | $3 \times 32$ |
 | Block 1 output, Block 2 output | stream $h_1$, $h_2$ | $3 \times 8$ |
-| `ln_final`, `W_head` | logits | $3 \times 16$ |
+| `ln_f`, `lm_head` | logits | $3 \times 16$ |
 
-: Matrix shapes through a two-block `TinyGPT` on a three-token input. {#tbl-tinygpt-shapes tbl-colwidths="[36,34,30]"}
+: Tensor shapes through a two-block `GPT` on a three-token input. {#tbl-tinygpt-shapes tbl-colwidths="[36,34,30]"}
 
-The parameter count is the other number worth having. Chapter 14 charges every generated token for reading every weight in the model, and the production bridge below does this arithmetic for GPT-2 small by hand. Reading a count off a configuration file is guesswork until you have totaled one yourself, so here is a helper that walks `parameters()` and sums the scalars, run on the same two-block model.
+The parameter count is the other number worth having. Chapter 14 charges every generated token for reading every weight in the model, and the production bridge below does this arithmetic for GPT-2 small by hand. Reading a count off a configuration file is guesswork until you have totaled one yourself, so here is a helper that walks `parameters()` and sums the shapes, run on the same two-block model.
 
 ```python
-def count_parameters(model):
-    """Total scalars across every matrix and vector in parameters()."""
-    return sum(len(p) * (len(p[0]) if isinstance(p[0], list) else 1) for p in model.parameters())
+from tinytorch.core.transformers import GPT
 
-model = TinyGPT(vocab_size=16, embed_dim=8, num_heads=2, num_layers=2, max_seq_len=8)
-logits = model.forward([3, 7, 1])
-print(len(logits), "x", len(logits[0]))   # 3 x 16: one row of 16 scores per position
-print(count_parameters(model))            # 2016
+def count_parameters(model):
+    """Total scalars across every tensor in parameters()."""
+    return sum(int(np.prod(p.shape)) for p in model.parameters())
+
+model = GPT(vocab_size=16, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=8)
+logits = model(Tensor([[3, 7, 1]]))
+print(logits.shape)                       # (1, 3, 16): one row of 16 scores per position
+print(count_parameters(model))            # 2080
 ```
 
-Of the 2,016 parameters, 1,680 sit in the two blocks (840 each, of which 552 are the MLP's), matching the two-thirds share I quoted beside the `MLP` listing once the biases are counted. The stream keeps shape $3 \times 8$ from the embeddings to the final normalization. Everything that changes shape (the per-head split, the $3 \times 3$ score matrix, the $4\times$ hidden layer) lives inside a sub-layer and is folded back before the addition. Position 3's row of logits, 16 numbers, is the model's prediction for a fourth token it has not seen.
+Of the 2,080 parameters, 1,744 sit in the two blocks (872 each, of which 552 are the MLP's, 288 attention's including its four biases, and 32 the two LayerNorms'), matching the roughly two-thirds MLP share I quoted beside the `MLP` listing. The rest are the embeddings (128 in the token table and 64 in the learned position table), the final LayerNorm's 16, and the head's 128. The stream keeps shape $3 \times 8$ from the embeddings to the final normalization. Everything that changes shape (the per-head split, the $3 \times 3$ score matrix, the $4\times$ hidden layer) lives inside a sub-layer and is folded back before the addition. Position 3's row of logits, 16 numbers, is the model's prediction for a fourth token it has not seen.
 
 ---
 
 ## From TinyTorch to Production
 
-GPT-2 (Radford et al., 2019) is this chapter's block almost line for line: Pre-LN, GELU, a $4\times$ MLP, a final LayerNorm, learned positional embeddings, and a bias-free head. Its differences are small and each has a reason. It processes a batch of sequences at once as a three-dimensional array, applies dropout of $0.1$ to embeddings, attention weights, and residual updates during training, and ties the head to the embedding table. The models that followed changed more, and the changes cluster around the two cheap-looking operations in the block, normalization and activation. Llama (Touvron et al., 2023) replaces LayerNorm with **RMSNorm** (Zhang and Sennrich, 2019), which drops the mean subtraction and divides by $\sqrt{\frac{1}{D}\sum_i x_i^2 + \epsilon}$ alone, saving one pass over each vector; experiments showed the centering step was not what made LayerNorm work. It replaces the GELU MLP with a gated variant, SwiGLU,[^fn-swiglu-mlp-gate] and the added position table with RoPE, (the rotary scheme introduced in Chapter 11) which rotates $Q$ and $K$ inside attention instead of adding anything to the stream. The block structure, the stream, and the Pre-LN placement are untouched.
+GPT-2 (Radford et al., 2019) is this chapter's block almost line for line: Pre-LN, GELU, a $4\times$ MLP, a final LayerNorm, learned positional embeddings, and a bias-free head. Its differences are small and each has a reason. It applies dropout of $0.1$ to embeddings, attention weights, and residual updates during training, and ties the head to the embedding table. The models that followed changed more, and the changes cluster around the two cheap-looking operations in the block, normalization and activation. Llama (Touvron et al., 2023) replaces LayerNorm with **RMSNorm** (Zhang and Sennrich, 2019), which drops the mean subtraction and divides by $\sqrt{\frac{1}{D}\sum_i x_i^2 + \epsilon}$ alone, saving one pass over each vector; experiments showed the centering step was not what made LayerNorm work. It replaces the GELU MLP with a gated variant, SwiGLU,[^fn-swiglu-mlp-gate] and the added position table with RoPE, (the rotary scheme introduced in Chapter 11) which rotates $Q$ and $K$ inside attention instead of adding anything to the stream. The block structure, the stream, and the Pre-LN placement are untouched.
 
 [^fn-swiglu-mlp-gate]: **SwiGLU**: an MLP whose hidden layer is the elementwise product of two linear projections, one passed through a smooth activation (Swish), so the network learns which hidden features to switch on. Llama uses a hidden width of about $2.7D$ rather than $4D$ to keep the parameter count of the three matrices equal to the two-matrix $4\times$ MLP.
 
@@ -335,11 +248,11 @@ Where the time goes is the other thing production changes. The two MLP matrix mu
 
 What carries over unchanged is nearly everything you built. The block is the same two lines in every GPT-family model; the stream has the same width $D$ from embeddings to head; the per-token statistics of LayerNorm and RMSNorm are what let the same code train on full sequences and then generate one token at a time; and the parameter formula in the callout holds to within the choices listed in @tbl-tinygpt-vs-production. When you read a model configuration, `n_embd`, `n_layer`, and `n_head` are $D$, $N$, and $H$; `norm_type`, `activation`, and `tie_word_embeddings` are the three switches this section described. When a training run's loss spikes in its first few hundred steps, normalization placement and warmup are the first suspects. When you profile a transformer, expect the GEMMs to dominate the arithmetic and the normalization and activation kernels to dominate the kernel count, which is why fusing them is the first optimization every compiler applies.
 
-| Design choice | `TinyGPT` (this chapter) | GPT-2 (2019) | Llama 2 (2023) |
+| Design choice | Module 13 `GPT` | GPT-2 (2019) | Llama 2 (2023) |
 | :--- | :--- | :--- | :--- |
 | Normalization | LayerNorm, Pre-LN | LayerNorm, Pre-LN | RMSNorm, Pre-LN |
 | Position | learned table, added | learned table, added | RoPE, inside attention |
-| MLP | $D \to 4D \to D$, GELU | $D \to 4D \to D$, GELU | gated, $D \to 2.7D \to D$, SwiGLU |
+| MLP | $D \to 4D \to D$, GELU (sigmoid form) | $D \to 4D \to D$, GELU | gated, $D \to 2.7D \to D$, SwiGLU |
 | Head | separate $D \times V$ | tied to embedding | separate $D \times V$ |
 | Dropout | none | $0.1$ | none |
 
@@ -351,7 +264,7 @@ Milestone 2 runs this model one token at a time, and recomputing attention over 
 
 ## Summary
 
-You built the three pieces that turn one attention layer into a language model: `LayerNorm`, which standardizes each token's vector across its own features; `MLP`, which widens each token to $4D$, applies GELU, and projects back; and `TransformerBlock`, which wraps attention and the MLP in Pre-LN residual connections. `TinyGPT` stacks $N$ blocks between embeddings and a vocabulary projection and returns an $S \times V$ matrix of logits, one row of next-token scores per position, in a single forward pass. The principle to keep is the residual stream. A sub-layer never replaces the token's vector; it normalizes a copy, computes a correction, and adds the correction back, so the gradient reaching any layer is the gradient from above plus corrections rather than a product of $N$ Jacobians. Milestone 2 takes `TinyGPT(vocab_size, embed_dim, num_heads, num_layers, max_seq_len)` and its $S \times V$ logits for granted and asks how to train it on text and sample the next token from those logits.
+Module 13 builds the three pieces that turn one attention layer into a language model: `LayerNorm`, which standardizes each token's vector across its own features; `MLP`, which widens each token to $4D$, applies GELU, and projects back; and `TransformerBlock`, which wraps attention and the MLP in Pre-LN residual connections. `GPT` stacks $N$ blocks between embeddings and a vocabulary projection and returns an $S \times V$ matrix of logits, one row of next-token scores per position, in a single forward pass. The principle to keep is the residual stream. A sub-layer never replaces the token's vector; it normalizes a copy, computes a correction, and adds the correction back, so the gradient reaching any layer is the gradient from above plus corrections rather than a product of $N$ Jacobians. Milestone 2 takes `GPT(vocab_size, embed_dim, num_layers, num_heads)` and its $S \times V$ logits for granted and asks how to train it on text and sample the next token from those logits.
 
 ---
 
@@ -361,4 +274,4 @@ You built the three pieces that turn one attention layer into a language model: 
 
 2. **RMSNorm.** Implement `RMSNorm` as described in the production bridge and count, for one row of length $D$, how many passes over the row `LayerNorm.forward` makes and how many `RMSNorm.forward` makes. Verify that on the trace vector $[1, 2, 3, 4]$ the two produce different outputs, and say why a network that only ever sees the normalized copy through a weight matrix can compensate for the missing mean subtraction.
 
-3. **Weight tying.** Modify `TinyGPT` so that the head reuses `tok_emb` instead of allocating `W_head` (multiply by the transpose of the embedding table), then use `count_parameters` from the worked trace to confirm the tied and untied totals for the GPT-2 small configuration match the 124.4 million and 163 million figures in the production bridge.
+3. **Weight tying.** Modify `GPT` so that the head reuses the token table, `embedding_layer.token_embedding.weight`, instead of allocating `lm_head` (multiply by the transpose of the table), then use `count_parameters` from the worked trace to confirm the tied and untied totals for the GPT-2 small configuration match the 124.4 million and 163 million figures in the production bridge.
