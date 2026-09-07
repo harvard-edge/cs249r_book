@@ -53,9 +53,9 @@ All three are the same gap. A tensor holds numbers; it does not hold the knowled
 
 ### A layer is parameters, a forward rule, and a mode
 
-The design is a tree. A `Layer` object stores its trainable tensors as attributes and knows how to run its forward pass. A container is itself a `Layer` whose attributes happen to be other layers. Asking the root for its parameters means walking the tree and collecting every tensor marked `requires_grad`; setting the root to eval mode means walking the same tree and flipping every flag. Nothing is registered by hand. The attributes are the registry.
+The design is a tree. A `Layer` object holds its trainable tensors and knows how to run its forward pass. A container is a layer whose children are other layers. Asking the root for its parameters means asking each layer for the short list it owns and concatenating the lists up the tree; telling the network whether it is training means passing one argument down the same tree with the call. Each layer answers for itself.
 
-That one picture, a tree whose leaves are tensors and whose inner nodes are layers, is the whole chapter. Initialization decides what numbers go into the leaves. The mode flag decides what some nodes do with them. Everything else is walking the tree.
+That one picture, a tree whose leaves are tensors and whose inner nodes are layers, is the whole chapter. Initialization decides what numbers go into the leaves. The `training` argument decides what some nodes do with them. Everything else is walking the tree.
 
 ### The right starting scale
 
@@ -102,85 +102,25 @@ That creates a mismatch. If a fraction $1 - p$ of the activations survive traini
 
 $$y_{\text{train}} = \frac{x \cdot m}{1 - p}, \quad m \in \{0, 1\} \text{ with } P(m = 1) = 1 - p, \qquad y_{\text{eval}} = x.$$
 
-The expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path is the identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` flag every layer carries.
+The expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path is the identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
 
 ---
 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 03 (`src/03_layers/03_layers.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down model of the same design, using NumPy only for the matrix multiply and the random draws, small enough to show every step of parameter discovery, initialization, and mode switching.
+The listings in this section are extracted from Module 03 (`src/03_layers/03_layers.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. Only `__repr__` methods are elided.
 :::
 
-The listings need only two things from Chapter 1's `Tensor`, the numbers it holds and its `requires_grad` flag. Chapter 1's `Tensor` keeps the numbers in a NumPy array; the stand-in here does the same and drops everything else, so that a matrix multiply is one line. To keep the chapter runnable on its own, we start from a ten-line stand-in that provides exactly those two things.
-
-```python
-import numpy as np
-
-rng = np.random.default_rng(0)
-
-class Tensor:
-    """Stand-in for Chapter 1's Tensor: an array plus a trainable flag."""
-    def __init__(self, data, requires_grad=False):
-        self.data = np.asarray(data, dtype=np.float32)
-        self.requires_grad = requires_grad
-        self.grad = None
-
-    @property
-    def shape(self):
-        return self.data.shape
-```
+Module 03 builds on two things from earlier chapters. From Chapter 1 it takes the `Tensor` and its operators, and from Chapter 2 it takes the rule that every piece of arithmetic goes through an operation object. A layer never touches `.data` in its forward pass; it calls `matmul`, `+`, and `*` on tensors, which is what lets Chapter 6 trace gradients back through a layer that knows nothing about gradients.
 
 ### The base class
 
-Everything later in the book that touches a model goes through two calls on the root. Chapter 7's optimizer takes `model.parameters()` and updates every tensor in the list; Chapter 8's trainer walks the same list to zero gradients, clip them, and write a checkpoint. Chapter 8's evaluation pass calls `model.eval()` before it measures accuracy, and in a GPT-2-sized model that one call has to reach dropout layers in every one of twelve blocks that the caller never sees.
+Everything later in the book that touches a model goes through two calls. Chapter 7's optimizer takes `model.parameters()` and updates every tensor in the list; Chapter 8's trainer walks the same list to flag the tensors as trainable, zero their gradients, clip them, and write a checkpoint. And every layer is run the same way, `y = layer(x)`, so that a container can hold a `Linear` and a `Dropout` and a `ReLU` from Chapter 2 without knowing which is which. `Layer` is that contract and nothing more.
 
-The naive way is a hand-written list. Milestone I's XOR network does exactly that; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`, and for two layers that is fine. Count what a real model carries. One GPT-2 block holds four `Linear` layers and two layer norms, each with a weight and a bias, so twelve blocks are 144 tensors before the embeddings, and a list that long is wrong the first time someone adds a layer and forgets the list. The failure is silent. The forgotten layer keeps its random initialization, the loss still falls because the other layers compensate, and nothing raises an error.
+{{< include _listings/03_layers/Layer.qmd >}}
 
-Here is the trick. Python already keeps the list for us. Every attribute assigned on an object lands in `self.__dict__`, so a layer's parameters are whatever trainable tensors sit in its own attributes, and the walk only has to look at each attribute and ask three questions. Is it a trainable tensor? Collect it. Is it a layer? Recurse. Is it a list of layers? Recurse into each. `train()` is the same walk with a flag flip in place of a collect. `Layer` holds the flag and the two walks, and a helper finds the child layers hiding in an attribute, including attributes that are lists, which is how `Sequential` will store its children.
-
-```python
-def _child_layers(value):
-    """Yield every Layer stored in an attribute value, looking inside lists."""
-    if isinstance(value, Layer):
-        yield value
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            yield from _child_layers(item)
-
-class Layer:
-    """A network building block: parameters, a forward rule, and a mode."""
-    def __init__(self):
-        self.training = True
-
-    def forward(self, x):
-        raise NotImplementedError
-
-    def __call__(self, x):
-        return self.forward(x)
-
-    def parameters(self):
-        """Every trainable Tensor on this layer or on any layer inside it."""
-        found = []
-        for value in self.__dict__.values():
-            if isinstance(value, Tensor) and value.requires_grad:
-                found.append(value)
-            for child in _child_layers(value):
-                found.extend(child.parameters())
-        return found
-
-    def train(self, mode=True):
-        self.training = mode
-        for value in self.__dict__.values():
-            for child in _child_layers(value):
-                child.train(mode)
-        return self
-
-    def eval(self):
-        return self.train(False)
-```
-
-Notice that nothing in the base class knows the names `weight` or `layers`. It only knows what a trainable tensor and a child layer look like, so assigning `self.weight = Tensor(...)` in a subclass is all the registration there is. Subclasses that add new attributes get discovery for free, and a subclass that stores a tensor it does not want trained simply leaves `requires_grad` off. PyTorch's `nn.Module` runs the same two walks, over two dictionaries it fills as attributes are assigned rather than by scanning `__dict__` after the fact.
+`forward` is abstract, `__call__` turns a layer into something you can call and passes any extra arguments through, and `parameters()` returns an empty list until a subclass says otherwise. Notice what is not here. There is no registry of parameters and no mode flag. Module 03 takes the direct route on both. Each layer that owns trainable tensors lists them in its own `parameters()`, right next to the code that allocated them, and a container concatenates its children's lists. Milestone I's XOR network does exactly this; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`. The list lives where the tensors live, so it stays short and readable, and the price is that a forgotten entry fails silently: the layer keeps its random weights, the loss still falls because the other layers compensate, and nothing raises. That silence is the reason PyTorch automates the registration, and the production section shows how. The mode question, which layers need to know whether the network is training, is answered the same direct way: the caller passes `training` as an argument, and `__call__` forwards it.
 
 ### Linear
 
@@ -188,97 +128,48 @@ Notice that nothing in the base class knows the names `weight` or `layers`. It o
 
 The naive scale is `randn`, and The Problem showed what it costs. At width 1024 the variance grows about 500-fold per layer, the pre-activations cross float32's ceiling near layer 29, and in a network that deep the first forward pass returns `NaN` before any gradient has been computed. The other naive scale, `randn * 0.001`, drives the same signal toward zero, and the gradients that come back through it in Chapter 6 vanish the same way. Both look like a broken network when the only thing wrong is one constant.
 
-The fix is to let the layer derive the constant from its own width. The variance rule from The Idea says $\text{Var}(w) = \text{gain} / D_{\text{in}}$ holds the signal steady, so `Linear` draws its weight with standard deviation $\sqrt{\text{gain} / D_{\text{in}}}$ and applies $y = xW + b$. The weight is stored as `(in_features, out_features)`, so a batch `x` of shape `(B, in_features)` multiplies it directly. The bias starts at zero; there is no variance argument for a random bias, and a zero bias adds nothing to the sum the rule tracks.
+The fix is to let the layer derive the constant from its own width. Module 03 uses LeCun's rule from @tbl-init-schemes, $\text{Var}(w) = 1 / D_{\text{in}}$, so `Linear` draws its weight with standard deviation $\sqrt{1 / D_{\text{in}}}$ (the module's `INIT_SCALE_FACTOR` is 1) and applies $y = xW + b$. The weight is stored as `(in_features, out_features)`, so a batch `x` of shape `(B, in_features)` multiplies it directly. The bias starts at zero; there is no variance argument for a random bias, and a zero bias adds nothing to the sum the rule tracks.
 
-```python
-import math
+{{< include _listings/03_layers/Linear.qmd >}}
 
-class Linear(Layer):
-    """y = x @ W + b, with W drawn at the scale that keeps variance steady."""
-    def __init__(self, in_features, out_features, bias=True, gain=2.0):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        std = math.sqrt(gain / in_features)        # gain 2 for ReLU, 1 otherwise
-        w = rng.standard_normal((in_features, out_features)) * std
-        self.weight = Tensor(w, requires_grad=True)
-        self.bias = Tensor(np.zeros(out_features), requires_grad=True) if bias else None
+Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the variance halve once per layer rather than hold steady, which is the gap Kaiming's gain of 2 closes; at the depths in this book the difference is harmless, the constant is one line to change, and the first exercise asks you to change it. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and defaults to a smaller scale than any rule in the table; the bridge section takes up both. Notice also that the weights are created without `requires_grad`. A layer does not decide whether it is being trained; Chapter 8's trainer flags every parameter it is given, and until then a `Linear` is just a function with some numbers in it.
 
-    def forward(self, x):
-        out = x.data @ self.weight.data
-        if self.bias is not None:
-            out = out + self.bias.data
-        return Tensor(out)
-```
-
-Notice that `std` comes from `in_features` and a gain the caller can set. The default of 2 assumes a ReLU follows; a layer feeding nothing, like the last one in a classifier, can pass `gain=1.0`. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and defaults to a smaller scale than any rule in @tbl-init-schemes; the bridge section takes up both. The output is a fresh `Tensor` that does not remember where it came from. Chapter 6 changes that, making each output record its inputs so gradients can flow back through the same tree.
-
-Notice also the addition of `self.bias`. The bias has shape `(out_features,)`, while the product `x.data @ self.weight.data` has shape `(B, out_features)`. Adding them relies on the broadcasting mechanics established in Chapter 1: the runtime virtually stretches the bias vector across all $B$ batch items without allocating extra memory. This forward efficiency creates an obligation for Chapter 6: because the bias influenced every sample in the batch, the backward engine will have to reduce those gradients across the batch to keep parameter shapes consistent.
+The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor` built by an operation object, so once Chapter 6 teaches `apply` to record what it did, this exact code will produce a gradient for `weight` and `bias` with no change. The addition of `self.bias` relies on the broadcasting from Chapter 1: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and the runtime stretches the bias across all $B$ rows through a zero stride without allocating. That forward efficiency creates an obligation for Chapter 6. Because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
 
 ### Dropout
 
-`Dropout` is the layer that gives the mode flag its job. GPT-2 applies it during training to the embeddings, the attention weights, and both residual updates in every block, and a trained model is used far more often than it is trained. A deployed classifier runs its forward pass on every request, and the generation loop in Chapter 18 runs it once per token.
+`Dropout` is the layer that gives the `training` argument its job. GPT-2 applies it during training to the embeddings, the attention weights, and both residual updates in every block, and a trained model is used far more often than it is trained. A deployed classifier runs its forward pass on every request, and the generation loop in Chapter 18 runs it once per token.
 
 The Idea mentioned the original fix, multiplying every activation by $1 - p$ at use time. Count what that costs. It is one extra pass over every activation at every dropout site on every request, forever, to correct for something that happened during training. On a hidden layer of width 4096 with a batch of 16 it is 65,536 multiplies per site per call, 256 KB read and written again, and it never stops.
 
 Inverted dropout moves the correction to training, where we are already drawing a mask and touching every element anyway. Divide each surviving activation by $1 - p$ then, and the use-time path has nothing left to do. So `Dropout` owns no parameters, only the probability `p`. The mask is drawn fresh on every training call and folded together with the $1 / (1 - p)$ scale, so each mask entry is either 0 or $1 / (1 - p)$ and one multiply does both jobs.
 
-```python
-class Dropout(Layer):
-    """Zero each element with probability p while training; do nothing in eval."""
-    def __init__(self, p=0.5):
-        super().__init__()
-        if not 0.0 <= p < 1.0:
-            raise ValueError(f"p must be in [0, 1), got {p}")
-        self.p = p
+{{< include _listings/03_layers/Dropout.qmd >}}
 
-    def forward(self, x):
-        if not self.training or self.p == 0.0:
-            return x                                # identity: no mask, no scaling
-        keep = 1.0 - self.p
-        mask = (rng.random(x.shape) < keep) / keep  # each entry is 0 or 1/keep
-        return Tensor(x.data * mask)
-```
-
-The first line of `forward` is the eval path in its entirety. It returns the input object itself, not a copy; no mask, no scaling, no allocation. PyTorch's dropout takes the same shortcut, and its compiler drops the layer from the graph altogether in eval mode.
+The two helpers split the decision from the draw, so each can be tested alone. `_should_apply_dropout` is the use-time path in its entirety: when `training` is false, or `p` is zero, `forward` returns the input object itself, not a copy; no mask, no scaling, no allocation. On the training path the multiply is `x * mask`, a tensor operation rather than an array one, so the mask becomes part of the graph that Chapter 6 walks and the gradient of a dropped element is zero the way it should be. PyTorch's dropout takes the same identity shortcut when the model is in eval mode, and its compiler drops the layer from the graph altogether.
 
 ### Sequential
 
-Milestone I's digit classifier is `Linear`, `ReLU`, `Linear`. Chapter 13's `TinyGPT` is an embedding, a list of blocks, a final norm, and an output projection, and each block is itself a small stack. A framework needs a container that turns a list of layers into one layer, so that the trainer can call `parameters()` and `eval()` on the root and never learn what is inside.
+Milestone I's digit classifier is `Linear`, `ReLU`, `Linear`. Chapter 13's `TinyGPT` is an embedding, a list of blocks, a final norm, and an output projection, and each block is itself a small stack. A framework needs a container that turns a list of layers into one layer, so that the trainer can call `parameters()` on the root and never learn what is inside.
 
-The naive container writes the walks again. It gives itself a `parameters()` that loops over its children and concatenates their lists, and a `train()` that loops and flips. That works until containers nest. A block inside a stack inside a model has the walk written three times, each copy is another place to forget a child, and every new kind of container repeats the mistake.
+{{< include _listings/03_layers/Sequential.qmd >}}
 
-Our base class already looks inside lists, so a container needs no bookkeeping at all. `Sequential` stores its children in a list and runs them in order, and that is the whole class.
-
-```python
-class Sequential(Layer):
-    """Run child layers in order. The base class finds their parameters."""
-    def __init__(self, *layers):
-        super().__init__()
-        self.layers = list(layers)
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-```
-
-Notice what `Sequential` does not override. `parameters()` and `train()` come from `Layer` unchanged, so a container is nothing more than a layer whose only attribute is other layers, and a `Sequential` inside a `Sequential` costs no new code. PyTorch's `nn.Sequential` is the same idea, though it registers each child by hand, because a bare Python list is invisible to `nn.Module`. Building a small model shows the tree doing its two jobs.
+`Sequential` runs its children in order and concatenates their parameter lists, which is the direct design from the base class applied one level up. The one awkward line is the `try`. A `Dropout` needs the `training` argument and a `Linear` does not accept it, so the container offers the flag first and falls back to a plain call when a layer refuses it. PyTorch avoids the question by storing the flag on every module, at the cost of the registration machinery the production section describes. Building a small model shows the container doing its two jobs.
 
 ```python
+from tinytorch.core.layers import Linear, Dropout, Sequential
+
 model = Sequential(Linear(4, 3), Dropout(0.5), Linear(3, 2))
 print([p.shape for p in model.parameters()])
-model.eval()
-print([layer.training for layer in model.layers])
-model.train()
+print(model)
 ```
 
 ```
 [(4, 3), (3,), (3, 2), (2,)]
-[False, False, False]
+Sequential(Linear(in_features=4, out_features=3, bias=True), Dropout(p=0.5), Linear(in_features=3, out_features=2, bias=True))
 ```
 
-Four parameter tensors came back, in attribute order within each layer and layer order within the container, and `Dropout` contributed none. One `eval()` call on the root reached all three children. In practice a `ReLU` from Chapter 2 sits between the two `Linear` layers; it is left out here so the trace below stays short, and Milestone I builds the full version.
+Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from Chapter 2 sits between the two `Linear` layers; it is left out here so the trace below stays short, and Milestone I builds the full version.
 
 ---
 
@@ -300,6 +191,8 @@ We trace that same model with weights chosen by hand so every number can be chec
 Now the forward pass. We overwrite the random weights with small integers and halves, feed one input row, and assume a particular dropout draw, keep-drop-keep, so the training path is deterministic.
 
 ```python
+from tinytorch.core.tensor import Tensor
+
 lin1, drop, lin2 = model.layers
 lin1.weight.data[:] = [[0.5, -1.0,  0.0],
                        [0.5,  0.5,  1.0],
@@ -315,13 +208,12 @@ x = Tensor([[1.0, 2.0, -1.0, 0.5]])
 h1 = lin1(x)
 print("h1      ", h1.data)
 
-mask = np.array([[2.0, 0.0, 2.0]])          # the draw we assume: keep, drop, keep
-h_drop = Tensor(h1.data * mask)
+mask = Tensor([[2.0, 0.0, 2.0]])            # the draw we assume: keep, drop, keep
+h_drop = h1 * mask
 print("h_drop  ", h_drop.data)
 print("y_train ", lin2(h_drop).data)
 
-model.eval()
-print("y_eval  ", model(x).data)
+print("y_eval  ", model(x, training=False).data)
 ```
 
 ```
@@ -331,26 +223,26 @@ y_train  [[5. 2.]]
 y_eval   [[4.5 3.5]]
 ```
 
-Check the first hidden unit by hand. Its column of `W1` is $[0.5, 0.5, 1.0, 0.0]$, so $x W_1$ gives $0.5 + 1.0 - 1.0 + 0 = 0.5$, and adding the bias $0.5$ makes $1.0$. The other two columns give $2.0$ and $3.0$ the same way. The mask keeps the first and third units and doubles them, since $1 / (1 - 0.5) = 2$. @tbl-dropout-trace follows both modes through the second layer.
+Check the first hidden unit by hand. Its column of `W1` is $[0.5, 0.5, 1.0, 0.0]$, so $x W_1$ gives $0.5 + 1.0 - 1.0 + 0 = 0.5$, and adding the bias $0.5$ makes $1.0$. The other two columns give $2.0$ and $3.0$ the same way. The mask keeps the first and third units and doubles them, since $1 / (1 - 0.5) = 2$. @tbl-dropout-trace follows both paths through the second layer.
 
-| Stage | Training mode | Eval mode |
+| Stage | `training=True` | `training=False` |
 | :--- | :--- | :--- |
 | Input $x$ | $[1.0, 2.0, -1.0, 0.5]$ | $[1.0, 2.0, -1.0, 0.5]$ |
 | $h_1 = xW_1 + b_1$ | $[1.0, 2.0, 3.0]$ | $[1.0, 2.0, 3.0]$ |
 | Dropout, $p = 0.5$ | mask $[2, 0, 2]$ gives $[2.0, 0.0, 6.0]$ | identity, $[1.0, 2.0, 3.0]$ |
 | $y = h W_2 + b_2$ | $[5.0, 2.0]$ | $[4.5, 3.5]$ |
 
-: The same input through the same weights in the two modes. The training output depends on the mask; the eval output does not. {#tbl-dropout-trace tbl-colwidths="[24,40,36]"}
+: The same input through the same weights on the two paths. The training output depends on the mask; the use-time output does not. {#tbl-dropout-trace tbl-colwidths="[24,40,36]"}
 
 The two outputs differ, as they should; training saw a noisy version of the network. The claim from The Idea is that they agree on average. With three units and $p = 0.5$ there are only eight equally likely masks, so we can average over all of them rather than trust the algebra.
 
 ```python
 import itertools
+import numpy as np
 
 outputs = []
 for bits in itertools.product([0.0, 2.0], repeat=3):   # all 8 masks, equally likely
-    h_masked = Tensor(h1.data * np.array([bits]))
-    outputs.append(lin2(h_masked).data)
+    outputs.append(lin2(h1 * Tensor([list(bits)])).data)
 print("mean of y_train over all masks:", np.mean(outputs, axis=0))
 ```
 
@@ -358,36 +250,37 @@ print("mean of y_train over all masks:", np.mean(outputs, axis=0))
 mean of y_train over all masks: [[4.5 3.5]]
 ```
 
-The average of the training outputs is the eval output to the last digit. That is inverted dropout's whole contract, and it is why `model.eval()` can be a single flag flip rather than a rescaling pass over the network.
+The average of the training outputs is the use-time output to the last digit. That is inverted dropout's whole contract, and it is why `training=False` can be a single skipped multiply rather than a rescaling pass over the network.
 
 ---
 
 ## From TinyTorch to Production
 
-PyTorch's `nn.Module` is this chapter's `Layer` with the same tree walk made explicit. Assigning an `nn.Parameter` or a child module to an attribute goes through `Module.__setattr__`, which files it into one of two ordered dictionaries, `_parameters` and `_modules`. `parameters()`, `named_parameters()`, `state_dict()` (the dictionary of named tensors you save to disk), and `train()`/`eval()` all walk those two dictionaries recursively. The one place the design differs from ours is instructive. A plain Python list of modules is *not* registered, because `__setattr__` only inspects the object being assigned, not its contents. That is why `nn.ModuleList` and `nn.Sequential` exist, and why a model that stores its blocks in a bare list trains only the parameters it happened to register elsewhere. Our `_child_layers` looks inside lists precisely to avoid that trap in a teaching implementation; production chose the explicit container so the registration rule stays simple.
+PyTorch's `nn.Module` automates the two things Module 03 does by hand. Assigning an `nn.Parameter` or a child module to an attribute goes through `Module.__setattr__`, which files it into one of two ordered dictionaries, `_parameters` and `_modules`, so no layer writes a `parameters()` list and the silent failure of a forgotten entry cannot happen. `parameters()`, `named_parameters()`, `state_dict()` (the dictionary of named tensors you save to disk), and `train()`/`eval()` all walk those two dictionaries recursively, and the mode lives on the module as `self.training` rather than traveling with the call. The automation has an edge worth knowing. A plain Python list of modules is *not* registered, because `__setattr__` only inspects the object being assigned, not its contents. That is why `nn.ModuleList` and `nn.Sequential` exist, and why a model that stores its blocks in a bare list trains only the parameters it happened to register elsewhere. Module 03's explicit lists have no such edge, because nothing is inferred; the cost is the one The Problem named.
 
 `nn.Linear` computes the same $xW + b$ but stores the weight as `(out_features, in_features)` and calls `F.linear`, which evaluates $x W^{T} + b$. The transposed layout puts each output unit's weights next to each other in memory, and the matrix library underneath, cuBLAS on NVIDIA GPUs and a CPU BLAS library otherwise, accepts a transpose flag on its GEMM call, so no copy is made. Whichever layout a framework picks, the number of multiply-adds is identical; the choice is about which dimension is contiguous. The default initializer is also worth knowing. `nn.Linear` calls `kaiming_uniform_` with an argument that works out to a uniform bound of $1 / \sqrt{D_{\text{in}}}$, a weight variance of $1 / (3 D_{\text{in}})$, which is a third of the LeCun scale in @tbl-init-schemes and a sixth of the ReLU gain. It is a documented historical accident, and it is why serious training code often re-initializes its layers explicitly with `torch.nn.init`.
 
-Dropout in PyTorch reads the same `self.training` flag and takes the same identity shortcut in eval mode. On a GPU the training path is one fused kernel that draws the mask, scales, and multiplies in a single pass over the tensor, and the mask is kept as one byte per element for the backward pass. In eval mode `torch.compile` removes the layer from the graph entirely, so a deployed model pays nothing for the dropout it trained with, which is the payoff of putting the $1/(1-p)$ on the training side.
+Dropout in PyTorch reads the module's `self.training` flag, flipped by `model.eval()`, where Module 03 reads the argument the caller passed, and it takes the same identity shortcut. On a GPU the training path is one fused kernel that draws the mask, scales, and multiplies in a single pass over the tensor, and the mask is kept as one byte per element for the backward pass. In eval mode `torch.compile` removes the layer from the graph entirely, so a deployed model pays nothing for the dropout it trained with, which is the payoff of putting the $1/(1-p)$ on the training side.
 
-JAX and Flax make the opposite design choice about where parameters live. A Flax module holds no tensors at all. `model.init(key, x)` returns the parameters as a nested dictionary (a **pytree**, a tree of arrays that JAX functions can walk), and every forward call is `model.apply(params, x)` with the parameters passed in. Randomness is explicit too. Initialization takes a random key, and dropout requires both a key and a `deterministic` flag at call time. The tree walk is the same idea as ours, but performed on data rather than on attributes of an object, which is what lets JAX transform whole training steps as pure functions.
+JAX and Flax make the opposite design choice about where parameters live. A Flax module holds no tensors at all. `model.init(key, x)` returns the parameters as a nested dictionary (a **pytree**, a tree of arrays that JAX functions can walk), and every forward call is `model.apply(params, x)` with the parameters passed in. Randomness is explicit too. Initialization takes a random key, and dropout requires both a key and a `deterministic` flag at call time, which is Module 03's `training` argument under another name. The parameter tree is the same idea as ours, but carried as data rather than held by objects, which is what lets JAX transform whole training steps as pure functions.
 
 ::: {#nbk-layers-parameter-memory-budget .callout-notebook title="What one production-sized Linear layer weighs"}
 Napkin math, not a measurement. A `Linear(4096, 4096)` in float32 holds $4096 \times 4096 \times 4 = 67.1\text{ MB}$ of weights and $16\text{ KB}$ of bias, so the bias is under $0.03\%$ of the layer's memory. Its Kaiming standard deviation is $\sqrt{2 / 4096} \approx 0.022$; initializing at $\sigma = 0.05$ instead inflates the variance by $(0.05/0.022)^2 \approx 5\times$ per layer, and twenty such layers compound to about $10^{14}$. A forward pass on a batch of 16 costs $2 \times 16 \times 4096 \times 4096 \approx 537$ million multiply-adds, but streams the full 67 MB of weights through the processor once per batch regardless of batch size, which is why small-batch inference is limited by memory traffic rather than arithmetic.
 :::
 
-What carries over unchanged is the mental model. Parameters are discoverable because they are attributes on a tree, initialization scale goes as $1 / \sqrt{\text{fan-in}}$ with a gain for the non-linearity, and dropout's scaling lives on the training side so eval is free. What to look for in your own work follows directly. A model whose loss never moves for one block often has that block in a bare list. `NaN` on the first batch usually means the wrong initialization scale, or a gain that does not match the activation. Worse scores in deployment than in validation usually mean the model was never put in `eval()` mode.
+What carries over unchanged is the mental model. Parameters are collected by asking each layer for its own list and letting containers concatenate, initialization scale goes as $1 / \sqrt{\text{fan-in}}$ with a gain for the non-linearity, and dropout's scaling lives on the training side so eval is free. What to look for in your own work follows directly. A model whose loss never moves for one block often has that block in a bare list. `NaN` on the first batch usually means the wrong initialization scale, or a gain that does not match the activation. Worse scores in deployment than in validation usually mean the model is still being called with `training=True`.
 
 ---
 
 ## Summary
 
-You built the layer abstraction: a `Layer` base class whose `parameters()` and `train()` walk the object's own attributes, a `Linear` that allocates its weight at the $\sqrt{\text{gain} / D_{\text{in}}}$ scale so signal variance holds steady across depth, an inverted `Dropout` whose eval path is the identity, and a `Sequential` that composes them without any registration code. The invariant to keep is the variance rule, $\text{Var}(y) = D_{\text{in}} \, \text{Var}(x) \, \text{Var}(w)$, because every initialization scheme is a way of setting that product to 1, and the trace showed that inverted dropout's training output equals its eval output on average. Chapter 4 takes for granted that a `Sequential` model turns a batch of inputs into a row of raw, unbounded scores per example and asks how to turn those scores into one number that says how wrong they are.
+Module 03 builds the layer abstraction: a `Layer` base class that fixes the calling contract, a `Linear` that lists its own two parameters and allocates its weight at the $\sqrt{1 / D_{\text{in}}}$ scale so signal variance survives depth, an inverted `Dropout` whose use-time path is the identity, and a `Sequential` that concatenates its children's lists and passes `training` down to the layers that want it. The invariant to keep is the variance rule, $\text{Var}(y) = D_{\text{in}} \, \text{Var}(x) \, \text{Var}(w)$, because every initialization scheme is a way of setting that product to 1, and the trace showed that inverted dropout's training output equals its eval output on average. Chapter 4 takes for granted that a `Sequential` model turns a batch of inputs into a row of raw, unbounded scores per example and asks how to turn those scores into one number that says how wrong they are.
 
 ---
 
 ## Exercises
 
-1. **Layer normalization.** Implement `LayerNorm(features, eps=1e-5)` as a `Layer` that, for each row of its input, subtracts the row's mean and divides by the square root of its variance plus `eps`, then multiplies by a learned per-feature scale and adds a learned per-feature shift. What are its parameters, and what does `model.parameters()` return for `Sequential(Linear(4, 3), LayerNorm(3))`?
-2. **Fan-out initialization.** Some networks scale weights by $2 / D_{\text{out}}$ instead of $2 / D_{\text{in}}$. Using the variance rule from The Idea, say what each choice holds constant, the forward signal or the backward gradient, and explain why for a square layer ($D_{\text{in}} = D_{\text{out}}$) the two agree.
-3. **Weight memory.** A language model's feed-forward block contains `Linear(4096, 16384)`. Compute its parameter memory in float32, then the memory of the activations it produces for a batch of 16 rows. Which of the two dominates, and by how much?
+1. **Kaiming gain.** `Linear` uses LeCun's scale. Add a `gain` argument so that `Linear(4, 3, gain=2.0)` draws at the Kaiming scale from @tbl-init-schemes, rerun the variance loop from The Problem with a 15-layer ReLU stack under both scales, and report the variance at layer 15 for each.
+2. **Layer normalization.** Implement `LayerNorm(features, eps=1e-5)` as a `Layer` that, for each row of its input, subtracts the row's mean and divides by the square root of its variance plus `eps`, then multiplies by a learned per-feature scale and adds a learned per-feature shift. What are its parameters, and what does `model.parameters()` return for `Sequential(Linear(4, 3), LayerNorm(3))`?
+3. **Fan-out initialization.** Some networks scale weights by $2 / D_{\text{out}}$ instead of $2 / D_{\text{in}}$. Using the variance rule from The Idea, say what each choice holds constant, the forward signal or the backward gradient, and explain why for a square layer ($D_{\text{in}} = D_{\text{out}}$) the two agree.
+4. **Weight memory.** A language model's feed-forward block contains `Linear(4096, 16384)`. Compute its parameter memory in float32, then the memory of the activations it produces for a batch of 16 rows. Which of the two dominates, and by how much?
