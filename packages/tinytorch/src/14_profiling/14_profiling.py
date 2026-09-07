@@ -236,10 +236,10 @@ Latency measurement is tricky because systems have variance, warmup effects, and
 ```
 Measurement Protocol:
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                │
-│ 2. Timed runs (100+)  → Statistical significance              │
-│ 3. Outlier handling   → Use median, not mean                  │
-│ 4. Memory cleanup     → Prevent contamination                 │
+│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                 │
+│ 2. Timed runs (100+)  → Statistical significance               │
+│ 3. Outlier handling   → Use median, not mean                   │
+│ 4. Memory cleanup     → Prevent contamination                  │
 └────────────────────────────────────────────────────────────────┘
 
 Timeline:
@@ -261,17 +261,17 @@ Now let's implement our profiler step by step. We'll start with the foundation a
 Profiler Class Structure:
 ┌─────────────────────────────────────────────────────────────┐
 │ Core Measurement Methods:                                   │
-│ • count_parameters() → Model size analysis                 │
-│ • count_flops() → Computational cost estimation            │
-│ • measure_memory() → Memory usage tracking                 │
-│ • measure_latency() → Performance timing                   │
+│ • count_parameters() → Model size analysis                  │
+│ • count_flops() → Computational cost estimation             │
+│ • measure_memory() → Memory usage tracking                  │
+│ • measure_latency() → Performance timing                    │
 ├─────────────────────────────────────────────────────────────┤
 │ Advanced Profiling Methods:                                 │
-│ • profile_layer() → Layer-wise analysis                    │
-│ • profile_forward_pass() → Complete forward analysis       │
-│ • profile_backward_pass() → Training analysis              │
+│ • profile_layer() → Layer-wise analysis                     │
+│ • profile_forward_pass() → Complete forward analysis        │
+│ • profile_backward_pass() → Training analysis               │
 ├─────────────────────────────────────────────────────────────┤
-│ Integration:                                                 │
+│ Integration:                                                │
 │ All methods work together for comprehensive insights        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1521,20 +1521,20 @@ FLOPs measure the computational work required for model operations. Unlike laten
 Linear Layer FLOP Breakdown:
 ┌────────────────────────────────────────────────────────────────┐
 │ Input (batch=32, features=768) × Weight (768, 3072) + Bias     │
-│                         ↓                                       │
+│                         ↓                                      │
 │ Matrix Multiplication: 32 × 768 × 3072 × 2 = 150,994,944 FLOPs │
 │ Bias Addition:         32 × 3072 × 1      =      98,304 FLOPs  │
-│                         ↓                                       │
+│                         ↓                                      │
 │ Total FLOPs:                                 151,093,248 FLOPs │
 └────────────────────────────────────────────────────────────────┘
 
 Convolution FLOP Breakdown:
 ┌────────────────────────────────────────────────────────────────┐
 │ Input (batch=1, channels=3, H=224, W=224)                      │
-│ Kernel (out=64, in=3, kH=7, kW=7)                             │
-│                         ↓                                       │
-│ Output size: (224×224) → (112×112) with stride=2              │
-│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs    │
+│ Kernel (out=64, in=3, kH=7, kW=7)                              │
+│                         ↓                                      │
+│ Output size: (224×224) → (112×112) with stride=2               │
+│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -2058,9 +2058,9 @@ Training requires both forward and backward passes. The backward pass typically 
 Training Memory Timeline:
 ┌────────────────────────────────────────────────────────────────┐
 │ Forward Pass:   [Parameters] + [Activations]                   │
-│                      ↓                                          │
+│                      ↓                                         │
 │ Backward Pass:  [Parameters] + [Activations] + [Gradients]     │
-│                      ↓                                          │
+│                      ↓                                         │
 │ Optimizer:      [Parameters] + [Gradients] + [Optimizer State] │
 └────────────────────────────────────────────────────────────────┘
 
@@ -2449,10 +2449,10 @@ Operation Types and Their Characteristics:
 
 Optimization Strategy:
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Profile first      → Identify bottlenecks                  │
-│ 2. Compute-bound ops  → Algorithmic improvements              │
-│ 3. Memory-bound ops   → Data movement optimization            │
-│ 4. Measure again      → Verify improvements                   │
+│ 1. Profile first      → Identify bottlenecks                   │
+│ 2. Compute-bound ops  → Algorithmic improvements               │
+│ 3. Memory-bound ops   → Data movement optimization             │
+│ 4. Measure again      → Verify improvements                    │
 └────────────────────────────────────────────────────────────────┘
 ```
 """

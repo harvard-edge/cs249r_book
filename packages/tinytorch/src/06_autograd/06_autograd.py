@@ -348,26 +348,26 @@ NumPy automatically broadcasts tensors of different shapes during forward operat
 Forward Pass (Broadcasting):
 ┌─────────────────────────────────────────────────────────────┐
 │ Example: Adding bias to batched data                        │
-│                                                              │
+│                                                             │
 │ x:    (32, 128)  ← Batch of 32 samples, 128 features        │
 │ bias: (128,)     ← Just 128 features (no batch dimension)   │
-│                                                              │
-│ Forward: y = x + bias                                        │
+│                                                             │
+│ Forward: y = x + bias                                       │
 │          NumPy broadcasts bias from (128,) to (32, 128)     │
-│          Result shape: (32, 128)                             │
+│          Result shape: (32, 128)                            │
 └─────────────────────────────────────────────────────────────┘
 
 Backward Pass (Gradient Reduction):
 ┌─────────────────────────────────────────────────────────────┐
 │ grad_output: (32, 128)  ← Gradient from upstream            │
-│                                                              │
+│                                                             │
 │ grad_x:    (32, 128)    ← Same shape as x ✓                 │
 │ grad_bias: (128,)       ← Must match bias shape!            │
-│                                                              │
+│                                                             │
 │ Problem: grad_output is (32, 128) but bias is (128,)        │
 │ Solution: Sum gradients over batch dimension                │
 │           grad_bias = grad_output.sum(axis=0)               │
-│           Result: (128,) ✓                                   │
+│           Result: (128,) ✓                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 

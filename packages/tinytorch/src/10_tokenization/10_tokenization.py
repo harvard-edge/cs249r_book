@@ -191,7 +191,7 @@ Different tokenization approaches make different trade-offs between vocabulary s
 │  │   2 → 'e'                                              │  │
 │  │   3 → 'l'                                              │  │
 │  │   3 → 'l'                                              │  │
-│  │   4 → 'o'                                              │  |
+│  │   4 → 'o'                                              │  │
 │  │                                                        │  │
 │  │  Result: "hello"                                       │  │
 │  └────────────────────────────────────────────────────────┘  │
@@ -730,14 +730,14 @@ appears across all words, weighted by word frequency. This tells us which pair t
 Count Pairs Across All Words (weighted by frequency):
 
   word_tokens:                     word_freq:
-  "hello" → ['h','e','l','l','o</w>']    freq=3
+  "hello" → ['h','e','l','l','o</w>']    freq=2
   "help"  → ['h','e','l','p</w>']        freq=1
 
   Pair counting (freq-weighted):
-    ('h','e'):  3+1 = 4   ← appears in both words
-    ('e','l'):  3+1 = 4   ← appears in both words
-    ('l','l'):  3   = 3   ← only in "hello"
-    ('l','o</w>'): 3 = 3  ← only in "hello"
+    ('h','e'):  2+1 = 3   ← appears in both words
+    ('e','l'):  2+1 = 3   ← appears in both words
+    ('l','l'):  2   = 2   ← only in "hello"
+    ('l','o</w>'): 2 = 2  ← only in "hello"
     ('l','p</w>'): 1 = 1  ← only in "help"
 ```
 """
@@ -1325,14 +1325,14 @@ BPE provides a balance between vocabulary size and sequence length. By learning 
 ```
 BPE Merging Visualization:
 
-Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n','</w>']
+Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n</w>']
                                                        ↓ Merge frequent pairs
-Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n','</w>']
-Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n','</w>']
-Step 3:   ('io','n') is frequent → ['to','k','e','n','io','z','a','t','ion','</w>']
-Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion','</w>']
+Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n</w>']
+Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n</w>']
+Step 3:   ('io','n</w>') is frequent → ['to','k','e','n','io','z','a','t','ion</w>']
+Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion</w>']
                                                        ↓ Continue merging...
-Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
+Final:    "tokenization" → ['token','ization</w>']  # 2 tokens vs 12 characters!
 ```
 
 **Key insights**:

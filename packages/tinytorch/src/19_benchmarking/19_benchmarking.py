@@ -3672,15 +3672,15 @@ optimization comparison workflow.
 
 ```
 analyze_optimization_techniques Pipeline:
-┌────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│ Run Full   │ ──> │ _collect_base_metrics│ ──> │ For each opt model: │
-│ Benchmark  │     │ (extract baseline)   │     │ _calculate_improvements│
-└────────────┘     └─────────────────────┘     └─────────────────────┘
-                                                          ↓
-                                               ┌─────────────────────┐
-                                               │_generate_recommendations│
-                                               │ (deploy guidance)    │
-                                               └─────────────────────┘
+┌────────────┐     ┌────────────────────────┐     ┌──────────────────────────┐
+│ Run Full   │ ──> │ _collect_base_metrics  │ ──> │ For each opt model:      │
+│ Benchmark  │     │ (extract baseline)     │     │ _calculate_improvements  │
+└────────────┘     └────────────────────────┘     └──────────────────────────┘
+                                                              ↓
+                                                  ┌──────────────────────────┐
+                                                  │ _generate_recommendations│
+                                                  │ (deploy guidance)        │
+                                                  └──────────────────────────┘
 ```
 """
 

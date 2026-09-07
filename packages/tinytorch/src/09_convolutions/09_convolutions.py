@@ -168,14 +168,14 @@ Convolution achieves dramatic parameter reduction (more than 1000×!) while pres
 Convolution sounds complex, but it's just a "sliding window dot product".
 Let's see exactly how it works:
 
-<pre>
+```
 Step 1: Position the kernel over input
-Input:          Kernel:
-┌─────────┐     ┌─────┐
-│ <span style="color:blue">1 2</span> 3 4 │     │ 1 0 │  ← If we place kernel at position (0,0)
-│ <span style="color:blue">5 6</span> 7 8 │  ×  │ 0 1 │
-│ 9 0 1 2 │     └─────┘
-└─────────┘
+Input:            Kernel:
+┌───────────┐     ┌─────┐
+│ [1 2] 3 4 │     │ 1 0 │  ← Kernel placed at position (0,0)
+│ [5 6] 7 8 │  ×  │ 0 1 │    covers the bracketed 2×2 patch
+│  9 0 1 2  │     └─────┘
+└───────────┘
 
 Step 2: Multiply corresponding elements
 Overlap:        Computation:
@@ -203,7 +203,7 @@ Final Output:  ┌────────┐
                │ 7 9 11 │
                │ 5 7 9  │
                └────────┘
-</pre>
+```
 
 ### The Mathematical Formula
 
@@ -2931,7 +2931,7 @@ CNN Approach:                    Dense Approach:
 │ Conv2: 16→32, 3×3  │          │ Params: 1.57M      │
 │ Params: 4,640      │          ├────────────────────┤
 ├────────────────────┤          │ Dense: 512→10      │
-│ Dense: 2048→10     │          │ Params: 5,120      │
+│ Dense: 2048→10     │          │ Params: 5,130      │
 │ Params: 20,490     │          └────────────────────┘
 └────────────────────┘          Total: 1.58M params
 Total: 25,578 params

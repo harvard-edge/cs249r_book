@@ -122,7 +122,7 @@ Consider the tokens from our tokenizer: [1, 42, 7] - how do we turn these discre
 │           │         Each ID → vector of learned features        │
 │           │                                                     │
 │           ├─ Step 2: Add positional information                 │
-│           │         Same word at different positions → different│
+│           │         Same word, different position → new vector  │
 │           │                                                     │
 │           ├─ Step 3: Create position-aware representations      │
 │           │         Ready for attention mechanisms              │
@@ -1142,7 +1142,7 @@ The production embedding layer that powers modern transformers combines multiple
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Representations│
+│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Vectors      │
 ├───────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
 │ INPUT: Token IDs [1, 42, 7, 99]                                           │

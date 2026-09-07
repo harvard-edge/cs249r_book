@@ -170,10 +170,11 @@ Momentum in optimization works like momentum in physics. A ball rolling down a h
 
 ```
 Narrow valley problem:            Momentum solution:
-|\•➡️ ⬅️ •/|                        |\•      /|
-| \     / | ← ping-pong            | \↘️    / | ← smoother
-|  \   /  |   motion               |  \•➡️•/  |   descent
-|    ●    |                        |     ●    |
+|\  •→  ←•  /|                    |\  •        /|
+| \   ↕    / |  ← ping-pong       | \   ↘     / |  ← smoother
+|  \  •   /  |    motion          |  \   •→• /  |    descent
+|   \    /   |                    |   \     /   |
+|     ●      |                    |     ●      |
 ```
 
 **SGD with Momentum Formula:**
@@ -514,9 +515,9 @@ Loss Surface (side view, imagine plane):
      | /  |\ gradient points uphill
      |/   | \
      ●----|--\--→ parameter
-    / \  •   \ ↘️ SGD steps downhill (opposite to gradient)
+    / \  •   \ ↘ SGD steps downhill (opposite to gradient)
    /   \         
-  /     \   ⭐ ← goal (minimum loss)     
+  /     \   ★ ← goal (minimum loss)     
  ↙       \
  other
 parameter
@@ -535,7 +536,7 @@ Narrow valley (side view, two different gradients shown as planes):
      \ / |     \ /
       \  •→ ←•  \
       /\     |  /\
-     /  \ ⭐ | /  \
+     /  \ ★  | /  \
     /    \|  |/    \
     -------+--+-------  
            |  |
@@ -815,7 +816,7 @@ Parameter Sensitivity Landscape:
     first_layer_weight              output_weight
            ↑                               ↑
            |                               |
-           |  🐌 gentle slope              |  ⛰️ steep cliff
+           |  gentle slope                 |  steep cliff
            |  (needs big steps)            |  (needs tiny steps)
            |                               |
         ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→

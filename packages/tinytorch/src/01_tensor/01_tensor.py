@@ -1340,13 +1340,13 @@ Common Linear Algebra Usage:
 
 ```
 Operation Performance (for 1000×1000 matrix):
-┌─────────────────┬──────────────┬─────────────────┬─────────────────┐
-│ Operation       │ Time         │ Memory Access   │ Cache Behavior  │
-├─────────────────┼──────────────┼─────────────────┼─────────────────┤
-│ reshape()       │ ~0.001 ms    │ No data copy    │ No cache impact │
+┌─────────────────┬──────────────┬─────────────────────┬─────────────────┐
+│ Operation       │ Time         │ Memory Access       │ Cache Behavior  │
+├─────────────────┼──────────────┼─────────────────────┼─────────────────┤
+│ reshape()       │ ~0.001 ms    │ No data copy        │ No cache impact │
 │ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
-│ view() (future) │ ~0.001 ms    │ No data copy    │ No cache impact │
-└─────────────────┴──────────────┴─────────────────┴─────────────────┘
+│ view() (future) │ ~0.001 ms    │ No data copy        │ No cache impact │
+└─────────────────┴──────────────┴─────────────────────┴─────────────────┘
 
 Why transpose() is slower:
 - Non-contiguous layout: same values, different stride interpretation
