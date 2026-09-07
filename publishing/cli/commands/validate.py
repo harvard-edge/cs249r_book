@@ -4949,6 +4949,7 @@ class ValidateCommand:
             self.config_manager.book_dir / "contents" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol1" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol2" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "contents" / "vol4" / "parts" / "summaries.yml",
         ]
 
         try:

@@ -65,25 +65,81 @@ When $f_{\text{compute}}$ drops below 0.5, the fleet spends more time on communi
 
 ## Intersection Landscape {#sec-appdx-c3-taxonomy-intersection-landscape}
 
-Like D·A·M, the C$^3$ axes interact at their boundaries. Production bottlenecks often sit at an intersection where two axes compound.
+The opening chapter uses @fig-c3-taxonomy to establish the co-design landscape across the node substrate, networking backbone, and orchestration layer. In production, bottlenecks rarely present as a single isolated axis; they arise at the boundaries where two or more dimensions compound. Diagnosing these compound bottlenecks requires mapping the symptoms to the governing intersection before choosing an intervention.
+
+@Tbl-c3-intersections expands the three pure dimensions, the three pairwise boundaries, and the central convergence into concrete engineering techniques and their primary book chapters.
+
+| **Zone**                                                                       | **Name**                     | **Key Techniques**                                                                                             | **Book Coverage**                                                               |
+|:-------------------------------------------------------------------------------|:-----------------------------|:---------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|
+| **Compute ($C_1$)**                                                            | The Node Substrate           | Operator fusion, mixed precision (FP8/BF16), MFU optimization, local NVMe staging                              | @sec-compute-infrastructure, @sec-data-storage, @sec-performance-engineering    |
+| **Communication ($C_2$)**                                                      | The Networking Backbone      | Rail-optimized Clos topologies, RoCEv2/InfiniBand fabrics, collective algorithms                               | @sec-network-fabrics, @sec-collective-communication                             |
+| **Coordination ($C_3$)**                                                       | The Orchestration Layer      | Gang scheduling (Slurm, Kubernetes, Ray), state consensus, heartbeat failure detection                         | @sec-fault-tolerance-reliability, @sec-fleet-orchestration, @sec-ops-scale      |
+| **Compute $\cap$ Communication ($C_1 \cap C_2$)**                              | Hiding Network Latency       | 1F1B pipelining, CUDA stream compute-comm overlap, comm-to-compute ratio ($\rho$) tuning, wire compression     | @sec-distributed-training-systems, @sec-collective-communication                |
+| **Compute $\cap$ Coordination ($C_1 \cap C_3$)**                               | Maximizing Fleet Goodput     | Non-blocking async checkpointing, pipeline bubble reduction, in-memory recompute vs. rollback, fast node drain | @sec-fault-tolerance-reliability, @sec-fleet-orchestration                      |
+| **Communication $\cap$ Coordination ($C_2 \cap C_3$)**                         | Collective Synchronization   | Straggler mitigation, hierarchical collectives (NVLink vs. IB), bounded staleness, topology-aware rank mapping | @sec-collective-communication, @sec-fault-tolerance-reliability                 |
+| **Compute $\cap$ Communication $\cap$ Coordination ($C_1 \cap C_2 \cap C_3$)** | Fleet ML Systems Engineering | Fleet Law decomposition, 4D parallelism (DP+TP+PP+EP), memory sharding (FSDP2, ZeRO-3), Goodput metric         | @sec-distributed-training-systems, @sec-inference-scale, @sec-edge-intelligence |
+
+: **C$^3$ Intersection Reference**: Each zone maps specific techniques to the axes they span and the chapters that cover them. The pairwise intersections require reasoning about two domains simultaneously; the center requires all three. {#tbl-c3-intersections tbl-colwidths="[22,20,36,22]"}
 
 ### Compute $\cap$ communication {#sec-appdx-c3-taxonomy-comp-comm}
 
-This intersection governs whether the system can hide communication behind computation. The communication-computation ratio ($\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$) is the key metric (@sec-appdx-fleet-foundations-comm-compute-ratio). When $\rho < 1$, computation takes longer than communication and the network transfer can be overlapped---the system is compute-bound and healthy. When $\rho > 1$, GPUs finish their local work before the network delivers the next round of data, and the system is communication-bound.
+This intersection governs whether the system can hide communication behind computation. The communication-to-compute ratio ($\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$) is the key diagnostic metric (@sec-appdx-fleet-foundations-comm-compute-ratio). When $\rho < 1$, computation takes longer than communication and the network transfer can theoretically be overlapped---the system is compute-bound and healthy. When $\rho > 1$, GPUs complete their local work before the network delivers the next round of operands, and the system becomes communication-bound.
 
-Engineering at this intersection focuses on overlap strategies: launching AllReduce during the backward pass, using CUDA streams to pipeline local computation with network transfers, and increasing the computation per synchronization point (larger microbatches, gradient accumulation). @Sec-distributed-training-systems and @sec-collective-communication cover these techniques in depth.
-
-### Communication $\cap$ coordination {#sec-appdx-c3-taxonomy-comm-coord}
-
-This intersection captures the synchronization cost embedded in communication. Every AllReduce is both a data transfer (communication) and a synchronization barrier (coordination)---all participants must reach the barrier before any can proceed. The cost of stragglers manifests here: if one GPU is 10 percent slower, every other GPU waits, converting a communication operation into a coordination bottleneck.
-
-Engineering at this intersection focuses on reducing barrier sensitivity: asynchronous gradient methods that decouple communication from synchronization, hierarchical AllReduce that limits the blast radius of stragglers, and straggler detection with proactive mitigation. @Sec-fault-tolerance-reliability addresses straggler management.
+In a GPU trace, this bottleneck appears as exposed communication intervals where tensor cores sit idle awaiting collective completion (such as `ncclKernel_AllReduce` or `ncclKernel_AllGather`). Engineering at this intersection focuses on overlap and compression: launching AllReduce during the backward pass before all gradients are finalized, pipelining activation transfers in 1F1B schedules, increasing microbatch sizes or gradient accumulation steps to dilute communication frequency, and applying FP8 or INT4 wire quantization to halve the required network transfer volume (@sec-distributed-training-systems, @sec-collective-communication).
 
 ### Compute $\cap$ coordination {#sec-appdx-c3-taxonomy-comp-coord}
 
-This intersection captures the idle compute caused by coordination overhead. Pipeline bubbles are the canonical example: during warmup and cooldown phases of pipeline parallelism, some stages are idle while others compute. Checkpoint writes that block the training loop convert coordination overhead into wasted compute capacity. Failure recovery that requires rolling back and recomputing work transforms a coordination event into a computation penalty.
+This intersection captures the idle compute caused by orchestration and resilience mechanisms. While compute engines should ideally remain saturated with arithmetic, coordination overhead repeatedly forces hardware into idle states.
 
-Engineering at this intersection focuses on minimizing idle time: increasing microbatches to shrink the pipeline bubble fraction, using asynchronous checkpointing to overlap writes with compute, and reducing the blast radius of failures so that recomputation is bounded. @Sec-distributed-training-systems covers pipeline scheduling; @sec-fault-tolerance-reliability covers recovery strategies.
+Three distinct mechanisms govern this intersection:
+
+1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For a pipeline depth $p$ and microbatch count $m$, the bubble fraction $F_{\text{bubble}} = (p - 1) / (m + p - 1)$ directly squanders accelerator cycles unless hidden by interleaved 1F1B schedules.
+2.  **Checkpoint stalls**: Synchronous checkpoint writes that block the training loop to serialize terabytes of weights and optimizer states convert expensive compute time into storage wait time. Asynchronous checkpointing mitigates this by snapshotting host-pinned or local Non-Volatile Memory Express (NVMe) memory in milliseconds, delegating remote persistence to background I/O threads.
+3.  **Recovery rollback**: When a node fails in an $N$-node cluster, training halts and rolls back to the last valid checkpoint, squandering the arithmetic executed since that snapshot. Minimizing the failure blast radius through fast health heartbeats and dynamic node replacement bounds this compute loss (@sec-fault-tolerance-reliability, @sec-fleet-orchestration).
+
+### Communication $\cap$ coordination {#sec-appdx-c3-taxonomy-comm-coord}
+
+This intersection captures the synchronization cost embedded in network communication. Every collective operation (AllReduce, AllGather, ReduceScatter) is simultaneously a data transfer over physical wires ($C_2$) and a cluster-wide barrier ($C_3$). All participants must arrive at the barrier before the collective can conclude.
+
+The governing failure mode is **straggler amplification**\index{Straggler amplification!definition}. If a single GPU or link experiences packet drops, thermal throttling, or ECC retry delays, every other GPU in the collective waits, transforming a localized degradation into a cluster-wide halt. At fleet scale ($N \ge 10{,}000$), tail latency dominates the barrier time: the probability of at least one node straggling approaches unity ($1 - (1 - p_{\text{straggle}})^N \to 1$).
+
+Engineering at this intersection focuses on decoupling synchronization from raw communication: using hierarchical collectives that isolate high-bandwidth intra-node NVLink domains from inter-node InfiniBand fabrics, adopting bounded-staleness asynchronous training to absorb transient tail latency, and enforcing topology-aware gang scheduling to align collective communication rings with physical spine-leaf switch rails (@sec-collective-communication, @sec-fault-tolerance-reliability).
+
+### Fleet-scale ML systems engineering {#sec-appdx-c3-taxonomy-triple-intersection}
+
+At the center ($C_1 \cap C_2 \cap C_3$), all three constraints converge simultaneously. This is the discipline of **Fleet-Scale ML Systems Engineering**\index{Fleet-scale ML systems engineering!definition}. Systems engineers at this center do not optimize a single accelerator or a single network switch; they manage the trade-offs of the distributed machine as an integrated whole.
+
+The central engineering challenges encompass:
+
+-  **4D parallelism co-design**: Balancing Data Parallelism (DP), Tensor Parallelism (TP), Pipeline Parallelism (PP), and Expert Parallelism (EP) so that memory consumption fits within accelerator high-bandwidth memory (HBM) ($C_1$), high-frequency communications map to intra-node NVLink and low-frequency communications map to inter-node fabrics ($C_2$), and pipeline bubbles and barrier dependencies are minimized ($C_3$).
+-  **Memory sharding vs. communication volume**: Frameworks like PyTorch FSDP2 and DeepSpeed ZeRO-3 eliminate memory redundancy ($C_1$) by partitioning model states across workers, but pay a strict tax in repeated AllGather communication ($C_2$) and state coordination metadata ($C_3$).
+-  **Holistic goodput optimization**: Google's ML Productivity Goodput metric operationalizes this triple intersection by decomposing fleet productivity into Program Goodput ($\eta_{\text{program}}$, $C_1$), Runtime Goodput ($\eta_{\text{runtime}}$, $C_2$), and Scheduling Goodput ($\eta_{\text{scheduling}}$, $C_3$).
+
+### C$^3$ coordination and overlap {#sec-appdx-c3-taxonomy-coordination-overlap}
+
+Just as single-node execution transforms the additive iron law into a maximum bounded by dependencies (@sec-appdx-dam-taxonomy-dam-coordination-sum-max), overlap at fleet scale transforms the Fleet Law (@eq-fleet-law) by maximizing $T_{\text{overlap}}$. @Tbl-c3-overlap summarizes the primary overlap techniques across the C$^3$ dimensions.
+
+| **Technique**                      | **C$^3$ Overlap**    | **Mechanism**                                                                                            | **Implementation**                                                                              |
+|:-----------------------------------|:---------------------|:---------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
+| **1F1B Pipeline Schedule**         | $C_1$ overlaps $C_2$ | Interleaves forward and backward microbatches to overlap cross-stage activation transfer with arithmetic | Microbatch queue scheduling (@sec-distributed-training-systems)                                 |
+| **CUDA Stream Decoupling**         | $C_1$ overlaps $C_2$ | Launches non-blocking AllGather or AllReduce on separate communication streams concurrently with GEMMs   | Dedicated NCCL streams (@sec-collective-communication)                                          |
+| **Async Checkpointing**            | $C_1$ overlaps $C_3$ | Fast in-memory or local NVMe snapshot while GPU arithmetic resumes immediately                           | Background host thread flushes to storage (@sec-data-storage, @sec-fault-tolerance-reliability) |
+| **Hierarchical Collectives**       | $C_2$ overlaps $C_3$ | Partitions collective into local NVLink reduction and inter-node fabric transfer, isolating tail jitter  | Hierarchical NCCL communicators (@sec-collective-communication)                                 |
+| **Double-Buffered Data Streaming** | $C_1$ overlaps $C_2$ | Prefetches and decompresses next batch shard in pinned host memory while GPUs compute current batch      | Host pinned memory + async D2D transfer (@sec-data-storage)                                     |
+
+: **C$^3$ Overlap Techniques**: System techniques that hide communication or coordination behind useful computation, maximizing $T_{\text{overlap}}$ in the Fleet Law. {#tbl-c3-overlap tbl-colwidths="[24,18,34,24]"}
+
+### Storage as the persistent substrate {#sec-appdx-c3-taxonomy-storage-substrate}
+
+A common diagnostic question is why Storage does not appear as a fourth explicit coordinate in the C$^3$ taxonomy or as an independent $T_{\text{storage}}$ term in the Fleet Law.
+
+The physical data center is procured around Compute, Network, and Storage (@sec-data-storage). At runtime, however, storage devices execute no model arithmetic. Storage overhead therefore manifests dynamically through the three C$^3$ dimensions:
+
+-  **In Compute ($C_1$)**: High-throughput local NVMe drives function as the tier-3 extension of the accelerator memory hierarchy (below SRAM and HBM), serving parameter offloading (ZeRO-Offload) and activation spilling.
+-  **In Communication ($C_2$)**: Remote dataset streaming from parallel file systems (Lustre, GPFS) or object stores (S3, Ceph) shares cluster network bandwidth and network interface card (NIC) capacity with collective communication traffic.
+-  **In Coordination ($C_3$)**: Durable distributed storage provides the persistent state anchor required for checkpoint serialization, node failover, and job rescheduling.
+
+When storage latency stalls a training run, profilers identify the symptom not as raw disk latency, but either as a network communication bottleneck ($C_2$, dataset starvation) or as a blocking coordination barrier ($C_3$, synchronous checkpoint flush). Storage is the persistent substrate supporting all three dimensions, rather than a separate term in the step execution budget.
 
 ```{python}
 #| echo: false
