@@ -3,6 +3,7 @@
 *Foundations for single-machine ML systems.*
 
 [![Read Online](https://img.shields.io/badge/Read_Online-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/vol1/)
+[![Give Feedback](https://img.shields.io/badge/Feedback-Open_an_Issue-0969da?logo=github)](https://github.com/harvard-edge/cs249r_book/issues/new?template=book-vol1.yml)
 
 <div align="center" style="background: #fdf2f2; border: 1px solid #f87171; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
   <span style="font-size: 1.1em; font-weight: bold; color: #991b1b;">📗 Release Edition &bull; Official Curriculum</span><br>

@@ -4,7 +4,7 @@
 **Author:** Prof. Vijay Janapa Reddi (Harvard University)
 **Design Philosophy:** Completely Self-Contained Standalone Textbook
 **Scope:** 100% Digital & Software Agents (Code, Shells, Browsers, APIs, Operating Systems)
-**Status:** 🟢 **Formally Settled 15-Chapter (5×3) MLSys Lifecycle Architecture**
+**Status:** 🟣 **Working plan, in development.** Chapter list matches the current build configuration; scope and content are still changing.
 
 ---
 
@@ -972,7 +972,7 @@ Request-level inference serving (vLLM, TensorRT-LLM) assumes independent request
 * **Systems Mechanism:** Traditional OS schedulers preempt or kill processes arbitrarily because RAM can be restored. If an agent has already crossed the reversibility boundary (e.g., emitted a banking wire, sent a customer email, run a non-idempotent DB write), the scheduler is strictly forbidden from killing or aborting the job without triggering compensating workflows.
 * **Seminal Literature & Grounding:**
   * [Sagas](https://doi.org/10.1145/38713.38742)
-  * [Architecting the Agentic AI Systems Stack](https://sigops.org/s/pubs/osr/)
+  * [Architecting the Agentic AI Systems Stack](https://doi.org/10.1145/3830422.3830429)
 
 ##### 9.11 Production Architecture: Building a Trajectory-Aware Scheduler on Kubernetes & Ray (`#sec-vol3-scheduling-production-architecture-building-a`)
 * **Systems Mechanism:** Concrete production implementation walkthrough. Integrates Ray Serve actors with custom Kubernetes custom resource definitions (CRDs) to manage agent lifecycles, offload suspended KV caches to Redis/S3, and dynamically autoscale GPU worker pools.
@@ -1124,7 +1124,7 @@ In classical computing, security rests on the separation of instructions and dat
 * **Systems Mechanism:** Compares hardware security primitives ($W \oplus X$, ring privileges, page protection flags) with transformer token sequences. Because instructions and untrusted data are serialized into the identical self-attention stream, prompt-level boundaries are mathematical impossibilities.
 * **Seminal Literature & Grounding:**
   * [Computer Security: A Guide to Principles and Practice](https://www.cl.cam.ac.uk/~rja14/book.html)
-  * [Architecting the Agentic AI Systems Stack](https://sigops.org/s/pubs/osr/)
+  * [Architecting the Agentic AI Systems Stack](https://doi.org/10.1145/3830422.3830429)
 
 ##### 11.3 Why Prompt Guardrails Fail: The Illusion of In-Context Security Filters (`#sec-vol3-sandboxing-why-prompt-guardrails-fail`)
 * **Systems Mechanism:** Deconstructs the failure of system prompt guardrails, "constitutional AI" barriers, and secondary classifier LLMs (e.g., Llama Guard). Demonstrates universal jailbreaks, base64 encoding attacks, and adversarial suffix injections that effortlessly bypass software-only filters.
@@ -1221,7 +1221,7 @@ Classical distributed systems operate under fail-stop (crash) or Byzantine fault
 ##### 12.2 Compounding Error Dynamics: Mathematical Derivation of $P_{\text{success}} \le p^N$ (`#sec-vol3-recovery-compounding-error-dynamics-mathematical`)
 * **Systems Mechanism:** Non-stationary Markov chain error modeling. Proves why single-step accuracy $p = 0.98$ decays to $36.4\%$ at horizon $N=50$ and collapses to $13.2\%$ at $N=100$. Demonstrates that scaling pre-training parameter scale cannot defeat the exponential horizon exponent $N$ without intermediate verification.
 * **Seminal Literature & Grounding:**
-  * [Architecting the Agentic AI Systems Stack](https://sigops.org/s/pubs/osr/)
+  * [Architecting the Agentic AI Systems Stack](https://doi.org/10.1145/3830422.3830429)
   * [SWE-bench: Benchmark Trajectory Horizon Limits](https://arxiv.org/abs/2310.06770)
 
 ##### 12.3 The Verification Tax ($C_{\text{ver}}$): Pareto Frontier of Verification Compute vs. Rollback Waste (`#sec-vol3-recovery-the-verification-tax-c`)
@@ -1245,7 +1245,7 @@ Classical distributed systems operate under fail-stop (crash) or Byzantine fault
 ##### 12.6 The Reversibility Boundary: Reversible Internal State vs. Irreversible External Side-Effects (`#sec-vol3-recovery-the-reversibility-boundary-reversible`)
 * **Systems Mechanism:** The fundamental bifurcation of systems state. Modifying local RAM, context, or git branch state is cheap and 100% reversible; mutating external production databases, sending emails, or triggering cloud deletions crosses the reversibility boundary where mathematical inverses do not exist.
 * **Seminal Literature & Grounding:**
-  * [Architecting the Agentic AI Systems Stack](https://sigops.org/s/pubs/osr/)
+  * [Architecting the Agentic AI Systems Stack](https://doi.org/10.1145/3830422.3830429)
   * [Transaction Processing: Concepts and Techniques](https://dl.acm.org/doi/book/10.5555/573304)
 
 ##### 12.7 Distributed Sagas for Agent Workflows: Forward Recovery and Compensating Actions ($A^{-1}$) (`#sec-vol3-recovery-distributed-sagas-for-agent`)
