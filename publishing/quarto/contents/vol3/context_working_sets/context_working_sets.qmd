@@ -303,6 +303,7 @@ The structural codebase processing pipeline proceeds across three stages:
 ### Abstract Syntax Tree (AST) Skeletonization
 
 Rather than ingesting implementation bodies, runtime preprocessors utilize Tree-Sitter parsers to extract language-accurate structural skeletons. For every file, the parser strips function bodies and internal loops, preserving only:
+
 - Class declarations and inheritance hierarchies
 - Function and method signatures with complete type annotations
 - Module-level docstrings and exported constants
@@ -312,6 +313,7 @@ A 1,500-line Python module ($7{,}500$ tokens) condenses into a 60-line structura
 ### PageRank Symbol Graphing (Repomaps)
 
 Not all classes and functions are equally relevant to a given task. To build an optimal repository map within a tight token budget (e.g., 2,048 tokens), systems construct a directed graph $G = (V, E)$ of symbol definitions and references across the entire repository:
+
 - Vertices $V$: All declared symbols (classes, functions, interfaces).
 - Directed edges $E$: An edge $(u, v)$ exists if symbol $u$ references, calls, or inherits from symbol $v$.
 
@@ -342,8 +344,9 @@ Even when an attention head at step $t$ finds none of the historical tokens sema
 If an eviction algorithm discards these initial sink tokens, the softmax normalization is violently disrupted: subsequent heads are forced to reallocate massive unneeded probability mass across remaining arbitrary tokens, corrupting intermediate representations.
 
 StreamingLLM (@xiao2024streamingllm) resolves this by preserving two distinct token subsets in the KV cache:
-1. **Sink Tokens ($S$):** The first $4$ tokens of the sequence ($t \in [0, 3]$). Retained permanently.
-2. **Rolling Window Tokens ($W$):** The most recent $W$ tokens ($t \in [t - W + 1, t]$).
+
+- **Sink Tokens ($S$):** The first $4$ tokens of the sequence ($t \in [0, 3]$). Retained permanently.
+- **Rolling Window Tokens ($W$):** The most recent $W$ tokens ($t \in [t - W + 1, t]$).
 
 By retaining just 4 initial sink tokens alongside a local sliding window of $W = 1{,}024$ tokens, the KV cache size is bounded to a constant $O(S + W)$, enabling language models to generate sequences exceeding 4 million tokens with rock-solid perplexity stability.
 
@@ -358,6 +361,7 @@ H2O tracks a running cumulative attention score $s_i$ for every token $i$ in the
 $$s_i^{(t)} = \sum_{k=i}^t \sum_{l=1}^L \sum_{h=1}^H \alpha_{k, i}^{(l, h)}$$ {#eq-vol3-context-h2o-score}
 
 When the KV cache reaches a predetermined budget $C_{\text{budget}}$, H2O partitions the cache into:
+
 - Initial Sink tokens: $S$ positions.
 - Local Window tokens: Recent $W$ positions.
 - Heavy-Hitter tokens: Top-$k$ tokens from the intermediate history ranked by cumulative score $s_i^{(t)}$, where $k = C_{\text{budget}} - |S| - |W|$.
@@ -375,6 +379,7 @@ As shown in @fig-vol3-context-compaction-pipeline, context compaction transforms
 ### Stage 1: Triage and Compaction Triggering
 
 The runtime monitors total token consumption after every tool execution. When total active tokens exceed $\theta_{\text{compact}}$, execution pauses and enters the compaction routine. Input payloads are triaged into three categories:
+
 - **Discardable ephemeral tokens:** Chain-of-thought scratchpad text from prior steps.
 - **Reducible structural tokens:** Verbose stdout/stderr dumps, file reads, and search results.
 - **Invariant tokens:** User instructions, security boundaries, and tool definitions.
@@ -384,10 +389,12 @@ The runtime monitors total token consumption after every tool execution. When to
 The system processes reducible tokens through two complementary engines:
 
 #### Pathway A: Deterministic Structural Slicing
+
 - **Head/Tail Output Slicing:** For tool executions emitting large text buffers (e.g., test runners or build outputs of $>500$ lines), the engine extracts the first 25 lines (initialization/command), the last 25 lines (summary/result), and regex-matched failure lines (`grep -E 'ERROR|FAIL|Exception'`), replacing the intermediate lines with an omission token: `[... 450 lines truncated; exit code 1 ...]`.
 - **Git Delta Representation:** When an agent inspects files it subsequently edits, the runtime discards the original raw file reads and substitutes the compact unified git diff (`git diff -U3`), preserving exact state change semantics with an 85% token reduction.
 
 #### Pathway B: Semantic State Synthesis
+
 - Historical turns are partitioned into logical epochs (e.g., turns $1 \dots 10$). A dedicated summarization call compresses these turns into a structured JSON or XML **State Ledger**:
 
 ```json
@@ -435,8 +442,9 @@ Information Content I(I_0; S_k)
 ```
 
 In language models, this information loss is accelerated by **paraphrasing mutation** and **confirmation bias** (@zhang2023cumulative, @shinn2023reflexion):
-1. **Constraint Erosion:** Nuanced negative constraints (e.g., *"Do not modify the public API signatures in `client.py`"*) are omitted or softened by the summarizer after 3–5 cycles (e.g., becoming *"Refactored client.py"*). The agent subsequently violates the original constraint.
-2. **Hallucination Cascades:** A slight hallucination or misinterpretation introduced in summary $S_k$ is treated as an immutable ground-truth fact in step $S_{k+1}$, compounding exponentially until the agent diverges entirely from the user's intent.
+
+- **Constraint Erosion:** Nuanced negative constraints (e.g., *"Do not modify the public API signatures in `client.py`"*) are omitted or softened by the summarizer after 3–5 cycles (e.g., becoming *"Refactored client.py"*). The agent subsequently violates the original constraint.
+- **Hallucination Cascades:** A slight hallucination or misinterpretation introduced in summary $S_k$ is treated as an immutable ground-truth fact in step $S_{k+1}$, compounding exponentially until the agent diverges entirely from the user's intent.
 
 ### Mitigation: The Invariant Enclosure
 
@@ -488,9 +496,10 @@ Because RoPE frequencies decay geometrically across hidden dimensions, attention
 ### Systems Mitigation: Context Edge Packing
 
 Understanding positional attention bias dictates optimal context packing topologies:
-1. **Never place critical instructions or tool contracts in the middle.** System instructions, role definitions, and negative constraints must always occupy the opening prefix ($[0, 0.05 \cdot L]$).
-2. **Place immediate goals and active questions at the terminal edge.** The specific sub-task, active tool call request, and immediate step instructions must occupy the final tokens ($[0.95 \cdot L, L]$).
-3. **Relegate historical logs and reference documents to the middle.** Bulky, reference-only background material (such as codebase skeletons and past turn summaries) can reside in the middle zone, accompanied by explicit index pointers in the system prompt.
+
+- **Never place critical instructions or tool contracts in the middle.** System instructions, role definitions, and negative constraints must always occupy the opening prefix ($[0, 0.05 \cdot L]$).
+- **Place immediate goals and active questions at the terminal edge.** The specific sub-task, active tool call request, and immediate step instructions must occupy the final tokens ($[0.95 \cdot L, L]$).
+- **Relegate historical logs and reference documents to the middle.** Bulky, reference-only background material (such as codebase skeletons and past turn summaries) can reside in the middle zone, accompanied by explicit index pointers in the system prompt.
 
 ## Ephemeral Scratchpads: In-Flight Reasoning Tokens vs. Committed State Transitions {#sec-vol3-context-ephemeral-scratchpads-in-flight-reasoning}
 
@@ -522,12 +531,13 @@ Step t Execution Cycle:
 
 Production agent architectures implement a **Two-Phase Commit** for reasoning tokens:
 
-1. **The Deliberation Phase (Transient Context):**
-   The model generates freely into an ephemeral context buffer, outputting internal deliberation, hypothesis testing, and backtracking logic:
-   $$\mathcal{T}_{\text{transient}} = \mathcal{C}_{\text{active}} \cup \{\text{CoT tokens}\} \cup \{a_t\}$$
-2. **The Commit Phase (Pruning and State Mutation):**
-   The runtime extracts the executable tool call $a_t$, executes it within the sandbox, and receives environment observation $o_t$. Before appending to the persistent trajectory history, the runtime **discards the ephemeral CoT tokens**, committing only the structured tuple:
-   $$\mathcal{C}_{t+1} = \mathcal{C}_t \cup \{(a_t, o_t)\}$$
+- **The Deliberation Phase (Transient Context):** The model generates freely into an ephemeral context buffer, outputting internal deliberation, hypothesis testing, and backtracking logic:
+
+  $$\mathcal{T}_{\text{transient}} = \mathcal{C}_{\text{active}} \cup \{\text{CoT tokens}\} \cup \{a_t\}$$
+
+- **The Commit Phase (Pruning and State Mutation):** The runtime extracts the executable tool call $a_t$, executes it within the sandbox, and receives environment observation $o_t$. Before appending to the persistent trajectory history, the runtime **discards the ephemeral CoT tokens**, committing only the structured tuple:
+
+  $$\mathcal{C}_{t+1} = \mathcal{C}_t \cup \{(a_t, o_t)\}$$
 
 This pruning policy reduces trajectory memory growth by 75% to 90%. Across a 30-step trajectory, an unpruned agent accumulates over 240,000 tokens of dead reasoning scratchpad, whereas a two-phase commit architecture maintains an active working set under 25,000 tokens.
 
@@ -557,39 +567,48 @@ A benchmark task on SWE-bench requires an agent to navigate an unfamiliar reposi
 
 ### Key Production Mechanisms Dissected
 
-1. **Automated Head/Tail Output Slicing:** When executing `pytest tests/`, full output routinely exceeds 4,000 lines. Claude Code captures the complete output in an external log file, but returns only the head (test suite discovery), tail (failure summary), and individual tracebacks into context, adding a pointer: *"Full log written to `.claude/tmp/test_run_28.log`"*.
-2. **Git Diff as State Representation:** Rather than retaining repeated calls to `view_file`, the system runs `git diff` after every file edit. The diff acts as a self-compacting ledger: if the agent edits line 40, tests it, finds an error, and reverts it, the git diff naturally collapses to empty, completely freeing context tokens.
-3. **Subagent Context Isolation:** When an exploratory task requires scanning 50 documentation files or evaluating multiple search queries, the primary orchestrator spawns an isolated **subagent**. The subagent runs in its own ephemeral 8k context window, completes the search, and returns a 200-word distilled briefing to the primary orchestrator. The hundreds of intermediate search tokens are instantly deallocated from HBM upon subagent termination.
+- **Automated Head/Tail Output Slicing:** When executing `pytest tests/`, full output routinely exceeds 4,000 lines. Claude Code captures the complete output in an external log file, but returns only the head (test suite discovery), tail (failure summary), and individual tracebacks into context, adding a pointer: *"Full log written to `.claude/tmp/test_run_28.log`"*.
+- **Git Diff as State Representation:** Rather than retaining repeated calls to `view_file`, the system runs `git diff` after every file edit. The diff acts as a self-compacting ledger: if the agent edits line 40, tests it, finds an error, and reverts it, the git diff naturally collapses to empty, completely freeing context tokens.
+- **Subagent Context Isolation:** When an exploratory task requires scanning 50 documentation files or evaluating multiple search queries, the primary orchestrator spawns an isolated **subagent**. The subagent runs in its own ephemeral 8k context window, completes the search, and returns a 200-word distilled briefing to the primary orchestrator. The hundreds of intermediate search tokens are instantly deallocated from HBM upon subagent termination.
 
 ---
 
 ## Fallacies and Pitfalls {#sec-vol3-context-fallacies}
 
-::: {.callout-warning}
-### Fallacy: Million-Token Context Windows Eliminate the Need for Memory Architecture
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Million-token context windows eliminate the need for memory architecture.*
 
 A dangerous misconception in modern AI engineering is that models supporting 1M+ token context windows render context management obsolete. While modern models *can* ingest a million tokens without crashing, the laws of physics and economics remain immutable:
-1. Prefill latency scales quadratically with sequence length, surging TTFT from 100ms to tens of seconds.
-2. Autoregressive decode is memory-bandwidth bound: streaming a 1M-token KV cache off HBM for every generated token collapses throughput to single-digit tokens per second.
-3. Attention dispersion and "Lost-in-the-Middle" positional degradation drastically reduce instruction adherence and reasoning accuracy over long sequences.
+
+- Prefill latency scales quadratically with sequence length, surging TTFT from 100ms to tens of seconds.
+- Autoregressive decode is memory-bandwidth bound: streaming a 1M-token KV cache off HBM for every generated token collapses throughput to single-digit tokens per second.
+- Attention dispersion and "Lost-in-the-Middle" positional degradation drastically reduce instruction adherence and reasoning accuracy over long sequences.
+
 :::
 
-::: {.callout-caution}
-### Pitfall: Recursive Lossy Summarization Without Invariant Anchors
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Recursive lossy summarization without invariant anchors.*
 
 Compressing history by repeatedly asking a language model to "summarize the previous conversation" inevitably triggers **Semantic Drift Collapse**. Within 5 to 10 compaction cycles, critical negative constraints, file names, and numerical parameters mutate or vanish. Always enforce an **Invariant Enclosure** that preserves raw user prompts, test assertions, and deterministic git diffs verbatim.
+
 :::
 
-::: {.callout-warning}
-### Fallacy: Sliding Window Attention is Sufficient for Autonomous Agents
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Sliding window attention is sufficient for autonomous agents.*
 
 While simple sliding-window attention preserves low latency and bounded memory, pure sliding windows cause **Middle Amnesia**. An agent that drops historical turns cannot recall tool execution outputs, previous error messages, or architectural decisions made in earlier steps. Production systems must combine sliding windows with **Attention Sinks** (to prevent softmax collapse), **Heavy-Hitter retention** (to preserve critical symbols), and **Structured Compaction** (to retain state).
+
 :::
 
-::: {.callout-caution}
-### Pitfall: Storing In-Flight Reasoning Tokens in Persistent History
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Storing in-flight reasoning tokens in persistent history.*
 
 Allowing chain-of-thought scratchpad tokens to accumulate in persistent trajectory history wastes up to 90% of available context capacity. Chain-of-thought tokens are ephemeral execution registers. Implement a **Two-Phase Commit** that strips scratchpad deliberation once a concrete tool action is executed, committing only the resulting action and observation to the persistent context ledger.
+
 :::
 
 ## Chapter Summary {#sec-vol3-context-summary}

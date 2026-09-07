@@ -142,7 +142,9 @@ However, the systems tax of the ReAct topology is severe:
    $$L_k = L_{\text{system}} + \sum_{i=1}^k \left( |x_i| + |a_i| + |o_i| \right)$$
 
    Because every step requires a complete forward pass over the accumulated context, the total token processing burden across $K$ steps scales quadratically: $\mathcal{O}(K^2)$.
+
 2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies.
+
 3. **Error Compounding (Cognitive Drift):** If an observation $o_t$ contains misleading, noisy, or truncated information, the model's subsequent thought $x_{t+1}$ frequently rationalizes the error rather than correcting it. Without external verifier gates, ReAct loops frequently diverge into hallucinated sub-goals.
 
 ## Plan-and-Solve vs. Reactive Topologies {#sec-vol3-topologies-plan-and-solve-vs-reactive-topologies}
@@ -226,7 +228,9 @@ The structural failure modes of peer-to-peer swarms stem directly from distribut
    $$C = \frac{N(N - 1)}{2} = \mathcal{O}(N^2)$$
 
    As $N$ increases, the message passing volume explodes. In a collaborative programming task, if Agent A proposes an edit, Agents B, C, and D all receive and respond to the proposal. Their responses prompt counter-responses, leading to exponential context bloat and catastrophic token burn [@brooks1975mythical].
+
 2. **Context Dilution and Attention Bleed:** When all agents share a single global message bus, every agent's context window becomes polluted with the conversational metadata, conversational filler, and unverified intermediate assertions of all other agents. The model's attention mechanism suffers from attention bleed: critical constraints provided in the initial user prompt are drowned out by dozens of turns of inter-agent conversational chatter.
+
 3. **Diffuse Accountability and Terminal Livelock:** In a flat mesh, no single process owns the terminal state invariant. Agent A waits for Agent B to finalize the specification; Agent B assumes Agent C is writing tests; Agent C assumes Agent A has already verified the code. Without an explicit root supervisor tracking global task completion, swarms degenerate into infinite mutual appreciation loops (*"Great job, Agent B! I agree with your plan. Let us proceed when you are ready."*).
 
 To solve these failure modes, production architectures standardize on **Hierarchical Supervisor Trees**:
@@ -252,6 +256,7 @@ We partition runtime guarantees into two complementary classes:
    $$\square \neg \text{HazardousState}(S_t)$$
 
    In practice, safety invariants enforce access control lists (ACLs), file system boundary constraints (e.g., path traversal prevention), and rate limits on destructive tool operations (e.g., dropping database tables or transmitting credentials over HTTP).
+
 2. **Liveness Properties ("Something good eventually happens"):**
    The agent trajectory must guarantee that execution reaches a valid terminal state in finite time:
 
@@ -360,6 +365,7 @@ In `HALF-OPEN`, unconstrained autonomous execution is suspended. The runtime ass
   You have executed 3 consecutive file search operations without modifying any code.
   You must formulate an alternative approach or report why you are blocked.
   ```
+
 - **Action Space Pruning:** The runtime temporarily disables failing tools from the model's available tool schema, forcing the model to consider alternative fallback strategies.
 - **Strict Remediation Budget:** The agent is granted a strict horizon (typically 2 steps) to demonstrate measurable environment mutation ($\Delta \mathcal{S}_{\text{env}} > \delta$).
 
@@ -410,8 +416,10 @@ Static state machine compilation transforms high-level agent specifications (suc
 
 2. **Terminal Path Exhaustion:**
    The compiler verifies that every reachable execution path contains at least one terminal node within a bounded diameter $D_{\max}$. Any cycle that lacks a deterministic exit condition is flagged at compile time as an unconstrained livelock hazard.
+
 3. **Tool Parameter Schema Compliance:**
    The compiler cross-references all action nodes against the OpenAPI or JSON Schema specifications of the target tools. It asserts that required arguments match declared types, default values are provided for optional parameters, and output schemas match the input requirements of downstream consuming nodes.
+
 4. **Exhaustive Error Coverage:**
    In production environments, external tools can fail in enumerable ways (e.g., HTTP 401 Unauthorized, HTTP 429 Rate Limited, HTTP 500 Internal Error, socket timeout, subprocess SIGKILL). The static compiler asserts that every action node defines explicit error transition edges for all declared failure modes. If an action node lacks an exception transition handler, compilation fails with an actionable diagnostic.
 
@@ -421,35 +429,35 @@ By enforcing static compilation and model checking, systems engineers eliminate 
 
 Designing control topologies for stochastic models is fraught with architectural misconceptions. Production engineering highlights several recurring fallacies and traps:
 
-::: {#flc-vol3-swarm-intelligence .callout-warning title="Fallacy: Emergent Swarm Intelligence"}
+::: {.fallacy-pitfall}
 
-**Fallacy**: Giving multiple autonomous agents unconstrained peer-to-peer communication produces emergent problem-solving intelligence that outperforms structured hierarchies.
+**Fallacy**: *Giving multiple autonomous agents unconstrained peer-to-peer communication produces emergent problem-solving intelligence.*
 
-**Reality**: Flat, unconstrained agent swarms invariably suffer from quadratic communication overhead $\mathcal{O}(N^2)$, context dilution, and diffuse accountability. In practice, models in peer-to-peer chat rooms amplify one another's hallucinations, engage in endless conversational pleasantries, and burn tokens without converging. High-reliability production systems universally adopt hierarchical supervisor trees with strict context isolation.
-
-:::
-
-::: {#flc-vol3-self-termination .callout-warning title="Fallacy: Model Self-Termination"}
-
-**Fallacy**: A language model can be reliably trusted to terminate its own execution loop when instructed to "stop when done."
-
-**Reality**: Foundation models are probabilistic text completers, not deterministic controllers. When confronted with unfamiliar tool errors or contradictory instructions, models regularly enter infinite retry loops. Every autonomous loop must be bound by out-of-band kernel watchdogs, hard step ceilings, and token burn circuit breakers that forcibly terminate execution regardless of model output.
+Flat, unconstrained agent swarms invariably suffer from quadratic communication overhead $\mathcal{O}(N^2)$, context dilution, and diffuse accountability. In practice, models in peer-to-peer chat rooms amplify one another's hallucinations, engage in endless conversational pleasantries, and burn tokens without converging. High-reliability production systems universally adopt hierarchical supervisor trees with strict context isolation.
 
 :::
 
-::: {#pit-vol3-token-bleed .callout-caution title="Pitfall: Monolithic Context Accumulation (Token Bleed)"}
+::: {.fallacy-pitfall}
 
-**Pitfall**: Appending all intermediate thoughts, tool calls, and verbose JSON payloads into a single monotonically growing prompt window in a naive `while True:` loop.
+**Fallacy**: *A language model can be reliably trusted to terminate its own execution loop.*
 
-**Consequences**: The token processing cost scales quadratically $\mathcal{O}(K^2)$ with step count, quickly exhausting context limits and causing severe attention degradation. Production runtimes enforce aggressive context hygiene: filtering raw tool outputs, persisting large payloads to out-of-band object stores, and injecting only concise summaries into the primary working context.
+Foundation models are probabilistic text completers, not deterministic controllers. When confronted with unfamiliar tool errors or contradictory instructions, models regularly enter infinite retry loops. Every autonomous loop must be bound by out-of-band kernel watchdogs, hard step ceilings, and token burn circuit breakers that forcibly terminate execution regardless of model output.
 
 :::
 
-::: {#pit-vol3-regex-routing .callout-caution title="Pitfall: Regex-Based Edge Parsing"}
+::: {.fallacy-pitfall}
 
-**Pitfall**: Using brittle string matching or regular expressions (e.g., searching for `"Action:"` or `"Thought:"` strings) to parse edge transitions in autonomous graphs.
+**Pitfall**: *Monolithic context accumulation in a naive while-loop.*
 
-**Consequences**: Minor formatting variations, markdown syntax highlighting, or model conversational disclaimers break edge transitions silently, causing runtime exceptions. Production architectures enforce native structured decoding (constrained JSON generation) where the serving engine restricts logits to guarantee schema-valid transitions.
+Appending all intermediate thoughts, tool calls, and verbose JSON payloads into a single monotonically growing prompt window causes the token processing cost to scale quadratically $\mathcal{O}(K^2)$ with step count, quickly exhausting context limits and causing severe attention degradation. Production runtimes enforce aggressive context hygiene: filtering raw tool outputs, persisting large payloads to out-of-band object stores, and injecting only concise summaries into the primary working context.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Using regex-based edge parsing for state transitions.*
+
+Using brittle string matching or regular expressions (e.g., searching for `"Action:"` or `"Thought:"` strings) to parse edge transitions in autonomous graphs makes the runtime fragile. Minor formatting variations, markdown syntax highlighting, or model conversational disclaimers break edge transitions silently, causing runtime exceptions. Production architectures enforce native structured decoding (constrained JSON generation) where the serving engine restricts logits to guarantee schema-valid transitions.
 
 :::
 
