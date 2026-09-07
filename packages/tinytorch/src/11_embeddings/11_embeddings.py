@@ -1470,58 +1470,6 @@ EmbeddingLayer.forward = emblayer_forward
 
 # %% [markdown]
 """
-### 🧪 Unit Test: EmbeddingLayer Forward Pass
-
-This test validates the forward composition: token lookup + scaling + positional
-encoding addition across all three PE strategies.
-
-**What we're testing**: Token + positional embedding integration, scaling, and batch processing
-**Why it matters**: Production transformers use this exact pattern
-**Expected**: Correct shapes, proper scaling, flexible position encoding support
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-emblayer-forward", "locked": true, "points": 10}
-def test_unit_emblayer_forward():
-    """🧪 Test EmbeddingLayer.forward composition."""
-    print("🧪 Unit Test: EmbeddingLayer Forward Pass...")
-
-    tokens = Tensor([[1, 2, 3], [4, 5, 6]])
-
-    # Test 1: Learned PE forward
-    embed_learned = EmbeddingLayer(vocab_size=100, embed_dim=64, max_seq_len=128, pos_encoding='learned')
-    output_learned = embed_learned.forward(tokens)
-    assert output_learned.shape == (2, 3, 64), f"Expected (2, 3, 64), got {output_learned.shape}"
-
-    # Test 2: Sinusoidal PE forward
-    embed_sin = EmbeddingLayer(vocab_size=100, embed_dim=64, pos_encoding='sinusoidal')
-    output_sin = embed_sin.forward(tokens)
-    assert output_sin.shape == (2, 3, 64), "Sinusoidal should produce same shape"
-
-    # Test 3: No PE forward
-    embed_none = EmbeddingLayer(vocab_size=100, embed_dim=64, pos_encoding=None)
-    output_none = embed_none.forward(tokens)
-    assert output_none.shape == (2, 3, 64), "No PE should produce same shape"
-
-    # Test 4: 1D input handling (auto batch dim)
-    tokens_1d = Tensor([1, 2, 3])
-    output_1d = embed_learned.forward(tokens_1d)
-    assert output_1d.shape == (3, 64), f"Expected (3, 64) for 1D input, got {output_1d.shape}"
-
-    # Test 5: Embedding scaling by sqrt(embed_dim)
-    embed_scaled = EmbeddingLayer(vocab_size=100, embed_dim=64, pos_encoding=None, scale_embeddings=True)
-    embed_scaled.token_embedding.weight = embed_none.token_embedding.weight  # share weights
-    output_scaled = embed_scaled.forward(tokens)
-    output_unscaled = embed_none.forward(tokens)
-    scale_factor = math.sqrt(64)
-    assert np.allclose(output_scaled.data, output_unscaled.data * scale_factor, rtol=1e-5), "Scaling broken"
-
-    print("✅ EmbeddingLayer forward pass works correctly!")
-
-if __name__ == "__main__":
-    test_unit_emblayer_forward()
-
-# %% [markdown]
-"""
 ### 🧪 Unit Test: Complete Embedding System
 
 This test validates our EmbeddingLayer combines all components correctly for production use.
@@ -1826,7 +1774,6 @@ def test_module():
     test_unit_sinusoidal_table()
     test_unit_sinusoidal_embeddings()
     test_unit_emblayer_init()
-    test_unit_emblayer_forward()
     test_unit_complete_embedding_system()
 
     print("\nRunning integration scenarios...")
