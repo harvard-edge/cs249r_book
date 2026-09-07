@@ -2635,20 +2635,22 @@ adjusts its output until the result looks plausible has stopped measuring.
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
 #| export
 def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
-                                    benchmark_name: str, num_runs: int) -> float:
+                                    benchmark_name: str, num_runs: int,
+                                    labels: Optional[np.ndarray] = None) -> float:
     """
-    Calculate accuracy from predictions against synthetic ground truth.
+    Calculate accuracy from predictions against the reference labels.
 
-    The ground truth here is SYNTHETIC. A model with no relationship to these
-    labels scores at chance -- 50% on the binary tasks, 10% on the 10-class
-    task -- and that is the correct, informative result. A real MLPerf
-    submission swaps in the benchmark's own labeled dataset; the protocol
+    Pass `labels` (one per test input) to score against a real test set. When
+    none are given the ground truth is SYNTHETIC: a model with no relationship
+    to those labels scores at chance -- 50% on the binary tasks, 10% on the
+    10-class task -- and that is the correct, informative result. A real
+    MLPerf submission uses the benchmark's own labeled dataset; the protocol
     around it does not change.
 
     TODO: Implement accuracy calculation using _extract_pred_array helper
 
     APPROACH:
-    1. Generate synthetic ground truth from self.random_seed so the run repeats
+    1. Use the labels given, or draw synthetic ones from self.random_seed so the run repeats
     2. For binary tasks: use _extract_pred_array, compare class scores
     3. For multi-class: use _extract_pred_array, take argmax
     4. Return the agreement rate. Nothing else.
@@ -2663,7 +2665,7 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     rng = np.random.default_rng(self.random_seed)
     if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
-        true_labels = rng.integers(0, 2, num_runs)
+        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, 2, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
@@ -2674,7 +2676,7 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     else:
         # Multi-class classification (image_classification only)
         num_classes = 10
-        true_labels = rng.integers(0, num_classes, num_runs)
+        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, num_classes, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
@@ -2780,18 +2782,26 @@ Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_a
 #| export
     # --- MLPerf.run_standard_benchmark ---
 def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
-                              num_runs: int = 100) -> Dict[str, Any]:
+                              num_runs: int = 100,
+                              test_inputs: Optional[List[Any]] = None,
+                              labels: Optional[np.ndarray] = None) -> Dict[str, Any]:
     """
     Run a standardized MLPerf benchmark.
+
+    Pass your own `test_inputs` (a list of Tensors of the task's input shape)
+    and `labels` to measure a real test set; without them the inputs are
+    deterministic random data and the labels synthetic, so the protocol runs
+    but the accuracy number means nothing.
 
     TODO: Orchestrate input generation, latency test, accuracy test, and compliance check
 
     APPROACH:
     1. Validate benchmark_name and get config
-    2. Generate deterministic test inputs using seeded random
+    2. Use the test inputs given, or generate deterministic ones using seeded random
     3. Call self._run_latency_test() for timing
     4. Call self._run_accuracy_test() for quality
-    5. Compile results with compliance determination
+    5. Compile results with compliance determination: the latency bar is checked
+       at the 99th percentile, as MLPerf's server scenario bounds the tail, not the mean
 
     HINTS:
     - Use rng = np.random.default_rng(7) for each input
@@ -2813,10 +2823,15 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
           f"<{config['max_latency_ms']}ms latency")
 
-    # Generate standardized test inputs (as Tensors for TinyTorch model compatibility)
+    # Use the caller's test set, or generate standardized test inputs
+    # (as Tensors for TinyTorch model compatibility)
     input_shape = config['input_shape']
-    test_inputs = []
-    for i in range(num_runs):
+    if test_inputs is not None:
+        test_inputs = list(test_inputs)
+        num_runs = len(test_inputs)
+    else:
+        test_inputs = []
+    for i in range(num_runs if not test_inputs else 0):
         # Use deterministic random generation for reproducibility
         rng = np.random.default_rng(7)
         if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
@@ -2829,12 +2844,14 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
 
     # Run latency and accuracy tests using helpers
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
-    accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs)
+    accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs, labels)
 
-    # Compile results
+    # Compile results. The latency bar is checked at the tail (p99), because a
+    # user waits on the slow requests; the mean is reported beside it.
     mean_latency = float(np.mean(latencies))
+    p99_latency = float(np.percentile(latencies, 99))
     accuracy_met = bool(accuracy >= config['target_accuracy'])
-    latency_met = bool(mean_latency <= config['max_latency_ms'])
+    latency_met = bool(p99_latency <= config['max_latency_ms'])
 
     results = {
         'benchmark_name': benchmark_name,
@@ -2844,7 +2861,7 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'std_latency_ms': float(np.std(latencies)),
         'p50_latency_ms': float(np.percentile(latencies, 50)),
         'p90_latency_ms': float(np.percentile(latencies, 90)),
-        'p99_latency_ms': float(np.percentile(latencies, 99)),
+        'p99_latency_ms': p99_latency,
         'max_latency_ms': float(np.max(latencies)),
         'throughput_fps': float(1000 / mean_latency),
         'target_accuracy': float(config['target_accuracy']),
@@ -2856,7 +2873,7 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'random_seed': int(self.random_seed)
     }
 
-    print(f"   Results: {accuracy:.1%} accuracy, {np.mean(latencies):.1f}ms latency")
+    print(f"   Results: {accuracy:.1%} accuracy, {mean_latency:.1f}ms mean latency, {p99_latency:.1f}ms p99")
     print(f"   Compliance: {'✅ PASS' if results['compliant'] else '❌ FAIL'}")
 
     return results
