@@ -51,9 +51,9 @@ Unlike stateless inference serving where input prompts are brief and independent
 
 To resolve this bottleneck, context cannot be treated as an unmanaged log; it must be engineered as an active, eviction-driven **working set**. Scalable agentic runtimes organize memory across three distinct architectural tiers:
 
-- **Tier 1 (L1 Context Working Set):** The active transformer attention window holding pinned system instructions, active tool schemas, and the immediate operational working set $W(t, \Delta t)$.
-- **Tier 2 (L2 KV-Cache Prefix Store and Paging):** High-speed Radix tree caches residing in GPU HBM and host DRAM, enabling sub-millisecond prefix reuse across multi-turn steps and branching search trees.
-- **Tier 3 (L3 Episodic and External Memory):** Persistent vector indices, relational state stores, and AST repomaps supporting semantic retrieval over long-term histories without polluting the active attention window.
+- **Tier 1 (L1 Context Working Set):** The active transformer attention window holding pinned system instructions, active tool schemas (see @sec-vol3-tool-interfaces), and the immediate operational working set $W(t, \Delta t)$.
+- **Tier 2 (L2 KV-Cache Prefix Store and Paging):** High-speed Radix tree caches residing in GPU HBM and host DRAM, enabling sub-millisecond prefix reuse across multi-turn steps and branching search trees (detailed in @sec-vol3-prefix-caching-paging).
+- **Tier 3 (L3 Episodic and External Memory):** Persistent vector indices, relational state stores, and AST repomaps supporting semantic retrieval over long-term histories without polluting the active attention window (see @sec-vol3-episodic-memory).
 
 This chapter establishes the systems foundations of context working sets. We derive the physical silicon limits of self-attention and HBM memory walls in @sec-vol3-context-the-physics-of-context, formulate autoregressive decode economics under the Roofline model in @sec-vol3-context-autoregressive-decode-economics-memory, apply Denning's Working Set theory to neural trajectories in @sec-vol3-context-denning-s-working-set, and develop structured eviction algorithms and semantic compaction pipelines across the subsequent sections.
 
@@ -248,10 +248,10 @@ In virtual memory, thrashing occurs when the sum of working sets exceeds physica
 
 To prevent thrashing, the agent system must enforce an explicit **Context Working Set Architecture**:
 
-1. **L0 Anchor (Pinned Set):** System prompt, invariant security enclosures, tool interface contracts (MCP), and user task definition. Pinned permanently with zero eviction.
+1. **L0 Anchor (Pinned Set):** System prompt, invariant security enclosures (see @sec-security-isolation), tool interface contracts (MCP) (see @sec-vol3-tool-interfaces), and user task definition. Pinned permanently with zero eviction.
 2. **L1 Dynamic Working Set ($W(t, \Delta t)$):** Immediate observations, live workspace state, and active chain-of-thought tokens required for the current reasoning step. Bounded by a strict budget ($C_{\text{active}} \le 32\text{k}$ tokens).
-3. **L2 Prefix Cache (Host RAM / HBM Radix Tree):** Invariant system prompts and reusable trajectory branches cached via RadixAttention for zero-latency reuse.
-4. **L3 Episodic Memory (External Vector / Structured Store):** Evicted trajectory epochs, historical tool outputs, and long-term knowledge indexed in vector stores (HNSW) or relational ledgers, retrievable on-demand via search tools.
+3. **L2 Prefix Cache (Host RAM / HBM Radix Tree):** Invariant system prompts and reusable trajectory branches cached via RadixAttention for zero-latency reuse (see @sec-vol3-prefix-caching-paging).
+4. **L3 Episodic Memory (External Vector / Structured Store):** Evicted trajectory epochs, historical tool outputs, and long-term knowledge indexed in vector stores (HNSW) or relational ledgers, retrievable on-demand via search tools (see @sec-vol3-episodic-memory).
 
 ## Structural Context Packing {#sec-vol3-context-structural-context-packing-instructions}
 
@@ -393,7 +393,7 @@ In classical deep learning inference, the KV cache for a sequence is allocated a
 
 **PagedAttention** (introduced by vLLM, @kwon2023vllm) solves this by mapping the OS virtual memory paradigm to transformer attention. The KV cache is divided into fixed-size physical blocks (e.g., 16 or 32 tokens per block). The runtime maintains a page table mapping logical token sequences to non-contiguous physical blocks in HBM. This eliminates internal fragmentation and enables zero-copy sharing of the system prompt across hundreds of concurrent agent rollouts.
 
-For complex search topologies (like Best-of-$N$ and Tree of Thoughts), **RadixAttention** (introduced by SGLang, @zheng2023sglang) extends PagedAttention by structuring the physical blocks into a Radix Trie. When a parent context forks into multiple search branches, RadixAttention ensures that the shared prefix tokens are physically cached exactly once. The branches simply maintain lightweight pointers to the shared Radix nodes, dropping the marginal memory cost of test-time search to near zero for the shared prefix.
+For complex search topologies (like Best-of-$N$ and Tree of Thoughts), **RadixAttention** (introduced by SGLang, @zheng2023sglang) extends PagedAttention by structuring the physical blocks into a Radix Trie. When a parent context forks into multiple search branches, RadixAttention ensures that the shared prefix tokens are physically cached exactly once. The branches simply maintain lightweight pointers to the shared Radix nodes, dropping the marginal memory cost of test-time search (see @sec-vol3-test-time-search) to near zero for the shared prefix.
 
 ## Distributed Context and Execution Scheduling {#sec-vol3-context-distributed-execution}
 
@@ -583,7 +583,7 @@ Production agent architectures implement a **Two-Phase Commit** for reasoning to
 
   $$\mathcal{T}_{\text{transient}} = \mathcal{C}_{\text{active}} \cup \{\text{CoT tokens}\} \cup \{a_t\}$$
 
-- **The Commit Phase (Pruning and State Mutation):** The runtime extracts the executable tool call $a_t$, executes it within the sandbox, and receives environment observation $o_t$. Before appending to the persistent trajectory history, the runtime **discards the ephemeral CoT tokens**, committing only the structured tuple:
+- **The Commit Phase (Pruning and State Mutation):** The runtime extracts the executable tool call $a_t$, executes it within the sandbox (see @sec-vol3-sandboxing-isolation), and receives environment observation $o_t$. Before appending to the persistent trajectory history, the runtime **discards the ephemeral CoT tokens**, committing only the structured tuple:
 
   $$\mathcal{C}_{t+1} = \mathcal{C}_t \cup \{(a_t, o_t)\}$$
 
@@ -617,7 +617,7 @@ A benchmark task on SWE-bench requires an agent to navigate an unfamiliar reposi
 
 - **Automated Head/Tail Output Slicing:** When executing `pytest tests/`, full output routinely exceeds 4,000 lines. Claude Code captures the complete output in an external log file, but returns only the head (test suite discovery), tail (failure summary), and individual tracebacks into context, adding a pointer: *"Full log written to `.claude/tmp/test_run_28.log`"*.
 - **Git Diff as State Representation:** Rather than retaining repeated calls to `view_file`, the system runs `git diff` after every file edit. The diff acts as a self-compacting ledger: if the agent edits line 40, tests it, finds an error, and reverts it, the git diff naturally collapses to empty, completely freeing context tokens.
-- **Subagent Context Isolation:** When an exploratory task requires scanning 50 documentation files or evaluating multiple search queries, the primary orchestrator spawns an isolated **subagent**. The subagent runs in its own ephemeral 8k context window, completes the search, and returns a 200-word distilled briefing to the primary orchestrator. The hundreds of intermediate search tokens are instantly deallocated from HBM upon subagent termination.
+- **Subagent Context Isolation:** When an exploratory task requires scanning 50 documentation files or evaluating multiple search queries, the primary orchestrator spawns an isolated **subagent** (detailed in @sec-vol3-multi-agent). The subagent runs in its own ephemeral 8k context window, completes the search, and returns a 200-word distilled briefing to the primary orchestrator. The hundreds of intermediate search tokens are instantly deallocated from HBM upon subagent termination.
 
 ---
 

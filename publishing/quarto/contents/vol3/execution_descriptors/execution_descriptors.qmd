@@ -137,7 +137,7 @@ The nine structural fields of the ACB serve dedicated systems responsibilities:
 | Architectural Dimension | Classical POSIX PCB | Agent Control Block (ACB) |
 |:---|:---|:---|
 | **Primary Identifier** | Process ID (`pid_t`, integer) | Agent ID (`AID`, 128-bit UUID/ULID) |
-| **Execution State** | Hardware registers (`RIP`, `RSP`, general registers) | Context working set, KV-cache block IDs, lifecycle FSM |
+| **Execution State** | Hardware registers (`RIP`, `RSP`, general registers) | Context working set (see @sec-vol3-context-working-sets), KV-cache block IDs, lifecycle FSM |
 | **Memory Isolation** | MMU page tables (CR3 register, virtual 4 KB pages) | Attention prefix boundaries, PagedAttention block tables |
 | **System Interface** | POSIX system call table (`sys_enter`, int 0x80) | Tool Execution Interface / Model Context Protocol (MCP) |
 | **Authority Model** | POSIX permissions (`rwx`, UID/GID, capabilities) | Monotonic capability leases, parameter schema filters |
@@ -231,7 +231,7 @@ If an attacker achieves prompt injection inside a leaf subagent (such as a docum
 
 ## Hierarchical Subagent Delegation Trees {#sec-vol3-descriptors-hierarchical-subagent-delegation-trees}
 
-Complex software engineering, data science, and operational tasks overwhelm single monolithic agent loops. Long execution horizons saturate context windows, degrade model reasoning accuracy, and increase latency. Production runtimes resolve this by organizing execution into dynamic **Hierarchical Delegation Trees** [@wu2023autogen; @openai2024swarm].
+Complex software engineering, data science, and operational tasks overwhelm single monolithic agent loops. Long execution horizons saturate context windows, degrade model reasoning accuracy, and increase latency. Production runtimes resolve this by organizing execution into dynamic **Hierarchical Delegation Trees** (see @sec-vol3-control-topologies) [@wu2023autogen; @openai2024swarm].
 
 When an agent invokes a `delegate_task()` or `spawn_subagent()` primitive, the runtime kernel performs an operation analogous to the POSIX `fork()`/`exec()` system calls:
 
@@ -263,18 +263,18 @@ The runtime kernel prevents circular delegation by enforcing a **Strictly Acycli
 When multi-agent systems coordinate, they require mechanisms analogous to POSIX Inter-Process Communication (IPC). Classical operating systems implement IPC via either **Message Passing** (pipes, sockets) or **Shared Memory** (`shmget`, `mmap`). In an agentic runtime, these paradigms map directly to physical hardware memory management and multi-node network topologies.
 
 ### Message Passing (Actor Model)
-When agents are highly decoupled—such as a Planner Agent written in Python communicating with a Coder Agent on a separate physical node—IPC is implemented via asynchronous message passing (e.g., passing serialized JSON or natural language over an event bus). Because the agents maintain separate ACBs and do not share physical GPU memory, they communicate by appending observations to each other's episodic working memory. This mirrors the Actor Model [@hewitt1973] and provides strong fault isolation, but incurs high latency and token-ingestion costs, as every received message must be re-processed through the model's compute-bound prefill phase.
+When agents are highly decoupled—such as a Planner Agent written in Python communicating with a Coder Agent on a separate physical node—IPC is implemented via asynchronous message passing (e.g., passing serialized JSON or natural language over an event bus). Because the agents maintain separate ACBs and do not share physical GPU memory, they communicate by appending observations to each other's episodic working memory (see @sec-vol3-episodic-memory). This mirrors the Actor Model [@hewitt1973] and provides strong fault isolation, but incurs high latency and token-ingestion costs, as every received message must be re-processed through the model's compute-bound prefill phase.
 
 ### Shared Memory (KV-Cache Prefix Sharing)
 When a parent agent spawns multiple parallel child subagents (e.g., to concurrently evaluate three different candidate solutions), copying the identical system instructions, task context, and tool schemas into each child's independent context window wastes massive GPU HBM and compute.
 
-To resolve this, modern agent runtimes implement **Shared Memory IPC** through **KV-Cache Prefix Sharing** (such as RadixAttention [@zheng2023sglang] or native prompt caching). Analogous to operating system virtual memory paging with Copy-On-Write (COW) semantics:
+To resolve this, modern agent runtimes implement **Shared Memory IPC** through **KV-Cache Prefix Sharing** (such as RadixAttention [@zheng2023sglang] or native prompt caching, see @sec-vol3-prefix-caching-paging). Analogous to operating system virtual memory paging with Copy-On-Write (COW) semantics:
 
 1. The kernel computes the Key-Value tensors for the shared preamble once.
 2. It maps the same physical PagedAttention block IDs into the $\mathcal{M}_{\text{handles}}$ of all child ACBs.
 3. As each child agent diverges and autoregressively generates its own unique reasoning tokens, the kernel allocates new, private physical KV blocks for the divergent sequences.
 
-This systems-level memory sharing dramatically increases serving throughput for tree-search and parallel multi-agent topologies by eliminating redundant prefill computation and compressing the physical memory footprint.
+This systems-level memory sharing dramatically increases serving throughput for tree-search and parallel multi-agent topologies (see @sec-vol3-control-topologies) by eliminating redundant prefill computation and compressing the physical memory footprint.
 
 ### Agent Synchronization and Mutexes
 When concurrent agents act upon a shared external environment, they face classic concurrency hazards (e.g., race conditions, lost updates). If Agent A and Agent B simultaneously attempt to edit the same source code file via a file-editing tool, their interleaved operations can corrupt the file. 
@@ -298,7 +298,7 @@ The lifecycle FSM consists of nine distinct operational states:
 1. **`INITIALIZED`:** The ACB data structure is instantiated, principal credentials are authenticated, initial token quotas are reserved, and root capability leases are generated. The agent is enqueued in the scheduler run queue.
 2. **`ACTIVE_PREFILL`:** The agent is scheduled onto an accelerator. The inference engine ingests the system instructions, tools schema, and accumulated history. This phase is compute-bound, saturating tensor cores to compute Time-To-First-Token (TTFT).
 3. **`ACTIVE_DECODE`:** The foundation model autoregressively generates output tokens. This phase is memory-bandwidth bound, generating tokens sequentially until an end-of-sequence token or structured tool call token is emitted.
-4. **`SUSPENDED_TOOL_WAIT`:** The model has emitted a structured tool call. The runtime intercepts the call, validates arguments against the capability lease schema, and dispatches the execution to an isolated sandbox. Because external tools can take hundreds of milliseconds to minutes, the ACB transitions to suspended wait, relinquishing its active decode slot.
+4. **`SUSPENDED_TOOL_WAIT`:** The model has emitted a structured tool call. The runtime intercepts the call, validates arguments against the capability lease schema, and dispatches the execution to an isolated sandbox (see @sec-vol3-sandboxing-isolation). Because external tools can take hundreds of milliseconds to minutes, the ACB transitions to suspended wait, relinquishing its active decode slot.
 5. **`SUSPENDED_HUMAN_GATE`:** An action requires human-in-the-loop authorization (e.g., deploying production infrastructure or executing financial transactions). The ACB serializes its execution state and enters an asynchronous sleep state awaiting an authenticated webhook.
 6. **`MEMORY_SWAPPING`:** When an agent remains suspended beyond a breakeven threshold, the memory manager swaps its volatile KV-cache blocks from high-cost GPU HBM to host DDR5 DRAM or NVMe storage to free accelerator resources.
 7. **`ROLLBACK_COMPENSATING`:** A task failure or verification rejection has occurred. The runtime traverses the ACB's undo log, executing compensating Sagas actions to restore the external environment to a safe state.
@@ -330,7 +330,7 @@ where $T(a)$ is the token set of the serialized tool call. If $J(a_t, a_{t-1}) >
 ### Proportional Share Scheduling
 When hundreds of agent trajectories contend for limited GPU inference capacity, naive First-Come-First-Served (FCFS) scheduling causes head-of-line blocking. Long-running, high-token trajectories starve short interactive agents.
 
-Following lottery and stride scheduling principles [@waldspurger1994], the agent scheduler uses the ACB's remaining quota and assigned priority weight $W_i$ to schedule chunked prefill batches [@agrawal2024sarathi], ensuring that active agents receive proportional shares of memory bandwidth and tensor core cycles.
+Following lottery and stride scheduling principles [@waldspurger1994], the agent scheduler (see @sec-vol3-trajectory-scheduling) uses the ACB's remaining quota and assigned priority weight $W_i$ to schedule chunked prefill batches [@agrawal2024sarathi], ensuring that active agents receive proportional shares of memory bandwidth and tensor core cycles.
 
 ## Causality Vectors and Trace Provenance {#sec-vol3-descriptors-causality-vectors-and-trace}
 
@@ -355,7 +355,7 @@ governed by the following transition invariants:
    $$\mathbf{V}_i[i] \leftarrow \mathbf{V}_i[i] + 1$$
 :::
 
-By recording $\mathbf{V}$ inside the episodic execution log for every turn, the runtime reconstructs an immutable, mathematically rigorous Directed Acyclic Graph (DAG) of the execution trajectory. During telemetry replay and offline evaluation (@sec-vol3-telemetry-evaluation), engineers can execute deterministic time-travel debugging, isolating the exact sequence of observations that triggered a specific reasoning divergence.
+By recording $\mathbf{V}$ inside the episodic execution log for every turn, the runtime reconstructs an immutable, mathematically rigorous Directed Acyclic Graph (DAG) of the execution trajectory. During telemetry replay and offline evaluation (see @sec-vol3-telemetry-evaluation), engineers can execute deterministic time-travel debugging, isolating the exact sequence of observations that triggered a specific reasoning divergence.
 
 ## Context Swapping and Process Suspension Mechanics {#sec-vol3-descriptors-context-swapping-and-process}
 
