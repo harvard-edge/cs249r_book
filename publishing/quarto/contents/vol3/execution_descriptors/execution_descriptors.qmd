@@ -436,7 +436,32 @@ Prompting an LLM with `"You are a safe assistant. You must never delete user fil
 
 **Pitfall**: *Holding GPU High Bandwidth Memory during blocking tool I/O.*
 
-Failing to implement context swapping causes idle agents awaiting HTTP responses to lock up physical GPU VRAM. In a 100-agent cluster, if each agent blocks for an average of 5 seconds on web tools, serving concurrency collapses by over $80\%$, driving GPU utilization to near zero while memory allocation remains at $100\%$.
+Failing to implement context swapping causes idle agents awaiting HTTP responses to lock up physical GPU VRAM. The size of that loss is worth computing rather than asserting, because it is what decides whether swapping is worth its own cost.
+
+::: {#nbk-descriptors-tool-wait-concurrency .callout-notebook title="What tool waits cost a resident cluster"}
+
+**Problem**: A node holds 100 agent sessions resident in HBM. Each step generates a short tool call, then blocks on a web request. How many of those 100 VRAM allocations are doing GPU work at any instant?
+
+**Variables**:
+
+* $N = 100$ resident agent sessions.
+* $t_{\text{gen}} = 1.2\text{ s}$, the decode time for one tool-call turn. Scenario assumption.
+* $t_{\text{wait}} = 5.0\text{ s}$, the average external tool latency. Scenario assumption.
+
+**Math**: Each session completes one step every $W = t_{\text{gen}} + t_{\text{wait}} = 1.2 + 5.0 = 6.2\text{ s}$, so the node's step arrival rate is
+
+$$\lambda = \frac{N}{W} = \frac{100}{6.2} = 16.1\ \text{steps/s}$$
+
+Applying Little's Law to the decode stage alone, where the residence time is $t_{\text{gen}}$ rather than the whole step:
+
+$$L_{\text{gpu}} = \lambda \, t_{\text{gen}} = 16.1 \times 1.2 = 19.4$$
+
+**Result**: About 19 of the 100 resident sessions occupy the accelerator at any instant. The other 81 hold their KV cache in HBM while contributing nothing, so memory allocation reads $100\%$ while useful concurrency sits near $19\%$.
+
+**Systems insight**: The collapse is a duty cycle, $t_{\text{gen}} / (t_{\text{gen}} + t_{\text{wait}})$, and it is set by the environment rather than by the model. Faster decoding makes it worse, because shrinking $t_{\text{gen}}$ shrinks the numerator while the tool latency stays fixed. This is why the descriptor has to be able to release memory during a suspension, and it is the term $T_{\text{breakeven}}$ is weighed against: swapping is worth its round-trip only when the wait is long enough that those idle allocations exceed the cost of moving them.
+
+:::
+
 
 :::
 
