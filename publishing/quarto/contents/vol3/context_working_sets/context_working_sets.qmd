@@ -382,6 +382,20 @@ When the KV cache reaches a predetermined budget $C_{\text{budget}}$, H2O partit
 
 All remaining intermediate tokens with low cumulative attention scores are evicted from HBM. Empirically, retaining just 20% of the KV cache using H2O preserves over 98% of full-attention task accuracy on multi-turn reasoning benchmarks while delivering a 3x to 5x reduction in decode memory footprint.
 
+### SnapKV: Prompt-Guided Sparsification
+
+While H2O relies on online cumulative scores, **SnapKV** (@li2024snapkv) identifies that for many agentic prompts, the crucial tokens can be statically predicted by the structure of the prompt itself. SnapKV isolates the attention weights of a specific "observation" window at the end of the prompt and uses those weights to select the most important tokens from the preceding context, aggressively dropping up to 80% of the KV cache before the autoregressive decode loop even begins. This provides a massive prefill acceleration that H2O cannot achieve.
+
+## OS-Level Memory Management: PagedAttention and RadixAttention {#sec-vol3-context-os-level-memory}
+
+Algorithmic sparsification reduces the *logical* token count, but production systems still require physical memory management to prevent GPU fragmentation.
+
+In classical deep learning inference, the KV cache for a sequence is allocated as a contiguous block of HBM. Since agent trajectories have unpredictable, heavy-tailed lengths (an agent might solve a task in 5 steps or 50), contiguous allocation forces runtimes to over-provision memory (internal fragmentation) or dynamically re-allocate and copy tensors (thrashing).
+
+**PagedAttention** (introduced by vLLM, @kwon2023vllm) solves this by mapping the OS virtual memory paradigm to transformer attention. The KV cache is divided into fixed-size physical blocks (e.g., 16 or 32 tokens per block). The runtime maintains a page table mapping logical token sequences to non-contiguous physical blocks in HBM. This eliminates internal fragmentation and enables zero-copy sharing of the system prompt across hundreds of concurrent agent rollouts.
+
+For complex search topologies (like Best-of-$N$ and Tree of Thoughts), **RadixAttention** (introduced by SGLang, @zheng2023sglang) extends PagedAttention by structuring the physical blocks into a Radix Trie. When a parent context forks into multiple search branches, RadixAttention ensures that the shared prefix tokens are physically cached exactly once. The branches simply maintain lightweight pointers to the shared Radix nodes, dropping the marginal memory cost of test-time search to near zero for the shared prefix.
+
 ## Recursive Context Compaction {#sec-vol3-context-compaction-via-recursive-summarization}
 
 While KV-cache eviction algorithms operate at the sub-token tensor level inside the inference engine, autonomous agent runtimes also require **Semantic Context Compaction** operating at the application layer. When an agent engages in extended tasks spanning 50 to 100 turns, token accumulation inevitably approaches the model's context threshold $\theta_{\text{compact}}$ (typically 75% of maximum context capacity).
