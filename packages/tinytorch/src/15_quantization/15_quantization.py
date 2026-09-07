@@ -925,9 +925,12 @@ class QuantizedLinear:
 
         all_values = np.array(all_values)
 
-        # Calculate input quantization parameters
-        min_val = float(np.min(all_values))
-        max_val = float(np.max(all_values))
+        # Calculate input quantization parameters, widening the range to
+        # straddle zero exactly as quantize_int8 does (post-ReLU inputs are
+        # all non-negative, and a zero_point outside the INT8 range would
+        # otherwise be clamped and corrupt every value)
+        min_val = min(float(np.min(all_values)), 0.0)
+        max_val = max(float(np.max(all_values)), 0.0)
 
         if abs(max_val - min_val) < EPSILON:
             self.input_scale = 1.0
@@ -935,7 +938,7 @@ class QuantizedLinear:
         else:
             self.input_scale = (max_val - min_val) / (INT8_RANGE - 1)
             self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
-            self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
+            self.input_zero_point = int(np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
         ### END SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
@@ -958,6 +961,8 @@ class QuantizedLinear:
         (1, 3)
 
         HINTS:
+        - If calibrate() has set input_scale, round the input onto its grid and
+          back first (clip to the INT8 range), so saturation is visible
         - Use dequantize_int8() to restore weights to FP32 before computation
         - Use x.matmul() for matrix multiplication
         - Add bias after matmul if it exists (dequantize bias first)
@@ -967,6 +972,13 @@ class QuantizedLinear:
         ### BEGIN SOLUTION
         # For educational purposes, we dequantize and compute in FP32
         # Production systems use specialized INT8 GEMM operations
+
+        # Round the input onto the calibrated grid and back, so the activations
+        # carry the same rounding (and saturation) they would on INT8 hardware
+        if self.input_scale is not None:
+            q_x = np.clip(np.round(x.data / self.input_scale + self.input_zero_point),
+                          INT8_MIN_VALUE, INT8_MAX_VALUE)
+            x = Tensor((q_x - self.input_zero_point) * self.input_scale)
 
         # Dequantize weights
         weight_fp32 = dequantize_int8(self.q_weight, self.weight_scale, self.weight_zero_point)
@@ -1460,8 +1472,12 @@ def test_unit_quantize_model():
     x = Tensor(rng.standard_normal((2, 4)))
     original_output = model.forward(x)
 
-    # Create calibration data
-    calibration_data = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
+    # Create calibration data. Calibration fixes each layer's input range, and
+    # an input outside that range saturates, so the set must cover the inputs
+    # the layer will see; the batch under test is included so this check
+    # measures rounding error, not saturation (the calibration exercise in the
+    # book shows what saturation does).
+    calibration_data = [x] + [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
 
     # Quantize model
     quantize_model(model, calibration_data)
