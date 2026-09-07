@@ -1289,6 +1289,7 @@ Step 2: Generate token_5
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-generate", "solution": true}
+#| export
 def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     Run autoregressive generation using the KV cache.
