@@ -820,14 +820,13 @@ class Profiler:
         ### END SOLUTION
 
     def __enter__(self):
-        """Start timing for use as a context manager."""
+        """Start timing: `with Profiler() as p:` times the block (see the tests)."""
         self._context_start = time.perf_counter()
         return self
 
     def __exit__(self, *args):
-        """Stop timing and store elapsed time in milliseconds."""
+        """Stop timing and store the elapsed time in milliseconds on .elapsed."""
         self.elapsed = (time.perf_counter() - self._context_start) * 1000
-
 
     def count_parameters(self, model) -> int:
         """
