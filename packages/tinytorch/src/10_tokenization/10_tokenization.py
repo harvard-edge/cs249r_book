@@ -1095,8 +1095,11 @@ class BPETokenizer(Tokenizer):
         if vocab_size:
             self.vocab_size = vocab_size
 
-        # Count word frequencies and initialize character vocabulary
-        word_freq = Counter(corpus)
+        # Count word frequencies and initialize character vocabulary.
+        # Split each text on whitespace exactly as encode() does, so that the
+        # symbols the trainer merges (with </w> on each word's last character)
+        # are the symbols encode() will later look up.
+        word_freq = Counter(word for text in corpus for word in text.split())
         vocab = set()
         word_tokens = {}
 
