@@ -1821,7 +1821,7 @@ def analyze_checkpoint_overhead():
     print("\n💡 Key Insights:")
     print("- Checkpoints include model state + optimizer state + training metadata")
     print("- Pickle serialization adds 10-30% overhead")
-    print("- Adam's two moment buffers would triple the parameter bytes (this Trainer checkpoints SGD momentum only)")
+    print("- Adam's two moment buffers triple the parameter bytes; the Trainer saves them via get_momentum_state()")
     print("- Use checkpoint frequency wisely in production (memory vs fault tolerance)")
 
 # Run the systems analysis
