@@ -59,15 +59,14 @@ from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_dis
 #| default_exp perf.profiling
 #| export
 
-import sys
 import os
 import time
+import tracemalloc
+from collections import defaultdict
+from typing import Dict, List, Any, Optional, Tuple
+
 import numpy as np
 rng = np.random.default_rng(7)
-import tracemalloc
-from typing import Dict, List, Any, Optional, Tuple
-from collections import defaultdict
-import gc
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -289,7 +288,8 @@ budget.
 
 The reason this is a separate function rather than a line inside the traversal
 is that "does this thing have parameters" is a question about an object, not
-about a model. Keeping it small lets the traversal above it stay a traversal.
+about a model. Keeping it small lets `Profiler.count_parameters`, the model-wide
+traversal later in this module, stay a plain traversal.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "count-layer-parameters", "solution": true}
@@ -820,14 +820,13 @@ class Profiler:
         ### END SOLUTION
 
     def __enter__(self):
-        """Start timing for use as a context manager."""
+        """Start timing: `with Profiler() as p:` times the block (see the tests)."""
         self._context_start = time.perf_counter()
         return self
 
     def __exit__(self, *args):
-        """Stop timing and store elapsed time in milliseconds."""
+        """Stop timing and store the elapsed time in milliseconds on .elapsed."""
         self.elapsed = (time.perf_counter() - self._context_start) * 1000
-
 
     def count_parameters(self, model) -> int:
         """
@@ -853,11 +852,9 @@ class Profiler:
         - Handle models with and without parameters() method
         """
         ### BEGIN SOLUTION
-        if hasattr(model, 'layers'):
-            return sum(p.data.size for layer in model.layers for p in layer.parameters())
-        elif hasattr(model, 'parameters'):
+        if hasattr(model, 'parameters'):
             return sum(p.data.size for p in model.parameters())
-        elif hasattr(model, 'weight'):
+        if hasattr(model, 'weight'):
             return _count_layer_parameters(model)
         return 0
         ### END SOLUTION
@@ -900,7 +897,7 @@ class Profiler:
 
         APPROACH:
         1. Identify model type by class name
-        2. Dispatch to count_linear_flops, self._count_conv_flops, or self._count_sequential_flops
+        2. Dispatch to _count_linear_flops, _count_conv_flops, or self._count_sequential_flops
         3. A GPT-style model (it has .blocks and .embed_dim) goes to self._count_transformer_flops
         4. Fall back to 1 FLOP per element for activations
 
@@ -1011,6 +1008,7 @@ class Profiler:
         parameter_memory_mb = self._calculate_parameter_memory(model)
 
         dummy_input = self._dummy_input(model, input_shape)
+        # Rough activation estimate: the input plus an output of about the same size
         activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
 
         _ = model.forward(dummy_input)
@@ -1020,10 +1018,12 @@ class Profiler:
         tracemalloc.stop()
 
         useful_memory = parameter_memory_mb + activation_memory_mb
+        # tracemalloc only sees allocations made after start(); never report a peak below what we know is live
+        peak_memory_mb = max(peak_memory_mb, useful_memory)
         return {
             'parameter_memory_mb': parameter_memory_mb,
             'activation_memory_mb': activation_memory_mb,
-            'peak_memory_mb': max(peak_memory_mb, useful_memory),
+            'peak_memory_mb': peak_memory_mb,
             'memory_efficiency': _calculate_memory_efficiency(useful_memory, peak_memory_mb)
         }
         ### END SOLUTION
@@ -1055,7 +1055,6 @@ class Profiler:
         HINTS:
         - Use time.perf_counter() for high precision
         - Use median instead of mean for robustness against outliers
-        - Handle different model interfaces (forward, __call__)
         """
         ### BEGIN SOLUTION
         # Warmup runs to stabilize performance
@@ -1166,7 +1165,7 @@ class Profiler:
 
 
 
-    def profile_backward_pass(self, model, input_tensor, _loss_fn=None) -> Dict[str, Any]:
+    def profile_backward_pass(self, model, input_tensor) -> Dict[str, Any]:
         """
         Profile both forward and backward passes for training analysis.
 
@@ -1206,7 +1205,7 @@ class Profiler:
             'total_flops': total_flops,
             'total_latency_ms': total_latency_ms,
             'total_memory_mb': total_memory_mb,
-            'total_gflops_per_second': (total_flops / 1e9) / (total_latency_ms / 1000.0),
+            'total_gflops_per_second': (total_flops / 1e9) / max(total_latency_ms / 1000.0, 1e-6),
             'optimizer_memory_estimates': _estimate_optimizer_memory(gradient_memory_mb),
             'memory_efficiency': fwd['memory_efficiency'],
             'bottleneck': fwd['bottleneck']
@@ -1339,7 +1338,6 @@ def test_unit_helper_functions():
     print("🧪 Unit Test: Helper Functions...")
 
     # Test 1: Quick profile function
-    from tinytorch.core.layers import Linear
     test_model = Linear(16, 8)
     test_input = Tensor(rng.standard_normal((8, 16)))
     profile = quick_profile(test_model, test_input, profiler=Profiler())
@@ -1526,6 +1524,7 @@ Linear Layer FLOP Breakdown:
 │ Bias Addition:         32 × 3072 × 1      =      98,304 FLOPs  │
 │                         ↓                                      │
 │ Total FLOPs:                                 151,093,248 FLOPs │
+│ Per sample (count_flops): 768 × 3072 × 2 = 4,718,592 FLOPs     │
 └────────────────────────────────────────────────────────────────┘
 
 Convolution FLOP Breakdown:
@@ -1533,7 +1532,7 @@ Convolution FLOP Breakdown:
 │ Input (batch=1, channels=3, H=224, W=224)                      │
 │ Kernel (out=64, in=3, kH=7, kW=7)                              │
 │                         ↓                                      │
-│ Output size: (224×224) → (112×112) with stride=2               │
+│ Output size: (224×224) → (112×112) with stride=2, padding=3    │
 │ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs     │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -1892,7 +1891,6 @@ def test_unit_memory_measurement():
 
     # Test 1: Basic memory measurement
     test_tensor = Tensor(rng.standard_normal((10, 20)))
-    from tinytorch.core.layers import Linear
     test_model = Linear(20, 10)
     memory_stats = profiler.measure_memory(test_model, (10, 20))
 
@@ -1908,7 +1906,6 @@ def test_unit_memory_measurement():
     print(f"✅ Basic measurement: {memory_stats['peak_memory_mb']:.3f} MB peak")
 
     # Test 2: Memory scaling with size
-    from tinytorch.core.layers import Linear
     small_model = Linear(5, 5)
     large_model = Linear(50, 50)
 
@@ -1986,7 +1983,6 @@ def test_unit_latency_measurement():
     profiler = Profiler()
 
     # Test 1: Basic latency measurement
-    from tinytorch.core.layers import Linear
     test_model = Linear(8, 4)
     test_input = Tensor(rng.standard_normal((4, 8)))
     latency = profiler.measure_latency(test_model, test_input, warmup=2, iterations=5)
@@ -2249,7 +2245,6 @@ def test_unit_advanced_profiling():
 
     # Create profiler and test model
     profiler = Profiler()
-    from tinytorch.core.layers import Linear
     test_model = Linear(8, 4)
     test_input = Tensor(rng.standard_normal((4, 8)))
 
@@ -2314,15 +2309,14 @@ Let's analyze how different model characteristics affect performance. This analy
 ```
 Model Scaling Analysis:
 ┌─────────────────────────────────────────────────────────────────┐
-│ Size → Memory → Latency → Throughput → Bottleneck Identification│
-│  ↓      ↓        ↓         ↓            ↓                       │
-│ 64    1MB     0.1ms    10K ops/s    Memory bound                │
-│ 128   4MB     0.2ms    8K ops/s     Memory bound                │
-│ 256   16MB    0.5ms    4K ops/s     Memory bound                │
-│ 512   64MB    2.0ms    1K ops/s     Memory bound                │
+│ Size → Params → FLOPs → Latency → GFLOP/s → Bottleneck          │
+│                                                                 │
+│ Params and FLOPs grow with size². Latency grows more slowly at  │
+│ small sizes (overhead dominates) and catches up at large sizes. │
+│ GFLOP/s far below the machine's peak → memory-bound.            │
 └─────────────────────────────────────────────────────────────────┘
 
-Insight: This workload is memory-bound -> Optimize data movement, not compute!
+Insight: measure, then classify. The numbers below come from your machine.
 ```
 """
 
@@ -2343,14 +2337,13 @@ def analyze_model_scaling():
 
     for size in sizes:
         # Create models of different sizes for comparison
-        from tinytorch.core.layers import Linear
         test_model = Linear(size, size)
         input_shape = (32, size)  # Batch of 32
         dummy_input = Tensor(rng.standard_normal(input_shape))
 
-        # Simulate linear layer characteristics
-        linear_params = size * size + size  # W + b
-        linear_flops = size * size * 2  # matmul
+        # Use the profiler's own counters (count_flops is per sample; scale by batch)
+        linear_params = profiler.count_parameters(test_model)
+        linear_flops = profiler.count_flops(test_model, input_shape) * input_shape[0]
 
         # Measure actual performance
         latency = profiler.measure_latency(test_model, dummy_input, warmup=3, iterations=10)
@@ -2402,7 +2395,6 @@ def analyze_batch_size_effects():
     print("-" * 85)
 
     for batch_size in batch_sizes:
-        from tinytorch.core.layers import Linear
         test_model = Linear(feature_size, feature_size)
         input_shape = (batch_size, feature_size)
         dummy_input = Tensor(rng.standard_normal(input_shape))
@@ -2489,10 +2481,9 @@ def benchmark_operation_efficiency():
     })
 
     # Matrix operations (compute-bound)
-    from tinytorch.core.layers import Linear
     matrix_model = Linear(size, size)
     matrix_latency = profiler.measure_latency(matrix_model, input_tensor, iterations=10)
-    matrix_flops = size * size * 2  # Matrix multiplication
+    matrix_flops = profiler.count_flops(matrix_model, input_tensor.shape) * input_tensor.shape[0]
 
     operations.append({
         'operation': 'Matrix Multiply',
@@ -2556,21 +2547,21 @@ def analyze_profiling_overhead():
     test_tensor = Tensor(rng.standard_normal((100, 100)))
     iterations = 50
 
-    # Without profiling - baseline measurement
-    start_time = time.perf_counter()
-    for _ in range(iterations):
-        _ = test_tensor.data.copy()  # Simple operation
-    end_time = time.perf_counter()
-    baseline_ms = (end_time - start_time) * 1000
-
-    # With profiling - includes measurement overhead
-    profiler = Profiler()
-    # Create a simple model for profiling overhead measurement
     class TestModel:
         def forward(self, x):
             return x + 1.0
 
     test_model = TestModel()
+
+    # Without profiling - the same forward call, timed as one block
+    start_time = time.perf_counter()
+    for _ in range(iterations):
+        _ = test_model.forward(test_tensor)
+    end_time = time.perf_counter()
+    baseline_ms = (end_time - start_time) * 1000
+
+    # With profiling - the same call through measure_latency, one timed run each
+    profiler = Profiler()
     start_time = time.perf_counter()
     for _ in range(iterations):
         _ = profiler.measure_latency(test_model, test_tensor, warmup=1, iterations=1)
@@ -2648,7 +2639,6 @@ def test_module():
     profiler = Profiler()
 
     # Create test model and data
-    from tinytorch.core.layers import Linear
     test_model = Linear(16, 32)
     test_input = Tensor(rng.standard_normal((8, 16)))
 
@@ -2697,7 +2687,6 @@ def test_module():
     print("4. Testing production profiling scenario...")
 
     # Simulate larger model analysis
-    from tinytorch.core.layers import Linear
     large_model = Linear(512, 256)
     large_input = Tensor(rng.standard_normal((32, 512)))  # Larger model input
     large_profile = profiler.profile_forward_pass(large_model, large_input)
@@ -2796,7 +2785,7 @@ def demo_profiling():
     print(f"\nFLOPs: {flops:,}")
     print(f"  = 784 × 128 × 2 (multiply-add per output)")
 
-    print(f"\nMemory: {params * 4 / 1024:.1f} KB (at FP32)")
+    print(f"\nMemory: {params * BYTES_PER_FLOAT32 / KB_TO_BYTES:.1f} KB (at FP32)")
 
     print("\n✨ Profiling reveals optimization opportunities!")
 

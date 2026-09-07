@@ -136,52 +136,42 @@ def profile_naive_generation():
 
     profiler = Profiler()
 
-    def naive_attention_step(seq_len, hidden_dim=64):
-        """
-        Simulates one step of attention computation.
-        Without caching, this processes ALL previous tokens every time.
-        """
-        # Q, K, V for entire sequence
-        q = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
-        k = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
-        v = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
+    class NaiveAttentionStep:
+        """One generation step without a cache: attention over the whole sequence."""
 
-        # Attention: Q @ K.T then @ V
-        # This is O(seq_len²) in complexity
-        scores = q @ k.T  # (1, seq_len, seq_len)
-        output = scores @ v
+        def forward(self, x):
+            # Without caching, every step recomputes K and V for ALL tokens so far
+            # (projections omitted: the O(seq_len²) part is the score matrix)
+            q, k, v = x.data, x.data, x.data
+            scores = np.matmul(q, np.transpose(k, (0, 2, 1)))  # (1, seq_len, seq_len)
+            return Tensor(np.matmul(scores, v))
 
-        return output
+    step = NaiveAttentionStep()
 
     # Profile at increasing sequence lengths
     print("🔬 Profiling Transformer Generation (Without Caching):\n")
     print("   Seq Len  |  Latency (ms)  |  Growth")
     print("   ---------|----------------|----------")
 
-    sequence_lengths = [10, 20, 40, 80, 160]
+    sequence_lengths = [64, 128, 256, 512, 1024]
     latencies = []
 
     for seq_len in sequence_lengths:
-        # Measure latency for this sequence length
-        latency = profiler.measure_latency(
-            lambda: naive_attention_step(seq_len),
-            None,
-            warmup=5,
-            iterations=20
-        )
+        x = Tensor(rng.standard_normal((1, seq_len, 64)))
+        latency = profiler.measure_latency(step, x, warmup=5, iterations=20)
         latencies.append(latency)
 
         # Calculate growth rate
         if len(latencies) > 1:
             growth = latencies[-1] / latencies[-2]
-            print(f"   {seq_len:3d}      |  {latency:6.2f}        |  {growth:.2f}×")
+            print(f"   {seq_len:5d}    |  {latency:6.2f}        |  {growth:.2f}×")
         else:
-            print(f"   {seq_len:3d}      |  {latency:6.2f}        |  baseline")
+            print(f"   {seq_len:5d}    |  {latency:6.2f}        |  baseline")
 
     print("\n💡 Key Observations:")
     print("   • Latency grows QUADRATICALLY with sequence length")
     print("   • Each new token forces recomputation of ALL previous K,V pairs")
-    print("   • For 160 tokens: ~4× time vs 80 tokens (2² growth)")
+    print("   • Doubling the sequence roughly quadruples the time once the arrays are big")
 
     print("\n🎯 The Problem:")
     print("   K and V values for previous tokens NEVER change,")
@@ -192,13 +182,10 @@ def profile_naive_generation():
     print("   • First compute: Calculate and store K,V")
     print("   • Later steps: Reuse stored K,V")
     print("   • Complexity: O(n²) → O(n)")
-    print("   • Operations saved: 10-15× for typical generation\n")
+    print("   • Attention ops saved: (n+1)/2 for n generated tokens (≈50× at n=100)\n")
 
-# Run profiling when module is executed directly
-# NOTE: Commented out to run tests. Profiling requires proper Profiler API usage.
-# Uncomment to run profiling (requires matplotlib installed)
-# if __name__ == "__main__":
-#     profile_naive_generation()
+if __name__ == "__main__":
+    profile_naive_generation()
 
 # %% [markdown]
 """
@@ -877,8 +864,8 @@ Why? Longer sequences = more redundant computation without cache.
 - For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~18 GB per sequence
 
 **Trade-off Analysis:**
-- **10x+ fewer operations** for typical generation lengths (50-200 tokens)
-- **Modest memory cost** compared to model parameters (often <1% of model size)
+- **(n+1)/2 fewer attention operations** for n generated tokens (25× at 50, 100× at 200)
+- **Memory cost grows with context**: 2 × layers × heads × seq_len × head_dim × 4 bytes per sequence
 - **Enables real-time interaction** that's impossible without caching
 
 **Best Practices:**
@@ -916,9 +903,6 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
         5. Compute attention: softmax(Q @ K^T / sqrt(d)) @ V
         6. Reshape and project to output
     """
-    import numpy as np
-    from tinytorch.core.tensor import Tensor
-
     batch_size = x.shape[0]
     num_heads = attention.num_heads
     head_dim = attention.head_dim
@@ -928,16 +912,10 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     K_new = attention.k_proj.forward(x)
     V_new = attention.v_proj.forward(x)
 
-    # Step 2: Reshape to multi-head format (batch, num_heads, 1, head_dim)
-    Q_heads = Tensor(np.transpose(
-        Q_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    K_heads = Tensor(np.transpose(
-        K_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    V_heads = Tensor(np.transpose(
-        V_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
+    # Step 2: Split into heads (batch, num_heads, 1, head_dim), reusing Module 12's helper
+    Q_heads = attention._split_heads(Q_new, batch_size, 1)
+    K_heads = attention._split_heads(K_new, batch_size, 1)
+    V_heads = attention._split_heads(V_new, batch_size, 1)
 
     # Step 3: Update cache with new K, V
     cache_obj.update(layer_idx, K_heads, V_heads)
@@ -964,9 +942,8 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     # Apply attention to values
     attention_output = np.matmul(attention_weights, V_all.data)
 
-    # Step 6: Reshape and project to output
-    attention_output_transposed = np.transpose(attention_output, (0, 2, 1, 3))
-    concat_output = Tensor(attention_output_transposed.reshape(batch_size, 1, num_heads * head_dim))
+    # Step 6: Merge heads back (Module 12's helper) and project to output
+    concat_output = attention._merge_heads(Tensor(attention_output), batch_size, 1)
 
     return attention.out_proj.forward(concat_output)
 
@@ -1271,7 +1248,7 @@ prompt = [token_1, token_2, token_3]
 cache  = empty
 
 Step 0 (prefill): Process prompt tokens one at a time
-  → each token's K,V is written into the cache via PATH 3
+  → each token's K,V is written into the cache by _cached_generation_step
   → get logits for next token prediction
 
 Step 1: Generate token_4
@@ -1340,8 +1317,8 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     # K,V into the cache. start_pos=cache.seq_pos gives the token its true
     # position, so a single-token forward computes exactly what the full
     # sequence would have computed for that position.
-    for i in range(len(prompt_tokens)):
-        token_tensor = Tensor(np.array([[prompt_tokens[i]]]))  # (1, 1)
+    for token in prompt_tokens:
+        token_tensor = Tensor(np.array([[token]]))  # (1, 1)
         logits = model.forward(token_tensor, start_pos=cache.seq_pos)
         cache.advance()
 
@@ -1648,12 +1625,12 @@ def analyze_kvcache_memory():
         - Large models (1024D): ~32 MB
 
     Key Insight:
-        Cache overhead is 10-30% of model parameters, but enables
-        10-15× fewer operations. Memory is cheap, compute is expensive!
+        Cache size is set by context length, not by parameter count. The
+        ratio below compares it to one transformer block's parameters (~12·d²).
 
     Production Context:
-        GPT-3 (175B params, 2048 context): ~4GB cache per sequence
-        This memory cost is acceptable given the massive speedup.
+        GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per
+        sequence in FP32, which is why serving systems budget memory per user.
     """
     print("📊 Analyzing KV Cache Memory Usage...")
     print()
@@ -1666,7 +1643,7 @@ def analyze_kvcache_memory():
         (1024, 16, 256, "Large"),
     ]
 
-    print("Model Config | Cache Memory | Per Layer | Memory Overhead")
+    print("Model Config | Cache Memory | Per Layer | Cache / Block Params")
     print("-" * 60)
 
     for embed_dim, num_layers, seq_len, name in configs:
@@ -1675,8 +1652,9 @@ def analyze_kvcache_memory():
         memory_per_layer = 2 * batch_size * seq_len * embed_dim * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
         total_memory = memory_per_layer * num_layers
 
-        # Model parameter memory (approximate)
-        params_per_layer = embed_dim * embed_dim * _BYTES_PER_FLOAT32  # QKV projections
+        # Model parameter memory: a transformer block has about 12·d² parameters
+        # (4·d² in attention projections, 8·d² in the MLP)
+        params_per_layer = 12 * embed_dim * embed_dim
         model_memory = params_per_layer * num_layers * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
 
         overhead_pct = (total_memory / model_memory) * 100 if model_memory > 0 else 0
@@ -1687,11 +1665,11 @@ def analyze_kvcache_memory():
     print("💡 Key Insights:")
     print("   • Cache memory scales linearly with sequence length (O(n))")
     print("   • Longer sequences require proportionally more cache memory")
-    print("   • Cache overhead is typically 10-30% of model parameters")
+    print("   • The ratio compares the cache to block parameters (~12·d² each); it grows with context")
     print()
     print("🚀 Production Context:")
-    print("   • GPT-3 (175B params, 2048 context): ~4GB cache memory")
-    print("   • Trade-off: 2× memory removes 10-15× of the arithmetic")
+    print("   • GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per sequence in FP32")
+    print("   • Trade-off: memory per cached token buys away the O(n²) attention recomputation")
     print("   • Worth it for inference-heavy workloads!")
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "solution": false}
@@ -1704,10 +1682,9 @@ def analyze_kvcache_speedup():
         concrete complexity analysis. Compares O(n²) vs O(n) growth.
 
     Demonstrates:
-        - Naive approach: O(n²) operations per token
-        - Cached approach: O(n) operations per token
-        - Speedup increases with generation length
-        - 100-token generation: ~50× fewer operations
+        - Naive approach: attention over the whole context for every new token
+        - Cached approach: one token of new work per step
+        - Measured wall-clock speedup on a tiny GPT, next to the (n+1)/2 ops ratio
 
     Key Insight:
         Speedup is SUPER-LINEAR with generation length because:
@@ -1721,44 +1698,46 @@ def analyze_kvcache_speedup():
     print("\n📊 Analyzing KV Cache Speedup...")
     print()
 
-    import time
+    from tinytorch.core.transformers import GPT
 
-    # Create test configuration
-    batch_size = 1
-    embed_dim = 256
-    num_heads = 8
-    head_dim = embed_dim // num_heads
+    # A tiny GPT: big enough to show the trend, small enough to run in seconds
+    model = GPT(vocab_size=64, embed_dim=64, num_layers=2, num_heads=4, max_seq_len=256)
+    prompt = [1, 2, 3, 4]
+    prompt_tensor = Tensor(np.array([prompt]))  # GPT.generate takes a (1, seq_len) Tensor
 
-    print("Generation Length | Without Cache | With Cache | Speedup")
-    print("-" * 55)
+    cache = enable_kv_cache(model)  # _cached_generate resets it for every new sequence
+
+    print("Generation Length | Without Cache | With Cache | Measured | Attention ops ratio")
+    print("-" * 80)
 
     for gen_length in [10, 25, 50, 100]:
-        # Simulate without cache: O(n²) for each new token
-        # Each token processes entire context
-        ops_without = sum(i for i in range(1, gen_length + 1))
+        # Without cache: model.generate() re-runs the whole sequence for every token.
+        # CachedAttention only changes single-token forwards, so the full-sequence
+        # path below is the plain Module 13 attention.
+        start = time.perf_counter()
+        model.generate(prompt_tensor, max_new_tokens=gen_length, temperature=1.0)
+        time_without = (time.perf_counter() - start) * 1000
 
-        # Simulate with cache: O(n) for each new token
-        # Each token only processes itself
-        ops_with = gen_length
+        # With cache: one token of work per step
+        start = time.perf_counter()
+        _cached_generate(model, prompt, gen_length, 1.0, cache)
+        time_with = (time.perf_counter() - start) * 1000
 
-        # Estimate time (arbitrary units)
-        time_without = ops_without / 1000  # ms
-        time_with = ops_with / 1000  # ms
-        speedup = ops_without / ops_with
+        measured = time_without / max(time_with, 1e-6)
+        ops_ratio = (gen_length + 1) / 2  # n(n+1)/2 attention rows vs n
 
-        print(f"{gen_length:17d} | {time_without:12.1f} ms | {time_with:10.1f} ms | {speedup:6.1f}×")
+        print(f"{gen_length:17d} | {time_without:10.1f} ms | {time_with:8.1f} ms | {measured:6.1f}× | {ops_ratio:6.1f}×")
 
+    disable_kv_cache(model)
     print()
     print("💡 Key Insights:")
-    print("   • Speedup increases with generation length (longer = better ROI)")
-    print("   • 100-token generation: ~50× fewer operations!")
-    print("   • Cache eliminates O(n²) recomputation per token")
+    print("   • Speedup grows with generation length (longer = better ROI)")
+    print("   • The attention-ops ratio (n+1)/2 is the ceiling; the MLP, sampling, and")
+    print("     Python overhead do not shrink, so the measured speedup sits below it")
     print()
     print("🚀 Production Reality:")
-    print("   • ChatGPT uses KV caching for ALL generation")
-    print("   • Without caching: 100-token response takes ~17 seconds")
-    print("   • With caching: 100-token response takes ~0.1 seconds")
-    print("   • This optimization makes conversational AI possible!")
+    print("   • Every production LLM server caches K/V; without it, per-token cost")
+    print("     grows with the conversation and long chats become unaffordable")
 
 # Run analysis when developing this module
 if __name__ == "__main__":
@@ -1875,11 +1854,11 @@ maximum sequence length of 2048, and batch size of 8. Calculate the KV cache siz
 is the cache? Is this overhead acceptable?
 
 ### Question 2: Speed vs Memory Trade-off
-Your KVCache makes generation 10× faster but uses several GB of RAM.
+Your KVCache removes the O(n²) recomputation but holds memory for every cached token.
 
 Consider a production API serving 1000 users simultaneously:
-- Without cache: Each generation is slow (10 sec) but uses minimal memory
-- With cache: Each generation is fast (1 sec) but uses 100 MB cache per user = 100 GB total!
+- Without cache: each generation is slow (per-token cost grows with context) but uses no extra memory
+- With cache: each generation is fast but holds, say, 100 MB of cache per user = 100 GB total!
 
 **Questions**:
 - For an interactive chatbot, is this trade-off worth it? Why?
@@ -1969,7 +1948,7 @@ def demo_memoization():
     k_all, v_all = cache.get(0)
     print(f"Retrieved: K{k_all.shape}, V{v_all.shape}")
 
-    print("\n✨ Compute once, reuse forever—10× faster generation!")
+    print("\n✨ Compute once, reuse for every later token!")
 
 # %%
 if __name__ == "__main__":
@@ -1986,28 +1965,28 @@ Congratulations! You've built the optimization that makes production language mo
 ### Key Accomplishments
 - Built KVCache class with efficient memory management for K,V tensors across layers
 - Implemented non-invasive cache integration using enable_kv_cache()
-- Measured a 10-15× reduction in operation count, showing the O(n²)→O(n) improvement
-- Understood memory-compute trade-off (2× memory enables 10× speedup)
+- Measured the O(n²)→O(n) reduction in attention work and the wall-clock speedup it buys
+- Understood the memory-compute trade-off: memory per cached token buys away recomputation
 - Discovered why speedup increases with generation length
 - All tests pass ✅ (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
-- **Memory-Speed Trade-off**: Doubling memory enables order-of-magnitude speedup
-- **Scaling Benefits**: Longer generation = better cache return on investment (~50× at 100 tokens)
+- **Memory-Speed Trade-off**: Cache memory grows with context length; it buys away the O(n²) recomputation
+- **Scaling Benefits**: Longer generation = better cache return on investment ((n+1)/2 in attention ops, ~50× at 100 tokens)
 - **Production Critical**: This single optimization makes ChatGPT-scale inference possible
 - **Non-Invasive Design**: Add capabilities forward without breaking existing modules
 
 ### Real-World Impact
 Without KV caching:
-- 100-token generation: ~17 seconds
-- Conversational AI: economically infeasible
-- User experience: unacceptably slow
+- Every new token recomputes attention over the whole context, so per-token cost grows with n
+- Total attention work for n tokens: n(n+1)/2
+- User experience: responses slow down as the conversation gets longer
 
 With KV caching:
-- 100-token generation: ~0.1 seconds (~50× faster!)
-- Conversational AI: production-ready at scale
-- User experience: real-time interaction
+- Each new token computes its own K, V once and reads the rest from the cache
+- Total attention work: n (the measured speedup is in the table above)
+- User experience: steady, real-time interaction
 
 This optimization is THE technique that transformed language models from research demonstrations into products serving millions of users daily.
 

@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/03_layers/layers.ipynb
+**Learning Side:** You work in `modules/03_layers/layers.ipynb`
 **Building Side:** Code exports to tinytorch.core.layers
 
 ```python
@@ -61,6 +61,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| default_exp core.layers
 #| export
 
+import inspect
 import numpy as np
 # Module-level RNG is seeded so Linear weight init is deterministic by default.
 # This is what the integration test suite (and any cross-run reproducibility)
@@ -592,7 +593,7 @@ Dropout Memory Usage:
 ├─────────────────────────────┤
 │ Output Tensor: X MB         │
 └─────────────────────────────┘
-        Total: ~2.25X MB peak memory
+        Total: ~3X MB peak memory (input, mask, and output all live at once)
 
 Computational Overhead: Minimal (element-wise operations)
 ```
@@ -707,7 +708,7 @@ class Dropout(Layer):
         (4,)
 
         HINTS:
-        - np.random.random(shape) gives uniform [0, 1) values
+        - rng.random(shape) gives uniform [0, 1) values
         - Threshold with < keep_prob to get a boolean mask
         - Scale factor is 1.0 / keep_prob
         """
@@ -843,7 +844,6 @@ def test_unit_generate_dropout_mask():
     print("🧪 Unit Test: Dropout Mask Generation...")
 
     d = Dropout(0.5)
-    rng = np.random.default_rng(7)
     mask = d._generate_dropout_mask((1000,))
 
     # Shape must match the requested shape
@@ -862,7 +862,6 @@ def test_unit_generate_dropout_mask():
 
     # Test with different dropout probability
     d2 = Dropout(0.3)
-    rng = np.random.default_rng(7)
     mask2 = d2._generate_dropout_mask((2000,))
 
     # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
@@ -936,9 +935,10 @@ class Sequential:
             output = model.forward(x, training=True)    # train: Dropout active
         """
         for layer in self.layers:
-            try:
+            # Only layers whose forward takes a `training` flag (Dropout) receive it
+            if 'training' in inspect.signature(layer.forward).parameters:
                 x = layer.forward(x, training=training)
-            except TypeError:
+            else:
                 x = layer.forward(x)
         return x
 
@@ -995,7 +995,6 @@ def test_unit_dropout_layer():
 
     # Test training mode with partial dropout
     # Note: This is probabilistic, so we test statistical properties
-    rng = np.random.default_rng(7)  # For reproducible test
     x_large = Tensor(np.ones((1000,)))  # Large tensor for statistical significance
     y_train = dropout.forward(x_large, training=True)
 
@@ -1054,7 +1053,7 @@ MNIST Classification Network (3-Layer MLP):
 │                 │    │   + Dropout     │    │   + Dropout     │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
         ↓                       ↓                       ↓                       ↓
-   "Raw pixels"          "First hidden features"        "Second hidden features"        "Output predictions"
+   "Raw pixels"            "Hidden 1"             "Hidden 2"            "Predictions"
 
 Data Flow:
 [32, 784] → Linear(784,256) → ReLU → Dropout(0.5) → Linear(256,128) → ReLU → Dropout(0.3) → Linear(128,10) → [32, 10]
@@ -1279,15 +1278,12 @@ def test_module():
     # Test realistic neural network construction with manual composition
     print("🧪 Integration Test: Multi-layer Network...")
 
-    # Use ReLU imported from package at module level
-    ReLU_class = ReLU
-
     # Build individual layers for manual composition
     layer1 = Linear(784, 128)
-    activation1 = ReLU_class()
+    activation1 = ReLU()
     dropout1 = Dropout(0.5)
     layer2 = Linear(128, 64)
-    activation2 = ReLU_class()
+    activation2 = ReLU()
     dropout2 = Dropout(0.3)
     layer3 = Linear(64, 10)
 
@@ -1471,9 +1467,10 @@ Congratulations! You've built the fundamental building blocks that make neural n
 - All tests pass ✅ (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Parameter memory dominates**: A Linear layer stores in_features x out_features
-  weights; the activations it produces are usually far smaller
-- **Initialization is not cosmetic**: Xavier scaling keeps activation variance
+- **Parameter memory is the floor**: a Linear layer stores in_features x out_features
+  weights, and during training the activations kept for backward can exceed
+  that by 10-100x depending on batch size
+- **Initialization is not cosmetic**: LeCun scaling (sqrt(1/fan_in)) keeps activation variance
   stable across depth, which is what makes deep stacks trainable at all
 - **Dropout costs memory, not just compute**: the mask is a full float32 tensor
   the same shape as the activations it gates
