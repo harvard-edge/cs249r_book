@@ -43,8 +43,7 @@ def cited_keys(vol: str) -> Counter:
     """Citation keys used by a volume, ignoring fenced code and crossrefs."""
     found: Counter = Counter()
     for qmd in sorted((CONTENTS / vol).rglob("*.qmd")):
-        text = qmd.read_text(encoding="utf-8", errors="ignore")
-        text = re.sub(r"```.*?```", "", text, flags=re.S)
+        text = strip_fenced_blocks(qmd.read_text(encoding="utf-8", errors="ignore"))
         for m in CITE.finditer(text):
             key = m.group(1).rstrip(".,;:)")
             if len(key) < 4 or CROSSREF.match(key):
@@ -72,6 +71,32 @@ def parse_entries(path: Path) -> dict[str, str]:
             j += 1
         entries[m.group(2)] = text[m.start() : j + 1]
     return entries
+
+
+def strip_fenced_blocks(text: str) -> str:
+    """Blank out fenced code blocks, tracking fences line by line.
+
+    A regex of the form ```` ```.*?``` ```` with DOTALL pairs fences positionally,
+    so one stray or indented fence offsets every pair after it and silently
+    deletes running prose. On one vol3 chapter that removed 45% of the file and
+    hid 22 citation keys from the audit, including a genuinely dangling one.
+    Matching the closing fence to its opener line-wise is immune to that.
+    """
+    out, in_fence, fence = [], False, ""
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if not in_fence and stripped.startswith("```"):
+            in_fence, fence = True, stripped[: len(stripped) - len(stripped.lstrip("`"))]
+            out.append("")
+            continue
+        if in_fence:
+            # A closing fence is at least as long as its opener and carries no info string.
+            if stripped.startswith(fence) and not stripped[len(fence) :].strip():
+                in_fence = False
+            out.append("")
+            continue
+        out.append(line)
+    return "\n".join(out)
 
 
 def parse_entries_text(text: str) -> dict[str, str]:
