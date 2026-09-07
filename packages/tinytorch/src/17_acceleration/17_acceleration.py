@@ -143,21 +143,20 @@ Solution: Kernel fusion, memory layout optimization
 Every processor has fundamental limits:
 
 ```
-Performance   │   Compute Bound Region
-(GFLOPS)      │  ┌─────────────────────
-              │  │ Peak Performance
-              │  │
-              │ ╱│ Memory Bound Region
-              │╱ │
-             ╱│  │
-            ╱ │  │
-           ╱  │  │
-          ╱───│──│───────────────────────
-         ╱    │  │
-        ╱     │  │
-       ╱──────│──│────────────────── Arithmetic Intensity
-              │  │        (FLOPs/Byte)
-           Low│  │High
+Performance
+(GFLOP/s)
+    │                    ┌────────────────────────  Peak compute (the roof)
+    │                  ╱ │
+    │                ╱   │  Compute bound: more FLOPs
+    │              ╱     │  per byte no longer buys speed
+    │            ╱       │
+    │          ╱         │
+    │        ╱  Memory   │
+    │      ╱    bound    │
+    │    ╱   (slope =    │
+    │  ╱     bandwidth)  │
+    └────────────────────┴────────────────────────  Arithmetic Intensity
+     Low               Ridge                 High   (FLOPs/Byte)
 ```
 
 **Key Insight**: Understand where your operations live on this graph to optimize effectively.
@@ -397,13 +396,15 @@ GELU (Gaussian Error Linear Unit) is used in transformers because it's **smooth*
 ```
 Activation Functions Compared:
 
-ReLU:           GELU:           Sigmoid:
-     |               |                 1 ┌─────
-     |               |               ╱   │
-     |           ╱───│───            ╱   │
-─────┘       ╱───    │         ───╱      │
- Discontinuous   Smooth Curve    │ Smooth but saturates
- gradient at 0   everywhere      │
+ReLU: max(0, x)                 GELU: x·Φ(x)                    Sigmoid: 1/(1+e⁻ˣ)
+     │            ╱                  │            ╱                1 ┤         ╭─────────
+     │           ╱                   │           ╱                  │        ╱
+     │          ╱                    │          ╱              0.5 ┤       ╱
+     │         ╱                     │         ╱                    │      ╱
+   0 ┼────────┼──────────── x      0 ┼──╮     ┼──────────── x     0 ┼─────╯─┼──────────── x
+              x=0                       ╰───╱ x=0                          x=0
+Kink at 0: the gradient jumps    Smooth everywhere, with a small    Smooth, but flat at both
+from 0 to 1                      dip below 0 just left of x=0       ends (gradient saturates)
 ```
 
 **GELU Formula**: `GELU(x) = x * Φ(x)` where Φ is the standard normal CDF
@@ -972,7 +973,7 @@ def analyze_arithmetic_intensity():
     add_gflops = add_flops / (add_time * 1e9)
     add_bandwidth = add_bytes / (add_time * 1e9)
 
-    print(f"│ Element-wise Add    │ {add_ai:6.3f}  │ {add_time*1000:9.2f}   │ {add_gflops:9.1f}   │ {add_bandwidth:9.1f}   │")
+    print(f"│ Element-wise Add    │ {add_ai:7.3f} │ {add_time*1000:9.2f}   │ {add_gflops:9.1f}   │ {add_bandwidth:9.1f}   │")
 
     # 2. Element-wise multiply (still low, but slightly higher)
     start = time.time()
@@ -986,7 +987,7 @@ def analyze_arithmetic_intensity():
     mul_gflops = mul_flops / (mul_time * 1e9)
     mul_bandwidth = mul_bytes / (mul_time * 1e9)
 
-    print(f"│ Element-wise Mult   │ {mul_ai:6.3f}  │ {mul_time*1000:9.2f}   │ {mul_gflops:9.1f}   │ {mul_bandwidth:9.1f}   │")
+    print(f"│ Element-wise Mult   │ {mul_ai:7.3f} │ {mul_time*1000:9.2f}   │ {mul_gflops:9.1f}   │ {mul_bandwidth:9.1f}   │")
 
     # 3. GELU (medium arithmetic intensity)
     start = time.time()
@@ -1000,7 +1001,7 @@ def analyze_arithmetic_intensity():
     gelu_gflops = gelu_flops / (gelu_time * 1e9)
     gelu_bandwidth = gelu_bytes / (gelu_time * 1e9)
 
-    print(f"│ Fused GELU          │ {gelu_ai:6.3f}  │ {gelu_time*1000:9.2f}   │ {gelu_gflops:9.1f}   │ {gelu_bandwidth:9.1f}   │")
+    print(f"│ Fused GELU          │ {gelu_ai:7.3f} │ {gelu_time*1000:9.2f}   │ {gelu_gflops:9.1f}   │ {gelu_bandwidth:9.1f}   │")
 
     # 4. Matrix multiplication (high arithmetic intensity)
     start = time.time()
@@ -1014,7 +1015,7 @@ def analyze_arithmetic_intensity():
     matmul_gflops = matmul_flops / (matmul_time * 1e9)
     matmul_bandwidth = matmul_bytes / (matmul_time * 1e9)
 
-    print(f"│ Matrix Multiply     │ {matmul_ai:6.3f}  │ {matmul_time*1000:9.2f}   │ {matmul_gflops:9.1f}   │ {matmul_bandwidth:9.1f}   │")
+    print(f"│ Matrix Multiply     │ {matmul_ai:7.3f} │ {matmul_time*1000:9.2f}   │ {matmul_gflops:9.1f}   │ {matmul_bandwidth:9.1f}   │")
 
     print("└─────────────────────┴─────────┴─────────────┴─────────────┴─────────────┘")
 
@@ -1074,7 +1075,7 @@ def analyze_memory_efficiency():
         _, fused_peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-        print(f"│ {size:6d}  │ {matmul_peak/1e6:10.2f}   │ {unfused_peak/1e6:10.2f}   │ {fused_peak/1e6:8.2f}   │")
+        print(f"│ {size:6d}  │ {matmul_peak/1e6:10.2f}   │ {unfused_peak/1e6:10.2f}   │ {fused_peak/1e6:10.2f}   │")
 
     print("└─────────┴──────────────┴──────────────┴──────────────┘")
 
@@ -1219,9 +1220,9 @@ def analyze_acceleration_decision_framework():
             recommendations.append(rec)
 
         rec_line = " │ ".join(f"{rec:10s}" for rec in recommendations)
-        print(f"│ {workload_name:18s}  │ {rec_line} │")
+        print(f"│ {workload_name:19s} │ {rec_line} │")
 
-    print("└─────────────────────┴─────────────┴─────────────┴─────────────┴─────────────┘")
+    print("└─────────────────────┴─────────────┴─────────────┴─────────────┘")
 
     # Implementation priority framework
     print(f"\n🛠️  Implementation Priority Framework:")

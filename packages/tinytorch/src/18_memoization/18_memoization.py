@@ -110,10 +110,10 @@ In machine learning systems, memoization is a fundamental optimization pattern: 
 Memoization Pattern:
 ┌─────────────────────────────────────────────────────────────┐
 │  Without Memoization (Naive):                               │
-│  f(x) called 100 times → 100 computations                  │
+│  f(x) called 100 times → 100 computations                   │
 │                                                             │
-│  With Memoization (Cached):                                │
-│  f(x) called 100 times → 1 computation + 99 cache lookups  │
+│  With Memoization (Cached):                                 │
+│  f(x) called 100 times → 1 computation + 99 cache lookups   │
 └─────────────────────────────────────────────────────────────┘
 ```
 

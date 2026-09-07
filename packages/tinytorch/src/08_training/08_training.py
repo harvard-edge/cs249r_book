@@ -205,15 +205,19 @@ Cosine annealing follows a smooth curve that provides:
 Cosine annealing uses the cosine function to smoothly transition from max_lr to min_lr:
 
 ```
-Learning Rate Schedule:
+Learning Rate Schedule (cosine annealing):
 
-max_lr ┌─\
-       │   \
-       │     \
-       │       \
-       │         \
-min_lr └───────────\────────
-       0    25    50   75  100 epochs
+max_lr ┤─────╮
+       │      ╲
+       │       ╲
+       │        ╲
+       │         ╲       ← halfway (epoch 50): lr = (max_lr + min_lr) / 2
+       │          ╲
+       │           ╲
+       │            ╲
+min_lr ┤             ╰──────
+       └────┬────┬────┬────┬──→ epoch
+       0    25   50   75   100
 
 Formula: lr = min_lr + (max_lr - min_lr) * (1 + cos(π * epoch / total_epochs)) / 2
 ```

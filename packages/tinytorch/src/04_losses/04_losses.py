@@ -569,10 +569,10 @@ What Cross-Entropy Teaches the Model:
 ┌─────────────────┬─────────────────┬───────────────────────────┐
 │ Prediction      │ True Label      │ Learning Signal           │
 ├─────────────────┼─────────────────┼───────────────────────────┤
-│ Confident ✅    │ Correct ✅      │ "Keep doing this"         │
-│ Uncertain ⚠️    │ Correct ✅      │ "Be more confident"       │
-│ Confident ❌    │ Wrong ❌        │ "STOP! Change everything" │
-│ Uncertain ⚠️    │ Wrong ❌        │ "Learn the right answer"  │
+│ Confident       │ Correct         │ "Keep doing this"         │
+│ Uncertain       │ Correct         │ "Be more confident"       │
+│ Confident       │ Wrong           │ "STOP! Change everything" │
+│ Uncertain       │ Wrong           │ "Learn the right answer"  │
 └─────────────────┴─────────────────┴───────────────────────────┘
 
 Loss Landscape by Confidence:

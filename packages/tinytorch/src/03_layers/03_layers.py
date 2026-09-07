@@ -1116,7 +1116,7 @@ Layer Memory Components:
 ├─────────────────────────────────────────────────────────────┤
 │                   TEMPORARY MEMORY                          │
 ├─────────────────────────────────────────────────────────────┤
-│ • Dropout masks: batch_size × features × 4 bytes (float32)   │
+│ • Dropout masks: batch_size × features × 4 bytes (float32)  │
 │ • Computation buffers for matrix operations                 │
 │ • Total: Peak during forward/backward passes                │
 └─────────────────────────────────────────────────────────────┘

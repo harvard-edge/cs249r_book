@@ -283,7 +283,7 @@ Every quantization system uses this fundamental relationship:
 ```
 Quantization (FP32 → INT8):
 ┌─────────────────────────────────────────────────────────┐
-│  quantized = round(float_value / scale + zero_point)     │
+│  quantized = round(float_value / scale + zero_point)    │
 └─────────────────────────────────────────────────────────┘
 
 Dequantization (INT8 → FP32):
@@ -1538,8 +1538,8 @@ Byte Accounting per Layer Type:
   ┌─────────────────────────┐      ┌─────────────────────────────────┐
   │ weight: N × 4 bytes     │      │ q_weight: N × 1 byte            │
   │ bias:   M × 4 bytes     │      │ q_bias:   M × 1 byte            │
-  │                         │      │ overhead: ~8 bytes (scale+zp)    │
-  │ Total: (N+M) × 4       │      │ Total: (N+M) × 1 + overhead     │
+  │                         │      │ overhead: ~8 bytes (scale+zp)   │
+  │ Total: (N+M) × 4        │      │ Total: (N+M) × 1 + overhead     │
   └─────────────────────────┘      └─────────────────────────────────┘
 ```
 """
@@ -1933,7 +1933,7 @@ This analysis compares different quantization approaches used in production syst
 ```
 Strategy Comparison Framework:
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────────────────┐
 │                          Three Advanced Strategies                             │
 ├──────────────────────────┬──────────────────────────┬──────────────────────────┤
 │       Strategy 1         │       Strategy 2         │       Strategy 3         │
@@ -1941,9 +1941,9 @@ Strategy Comparison Framework:
 ├──────────────────────────┼──────────────────────────┼──────────────────────────┤
 │                          │                          │                          │
 │ ┌──────────────────────┐ │ ┌──────────────────────┐ │ ┌──────────────────────┐ │
-│ │ Weights:             │ │ │ Channel 1: scale₁   │ │ │ Sensitive: FP32      │ │
-│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂   │ │ │ Regular: INT8        │ │
-│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃   │ │ │                      │ │
+│ │ Weights:             │ │ │ Channel 1: scale₁    │ │ │ Sensitive: FP32      │ │
+│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂    │ │ │ Regular: INT8        │ │
+│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃    │ │ │                      │ │
 │ │ [W₃₁ W₃₂ W₃₃]        │ │ │                      │ │ │ Input: FP32          │ │
 │ └──────────────────────┘ │ │ Better precision     │ │ │ Output: FP32         │ │
 │                          │ │ per channel          │ │ │ Hidden: INT8         │ │
@@ -1983,10 +1983,10 @@ Pros: Better precision       Cons: More complex
 ```
 Model Architecture:            Precision Assignment:
 ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Input Layer  (sensitive) │     │ Keep in FP32 (precision) │
-│ Hidden 1     (bulk)     │ →   │ Quantize to INT8        │
-│ Hidden 2     (bulk)     │     │ Quantize to INT8        │
-│ Output Layer (sensitive)│     │ Keep in FP32 (quality)   │
+│ Input Layer (sensitive) │     │ Keep in FP32 (precision)│
+│ Hidden 1    (bulk)      │ →   │ Quantize to INT8        │
+│ Hidden 2    (bulk)      │     │ Quantize to INT8        │
+│ Output Layer (sensitive)│     │ Keep in FP32 (quality)  │
 └─────────────────────────┘     └─────────────────────────┘
 
 Pros: Optimal trade-off      Cons: Requires expertise
@@ -1997,11 +1997,11 @@ Pros: Optimal trade-off      Cons: Requires expertise
 Comparative Testing Protocol:
 
 1. Create identical test model   →  2. Apply each strategy        →  3. Measure results
-   ┌───────────────────────┐     ┌───────────────────────┐     ┌───────────────────────┐
-   │ 128 → 64 → 10 MLP      │     │ Per-tensor quantization │     │ MSE error calculation  │
-   │ Identical weights       │     │ Per-channel simulation  │     │ Compression measurement│
-   │ Same test input         │     │ Mixed precision setup   │     │ Speed comparison       │
-   └───────────────────────┘     └───────────────────────┘     └───────────────────────┘
+   ┌─────────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
+   │ 128 → 64 → 10 MLP       │     │ Per-tensor quantization │     │ MSE error calculation   │
+   │ Identical weights       │     │ Per-channel simulation  │     │ Compression measurement │
+   │ Same test input         │     │ Mixed precision setup   │     │ Speed comparison        │
+   └─────────────────────────┘     └─────────────────────────┘     └─────────────────────────┘
 ```
 
 **Expected Strategy Rankings:**

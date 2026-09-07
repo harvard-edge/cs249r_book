@@ -1830,7 +1830,7 @@ Effective benchmarking requires rigorous methodology that bridges scientific mea
 ```
 1. REPEATABILITY (Same Experiment → Same Result)
    ┌─────────────────────────────────────────┐
-   │ • Fixed random seeds (default_rng)       │
+   │ • Fixed random seeds (default_rng)      │
    │ • Same test dataset across runs         │
    │ • Consistent environment (same hardware)│
    │ • Multiple runs to capture variance     │
@@ -1979,9 +1979,9 @@ Your submission format uses JSON Schema validation—a powerful pattern for ensu
 WITHOUT Schema:                     WITH Schema:
 ┌──────────────────────────┐       ┌──────────────────────────┐
 │ {                        │       │ {                        │
-│   "accuracy": "92%",     │ ❌    │   "accuracy": 0.92,      │ ✅
-│   "latency": 10.5,       │ ❌    │   "latency_ms_mean": 10.5│ ✅
-│   "time": "today"        │ ❌    │   "timestamp": "2025..." │ ✅
+│   "accuracy": "92%",     │  bad  │   "accuracy": 0.92,      │  ok
+│   "latency": 10.5,       │  bad  │   "latency_ms_mean": 10.5│  ok
+│   "time": "today"        │  bad  │   "timestamp": "2025..." │  ok
 │ }                        │       │ }                        │
 │                          │       │                          │
 │ Problems:                │       │ Benefits:                │

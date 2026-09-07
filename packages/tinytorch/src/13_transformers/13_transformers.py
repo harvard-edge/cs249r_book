@@ -164,9 +164,9 @@ Before transformers, language models used RNNs or CNNs that processed text seque
 │  │  ┌─────────────┐       ┌─────────────────────────────┐    │  │
 │  │  │Token Embed  │   +   │ Positional Embedding        │    │  │
 │  │  │15496→[0.1,  │       │ pos_0→[0.05, -0.02, ...]    │    │  │
-│  │  │     0.3,..]│       │ pos_1→[0.12,  0.08, ...]     │    │  │
+│  │  │     0.3,..] │       │ pos_1→[0.12,  0.08, ...]    │    │  │
 │  │  │1917→[0.2,   │       │                             │    │  │
-│  │  │    -0.1,..]│       │                              │    │  │
+│  │  │    -0.1,..] │       │                             │    │  │
 │  │  └─────────────┘       └─────────────────────────────┘    │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                ↓                                │
@@ -896,13 +896,11 @@ Think of the residual connections as a "stream" that carries information through
 ```
 Residual Stream Flow:
 
-Layer 1: [original embeddings] ─┐
-                                 ├─→ + attention info ─┐
-Attention adds information ──────┘                      │
-                                                        ├─→ + MLP info ─┐
-MLP adds information ───────────────────────────────────┘               │
-                                                                        │
-Layer 2: carries accumulated information ───────────────────────────────┘
+x (embeddings) ───┬─────────────────(+)──┬──────────────(+)──→ x₄ (to next block)
+                  │                  ↑   │               ↑
+                  └── LN → Attention ┘   └── LN → MLP ───┘
+
+Each branch reads the stream and adds its result back; nothing overwrites it.
 ```
 
 Each layer adds information to this stream rather than replacing it, creating a rich representation.
