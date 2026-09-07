@@ -25,13 +25,13 @@ Welcome to Module 09! You'll implement spatial operations that transform machine
 
 **Connection Map**:
 ```
-Training Pipeline → Spatial Operations → CNN (Milestone 03)
+Training Pipeline → Spatial Operations → CNN (Milestone 04)
     (MLPs)            (Conv/Pool)        (Computer Vision)
 ```
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement Conv2d with explicit loops to understand O(N²M²K²) complexity
+1. Implement Conv2d with explicit loops to see its O(H·W·C_in·C_out·K²) cost
 2. Build pooling operations (Max and Average) for spatial reduction
 3. Understand receptive fields and spatial feature extraction
 4. Analyze memory vs computation trade-offs in spatial operations
@@ -63,13 +63,10 @@ import numpy as np
 rng = np.random.default_rng(7)
 import time
 
-from tinytorch.core.tensor import Tensor
-
-# Enable autograd for gradient tracking (required for BatchNorm2d learnable parameters)
-from tinytorch.core.tensor import Function
-from tinytorch.core.activations import ReLUFunction
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.activations import ReLU
+from tinytorch.core.layers import Linear
 import tinytorch.core.autograd  # completes every operation with its backward half
-from tinytorch.core.autograd import is_grad_enabled
 
 # Constants for convolution defaults
 DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
@@ -100,7 +97,7 @@ Spatial operations will integrate with your existing layers and training system.
 
 **Dependency Flow**:
 ```
-Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (Milestone 03)
+Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (Milestone 04)
          ↓
   Complete training system enables CNN development
 ```
@@ -592,8 +589,6 @@ class Conv2dFunction(Function):
             return grad_input, grad_weight
         return grad_input, grad_weight, grad_bias
 
-#| export
-
 class Conv2d:
     """
     2D Convolution layer for spatial feature extraction.
@@ -780,12 +775,14 @@ class Conv2d:
         """
         Forward pass through Conv2d layer.
 
-        This method composes four steps:
+        This method composes five steps:
         1. Validate input is 4D (shared helper)
         2. Compute output spatial dimensions
         3. Pad input if needed
         4. Run the sliding window convolution loops
-        5. Add bias (steps 3-5 run inside Conv2dFunction.apply, which records the operation)
+        5. Add bias
+
+        Steps 3-5 run inside Conv2dFunction.apply, which records the operation for backward.
 
         Each step is a separate helper you implement below.
         See the individual helper docstrings for details.
@@ -1239,7 +1236,7 @@ For input (1, 64, 224, 224) with 2×2 pooling:
 
 class MaxPool2dFunction(Function):
     """
-    Gradient computation for 2D max pooling.
+    Forward and backward passes for 2D max pooling.
 
     Max pooling gradients flow only to the positions that were selected
     as the maximum in the forward pass.
@@ -1316,8 +1313,6 @@ class MaxPool2dFunction(Function):
 
         # Return as tuple (following Function protocol)
         return (grad_input,)
-
-#| export
 
 class MaxPool2d:
     """
@@ -1646,7 +1641,7 @@ Memory access pattern identical to MaxPool, just different aggregation!
 
 class AvgPool2dFunction(Function):
     """
-    Gradient computation for 2D average pooling.
+    Forward and backward passes for 2D average pooling.
 
     Each output is the mean of the kernel_h*kernel_w inputs in its window, so
     the gradient is distributed equally (1/kernel_area) to every input position
@@ -1715,8 +1710,6 @@ class AvgPool2dFunction(Function):
 
         # Return as tuple (following Function protocol)
         return (grad_input,)
-
-#| export
 
 class AvgPool2d:
     """
@@ -2028,7 +2021,7 @@ current batch                      consistent inference
 ### The Backward Pass: Why BatchNorm Needs Its Own Function
 
 Every other layer in this module -- `Conv2d`, `MaxPool2d`, `AvgPool2d` -- pairs
-its forward pass with an explicit `Backward` class. BatchNorm needs one too, and
+its forward pass with an explicit `Function` subclass. BatchNorm needs one too, and
 its gradient is the most interesting of the four.
 
 The reason is that `μ` and `σ²` are **computed from the batch**. In every layer
@@ -2179,8 +2172,6 @@ class BatchNorm2d:
         >>> print(bn.gamma.shape)  # (64,)
         >>> print(bn.training)     # True
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         self.num_features = num_features
         self.eps = eps
@@ -2978,13 +2969,12 @@ class SimpleCNN:
         2. Pool layer 1: 2×2 max pooling
         3. Conv layer 2: 16 → 32 channels, 3×3 kernel, padding=1
         4. Pool layer 2: 2×2 max pooling
-        5. Calculate flattened size and add final linear layer
+        5. Calculate flattened size and add the final Linear layer (Module 03)
 
         HINT: For 32×32 input → 32 → 16 → 8 spatial reduction
         Final feature size: 32 channels × 8 × 8 = 2048 features
+        Linear(in_features, out_features) maps those 2048 features to num_classes logits
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         # Convolutional layers
         self.conv1 = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
@@ -2998,9 +2988,9 @@ class SimpleCNN:
         # Final: 32 channels × 8 × 8 = 2048 features
         self.flattened_size = 32 * 8 * 8
 
-        # Import Linear layer (we'll implement a simple version)
-        # For now, we'll use a placeholder that we can replace
-        # This represents the final classification layer
+        # Classification head: the Linear layer from Module 03
+        self.fc = Linear(self.flattened_size, num_classes)
+        self.relu = ReLU()
         self.num_classes = num_classes
         ### END SOLUTION
 
@@ -3014,10 +3004,12 @@ class SimpleCNN:
         1. Apply conv1 → ReLU → pool1
         2. Apply conv2 → ReLU → pool2
         3. Flatten spatial dimensions
-        4. Apply final linear layer (when available)
+        4. Apply the final Linear layer to get class logits
 
-        For now, return features before final linear layer
-        since we haven't imported Linear from layers module yet.
+        EXAMPLE:
+        >>> model = SimpleCNN(num_classes=10)
+        >>> logits = model(Tensor(rng.standard_normal((2, 3, 32, 32))))
+        >>> print(logits.shape)  # (2, 10)
         """
         ### BEGIN SOLUTION
         # First conv block
@@ -3034,21 +3026,16 @@ class SimpleCNN:
         batch_size = x.shape[0]
         x = x.reshape(batch_size, -1)
 
-        # Return flattened features
-        # In a complete implementation, this would go through a Linear layer
-        return x
+        # Classification head
+        return self.fc(x)
         ### END SOLUTION
-
-    def relu(self, x):
-        """ReLU activation with gradient tracking for CNN."""
-        return ReLUFunction.apply(x)
 
     def parameters(self):
         """Return all trainable parameters."""
         params = []
         params.extend(self.conv1.parameters())
         params.extend(self.conv2.parameters())
-        # Linear layer parameters would be added here
+        params.extend(self.fc.parameters())
         return params
 
     def __call__(self, x):
@@ -3063,7 +3050,7 @@ This test validates that spatial operations work together in a complete CNN arch
 
 **What we're testing**: End-to-end spatial processing pipeline
 **Why it matters**: Spatial operations must compose correctly for real CNNs
-**Expected**: Proper dimension reduction and feature extraction
+**Expected**: Proper dimension reduction and one logit per class
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-simple-cnn", "locked": true, "points": 10}
@@ -3078,11 +3065,11 @@ def test_unit_simple_cnn():
     model = SimpleCNN(num_classes=10)
     x = Tensor(rng.standard_normal((2, 3, 32, 32)))  # Batch of 2, RGB, 32×32
 
-    features = model(x)
+    logits = model(x)
 
-    # Expected: 2 samples, 32 channels × 8×8 spatial = 2048 features
-    expected_shape = (2, 2048)
-    assert features.shape == expected_shape, f"Expected {expected_shape}, got {features.shape}"
+    # Expected: 2 samples, one logit per class
+    expected_shape = (2, 10)
+    assert logits.shape == expected_shape, f"Expected {expected_shape}, got {logits.shape}"
 
     # Test 2: Parameter counting
     print("  Testing parameter counting...")
@@ -3090,33 +3077,24 @@ def test_unit_simple_cnn():
 
     # Conv1: (16, 3, 3, 3) + bias (16,) = 432 + 16 = 448
     # Conv2: (32, 16, 3, 3) + bias (32,) = 4608 + 32 = 4640
-    # Total: 448 + 4640 = 5088 parameters
+    # Linear: (2048, 10) + bias (10,) = 20480 + 10 = 20490
+    # Total: 448 + 4640 + 20490 = 25578 parameters
 
     conv1_params = 16 * 3 * 3 * 3 + 16  # weights + bias
     conv2_params = 32 * 16 * 3 * 3 + 32  # weights + bias
-    expected_total = conv1_params + conv2_params
+    fc_params = 2048 * 10 + 10  # weights + bias
+    expected_total = conv1_params + conv2_params + fc_params
 
     actual_total = sum(np.prod(p.shape) for p in params)
     assert actual_total == expected_total, f"Expected {expected_total} parameters, got {actual_total}"
 
-    # Test 3: Different input sizes
-    print("  Testing different input sizes...")
-
-    # Test with different spatial dimensions
-    x_small = Tensor(rng.standard_normal((1, 3, 16, 16)))
-    features_small = model(x_small)
-
-    # 16×16 → 8×8 → 4×4, so 32 × 4×4 = 512 features
-    expected_small = (1, 512)
-    assert features_small.shape == expected_small, f"Expected {expected_small}, got {features_small.shape}"
-
-    # Test 4: Batch processing
+    # Test 3: Batch processing
     print("  Testing batch processing...")
     x_batch = Tensor(rng.standard_normal((8, 3, 32, 32)))
-    features_batch = model(x_batch)
+    logits_batch = model(x_batch)
 
-    expected_batch = (8, 2048)
-    assert features_batch.shape == expected_batch, f"Expected {expected_batch}, got {features_batch.shape}"
+    expected_batch = (8, 10)
+    assert logits_batch.shape == expected_batch, f"Expected {expected_batch}, got {logits_batch.shape}"
 
     print("✅ SimpleCNN integration works correctly!")
 
@@ -3183,6 +3161,7 @@ def test_module():
     conv2 = Conv2d(8, 16, kernel_size=3, padding=1)
     bn2 = BatchNorm2d(16)
     pool2 = AvgPool2d(2, stride=2)
+    relu = ReLU()
 
     # Process batch of images (training mode)
     batch_images = Tensor(rng.standard_normal((4, 3, 32, 32)))
@@ -3190,12 +3169,12 @@ def test_module():
     # Forward pass: Conv → BatchNorm → ReLU → Pool (modern pattern)
     x = conv1(batch_images)  # (4, 8, 32, 32)
     x = bn1(x)               # (4, 8, 32, 32) - normalized
-    x = Tensor(np.maximum(0, x.data))  # ReLU
+    x = relu(x)
     x = pool1(x)             # (4, 8, 16, 16)
 
     x = conv2(x)             # (4, 16, 16, 16)
     x = bn2(x)               # (4, 16, 16, 16) - normalized
-    x = Tensor(np.maximum(0, x.data))  # ReLU
+    x = relu(x)
     features = pool2(x)      # (4, 16, 8, 8)
 
     # Validate shapes at each step
@@ -3379,7 +3358,7 @@ if __name__ == "__main__":
 Congratulations! You've built the spatial processing foundation that powers computer vision!
 
 ### Key Accomplishments
-- **Built Conv2d** with explicit loops showing O(N^2 M^2 K^2) complexity
+- **Built Conv2d** with explicit loops showing the O(H·W·C_in·C_out·K²) cost
 - **Implemented BatchNorm2d** with train/eval mode and running statistics
 - **Implemented MaxPool2d and AvgPool2d** for spatial dimension reduction
 - **Created SimpleCNN** demonstrating spatial operation integration
@@ -3399,5 +3378,5 @@ Your spatial operations enable building complete CNNs for computer vision tasks!
 
 Export with: `tito module complete 09`
 
-**Next**: Milestone 03 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
+**Next**: Milestone 04 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 """
