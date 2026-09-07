@@ -4,28 +4,32 @@ def structured_prune(model, prune_ratio=0.5):
     """
     Remove entire channels/neurons based on L2 norm importance.
     """
-    # All Linear layers have .weight attribute
-    for layer in model.layers:
-        if isinstance(layer, Linear):
-            weight = layer.weight.data
+    # Prune the hidden Linear layers. The last Linear is the head: its output
+    # channels are the classes, so zeroing them removes classes, not neurons.
+    # A model with a single Linear has nothing else to prune and is pruned as is.
+    linears = [layer for layer in model.layers if isinstance(layer, Linear)]
+    hidden = linears[:-1] if len(linears) > 1 else linears
 
-            # Calculate L2 norm for each output channel (column)
-            channel_norms = np.linalg.norm(weight, axis=0)
+    for layer in hidden:
+        weight = layer.weight.data
 
-            # Find channels to prune (lowest importance)
-            num_channels = weight.shape[1]
-            num_to_prune = int(num_channels * prune_ratio)
+        # Calculate L2 norm for each output channel (column)
+        channel_norms = np.linalg.norm(weight, axis=0)
 
-            if num_to_prune > 0:
-                # Get indices of channels to prune (smallest norms)
-                prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
+        # Find channels to prune (lowest importance)
+        num_channels = weight.shape[1]
+        num_to_prune = int(num_channels * prune_ratio)
 
-                # Zero out entire channels
-                weight[:, prune_indices] = 0
+        if num_to_prune > 0:
+            # Get indices of channels to prune (smallest norms)
+            prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
 
-                # Also zero corresponding bias elements if bias exists
-                if layer.bias is not None:
-                    layer.bias.data[prune_indices] = 0
+            # Zero out entire channels
+            weight[:, prune_indices] = 0
+
+            # Also zero corresponding bias elements if bias exists
+            if layer.bias is not None:
+                layer.bias.data[prune_indices] = 0
 
     return model
 ```
