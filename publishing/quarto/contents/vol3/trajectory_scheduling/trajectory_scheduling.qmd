@@ -42,7 +42,7 @@ This chapter develops the systems architecture of:
 
 - Characterize the heavy-tailed Pareto service-time distributions of autonomous agent trajectories
 - Explain why request-level schedulers cause severe head-of-line blocking and prefix cache thrashing
-- Implement session-centric and cache-affinity routing algorithms to maximize Radix prefix reuse
+- Implement session-centric and cache-affinity routing algorithms to maximize Radix prefix reuse (@sec-vol3-prefix-caching-paging)
 - Design predictive admission control algorithms that prevent cluster Out-Of-Memory (OOM) thrashing
 - Analyze the constraints imposed by external reversibility boundaries on job preemption and migration
 
@@ -61,7 +61,7 @@ Autonomous agent workloads dismantle every foundational assumption of this class
 
 To achieve high cluster efficiency, an agentic scheduler must optimize for **Trajectory Goodput** ($G$)—the rate of successfully certified task completions per unit cost. This requires co-designing:
 
-- **Cache-affinity routing**: Directing consecutive turns to the same GPU to maximize Radix prefix reuse.
+- **Cache-affinity routing**: Directing consecutive turns to the same GPU to maximize Radix prefix reuse (@sec-vol3-prefix-caching-paging).
 - **Predictive admission control**: Forecasting trajectory horizon lengths.
 - **Stateful suspension mechanisms**: Managing bimodal execution dynamically.
 
@@ -114,7 +114,7 @@ The most extreme form of tool-wait bimodal execution occurs during **Human-in-th
 
 Because human response times range from minutes to days, the scheduler cannot simply block. Instead, it must execute a **Suspend-to-Disk** operation. The agent's complete KV cache is flushed from HBM, and its trajectory event stream (the immutable sequence of past actions and observations) is persisted to cold storage (e.g., S3 or a relational ledger). The agent process terminates.
 
-When the human operator provides feedback or approval, the scheduler executes a **Resume** operation. The orchestrator re-hydrates the agent by fetching the event stream, spinning up a new sandboxed execution context, and passing the trajectory back into the inference engine. Because the entire history is treated as an immutable ledger, the agent resumes execution seamlessly, incorporating the human's asynchronous input as just another observation in its linear event stream.
+When the human operator provides feedback or approval, the scheduler executes a **Resume** operation. The orchestrator re-hydrates the agent by fetching the event stream, spinning up a new sandboxed execution context (@sec-vol3-sandboxing-isolation), and passing the trajectory back into the inference engine. Because the entire history is treated as an immutable ledger (@sec-vol3-telemetry-deterministic-event-recording-and), the agent resumes execution seamlessly, incorporating the human's asynchronous input as just another observation in its linear event stream.
 
 ## Memory-Constrained Serving {#sec-vol3-scheduling-the-memory-constrained-serving-problem}
 
@@ -136,7 +136,7 @@ If a cluster scheduler performs capacity checks based solely on an agent's initi
 
 When total aggregate KV-cache demand exceeds physical accelerator capacity, the cluster enters an unrecoverable resource deadlock. This pathology represents a classic systems deadlock governed by the four Coffman conditions [@coffman1971]:
 
-1. **Mutual Exclusion:** Physical PagedAttention blocks in GPU HBM cannot be simultaneously written by multiple distinct agent sessions.
+1. **Mutual Exclusion:** Physical PagedAttention blocks (@sec-vol3-prefix-caching-paging) in GPU HBM cannot be simultaneously written by multiple distinct agent sessions.
 2. **Hold and Wait:** In-flight agent sessions retain ownership of physical blocks allocated during earlier turns while demanding additional physical blocks to generate new response tokens.
 3. **No Preemption:** Under standard serving runtimes, allocated physical KV blocks cannot be forcibly reclaimed from an active sequence without aborting the entire request.
 4. **Circular Wait:** Agent Session 1 holds blocks in GPU A while requesting free frames to decode; concurrent sessions hold all remaining frames. No session can complete, creating a closed dependency loop.
@@ -221,7 +221,7 @@ When an agent issues a tool execution call (e.g., `bash(pytest tests/)`), the sc
 
 1. **Phase 1: Yield and Mark Inactive:** The model decodes the tool call token sequence and emits an end-of-turn delimiter. The scheduler detects the tool invocation, removes the session from the active GPU dispatch ring, and flags its status as `SUSPENDED_IO`.
 2. **Phase 2: Asynchronous Memory Evacuation:**
-   - If cluster HBM pressure is low ($M_{\text{free}} > 30\%$), the runtime leaves the session's physical KV blocks in HBM, simply decrementing their reference counts in the Radix tree to allow lazy LRU eviction if needed.
+   - If cluster HBM pressure is low ($M_{\text{free}} > 30\%$), the runtime leaves the session's physical KV blocks in HBM, simply decrementing their reference counts in the Radix tree (@sec-vol3-prefix-caching-paging) to allow lazy LRU eviction if needed.
    - If cluster HBM pressure is high ($M_{\text{free}} \le 30\%$), the scheduler issues an asynchronous DMA swap command over PCIe Gen5 x16, offloading the session's physical KV blocks to Host DRAM. The freed HBM page frames are returned to the global allocator for immediate use by active requests.
 3. **Phase 3: Event-Driven Prefetch and Resumption:** The tool execution completes in its isolated sandbox container. The sandbox runtime posts an event containing stdout and exit code to the scheduler's completion queue. The scheduler signals the memory manager to prefetch the cached KV blocks from Host DRAM back to GPU HBM, restores the session's logical page table, and places the session in the ready queue for its next token generation step.
 
@@ -241,7 +241,7 @@ An autonomous agent cluster is governed by three primary orthogonal resource poo
 
 Different agent architectures exhibit radically divergent resource consumption profiles:
 
-- **MCTS Speculative Reasoning Agents:** Dominated by GPU compute ($60\%$ of compute quota) to explore wide search trees; minimal memory footprint due to aggressive Copy-on-Write sharing; zero tool calls during pure thinking phases.
+- **MCTS Speculative Reasoning Agents** (@sec-vol3-search-monte-carlo-tree-search): Dominated by GPU compute ($60\%$ of compute quota) to explore wide search trees; minimal memory footprint due to aggressive Copy-on-Write sharing (@sec-vol3-search-tree-structured-kv-cache-allocation); zero tool calls during pure thinking phases.
 - **Repository-Scale Coding Agents:** Dominated by device memory ($75\%$ of HBM quota) to retain $128\text{k}$-token context files; moderate compute requirements; modest tool usage.
 - **Web Scraping and Research Orchestrators:** Dominated by tool concurrency ($80\%$ of sandbox leases) to run dozens of headless browser instances; low GPU compute and modest context footprints.
 
@@ -300,14 +300,14 @@ The latency disparity between neural token generation and human operator review 
 
 Holding server threads, connection sockets, or accelerator memory across human review intervals is an architectural catastrophe [@saltzer2009]. Runtimes must implement completely asynchronous, decoupled escalation mailboxes:
 
-1. **State Snapshotting and Token Serialization:** When the agent generates an action requiring human approval, the runtime checkpoints the complete Agent Control Block (ACB)—including conversation history, scratchpad tokens, tool call parameters, and workspace filesystem diffs.
+1. **State Snapshotting and Token Serialization:** When the agent generates an action requiring human approval, the runtime checkpoints the complete Agent Control Block (ACB) (@sec-vol3-descriptors-the-agent-control-block)—including conversation history, scratchpad tokens, tool call parameters, and workspace filesystem diffs.
 2. **Cold-Tier Offloading:** The session's physical KV cache is serialized and flushed over the network to persistent object storage (e.g., AWS S3 or cluster Ceph storage). All device HBM frames and host DRAM allocations are completely released.
 3. **Durable Mailbox Registration:** The request is assigned a unique cryptographic transaction ID and pushed to a persistent distributed message queue (e.g., Kafka or Temporal). The agent worker process terminates or returns to the global pool.
 4. **Resumption via Ephemeral Warm-Up:** When the human operator approves or rejects the action via dashboard or Slack webhook, the event is consumed by the scheduling controller. The controller provisions a new worker, retrieves the serialized ACB from cold storage, executes a fast chunked prefill to reconstruct the KV state, and resumes execution seamlessly.
 
 ## Gang Scheduling and Co-Allocation {#sec-vol3-scheduling-gang-scheduling-and-co-allocation}
 
-When an agent is deployed as part of a cooperating swarm—where multiple parallel agent instances communicate to solve a joint task (e.g., an architect orchestrating three parallel coding workers via a shared message broker)—scheduling individual agents independently causes synchronization deadlocks.
+When an agent is deployed as part of a cooperating swarm (@sec-vol3-multi-agent-swarm-runtimes-and-state)—where multiple parallel agent instances communicate to solve a joint task (e.g., an architect orchestrating three parallel coding workers via a shared message broker)—scheduling individual agents independently causes synchronization deadlocks.
 
 ### The Co-Allocation Deadlock
 
@@ -347,7 +347,7 @@ When an interactive Tier 1 request arrives at a fully saturated GPU worker:
 
 In classical operating systems, process preemption is universally assumed to be safe. Because a CPU process operates entirely within an isolated virtual address space, the OS kernel can pause, suspend, page out, or kill a process at any machine instruction without corrupting hardware state: virtual memory pages can simply be restored from swap disk [@saltzer2009].
 
-In agentic systems, this fundamental systems invariant is completely destroyed. Agents interact directly with external physical and digital environments. Once an agent performs a mutating action in an external system, that action cannot be undone by simply rewinding GPU memory.
+In agentic systems, this fundamental systems invariant is completely destroyed. Agents interact directly with external physical and digital environments. Once an agent performs a mutating action in an external system, that action cannot be undone by simply rewinding GPU memory (formally defined as the Reversibility Boundary in @sec-vol3-recovery-the-reversibility-boundary-reversible).
 
 ### External Side Effects and Preemption
 
@@ -355,7 +355,7 @@ As formalized in @fig-vol3-scheduling-preemption-matrix, agent operations partit
 
 1. **Zone 1: Pure LLM Compute (100% Fully Reversible):** In-GPU prompt prefill, token decoding, and internal scratchpad reasoning. State exists solely as ephemeral activations and KV tensors in GPU memory. Preemption policy: **Instantaneous Preemption / Kill**. The scheduler may evict or discard the job at any moment with zero external side effects.
 2. **Zone 2: Idempotent Tool Reads (Safe Preemption):** Read-only operations (`read_file`, `grep_search`, `web_search`, database `SELECT`). By definition of idempotency ($f(x) = f(f(x))$), executing the action multiple times produces identical results without altering environment state. Preemption policy: **Safe Preemption**. The scheduler can abort an in-flight network call; restarting simply re-executes the query.
-3. **Zone 3: Reversible Writes with Compensating Actions (Semi-Reversible):** Operations that alter environment state but possess a formally defined compensating inverse operation $C_i$ (e.g., committing changes to a temporary Git branch, writing temporary scratch files, executing an SQL transaction within a database rollback log). Preemption policy: **Conditional Preemption**. The scheduler cannot simply kill the agent; it must trigger the compensating workflow $C_i$ (e.g., executing `git reset --hard` or `ROLLBACK`) before reclaiming cluster resources.
+3. **Zone 3: Reversible Writes with Compensating Actions (Semi-Reversible):** Operations that alter environment state but possess a formally defined compensating inverse operation $C_i$ (e.g., committing changes to a temporary Git branch, writing temporary scratch files, executing an SQL transaction within a database rollback log). Preemption policy: **Conditional Preemption**. The scheduler cannot simply kill the agent; it must trigger the compensating workflow $C_i$ (e.g., executing `git reset --hard` or `ROLLBACK`, see @sec-vol3-recovery-distributed-sagas-for-agent) before reclaiming cluster resources.
 4. **Zone 4: Irreversible Real-World Actions (Strictly Non-Preemptible):** Operations that produce permanent, non-undoable real-world state changes (e.g., transferring funds via banking API, sending an external email or Slack message, deploying code to production servers, actuating a physical robotic arm). Preemption policy: **Strictly Non-Preemptible (Pinned Execution)**. Preemption is legally and architecturally forbidden. The scheduler is strictly barred from aborting or migrating the job until the transaction confirms terminal status.
 
 | Execution Zone | Action Type | Typical Operations | State Residency | Reversibility Guarantee | Preemption Feasibility | Scheduler Action on Memory Shortage |
@@ -400,7 +400,7 @@ A production-grade agent scheduling architecture integrates three primary open-s
 
 In long-running agentic workflows (spanning hours or days), the probability of underlying hardware failure (e.g., uncorrectable ECC memory errors, network partitions, or spot instance preemption) is non-trivial. Classical stateless serving runtimes simply drop the request on worker failure, relying on client-side retries. In agentic systems, silently discarding a 200-step trajectory that has already mutated external state is unacceptable.
 
-To provide robust systems reliability, schedulers implement **Event Sourcing** backed by a **Write-Ahead Log (WAL)**. Agent state is composed of discrete conversational turns, tool invocations, and environment observations. By treating the agent's context window as an append-only ledger:
+To provide robust systems reliability, schedulers implement **Event Sourcing** backed by a **Write-Ahead Log (WAL)** (detailed in @sec-vol3-recovery-trajectory-checkpointing-persistent-stategraphs). Agent state is composed of discrete conversational turns, tool invocations, and environment observations. By treating the agent's context window as an append-only ledger:
 
 1. **Durability Before Side Effects:** Before any tool execution or external API call is initiated, the scheduler durably appends the agent's planned action to the WAL (e.g., Apache Kafka or a transactional database).
 2. **Deterministic Recovery:** If a GPU worker crashes, the scheduler detects the heartbeat timeout and provisions a replacement worker. The replacement worker reads the WAL to retrieve the complete, exact sequence of historical events.
