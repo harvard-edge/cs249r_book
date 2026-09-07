@@ -100,7 +100,7 @@ One more rule follows from the same model. A comparison is fair only when both s
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The listings in this chapter are extracted from Module 19 (`src/19_benchmarking/19_benchmarking.py`), which the package exports as `tinytorch.perf.benchmarking`. `BenchmarkResult` is the container, `Benchmark` with its `run_latency_benchmark` method is the harness (the method is written as a function and attached to the class, as Chapter 8's `Trainer` methods were), `precise_timer` is the clock, and the `MLPerf` class's `_run_latency_test` and `run_standard_benchmark` turn a result into a verdict. Three short functions are book code and are labelled as such: a `percentile` written out by hand so the interpolation is visible, and a `check_compliance` and `compare` that move the module's verdict from the mean to the tail.
+The listings in this chapter are extracted from Module 19 (`src/19_benchmarking/19_benchmarking.py`), which the package exports as `tinytorch.perf.benchmarking`. `BenchmarkResult` is the container, `Benchmark` with its `run_latency_benchmark` method is the harness (the method is written as a function and attached to the class, as Chapter 8's `Trainer` methods were), `precise_timer` is the clock, and the `MLPerf` class's `_run_latency_test` and `run_standard_benchmark` turn a result into a verdict. Three short functions are book code and are labelled as such: a `percentile` written out by hand so the interpolation is visible, and a `check_compliance` and `compare` that put the module's two bars on a `BenchmarkResult` and add the relative rule.
 :::
 
 We build four pieces. A percentile function does the sorting and interpolation. `BenchmarkResult` holds every timing from one run and computes the summaries. `Benchmark` performs the warmup-then-measure loop. The `MLPerf` class turns a result and an accuracy into a verdict. None of them needs a `Tensor` of its own; the model is anything with a `forward` method.
@@ -185,7 +185,7 @@ This loop times one forward pass per test input, after a warmup of a tenth of th
 
 {{< include _listings/19_benchmarking/mlperf_run_standard_benchmark.qmd >}}
 
-Read the two bars carefully, because this is where the classroom version and the real rules part ways, and the chapter should say so. The latency bar is checked against the mean, not $P_{99}$, and the second exercise asks you to construct a list where the two disagree; the result dictionary carries $P_{50}$, $P_{90}$, and $P_{99}$ beside the mean, so a reader can apply the tail rule themselves. And the accuracy bar is scored by `_run_accuracy_test` against reference labels drawn from a seeded random generator, because the class ships no datasets. A real model scores about chance against them, which is far below every target, so the accuracy half of this verdict is a stand-in for the test set you supply; what the class fixes is the protocol around it, the same inputs for every submission, the warmup, the two bars, and a report that records the seed and the run count. The trace runs it on a small model so you can see the shape of the verdict. Here, as book code, is the verdict with the bar moved to the tail, which is what Chapter 20 uses.
+Read the two bars carefully. The latency bar is checked at $P_{99}$, not the mean, because MLPerf's server scenario bounds the tail and a user waits on the slow requests; the mean, $P_{50}$, and $P_{90}$ are reported beside it. The accuracy bar is scored by `_run_accuracy_test` against the `labels` you pass with your `test_inputs`. Pass neither, and the class builds deterministic random inputs and draws synthetic labels from its seed, so the protocol runs but the accuracy is chance, which is the correct, informative result for a model that has never seen those labels; the docstring says so, and the trace shows both cases. What the class fixes either way is the protocol around the numbers, the same inputs for every submission, the warmup, the two bars, and a report that records the seed and the run count. Here, as book code, is the same pair of bars on a `BenchmarkResult`, plus the relative rule Chapter 20 needs.
 
 ```python
 def check_compliance(result, accuracy, max_latency_ms, min_accuracy):
@@ -281,12 +281,26 @@ print({k: report[k] for k in ("p50_latency_ms", "p99_latency_ms", "mean_latency_
    Target: 90.0% accuracy, <100ms latency
    Warming up (10 runs)...
    Measuring performance (100 runs)...
-   Results: 48.0% accuracy, 0.2ms latency
+   Results: 52.0% accuracy, 0.7ms mean latency, 10.2ms p99
    Compliance: ❌ FAIL
-{'p50_latency_ms': 0.214, 'p99_latency_ms': 0.288, 'mean_latency_ms': 0.217, 'accuracy': 0.48, 'latency_met': True, 'accuracy_met': False, 'compliant': False}
+{'p50_latency_ms': 0.29, 'p99_latency_ms': 10.225, 'mean_latency_ms': 0.657, 'accuracy': 0.52, 'latency_met': True, 'accuracy_met': False, 'compliant': False}
 ```
 
-The latency bar clears by a wide margin, at the mean and at the tail. The accuracy bar fails at 48 percent, which is what an untrained two-class model scores against labels it has never seen, and is exactly what the verdict should say about it. Swap in a trained model and a real test set, and the same protocol produces a verdict worth putting in a report.
+The latency bar clears, and look at how. The median run took 0.29 ms and one run in a hundred took 10 ms, a stall thirty-five times the typical cost that pulled the mean to more than twice the median; the bar is at $P_{99}$ so that a stall like that is what gets judged, and here it still sits far under 100 ms. The accuracy bar fails at 52 percent, which is what an untrained two-class model scores against labels it has never seen, and is exactly what the verdict should say about it. Hand the same protocol a test set and it scores that instead.
+
+```python
+rng = np.random.default_rng(1)
+inputs = [Tensor(rng.standard_normal((1, 16000)).astype(np.float32)) for _ in range(50)]
+labels = np.array([int(np.argmax(model.forward(x).data)) for x in inputs])   # the model's own answers
+report = MLPerf().run_standard_benchmark(model, "keyword_spotting", test_inputs=inputs, labels=labels)
+print({k: report[k] for k in ("accuracy", "accuracy_met", "latency_met", "compliant", "num_runs")})
+```
+
+```
+{'accuracy': 1.0, 'accuracy_met': True, 'latency_met': True, 'compliant': True, 'num_runs': 50}
+```
+
+Labels the model itself produced are not a test set, and the 100 percent is not an accuracy claim; they are the check that the wiring scores what it is given, and the run count follows the inputs. Swap in a trained model and real labels, and the same call produces a verdict worth putting in a report.
 
 ---
 
@@ -312,12 +326,12 @@ The rules that TinyTorch's compliance check imitates come from MLPerf, the bench
 | Warmup | 10 runs discarded (`MLPerf`: a tenth of the runs) | Runs discarded until clocks and allocators settle; clocks often pinned |
 | Repetition | 100 runs by default | Hundreds to thousands; MLPerf fixes the count per task |
 | Statistic reported | mean, std, median, min, max, a 95 percent interval on the mean, percentiles on demand | Same; scenario decides which one is the score |
-| Accuracy floor | a fixed target per task, scored against a stand-in label set | 99 percent (sometimes 99.9) of the reference model, audited |
+| Accuracy floor | a fixed target per task, scored against your labels (a synthetic stand-in when none are given) | 99 percent (sometimes 99.9) of the reference model, audited |
 | Reproducibility | same input, same counts, platform recorded in the result's metadata | Full hardware and software configuration logged with every result |
 
 : What changes between the classroom harness and production measurement, and what does not. {#tbl-bench-bridge tbl-colwidths="[20,35,45]"}
 
-What carries over unchanged is everything in the middle of the table. Warmup, repetition, percentiles over a heavy-tailed distribution, throughput as a separate number from latency, and an accuracy floor are the whole of the discipline; production adds a better clock, more samples, and a verdict taken at the tail rather than the mean. So when you next read a speedup claim, in a paper, a pull request, or your own notes, look for the run count, the warmup, the statistic being compared, whether the GPU was synchronized, and whether accuracy was checked. A claim missing any of those is a number, not a measurement, and the checklist for reporting the rest has been written down for years.[^fn-hoefler-twelve-ways]
+What carries over unchanged is everything in the middle of the table. Warmup, repetition, percentiles over a heavy-tailed distribution, throughput as a separate number from latency, and an accuracy floor are the whole of the discipline; production adds a better clock and more samples. So when you next read a speedup claim, in a paper, a pull request, or your own notes, look for the run count, the warmup, the statistic being compared, whether the GPU was synchronized, and whether accuracy was checked. A claim missing any of those is a number, not a measurement, and the checklist for reporting the rest has been written down for years.[^fn-hoefler-twelve-ways]
 
 [^fn-hoefler-twelve-ways]: Torsten Hoefler and Roberto Belli, "Scientific Benchmarking of Parallel Computing Systems: Twelve Ways to Tell the Whole Story," *SC*, 2015. Its rules, such as reporting the number of runs and never comparing a mean against a median, are the long form of this chapter.
 
@@ -325,12 +339,12 @@ What carries over unchanged is everything in the middle of the table. Warmup, re
 
 ## Summary
 
-You built a benchmark harness that discards warmup runs, times the model many times with a steady clock, keeps every timing, and reports the median, the tail percentiles, and throughput rather than a single average. You also met the verdict that sits on top of it. The module's `MLPerf` class fixes the inputs, the warmup, and two bars, and checks its latency bar at the mean; the book's `check_compliance` moves that bar to $P_{99}$ and adds the rule that an optimized model must keep 99 percent of the baseline's accuracy. The principle to carry forward is that a latency is a sample from a skewed distribution, so the honest report is the distribution's shape, and the honest comparison holds everything else fixed. Chapter 20 takes `BenchmarkResult`, the percentile rule, and the 99 percent accuracy floor for granted and asks how the four optimizations of Chapters 15 through 18 compound when they are stacked in one model.
+You built a benchmark harness that discards warmup runs, times the model many times with a steady clock, keeps every timing, and reports the median, the tail percentiles, and throughput rather than a single average. You also met the verdict that sits on top of it. The module's `MLPerf` class fixes the inputs, the warmup, and two bars, checks its latency bar at $P_{99}$, and scores accuracy against the labels you hand it; the book's `compare` adds the rule that an optimized model must keep 99 percent of the baseline's accuracy. The principle to carry forward is that a latency is a sample from a skewed distribution, so the honest report is the distribution's shape, and the honest comparison holds everything else fixed. Chapter 20 takes `BenchmarkResult`, the percentile rule, and the 99 percent accuracy floor for granted and asks how the four optimizations of Chapters 15 through 18 compound when they are stacked in one model.
 
 ---
 
 ## Exercises
 
 1. Change `ToyModel` so the stall happens every 10th call instead of every 25th, rerun `Benchmark.run_latency_benchmark`, and predict before running how $P_{50}$, $P_{95}$, and the mean will move. Explain which of the three changed the most and why.
-2. The book's `check_compliance` compares $P_{99}$ against the latency bound; the module's `run_standard_benchmark` compares the mean. Construct a list of 100 latencies for which the two checks disagree, and argue which verdict a user of the model would agree with.
+2. `run_standard_benchmark` checks the latency bound at $P_{99}$; an earlier version of the module checked the mean. Construct a list of 100 latencies for which the two rules disagree, one where the mean passes and the tail fails and one the other way around, and argue which verdict a user of the model would agree with.
 3. Using the formula from the sample-size box, compute how many runs are needed to have a 95 percent chance of observing at least one event above $P_{99.9}$. Then measure how long that many runs of `ToyModel` would take and decide whether $P_{99.9}$ is a statistic this harness can honestly report.
