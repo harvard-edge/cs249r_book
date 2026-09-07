@@ -111,7 +111,7 @@ where $\mathbf{g}_i$ is the gradient of the $i$-th of $P$ parameter tensors and 
 
 {{< include _listings/08_training/clip_grad_norm.qmd >}}
 
-Three things to notice. Parameters whose `.grad` is `None` are skipped in both passes; a parameter that no path of the tape reached contributes nothing to the norm and has nothing to scale. A gradient may be a `Tensor` left by Chapter 6's `backward()` or a bare array left by a test, and the function reads and scales either in place. And the function returns the norm it measured *before* clipping, because that number is the best early warning a training log can carry. A pre-clip norm that jumps is the spike described above, visible one step before the loss shows it. PyTorch's `clip_grad_norm_` is the same two passes, down to the variable name `clip_coef`.
+Three things to notice. Parameters whose `.grad` is `None` are skipped in both passes; a parameter that no path of the tape reached contributes nothing to the norm and has nothing to scale. A gradient may be the bare array Chapter 6's `backward()` leaves or a `Tensor` assigned by hand, and the function reads and scales either in place. And the function returns the norm it measured *before* clipping, because that number is the best early warning a training log can carry. A pre-clip norm that jumps is the spike described above, visible one step before the loss shows it. PyTorch's `clip_grad_norm_` is the same two passes, down to the variable name `clip_coef`.
 
 ### The Trainer and the five steps
 
@@ -161,7 +161,7 @@ The naive way is to run the training forward pass on the test set and count. Two
 
 {{< include _listings/08_training/evaluate.qmd >}}
 
-There is no `backward()` here, so `.grad` is never touched and the parameters cannot move. The forward pass still records a tape, because the Chapter 6 `Tensor` has no way to switch recording off, and that tape is the memory Chapter 6 priced, tens of gigabytes of saved activations on a real model, held for nothing and discarded when `loss` goes out of scope. PyTorch's `model.eval()` is the flag flip; `torch.no_grad()` is the missing half, and the bridge section says what it buys.
+There is no `backward()` here, so `.grad` is never touched and the parameters cannot move. The forward pass runs inside Chapter 6's `no_grad()`, so no tape is recorded and the saved activations Chapter 6 priced, tens of gigabytes on a real model, are never allocated. PyTorch's `model.eval()` and `torch.no_grad()` are the same two moves, and the bridge section says what the second one buys.
 
 ### Checkpoints
 
@@ -279,7 +279,7 @@ for t in range(5):
 
 PyTorch ships no `Trainer` in its core library. The five calls are written by hand in nearly every PyTorch script in existence, in exactly this order, and libraries such as PyTorch Lightning and the Hugging Face `Trainer` exist to write them for you with the same conveniences this chapter added. What changes in production is not the contract but the cost of each step, and most of the differences below are responses to that cost.
 
-Evaluation is the clearest case. PyTorch pairs `model.eval()` with a `torch.no_grad()` block, which tells autograd not to record a tape at all. TinyTorch's `evaluate` cannot do that, so it builds a tape it will never use. On a real model that tape holds every intermediate activation, and Chapter 6 showed those activations dominate training memory. Turning recording off is what lets a GPU evaluate with a batch many times larger than it could train with. The `zero_grad` step also matured. Since PyTorch 2.0, `optimizer.zero_grad()` sets each `.grad` to `None` by default rather than filling it with zeros, which skips a memory write per parameter and is exactly what Chapter 7's `zero_grad` does.
+Evaluation is the clearest case. PyTorch pairs `model.eval()` with a `torch.no_grad()` block, which tells autograd not to record a tape at all, and Module 08's `evaluate` does the same with Chapter 6's `no_grad()`. Without it the pass would build a tape it never uses; on a real model that tape holds every intermediate activation, and Chapter 6 showed those activations dominate training memory. Turning recording off is what lets a GPU evaluate with a batch many times larger than it could train with. The `zero_grad` step also matured. Since PyTorch 2.0, `optimizer.zero_grad()` sets each `.grad` to `None` by default rather than filling it with zeros, which skips a memory write per parameter and is exactly what Chapter 7's `zero_grad` does.
 
 Clipping is the same algorithm under the name `torch.nn.utils.clip_grad_norm_`, down to the variable `clip_coef`. The difference is that a model may have hundreds of parameter tensors, and computing hundreds of separate norms would mean hundreds of separate GPU launches, so PyTorch computes them in one fused pass. Clipping also acquires a neighbor under the mixed-precision training that Chapter 7 described. With gradients stored in 16-bit floats, small values round to zero, so the loss is multiplied by a large constant before `backward()` and the gradients must be divided back (`scaler.unscale_(optimizer)`) *before* clipping, or the clip threshold is compared against scaled numbers. That is a new step inserted between 4 and 5, and getting its position wrong is a common silent bug of the kind this chapter opened with.
 
@@ -292,7 +292,7 @@ Across many GPUs the contract holds without modification. Under `DistributedData
 | Concern | TinyTorch `Trainer` | PyTorch |
 | :--- | :--- | :--- |
 | The five steps | `_process_batch` + `_optimizer_update` | Written by hand, same order |
-| Evaluation | `training=False` passed through `_forward`, tape still recorded | `model.eval()` + `torch.no_grad()` |
+| Evaluation | `training=False` through `_forward`, inside `no_grad()` | `model.eval()` + `torch.no_grad()` |
 | Clipping | `clip_grad_norm`, one tensor at a time | `clip_grad_norm_`, fused across tensors |
 | Schedule | Per epoch, set before the epoch | Per step, `scheduler.step()` after `optimizer.step()` |
 | Accumulation | Seed `backward()` with $1/k$ | Divide the loss by $k$ before `backward()` |
