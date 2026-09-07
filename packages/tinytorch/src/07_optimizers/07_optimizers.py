@@ -1562,6 +1562,78 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### Checkpointing Adam's Moments
+
+Module 08's Trainer saves optimizer state through three small methods that SGD
+already has: `has_momentum()`, `get_momentum_state()`, and `set_momentum_state()`.
+Adam and AdamW carry two buffers per parameter instead of one, so they answer the
+same three questions with (m, v) pairs. Without this, a restored Adam run would
+restart its moments from zero.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "adam-checkpoint-state", "solution": false}
+#| export
+def _adam_has_momentum(self) -> bool:
+    """Adam always keeps moment buffers, so there is always state to checkpoint."""
+    return True
+
+def _adam_get_momentum_state(self) -> List:
+    """Copy the (m, v) buffers for checkpointing; None for parameters not yet stepped."""
+    return [
+        (None if m is None else m.copy(), None if v is None else v.copy())
+        for m, v in zip(self.m_buffers, self.v_buffers)
+    ]
+
+def _adam_set_momentum_state(self, state: Optional[List]) -> None:
+    """Restore the (m, v) buffers saved by get_momentum_state()."""
+    if state is None:
+        return
+    if len(state) != len(self.m_buffers):
+        raise ValueError(
+            f"Optimizer state mismatch: state has {len(state)} entries, "
+            f"optimizer has {len(self.m_buffers)} parameters"
+        )
+    self.m_buffers = [None if m is None else m.copy() for m, _ in state]
+    self.v_buffers = [None if v is None else v.copy() for _, v in state]
+
+for _cls in (Adam, AdamW):
+    _cls.has_momentum = _adam_has_momentum
+    _cls.get_momentum_state = _adam_get_momentum_state
+    _cls.set_momentum_state = _adam_set_momentum_state
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Adam Checkpoint State
+
+**What we're testing**: get_momentum_state / set_momentum_state round trip for Adam and AdamW
+**Why it matters**: Module 08's Trainer restores optimizer state from checkpoints
+**Expected**: Restored buffers equal the saved ones
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-adam-checkpoint-state", "locked": true, "points": 5}
+def test_unit_adam_checkpoint_state():
+    """🧪 Test that Adam's moments survive a get/set round trip."""
+    print("🧪 Unit Test: Adam checkpoint state...")
+    W = Tensor(rng.standard_normal((3, 2)))
+    optimizer = Adam([W], lr=0.001)
+    W.grad = Tensor(rng.standard_normal((3, 2)))
+    optimizer.step()
+
+    assert optimizer.has_momentum()
+    state = optimizer.get_momentum_state()
+    assert len(state) == 1 and state[0][0] is not None and state[0][1] is not None
+
+    fresh = AdamW([W], lr=0.001)
+    fresh.set_momentum_state(state)
+    assert np.allclose(fresh.m_buffers[0], optimizer.m_buffers[0])
+    assert np.allclose(fresh.v_buffers[0], optimizer.v_buffers[0])
+    print("✅ Adam checkpoint state works correctly!")
+
+if __name__ == "__main__":
+    test_unit_adam_checkpoint_state()
+
+# %% [markdown]
+"""
 ## 🔧 Integration: Bringing It Together
 
 Now let's see how our optimizers perform in realistic scenarios. We'll compare their behavior on the same optimization problem to understand their different characteristics.
@@ -1773,6 +1845,7 @@ def test_module():
     test_unit_adam_optimizer()
     test_unit_adamw_update_moments()
     test_unit_adamw_optimizer()
+    test_unit_adam_checkpoint_state()
 
     print("\nRunning integration scenarios...")
 
