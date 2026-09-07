@@ -40,6 +40,24 @@ Denning's 1968 Working Set theory is the foundational model of memory hierarchy 
 
 :::
 
+## Introduction to Context Working Sets: Memory Hierarchies in Autonomous Agents {#sec-vol3-context-intro}
+
+In classical computer architecture, the memory hierarchy spans registers, L1/L2/L3 SRAM caches, host DRAM, and persistent NVMe storage, balancing access latency against bit density and physical cost [@hennessy2011computer]. In an agentic machine learning system, the **context window** serves as the primary computational substrate—the "L1 cache" of the autonomous agent. Every decision, tool invocation, environment observation, and intermediate reasoning thought must reside within this active sequence for the neural policy to attend to it during autoregressive inference.
+
+Unlike stateless inference serving where input prompts are brief and independent, an autonomous agent accumulates state over extended multi-step trajectories. As an agent inspects files, runs shell commands, parses compiler diagnostics, and reflects on intermediate errors, its prompt history expands monotonically. Developers and framework builders frequently treat modern long-context windows (128k to 1M+ tokens) as elastic, unbounded repositories. In production systems engineering, this append-only approach precipitates three severe failures:
+
+1. **Quadratic Prefill Latency and TTFT Explosion:** Prefill computation scales quadratically with sequence length ($O(N^2)$), causing Time-to-First-Token (TTFT) to expand from milliseconds to tens of seconds and stalling interactive execution loops.
+2. **Key-Value Cache Memory Exhaustion:** The Key-Value (KV) cache footprint expands linearly with every token across all model layers and attention heads, rapidly consuming scarce accelerator High Bandwidth Memory (HBM) and inducing cluster-wide memory thrashing.
+3. **Cognitive Degradation ("Lost in the Middle"):** Expanding contexts dilute transformer self-attention distributions, degrading retrieval precision and causing models to hallucinate tool parameters or overlook critical constraints [@liu2024lost].
+
+To resolve this bottleneck, context cannot be treated as an unmanaged log; it must be engineered as an active, eviction-driven **working set**. Scalable agentic runtimes organize memory across three distinct architectural tiers:
+
+- **Tier 1 (L1 Context Working Set):** The active transformer attention window holding pinned system instructions, active tool schemas, and the immediate operational working set $W(t, \Delta t)$.
+- **Tier 2 (L2 KV-Cache Prefix Store and Paging):** High-speed Radix tree caches residing in GPU HBM and host DRAM, enabling sub-millisecond prefix reuse across multi-turn steps and branching search trees.
+- **Tier 3 (L3 Episodic and External Memory):** Persistent vector indices, relational state stores, and AST repomaps supporting semantic retrieval over long-term histories without polluting the active attention window.
+
+This chapter establishes the systems foundations of context working sets. We derive the physical silicon limits of self-attention and HBM memory walls in @sec-vol3-context-the-physics-of-context, formulate autoregressive decode economics under the Roofline model in @sec-vol3-context-autoregressive-decode-economics-memory, apply Denning's Working Set theory to neural trajectories in @sec-vol3-context-denning-s-working-set, and develop structured eviction algorithms, semantic compaction pipelines, and persistent episodic memory subsystems across the subsequent sections.
+
 ## The Physics of Context Windows: Quadratic Attention and High-Bandwidth Memory (HBM) Walls {#sec-vol3-context-the-physics-of-context}
 
 In autonomous agent systems, the context window serves as the primary computational substrate where reasoning, environmental observations, tool execution schemas, and intermediate plans reside. While contemporary software interfaces treat context windows as elastic, append-only streams spanning hundreds of thousands of tokens, underlying accelerator hardware enforces rigid mathematical and thermodynamic limits. Every token appended to an agent's context imposes a dual penalty: quadratic computational growth during the prompt prefill phase and linear capacity exhaustion of accelerator High Bandwidth Memory (HBM) during autoregressive token generation.

@@ -43,6 +43,21 @@ This chapter develops the systems architecture of trajectory-aware scheduling, c
 
 :::
 
+## Introduction to Trajectory Scheduling: The Post-Request Serving Dilemma {#sec-vol3-scheduling-intro}
+
+Classical accelerator serving runtimes—such as vLLM, TensorRT-LLM, and Triton Inference Server—are engineered around request-level queueing abstractions [@kwon2023; @sheng2023flexgen]. An incoming client query is placed in an admission queue, batched with concurrent requests via continuous iteration-level scheduling, autoregressively decoded to completion, and evicted. Once the final token is emitted, all temporary activation and Key-Value (KV) memory is immediately reclaimed.
+
+Autonomous agent workloads dismantle every foundational assumption of this classical queueing paradigm. An agent session is not an isolated request; it is an extended, stateful, and non-deterministic trajectory spanning tens or hundreds of discrete interaction turns. Operating clusters under this post-request regime exposes four acute systems challenges:
+
+1. **Heavy-Tailed Pareto Service Times:** Unlike stateless queries with well-behaved, narrow latency distributions, agent trajectories exhibit extreme service-time variance ($1.0 < \alpha < 1.4$). A tiny fraction ($3\%\text{--}5\%$) of complex debugging tasks expand into massive multi-step journeys that consume the majority of cluster compute resources.
+2. **Bimodal Execution and Blocking Tool Delays:** Agent execution alternates between sub-second GPU decode bursts and lengthy external tool delays (compiling codebases, executing integration test suites, or awaiting human approval). Holding multi-gigabyte KV caches pinned in high-cost GPU High Bandwidth Memory (HBM) during these blocking delays induces severe memory starvation.
+3. **Expanding Memory Footprints and Admission Deadlocks:** An agent admitted at Step 1 with a compact $2\text{k}$-token context may expand to $64\text{k}$ or $128\text{k}$ tokens by Step 30. Oblivious schedulers that admit sessions based only on current context size suffer catastrophic out-of-memory (OOM) thrashing and deadlock.
+4. **The Reversibility Boundary under Preemption:** In classical batch clusters, an interrupted job can be killed and restarted from scratch. In an agent trajectory, intermediate actions perform real mutations on external filesystems, databases, and network APIs. Schedulers cannot simply abort an in-flight trajectory without executing compensating actions or preserving checkpointed event streams.
+
+To achieve high cluster efficiency, an agentic scheduler must optimize for **Trajectory Goodput** ($G$)—the rate of successfully certified task completions per unit cost. This requires co-designing cache-affinity routing (directing consecutive turns to the same GPU to maximize Radix prefix reuse), predictive admission control (forecasting trajectory horizon lengths), and stateful suspension mechanisms.
+
+This chapter formalizes the systems principles of trajectory scheduling. In @sec-vol3-scheduling-workload-characterization-heavy-tails, we characterize empirical heavy-tailed Pareto distributions and prove why classical queueing models fail. In @sec-vol3-scheduling-the-memory-constrained-serving-problem, we dissect memory pressure and admission deadlocks. We formulate predictive horizon sizing in @sec-vol3-scheduling-predictive-horizon-sizing-and, examine scheduling approximations under unknown service times, and analyze safe preemption policies across the remainder of the chapter.
+
 ## Workload Characterization: Heavy Tails, High Step-Variance, and Unpredictable Horizons {#sec-vol3-scheduling-workload-characterization-heavy-tails}
 
 In traditional web search and stateless inference serving, request service times follow narrow, unimodal distributions (such as Gaussian or light-tailed Poisson distributions) with well-behaved means and finite variance [@kleinrock1975queueing]. Schedulers relying on classical $M/M/k$ or $M/G/k$ queueing models exploit this predictable variance to establish tight tail latency Service Level Agreements (SLAs) [@harchol-balter2013].
