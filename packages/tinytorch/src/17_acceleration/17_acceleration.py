@@ -558,6 +558,7 @@ Let's quantify the impact of kernel fusion by comparing fused vs unfused impleme
 """
 
 # %% nbgrader={"grade": false, "grade_id": "unfused-gelu", "solution": true}
+#| export
 def unfused_gelu(x: Tensor) -> Tensor:
     """
     Deliberately unfused GELU implementation for performance comparison.
