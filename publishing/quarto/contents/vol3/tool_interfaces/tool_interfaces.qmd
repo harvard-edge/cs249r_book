@@ -155,6 +155,22 @@ If an MCP server exposes a tool:
 The MCP layer strictly verifies that `params.arguments.query` is a valid string. It provides zero validation of whether that string contains `DROP DATABASE production;`. Privilege control, credential containment, and sandbox isolation must be enforced by the host runtime below the protocol wire (as we will explore in detail in @sec-vol3-sandboxing-isolation).
 :::
 
+That warning describes the direction most deployments consider, in which arguments travel from the model through the client and into a server. Setup traffic runs the other way. The client acts on fields the server returns before any tool has been called, and a critical vulnerability disclosed in 2025 against a widely deployed MCP proxy began in one of them (\ref{ws-tools-mcp-remote-2025}).
+
+::: {#ws-tools-mcp-remote-2025 .callout-war-story title="The mcp-remote authorization endpoint (2025)"}
+
+**Context**: The `mcp-remote` package is a proxy that lets hosts that speak only the local stdio transport, including Claude Desktop, Cursor, and Windsurf, reach remote MCP servers over HTTP. Configuring it takes a single field, the remote server's URL. JFrog Security Research disclosed CVE-2025-6514 against the package on July 9, 2025, with a base score of 9.6 [@jfrog2025mcpremote].
+
+**Mechanism**: When the remote server answered the first request with a 401, the proxy opened an OAuth flow and fetched the server's metadata document, whose `authorization_endpoint` field names a URL the client is expected to open in a browser. The client checked that field only by passing it to the URL constructor, which tests syntax and nothing more, then handed the result to a helper that opens a link in the desktop browser. On Windows that helper builds a PowerShell command line. A value carrying an unrecognized scheme is left unencoded by the URL constructor, so a string of the form `a:$(cmd.exe /c whoami)` passed validation intact and PowerShell evaluated the subexpression. Every component behaved as documented. The defect was that a field arriving from the far end of the protocol was treated as trusted.
+
+**Impact**: Versions 0.0.5 through 0.1.15 were affected. On Windows, JFrog demonstrated arbitrary operating system command execution with full control of arguments, amounting to full compromise of the developer machine hosting the client. On macOS and Linux, where the helper calls `open` or `xdg-open` and no shell is invoked, the same field yields execution of arbitrary executables with limited control of arguments. Two routes reach the bug. One is connecting to a malicious or hijacked server. The other is connecting to any server over plain HTTP while an attacker on the local network redirects the traffic, a likely case because MCP clients tend to trust servers on the same network and connect to them insecurely.
+
+**Fix**: Version 0.1.16, published on June 17, 2025 ahead of public disclosure, routes the discovered URL through a sanitizer before opening it. The sanitizer rejects any scheme other than `http` and `https`, rejects a host containing any character that percent-encoding would alter, and re-encodes the user information, path, query, and fragment. The standing mitigation is to connect only to trusted MCP servers over HTTPS.
+
+**Systems lesson**: A tool protocol types every field and types nothing about trust. The `authorization_endpoint` value had the declared type and valid URL syntax and was still hostile, because parsing as a URL says nothing about what the program receiving it will do. Validation at a protocol boundary therefore has a direction, and the client owes a server's replies the same suspicion the host owes the model's arguments. The operational form of that rule is narrow enough to implement. Any value crossing into an interpreter (a shell, a browser launcher, a query engine) must be validated against the grammar of that interpreter, not merely against the grammar of the wire.
+
+:::
+
 ## Tool Definition Economics {#sec-vol3-tools-tool-definition-economics-ousterhout}
 
 ::: {.callout-definition title="Deep vs. Shallow Modules"}
