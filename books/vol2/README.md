@@ -1,8 +1,9 @@
-# Volume II: Machine Learning Systems at Scale
+# Volume II: Scaling Machine Learning Systems
 
 *Distributed systems and production infrastructure for ML.*
 
 [![Read Online](https://img.shields.io/badge/Read_Online-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/vol2/)
+[![Give Feedback](https://img.shields.io/badge/Feedback-Open_an_Issue-0969da?logo=github)](https://github.com/harvard-edge/cs249r_book/issues/new?template=book-vol2.yml)
 
 <div align="center" style="background: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
   <span style="font-size: 1.1em; font-weight: bold; color: #1e40af;">📘 Preview Edition &bull; Active Final Polish</span><br>
