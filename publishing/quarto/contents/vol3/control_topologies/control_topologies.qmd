@@ -76,27 +76,7 @@ The engineering rule governing this spectrum is straightforward: *never use a mo
 
 ## Trajectories as Directed Acyclic Graphs {#sec-vol3-topologies-trajectories-as-directed-acyclic}
 
-In classical operating systems, process execution is modeled as a linear instruction stream periodically interrupted by system calls and context switches. In agentic systems, execution is fundamentally a graph traversal. We formalize an agent execution trajectory as a Directed Acyclic Graph (DAG) $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ grounded in a Partially Observable Markov Decision Process (POMDP) [@kaelbling1998; @zaharia2012resilient].
-
-Formally, an agent operates over a POMDP defined by the 7-tuple:
-
-$$\langle \mathcal{S}, \mathcal{A}, \mathcal{T}, \mathcal{R}, \Omega, \mathcal{O}, \gamma \rangle$$
-
-where:
-
-- $\mathcal{S}$ is the set of hidden environment states (e.g., the complete virtual machine filesystem, remote database state, and network socket buffers).
-- $\mathcal{A}$ is the set of discrete actions available to the agent (e.g., shell commands, code edits, and HTTP requests).
-- $\mathcal{T}(s' \mid s, a) = \mathbb{P}(S_{t+1} = s' \mid S_t = s, A_t = a)$ is the state transition probability distribution of the external environment.
-- $\mathcal{R}(s, a)$ is the reward function evaluating progress toward the user's objective.
-- $\Omega$ is the set of observations returned to the agent (e.g., stdout logs, compiler error messages, and API response JSON).
-- $\mathcal{O}(o \mid s', a) = \mathbb{P}(O_{t+1} = o \mid S_{t+1} = s', A_t = a)$ is the observation probability distribution conditioned on the underlying state.
-- $\gamma \in [0, 1)$ is the discount factor.
-
-Because the agent cannot directly inspect the complete state $s \in \mathcal{S}$, it maintains an internal *belief state* or *trajectory context* $b_t \in \mathcal{B}$, represented by the sequence of past tokens:
-
-$$b_t = (x_0, a_0, o_0, x_1, a_1, o_1, \dots, x_t)$$
-
-where $x_t$ denotes internal model thoughts and reasoning tokens.
+In classical operating systems, process execution is modeled as a linear instruction stream periodically interrupted by system calls and context switches. In agentic systems, execution is fundamentally a graph traversal. Formally, an agent operates over a Partially Observable Markov Decision Process (POMDP) [@kaelbling1998; @zaharia2012resilient]. Because the agent cannot directly inspect the complete state of the external environment, it maintains an internal *belief state* or *trajectory context*—represented by the sequence of past observations, thoughts, and actions. (The formal mathematical derivation of the POMDP 7-tuple and belief state is detailed in @sec-vol3-appendix-math-pomdp).
 
 When this interaction is unrolled over time, it forms an execution graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. The vertex set $\mathcal{V}$ contains three distinct node types:
 
@@ -262,21 +242,11 @@ We partition runtime guarantees into two complementary classes:
 
    $$\lozenge \text{TerminalState}(S_t)$$
 
-To mathematically prove liveness and guarantee termination in a stochastic control graph, the runtime constructs a **Monotonically Decreasing Variant Function** (a Lyapunov or ranking function) $V: \mathcal{S} \times \mathcal{B} \to \mathbb{R}^+$. A control topology satisfies guaranteed termination if, for every execution step $t$, the expected value of $V$ decreases by at least a strictly positive constant $\delta > 0$:
+To mathematically prove liveness and guarantee termination in a stochastic control graph, the runtime constructs a Monotonically Decreasing Variant Function (a Lyapunov or ranking function). A control topology satisfies guaranteed termination if the expected value of this function strictly decreases with every execution step.
 
-$$\mathbb{E}\left[ V(S_{t+1}, b_{t+1}) \mid S_t, b_t \right] \le V(S_t, b_t) - \delta$$
+ The runtime enforces this condition by defining the variant function over an explicit composite vector of execution resources: the remaining step ceiling, the remaining token budget, and the distance to the goal state. (The formal mathematical derivation and invariants of this Lyapunov function are detailed in @sec-vol3-appendix-math-lyapunov).
 
-The runtime enforces this condition by defining $V$ over an explicit composite vector of execution resources:
-
-$$V(t) = \mathbf{w}^T \begin{bmatrix} K_{\max} - k_t \\ T_{\text{budget}} - T_{\text{consumed},t} \\ \mathcal{D}_{\text{goal}}(S_t, S^*) \end{bmatrix}$$
-
-where:
-
-- $K_{\max} - k_t$ is the remaining step ceiling.
-- $T_{\text{budget}} - T_{\text{consumed},t}$ is the remaining token and financial compute balance.
-- $\mathcal{D}_{\text{goal}}(S_t, S^*)$ is a metric measuring distance to goal state completion.
-
-If an agent executes an action that fails to reduce $\mathcal{D}_{\text{goal}}$, the step and token budget terms enforce that $V(t)$ strictly decreases. When $V(t) \le 0$, the runtime intercepts execution and triggers deterministic termination handlers:
+ If an agent executes an action that fails to reduce the distance to the goal, the step and token budget terms enforce that the overall function strictly decreases. When it reaches zero, the runtime intercepts execution and triggers deterministic termination handlers:
 
 - **State Rollback:** Reverting uncommitted filesystem or database mutations via Write-Ahead Logging (WAL) or Saga compensating transactions.
 - **Typed Error Packaging:** Emitting a structured failure descriptor to the upstream caller detailing the budget exhaustion cause.
