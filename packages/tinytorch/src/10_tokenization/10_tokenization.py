@@ -59,10 +59,13 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 #| default_exp core.tokenization
 #| export
 
+import string
+import time
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Constants for memory calculations
 KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
@@ -1064,11 +1067,10 @@ class BPETokenizer(Tokenizer):
         then runs a greedy merge loop using _count_byte_pairs() to find the
         best pair and _merge_pair() to apply it.
 
-        The corpus is a list of WORDS, one per element, not a list of sentences.
-        Nothing here splits on whitespace: _get_word_tokens("hello world") keeps
-        the space as an ordinary character and treats the whole string as a
-        single word. Pre-split your text (corpus = text.split()) before calling
-        this, or BPE will happily learn merges that straddle word boundaries.
+        The corpus is a list of texts. Each text is split on whitespace, exactly
+        as encode() does, so the symbols the trainer merges (with </w> marking
+        each word's last character) are the symbols encode() will later look up.
+        Merges never straddle a word boundary.
 
         TODO: Implement BPE training using the greedy merge loop
 
@@ -1412,7 +1414,6 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
     return tokenizer
     ### END SOLUTION
 
-#| export
 def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = None) -> List[List[int]]:
     """
     Tokenize a dataset with optional length limits.
@@ -1449,7 +1450,6 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     return tokenized
     ### END SOLUTION
 
-#| export
 def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, float]:
     """
     Analyze tokenization statistics.
@@ -1475,16 +1475,11 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     - Return dict with vocab_size, avg_sequence_length, max_sequence_length, etc.
     """
     ### BEGIN SOLUTION
-    all_tokens = []
-    total_chars = 0
-
-    for text in texts:
-        tokens = tokenizer.encode(text)
-        all_tokens.extend(tokens)
-        total_chars += len(text)
-
-    # Calculate statistics
-    tokenized_lengths = [len(tokenizer.encode(text)) for text in texts]
+    # Tokenize once, then derive every statistic from the result
+    tokenized = [tokenizer.encode(text) for text in texts]
+    all_tokens = [token for tokens in tokenized for token in tokens]
+    total_chars = sum(len(text) for text in texts)
+    tokenized_lengths = [len(tokens) for tokens in tokenized]
 
     stats = {
         'vocab_size': tokenizer.vocab_size,
@@ -1574,7 +1569,7 @@ def analyze_tokenization_strategies():
         ("BPE-500", create_tokenizer("bpe", vocab_size=500, corpus=corpus))
     ]
 
-    print(f"{'Strategy':<12} {'Vocab':<8} {'Avg Len':<8} {'Compression':<12} {'Coverage':<10}")
+    print(f"{'Strategy':<12} {'Vocab':<8} {'Avg Len':<8} {'Compression':<12} {'Unique':<10}")
     print("-" * 60)
 
     for name, tokenizer in strategies:
@@ -1591,7 +1586,7 @@ def analyze_tokenization_strategies():
     print("   3. Higher compression ratio = more characters per token = efficiency")
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
-    print("   - GPT-3/4 uses ~50K BPE tokens for balance")
+    print("   - GPT-2/3 use ~50K BPE tokens; GPT-4 uses ~100K")
     print("   - Character models need more compute (longer sequences)")
     print("   - Embedding table size scales with vocabulary size")
 
@@ -1677,7 +1672,6 @@ This helps understand computational bottlenecks in NLP pipelines.
 # %%
 def benchmark_tokenization_speed():
     """📊 Measure encoding/decoding speed for different strategies."""
-    import time
 
     print("📊 Benchmarking Tokenization Speed...")
     print("=" * 70)
@@ -1738,16 +1732,13 @@ Let's measure how BPE training time scales with corpus size.
 # %%
 def analyze_bpe_scaling():
     """📊 Analyze how BPE training scales with corpus size."""
-    import time
 
     print("📊 Analyzing BPE Training Scaling...")
     print("=" * 70)
 
     # Generate random text helper
     def generate_random_text(length=10):
-        import random
-        import string
-        return ''.join(random.choices(string.ascii_lowercase + ' ', k=length))
+        return ''.join(rng.choice(list(string.ascii_lowercase + ' '), size=length))
 
     corpus_sizes = [100, 500, 1000, 2500]
 
@@ -1773,8 +1764,8 @@ def analyze_bpe_scaling():
         print(f"{size:<15} {train_time:<20.1f} {len(tokenizer.vocab):<15} {memory_kb:<15.1f}")
 
     print("\n💡 Key Insights:")
-    print("- BPE training scales roughly O(n²) with corpus size")
-    print("- Each merge iteration requires counting all pairs in all words")
+    print("- BPE training cost is about (number of merges) x (corpus size)")
+    print("- Each merge iteration rescans every word to count all pairs")
     print("- Memory usage grows linearly with vocabulary size")
     print("- Large corpora (millions of docs) need optimized implementations")
     print("\n🚀 Production strategies:")
@@ -1814,7 +1805,7 @@ coverage: 100% →   coverage: 99% →   coverage: 95% →   coverage: <80%
 
 **Real-world scaling examples**:
 ```
-GPT-3/4:     ~50K BPE tokens, avg 3-4 chars/token
+GPT-2/3:     ~50K BPE tokens, avg 3-4 chars/token (GPT-4: ~100K)
 BERT:        ~30K WordPiece tokens, avg 4-5 chars/token
 T5:          ~32K SentencePiece tokens, handles 100+ languages
 ChatGPT:     ~100K tokens with extended vocabulary
@@ -2054,7 +2045,7 @@ Congratulations! You've built a complete tokenization system for converting text
 ### Systems Insights Discovered
 - **Memory scaling**: Embedding table size = vocab_size x embed_dim (can be 100+ MB)
 - **Sequence length trade-offs**: BPE compresses text, reducing compute by 3-4x
-- **Training complexity**: BPE training scales O(n^2) with corpus size
+- **Training complexity**: BPE training costs about (merges x corpus size), since every merge rescans the corpus
 - **Production patterns**: Rust tokenizers are 10-100x faster than pure Python
 
 ### Ready for Next Steps

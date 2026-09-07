@@ -12,9 +12,6 @@
 #     name: python3
 # ---
 
-#| default_exp core.dataloader
-#| export
-
 # %% [markdown]
 """
 # Module 05: DataLoader - Efficient Data Pipeline for ML Training
@@ -38,7 +35,7 @@ By the end of this module, you will:
 2. Implement Dataset abstraction and TensorDataset for tensor-based data
 3. Build DataLoader with intelligent batching, shuffling, and memory-efficient iteration
 4. Experience data pipeline performance characteristics firsthand
-5. Create download functions for real computer vision datasets
+5. Apply augmentation transforms (flip, crop) inside the data pipeline
 
 Let's transform scattered data into organized learning batches!
 
@@ -50,8 +47,8 @@ Let's transform scattered data into organized learning batches!
 ```python
 # How to use this module:
 from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
-# Note: Dataset download utilities (download_mnist, download_cifar10) will be
-# available in a future release.
+# Real data: datasets/tinydigits/ ships with TinyTorch; milestones/data_manager.py
+# downloads MNIST and CIFAR-10 for the milestones.
 ```
 
 **Why this matters:**
@@ -62,6 +59,7 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.dataloader
 #| export
 
 # Essential imports for data loading
@@ -365,7 +363,8 @@ class TensorDataset(Dataset):
         All tensors must have the same size in their first dimension.
         """
         ### BEGIN SOLUTION
-        assert len(tensors) > 0, "Must provide at least one tensor"
+        if len(tensors) == 0:
+            raise ValueError("TensorDataset needs at least one tensor")
 
         # Store all tensors
         self.tensors = tensors
@@ -872,10 +871,10 @@ class RandomHorizontalFlip:
         >>> img = np.array([[1, 2, 3], [4, 5, 6]])  # 2x3 image
         >>> # 50% chance output is [[3, 2, 1], [6, 5, 4]]
 
-        HINT: Think about all the possible position of the width axis to flip
+        HINT: Find the width axis first; it differs for HW, CHW, and HWC layouts
         """
         ### BEGIN SOLUTION
-        if np.random.random() < self.p:
+        if rng.random() < self.p:
             is_tensor = isinstance(x, Tensor)
             data = x.data if is_tensor else x
 
@@ -1239,8 +1238,17 @@ class RandomCrop:
         return Tensor(cropped) if is_tensor else cropped
         ### END SOLUTION
 
-#| export
+# %% [markdown]
+"""
+### Compose: Chaining Transforms
 
+Augmentations are rarely used alone. `Compose` takes a list of transforms and
+applies them in order, passing each output to the next, so a pipeline such as
+"flip, then crop" becomes one callable the DataLoader can apply per sample.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "compose", "solution": false}
+#| export
 class Compose:
     """
     Compose multiple transforms into a pipeline.
@@ -1553,11 +1561,12 @@ This is what your model sees during training!
 
 **Tiny Datasets (ships with TinyTorch):**
 ```python
-# 8×8 handwritten digits - instant, no downloads!
-import numpy as np
-data = np.load('datasets/tiny/digits_8x8.npz')
-images = Tensor(data['images'])  # (1797, 8, 8)
-labels = Tensor(data['labels'])  # (1797,)
+# 8×8 handwritten digits - ships with TinyTorch, no download
+import pickle
+with open('datasets/tinydigits/train.pkl', 'rb') as f:
+    data = pickle.load(f)
+images = Tensor(data['images'])  # (150, 8, 8)
+labels = Tensor(data['labels'])  # (150,)
 
 dataset = TensorDataset(images, labels)
 loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -1571,8 +1580,8 @@ for batch_images, batch_labels in loader:
 
 **Full Datasets (for serious training):**
 ```python
-# See milestones/data_manager.py for optional MNIST download utilities
-# See milestones/04_1998_cnn/02_lecun_cifar10.py for CIFAR-10 download
+# milestones/data_manager.py: get_mnist() and get_cifar10() download the full sets
+# milestones/04_1998_cnn/02_lecun_cifar10.py shows them feeding a DataLoader
 ```
 
 ### What You've Accomplished
@@ -1596,8 +1605,6 @@ You've built the **data loading infrastructure** that powers all modern ML:
 # %% [markdown]
 """
 ## 📊 Systems Analysis: Data Pipeline Performance
-
-**Note:** This section provides performance analysis tools for understanding DataLoader behavior. The analysis functions are defined below but not run automatically. To explore performance characteristics, uncomment and run `analyze_dataloader_performance()` or `analyze_memory_usage()` manually.
 
 Now let's understand data pipeline performance like production ML engineers. Understanding where time and memory go is crucial for building systems that scale.
 
@@ -1829,12 +1836,6 @@ def analyze_collation_overhead():
     print("• Optimal: Balance between batch size and iteration overhead")
 
 
-# Run the systems analysis (uncomment to run)
-# if __name__ == "__main__":
-#     analyze_dataloader_performance()
-#     analyze_memory_usage()
-#     analyze_collation_overhead()
-
 
 # Run the systems analysis
 if __name__ == "__main__":
@@ -1888,8 +1889,8 @@ train_loader = DataLoader(all_data, shuffle=True)  # No split!
 
 # ✅ CORRECT - Separate train and validation
 train_size = int(0.8 * len(dataset))
-train_data = dataset[:train_size]
-val_data = dataset[train_size:]
+train_data = TensorDataset(images[:train_size], labels[:train_size])
+val_data = TensorDataset(images[train_size:], labels[train_size:])
 train_loader = DataLoader(train_data, shuffle=True)
 val_loader = DataLoader(val_data, shuffle=False)
 ```
@@ -2366,6 +2367,7 @@ You've implemented the same patterns used in:
 - **Research**: Standard foundation for all deep learning experiments
 
 Your data loading pipeline is now ready to power neural network training!
+
 ### Ready for Next Steps
 Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
 Export with: `tito module complete 05`

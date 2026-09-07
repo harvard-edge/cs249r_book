@@ -44,7 +44,7 @@ Let's measure prediction quality!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `src/04_losses/04_losses.py`
+**Learning Side:** You work in `modules/04_losses/losses.ipynb`
 **Building Side:** Code exports to `tinytorch.core.losses`
 
 ```python
@@ -153,7 +153,7 @@ Cross-Entropy Penalty Curve:
       |  \
     2 |   \
       |    \
-    0 |_____\\____> Predicted Probability of Correct Class
+    0 |_____\____> Predicted Probability of Correct Class
       0   0.5   1.0
 
 Logarithmic: wrong confident predictions get severe penalty
@@ -805,8 +805,8 @@ Target: 1.0 (is spam)            Target: 1 (class index)
 Formula:                         Formula:
 -[y*log(p) + (1-y)*log(1-p)]    -log(p[target_class])
 
-Handles class imbalance well     Assumes balanced classes
-Optimized for 2-class case      General for N classes
+One output, one probability      One output per class
+Specialized for 2 classes        General for N classes
 ```
 
 ### Why Binary Cross-Entropy is Special
@@ -1653,7 +1653,7 @@ What happens to:
 <details>
 <summary>💡 Hint</summary>
 
-**Memory Usage**: YES, approximately 32GB (4× increase) - **EXCEEDS GPU MEMORY! Training will crash.**
+**Memory Usage**: Almost. About 29 GB (1 GB fixed + 4 × 7 GB of activations) - **EXCEEDS GPU MEMORY! Training will crash.**
 
 **Why linear scaling?**
 ```
