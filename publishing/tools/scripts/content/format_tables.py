@@ -751,8 +751,23 @@ def extract_tables_from_file(file_path: Path) -> List[Tuple[int, List[str], int]
 
     tables = []
     i = 0
+    in_fence = False
+    fence = ""
 
     while i < len(lines):
+        stripped_line = lines[i].lstrip()
+        # ASCII-art diagrams inside fenced code blocks use the same box-drawing
+        # characters as grid tables. Reformatting one destroys the drawing.
+        if not in_fence and stripped_line.startswith("```"):
+            in_fence = True
+            fence = stripped_line[: len(stripped_line) - len(stripped_line.lstrip("`"))]
+            i += 1
+            continue
+        if in_fence:
+            if stripped_line.startswith(fence) and not stripped_line[len(fence):].strip():
+                in_fence = False
+            i += 1
+            continue
         if lines[i].strip().startswith('+') and '---' in lines[i]:
             # Potential table start
             start_line = i
