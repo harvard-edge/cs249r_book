@@ -183,32 +183,12 @@ Verification is not free. Executing an external verification suite consumes wall
 * **Full test suite run (`pytest`, integration tests):** $T_{\text{ver}} \approx 5\text{--}60\text{ s}$, multi-core CPU, memory I/O, disk bandwidth.
 * **Large language model (LLM) secondary verification pass:** $T_{\text{ver}} \approx 500\text{--}2000\text{ ms}$, thousands of inference tokens.
 
-Let $N$ denote the total trajectory length in steps. Let $K$ denote the number of verification checkpoints scheduled across the trajectory ($1 \le K \le N$). The trajectory is divided into $K$ intervals of length $L = N / K$.
+The optimal checkpoint cadence balances the verification tax against the expected cost of discarded forward progress.
 
-The total compute and latency cost of an agent task is modeled as:
+This formulation reveals a fundamental trade-off (formally derived using a continuous cost model in @sec-vol3-appendix-math-verification):
 
-$$C_{\text{total}} = N \cdot C_{\text{gen}} + K \cdot C_{\text{ver}} + \mathbb{E}[N_{\text{wasted}}] \cdot C_{\text{gen}} + \mathbb{E}[N_{\text{rollback}}] \cdot C_{\text{rollback}}$$
-
-where:
-
-* $C_{\text{gen}}$ is the cost of generating a single action step.
-* $C_{\text{ver}}$ is the cost of executing the verification suite.
-* $\mathbb{E}[N_{\text{wasted}}]$ is the expected number of steps executed between the occurrence of an error and its detection at the next verification checkpoint.
-* $C_{\text{rollback}}$ is the overhead of rewinding state to the prior checkpoint.
-
-### The Pareto Frontier: Cadence Optimization
-
-This formulation reveals a fundamental trade-off:
-
-* **Under-Verification ($K \to 1$, verification only at end):**
-  Verification cost $K \cdot C_{\text{ver}}$ is minimized. However, if an uncorrectable semantic defect occurs at step $t=3$, the agent blindly executes the remaining $N-3$ steps before discovering the failure. The entire trajectory must be discarded:
-  $$\mathbb{E}[N_{\text{wasted}}] \approx \frac{N}{2}$$
-  All compute invested in steps $3$ through $N$ is completely wasted.
-
-* **Over-Verification ($K \to N$, verify every micro-step):**
-  Wasted steps are eliminated ($\mathbb{E}[N_{\text{wasted}}] = 0$). However, the verification tax explodes:
-  $$C_{\text{tax}} = N \cdot C_{\text{ver}}$$
-  If running the test suite takes 10 seconds and an action takes 1 second, the system operates at only 9 percent execution efficiency, locked in continuous verification overhead.
+* **Under-Verification:** Verification compute is minimized, but if an uncorrectable defect occurs early, the agent blindly executes the remaining steps before discovering the failure. The entire trajectory must be discarded. All compute invested in the subsequent steps is completely wasted.
+* **Over-Verification:** Wasted steps are eliminated, but the verification tax explodes. If running the test suite takes 10 seconds and an action takes 1 second, the system operates at a fraction of execution efficiency, locked in continuous verification overhead.
 
 ```
 Total Cost
@@ -225,13 +205,7 @@ Total Cost
    +----------------------------------------------------> Verification Cadence (K)
 ```
 
-The optimal checkpoint cadence $K^*$ balances the marginal cost of verification against the expected cost of discarded forward progress [@cobbe2021training; @lightman2023let]:
-
-$$K^* = \sqrt{\frac{N \cdot \lambda_{\text{error}} \cdot C_{\text{gen}}}{C_{\text{ver}}}}$$
-
-where $\lambda_{\text{error}} = 1 - p$ is the per-step error arrival rate.
-
-In high-error environments ($\lambda_{\text{error}} \approx 0.15$), verification must be aggressive ($K^* \approx N/2$). In highly reliable, deterministic sub-tasks ($\lambda_{\text{error}} \approx 0.01$), verification can be lazily deferred to logical milestone boundaries.
+In high-error environments, verification must be aggressive. In highly reliable, deterministic sub-tasks, verification can be lazily deferred to logical milestone boundaries.
 
 
 ## Deterministic Test Oracles {#sec-vol3-recovery-deterministic-test-oracles-compilers}
