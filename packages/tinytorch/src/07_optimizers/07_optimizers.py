@@ -68,8 +68,7 @@ from tinytorch.core.tensor import Tensor
 
 # Enable autograd to add gradient tracking to Tensor
 # This module depends on Module 06 (Autograd) being available
-from tinytorch.core.autograd import enable_autograd
-enable_autograd()
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Constants for optimizer defaults
 DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
@@ -94,7 +93,7 @@ DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` - Core tensor operations
-- `tinytorch.core.autograd.enable_autograd` - Called at import to attach gradient
+- `tinytorch.core.autograd` - Imported so every operation carries its backward half
   tracking to Tensor
 
 **Dependency Flow**:

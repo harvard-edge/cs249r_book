@@ -55,7 +55,7 @@ _MODULE_REGISTRY = [
     ( 3, "Layers",          "core/layers.py",          "tinytorch.core.layers",         "Linear",               True),
     ( 4, "Losses",          "core/losses.py",          "tinytorch.core.losses",         "MSELoss",              True),
     ( 5, "DataLoader",      "core/dataloader.py",      "tinytorch.core.dataloader",     "DataLoader",           False),
-    ( 6, "Autograd",        "core/autograd.py",        "tinytorch.core.autograd",       "enable_autograd",      False),
+    ( 6, "Autograd",        "core/autograd.py",        "tinytorch.core.autograd",       "no_grad",      False),
     ( 7, "Optimizers",      "core/optimizers.py",      "tinytorch.core.optimizers",     "SGD",                  False),
     ( 8, "Training",        "core/training.py",        "tinytorch.core.training",       "Trainer",              False),
     # Module 09 exports to core.spatial — not core.convolutions

@@ -15,7 +15,7 @@ rng = np.random.default_rng(7)
 import pytest
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 
 class TestConv2dOperations:
@@ -192,9 +192,6 @@ class TestCNNGradientFlow:
 
     def test_conv2d_gradient_flow(self):
         """Verify that gradients flow through Conv2d layers correctly."""
-        enable_autograd()
-
-        # Create simple conv layer
         x = Tensor(rng.standard_normal((1, 3, 8, 8)), requires_grad=True)
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
         conv.weight.requires_grad = True
@@ -228,9 +225,6 @@ class TestCNNGradientFlow:
 
     def test_complete_cnn_forward_backward(self):
         """Test complete CNN forward and backward pass with Conv → Pool → Conv."""
-        enable_autograd()
-
-        # Input
         x = Tensor(rng.standard_normal((2, 3, 16, 16)), requires_grad=True)
 
         # Layer 1: Conv2d

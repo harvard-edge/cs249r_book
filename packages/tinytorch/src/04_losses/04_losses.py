@@ -101,7 +101,7 @@ rng = np.random.default_rng(7)
 from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
+from tinytorch.core.tensor import Tensor, Function
 from tinytorch.core.activations import ReLU
 from tinytorch.core.layers import Linear
 
@@ -269,41 +269,52 @@ Both give the same result, but the stable version never overflows!
 
 # %% nbgrader={"grade": false, "grade_id": "log-softmax", "solution": true}
 #| export
+class LogSoftmax(Function):
+    """
+    The log-softmax operation along an axis. forward() works on NumPy arrays; Module 06 adds backward().
+    """
+    dim = -1
+
+    def forward(self, x):
+        """
+        Compute log-softmax with numerical stability.
+
+        TODO: Implement numerically stable log-softmax using the log-sum-exp trick
+
+        APPROACH:
+        1. Find maximum along dimension (for stability)
+        2. Subtract max from input (prevents overflow)
+        3. Compute log(sum(exp(shifted_input)))
+        4. Return input - max - log_sum_exp
+
+        EXAMPLE:
+        >>> logits = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
+        >>> result = log_softmax(logits, dim=-1)
+        >>> print(result.shape)
+        (2, 3)
+
+        HINT: Use np.max(x, axis=dim, keepdims=True) to preserve dimensions
+        """
+        ### BEGIN SOLUTION
+        # Step 1: Find max along dimension for numerical stability
+        max_vals = np.max(x, axis=self.dim, keepdims=True)
+
+        # Step 2: Subtract max to prevent overflow
+        shifted = x - max_vals
+
+        # Step 3: Compute log(sum(exp(shifted)))
+        log_sum_exp = np.log(np.sum(np.exp(shifted), axis=self.dim, keepdims=True))
+
+        # Step 4: Return log_softmax = input - max - log_sum_exp
+        result = x - max_vals - log_sum_exp
+
+        return result
+        ### END SOLUTION
+
+
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
-    """
-    Compute log-softmax with numerical stability.
-
-    TODO: Implement numerically stable log-softmax using the log-sum-exp trick
-
-    APPROACH:
-    1. Find maximum along dimension (for stability)
-    2. Subtract max from input (prevents overflow)
-    3. Compute log(sum(exp(shifted_input)))
-    4. Return input - max - log_sum_exp
-
-    EXAMPLE:
-    >>> logits = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
-    >>> result = log_softmax(logits, dim=-1)
-    >>> print(result.shape)
-    (2, 3)
-
-    HINT: Use np.max(x.data, axis=dim, keepdims=True) to preserve dimensions
-    """
-    ### BEGIN SOLUTION
-    # Step 1: Find max along dimension for numerical stability
-    max_vals = np.max(x.data, axis=dim, keepdims=True)
-
-    # Step 2: Subtract max to prevent overflow
-    shifted = x.data - max_vals
-
-    # Step 3: Compute log(sum(exp(shifted)))
-    log_sum_exp = np.log(np.sum(np.exp(shifted), axis=dim, keepdims=True))
-
-    # Step 4: Return log_softmax = input - max - log_sum_exp
-    result = x.data - max_vals - log_sum_exp
-
-    return Tensor(result)
-    ### END SOLUTION
+    """Compute log-softmax of a Tensor along dim (see LogSoftmax)."""
+    return LogSoftmax.apply(x, dim=dim)
 
 # %% [markdown]
 """
@@ -409,14 +420,12 @@ Error Sensitivity Comparison:
 
 # %% nbgrader={"grade": false, "grade_id": "mse-loss", "solution": true}
 #| export
-class MSELoss:
-    """Mean Squared Error loss for regression tasks."""
+class MSEFunction(Function):
+    """
+    The MSELoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize MSE loss function."""
-        pass
-
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, predictions, targets):
         """
         Compute mean squared error between predictions and targets.
 
@@ -436,13 +445,13 @@ class MSELoss:
         MSE Loss: 0.1800
 
         HINTS:
-        - Use (predictions.data - targets.data) for element-wise difference
+        - Use (predictions - targets) for element-wise difference
         - Square with **2 or np.power(diff, 2)
         - Use np.mean() to average over all elements
         """
         ### BEGIN SOLUTION
         # Step 1: Compute element-wise difference
-        diff = predictions.data - targets.data
+        diff = predictions - targets
 
         # Step 2: Square the differences
         squared_diff = diff ** 2
@@ -450,20 +459,25 @@ class MSELoss:
         # Step 3: Take mean across all elements
         mse = np.mean(squared_diff)
 
-        return Tensor(mse)
+        return mse
         ### END SOLUTION
+
+
+class MSELoss:
+    """Mean Squared Error loss for regression tasks."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        return MSEFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(predictions, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
@@ -597,14 +611,12 @@ Uses: CrossEntropyLoss            Uses: BinaryCrossEntropyLoss
 
 # %% nbgrader={"grade": false, "grade_id": "cross-entropy-loss", "solution": true}
 #| export
-class CrossEntropyLoss:
-    """Cross-entropy loss for multi-class classification."""
+class CrossEntropyFunction(Function):
+    """
+    The CrossEntropyLoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize cross-entropy loss function."""
-        pass
-
-    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, logits, targets):
         """
         Compute cross-entropy loss between logits and target class indices.
 
@@ -613,7 +625,7 @@ class CrossEntropyLoss:
         APPROACH:
         1. Compute log-softmax of logits (numerically stable)
         2. Check every target index is a real class, 0 <= t < num_classes,
-           and raise ValueError if any is not
+        and raise ValueError if any is not
         3. Select log-probabilities for correct classes
         4. Return negative mean of selected log-probabilities
 
@@ -625,22 +637,22 @@ class CrossEntropyLoss:
         >>> print(f"Cross-Entropy Loss: {loss.data:.4f}")
 
         HINTS:
-        - Use log_softmax() for numerical stability
-        - targets.data.astype(int) ensures integer indices
+        - Use LogSoftmax().forward(logits) for numerical stability (the array-level log-softmax you wrote above)
+        - targets.astype(int) ensures integer indices
         - num_classes is logits.shape[-1]; validate before indexing, because
-          NumPy would let a negative target silently select the wrong class
-          and would raise a bare IndexError for one that is too large
+        NumPy would let a negative target silently select the wrong class
+        and would raise a bare IndexError for one that is too large
         - Use np.arange(batch_size) for row indexing: log_probs[np.arange(batch_size), targets]
         - Return negative mean: -np.mean(selected_log_probs)
         """
         ### BEGIN SOLUTION
         # Step 1: Compute log-softmax for numerical stability
-        log_probs = log_softmax(logits, dim=-1)
+        log_probs = LogSoftmax().forward(logits)
 
         # Step 2: Select log-probabilities for correct classes
         batch_size = logits.shape[0]
         num_classes = logits.shape[-1]
-        target_indices = targets.data.astype(int)
+        target_indices = targets.astype(int)
 
         out_of_range = (target_indices < 0) | (target_indices >= num_classes)
         if np.any(out_of_range):
@@ -651,25 +663,30 @@ class CrossEntropyLoss:
             )
 
         # Select correct class log-probabilities using advanced indexing
-        selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
+        selected_log_probs = log_probs[np.arange(batch_size), target_indices]
 
         # Step 3: Return negative mean (cross-entropy is negative log-likelihood)
         cross_entropy = -np.mean(selected_log_probs)
 
-        return Tensor(cross_entropy)
+        return cross_entropy
         ### END SOLUTION
+
+
+class CrossEntropyLoss:
+    """Cross-entropy loss for multi-class classification."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        return CrossEntropyFunction.apply(logits, targets)
 
     def __call__(self, logits: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(logits, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
@@ -824,14 +841,12 @@ Message: "Be confident about positive class, uncertain is okay,
 
 # %% nbgrader={"grade": false, "grade_id": "binary-cross-entropy-loss", "solution": true}
 #| export
-class BinaryCrossEntropyLoss:
-    """Binary cross-entropy loss for binary classification."""
+class BinaryCrossEntropyFunction(Function):
+    """
+    The BinaryCrossEntropyLoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize binary cross-entropy loss function."""
-        pass
-
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, predictions, targets):
         """
         Compute binary cross-entropy loss.
 
@@ -850,39 +865,44 @@ class BinaryCrossEntropyLoss:
         >>> print(f"Binary Cross-Entropy Loss: {loss.data:.4f}")
 
         HINTS:
-        - Use np.clip(predictions.data, 1e-7, 1-1e-7) to prevent log(0)
+        - Use np.clip(predictions, 1e-7, 1-1e-7) to prevent log(0)
         - Binary cross-entropy: -(targets * log(preds) + (1-targets) * log(1-preds))
         - Use np.mean() to average over all samples
         """
         ### BEGIN SOLUTION
         # Step 1: Clamp predictions to avoid numerical issues with log(0) and log(1)
         eps = EPSILON
-        clamped_preds = np.clip(predictions.data, eps, 1 - eps)
+        clamped_preds = np.clip(predictions, eps, 1 - eps)
 
         # Step 2: Compute binary cross-entropy
         # BCE = -(targets * log(preds) + (1-targets) * log(1-preds))
         log_preds = np.log(clamped_preds)
         log_one_minus_preds = np.log(1 - clamped_preds)
 
-        bce_per_sample = -(targets.data * log_preds + (1 - targets.data) * log_one_minus_preds)
+        bce_per_sample = -(targets * log_preds + (1 - targets) * log_one_minus_preds)
 
         # Step 3: Return mean across all samples
         bce_loss = np.mean(bce_per_sample)
 
-        return Tensor(bce_loss)
+        return bce_loss
         ### END SOLUTION
+
+
+class BinaryCrossEntropyLoss:
+    """Binary cross-entropy loss for binary classification."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        return BinaryCrossEntropyFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(predictions, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
