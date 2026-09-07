@@ -79,6 +79,7 @@ from tinytorch.core.optimizers import SGD, AdamW
 
 # Enable autograd for gradient tracking (required for training)
 import tinytorch.core.autograd  # completes every operation with its backward half
+from tinytorch.core.autograd import no_grad
 
 # Constants for learning rate scheduling defaults
 DEFAULT_MAX_LR = 0.1  # Default maximum learning rate for cosine schedule
@@ -1124,7 +1125,8 @@ def trainer_evaluate(self, dataloader):
 
     APPROACH:
     1. Set model.training = False and self.training_mode = False
-    2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity), accumulate loss
+    2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity),
+       inside no_grad() so no graph is recorded; accumulate loss
     3. For classification: compute accuracy from argmax predictions
     4. Record average loss in self.history['eval_loss']
     5. Return (avg_loss, accuracy)
@@ -1148,9 +1150,10 @@ def trainer_evaluate(self, dataloader):
     num_batches = 0
 
     for inputs, targets in dataloader:
-        # Forward pass only, with the training flag off
-        outputs = self._forward(inputs)
-        loss = self.loss_fn.forward(outputs, targets)
+        # Forward pass only, with the training flag off and no graph recorded
+        with no_grad():
+            outputs = self._forward(inputs)
+            loss = self.loss_fn.forward(outputs, targets)
 
         total_loss += loss.data
         num_batches += 1
