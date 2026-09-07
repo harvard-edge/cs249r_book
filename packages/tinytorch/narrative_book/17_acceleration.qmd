@@ -37,7 +37,7 @@ for f in (sum_by_rows, sum_by_cols):
     print(f"{f.__name__}: {(time.perf_counter() - t0) * 1e3:.0f} ms")
 ```
 
-On my laptop (an Apple M5 Max running NumPy 2.4) the row walk took 16 ms and the column walk took 320 ms. Same data, same arithmetic, twenty times slower. The only thing I changed is the order in which the bytes were visited.
+On my laptop (an Apple M5 Max running NumPy 2.5) the row walk took 15 ms and the column walk took 316 ms. Same data, same arithmetic, twenty times slower. The only thing I changed is the order in which the bytes were visited.
 
 The reason is that memory does not deliver single numbers. It delivers fixed-size chunks, the cache lines from Chapter 1, and it delivers them to a small fast memory beside the processor, not to the processor directly. A row of `A` is 8192 floats sitting next to each other, so one fetched line brings 16 or 32 useful values and the next line is already on its way. A column of `A` is 8192 floats spaced 32 KB apart. Every one of them lives in a different line, so the processor fetches a whole line, uses 4 bytes of it, and throws the rest away. The column walk moves roughly 16 to 32 times more bytes across the boundary between main memory and the cache, and the time follows the bytes.
 
@@ -85,14 +85,14 @@ The tile cannot grow without limit. Three blocks must fit in fast memory at once
 
 $$3\,T^2 \times 4 \text{ bytes} \le \text{cache size}.$$
 
-For a 32 KB L1 cache that gives $T \le 52$, which is why 32 and 64 are the tile sizes that appear in real code. The napkin math also says what the tile buys. One block product does $2T^3$ floating-point operations on $3T^2 \times 4$ bytes, an arithmetic intensity of $T/6$ FLOPs per byte, so a $64 \times 64$ tile runs at about 10.7 FLOPs per byte, some seventy times the unfused GELU chain and nearly nine times the fused one. That is still short of the ridge point Chapter 14 measured on my laptop, about 36 FLOPs per byte, and further still from a GPU's, which is one reason real libraries tile at more than one level and why the exercises ask you to size a tile for your own caches.
+For a 32 KB L1 cache that gives $T \le 52$, which is why 32 and 64 are the tile sizes that appear in real code. The napkin math also says what the tile buys. One block product does $2T^3$ floating-point operations on $3T^2 \times 4$ bytes, an arithmetic intensity of $T/6$ FLOPs per byte, so a $64 \times 64$ tile runs at about 10.7 FLOPs per byte, some seventy times the unfused GELU chain and nearly nine times the fused one. That is still short of the ridge point Chapter 14 measured on my laptop, about 37 FLOPs per byte, and further still from a GPU's, which is one reason real libraries tile at more than one level and why the exercises ask you to size a tile for your own caches.
 
 ---
 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 17 (`src/17_acceleration/17_acceleration.py`) is the NumPy-backed implementation students build in the TinyTorch course. It exports three functions, `vectorized_matmul`, `fused_gelu`, and `tiled_matmul`, plus an `unfused_gelu` used for comparison, all of which take and return the Chapter 6 `Tensor`. The listings in this chapter are a stripped-down model of the same design that works on the underlying NumPy arrays directly, small enough to show every pass over memory and every tile load. Wrapping the results in a `Tensor` is the only step left out.
+The listings in this chapter are extracted from Module 17 (`src/17_acceleration/17_acceleration.py`), which the package exports as `tinytorch.perf.acceleration`: `unfused_gelu`, `fused_gelu`, and `tiled_matmul`, all of which take and return the Chapter 6 `Tensor`. The module also exports `vectorized_matmul`, a shape-checked call to NumPy's `matmul`, which exists to show what the BLAS library underneath delivers and which the text uses as the reference the tiled version is measured against.
 :::
 
 ### The two GELUs
@@ -103,34 +103,21 @@ Run it one operation at a time and you pay the eighteen passes from The Problem.
 
 So the real question is whether the temporaries need to exist at all. Element $i$ of the output depends only on element $i$ of the input, so all eight steps can run on one value while it sits in a register, and that value crosses the memory boundary twice, once on the way in and once on the way out. I call this register residency. The intermediate lives in a register for the whole chain and never becomes an array. Here is the chain written both ways, first with every temporary visible, which is what a framework does when it dispatches each operation on its own, and then as the single expression a fused pass wants.
 
-```python
-import numpy as np
+{{< include _listings/17_acceleration/unfused_gelu.qmd >}}
 
-SQRT_2_OVER_PI = np.float32(np.sqrt(2.0 / np.pi))
-COEFF = np.float32(0.044715)
+Each temporary is wrapped in a `Tensor`, which is exactly what a framework does when it dispatches one operation at a time; eight objects are created and seven are discarded. Count the reads and writes in the comments and you get ten array reads and eight array writes, the eighteen passes from the napkin math. The other version is the same computation written as a single expression.
 
-def unfused_gelu(x):
-    """Eight elementwise passes; every temporary is a full array."""
-    t1 = x ** 3                    # read x,      write t1
-    t2 = COEFF * t1                # read t1,     write t2
-    t3 = x + t2                    # read x, t2,  write t3
-    t4 = SQRT_2_OVER_PI * t3       # read t3,     write t4
-    t5 = np.tanh(t4)               # read t4,     write t5
-    t6 = 1.0 + t5                  # read t5,     write t6
-    t7 = x * t6                    # read x, t6,  write t7
-    return 0.5 * t7                # read t7,     write out
+{{< include _listings/17_acceleration/fused_gelu.qmd >}}
 
-def fused_gelu(x):
-    """The same math as one expression, the shape a fused kernel wants."""
-    return 0.5 * x * (1.0 + np.tanh(SQRT_2_OVER_PI * (x + COEFF * x ** 3)))
-```
+This is the form a compiler needs in order to generate one pass. In production that one pass is a kernel, one compiled function launched on the accelerator, which is why the technique is called kernel fusion; TorchInductor generates exactly this shape, and the GELU epilogue Chapter 2 mentioned bakes it into the tail of the matrix multiply. The bias add folds into the same expression at no extra traffic, and Chapter 21 does that by hand.
 
-The comments on `unfused_gelu` are the traffic ledger. Count them and you get ten array reads and eight array writes, the eighteen passes from the napkin math. `fused_gelu` is the same computation written as a single expression, the form a compiler needs in order to generate one pass. In production that one pass is a kernel, one compiled function launched on the accelerator, which is why the technique is called kernel fusion; TorchInductor generates exactly this shape, and the GELU epilogue Chapter 2 mentioned bakes it into the tail of the matrix multiply. The bias add folds into the same expression at no extra traffic, and Chapter 21 does that by hand.
-
-I have to be honest about this listing. NumPy is not that compiler. When Python evaluates the one-line version, it still calls NumPy once per operator, and each call reads its inputs and writes a fresh temporary, exactly as the unfused version does. Measuring both settles it.
+The module's comment is honest about the same thing I have to be honest about. NumPy is not that compiler. When Python evaluates the one-line version, it still calls NumPy once per operator, and each call reads its inputs and writes a fresh temporary, exactly as the unfused version does. Measuring both settles it.
 
 ```python
 import time
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.perf.acceleration import fused_gelu, unfused_gelu
 
 def time_ms(f, x, reps=5):
     f(x)                                        # warm up
@@ -141,13 +128,13 @@ def time_ms(f, x, reps=5):
         best = min(best, time.perf_counter() - t0)
     return best * 1e3
 
-x = np.random.randn(4096, 4096).astype(np.float32)   # 67 MB
+x = Tensor(np.random.randn(4096, 4096).astype(np.float32))   # 67 MB
 print(f"unfused: {time_ms(unfused_gelu, x):.0f} ms")
 print(f"fused:   {time_ms(fused_gelu, x):.0f} ms")
-assert np.allclose(unfused_gelu(x), fused_gelu(x), atol=1e-6)
+assert np.allclose(unfused_gelu(x).data, fused_gelu(x).data, atol=1e-6)
 ```
 
-On my laptop the unfused version took 160 ms and the fused version 159 ms. To the machine they are the same program. What the fused form buys inside TinyTorch is one `Tensor` and one autograd node instead of eight, and, more importantly, a computation expressed as a unit that a real fusing compiler can turn into a single pass. Seeing the pass count show up as time takes a compiler NumPy does not have, which is where the production bridge picks up.
+On my laptop the unfused version took 173 ms and the fused version 203 ms, in three runs and in either order. The one-line form is not faster. In this run it was slower by a sixth, and the whole difference is in how NumPy allocates and frees the temporaries along the way, because not one pass was saved. To the machine they are the same program. What the fused form buys inside TinyTorch is one `Tensor` and one autograd node instead of eight, and, more importantly, a computation expressed as a unit that a real fusing compiler can turn into a single pass. Seeing the pass count show up as time takes a compiler NumPy does not have, which is where the production bridge picks up.
 
 ### Tiled matrix multiply
 
@@ -155,38 +142,27 @@ The matrix multiply is where the rest of the bytes go, and where nearly all of t
 
 The obvious triple loop computes each $C_{ij}$ by walking $k$, reading $A_{ik}$ along a row and $B_{kj}$ down a column. For $1024 \times 1024$ matrices of 32-bit floats the column's elements sit 4 KB apart, which is the column walk that ran twenty times slower in The Problem, and the loop repeats it once per output, a million times over. Counted in element loads, the naive order fetches 2.1 billion elements, 8.6 GB of traffic, for a problem whose two inputs occupy 8 MB, because each element of $A$ and $B$ is fetched afresh on most of the 1024 occasions it is needed.
 
-The fix is to arrange for the reuse to happen while the element is still in fast memory. Choose $T$ so that three $T \times T$ blocks fit in cache and compute $C$ one block at a time. Every element of the two input blocks is then used $T$ times before anything is evicted, the $T^3$ multiply-adds on a pair of blocks run without a single trip to main memory, and the loads fall by about a factor of $T$, the count from The Idea. Nothing about the arithmetic changes; only the loop order does. The three outer loops below walk over blocks of rows of $C$, blocks of columns of $C$, and blocks of the shared dimension; the body multiplies one block of $A$ by one block of $B$ and accumulates into one block of $C$. The `min` calls let the last tile along each edge be smaller than `tile_size` when the matrix dimension is not a multiple of it.
+The fix is to arrange for the reuse to happen while the element is still in fast memory. Choose $T$ so that three $T \times T$ blocks fit in cache and compute $C$ one block at a time. Every element of the two input blocks is then used $T$ times before anything is evicted, the $T^3$ multiply-adds on a pair of blocks run without a single trip to main memory, and the loads fall by about a factor of $T$, the count from The Idea. Nothing about the arithmetic changes; only the loop order does.
+
+{{< include _listings/17_acceleration/tiled_matmul.qmd >}}
+
+The first two dozen lines are the shape checks, with the three-line error messages TinyTorch uses everywhere; the mechanism is the three loops at the end. They walk over blocks of rows of $C$, blocks of columns of $C$, and blocks of the shared dimension, and the body multiplies one block of $A$ by one block of $B$ and accumulates into one block of $C$. The `min` calls let the last tile along each edge be smaller than `tile_size` when the matrix dimension is not a multiple of it, which the second check below exercises.
 
 ```python
-def tiled_matmul(A, B, tile_size=64):
-    """Blocked matrix multiply: same FLOPs as A @ B, different loop order."""
-    M, K = A.shape
-    K2, N = B.shape
-    if K != K2:
-        raise ValueError(f"inner dimensions must match: {K} vs {K2}")
-    C = np.zeros((M, N), dtype=A.dtype)
-    for i0 in range(0, M, tile_size):
-        i1 = min(i0 + tile_size, M)
-        for j0 in range(0, N, tile_size):
-            j1 = min(j0 + tile_size, N)
-            for k0 in range(0, K, tile_size):
-                k1 = min(k0 + tile_size, K)
-                # three blocks in play: A[i,k], B[k,j], C[i,j]
-                C[i0:i1, j0:j1] += A[i0:i1, k0:k1] @ B[k0:k1, j0:j1]
-    return C
+from tinytorch.perf.acceleration import tiled_matmul
 
-A = np.random.randn(4, 4).astype(np.float32)
-B = np.random.randn(4, 4).astype(np.float32)
-assert np.allclose(tiled_matmul(A, B, tile_size=2), A @ B, atol=1e-4)
+A = Tensor(np.random.randn(4, 4).astype(np.float32))
+B = Tensor(np.random.randn(4, 4).astype(np.float32))
+assert np.allclose(tiled_matmul(A, B, tile_size=2).data, A.data @ B.data, atol=1e-4)
 
-A = np.random.randn(300, 500).astype(np.float32)
-B = np.random.randn(500, 200).astype(np.float32)
-assert np.allclose(tiled_matmul(A, B, tile_size=64), A @ B, atol=1e-2)
+A = Tensor(np.random.randn(300, 500).astype(np.float32))
+B = Tensor(np.random.randn(500, 200).astype(np.float32))
+assert np.allclose(tiled_matmul(A, B, tile_size=64).data, A.data @ B.data, atol=1e-2)
 ```
 
 Notice what the code does and does not do. It decides which three blocks are in play together; that is the whole mechanism, and it is the same decision cuBLAS, oneDNN, and the BLAS under NumPy's `@` make, except that they make it at several cache levels at once. The multiply inside each block is still NumPy's `@`, which hands the block to that compiled BLAS routine. Writing the inner multiply as scalar Python loops would run thousands of times slower for reasons that have nothing to do with caches, and would teach nothing about them.
 
-The same fact means `tiled_matmul` will not beat `A @ B` on the full matrix. NumPy's `@` already passes the whole matrix to BLAS, and BLAS tiles it in tuned compiled code with more levels than this one, so the Python version adds loop overhead on top of a routine that was already tiled. On my laptop a $512 \times 512$ multiply took 0.3 ms with `@` and 2.8 ms with `tiled_matmul` at `tile_size=64`. The listing exists to show the mechanism BLAS uses, not to compete with it.
+The same fact means `tiled_matmul` will not beat `vectorized_matmul` on the full matrix. NumPy's `@` already passes the whole matrix to BLAS, and BLAS tiles it in tuned compiled code with more levels than this one, so the Python version adds loop overhead on top of a routine that was already tiled. On my laptop a $512 \times 512$ multiply took 0.25 ms with `@`, 0.28 ms through `vectorized_matmul`, and 2.9 ms with `tiled_matmul` at `tile_size=64`. The listing exists to show the mechanism BLAS uses, not to compete with it.
 
 ---
 
@@ -211,9 +187,11 @@ Run the unfused GELU on five inputs, $x = [-2, -1, 0, 1, 2]$, and record every t
 
 : Every temporary in the unfused GELU for three of the five inputs, with the array traffic each step generates. The fused kernel computes the same eight rows per element while the value sits in a register and touches memory only at the first and last. {#tbl-fusion-trace tbl-colwidths="[8,26,14,14,14,12,12]"}
 
-The output column agrees with the value Chapter 2 tabulated for GELU at $x = 1$ to three decimals ($0.841$; Chapter 2 uses the exact form, this chapter the tanh approximation), so the eight steps are the right eight steps. The traffic columns are the point. Eighteen array passes on 20-byte arrays is 360 bytes moved to produce 20 bytes of output; the fused kernel moves 40 bytes. Scale the arrays to $4096 \times 4096$ and the same ratio reads 1.2 GB against 134 MB, a factor of nine, with the arithmetic unchanged. The following script reproduces the table and the byte counts.
+The output column agrees with the value Chapter 2 tabulated for GELU at $x = 1$ to three decimals ($0.841$; Chapter 2 uses the exact form, this chapter the tanh approximation), so the eight steps are the right eight steps. The traffic columns are the point. Eighteen array passes on 20-byte arrays is 360 bytes moved to produce 20 bytes of output; the fused kernel moves 40 bytes. Scale the arrays to $4096 \times 4096$ and the same ratio reads 1.2 GB against 134 MB, a factor of nine, with the arithmetic unchanged. The following script reproduces the table and the byte counts, and checks the last row against the module's `fused_gelu`.
 
 ```python
+SQRT_2_OVER_PI = np.float32(np.sqrt(2.0 / np.pi))
+COEFF = np.float32(0.044715)
 x = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=np.float32)
 steps = []
 t1 = x ** 3;                    steps.append(("t1", t1, 1, 1))
@@ -234,7 +212,7 @@ fused = 2 * array_bytes
 print(f"unfused traffic: {unfused} B, fused traffic: {fused} B, "
       f"ratio {unfused / fused:.1f}x")
 assert unfused / fused == 9.0
-assert np.allclose(y, fused_gelu(x))
+assert np.allclose(y, fused_gelu(Tensor(x)).data)
 ```
 
 ### Tiling: which blocks are loaded
