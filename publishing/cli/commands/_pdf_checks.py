@@ -36,7 +36,13 @@ PDF_BY_VOLUME = {
 XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"
 RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
-LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
+# Case-insensitive on the leading word: Quarto renders a mid-sentence
+# cross-reference in lowercase, so an unresolved one reads "(figure ??)".
+# Matching only the capitalized form let a dropped figure ship undetected
+# while this check reported "no unresolved refs".
+LATEX_UNDEF = re.compile(
+    r"\b(?i:figure|table|section|equation|listing)\s+\?\?+"
+)
 # The separator must not cross a blank line. A real "Table 8.2.1" is a single
 # reference and at worst wraps once; \s+ also spanned paragraph breaks, so a
 # running header ending in "... Case Study" followed by the next subsection
