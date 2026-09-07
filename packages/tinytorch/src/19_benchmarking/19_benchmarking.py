@@ -2561,7 +2561,7 @@ under test has nothing to do with the synthetic labels. Resist the urge to
 adjusts its output until the result looks plausible has stopped measuring.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-accuracy", "solution": true}
 #| export
 def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
                                     benchmark_name: str, num_runs: int,
