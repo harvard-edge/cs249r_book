@@ -1,88 +1,130 @@
 import asyncio
 import argparse
-import os
+import sys
 from pathlib import Path
-
 from google.antigravity import Agent, LocalAgentConfig
+from google.antigravity.types import TemplatedSystemInstructions, CapabilitiesConfig
 
-CHAPTERS_DIR = Path("publishing/quarto/contents/vol4/chapters")
-CHAPTERS = sorted(list(CHAPTERS_DIR.glob("**/*.qmd")))
+# Define the sequential order of chapters to feed into progressive disclosure
+CHAPTERS = [
+    "introduction/introduction.qmd",
+    "execution_descriptors/execution_descriptors.qmd",
+    "control_topologies/control_topologies.qmd",
+    "trajectory_fine_tuning/trajectory_fine_tuning.qmd",
+    "reinforcement_learning/reinforcement_learning.qmd",
+    "test_time_search/test_time_search.qmd",
+    "context_working_sets/context_working_sets.qmd",
+    "prefix_caching_paging/prefix_caching_paging.qmd",
+    "trajectory_scheduling/trajectory_scheduling.qmd",
+    "tool_interfaces/tool_interfaces.qmd",
+    "sandboxing_isolation/sandboxing_isolation.qmd",
+    "verification_recovery/verification_recovery.qmd",
+    "multi_agent_coordination/multi_agent_coordination.qmd",
+    "telemetry_evaluation/telemetry_evaluation.qmd",
+    "conclusion/conclusion.qmd",
+]
 
-async def audit_chapter(chapter_path: Path, pass_prompt: str):
+VOL3_DIR = Path("publishing/quarto/contents/vol3")
+
+PASSES = {
+    "pass1": {
+        "name": "Systems Principles Check",
+        "description": "Check whether we are covering all timeless principles and concepts. Ensure we focus on system implications, not just algorithmics. We are an MLSys book.",
+        "needs_context": False
+    },
+    "pass2": {
+        "name": "Progressive Disclosure",
+        "description": "Ensure we maintain progressive disclosure. If a concept is assumed, verify it was introduced in a previous chapter. Do not assume future knowledge.",
+        "needs_context": True
+    },
+    "pass3": {
+        "name": "Footnotes & Progressive Disclosure",
+        "description": "Audit footnotes. Are we using them correctly for progressive disclosure? Ensure footnotes don't introduce critical concepts that should be in the main text.",
+        "needs_context": True
+    },
+    "pass4": {
+        "name": "Cross-References",
+        "description": "Add explicit Quarto cross-references (@sec-vol3-...) to other sections. Link concepts backward and forward where appropriate.",
+        "needs_context": True
+    }
+}
+
+async def run_agent_on_chapter(chapter_idx: int, pass_id: str):
+    chapter_rel = CHAPTERS[chapter_idx]
+    chapter_path = VOL3_DIR / chapter_rel
+    if not chapter_path.exists():
+        print(f"[ERROR] Chapter not found: {chapter_path}")
+        return
+        
+    pass_info = PASSES[pass_id]
+    
+    # Build context for progressive disclosure passes
+    context = ""
+    if pass_info["needs_context"]:
+        context = "### Context from Previous Chapters\n"
+        if chapter_idx == 0:
+            context += "This is the first chapter. No previous chapters exist.\n"
+        else:
+            for i in range(chapter_idx):
+                prev_path = VOL3_DIR / CHAPTERS[i]
+                if prev_path.exists():
+                    # For a real run, reading the whole file might blow up context,
+                    # but modern models have large contexts. 
+                    # We inject the current text of previous chapters as read-only context.
+                    content = prev_path.read_text(encoding="utf-8")
+                    context += f"\n==== PREVIOUS CHAPTER: {CHAPTERS[i]} ====\n{content}\n"
+
+    prompt = f"""
+You are an expert Systems and Machine Learning Editor.
+We are executing a targeted editorial pass on the book "Machine Learning Systems, Volume III: Agentic Machine Learning Systems".
+
+TARGET FILE TO EDIT: {chapter_path.absolute()}
+
+CURRENT PASS: {pass_info['name']}
+PASS INSTRUCTIONS: {pass_info['description']}
+
+{context}
+
+YOUR TASK:
+1. Use `view_file` to read the target file.
+2. Evaluate the file against the PASS INSTRUCTIONS.
+3. Use `edit_file` to apply your improvements directly to the file.
+4. When finished, use `finish` to return a concise summary of the changes you made.
+"""
+
+    print(f"[{chapter_rel}] Starting agent for {pass_id}...")
+    
     config = LocalAgentConfig(
-        model="gemini-3.5-pro",
-        system_instructions=(
-            "You are an expert textbook editor and AI engineering researcher. "
-            "Your task is to audit the provided chapter for the given criteria."
+        system_instructions=TemplatedSystemInstructions(
+            identity="You are an expert Editor for a graduate-level CS textbook on Machine Learning Systems.",
+            mandate="Strictly follow the pass instructions. Use file tools to read and edit the target chapter. Return a summary."
+        ),
+        capabilities=CapabilitiesConfig(
+            enable_mcp_tools=False,
+            enable_subagents=False
         )
     )
     
-    abs_path = chapter_path.resolve()
-    
-    prompt = f"""
-You are auditing {abs_path.name}. The file is located at {abs_path}.
-
-{pass_prompt}
-
-Use your tools to read the file, make the necessary edits directly to the file, and then finish your turn.
-Ensure you actually use the file editing tools to make changes where needed.
-Explain the changes you made in your final response.
-"""
-    
     async with Agent(config) as agent:
-        try:
-            response = await agent.chat(prompt)
-            text = await response.text()
-            print(f"=== Report for {abs_path.name} ===\n{text}\n")
-        except Exception as e:
-            print(f"=== Error in {abs_path.name} ===\n{e}\n")
+        response = await agent.chat(prompt)
+        print(f"\n======================================================\n[{chapter_rel}] Finished:\n{await response.text()}\n======================================================\n")
 
 async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pass1", action="store_true", help="Run Pass 1 (Systems Principles)")
-    parser.add_argument("--pass2", action="store_true", help="Run Pass 2 (Progressive Disclosure & Indexing)")
-    parser.add_argument("--pass3", action="store_true", help="Run Pass 3 (Footnotes)")
-    parser.add_argument("--pass4", action="store_true", help="Run Pass 4 (Cross-References)")
+    parser = argparse.ArgumentParser(description="Orchestrate parallel agent passes over Volume III chapters.")
+    parser.add_argument("pass_id", choices=PASSES.keys(), help="Which pass to execute (pass1, pass2, pass3, pass4)")
     args = parser.parse_args()
-
-    pass_prompt = ""
-    if args.pass1:
-        pass_prompt = """
-Pass 1 (Systems Principles):
-- Ensure the text has textbook-style definitions of "physical AI systems" (or related physical AI terms) where appropriate.
-- Focus on physical AI first principles.
-- Ensure students are not inundated with math in the main text. The first principles should contain math, but heavy derivations or extra math should be moved to footnotes or backmatter to complement it. Ensure good progressive disclosure.
-"""
-    elif args.pass2:
-        pass_prompt = """
-Pass 2 (Progressive Disclosure & Indexing):
-- Ensure concepts are built progressively.
-- Audit for bold terms (index terms) ensuring they are sentence case (or lowercase) inside the main neuroprose, matching the style from Volume I (e.g., `**model compression**\\index{Model compression!definition}`).
-- Do not capitalize bold terms unless they are proper nouns or abbreviations.
-"""
-    elif args.pass3:
-        pass_prompt = """
-Pass 3 (Footnotes):
-- Audit footnotes for proper progressive disclosure vs. main text.
-- Base footnote categorizations and style on a reference chapter (Chapter 1).
-"""
-    elif args.pass4:
-        pass_prompt = """
-Pass 4 (Cross-References):
-- Validate and insert strict cross-references.
-"""
-    else:
-        print("Please specify a pass to run (e.g., --pass1)")
-        return
-
-    print(f"Running orchestrator on {len(CHAPTERS)} chapters...")
     
+    pass_info = PASSES[args.pass_id]
+    print(f"🚀 Starting {args.pass_id}: {pass_info['name']}")
+    print(f"Instructions: {pass_info['description']}\n")
+    
+    # Run agents concurrently for all chapters
     tasks = []
-    for chapter_path in CHAPTERS:
-        tasks.append(audit_chapter(chapter_path, pass_prompt))
+    for idx in range(len(CHAPTERS)):
+        tasks.append(run_agent_on_chapter(idx, args.pass_id))
         
     await asyncio.gather(*tasks)
-    print("All agents finished.")
+    print(f"✅ Pass {args.pass_id} complete. You should now review and `git commit` before running the next pass.")
 
 if __name__ == "__main__":
     asyncio.run(main())

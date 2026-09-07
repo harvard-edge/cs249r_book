@@ -3,14 +3,14 @@
 *That Sense and Act — Grounded cyber-physical systems, real-time control, and embodied intelligence.*
 
 **Author:** Prof. Vijay Janapa Reddi (Harvard University)
-**Status:** 🌲 **Preview / Work in Progress** *(17 Chapters & 7 Appendices Compiled)*
+**Status:** 🌲 **Early Development / Exploratory Work in Progress** *(Structure and scope remain subject to substantial change)*
 
 <div align="center" style="background: #ecfdf5; border: 1px solid #34d399; border-radius: 8px; padding: 18px 24px; margin: 20px 0; text-align: left;">
   <div style="font-size: 1.1em; font-weight: bold; color: #065f46; margin-bottom: 6px; text-align: center;">
-    🌲 Author's Working Note: Early Draft &bull; Learning in Public
+    🌲 Development Notice: Author's Working Notebook
   </div>
   <p style="color: #044e3b; font-size: 0.95em; line-height: 1.5; margin: 0;">
-    <i>"This volume is where I am actively working through how machine learning grounds in the physical laws of nature, real-time silicon, and mechanical inertia. I write to sift through the chaos, explore the frontier, and figure out what is truly fundamental. <b>This is an open, working research draft:</b> explore with curiosity, read at your own risk, and know that concepts and mathematical bounds are actively being refined."</i>
+    <i>"I am still sketching the structure of this volume, collecting ideas, and deciding what belongs in the final book. <b>Please treat these materials as an exploratory working notebook, not as a preview release or a settled book plan.</b> The scope, terminology, chapter order, and technical claims may change substantially. Please refrain from redistributing excerpts or presenting the material as authoritative, classroom-ready, or suitable for citation. Thoughtful comments and suggestions are welcome with the understanding that this work remains in an early stage."</i>
     <br><span style="display: block; text-align: right; font-weight: bold; margin-top: 6px;">— Vijay Janapa Reddi</span>
   </p>
 </div>
@@ -40,7 +40,7 @@ When autonomous software moves from behind glass into physical actuators, comput
 
 ---
 
-## 4-Part, 17-Chapter Structure
+## Working 4-Part, 17-Chapter Sketch
 
 *   **Part I: The Machine Anatomy (Chapters 1–4)** — The Causal Boundary, The Physical Body, The Cognitive Brain, The Real-Time Nervous System.
 *   **Part II: Teaching the Machine (Chapters 5–7)** — Physical Data Collection, Policy Synthesis & Training, Closed-Loop Evaluation.
