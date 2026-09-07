@@ -57,8 +57,10 @@ Test-time compute scaling fundamentally decouples task difficulty from model par
 ![Test-Time Compute Scaling and Verification Tax. Panel A illustrates the Pareto frontier inversion where a compact 7B model scaled with test-time search matches and exceeds a 70B greedy model. Panel B formalizes the Verification Tax, showing how investing in intermediate step verification collapses the combinatorial tree explosion.](images/svg/test_time_compute_scaling.svg){#fig-test-time-compute-scaling width=100%}
 
 As illustrated in @fig-test-time-compute-scaling, scaling test-time compute shifts the system's performance envelope along a new scaling axis:
-1. **Parameter Scaling vs. Search Scaling:** On complex reasoning benchmarks, allocating $10\times$ to $100\times$ more inference tokens through structured search on a compact model (e.g., 7B or 14B) yields accuracy improvements equivalent to scaling pre-training parameters by an order of magnitude, at a fraction of pre-training capital expenditure.
-2. **The Test-Time Trade-off Space:** The system operates over four interconnected dimensions: task success probability $P(\text{success})$, wall-clock latency deadline $L_{\max}$, token generation expenditure $T_{\text{gen}}$, and verification compute $C_{\text{ver}}$.
+
+- **Parameter Scaling vs. Search Scaling:** On complex reasoning benchmarks, allocating $10\times$ to $100\times$ more inference tokens through structured search on a compact model (e.g., 7B or 14B) yields accuracy improvements equivalent to scaling pre-training parameters by an order of magnitude, at a fraction of pre-training capital expenditure.
+
+- **The Test-Time Trade-off Space:** The system operates over four interconnected dimensions: task success probability $P(\text{success})$, wall-clock latency deadline $L_{\max}$, token generation expenditure $T_{\text{gen}}$, and verification compute $C_{\text{ver}}$.
 
 ::: {.callout-note}
 ### Principle 12: The Inference Scaling Invariant
@@ -93,9 +95,12 @@ $$
 \tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)
 $$
 While Best-of-$N$ is embarrassingly parallel—saturating GPU tensor cores by batching all $N$ rollouts concurrently—it exhibits severe systems inefficiencies:
-1. **Redundant Prefix Duplication:** All $N$ trajectories share the exact same prompt prefix $x$ (often spanning 8,000 to 32,000 tokens of documentation and tool schemas). Without advanced prefix caching, the runtime redundantly re-computes or stores millions of identical Key-Value tokens across branches.
-2. **All-or-Nothing Token Waste:** If an agent commits an unrecoverable syntax error or hallucinated path argument on step 1, the remaining 40 steps of trajectory $\tau_i$ continue generating tokens to completion, consuming GPU FLOPs on an already doomed branch.
-3. **Reward Model Overoptimization (Goodhart's Law):** As $N$ scales to thousands of candidates, learned neural reward models suffer from extreme value overestimation [@gao2023scaling; @goodhart1984]. The policy exploits subtle blind spots in the reward network, selecting adversarial outputs that receive high scores from the verifier despite being functionally incorrect.
+
+- **Redundant Prefix Duplication:** All $N$ trajectories share the exact same prompt prefix $x$ (often spanning 8,000 to 32,000 tokens of documentation and tool schemas). Without advanced prefix caching, the runtime redundantly re-computes or stores millions of identical Key-Value tokens across branches.
+
+- **All-or-Nothing Token Waste:** If an agent commits an unrecoverable syntax error or hallucinated path argument on step 1, the remaining 40 steps of trajectory $\tau_i$ continue generating tokens to completion, consuming GPU FLOPs on an already doomed branch.
+
+- **Reward Model Overoptimization (Goodhart's Law):** As $N$ scales to thousands of candidates, learned neural reward models suffer from extreme value overestimation [@gao2023scaling; @goodhart1984]. The policy exploits subtle blind spots in the reward network, selecting adversarial outputs that receive high scores from the verifier despite being functionally incorrect.
 
 ## Beam Search over Thought Spaces {#sec-vol3-search-beam-search-over-thought}
 
@@ -109,20 +114,24 @@ $$
 ### Beam Search Execution Loop
 
 At horizon step $t$, the system holds $B$ partial trajectories $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. The algorithm proceeds in three phases:
-1. **Candidate Expansion:** For each beam hypothesis $\tau_t^{(b)}$, the policy samples $K$ candidate next-step actions:
-   $$
-   \mathcal{C}_{t+1} = \bigcup_{b=1}^B \left\{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \right\}
-   $$
-   This yields a total candidate pool of size $|\mathcal{C}_{t+1}| = B \cdot K$.
-2. **Environment Execution & Step Scoring:** Each candidate action $a_{t+1}^{(k)}$ is executed in a sandboxed execution container, yielding observation $o_{t+1}^{(k)}$. A Process Reward Model (PRM) or heuristic scoring function evaluates the new state:
-   $$
-   \text{score}(\tau_{t+1}) = \text{score}(\tau_t) + \log r_{\text{PRM}}(s_t, a_{t+1})
-   $$
-3. **Top-$B$ Selection:** The runtime retains only the $B$ highest-scoring candidates to form $\mathcal{B}_{t+1}$, pruning the remaining $(B \cdot K - B)$ partial paths from memory.
+
+- **Candidate Expansion:** For each beam hypothesis $\tau_t^{(b)}$, the policy samples $K$ candidate next-step actions:
+  $$
+  \mathcal{C}_{t+1} = \bigcup_{b=1}^B \left\{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \right\}
+  $$
+  This yields a total candidate pool of size $|\mathcal{C}_{t+1}| = B \cdot K$.
+
+- **Environment Execution & Step Scoring:** Each candidate action $a_{t+1}^{(k)}$ is executed in a sandboxed execution container, yielding observation $o_{t+1}^{(k)}$. A Process Reward Model (PRM) or heuristic scoring function evaluates the new state:
+  $$
+  \text{score}(\tau_{t+1}) = \text{score}(\tau_t) + \log r_{\text{PRM}}(s_t, a_{t+1})
+  $$
+
+- **Top-$B$ Selection:** The runtime retains only the $B$ highest-scoring candidates to form $\mathcal{B}_{t+1}$, pruning the remaining $(B \cdot K - B)$ partial paths from memory.
 
 ### Systems Bottlenecks in Beam Search
 
 While beam search bounds GPU memory consumption to exactly $B$ active sequences, it imposes significant operational constraints on agent runtimes:
+
 - **Synchronous Execution Barrier:** Because pruning requires scoring all $B \cdot K$ candidates at step $t+1$, the system must synchronize across all branches. If one candidate action executes a 30-second compiler build while the other nine complete in 100 milliseconds, the entire beam stalls at the barrier.
 - **Myopic Pruning & Non-Monotonicity:** Intermediate heuristic scores are frequently deceptive. A brilliant debugging strategy often requires traversing an apparent degradation in state (e.g., stripping out legacy code, causing compilation errors) before achieving resolution. Beam search aggressively prunes these temporary regressions, trapping the agent in superficial local optima.
 
@@ -140,6 +149,7 @@ $$
 a^* = \arg\max_a \left[ Q(s, a) + c_{\text{puct}} \cdot P(s, a) \cdot \frac{\sqrt{N(s)}}{1 + N(s, a)} \right]
 $$
 where:
+
 - $Q(s, a)$ is the running mean empirical value of action $a$ from state $s$.
 - $P(s, a) = \pi_\theta(a \mid s)$ is the prior probability assigned by the foundation policy.
 - $N(s)$ is the total visit count of parent state $s$.
@@ -153,8 +163,9 @@ When the selection traversal reaches a leaf node $s_L$ that is not terminal, the
 
 ### Phase 3: Simulation (Evaluation)
 To evaluate the promise of newly expanded node $s'$, the system estimates its future expected value $V(s')$. In classical game playing, this was computed via random Monte Carlo rollouts to terminal states. In agentic MLSys, random token rollouts are computationally prohibitive and statistically noisy. Production runtimes utilize two alternative evaluators:
-1. **Value Network Inference:** A learned value head $V_\phi(s')$ computes a scalar expected success probability in a single forward pass.
-2. **Truncated Fast Rollout:** A compact draft model executes a shallow 2-step rollout evaluated by a deterministic lint or test oracle.
+
+- **Value Network Inference:** A learned value head $V_\phi(s')$ computes a scalar expected success probability in a single forward pass.
+- **Truncated Fast Rollout:** A compact draft model executes a shallow 2-step rollout evaluated by a deterministic lint or test oracle.
 
 ### Phase 4: Backpropagation
 The estimated value $V(s')$ is recursively propagated back up the ancestral path to the root. For every visited edge $(s, a)$ along the path:
@@ -171,6 +182,7 @@ While MCTS provides asymptotic optimality, alternative discrete graph formulatio
 Introduced by Yao et al. [@yao2023tree], Tree of Thoughts conceptualizes problem solving as navigating a tree of coherent language units ("thoughts"). A thought corresponds to an intermediate plan step, mathematical lemma, or diagnostic hypothesis.
 
 ToT implements systematic tree search algorithms:
+
 - **Depth-First Search (DFS):** Prioritizes deep exploration along a single hypothesis until a verifier marks the branch invalid ($r < \tau$), triggering explicit backtracking to the parent node. DFS minimizes active working memory by maintaining only the current search spine.
 - **Breadth-First Search (BFS):** Explores all candidate thoughts at depth $d$ concurrently, pruning low-scoring thoughts before descending to depth $d+1$. BFS avoids getting trapped in infinite rabbit holes but incurs massive peak KV-cache memory pressure.
 
@@ -178,9 +190,10 @@ ToT implements systematic tree search algorithms:
 Besta et al. [@besta2024graph] generalized tree search into arbitrary Directed Acyclic Graphs (DAGs). In realistic problem solving, human engineers do not merely branch and backtrack; they **synthesize** insights from disparate investigative branches.
 
 Graph of Thoughts introduces three topological transformations:
-1. **Thought Aggregation (Merging):** Combining multiple independent partial solutions $\tau_A$ and $\tau_B$ into a composite superior hypothesis $\tau_{AB} = \text{aggregate}(\tau_A, \tau_B)$. For example, combining a frontend UI layout from branch A with a performant backend database query from branch B.
-2. **Thought Refinement (Feedback Loops):** Routing a generated thought through an iterative self-correction loop without instantiating new sibling branches.
-3. **Graph Distillation:** Compressing a complex multi-node investigation subgraph into a concise summary node before continuing downstream execution.
+
+- **Thought Aggregation (Merging):** Combining multiple independent partial solutions $\tau_A$ and $\tau_B$ into a composite superior hypothesis $\tau_{AB} = \text{aggregate}(\tau_A, \tau_B)$. For example, combining a frontend UI layout from branch A with a performant backend database query from branch B.
+- **Thought Refinement (Feedback Loops):** Routing a generated thought through an iterative self-correction loop without instantiating new sibling branches.
+- **Graph Distillation:** Compressing a complex multi-node investigation subgraph into a concise summary node before continuing downstream execution.
 
 The architectural tradeoffs governing these search topologies are summarized in @tbl-search-topologies.
 
@@ -206,10 +219,12 @@ $$
 where $C_{\text{gen}}(v)$ is the FLOP cost of generating node $v$, and $C_{\text{ver}}(v)$ is the cost of verifying it.
 
 The economic rationale for the Verification Tax is search space collapse:
+
 - In an unverified search tree with branching factor $b$ and depth $d$, total candidate nodes expand exponentially:
   $$
   |\mathcal{V}_{\text{unverified}}| = \frac{b^{d+1} - 1}{b - 1} \approx b^d
   $$
+
 - When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply, the effective branching factor drops to:
   $$
   b_{\text{eff}} = \alpha \cdot b
@@ -219,10 +234,12 @@ The economic rationale for the Verification Tax is search space collapse:
 ### Verifier Taxonomy
 
 Agent systems integrate two distinct classes of verifiers:
-1. **Deterministic Environmental Oracles:** Compilers (`gcc`, `rustc`), test runners (`pytest`, `go test`), linters (`ruff`, `eslint`), and formal theorem provers (Lean, Z3). These provide unambiguous binary signals ($R \in \{0, 1\}$) with zero reward hacking vulnerability. Their primary systems constraint is execution latency (container startup and compilation time).
-2. **Learned Process Reward Models (PRMs):** Neural classifiers trained on step-by-step human annotations or synthetic verification datasets [@lightman2023let]. PRMs grade arbitrary natural language thoughts ($r_{\text{PRM}} \in [-1, 1]$). While highly versatile, PRMs introduce two critical failure modes:
-   - **False Positives (Reward Hacking):** Emitting high confidence on plausible-sounding but mathematically false derivations.
-   - **False Negatives (Premature Pruning):** Penalizing unconventional or creative reasoning paths, killing viable solutions early.
+
+- **Deterministic Environmental Oracles:** Compilers (`gcc`, `rustc`), test runners (`pytest`, `go test`), linters (`ruff`, `eslint`), and formal theorem provers (Lean, Z3). These provide unambiguous binary signals ($R \in \{0, 1\}$) with zero reward hacking vulnerability. Their primary systems constraint is execution latency (container startup and compilation time).
+
+- **Learned Process Reward Models (PRMs):** Neural classifiers trained on step-by-step human annotations or synthetic verification datasets [@lightman2023let]. PRMs grade arbitrary natural language thoughts ($r_{\text{PRM}} \in [-1, 1]$). While highly versatile, PRMs introduce two critical failure modes:
+  - **False Positives (Reward Hacking):** Emitting high confidence on plausible-sounding but mathematically false derivations.
+  - **False Negatives (Premature Pruning):** Penalizing unconventional or creative reasoning paths, killing viable solutions early.
 
 ## Speculative Decoding and Branch Rollouts {#sec-vol3-search-speculative-decoding-and-branch}
 
@@ -233,12 +250,15 @@ Tree search algorithms impose massive compute demands during node expansion. In 
 ### Speculative Branch Execution
 
 Instead of using the large target model $\mathcal{M}_{\text{target}}$ (e.g., a 70B parameter agent) to sequentially generate every search branch, the runtime pairs the target model with a small, high-throughput draft model $\mathcal{M}_{\text{draft}}$ (e.g., a 1B to 3B parameter model):
-1. **Draft Branch Speculation:** The draft model rapidly samples a $\gamma$-step candidate reasoning sequence $\tilde{y}_{1:\gamma}$ from leaf state $s$. Because $\mathcal{M}_{\text{draft}}$ is small, it executes at $5\times$ to $10\times$ higher token generation speed.
-2. **Parallel Target Verification:** The target model $\mathcal{M}_{\text{target}}$ processes all $\gamma$ speculative tokens concurrently in a single forward pass:
-   $$
-   P_{\text{target}}(y_t \mid x, \tilde{y}_{<t}) \quad \text{for } t = 1, \dots, \gamma
-   $$
-3. **Modified Rejection Sampling:** Tokens are accepted or rejected based on the likelihood ratio $\frac{P_{\text{target}}(\tilde{y}_t)}{P_{\text{draft}}(\tilde{y}_t)}$. If token $t^*$ is rejected, execution halts at $t^*$, a replacement token is sampled from the target distribution, and unaccepted tokens are discarded.
+
+- **Draft Branch Speculation:** The draft model rapidly samples a $\gamma$-step candidate reasoning sequence $\tilde{y}_{1:\gamma}$ from leaf state $s$. Because $\mathcal{M}_{\text{draft}}$ is small, it executes at $5\times$ to $10\times$ higher token generation speed.
+
+- **Parallel Target Verification:** The target model $\mathcal{M}_{\text{target}}$ processes all $\gamma$ speculative tokens concurrently in a single forward pass:
+  $$
+  P_{\text{target}}(y_t \mid x, \tilde{y}_{<t}) \quad \text{for } t = 1, \dots, \gamma
+  $$
+
+- **Modified Rejection Sampling:** Tokens are accepted or rejected based on the likelihood ratio $\frac{P_{\text{target}}(\tilde{y}_t)}{P_{\text{draft}}(\tilde{y}_t)}$. If token $t^*$ is rejected, execution halts at $t^*$, a replacement token is sampled from the target distribution, and unaccepted tokens are discarded.
 
 In tree search topologies, speculative decoding can be generalized to **Tree Speculative Sampling**: the draft model generates an entire multi-branch subtree, and the target model verifies all branches in parallel using a customized tree-attention mask, maximizing GPU tensor core FLOP utilization.
 
@@ -247,6 +267,7 @@ In tree search topologies, speculative decoding can be generalized to **Tree Spe
 When serving tree search algorithms in production, the primary hardware bottleneck is not compute—it is GPU High-Bandwidth Memory (HBM) capacity.
 
 In naive LLM serving engines, each concurrent sequence maintains an independent linear Key-Value (KV) cache buffer. Consider serving an MCTS tree with branch factor $b=4$ over an 8,000-token prompt context:
+
 - Under naive independent allocation, 16 candidate leaf trajectories replicate the 8,000-token prompt prefix 16 times in HBM.
 - For a 70B model using 16-bit FP16 precision across 80 layers, a single 8,000-token prompt KV-cache consumes approximately 2.5 GB of HBM. Replicating this 16 times wastes **40 GB of HBM** on identical prefix data!
 - The GPU runs out of memory (OOM) after exploring only a few plies, crippling search width.
@@ -258,10 +279,14 @@ In naive LLM serving engines, each concurrent sequence maintains an independent 
 To solve the search memory wall, modern agent serving runtimes (such as SGLang [@zheng2024sglang] and vLLM PagedAttention [@kwon2023]) implement **Tree-Structured Radix KV-Caches**.
 
 As diagrammed in @fig-tree-kv-cache-radix, the KV-cache is organized as a radix tree where:
-1. **Shared Prefix Block Dedup:** Physical memory pages for the shared system prompt, problem description, and intermediate completed turns are stored exactly once.
-2. **Reference Counting:** Each physical KV page maintains a reference counter $rc$. When a parent node expands into 4 child branches, the reference counters of ancestral pages increment: $rc \leftarrow rc + 4$.
-3. **Copy-on-Write (CoW):** Child branches share read-only access to ancestral prefix pages. Only when a branch generates its unique incremental delta tokens are new physical pages allocated from the free memory pool.
-4. **LRU Tree Eviction:** When HBM capacity is saturated, the eviction manager traverses the radix tree, evicting leaf nodes whose reference count has dropped to zero ($rc = 0$), preserving shared root prefixes that serve active ongoing searches.
+
+- **Shared Prefix Block Dedup:** Physical memory pages for the shared system prompt, problem description, and intermediate completed turns are stored exactly once.
+
+- **Reference Counting:** Each physical KV page maintains a reference counter $rc$. When a parent node expands into 4 child branches, the reference counters of ancestral pages increment: $rc \leftarrow rc + 4$.
+
+- **Copy-on-Write (CoW):** Child branches share read-only access to ancestral prefix pages. Only when a branch generates its unique incremental delta tokens are new physical pages allocated from the free memory pool.
+
+- **LRU Tree Eviction:** When HBM capacity is saturated, the eviction manager traverses the radix tree, evicting leaf nodes whose reference count has dropped to zero ($rc = 0$), preserving shared root prefixes that serve active ongoing searches.
 
 Tree-structured KV-caching slashes HBM consumption by 60% to 85% during multi-branch search, allowing production systems to scale search width $B$ from 4 to 32 concurrent branches on identical server hardware.
 
@@ -280,6 +305,7 @@ High token entropy and dispersed softmax probabilities indicate high epistemic u
 
 ### Verifier Consensus and Margin of Victory
 In Best-of-$N$ and MCTS, search terminates early when a dominant candidate emerges:
+
 - **Consensus Threshold:** If 8 out of the first 10 sampled trajectories converge on the identical tool call or code patch, sampling terminates immediately without executing the remaining $N-10$ candidates.
 - **UCT Visit Count Margin:** In MCTS, if the visit count of the top-ranked child $N(s_0, a^*)$ exceeds the second-place child $N(s_0, a') + \Delta_{\text{margin}}$, mathematical bounds guarantee that subsequent iterations cannot alter the optimal action choice, triggering immediate dispatch.
 
@@ -297,8 +323,10 @@ $$
 \text{Cost}_{\text{task}} = \text{Cost}_{\text{pre-train}}(\theta) + \mathbb{E}_{x} \left[ T_{\text{search}}(x) \cdot C_{\text{token}}(\theta) \right]
 $$
 On complex benchmarks, Snell et al. [@snell2024scaling] demonstrated that:
-1. **The Inversion Point:** A compact 8B parameter model equipped with optimal test-time search matches or exceeds the accuracy of a 70B parameter model operating under greedy decoding.
-2. **Cost-per-Resolved-Task Inversion:** Because serving an 8B model is an order of magnitude cheaper per token than serving a 70B or 405B model (due to reduced GPU tensor parallelism, smaller HBM footprints, and higher batch throughput), running 10 search rollouts on an 8B model is frequently **cheaper in raw dollar cost** than running a single greedy forward pass on a 70B model—while achieving superior benchmark pass rates.
+
+- **The Inversion Point:** A compact 8B parameter model equipped with optimal test-time search matches or exceeds the accuracy of a 70B parameter model operating under greedy decoding.
+
+- **Cost-per-Resolved-Task Inversion:** Because serving an 8B model is an order of magnitude cheaper per token than serving a 70B or 405B model (due to reduced GPU tensor parallelism, smaller HBM footprints, and higher batch throughput), running 10 search rollouts on an 8B model is frequently **cheaper in raw dollar cost** than running a single greedy forward pass on a 70B model—while achieving superior benchmark pass rates.
 
 In production engineering, the system architect does not pick a static model; they tune an operational dial between parameter scale and search depth depending on whether the workload is latency-critical (favoring larger models with shallow search) or cost/accuracy-critical (favoring compact models with deep deliberate search).
 
@@ -306,17 +334,37 @@ In production engineering, the system architect does not pick a static model; th
 
 Engineering test-time search runtimes involves navigating treacherous architectural pitfalls:
 
-### Fallacy 1: Scaling Best-of-$N$ indefinitely will solve any reasoning task.
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Scaling Best-of-$N$ indefinitely will solve any reasoning task.*
+
 Naively increasing $N$ from 10 to 10,000 exhibits logarithmic diminishing returns. If the underlying policy has zero probability of generating a key creative leap ($P(a^* \mid s) = 0$), sampling millions of trajectories simply samples noise. Furthermore, under imperfect neural reward models, large $N$ triggers catastrophic Goodhart overoptimization, selecting pathologically hallucinated responses.
 
-### Fallacy 2: Tree search requires simulating full trajectories to terminal leaf states.
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Tree search requires simulating full trajectories to terminal leaf states.*
+
 Simulating complete 50-step agent trajectories for every candidate branch creates prohibitive latency and destroys GPU throughput. Production systems rely on step-level Process Reward Models (PRMs) or deterministic state linting to evaluate partial hypotheses after 1 or 2 steps.
 
-### Pitfall 1: Unpruned exponential branching in open-ended tool spaces.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Unpruned exponential branching in open-ended tool spaces.*
+
 Allowing an agent to branch across arbitrary bash commands or python snippets yields an infinite branching factor ($b \to \infty$). Without strict beam bounds ($B \le 5$) or top-$k$ action filtering, search engines exhaust cluster memory and queue capacity within seconds.
 
-### Pitfall 2: Neglecting the memory footprint of shared search prefixes.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Neglecting the memory footprint of shared search prefixes.*
+
 Deploying tree search on top of standard stateless inference endpoints duplicates prompt prefixes across all branches, triggering immediate GPU HBM Out-of-Memory crashes. Production tree search requires native tree-structured KV-cache engines with Copy-on-Write page sharing.
+
+:::
 
 ## Chapter Summary {#sec-vol3-search-summary}
 

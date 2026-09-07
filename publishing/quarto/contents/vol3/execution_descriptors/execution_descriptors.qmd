@@ -49,11 +49,12 @@ The ACB therefore does not attempt to snapshot internal neural thought; it manag
 For over half a century, the **process** has served as the central abstraction of computer systems engineering [@ritchie1974; @silberschatz2018]. In the classical formulation established by @dennis1966 and refined in UNIX, a process represents an independent program in execution, encapsulated within an isolated virtual address space and allocated a discrete share of hardware execution time. The operating system kernel manages this abstraction through a foundational kernel data structure: the **Process Control Block (PCB)**.
 
 The PCB encapsulates the entire execution state of a thread or process:
-1. **Identifier and Credentials:** Process ID (PID), user ID (UID), group ID (GID), and security context.
-2. **Architectural Register State:** Instruction pointer (PC), stack pointer (SP), general-purpose registers, floating-point units, and processor status flags.
-3. **Memory Management Handles:** Page table base registers (such as CR3 in x86-64), segment descriptors, and virtual memory area (VMA) linked lists.
-4. **I/O and Resource Descriptors:** File descriptor tables pointing to open vnodes, network sockets, and inter-process communication (IPC) pipes.
-5. **Scheduling and Accounting State:** Process priority, CPU execution time, wait channels, and pending POSIX signal masks.
+
+- **Identifier and Credentials:** Process ID (PID), user ID (UID), group ID (GID), and security context.
+- **Architectural Register State:** Instruction pointer (PC), stack pointer (SP), general-purpose registers, floating-point units, and processor status flags.
+- **Memory Management Handles:** Page table base registers (such as CR3 in x86-64), segment descriptors, and virtual memory area (VMA) linked lists.
+- **I/O and Resource Descriptors:** File descriptor tables pointing to open vnodes, network sockets, and inter-process communication (IPC) pipes.
+- **Scheduling and Accounting State:** Process priority, CPU execution time, wait channels, and pending POSIX signal masks.
 
 When a classical operating system performs a context switch, it executes an invariant contract: the kernel saves the current register values into the PCB, updates scheduling accounting, switches the virtual memory address space by modifying the page table root register, and restores the register values of the incoming process. Because hardware execution is deterministic at the instruction level, this state snapshot is complete and bit-exact. The suspended process resumes execution unaware that its thread was interrupted.
 
@@ -82,7 +83,7 @@ To resolve these contradictions, an agentic runtime requires a purpose-built exe
 
 The **Agent Control Block (ACB)** is the authoritative, kernel-level descriptor that encapsulates the identity, authority, memory references, and operational state of an autonomous agent process throughout its lifecycle.
 
-::: {#def-acb .callout-definition title="Agent Control Block (ACB)"}
+::: {#dfn-acb .callout-definition title="Agent Control Block (ACB)"}
 An **Agent Control Block** is a strongly typed, persistent data structure maintained by the agentic runtime kernel:
 $$\text{ACB} = \langle \text{AID}, \mathcal{P}_{\text{id}}, \mathcal{G}, \mathcal{K}_{\text{leases}}, \mathcal{Q}_{\text{budget}}, \mathcal{M}_{\text{handles}}, \mathcal{S}_{\text{fsm}}, \mathcal{L}_{\text{lineage}}, \mathcal{V}_{\text{clock}} \rangle$$
 uniquely identifying an active agent instance $\text{AID}$, binding it to an authenticated principal $\mathcal{P}_{\text{id}}$, bounding its objective within goal envelope $\mathcal{G}$, governing its tool access through capability leases $\mathcal{K}_{\text{leases}}$, enforcing resource consumption against quota $\mathcal{Q}_{\text{budget}}$, tracking physical and episodic memory allocations $\mathcal{M}_{\text{handles}}$, recording execution state $\mathcal{S}_{\text{fsm}}$, maintaining hierarchical parent-child ancestry $\mathcal{L}_{\text{lineage}}$, and establishing logical event ordering via causality vector $\mathcal{V}_{\text{clock}}$.
@@ -99,18 +100,26 @@ uniquely identifying an active agent instance $\text{AID}$, binding it to an aut
 The nine structural fields of the ACB serve dedicated systems responsibilities:
 
 1. **Agent Identifier ($\text{AID}$):** A globally unique, cryptographically random 128-bit identifier (UUIDv7 or ULID) encoding creation timestamp and node locality.
+
 2. **Principal Identity ($\mathcal{P}_{\text{id}}$):** The authenticated human or service account on whose behalf the agent executes. Contains cryptographic public keys, OAuth subject tokens, and tenant organizational boundaries used to authorize all downstream actions.
+
 3. **Goal Envelope ($\mathcal{G}$):** The immutable operational specification of the task, containing the natural language prompt, formal completion predicates (e.g., unit test suites that must pass), invariant constraints (e.g., "do not modify files outside `/src`"), and execution bounds.
+
 4. **Capability Leases ($\mathcal{K}_{\text{leases}}$):** A set of cryptographically signed, time-limited tokens granting access to specific external tools and sandboxed APIs, parameterized with parameter white-lists and monotonic access restrictions.
+
 5. **Resource Quotas and Budgets ($\mathcal{Q}_{\text{budget}}$):** Multi-dimensional resource constraints tracking accumulated and remaining allowances:
    $$\mathcal{Q} = \langle T_{\text{in}}, T_{\text{out}}, C_{\text{dollar}}, \Delta t_{\text{wall}}, K_{\text{tools}}, D_{\text{depth}} \rangle$$
    representing input tokens, output tokens, financial expenditure in dollars, maximum wall-clock duration, maximum tool invocations, and maximum subagent delegation recursion depth.
+
 6. **Memory Handles ($\mathcal{M}_{\text{handles}}$):** Pointers to physical and virtual memory resources:
    - *Physical KV-Cache Table Pointer:* Identifies the virtual block IDs allocated in PagedAttention tables across inference servers.
    - *Episodic Audit Log URI:* Append-only transactional log recording every prompt, reasoning thought, tool call, and observation.
    - *Working Scratchpad Store:* In-memory key-value state for volatile scratchpad variables.
+
 7. **Lifecycle State ($\mathcal{S}_{\text{fsm}}$):** The active state of the agent within the kernel finite state machine (e.g., `ACTIVE_PREFILL`, `SUSPENDED_TOOL_WAIT`, `TERMINATED`).
+
 8. **Lineage and Ancestry ($\mathcal{L}_{\text{lineage}}$):** Parent agent identifier ($\text{PID}$), child subagent list ($\{\text{CID}_1, \text{CID}_2, \dots\}$), and delegation depth counter, establishing the process tree.
+
 9. **Causality Vector ($\mathcal{V}_{\text{clock}}$):** A vector clock tracking logical time across concurrent tool dispatches and multi-agent interactions, guaranteeing causal event ordering.
 
 | Architectural Dimension | Classical POSIX PCB | Agent Control Block (ACB) |
@@ -131,9 +140,10 @@ The nine structural fields of the ACB serve dedicated systems responsibilities:
 A fatal error in naive agent architectures is assuming that the large language model's in-context attention window constitutes the entire execution state of the system. In this anti-pattern—termed the **Context-as-State Anti-Pattern**—the application designer dumps raw conversation logs, environment variables, tool outputs, and operational state directly into the prompt buffer, relying on the model to infer current state via self-attention.
 
 This approach creates severe systems vulnerabilities:
-1. **Context Poisoning:** If an intermediate tool output emits erroneous, contradictory, or malicious text, the neural policy absorbs this text into its attention matrix, biasing all future autoregressive predictions.
-2. **Context Eviction Drift:** When context compaction algorithms (such as sliding window truncation or recursive summarization) evict older tokens, critical operational state (e.g., database credentials, file paths, or task invariants) is lost, causing the agent to repeat failed actions.
-3. **State Hallucination:** A generative model can hallucinate that a file was deleted or a server was rebooted simply because the autoregressive text continuation says it occurred, even when the underlying environment returned an error code.
+
+- **Context Poisoning:** If an intermediate tool output emits erroneous, contradictory, or malicious text, the neural policy absorbs this text into its attention matrix, biasing all future autoregressive predictions.
+- **Context Eviction Drift:** When context compaction algorithms (such as sliding window truncation or recursive summarization) evict older tokens, critical operational state (e.g., database credentials, file paths, or task invariants) is lost, causing the agent to repeat failed actions.
+- **State Hallucination:** A generative model can hallucinate that a file was deleted or a server was rebooted simply because the autoregressive text continuation says it occurred, even when the underlying environment returned an error code.
 
 To guarantee execution integrity, the agentic runtime must enforce a strict architectural boundary between the **Authoritative State Descriptor** and the **Neural Belief State**.
 
@@ -141,6 +151,7 @@ This boundary maps directly to the theory of Partially Observable Markov Decisio
 $$b_t(s) = P(s_t = s \mid o_1, a_1, \dots, o_t, a_t)$$
 
 In an agentic MLSys:
+
 - The **Authoritative State** is the external reality: the ground-truth filesystem, running processes, active network sockets, database tables, and the ACB's accounting registers.
 - The **Neural Belief State** is the foundation model's internal representation: the activation patterns across transformer layers and the text history in the context window.
 
@@ -152,6 +163,7 @@ Within the agent process itself, memory must be stratified based on durability, 
 
 ### 1. Ephemeral Working Memory (Volatile Scratchpad)
 During multi-step reasoning, foundation models generate chain-of-thought tokens, intermediate hypotheses, decomposition trees, and draft tool parameters. This working memory resides in:
+
 - The active GPU Key-Value cache activations.
 - Temporary scratchpad text buffers.
 - Thread-local in-memory variables.
@@ -173,7 +185,7 @@ In a system executing autonomous, non-deterministic reasoning, security cannot r
 
 To enforce the Principle of Least Privilege [@saltzer1975], an agentic runtime implements **Capability-Based Access Control** [@dennis1966; @miller2003]. In a capability system, having a reference to an object conveys the right to perform authorized operations on that object; ambient authority is abolished. In the ACB, capabilities are packaged as cryptographically signed, time-bounded **Capability Leases**.
 
-::: {#def-capability-lease .callout-definition title="Capability Lease"}
+::: {#dfn-capability-lease .callout-definition title="Capability Lease"}
 A **Capability Lease** $\mathcal{K}$ is a cryptographically signed, tamper-proof token:
 $$\mathcal{K} = \langle \text{CID}, \text{AID}, \text{URI}_{\text{target}}, \mathcal{O}_{\text{ops}}, \mathcal{C}_{\text{params}}, \tau_{\text{expire}}, \text{Sig}_{K_{\text{kernel}}} \rangle$$
 authorizing the agent $\text{AID}$ to invoke the set of operations $\mathcal{O}_{\text{ops}}$ on target resource $\text{URI}_{\text{target}}$, subject to parameter schema constraints $\mathcal{C}_{\text{params}}$, expiring at wall-clock timestamp $\tau_{\text{expire}}$, and verified by kernel signature $\text{Sig}_{K_{\text{kernel}}}$.
@@ -185,10 +197,13 @@ When a primary agent decomposes a complex objective into smaller sub-tasks, it s
 $$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}}$$
 
 A parent agent cannot grant a child subagent any capability, scope, or budget that the parent does not itself possess. Privileges can only be narrowed (attenuated) as execution traverses down the delegation hierarchy:
+
 - A parent with read-write filesystem access can grant a child subagent read-only access to a specific subfolder:
   $$\text{ops}_{\text{child}} = \{\text{READ}\} \subset \{\text{READ}, \text{WRITE}\}_{\text{parent}}$$
+
 - A parent with a budget of 100,000 tokens can allocate at most a subset (e.g., 20,000 tokens) to its child:
   $$Q_{\text{child}}^{\text{tokens}} \le Q_{\text{parent}}^{\text{tokens}} - Q_{\text{consumed}}^{\text{tokens}}$$
+
 - A parent with a 30-minute lease can only issue child leases with expirations prior to its own:
   $$\tau_{\text{expire}}^{\text{child}} \le \tau_{\text{expire}}^{\text{parent}}$$
 
@@ -207,6 +222,7 @@ If an attacker achieves prompt injection inside a leaf subagent (such as a docum
 Complex software engineering, data science, and operational tasks overwhelm single monolithic agent loops. Long execution horizons saturate context windows, degrade model reasoning accuracy, and increase latency. Production runtimes resolve this by organizing execution into dynamic **Hierarchical Delegation Trees** [@wu2023autogen; @openai2024swarm].
 
 When an agent invokes a `delegate_task()` or `spawn_subagent()` primitive, the runtime kernel performs an operation analogous to the POSIX `fork()`/`exec()` system calls:
+
 1. **ACB Allocation:** The kernel allocates a new child Agent Control Block ($\text{ACB}_{\text{child}}$) with a unique $\text{AID}_{\text{child}}$.
 2. **Lineage Binding:** $\text{ACB}_{\text{child}}.\mathcal{L}_{\text{lineage}}$ registers the parent's $\text{AID}$, while the parent's ACB records the child in its active dependents table.
 3. **Capability and Quota Slicing:** The kernel enforces monotonic attenuation, deducting the child's allocated token and monetary budget from the parent's reserve.
@@ -223,9 +239,11 @@ To eliminate orphaned processes, the runtime implements **Cascading Cancellation
 If subagents are permitted to delegate tasks laterally, circular dependencies can emerge (e.g., Agent A delegates a query to Agent B, which delegates a verification to Agent C, which queries Agent A). This results in distributed deadlock and rapid token budget exhaustion.
 
 The runtime kernel prevents circular delegation by enforcing a **Strictly Acyclic Directed Lineage Rule**:
+
 - The delegation graph must form a Directed Acyclic Graph (DAG).
 - An ACB's delegation depth $D$ cannot exceed a configured maximum limit:
   $$D_{\text{current}} < D_{\text{max}} \quad (\text{typically } D_{\text{max}} \le 4)$$
+
 - A subagent can only return results upward to its explicit parent; it cannot delegate tasks upward or to siblings without traversing the parent coordinator.
 
 ## The ACB Lifecycle State Machine {#sec-vol3-descriptors-the-acb-lifecycle-state}
@@ -287,13 +305,16 @@ If an agent emits an action conditioned on a tool output that logically succeede
 
 To guarantee rigorous event provenance, the ACB incorporates **Lamport Timestamps** and **Vector Clocks** [@lamport1978time; @mattern1989].
 
-::: {#def-causality-vector .callout-definition title="ACB Causality Vector"}
+::: {#dfn-causality-vector .callout-definition title="ACB Causality Vector"}
 For a system of $M$ concurrent entities (agent coordinators, subagents, and tool sandbox workers), each ACB maintains a vector of logical integers:
 $$\mathbf{V} = [v_1, v_2, \dots, v_M]$$
 governed by the following transition invariants:
+
 1. **Local Action Increment:** Before dispatching an action or generating an internal thought, agent $i$ increments its local clock:
    $$\mathbf{V}_i[i] \leftarrow \mathbf{V}_i[i] + 1$$
+
 2. **Message / Tool Dispatch:** Every tool request message sent by agent $i$ carries a snapshot of its current vector $\mathbf{V}_i$.
+
 3. **Observation Receipt and Merge:** When agent $i$ receives an observation $o$ carrying vector $\mathbf{V}_{\text{msg}}$, it updates its internal clock via component-wise maximum before processing the observation:
    $$\mathbf{V}_i[k] \leftarrow \max(\mathbf{V}_i[k], \, \mathbf{V}_{\text{msg}}[k]) \quad \forall k \in \{1, \dots, M\}$$
    $$\mathbf{V}_i[i] \leftarrow \mathbf{V}_i[i] + 1$$
@@ -304,6 +325,7 @@ By recording $\mathbf{V}$ inside the episodic execution log for every turn, the 
 ## Context Swapping and Process Suspension Mechanics {#sec-vol3-descriptors-context-swapping-and-process}
 
 In an agentic system, tool invocations and human-in-the-loop approvals are orders of magnitude slower than neural inference:
+
 - Model forward pass step (decode): $20\text{--}50\,\text{ms}$
 - Local compiler build / unit test execution: $1\text{--}30\,\text{s}$
 - Remote web scraping / API rate-limit wait: $2\text{--}60\,\text{s}$
@@ -312,9 +334,10 @@ In an agentic system, tool invocations and human-in-the-loop approvals are order
 If the runtime kernel allows an agent to hold its active Key-Value cache in GPU High Bandwidth Memory (HBM) while blocked in `SUSPENDED_TOOL_WAIT` or `SUSPENDED_HUMAN_GATE`, expensive accelerator memory sits completely idle. Because HBM capacity is the primary physical bottleneck limiting serving concurrency, holding allocated KV blocks for idle agents starves active workloads.
 
 The runtime memory manager resolves this through **Asynchronous Multi-Tier Context Swapping** [@kwon2023; @qin2024mooncake], migrating agent memory across three physical storage tiers:
-1. **Tier 1: Accelerator High Bandwidth Memory (HBM3e):** Ultra-high bandwidth ($3.35\,\text{TB/s}$), low capacity ($80\text{--}144\,\text{GB}$ per GPU). Stores active prefill and decode KV caches.
-2. **Tier 2: Host System Memory (DDR5 DRAM):** Moderate bandwidth ($300\,\text{GB/s}$), high capacity ($512\text{--}2048\,\text{GB}$ per node). Stores warm suspended KV caches.
-3. **Tier 3: Local NVMe Storage Fabric (PCIe Gen5 SSD):** Streaming bandwidth ($14\,\text{GB/s}$), massive capacity ($4\text{--}30\,\text{TB}$). Stores cold, checkpointed agent state.
+
+- **Tier 1: Accelerator High Bandwidth Memory (HBM3e):** Ultra-high bandwidth ($3.35\,\text{TB/s}$), low capacity ($80\text{--}144\,\text{GB}$ per GPU). Stores active prefill and decode KV caches.
+- **Tier 2: Host System Memory (DDR5 DRAM):** Moderate bandwidth ($300\,\text{GB/s}$), high capacity ($512\text{--}2048\,\text{GB}$ per node). Stores warm suspended KV caches.
+- **Tier 3: Local NVMe Storage Fabric (PCIe Gen5 SSD):** Streaming bandwidth ($14\,\text{GB/s}$), massive capacity ($4\text{--}30\,\text{TB}$). Stores cold, checkpointed agent state.
 
 @Fig-acb-memory-swapping illustrates the physical hardware data paths and DMA transfers governing context swapping.
 
@@ -328,8 +351,10 @@ The runtime memory manager resolves this through **Asynchronous Multi-Tier Conte
 Swapping a multi-gigabyte KV cache over the PCIe bus consumes memory bus bandwidth and introduces prefetch latency when the agent resumes. Therefore, swapping should only occur if the expected suspension duration exceeds a mathematical breakeven threshold $T_{\text{breakeven}}$.
 
 Let:
+
 - $S_{\text{KV}}$ be the total size of the agent's active KV cache in bytes:
   $$S_{\text{KV}} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times L_{\text{ctx}} \times b_{\text{precision}}$$
+
 - $B_{\text{PCIe}}$ be the effective unidirectional DMA transfer bandwidth across the PCIe Gen5 x16 bus (typically $\approx 64\,\text{GB/s}$).
 - $\mathcal{C}_{\text{HBM}}$ be the amortization cost per second of holding one gigabyte of GPU HBM.
 - $\mathcal{C}_{\text{DRAM}}$ be the amortization cost per second of holding one gigabyte of host DDR5 DRAM ($\mathcal{C}_{\text{HBM}} \gg \mathcal{C}_{\text{DRAM}}$, typically a $10\times\text{--}20\times$ ratio).
@@ -354,22 +379,47 @@ If a tool invocation is predicted to block for more than $T_{\text{breakeven}} \
 
 ## Fallacies and Pitfalls {#sec-vol3-descriptors-fallacies}
 
-Architecting execution descriptors and state managers for agentic runtimes exposes systems engineers to subtle conceptual traps and hardware bottlenecks. We highlight two prevalent fallacies and two critical implementation pitfalls:
+Architecting execution descriptors and state managers for agentic runtimes exposes systems engineers to subtle conceptual traps and hardware bottlenecks. We highlight two prevalent fallacies and three critical implementation pitfalls:
 
-### Fallacy 1: The Large Language Model is the operating system kernel.
+::: {.fallacy-pitfall}
+
+**Fallacy**: *The Large Language Model is the operating system kernel.*
+
 A prevalent marketing metaphor claims that the foundation model serves as the kernel of the modern AI operating system. This is a severe conceptual category error. An operating system kernel is an authoritative, deterministic resource arbiter responsible for memory isolation, hardware interrupts, process scheduling, and security boundary enforcement. A foundation model is an untrusted, stochastic sequence predictor. It cannot enforce its own memory bounds, prevent its own adversarial jailbreaks, or schedule hardware. The agentic runtime software—the C++/Rust/Go control plane executing the ACB—is the true operating system kernel; the model is merely a coprocessor executing stochastic matrix operations.
 
-### Fallacy 2: Natural language system prompts can enforce immutable security boundaries.
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Natural language system prompts can enforce immutable security boundaries.*
+
 Prompting an LLM with `"You are a safe assistant. You must never delete user files or reveal credentials"` is often treated as security policy. Under adversarial scrutiny, this belief collapses instantly. Prompt instructions share the exact same attention channel as untrusted data retrieved from external tools, rendering natural language instructions vulnerable to indirect prompt injection [@greshake2023not]. Security boundaries must be enforced outside the token space, within the ACB's cryptographic capability leases and sandbox isolation layers.
 
-### Pitfall 1: Holding GPU High Bandwidth Memory during blocking tool I/O.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Holding GPU High Bandwidth Memory during blocking tool I/O.*
+
 Failing to implement context swapping causes idle agents awaiting HTTP responses to lock up physical GPU VRAM. In a 100-agent cluster, if each agent blocks for an average of 5 seconds on web tools, serving concurrency collapses by over $80\%$, driving GPU utilization to near zero while memory allocation remains at $100\%$.
 
-### Pitfall 2: Neglecting cascading cancellation down subagent trees.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Neglecting cascading cancellation down subagent trees.*
+
 When a user closes an agent session or a parent coordinator reaches an error state, failing to propagate cancellation signals leaves child subagents running in background threads. These orphaned subagents continue querying model APIs, generating massive surprise cloud bills.
 
-### Pitfall 3: Treating uncommitted reasoning scratchpads as persistent state.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating uncommitted reasoning scratchpads as persistent state.*
+
 Allowing an agent to commit scratchpad thoughts directly to permanent database records before tool verification is complete causes state corruption. If the downstream action fails, the database retains the invalid speculative data. All environmental mutations must follow strict Write-Ahead Logging and two-phase commitment.
+
+:::
 
 ## Chapter Summary {#sec-vol3-descriptors-summary}
 
