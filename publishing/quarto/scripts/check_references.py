@@ -33,6 +33,10 @@ VOLUMES = {
         "chapters_dir": Path("contents/vol2"),
         "bib_file":     Path("contents/references.bib"),
     },
+    "vol3": {
+        "chapters_dir": Path("contents/vol3"),
+        "bib_file":     Path("contents/references.bib"),
+    },
 }
 
 # Quarto cross-reference prefixes — these are NOT citation keys
@@ -46,6 +50,7 @@ KNOWN_FALSE_POSITIVE_KEYS = {
     "charset", "namespace", "document",
     "grad", "staticmethod", "classmethod", "property", "abstractmethod",
     "dataclass", "cached_property", "wraps",
+    "k", "D",
 }
 
 # ---------------------------------------------------------------------------

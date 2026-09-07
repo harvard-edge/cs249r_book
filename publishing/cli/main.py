@@ -115,6 +115,10 @@ class MLSysBookCLI:
         vol_table.add_row(_cmd("build html --vol2"), "Build Volume II website", _cmd("./binder build html --vol2"))
         vol_table.add_row(_cmd("build pdf --vol1"), "Build Volume I as PDF", _cmd("./binder build pdf --vol1"))
         vol_table.add_row(_cmd("build pdf --vol2"), "Build Volume II as PDF", _cmd("./binder build pdf --vol2"))
+        vol_table.add_row(_cmd("build pdf --vol3"), "Build Volume III as PDF", _cmd("./binder build pdf --vol3"))
+        vol_table.add_row(_cmd("build pdf --vol4"), "Build Volume IV as PDF", _cmd("./binder build pdf --vol4"))
+        vol_table.add_row(_cmd("build pdf --vol1 --no-cover"), "Omit the designed PDF cover", _cmd("./binder build pdf --vol1 --no-cover"))
+        vol_table.add_row(_cmd("build pdf --vol1 --print-marks"), "Add printer camera/trim marks", _cmd("./binder build pdf --vol1 --print-marks"))
         vol_table.add_row(_cmd("build pdf --vol1 --layout"), "Build Volume I PDF, then plan layout fixes", _cmd("./binder build pdf --vol1 --layout"))
         vol_table.add_row(_cmd("build epub --vol1"), "Build Volume I as EPUB", _cmd("./binder build epub --vol1"))
         vol_table.add_row(_cmd("build epub --vol2"), "Build Volume II as EPUB", _cmd("./binder build epub --vol2"))
@@ -231,6 +235,8 @@ class MLSysBookCLI:
         skip_hygiene = False
         skip_validate = False
         layout_after = False
+        no_cover = False
+        print_marks = False
         remaining = []
 
         for arg in args:
@@ -261,6 +267,10 @@ class MLSysBookCLI:
                 skip_validate = True
             elif lower == "--layout":
                 layout_after = True
+            elif lower == "--no-cover":
+                no_cover = True
+            elif lower == "--print-marks":
+                print_marks = True
             elif format_type is None and lower in ("html", "pdf", "epub"):
                 format_type = lower
             else:
@@ -278,6 +288,8 @@ class MLSysBookCLI:
             skip_hygiene,
             skip_validate,
             layout_after,
+            no_cover,
+            print_marks,
         )
 
     def handle_build_command(self, args):
@@ -295,7 +307,7 @@ class MLSysBookCLI:
             return False
 
         if "-h" in args or "--help" in args:
-            console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--all] [--skip-hygiene] [--skip-validate] [--layout]", markup=False)
+            console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks]", markup=False)
             console.print("[dim]Build renders source artifacts. For PDF layout polish, add --layout to a full-volume PDF build.[/dim]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder build[/dim]")
@@ -305,6 +317,9 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder build epub --vol1[/dim]")
             console.print("[dim]  ./binder build pdf --vol1 --layout       # render Vol I, then emit auto-layout plan[/dim]")
             console.print("[dim]  ./binder build pdf --vol2 --layout       # render Vol II, then emit auto-layout plan[/dim]")
+            console.print("[dim]  ./binder build pdf --vol1               # include the cover; omit printer marks[/dim]")
+            console.print("[dim]  ./binder build pdf --vol1 --no-cover    # omit the designed cover[/dim]")
+            console.print("[dim]  ./binder build pdf --vol1 --print-marks # add printer camera/trim marks[/dim]")
             console.print("[dim]  ./binder build epub --vol1 --skip-hygiene    # bypass pre-render hygiene check[/dim]")
             console.print("[dim]  ./binder build epub --vol1 --skip-validate   # bypass post-render validation[/dim]")
             console.print("[dim]  ./binder build pdf --vol1                  # runs pdftotext cross-ref scan after render[/dim]")
@@ -320,6 +335,8 @@ class MLSysBookCLI:
             skip_hygiene,
             skip_validate,
             layout_after,
+            no_cover,
+            print_marks,
         ) = self._parse_build_args(args)
 
         if build_all and chapters_arg:
@@ -338,6 +355,30 @@ class MLSysBookCLI:
             )
             return False
 
+        if no_cover and (
+            format_type != "pdf" or not volume or build_all or chapters_arg
+        ):
+            console.print(
+                "[red]❌ `--no-cover` is supported for full-volume PDF builds only.[/red]"
+            )
+            console.print(
+                "[yellow]Use: ./binder build pdf --vol1 --no-cover "
+                "(or --vol2, --vol3, --vol4).[/yellow]"
+            )
+            return False
+
+        if print_marks and (
+            format_type != "pdf" or not volume or build_all or chapters_arg
+        ):
+            console.print(
+                "[red]❌ `--print-marks` is supported for full-volume PDF builds only.[/red]"
+            )
+            console.print(
+                "[yellow]Use: ./binder build pdf --vol1 --print-marks "
+                "(or --vol2, --vol3, --vol4).[/yellow]"
+            )
+            return False
+
         if build_all:
             if format_type == "html":
                 console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
@@ -346,13 +387,21 @@ class MLSysBookCLI:
             return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if volume and not chapters_arg:
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            volume_name = {
+                "vol1": "Volume I",
+                "vol2": "Volume II",
+                "vol3": "Volume III",
+                "vol4": "Volume IV",
+                "tinytorch": "TinyTorch",
+            }.get(volume, volume)
             console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
             ok = self.build_command.build_volume(
                 volume,
                 format_type,
                 skip_hygiene=skip_hygiene,
                 skip_validate=skip_validate,
+                no_cover=no_cover,
+                print_marks=print_marks,
             )
             if ok and layout_after:
                 return self.layout_command.run([f"--{volume}", "--no-build"])
