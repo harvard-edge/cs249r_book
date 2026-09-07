@@ -159,13 +159,7 @@ $$\frac{\binom{n - c}{k}}{\binom{n}{k}} = \prod_{i=1}^k \frac{n - c - i + 1}{n -
 
 While Pass@$k$ measures algorithmic capability, it completely ignores inference compute economics. Generating $n=100$ candidate trajectories to achieve $\text{Pass}@100 = 80\%$ is economically useless in production if each trajectory costs $\$5.00$ in GPU compute. Real-world autonomous systems are constrained by serving economics.
 
-::: {#pri-vol3-trajectory-goodput .callout-principle title="Trajectory Goodput and Fleet Economics"}
-
-**Invariant**: The governing metric of autonomous serving is Trajectory Goodput ($G$), defined as verified successful outcomes completed per dollar per GPU-hour. Maximizing token throughput (tokens/second) is irrelevant if those tokens are expended on hallucinated loops or unverified search branches.
-
-**Implication**: Systems architectures must optimize the Trajectory Goodput Pareto frontier, balancing sparse Mixture-of-Experts (MoE) routing, prefix caching, and verifier-guided search to minimize the Cost-per-Goal.
-
-:::
+This chapter gives principle \ref{pri-vol3-trajectory-goodput} its measurement apparatus. Trajectory goodput is stated in the part opener as the governing metric; what the telemetry stack adds is the means to compute it honestly, by attributing cost to a whole trajectory rather than a request and by carrying the verification outcome alongside the spend. Without that attribution the metric is unmeasurable, and a fleet optimizing token throughput will report improvement while goodput falls.
 
 ::: {#dfn-vol3-trajectory-goodput .callout-definition}
 **Trajectory Goodput** ($G$) is formulated as:
@@ -281,17 +275,11 @@ The OpenTelemetry GenAI working group standardized semantic attributes to ensure
 
 ### Telemetry Payload Offloading
 
-A critical systems failure mode in agent observability is span bloat. Distributed tracing backends (such as Jaeger, Datadog, and Zipkin) are engineered for high-throughput, low-latency ingestion of small structural metadata spans (typically strictly capped at 64KB per span). 
+A critical systems failure mode in agent observability is span bloat. Distributed tracing backends (such as Jaeger, Datadog, and Zipkin) are engineered for high-throughput, low-latency ingestion of small structural metadata spans (typically strictly capped at 64KB per span).
 
 When an agent interacts with long-context environments, a single prompt may contain 100,000 tokens of bash logs and retrieved source code. Injecting megabytes of raw text strings directly into span attributes (`gen_ai.prompt.content`) causes catastrophic ingestion queues, network saturation, and Out-Of-Memory (OOM) crashes in the telemetry collector.
 
-::: {#pri-vol3-telemetry-offloading .callout-principle title="Telemetry Payload Offloading"}
-
-**Invariant**: Observability infrastructure must decouple structured causal metadata (latency, tree topology, token counts) from unstructured high-volume payload data (prompts, raw image bytes, and tool stdout).
-
-**Implication**: Tracing runtimes must implement **Payload Offloading**. OpenTelemetry spans must remain strictly lightweight. The massive prompt strings and tool outputs are asynchronously flushed to scalable object storage (e.g., Amazon S3) or columnar datastores (e.g., ClickHouse). The span attributes merely record lightweight URI pointers (`gen_ai.prompt.url = "s3://traces/4bf9.../prompt.json"`).
-
-:::
+**Telemetry payload offloading**: Observability infrastructure must decouple structured causal metadata (latency, tree topology, token counts) from unstructured high-volume payload data (prompts, raw image bytes, and tool stdout). Tracing runtimes must implement **Payload Offloading**. OpenTelemetry spans must remain strictly lightweight. The massive prompt strings and tool outputs are asynchronously flushed to scalable object storage (e.g., Amazon S3) or columnar datastores (e.g., ClickHouse). The span attributes merely record lightweight URI pointers (`gen_ai.prompt.url = "s3://traces/4bf9.../prompt.json"`).
 
 ::: {#lst-vol3-otel-genai-span lst-cap="**OpenTelemetry GenAI Structured Span**: JSON payload showing standardized attributes including provider system, model requested, token counts, TTFT, and decode throughput."}
 
@@ -324,7 +312,7 @@ As demonstrated in @lst-vol3-otel-genai-span, capturing structured attributes al
 
 ### Tail-Based Tracing Sampling
 
-In traditional microservices processing 100,000 requests per second, telemetry systems employ **Head-based Sampling**: the ingress gateway flips a weighted coin (e.g., $1\%$) at the root span and discards $99\%$ of traces instantly to save storage and network bandwidth. 
+In traditional microservices processing 100,000 requests per second, telemetry systems employ **Head-based Sampling**: the ingress gateway flips a weighted coin (e.g., $1\%$) at the root span and discards $99\%$ of traces instantly to save storage and network bandwidth.
 
 For autonomous agents, head-based sampling is an anti-pattern. Agent trajectories are relatively low-throughput but extremely high-value. If an agent hallucinates and drops a database table $0.5\%$ of the time, dropping $99\%$ of traces randomly guarantees that systems engineers will have zero diagnostic data when the catastrophic failure occurs.
 
@@ -374,13 +362,7 @@ To trace stochastic search trees without corrupting the linear trajectory timeli
 
 When an agent fails in production at 3:00 AM, how can an on-call engineer reproduce the bug? If the engineer reruns the agent locally with the same initial prompt, floating-point non-determinism, external network mutations, and temperature variance guarantee that the agent will take a different path. The failure cannot be reproduced.
 
-::: {#pri-vol3-trace-reconstructibility .callout-principle title="Deterministic Trace Reconstructibility"}
-
-**Invariant**: Robust production operations require capturing all non-deterministic interactions across the environment boundary into immutable event streams to enable bit-exact offline replay and counterfactual diffing.
-
-**Implication**: Runtimes must implement deterministic event-sourcing, intercepting and recording model completions, tool outputs, pseudorandom seeds, and environmental clocks.
-
-:::
+The tracing architecture developed here is what makes principle \ref{pri-vol3-trace-reconstructibility} achievable rather than aspirational. Bit-exact replay requires that every non-deterministic crossing of the environment boundary be captured at the moment it happens, because none of it can be reconstructed afterward from the model weights. The span hierarchy and immutable event stream are the mechanism that turns that requirement into a property the runtime actually holds.
 
 ### Event Sourcing at the Stochastic Boundary
 
