@@ -159,7 +159,7 @@ Any computation with operational intensity $I < 295.4\ \text{FLOPs/Byte}$ is str
 
 In autonomous agent workloads, the execution lifecycle oscillates between two fundamentally distinct operational regimes:
 
-### The Prompt Prefill Phase (Compute-Bound)
+### The prompt prefill phase (compute-bound)
 
 When the agent receives a new prompt, tool output, or environment observation, it processes all $N$ context tokens in parallel. Attention computation evaluates $Q K^T$ as a dense Matrix-Matrix multiplication (GEMM). For sequence length $N$ and hidden size $d$, arithmetic operations scale as $O(N^2 d)$, while memory traffic transfers the weights and inputs once:
 
@@ -167,7 +167,7 @@ $$I_{\text{prefill}} \approx \frac{4 L N^2 d + 2 P N}{2 P \cdot \text{sizeof(wei
 
 For sequences where $N > 2{,}048$, operational intensity $I_{\text{prefill}}$ easily exceeds $300\ \text{FLOPs/Byte}$, placing prefill deep inside the compute-bound plateau. The GPU tensor cores achieve near-peak utilization.
 
-### The Autoregressive Decode Phase (Memory-Bound)
+### The autoregressive decode phase (memory-bound)
 
 Once the prefill phase populates the KV cache, token generation occurs strictly sequentially: token $t+1$ depends on the output of token $t$. Generating a single token requires projecting a single query vector $q_t \in \mathbb{R}^{1 \times d_{\text{model}}}$, computing its dot product against all cached historical keys $K_{1:t}$, and accumulating across cached values $V_{1:t}$.
 
@@ -308,7 +308,7 @@ A robust agent runtime structures context into explicit, compartmentalized funct
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Context Boundary Serialization
+### Context boundary serialization
 
 The serialization syntax used to demarcate functional zones directly impacts model compliance and parsing overhead:
 
@@ -339,7 +339,7 @@ The structural codebase processing pipeline proceeds across three stages:
 2. **Symbol Dependency Graphing:** The system constructs a directed graph $G = (V, E)$ where vertices represent extracted symbols and directed edges capture function calls, class inheritance, and module imports.
 3. **Topological Ranking:** Personalized PageRank calculates centrality over the symbol graph, prioritizing symbols related to the immediate issue context and packing the top-ranked signatures into a compact repository map ($\le 3{,}000$ tokens).
 
-### Abstract Syntax Tree (AST) Skeletonization
+### Abstract syntax tree (AST) skeletonization
 
 Rather than ingesting implementation bodies, runtime preprocessors utilize Tree-Sitter parsers to extract language-accurate structural skeletons. For every file, the parser strips function bodies and internal loops, preserving only:
 
@@ -349,7 +349,7 @@ Rather than ingesting implementation bodies, runtime preprocessors utilize Tree-
 
 A 1,500-line Python module ($7{,}500$ tokens) condenses into a 60-line structural skeleton ($350$ tokens)—a 95.3% reduction in token overhead with zero loss of API structural information.
 
-### PageRank Symbol Graphing (Repomaps)
+### PageRank symbol graphing (repomaps)
 
 Not all classes and functions are equally relevant to a given task. To build an optimal repository map within a tight token budget (e.g., 2,048 tokens), systems construct a directed graph $G = (V, E)$ of symbol definitions and references across the entire repository:
 
@@ -366,7 +366,7 @@ When an agent's active trajectory exceeds hardware or latency thresholds, runtim
 
 ![Dynamic KV Cache Sparsification & Eviction Topologies. Contrasting dense unconstrained attention against Attention Sinks (StreamingLLM) and Heavy-Hitter retention (H2O / FastGen).](images/svg/attention_sinks_and_eviction.svg){#fig-vol3-context-attention-sinks}
 
-### The Attention Sink Phenomenon
+### The attention sink phenomenon
 
 In 2024, Xiao et al. discovered the **Attention Sink** phenomenon (@xiao2024streamingllm). When evaluating window-based attention—where tokens outside a local sliding window of length $W$ are discarded—the model's language modeling perplexity does not degrade gracefully. Instead, the moment the very first token ($t=0$, often `[BOS]`) drops out of the sliding window, perplexity explodes to $>10^3$, rendering generated text complete gibberish.
 
@@ -385,7 +385,7 @@ StreamingLLM (@xiao2024streamingllm) resolves this by preserving two distinct to
 
 By retaining just 4 initial sink tokens alongside a local sliding window of $W = 1{,}024$ tokens, the KV cache size is bounded to a constant $O(S + W)$, enabling language models to generate sequences exceeding 4 million tokens with rock-solid perplexity stability.
 
-### Heavy-Hitter Oracle (H2O) and Adaptive Sparsification
+### Heavy-hitter oracle (H2O) and adaptive sparsification
 
 While StreamingLLM guarantees perplexity stability for streaming generation, it exhibits "middle amnesia": tokens evicted between the sink and the sliding window are permanently lost. For an autonomous agent, middle tokens often contain critical environment feedback, error codes, or function names generated ten steps earlier.
 
@@ -403,7 +403,7 @@ When the KV cache reaches a predetermined budget $C_{\text{budget}}$, H2O partit
 
 All remaining intermediate tokens with low cumulative attention scores are evicted from HBM. Empirically, retaining just 20% of the KV cache using H2O preserves over 98% of full-attention task accuracy on multi-turn reasoning benchmarks while delivering a 3x to 5x reduction in decode memory footprint.
 
-### SnapKV: Prompt-Guided Sparsification
+### SnapKV: Prompt-guided sparsification
 
 While H2O relies on online cumulative scores, **SnapKV** (@li2024snapkv) identifies that for many agentic prompts, the crucial tokens can be statically predicted by the structure of the prompt itself. SnapKV isolates the attention weights of a specific "observation" window at the end of the prompt and uses those weights to select the most important tokens from the preceding context, aggressively dropping up to 80% of the KV cache before the autoregressive decode loop even begins. This provides a massive prefill acceleration that H2O cannot achieve.
 
@@ -421,13 +421,13 @@ For complex search topologies (like Best-of-$N$ and Tree of Thoughts), **RadixAt
 
 Beyond single-node physical memory allocation, production agentic platforms must manage context across asynchronous workloads and cluster-wide resources. The extreme latency and memory characteristics of context windows dictate specialized scheduling and distributed overlays.
 
-### Chunked Prefill for Head-of-Line Blocking
+### Chunked prefill for head-of-line blocking
 
 When an inference node interleaves multiple concurrent agent streams, the stark operational dichotomy between the compute-bound prefill and memory-bound decode creates severe head-of-line blocking. If Agent A requires a 100k-token prefill for a new repository map, the dense GEMM computation monopolizes the GPU's streaming multiprocessors (SMs) for several seconds. During this time, Agent B and Agent C—who only need quick autoregressive decode steps—are completely stalled.
 
 To resolve this scheduling conflict, modern inference engines employ **Chunked Prefill** (e.g., Sarathi, @agrawal2024sarathi). Instead of processing Agent A's entire 100k-token prompt as a single monolithic block, the prefill is sliced into smaller, fixed-size chunks (e.g., 2,048 tokens). The scheduler interleaves one prefill chunk from Agent A with a batch of decode steps from Agents B and C. This converts the prefill from a massive latency spike into a sustained background stream, maintaining strict tail-latency guarantees for interactive decode generation while keeping GPU compute units saturated.
 
-### Distributed KV Cache Migration and Disaggregation
+### Distributed KV cache migration and disaggregation
 
 As agent trajectories expand, binding an agent to a single physical GPU node becomes a severe availability bottleneck. If a long-running agent waits 30 seconds for an external bash command to complete, holding its multi-gigabyte KV cache in accelerator HBM wastes critical memory capacity. To solve this, production clusters implement **Distributed Context Management** and **Prefill-Decode Disaggregation** (e.g., DistServe, @zhong2024distserve; Mooncake, @qin2024mooncake).
 
@@ -446,7 +446,7 @@ While KV-cache eviction algorithms operate at the sub-token tensor level inside 
 
 As shown in @fig-vol3-context-compaction-pipeline, context compaction transforms an unmanageably bloated trajectory buffer into a compact, semantically dense state representation. The pipeline operates across four discrete stages:
 
-### Stage 1: Triage and Compaction Triggering
+### Stage 1: Triage and compaction triggering
 
 The runtime monitors total token consumption after every tool execution. When total active tokens exceed $\theta_{\text{compact}}$, execution pauses and enters the compaction routine. Input payloads are triaged into three categories:
 
@@ -454,16 +454,16 @@ The runtime monitors total token consumption after every tool execution. When to
 - **Reducible structural tokens:** Verbose stdout/stderr dumps, file reads, and search results.
 - **Invariant tokens:** User instructions, security boundaries, and tool definitions.
 
-### Stage 2: Dual Compaction Pathways
+### Stage 2: Dual compaction pathways
 
 The system processes reducible tokens through two complementary engines:
 
-#### Pathway A: Deterministic Structural Slicing
+#### Pathway A: Deterministic structural slicing
 
 - **Head/Tail Output Slicing:** For tool executions emitting large text buffers (e.g., test runners or build outputs of $>500$ lines), the engine extracts the first 25 lines (initialization/command), the last 25 lines (summary/result), and regex-matched failure lines (`grep -E 'ERROR|FAIL|Exception'`), replacing the intermediate lines with an omission token: `[... 450 lines truncated; exit code 1 ...]`.
 - **Git Delta Representation:** When an agent inspects files it subsequently edits, the runtime discards the original raw file reads and substitutes the compact unified git diff (`git diff -U3`), preserving exact state change semantics with an 85% token reduction.
 
-#### Pathway B: Semantic State Synthesis
+#### Pathway B: Semantic state synthesis
 
 - Historical turns are partitioned into logical epochs (e.g., turns $1 \dots 10$). A dedicated summarization call compresses these turns into a structured JSON or XML **State Ledger**:
 
@@ -516,7 +516,7 @@ In language models, this information loss is accelerated by **paraphrasing mutat
 - **Constraint Erosion:** Nuanced negative constraints (e.g., *"Do not modify the public API signatures in `client.py`"*) are omitted or softened by the summarizer after 3–5 cycles (e.g., becoming *"Refactored client.py"*). The agent subsequently violates the original constraint.
 - **Hallucination Cascades:** A slight hallucination or misinterpretation introduced in summary $S_k$ is treated as an immutable ground-truth fact in step $S_{k+1}$, compounding exponentially until the agent diverges entirely from the user's intent.
 
-### Mitigation: The Invariant Enclosure
+### Mitigation: The invariant enclosure
 
 To eliminate semantic drift across arbitrary compaction horizons, production architectures implement an **Invariant Enclosure**:
 
@@ -551,7 +551,7 @@ Retrieval Accuracy (%)
 
 Models achieve near 100% retrieval accuracy when critical information is placed at the extreme beginning (first 10%) or extreme end (last 10%) of the context window. However, when the relevant information resides in the middle 60% ($0.2 < \text{pos} < 0.8$), retrieval accuracy plunges to below 30%—even in models explicitly trained and marketed for 128k or 1M token contexts.
 
-### Mathematical Root: Positional Encoding Decay
+### Mathematical root: Positional encoding decay
 
 This failure mode is fundamentally tied to the mechanics of modern positional embeddings, specifically Rotary Position Embeddings (RoPE, @su2024). RoPE encodes positional information by rotating the Query and Key representations in 2D vector slices:
 
@@ -563,7 +563,7 @@ $$\langle \mathbf{R}_{\Theta, m}^d \mathbf{q}, \mathbf{R}_{\Theta, n}^d \mathbf{
 
 Because RoPE frequencies decay geometrically across hidden dimensions, attention dot products exhibit a natural long-term decay: query vectors attend most sharply to immediate neighbors ($n \approx m$, recency bias) and the initial prefix tokens ($n \approx 0$, attention sink bias). Keys situated in the middle distance ($m - n \gg 0$ but $n \gg 0$) suffer from destructive phase interference and softmax probability dilution across thousands of competing tokens.
 
-### Systems Mitigation: Context Edge Packing
+### Systems mitigation: Context edge packing
 
 Understanding positional attention bias dictates optimal context packing topologies:
 
@@ -597,7 +597,7 @@ Step t Execution Cycle:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### The Two-Phase Commit for Context Management
+### The two-phase commit for context management
 
 Production agent architectures implement a **Two-Phase Commit** for reasoning tokens:
 
@@ -635,7 +635,7 @@ A benchmark task on SWE-bench requires an agent to navigate an unfamiliar reposi
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Production Mechanisms Dissected
+### Key production mechanisms dissected
 
 - **Automated Head/Tail Output Slicing:** When executing `pytest tests/`, full output routinely exceeds 4,000 lines. Claude Code captures the complete output in an external log file, but returns only the head (test suite discovery), tail (failure summary), and individual tracebacks into context, adding a pointer: *"Full log written to `.claude/tmp/test_run_28.log`"*.
 - **Git Diff as State Representation:** Rather than retaining repeated calls to `view_file`, the system runs `git diff` after every file edit. The diff acts as a self-compacting ledger: if the agent edits line 40, tests it, finds an error, and reverts it, the git diff naturally collapses to empty, completely freeing context tokens.

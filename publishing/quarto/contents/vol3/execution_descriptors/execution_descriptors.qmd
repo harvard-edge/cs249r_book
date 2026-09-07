@@ -68,17 +68,17 @@ When systems engineers construct autonomous, multi-turn agent runtimes, the urge
 
 While this metaphor provides useful architectural intuition, it breaks down violently across three fundamental systems boundaries:
 
-### 1. Determinism vs. Stochasticity
+### 1. Determinism vs. stochasticity
 A hardware CPU is a deterministic state transition machine. Given an identical register state and instruction stream, a processor executes the exact same operations every time. A foundation model is an autoregressive probability distribution over tokens:
 $$P(x_t \mid x_{<t}; \theta)$$
 Even when temperature is set to zero ($T=0$), hardware floating-point non-associativity across distributed matrix multiplication kernels (tensor parallelism, warp scheduling, and dynamic batching) introduces token non-determinism across runs. A runtime cannot guarantee bit-exact trajectory reproduction merely by restoring an execution snapshot.
 
-### 2. Physical Memory vs. Neural Activation Footprints
+### 2. Physical memory vs. neural activation footprints
 In a classical OS, context switching a thread incurs a latency on the order of microseconds ($1\text{--}10\,\mu\text{s}$) because only the small architectural register file (hundreds of bytes) must be saved, while the physical page tables remain mapped in host DRAM.
 
 In an agentic system, the in-flight cognitive state of an agent is encoded in its **Key-Value (KV) cache**—a multi-gigabyte activation footprint resident in scarce, high-cost GPU High Bandwidth Memory (HBM). For an agent operating over a $128\text{K}$-token horizon with a 70-billion parameter model, the active KV cache occupies dozens of gigabytes of VRAM. A runtime cannot instantly "switch" agents without either retaining that memory footprint idle on the GPU or paying massive PCIe transfer latencies ($10\text{--}100\,\text{ms}$) to swap activations to host DRAM.
 
-### 3. Isolated Address Spaces vs. Mutating Environmental Side Effects
+### 3. Isolated address spaces vs. mutating environmental side effects
 The classical process isolation contract relies on hardware-enforced virtual memory boundaries (MMUs, page fault traps, and ring protection domains) [@saltzer1975]. A process can write freely to its private virtual address space without corrupting neighboring processes. If a process faults, the kernel reclaims its memory and terminates the descriptor cleanly.
 
 An autonomous agent, by contrast, executes actions by invoking external tools:
@@ -173,7 +173,7 @@ The runtime kernel must treat the neural belief state as strictly speculative. W
 
 Within the agent process itself, memory must be stratified based on durability, mutability, and transactional commitment. An agent runtime distinguishes two tiers of internal memory:
 
-### 1. Ephemeral Working Memory (Volatile Scratchpad)
+### 1. Ephemeral working memory (volatile scratchpad)
 During multi-step reasoning, foundation models generate chain-of-thought tokens, intermediate hypotheses, decomposition trees, and draft tool parameters. This working memory resides in:
 
 - The active GPU Key-Value cache activations.
@@ -182,7 +182,7 @@ During multi-step reasoning, foundation models generate chain-of-thought tokens,
 
 Ephemeral memory is volatile and speculative. If an agent explores a reasoning branch that proves invalid (e.g., generating code that fails compilation), this working memory should be pruned or rolled back without polluting the persistent execution history.
 
-### 2. Authoritative State and Write-Ahead Logging (WAL)
+### 2. Authoritative state and write-ahead logging (WAL)
 When an agent takes an action that crosses the boundary into the physical environment—such as executing an external API call, modifying a persistent file, or spawning a child subagent—the transaction must be recorded authoritatively.
 
 Following classical database recovery theory [@gray1992; @mohan1992aries], an agentic runtime implements a **Write-Ahead Logging (WAL)** protocol for agent actions:
@@ -203,7 +203,7 @@ $$\mathcal{K} = \langle \text{CID}, \text{AID}, \text{URI}_{\text{target}}, \mat
 authorizing the agent $\text{AID}$ to invoke the set of operations $\mathcal{O}_{\text{ops}}$ on target resource $\text{URI}_{\text{target}}$, subject to parameter schema constraints $\mathcal{C}_{\text{params}}$, expiring at wall-clock timestamp $\tau_{\text{expire}}$, and verified by kernel signature $\text{Sig}_{K_{\text{kernel}}}$.
 :::
 
-### The Monotonic Capability Attenuation Principle
+### The monotonic capability attenuation principle
 When a primary agent decomposes a complex objective into smaller sub-tasks, it spawns child subagents. A foundational security invariant of execution descriptors is the **Monotonic Capability Attenuation Principle**:
 
 $$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}}$$
@@ -242,12 +242,12 @@ When an agent invokes a `delegate_task()` or `spawn_subagent()` primitive, the r
 
 Managing hierarchical agent trees introduces critical systems failure modes that the runtime kernel must resolve:
 
-### 1. The Orphaned Agent Problem and Cascading Cancellation
+### 1. The orphaned agent problem and cascading cancellation
 If a parent agent terminates prematurely—due to budget exhaustion, fatal exception, or user cancellation—unsupervised child subagents can continue executing in the background, consuming thousands of dollars in GPU inference and API calls.
 
 To eliminate orphaned processes, the runtime implements **Cascading Cancellation**. Every child ACB maintains an active heartbeat connection to its parent. If the parent transitions to `TERMINATED` or `FAILED`, the kernel automatically broadcasts a `SIGTERM`-equivalent cancellation signal down the lineage tree, aborting all descendant ACBs, terminating in-flight model inference requests, and revoking outstanding tool capability leases.
 
-### 2. Subagent Deadlocks and Circular Delegation
+### 2. Subagent deadlocks and circular delegation
 If subagents are permitted to delegate tasks laterally, circular dependencies can emerge (e.g., Agent A delegates a query to Agent B, which delegates a verification to Agent C, which queries Agent A). This results in distributed deadlock and rapid token budget exhaustion.
 
 The runtime kernel prevents circular delegation by enforcing a **Strictly Acyclic Directed Lineage Rule**:
@@ -262,10 +262,10 @@ The runtime kernel prevents circular delegation by enforcing a **Strictly Acycli
 
 When multi-agent systems coordinate, they require mechanisms analogous to POSIX Inter-Process Communication (IPC). Classical operating systems implement IPC via either **Message Passing** (pipes, sockets) or **Shared Memory** (`shmget`, `mmap`). In an agentic runtime, these paradigms map directly to physical hardware memory management and multi-node network topologies.
 
-### Message Passing (Actor Model)
+### Message passing (actor model)
 When agents are highly decoupled—such as a Planner Agent written in Python communicating with a Coder Agent on a separate physical node—IPC is implemented via asynchronous message passing (e.g., passing serialized JSON or natural language over an event bus). Because the agents maintain separate ACBs and do not share physical GPU memory, they communicate by appending observations to each other's episodic working memory . This mirrors the Actor Model [@hewitt1973actor] and provides strong fault isolation, but incurs high latency and token-ingestion costs, as every received message must be re-processed through the model's compute-bound prefill phase.
 
-### Shared Memory (KV-Cache Prefix Sharing)
+### Shared memory (KV-cache prefix sharing)
 When a parent agent spawns multiple parallel child subagents (e.g., to concurrently evaluate three different candidate solutions), copying the identical system instructions, task context, and tool schemas into each child's independent context window wastes massive GPU HBM and compute.
 
 To resolve this, modern agent runtimes implement **Shared Memory IPC** through **KV-Cache Prefix Sharing** (such as RadixAttention [@zheng2024sglang] or native prompt caching, see @sec-vol3-prefix-caching-paging). Analogous to operating system virtual memory paging with Copy-On-Write (COW) semantics:
@@ -276,7 +276,7 @@ To resolve this, modern agent runtimes implement **Shared Memory IPC** through *
 
 This systems-level memory sharing dramatically increases serving throughput for tree-search and parallel multi-agent topologies (see @sec-vol3-control-topologies) by eliminating redundant prefill computation and compressing the physical memory footprint.
 
-### Agent Synchronization and Mutexes
+### Agent synchronization and mutexes
 When concurrent agents act upon a shared external environment, they face classic concurrency hazards (e.g., race conditions, lost updates). If Agent A and Agent B simultaneously attempt to edit the same source code file via a file-editing tool, their interleaved operations can corrupt the file.
 
 The runtime must provide **Agent Mutexes** or distributed locks, exposed as tool capabilities. Before mutating a shared external resource, the agent must acquire a time-bounded lease on the resource. If the lock is held by another ACB, the requesting agent receives a `ResourceLocked` observation, allowing it to either wait, yield its execution slice, or pivot to another task.
@@ -316,7 +316,7 @@ $$\mathbf{q}_t = \big[ T_{\text{in}}(t), \, T_{\text{out}}(t), \, C_{\text{cost}
 
 Every autoregressive forward pass and tool execution updates these counters atomically. If any component exceeds its allocated envelope $\mathbf{q}_{\text{max}}$, the runtime kernel fires an immediate hardware trap, interrupting the model dispatch and forcing the ACB into `TERMINATED_FAILED` (or triggering an emergency checkpoint).
 
-### Token Burn Velocity and Degeneracy Detection
+### Token burn velocity and degeneracy detection
 Static budget caps are insufficient to protect large-scale production fleets. If an agent with a $50 budget enters an infinite loop, it will burn the entire $50 before halting. To detect pathological loops early, the ACB tracks the **Token Burn Velocity** ($v_{\text{burn}}$) and **Action Entropy**:
 
 $$v_{\text{burn}}(t) = \frac{\Delta T_{\text{in}} + \Delta T_{\text{out}}}{\Delta t} \quad \left[ \frac{\text{tokens}}{\text{second}} \right]$$
@@ -327,7 +327,7 @@ The runtime computes the **Action Repetition Jaccard Distance** over a sliding w
 $$J(a_t, a_{t-1}) = \frac{|T(a_t) \cap T(a_{t-1})|}{|T(a_t) \cup T(a_{t-1})|}$$
 where $T(a)$ is the token set of the serialized tool call. If $J(a_t, a_{t-1}) > 0.95$ for three consecutive steps ($N_{\text{repeat}} \ge 3$), the runtime halts execution for **Livelock Degeneracy**, regardless of remaining token budget.
 
-### Proportional Share Scheduling
+### Proportional share scheduling
 When hundreds of agent trajectories contend for limited GPU inference capacity, naive First-Come-First-Served (FCFS) scheduling causes head-of-line blocking. Long-running, high-token trajectories starve short interactive agents.
 
 Following lottery and stride scheduling principles [@waldspurger1994], the agent scheduler (see @sec-vol3-trajectory-scheduling) uses the ACB's remaining quota and assigned priority weight $W_i$ to schedule chunked prefill batches [@agrawal2024sarathi], ensuring that active agents receive proportional shares of memory bandwidth and tensor core cycles.
@@ -382,7 +382,7 @@ The runtime memory manager resolves this through **Asynchronous Multi-Tier Conte
 
 :::
 
-### Mathematical Derivation of the Breakeven Suspension Duration
+### Mathematical derivation of the breakeven suspension duration
 Swapping a multi-gigabyte KV cache over the PCIe bus consumes memory bus bandwidth and introduces prefetch latency when the agent resumes. Therefore, swapping should only occur if the expected suspension duration exceeds a mathematical breakeven threshold $T_{\text{breakeven}}$.
 
 Let:
