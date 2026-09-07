@@ -12,9 +12,6 @@
 #     name: python3
 # ---
 
-#| default_exp core.transformers
-#| export
-
 # %% [markdown]
 """
 # Module 13: Transformers - Complete Transformer Architecture
@@ -60,26 +57,34 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.transformers
 #| export
 
 import numpy as np
 rng = np.random.default_rng(7)
 
+# Import from previous modules - following the dependency chain
+from tinytorch.core.tensor import Tensor, Function
 from tinytorch.core.activations import GELU
-from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.tensor import Function
-from tinytorch.core.autograd import is_grad_enabled
-from tinytorch.core.embeddings import EmbeddingLayer
 from tinytorch.core.layers import Linear
-
-# Import from previous modules - following proper dependency chain
-from tinytorch.core.tensor import Tensor
+from tinytorch.core.embeddings import EmbeddingLayer
+from tinytorch.core.attention import MultiHeadAttention
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
+# %% [markdown]
+"""
+### The Causal Mask
 
+GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
+below encodes that rule in the binary convention Module 12's `_apply_mask`
+expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "causal-mask", "solution": false}
+#| export
 def create_causal_mask(seq_len: int) -> Tensor:
     """
     Create a causal (autoregressive) attention mask.
@@ -481,23 +486,22 @@ class LayerNormFunction(Function):
         std_data = self.std_data
 
         # Gradient for beta: sum over all dims except last
-        if isinstance(beta, Tensor) and beta.requires_grad:
+        if beta.requires_grad:
             # Sum over batch and sequence dimensions
             grad_beta = grad_output.copy()
             while grad_beta.ndim > 1:
                 grad_beta = grad_beta.sum(axis=0)
 
         # Gradient for gamma: sum of (grad_output * normalized) over batch/seq dims
-        if isinstance(gamma, Tensor) and gamma.requires_grad:
+        if gamma.requires_grad:
             grad_gamma = (grad_output * normalized).copy()
             while grad_gamma.ndim > 1:
                 grad_gamma = grad_gamma.sum(axis=0)
 
         # Gradient for x: full LayerNorm backward formula
-        if isinstance(x, Tensor) and x.requires_grad:
+        if x.requires_grad:
             # grad flowing through gamma: grad_output * gamma
-            gamma_data = gamma.data if isinstance(gamma, Tensor) else gamma
-            grad_norm = grad_output * gamma_data
+            grad_norm = grad_output * gamma.data
 
             mean_grad = np.mean(grad_norm, axis=-1, keepdims=True)
             mean_grad_norm = np.mean(grad_norm * normalized, axis=-1, keepdims=True)
@@ -605,7 +609,7 @@ def test_unit_layer_norm():
 
 # Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_layer_norm()  # Moved after implementation
+    test_unit_layer_norm()
 
 # %% [markdown]
 """
@@ -741,13 +745,13 @@ class MLP:
         COMPUTATION FLOW:
         x -> Linear -> GELU -> Linear -> output
 
-        HINT: GELU activation is implemented above as a function
+        HINT: self.gelu is the GELU you built in Module 02
         """
         ### BEGIN SOLUTION
         # First linear layer with expansion
         hidden = self.linear1.forward(x)
 
-        # GELU activation (YOUR activation from Module 03!)
+        # GELU activation (YOUR activation from Module 02!)
         hidden = self.gelu.forward(hidden)
 
         # Second linear layer back to original size
@@ -811,7 +815,7 @@ def test_unit_mlp():
 
 # Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_mlp()  # Moved after implementation
+    test_unit_mlp()
 
 # %% [markdown]
 """
@@ -1079,7 +1083,7 @@ def test_unit_transformer_block():
 
 # Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_transformer_block()  # Moved after implementation
+    test_unit_transformer_block()
 
 # %% [markdown]
 r"""
@@ -1306,10 +1310,10 @@ class GPT:
         TODO: Implement the complete GPT forward pass
 
         APPROACH:
-        1. Get token embeddings and positional embeddings
-        2. Add them together (broadcasting handles different shapes)
-        3. Pass through all transformer blocks sequentially
-        4. Apply final layer norm and language modeling head
+        1. Get token + positional embeddings from the embedding layer (pass start_pos)
+        2. Build the causal mask with _create_causal_mask(seq_len)
+        3. Pass x and the mask through all transformer blocks in order
+        4. Apply final layer norm and the language modeling head
 
         COMPUTATION FLOW:
         tokens → embed + pos_embed → blocks → ln_f → lm_head → logits
@@ -1349,10 +1353,8 @@ class GPT:
     def _create_causal_mask(self, seq_len):
         """Create causal mask to prevent attending to future positions."""
         ### BEGIN SOLUTION
-        # Lower triangular binary mask: 1=allow (past/present), 0=block (future)
-        # _apply_mask in module 12 expects this convention: adder = (1-mask)*MASK_VALUE
-        mask = np.tril(np.ones((seq_len, seq_len)))
-        return Tensor(mask)
+        # Same binary convention as create_causal_mask: 1 = attend, 0 = block
+        return create_causal_mask(seq_len)
         ### END SOLUTION
 
     def _sample_next_token(self, logits, temperature=1.0):
@@ -1496,7 +1498,7 @@ def test_unit_gpt():
 
 # Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_gpt()  # Moved after implementation
+    test_unit_gpt()
 
 # %% [markdown]
 """
@@ -1662,8 +1664,6 @@ def demonstrate_transformer_integration():
 
     return model
 
-# demonstrate_transformer_integration()  # Moved to __main__ block below
-
 # %% [markdown]
 """
 ## 📊 Systems Analysis: Parameter Scaling and Memory
@@ -1675,15 +1675,17 @@ Transformer models scale dramatically with size, leading to both opportunities a
 One of the key discoveries in modern AI is that transformer performance follows predictable scaling laws:
 
 ```
-Scaling Laws Pattern:
-Performance ∝ Parameters^α × Data^β × Compute^γ
-
-where α ≈ 0.7, β ≈ 0.8, γ ≈ 0.5
+Scaling Laws Pattern (Kaplan et al., 2020):
+Loss ∝ N^-0.076   (N = parameters)
+Loss ∝ D^-0.095   (D = training tokens)
+Loss ∝ C^-0.050   (C = compute)
 
 This means:
-- 10× more parameters → ~5× better performance
-- 10× more data → ~6× better performance
-- 10× more compute → ~3× better performance
+- 10× more parameters → ~16% lower loss
+- 10× more data       → ~20% lower loss
+- 10× more compute    → ~11% lower loss
+
+Small exponents, but they hold across many orders of magnitude.
 ```
 
 ### Memory Scaling Analysis
@@ -1695,7 +1697,7 @@ Memory Scaling by Component:
 
 1. Parameter Memory (Linear with model size):
    - Embeddings: vocab_size × embed_dim
-   - Transformer blocks: ~4 × embed_dim²
+   - Transformer blocks: ~12 × embed_dim² each (4 for attention, 8 for the MLP)
    - Total: O(embed_dim²)
 
 2. Attention Memory (Quadratic with sequence length):
@@ -1716,7 +1718,7 @@ Memory Scaling by Component:
 │  ATTENTION MEMORY WALL: Why Long Context is Expensive           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):            │
+│  MEMORY USAGE BY SEQUENCE LENGTH (float32, batch×heads = 4):    │
 │                                                                 │
 │  1K tokens:   [▓] 16 MB                ← Manageable             │
 │  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic)  │
@@ -1893,9 +1895,6 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 13")
 
-# Call the comprehensive test
-# test_module()  # Only run in __main__ block below
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
@@ -1999,6 +1998,8 @@ def demo_transformers():
 # %%
 if __name__ == "__main__":
     test_module()
+    print("\n")
+    demonstrate_transformer_integration()
     print("\n")
     demo_transformers()
 
