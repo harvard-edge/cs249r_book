@@ -682,7 +682,8 @@ def structured_prune(model, prune_ratio=0.5):
     TODO: Implement structured pruning for Linear layers
 
     APPROACH:
-    1. For each Linear layer, calculate L2 norm of each output channel
+    1. For each hidden Linear layer (every Linear but the last, whose output
+       channels are the classes), calculate the L2 norm of each output channel
     2. Rank channels by importance (L2 norm)
     3. Remove lowest importance channels by setting to zero
     4. This creates block sparsity that's hardware-friendly
@@ -694,10 +695,10 @@ def structured_prune(model, prune_ratio=0.5):
     >>> model = Sequential(layer1, layer2)
     >>> original_shape = layer1.weight.shape
     >>> structured_prune(model, prune_ratio=0.3)
-    >>> # 30% of channels are now completely zero
+    >>> # 30% of layer1's channels are now completely zero; the head (layer2) is untouched
     >>> final_sparsity = measure_sparsity(model)
     >>> print(f"Structured sparsity: {final_sparsity:.1f}%")
-    Structured sparsity: 30.0%
+    Structured sparsity: 27.3%
 
     HINTS:
     - Calculate L2 norm for all channels at once: np.linalg.norm(weight, axis=0)
@@ -705,28 +706,32 @@ def structured_prune(model, prune_ratio=0.5):
     - Set entire channels to zero: weight[:, prune_indices] = 0
     """
     ### BEGIN SOLUTION
-    # All Linear layers have .weight attribute
-    for layer in model.layers:
-        if isinstance(layer, Linear):
-            weight = layer.weight.data
+    # Prune the hidden Linear layers. The last Linear is the head: its output
+    # channels are the classes, so zeroing them removes classes, not neurons.
+    # A model with a single Linear has nothing else to prune and is pruned as is.
+    linears = [layer for layer in model.layers if isinstance(layer, Linear)]
+    hidden = linears[:-1] if len(linears) > 1 else linears
 
-            # Calculate L2 norm for each output channel (column)
-            channel_norms = np.linalg.norm(weight, axis=0)
+    for layer in hidden:
+        weight = layer.weight.data
 
-            # Find channels to prune (lowest importance)
-            num_channels = weight.shape[1]
-            num_to_prune = int(num_channels * prune_ratio)
+        # Calculate L2 norm for each output channel (column)
+        channel_norms = np.linalg.norm(weight, axis=0)
 
-            if num_to_prune > 0:
-                # Get indices of channels to prune (smallest norms)
-                prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
+        # Find channels to prune (lowest importance)
+        num_channels = weight.shape[1]
+        num_to_prune = int(num_channels * prune_ratio)
 
-                # Zero out entire channels
-                weight[:, prune_indices] = 0
+        if num_to_prune > 0:
+            # Get indices of channels to prune (smallest norms)
+            prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
 
-                # Also zero corresponding bias elements if bias exists
-                if layer.bias is not None:
-                    layer.bias.data[prune_indices] = 0
+            # Zero out entire channels
+            weight[:, prune_indices] = 0
+
+            # Also zero corresponding bias elements if bias exists
+            if layer.bias is not None:
+                layer.bias.data[prune_indices] = 0
 
     return model
     ### END SOLUTION
