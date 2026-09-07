@@ -449,7 +449,14 @@ def main(_):
     final_result = dict(
         projectName=REPO,
         projectOwner=OWNER,
-        files=[f"{book_quarto}/contents/frontmatter/acknowledgements/acknowledgements.qmd", "README.md"],
+        files=[
+            # The rendered acknowledgements are the per-volume files; a shared
+            # contents/frontmatter/acknowledgements/ copy existed but no Quarto config
+            # rendered it, so contributor updates never reached the book (fixed 2026-09-07).
+            f"{book_quarto}/contents/vol1/frontmatter/acknowledgements.qmd",
+            f"{book_quarto}/contents/vol2/frontmatter/acknowledgements.qmd",
+            "README.md",
+        ],
         contributors=[
             dict(
                 login=(
