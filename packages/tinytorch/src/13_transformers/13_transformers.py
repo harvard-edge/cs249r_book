@@ -724,6 +724,8 @@ class MLP:
 
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
+        # Kept for API parity with PyTorch; TinyTorch's MLP applies no dropout
+        self.dropout_prob = dropout_prob
 
         # Two-layer feed-forward network
         self.linear1 = Linear(embed_dim, hidden_dim)
@@ -961,7 +963,7 @@ class TransformerBlock:
             hidden_dim = ff_dim
         else:
             hidden_dim = int(embed_dim * mlp_ratio)
-        self.mlp = MLP(embed_dim, hidden_dim)
+        self.mlp = MLP(embed_dim, hidden_dim, dropout_prob)
         ### END SOLUTION
 
     def forward(self, x, mask=None):
