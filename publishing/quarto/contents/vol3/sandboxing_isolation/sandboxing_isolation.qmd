@@ -226,7 +226,7 @@ Linux containers are not virtualization boundaries; they are constrained process
 * **Control Groups (`cgroups v2`):** Impose accounting limits on CPU, memory, and block I/O.
 * **Seccomp Filters:** Restrict available system calls.
 
-While containers boot relatively quickly (~200–500 ms), they represent an **unacceptable risk for untrusted agent code execution**. Over 450 system calls are exposed to the containerized process. Any local privilege escalation vulnerability in the host Linux kernel (such as Dirty COW [CVE-2016-5195] or Dirty Pipe [CVE-2022-0847]) grants root access to the physical host. Furthermore, misconfigured `/proc` and `/sys` mounts frequently leak host metadata, while shared loop devices can corrupt host block storage.
+While containers boot relatively quickly (~200–500 ms), they represent an **unacceptable risk for untrusted agent code execution** because they violate the principle of **Least Common Mechanism** [@saltzer1975]. By sharing the monolithic host Linux kernel across all tenants, containers introduce a massive shared attack surface. Over 450 system calls are exposed to the containerized process. Any local privilege escalation vulnerability in the host Linux kernel (such as Dirty COW [CVE-2016-5195] or Dirty Pipe [CVE-2022-0847]) grants root access to the physical host. Furthermore, misconfigured `/proc` and `/sys` mounts frequently leak host metadata, while shared loop devices can corrupt host block storage.
 
 ### Userspace Syscall Emulation (gVisor)
 
@@ -262,9 +262,9 @@ As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden arch
 
 AWS Firecracker was designed specifically for multi-tenant, serverless cloud workloads (powering AWS Lambda and AWS Fargate) and has become the de facto standard for developer agent sandboxing (utilized by platforms like Modal, Fly.io, and E2B).
 
-### Architectural Minimalism
+### Economy of Mechanism and the TCB
 
-Traditional virtual machine monitors like QEMU emulate complete PC motherboards: PCI buses, ACPI power tables, IDE/SATA controllers, USB ports, PS/2 keyboards, and NE2000 network cards. This legacy emulation introduces hundreds of thousands of lines of C code, resulting in large attack surfaces (such as the historic VENOM [CVE-2015-3456] floppy drive escape) and multi-second boot delays.
+The foundational security principle of **Economy of Mechanism** [@saltzer1975] dictates that the Trusted Computing Base (TCB)—the set of all hardware, firmware, and software components critical to security—must be kept as small and simple as possible to allow rigorous verification. Traditional virtual machine monitors like QEMU violate this principle by emulating complete PC motherboards: PCI buses, ACPI power tables, IDE/SATA controllers, USB ports, PS/2 keyboards, and NE2000 network cards. This legacy emulation introduces hundreds of thousands of lines of C code into the TCB, resulting in large attack surfaces (such as the historic VENOM [CVE-2015-3456] floppy drive escape) and multi-second boot delays.
 
 Firecracker eliminates legacy PC emulation entirely. Written in Rust for compile-time memory safety, Firecracker provides strictly four minimalist VirtIO devices:
 
@@ -349,7 +349,7 @@ The single most dangerous threat posed by an injected or compromised agent is **
 
 Relying on traditional perimeter firewalls is insufficient because developer agents legitimately require internet access to fetch package dependencies from package managers (such as PyPI, npm, and crates.io) and interface with git remotes (such as GitHub and GitLab).
 
-Production sandboxes enforce a **Multi-Layer Defense-in-Depth Network Egress Architecture** (@fig-network-egress).
+Production sandboxes enforce a **Multi-Layer Defense-in-Depth Network Egress Architecture** (@fig-network-egress) to guarantee **Complete Mediation** [@saltzer1975]—the principle that every single access to an external resource must be checked for authority. Furthermore, egress filters must follow **Fail-Safe Defaults**, operating as strict default-deny firewalls rather than default-allow blocklists.
 
 ::: {#fig-network-egress fig-env="figure" fig-pos="htb" fig-cap="**Multi-Layer Network Egress Filtering**: Defense-in-depth network isolation enforcing Zero Trust via eBPF packet interception, TLS SNI domain allowlists, outbound credential regex scanning, and DNS sinkholing." fig-alt="Diagram illustrating multi-layer network egress defense showing untrusted sandbox code on the left, Layer 1 kernel eBPF packet filtering dropping direct IPs, Layer 2 transparent Envoy proxy with TLS SNI allowlisting and secret scanning, Layer 3 DNS sinkhole, and allowed package repositories vs blocked C2 servers on the right."}
 ![](images/svg/network_egress_defense_in_depth.svg)
@@ -618,7 +618,7 @@ The enterprise redesigned its agent architecture according to the principles det
 1. **Firecracker MicroVMs:** Replaced Docker with rootless Firecracker microVMs managed by the Jailer. Each pull request runs in an ephemeral microVM that is discarded immediately after the test run.
 2. **IMDSv2 and Ephemeral STS:** Disabled IMDS entirely on worker nodes. The agent receives short-lived, scoped STS session tokens with zero administrative permissions.
 3. **Transparent Egress Proxy:** Installed an Envoy egress filter enforcing strict domain whitelisting. Outbound connections to raw IP addresses or non-allowlisted domains are severed instantly.
-4. **Dual-Agent Privilege Separation:** Separated the workflow into an unprivileged *Reader Agent* (which parses PR code and produces structured JSON summaries) and an isolated *Test Runner* (which executes in a network-disabled sandbox).
+4. **Separation of Privilege via Dual-Agent Architectures:** Applying the principle of **Separation of Privilege** [@saltzer1975], the enterprise divided the workflow into an unprivileged *Reader Agent* (which parses PR code and produces structured JSON summaries) and an isolated *Test Runner* (which executes in a network-disabled sandbox).
 
 ---
 

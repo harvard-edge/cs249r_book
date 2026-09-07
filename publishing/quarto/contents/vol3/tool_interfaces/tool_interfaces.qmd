@@ -41,6 +41,8 @@ However, systems architects must confront a dangerous misconception: **a wire pr
 - Implement grammar-constrained logit decoding via Finite State Automata (FSAs) to guarantee 100% syntactic compliance at zero latency overhead.
 - Engineer distributed idempotency filters and cryptographic nonces to guarantee at-most-once execution across stochastic agent retry loops.
 - Map POSIX exit codes, signals, and process output streams into high-signal diagnostic observation representations.
+- Implement circuit breaking and transparent backpressure to protect downstream APIs from runaway agent retry loops.
+- Enforce schema evolution principles and distributed tracing context propagation to maintain system stability and cross-boundary observability.
 
 :::
 
@@ -295,6 +297,16 @@ Please re-issue the tool call with corrected arguments.
 
 By presenting the specific field, the invalid value received, and the exact constraint violated, the agent typically corrects its invocation on the subsequent turn without drifting off-task.
 
+## Schema Evolution and Interface Versioning {#sec-vol3-tools-schema-evolution}
+
+Unlike human developers who can read changelogs and intuitively adapt to updated APIs, language models are notoriously brittle when interacting with evolving tool schemas. If a backend system adds a new required parameter to an existing tool, an agent relying on few-shot examples, pre-trained weights, or static prompts tailored to the V1 schema will systematically fail.
+
+To maintain system stability across continuous deployments, tool interfaces must adhere to strict **Forward Compatibility** and **Schema Versioning** principles:
+
+- **Immutable Tool Signatures:** Once an agent relies on a tool signature in production (e.g., `create_user(name, email)`), the signature must not introduce new required fields. Structural changes must be exposed as explicitly versioned endpoints (e.g., `create_user_v2`).
+- **Tolerant Reader Pattern:** The tool server must implement permissive parsing. If a newer model opportunistically passes a newly documented optional field (e.g., `create_user(name, email, role="admin")`), an older V1 tool server must gracefully ignore the unrecognized `role` parameter rather than crashing with a strict `ValidationError`.
+- **Deprecation Windows:** Before a tool is removed, its schema description should be dynamically prepended with a system-level warning: `[DEPRECATED: Use v2 tool instead]`. This semantic signal allows the model to migrate its behavior before the physical endpoint is severed.
+
 ## Execution Semantics {#sec-vol3-tools-execution-semantics-synchronous-rpc}
 
 Tool operations span a wide spectrum of execution latencies, from sub-millisecond database lookups to multi-hour test suite runs. A production agent runtime must implement three distinct execution semantics [@birrell1984rpc; @fielding2000].
@@ -328,6 +340,15 @@ For asynchronous operations, the tool interface adheres to the **Job Handle Patt
 When tools generate high-volume terminal output (such as running a build command that emits 10,000 lines of compiler logs), waiting for process termination before returning output wastes precious wall-clock time.
 
 Streaming execution pipes `stdout` and `stderr` directly to the client as chunked tokens. This enables the runtime to perform **early termination**: if a build failure or fatal assertion is detected in line 12 of a 5,000-line log, the host application sends a `SIGTERM` or cancellation RPC to the tool process immediately, avoiding unnecessary compute and saving context tokens.
+
+### Backpressure and Circuit Breaking
+
+Because language models can generate tokens at high speeds, an agent caught in an automated retry loop can easily trigger unintended Denial of Service (DoS) attacks against downstream tool APIs. For instance, if an agent repeatedly polls a rate-limited cloud service without respecting `HTTP 429 Too Many Requests`, it will exhaust organizational API quotas.
+
+The tool interface gateway must implement **Circuit Breakers** and **Backpressure mechanisms**:
+
+- **Circuit Breaking:** If a tool returns consecutive system-level failures (e.g., five HTTP 500 or 429 errors in a row), the gateway trips the circuit. Subsequent calls immediately fail with a localized error (saving network bandwidth and latency) until a reset timeout expires.
+- **Backoff Propagation:** When backpressure is applied by a downstream service (via `Retry-After` headers), the agent runtime must transparently implement exponential backoff at the scheduling layer rather than passing the 429 directly back to the model as a textual observation, which would force the model to burn expensive context window tokens simply waiting.
 
 ## Idempotency and Nonce Tracking {#sec-vol3-tools-idempotency-keys-nonce-tracking}
 
@@ -449,6 +470,16 @@ The tool interface must enforce a **Head-and-Tail Preservation Policy**:
 
 This guarantees that the diagnostic core is preserved while strictly bounding context consumption.
 
+## Distributed Tracing and Context Propagation {#sec-vol3-tools-distributed-tracing}
+
+In a microservice architecture, an autonomous agent's tool invocation may traverse multiple network boundaries, from the client host through an MCP gateway, load balancers, and finally to a backend database or internal API. When an agent produces an unintended side effect, systems engineers must reconstruct the exact causal chain linking the model's generation to the physical mutation.
+
+Tool interfaces must natively support **Distributed Context Propagation** (such as W3C Trace Context and OpenTelemetry):
+
+- **Trace Injection:** The host runtime automatically generates a unique `trace_id` for the trajectory step and a `span_id` for the specific tool invocation. These identifiers are injected into the JSON-RPC or HTTP transport headers (e.g., `traceparent`).
+- **Causal Linking:** The downstream MCP server extracts the trace headers and attaches them to any database queries, log emissions, or sub-service calls triggered by the tool.
+- **Audit Logging:** By joining the telemetry store on `trace_id`, operators can query the exact model prompt, the synthesized trajectory nonce, the generated JSON parameters, and the backend execution latency in a unified observability dashboard.
+
 ## Dynamic Tool Registry Indexing {#sec-vol3-tools-dynamic-tool-registry-indexing}
 
 Enterprise agent platforms frequently have access to thousands of internal tools and REST endpoints (e.g., company HR tools, financial reporting APIs, internal microservices). Packing 5,000 tool schemas into every prompt is impossible: it would require millions of tokens and collapse model reasoning [@qin2024toolllm; @tang2023toolalpaca].
@@ -539,4 +570,6 @@ When a model emits invalid tool JSON, dumping a raw traceback and asking it to "
 - **Ousterhout’s Deep Modules:** Designing a few expressive, deep tools (such as persistent shells and atomic file editors) saves up to 95% of prompt token overhead compared to shallow micro-tool catalogs.
 - **Grammar-constrained logit decoding:** Compiling schemas into Deterministic Finite Automata (DFAs) allows CUDA kernels to mask invalid token logits to $-\infty$, mathematically guaranteeing 100% syntactic compliance at sub-millisecond latency.
 - **At-most-once execution via idempotency:** Binding mutating tool calls to cryptographic trajectory nonces $\eta$ and distributed lease locks guarantees that network retry loops never trigger duplicate real-world mutations.
+- **Schema evolution and tracing:** Forward-compatible schemas, tolerant readers, and OpenTelemetry trace propagation are required to maintain stability and observability across distributed agent workflows.
+- **Execution control and backpressure:** Agent runtimes must implement circuit breakers, transparent backoff, and chunked streaming responses to protect downstream APIs and avoid context exhaustion.
 - **Semantic signal translation:** Tool runtimes must decode raw POSIX signals and exit codes into actionable diagnostic feedback, utilizing head-and-tail buffering to preserve context limits.

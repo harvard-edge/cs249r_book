@@ -400,6 +400,16 @@ A production-grade agent scheduling architecture integrates three primary open-s
    - A Redis cluster maintains real-time metadata, lease locks, and active Agent Control Blocks.
    - S3-compatible object storage persists cold-tier serialized KV caches and historical trajectory execution traces for post-hoc debugging.
 
+### Fault Tolerance and Write-Ahead Logging
+
+In long-running agentic workflows (spanning hours or days), the probability of underlying hardware failure (e.g., uncorrectable ECC memory errors, network partitions, or spot instance preemption) is non-trivial. Classical stateless serving runtimes simply drop the request on worker failure, relying on client-side retries. In agentic systems, silently discarding a 200-step trajectory that has already mutated external state is unacceptable.
+
+To provide robust systems reliability, schedulers implement **Event Sourcing** backed by a **Write-Ahead Log (WAL)**. Agent state is composed of discrete conversational turns, tool invocations, and environment observations. By treating the agent's context window as an append-only ledger:
+
+1. **Durability Before Side Effects:** Before any tool execution or external API call is initiated, the scheduler durably appends the agent's planned action to the WAL (e.g., Apache Kafka or a transactional database).
+2. **Deterministic Recovery:** If a GPU worker crashes, the scheduler detects the heartbeat timeout and provisions a replacement worker. The replacement worker reads the WAL to retrieve the complete, exact sequence of historical events.
+3. **KV Cache Rehydration:** Rather than re-executing the entire sequence step-by-step (which would dangerously re-trigger side effects), the replacement worker concatenates the logged events into a single contiguous text prompt. It executes one massive chunked prefill pass, rapidly regenerating the exact KV cache state in HBM, and seamlessly resumes execution.
+
 ---
 
 ## Fallacies and Pitfalls {#sec-vol3-scheduling-fallacies}
@@ -436,6 +446,14 @@ Allowing multi-gigabyte KV caches to sit pinned in accelerator HBM while an agen
 
 :::
 
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Relying on client-side retries for agent fault tolerance.*
+
+In stateless web serving, if a request fails, the client simply retries. If an agent worker crashes at step 45 of a 50-step database migration, a naive retry restarts the migration from step 1, potentially corrupting the database or duplicating non-idempotent operations. Agent fault tolerance must be handled server-side via Write-Ahead Logging and deterministic KV cache rehydration.
+
+:::
+
 ## Chapter Summary {#sec-vol3-scheduling-summary}
 
 - **Heavy-Tailed Pareto Service Times:** Agent workloads exhibit power-law service times with infinite variance ($\alpha \le 2$), rendering classical FIFO and Poisson queueing models obsolete due to severe Head-of-Line blocking.
@@ -444,3 +462,4 @@ Allowing multi-gigabyte KV caches to sit pinned in accelerator HBM while an agen
 - **Preemption Across Bimodal I/O Gaps:** Decoupling active compute from tool waits allows schedulers to asynchronously swap idle KV caches to Host DRAM over PCIe Gen5, freeing scarce HBM page frames during multi-second tool stalls.
 - **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65%.
 - **The Reversibility Boundary:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating Saga workflows, and irreversible actions must remain pinned to completion.
+- **Fault Tolerance via WAL:** Schedulers treat agent contexts as append-only event ledgers. Using Write-Ahead Logging ensures that if a worker crashes, the trajectory can be deterministically rehydrated via a single chunked prefill without re-executing non-idempotent side effects.

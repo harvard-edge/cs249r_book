@@ -236,7 +236,7 @@ When an agent initiates a new execution step with token sequence $T = [t_1, t_2,
 
 ### Reference Counting and LRU Eviction
 
-Because accelerator HBM has strictly finite capacity, the Radix tree cannot retain all historical prefixes indefinitely. The runtime implements reference-counted Least-Recently-Used (LRU) eviction:
+Because accelerator HBM has strictly finite capacity, the Radix tree cannot retain all historical prefixes indefinitely. Exploiting the system principle of **temporal locality**—the empirical observation that recently accessed trajectories are the most likely to receive new generation steps in the near future—the runtime implements reference-counted Least-Recently-Used (LRU) eviction:
 
 - **Pinned Internal Nodes:** When an agent is actively decoding tokens or awaiting a step execution, all Radix tree nodes along its active path have $\text{ref\_count} \ge 1$. The memory manager is strictly forbidden from evicting any node with $\text{ref\_count} > 0$.
 - **Eviction Candidate Pool:** When an agent completes a turn or releases a session, the runtime decrements $\text{ref\_count}$ along its path. Nodes whose reference count reaches zero ($\text{ref\_count} = 0$) are moved into an LRU eviction pool. Crucially, the physical KV blocks belonging to these nodes remain resident in HBM; they are not immediately deallocated.
@@ -296,7 +296,9 @@ To maximize prefix cache reuse while isolating mutations, prompt engineers must 
 
 In human-in-the-loop interactions and complex agent workflows, agent execution is dominated by heavy-tailed idle gaps. While an LLM generates tokens in a few hundred milliseconds, an external bash command (e.g., running an entire regression test suite), an API call to a rate-limited external service, or a human reviewing an approval request can stall the agent for $15$ seconds to several hours.
 
-### The Pinned Memory Crisis
+### Working Set Constraints and the Pinned Memory Crisis
+
+In classical operating systems, a process's *working set* is the minimum amount of physical memory required to make forward progress without thrashing. For an active agent trajectory, the working set is strictly the entire uncompressed KV cache of its context history.
 
 If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), just 20 idle agent sessions can exhaust the entire cluster's memory, causing out-of-memory (OOM) crashes and stalling active generation.
 
@@ -362,8 +364,8 @@ Traditional LLM serving engines co-locate the prompt prefill phase and the autor
 
 Prompt prefill and token decoding represent polar opposites in systems behavior:
 
-- **Prefill Phase:** Computes across all input prompt tokens simultaneously using large matrix-matrix multiplications (GEMM). Highly compute-bound with Arithmetic Intensity exceeding $100\text{ FLOPs/byte}$. Saturates Tensor Cores at peak utilization.
-- **Decode Phase:** Generates one token at a time autoregressively using matrix-vector multiplications (GEMV). Severely memory-bandwidth-bound with Arithmetic Intensity near $1\text{ FLOP/byte}$. Bottlenecked entirely by HBM read bandwidth.
+- **Prefill Phase:** Computes across all input prompt tokens simultaneously using large matrix-matrix multiplications (GEMM). Operating in the compute-bound regime of the hardware Roofline model, it achieves high Arithmetic Intensity (exceeding $100\text{ FLOPs/byte}$) and saturates Tensor Cores at peak utilization.
+- **Decode Phase:** Generates one token at a time autoregressively using matrix-vector multiplications (GEMV). Operating in the memory-bound regime of the Roofline model, it suffers from severe Arithmetic Intensity starvation (near $1\text{ FLOP/byte}$) and is bottlenecked entirely by HBM read bandwidth.
 
 When a long prompt prefill (e.g., an agent submitting a $48\text{k}$-token context) is scheduled on a GPU currently decoding active sequences, it triggers **Head-of-Line (HoL) blocking**. The compute-bound prefill monopolizes the GPU's streaming multiprocessors for hundreds of milliseconds or seconds, freezing all ongoing decode iterations. This causes catastrophic spikes in Inter-Token Latency (ITL)—producing severe stuttering in interactive user sessions and causing time-sensitive agent tool calls to breach service level objectives (SLOs).
 
@@ -411,6 +413,12 @@ In Mooncake:
 - **Zero-Copy RDMA Streaming:** If the client router dispatches an agent request to Node C, but its prefix KV cache resides in the DRAM of Node A, Node C's PagedAttention allocator does not recompute the prefix. Instead, it issues an asynchronous RDMA read over the RoCEv2 network, streaming the KV blocks directly into Node C's GPU HBM at line rate.
 
 By decoupling prefix caching from the physical placement of compute, KVCache-centric datacenter architectures achieve global cache hit rates exceeding 90% across thousands of distributed agent workflows, transforming multi-turn agent serving economics.
+
+### Immutability and the Absence of Cache Coherence
+
+A foundational principle of distributed systems is that caching mutable state requires complex, latency-inducing cache coherence protocols (e.g., MESI, directory-based invalidation) to prevent nodes from reading stale data. However, autoregressive LLM KV caches possess a profound systems property: **token sequences and their corresponding KV activations are strictly immutable**. The mathematical Key and Value tensors for the sequence `[A, B, C]` will never change, regardless of how many agents access them.
+
+Because KV caches are append-only and immutable, KVCache-centric architectures completely bypass distributed cache coherence overhead. When Node C replicates a prefix from Node A, it requires no lease, no lock, and no invalidation callback. The global metadata service only tracks placement, not mutation. This structural immutability is the key system property that enables KV disaggregation to scale gracefully to tens of thousands of nodes without distributed coordination bottlenecks.
 
 ## Branching Speculation {#sec-vol3-caching-branching-speculation-prefix-cache}
 
@@ -489,7 +497,7 @@ The failure propagated through five distinct stages:
 1. **Zero-Hit Prefix Invalidation:** When requests arrived at the inference engine, the Radix tree traversal failed immediately at token position 12. The engine was unable to reuse any cached physical blocks for the subsequent $35\text{k}$ tokens of tool schemas, repository context, and conversation history.
 2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $14\times$.
 3. **Radix Tree Eviction Thrashing:** To allocate physical blocks for the massive surge of incoming prefills, the PagedAttention memory manager entered aggressive LRU eviction mode. Because new prefixes diverged immediately at the root, the Radix tree allocator created thousands of short-lived, fragmented branches. High-utility cached prefixes from other active workflows were prematurely evicted.
-4. **Queueing Backpressure and Pinned Block Exhaustion:** As prefill latency exploded from $220\text{ ms}$ to over $11\text{ seconds}$, incoming requests accumulated in the serving queue. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks exhausted the global free list.
+4. **Queueing Backpressure and Pinned Block Exhaustion:** Dictated by Little's Law ($L = \lambda W$), as prefill latency ($W$) exploded from $220\text{ ms}$ to over $11\text{ seconds}$ under constant arrival rate ($\lambda$), the number of concurrent requests actively trapped in the system ($L$) skyrocketed. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks completely exhausted the global free list.
 5. **Cascading Worker Death:** When an active decode step requested an additional physical block from an exhausted free pool with zero evictable zero-ref-count blocks, the allocation call failed. Rather than graceful throttling, worker processes crashed with CUDA out-of-memory exceptions, triggering cluster-wide leader election storms.
 
 ### Architectural Postmortem Remedies

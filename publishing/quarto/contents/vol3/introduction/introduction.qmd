@@ -313,10 +313,20 @@ Because the prefill length $C_i$ expands with each step, the computational cost 
 $$\text{Total Tokens Processed} = \sum_{i=1}^N C_i = \sum_{i=1}^N \left( C_0 + \sum_{j=1}^{i-1} \Delta_j \right) \approx N C_0 + \frac{1}{2} N^2 \bar{\Delta}$$
 where $\bar{\Delta}$ is the average tokens added per step. Across a 50-step trajectory with an initial prompt of 10,000 tokens and an average turn payload of 2,000 tokens, the inference engine evaluates over **3 million tokens**, paying the prefill cost repeatedly if prefix caching is not utilized.
 
+### Amdahl's Law for Agentic Systems
+
+This latency model exposes a profound system limitation governed by **Amdahl's Law**. In classical computer architecture, Amdahl's Law dictates that the overall speedup of a system is strictly bottlenecked by its unparallelizable, serial components.
+
+In an agentic trajectory, the neural compute time ($T_{\text{prefill}} + T_{\text{decode}}$) can be aggressively accelerated through faster silicon (e.g., HBM3e), systems optimizations (speculative decoding, continuous batching), or reduced precision. However, the environment actuation time ($T_{\text{tool}}$)—such as waiting for a 45-second Python `pip install`, a web page DOM to render, or a remote REST API response—is bound by external physical and network latencies. No amount of GPU scaling can accelerate a blocking external network request.
+
+As neural inference latency is optimized toward zero, the overall trajectory time asymptotically hits the Amdahl bottleneck of the external environment. **Accelerating the model does not accelerate the environment.** This principle dictates that systems engineers must shift focus from micro-optimizing inference kernels to macro-optimizing the trajectory: parallelizing tool invocations, implementing asynchronous I/O offloading, and aggressively pruning the critical path of the step horizon.
+
 ### The Tool-Wait Memory Tax
 A severe, hidden systems inefficiency in naive agent runtimes is the **Tool-Wait Memory Tax** (@fig-tool-wait-memory-tax). Consider an agent running on an 8-GPU node of NVIDIA H100s. At step $t=10$, the agent issues a bash command to run a comprehensive test suite that executes for 45 seconds ($T_{\text{tool}} = 45\text{ s}$).
 
-During those 45 seconds, the neural policy engine is completely idle, awaiting the completion of the child process. However, in a naive serving architecture, the entire multi-gigabyte KV cache associated with that trajectory remains pinned in GPU High Bandwidth Memory (HBM). Because HBM is the scarcest and most expensive resource in modern data centers ($\approx \$40,000$ per accelerator), holding HBM allocated while awaiting blocking operating system I/O slashes overall cluster throughput.
+During those 45 seconds, the neural policy engine is completely idle, awaiting the completion of the child process. However, in a naive serving architecture, the entire multi-gigabyte KV cache associated with that trajectory remains pinned in GPU High Bandwidth Memory (HBM). 
+
+This inefficiency is mathematically formalized by **Little's Law** ($L = \lambda W$), which states that the number of concurrent items in a stable system ($L$) equals the long-term average arrival rate ($\lambda$) multiplied by the average time spent in the system ($W$). In an agentic cluster, the number of concurrent active trajectories residing in memory ($L$) scales linearly with the average trajectory duration ($W$). Because $W$ is dominated by these extended external tool waits, a high-throughput serving cluster will rapidly accumulate a massive backlog of suspended trajectories. Because HBM is the scarcest and most expensive resource in modern data centers ($\approx \$40,000$ per accelerator), holding HBM allocated for these stalled trajectories slashes overall cluster throughput and triggers out-of-memory (OOM) cascading failures.
 
 ::: {#fig-tool-wait-memory-tax fig-env="figure" fig-pos="htb" fig-cap="**The Tool-Wait Memory Tax and GPU HBM Idleness**: During extended external tool invocations, gigabytes of Key-Value cache memory remain pinned in idle accelerator HBM unless managed by asynchronous swapping or prefix caching." fig-alt="Timing diagram illustrating the GPU HBM idleness crisis during external tool execution, contrasting naive memory pinning against radix prefix caching and asynchronous PCIe/CXL offloading."}
 
@@ -340,12 +350,14 @@ In modern agentic architectures, foundation models are inherently untrusted comp
 In an autonomous agentic system, safety, budget, capability, and transactional invariants must be enforced by a deterministic, non-neural runtime enclosure. The untrusted neural policy must operate strictly as an advisory proposal engine enclosed within an unbypassable execution supervisor.
 :::
 
+This principle is a direct adaptation of the classic operating systems tenet of **Separation of Mechanism and Policy**. In traditional operating systems (like the Hydra kernel), the kernel provides the mechanisms (e.g., page tables, context switching) while user-space or administrators provide the policy (e.g., which pages to evict, scheduling priorities). In agentic MLSys, this separation is strictly inverted: the neural foundation model provides the complex, non-deterministic *policy* (deciding *what* tools to call and formulating the multi-step plan), while the deterministic runtime enclosure provides the unyielding *mechanism* (executing the ABI calls, enforcing budgets, and applying sandboxes).
+
 Under the Invariant Closure Principle, the system architecture explicitly partitions the runtime into two distinct privilege domains:
 
 - **The Proposal Domain (Untrusted Neural Policy):** The foundation model generates natural language reasoning and proposes structured tool invocations $a_t = \langle \text{fn}, \text{args} \rangle$. The model possesses **zero direct authority** to execute operations on hardware, filesystems, or networks.
 - **The Enforcement Domain (Deterministic Runtime Enclosure):** The outer software harness intercepts the proposed action before execution. It validates the proposal against strict formal invariants:
   - **Budget Invariants:** Checks whether the trajectory's cumulative token usage, financial cost, and elapsed wall-clock time reside within hard limits ($C_{\text{cum}} \le C_{\text{budget}}$).
-  - **Capability Invariants:** Verifies that the proposed function and arguments adhere to cryptographic capability tokens, role-based access control (RBAC) policies, and file path sandboxing rules.
+  - **Capability Invariants:** Verifies that the proposed function and arguments adhere to cryptographic capability tokens, role-based access control (RBAC) policies, and file path sandboxing rules, rigidly enforcing the **Principle of Least Privilege**.
   - **Schema Invariants:** Validates argument types against static AST schemas, rejecting malformed payloads before they reach the tool ABI.
   - **State Invariants:** Assesses whether the environment state transition is reversible, establishing transactional checkpoints before mutating commands are committed.
 
