@@ -1,156 +1,350 @@
-# Rigorous Benchmarking: GPU Synchronization and Tail Latencies {#sec-benchmarking}
+# Benchmarking: Measuring a Speedup You Can Trust {#sec-benchmarking}
 
-In Chapters 14 through 18, we engineered a comprehensive arsenal of performance optimizations: INT8 quantization, structured pruning, kernel fusion, and the KV cache engine. Yet in computer systems research, claiming a *"4x speedup"* without scientific measurement methodology is meaningless.
+Chapter 18 ended with a claim: with the KV cache in place, a decode step costs about the same at every position, so generation no longer slows down as the text grows. Chapters 15 through 17 each ended with a claim of the same kind, that a change made the model smaller or faster. This chapter asks the question a practitioner asks the moment they are about to put such a claim in a report or a pull request. I timed the model before and after, and the ratio looks good. Can I believe it, and what would I have to show for someone else to believe it?
 
-In this chapter, we engineer the **TinyTorch Benchmark Suite (`Benchmark`, `MLPerf`)**. We explore why naive timing scripts measure asynchronous queue latencies rather than real compute time, formulate statistical warmup stabilization, and build percentile-based latency distributions ($P_{50}, P_{95}, P_{99}$) compliant with industry-standard **MLPerf** specifications.
+The answer is a small discipline rather than a large piece of code. Run the model a few times before you start the clock, because the first run pays for setup that later runs do not. Run it many times after, because one timing is one draw from a noisy distribution. Report the distribution rather than a single number, because the users who notice latency are the ones who hit the slow runs. And attach an accuracy check, because a model that got faster by getting worse has not been optimized. TinyTorch's `Benchmark` and `BenchmarkResult` encode those four habits, and the chapter closes with a pass/fail check modeled on the industry benchmark that turned the same habits into rules.
 
-![Statistical Benchmarking Methodology: Warmup Phase Stabilization, Device Synchronization Barriers, and Tail Latency Percentiles](assets/images/diagrams/19_benchmarking-diag-1.svg){#fig-benchmarking-pipeline}
-
----
-
-## The Crisis: The Illusion of Naive Timing
-
-Consider the following benchmarking script written by a well-meaning engineer:
-
-```python
-# The Naive Benchmarking Trap:
-import time
-t0 = time.time()
-output = model(input_tensor)
-t1 = time.time()
-print(f"Latency: {(t1 - t0) * 1000} ms")
-```
-
-```
-The Three Fatal Benchmarking Flaws:
-1. Cold Cache Contamination: The first iteration triggers OS page faults, CPU instruction
-   cache misses, and dynamic memory allocations. Latency is 10x higher than steady-state! ❌
-2. Asynchronous Queue Timing: On GPUs, model(x) merely places a kernel pointer onto the
-   CUDA command queue and returns IMMEDIATELY to Python. time.time() measures CPU launch
-   time (0.02 ms), not GPU compute time (15.0 ms)! ❌
-3. Average Mean Deception: If 99 requests take 5 ms and 1 request stalls for 500 ms,
-   the arithmetic mean reports a cheerful 9.9 ms, hiding catastrophic tail latency! ❌
-```
-
-To report scientifically honest performance, benchmark harnesses must implement:
-1. **Warmup Passes**: Discard initial runs until memory caches and JIT compilers stabilize.
-2. **Hardware Synchronization Barriers**: Explicitly block the host CPU until all asynchronous accelerator queues have fully retired.
-3. **Tail Latency Percentiles**: Report $P_{50}$ (Median), $P_{95}$, and $P_{99}$ percentiles across hundreds of iterations.
+![Warmup runs are discarded, measured runs are collected, and the sorted collection yields the median and the tail.](assets/images/diagrams/19_benchmarking-diag-1.svg){#fig-benchmarking-pipeline}
 
 ---
 
-## The Mental Model: Statistical Benchmarking and MLPerf Protocols
+## The Problem
 
-The **MLPerf Consortium** (MLCommons) sets the global standard for machine learning performance evaluation:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ MLPerf Benchmarking Discipline                                              │
-├───────────────────┬─────────────────────────────────────────────────────────┤
-│ Protocol          │ Systems Reality                                         │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 1. Warmup Runs    │ Execute N_warmup iterations (e.g. 10 runs) unmeasured to│
-│                   │ prime hardware L1/L2 caches and memory allocators.      │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 2. Synchronization│ Call torch.cuda.synchronize() before and after timers. │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 3. Repetition     │ Execute N_measure iterations (e.g. 100 runs) to produce │
-│                   │ statistically valid distributions.                      │
-├───────────────────┼─────────────────────────────────────────────────────────┤
-│ 4. Metrics        │ Throughput (samples/sec), P50, P95, and P99 latencies.  │
-└───────────────────┴─────────────────────────────────────────────────────────┘
-```
-
-$$\text{Throughput} = \frac{\text{Total Samples Processed}}{\sum_{i=1}^N \text{Latency}_i}$$
-
----
-
-## The Pure TinyTorch Construction
-
-We implement the complete `Benchmark` and `MLPerf` compliance engine in TinyTorch:
+The script below is how most people time a model the first time, and it is wrong in three separate ways. The model is a stand-in that sleeps instead of multiplying, so the numbers are predictable and you can run it without any other TinyTorch class.
 
 ```python
 import time
-import numpy as np
-from typing import Dict, List, Any, Tuple, Callable
-from .tensor import Tensor
 
-class BenchmarkResult:
-    """Structured benchmark results container."""
-    def __init__(self, name: str, latencies_ms: List[float], memory_mb: float, accuracy: float):
-        self.name = name
-        self.latencies_ms = np.array(latencies_ms)
-        self.memory_mb = memory_mb
-        self.accuracy = accuracy
+class ToyModel:
+    """Stands in for a real model: slow once, then fast, with a periodic stall."""
+    def __init__(self):
+        self.calls = 0
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'name': self.name,
-            'mean_ms': float(np.mean(self.latencies_ms)),
-            'p50_ms': float(np.percentile(self.latencies_ms, 50)),
-            'p95_ms': float(np.percentile(self.latencies_ms, 95)),
-            'p99_ms': float(np.percentile(self.latencies_ms, 99)),
-            'throughput_fps': float(1000.0 / np.mean(self.latencies_ms)) if np.mean(self.latencies_ms) > 0 else 0.0,
-            'memory_mb': self.memory_mb,
-            'accuracy': self.accuracy
-        }
+    def forward(self, x):
+        self.calls += 1
+        if self.calls == 1:
+            time.sleep(0.040)      # one-time setup: allocate, load, compile
+        if self.calls % 25 == 0:
+            time.sleep(0.010)      # something else grabbed the CPU
+        time.sleep(0.005)          # the steady-state work
+        return x
 
-class Benchmark:
-    """Rigorous execution and statistical benchmarking engine."""
-    def __init__(self, num_warmup: int = 10, num_runs: int = 100):
-        self.num_warmup = num_warmup
-        self.num_runs = num_runs
-
-    def run_latency_benchmark(self, model, sample_input: Tensor, name: str = "Model") -> BenchmarkResult:
-        """Measure steady-state execution latency percentiles with strict warmup."""
-        # 1. Warmup Phase (Prime instruction & data caches)
-        for _ in range(self.num_warmup):
-            _ = model.forward(sample_input)
-
-        # 2. Measurement Phase
-        latencies = []
-        for _ in range(self.num_runs):
-            t_start = time.perf_counter()
-            _ = model.forward(sample_input)
-            t_end = time.perf_counter()
-            latencies.append((t_end - t_start) * 1000.0)
-
-        # 3. Measure memory footprint
-        total_bytes = sum(p.data.nbytes for p in model.parameters())
-        mem_mb = total_bytes / (1024.0 * 1024.0)
-
-        return BenchmarkResult(name, latencies, mem_mb, accuracy=1.0)
+model = ToyModel()
+t0 = time.perf_counter()
+model.forward(None)
+t1 = time.perf_counter()
+print(f"latency: {(t1 - t0) * 1000:.1f} ms")
 ```
+
+The script prints roughly 50 ms for a model whose steady-state cost is 5 ms. That is the first flaw. The first call to any real model pays costs that later calls do not, such as allocating buffers, loading weights into memory, and building whatever lookup tables the layers keep. A cold measurement can be ten times the warm one, and if you measure the baseline cold and the optimized version warm, the setup cost alone looks like a 9x speedup.
+
+The second flaw is that one measurement is one sample. Even after warmup, the same forward pass does not take the same time twice. The operating system schedules other work, the caches hold different contents, the clock frequency drifts. Run the toy model 100 times after warmup and 96 runs land near 5 ms while four land near 15 ms. A single timing that happens to catch a stall reports a model three times slower than it is; a single timing that misses every stall reports a model that never stalls.
+
+The third flaw appears once you do repeat the measurement and average it. The napkin version is enough to feel it. If 99 requests take 5.0 ms and one stalls for 500 ms, the mean is 9.95 ms, a number no single request ever experienced. The mean is pulled up by the one outlier and tells you neither what a typical request costs nor how bad the worst ones are. Latency is not symmetric noise around a center; it has a floor and a long right tail, and the average hides both.
+
+There is a fourth problem that the toy model cannot show because it runs on a CPU. On a GPU, the call that launches the work returns before the work is done, so a script like the one above can time the launch, a few hundredths of a millisecond, instead of a 15 ms computation, and report a latency that is wrong by a factor of a thousand. TinyTorch never meets that problem, since NumPy finishes each operation before returning. The bridge at the end of the chapter covers what production code does about it.
 
 ---
 
-## The Production Bridge: MLPerf Submission Verification
+## The Idea
 
-In production systems, industry competitors submit benchmark logs directly to the MLCommons verification suite:
+Treat a latency measurement as a sample from a distribution, and design the benchmark so that the distribution you sample is the one you care about. That single reframing produces every rule in the chapter.
 
-```
-MLPerf Automated Verification Checks:
-1. Accuracy Threshold Check : The optimized model MUST meet >= 99% of baseline accuracy.
-2. Latency P99 Constraint   : 99th percentile latency must remain strictly bounded.
-3. System Audit Log         : Full hardware specification (CPU, GPU, DRAM, OS version).
-```
+### Warmup
+
+The distribution you care about is steady state, the cost of the model once it is loaded and running. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary you compute. The fix is to run the model several times and throw those timings away, so that the list you keep is drawn from the distribution you meant to measure.
+
+### Repetition and the shape of the distribution
+
+After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
+
+$$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
+
+Both describe a distribution well only when it is roughly symmetric. Latency is not. Nothing can run faster than the floor, and occasional stalls push a few timings far above it, so the histogram has a sharp left edge and a long right tail. For such a distribution the useful summaries come from sorting.
+
+A **percentile** is a position in the sorted list. Sort the $N$ timings in ascending order, and the $p$-th percentile $P_p$ is the value $p$ percent of the way from the smallest to the largest. Three percentiles carry most of the meaning:
+
+- **$P_{50}$**, the median, is what a typical request costs. Half the runs were faster, half slower. It ignores outliers entirely, which is what you want when the question is "how fast is this model."
+- **$P_{95}$** and **$P_{99}$** are the **tail latency**, the cost seen by the slowest 5 and 1 percent of requests. If a service promises that responses arrive within 20 ms, the promise is about $P_{99}$, not the mean, because one user in a hundred lands there on every request.[^fn-sla-latency-target]
+
+[^fn-sla-latency-target]: **SLA** (service-level agreement): a written promise about a service's behavior, such as "99 percent of requests complete within 20 ms." Latency SLAs are almost always stated as a percentile, which is why a benchmark that reports only the mean cannot tell you whether a model meets one.
+
+When $p$ percent of the way through the list falls between two entries, TinyTorch interpolates linearly between them, the same convention NumPy uses by default. With seven sorted timings, $P_{50}$ sits at position $0.5 \times 6 = 3$, exactly the fourth entry, while $P_{95}$ sits at position $5.7$, seven tenths of the way from the sixth entry to the seventh. The worked trace does this arithmetic by hand.
+
+### How many runs
+
+A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so with 20 runs the "99th percentile" is a guess at a value the sample never contained. The box below turns that intuition into a number.
+
+::: {#nbk-benchmarking-sample-size-tail-latencies .callout-notebook title="How many runs does a P99 need?"}
+A run exceeds the true 99th percentile with probability $p = 0.01$. The chance that $N$ runs contain no such event is $(1 - p)^N$, so the chance of seeing at least one is $1 - (1 - p)^N$. Asking for a 95 percent chance of catching at least one tail event gives
+
+$$1 - 0.99^N \ge 0.95 \quad\Longrightarrow\quad N \ge \frac{\ln 0.05}{\ln 0.99} \approx \frac{-2.996}{-0.01005} \approx 298 \text{ runs}.$$
+
+Three hundred runs is the floor for a $P_{99}$ that means anything, and TinyTorch's default of 100 is a compromise for classroom models that run in milliseconds. For $P_{50}$ the same argument gives about five runs, which is why the median stabilizes long before the tail does.
+:::
+
+### Throughput
+
+Latency is the cost of one request. **Throughput** is how many samples the model finishes per second, which is what matters when requests arrive in batches. Over the measured window it is total samples over total time, with $B$ the batch size and the timings in milliseconds:
+
+$$\text{Throughput} = \frac{N \cdot B}{\sum_{i=1}^N t_i} \times 1000 \quad \text{samples per second}$$
+
+A batch of 32 that takes 40 ms has a worse latency than a batch of 1 that takes 5 ms and a four times better throughput. The two numbers answer different questions, and a benchmark reports both.
+
+### Fairness
+
+One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Compare a median against a mean, or a warm run against a cold one, and the ratio you get is a property of the measurement rather than of the models.
 
 ---
 
-## Building the System: How It All Connects
+## The Code
 
-Chapter 19 equips TinyTorch with scientific rigor:
+::: {.callout-note title="Source Code Mapping"}
+The listings in this chapter are extracted from Module 19 (`src/19_benchmarking/19_benchmarking.py`), which the package exports as `tinytorch.perf.benchmarking`. `BenchmarkResult` is the container, `Benchmark` with its `run_latency_benchmark` method is the harness (the method is written as a function and attached to the class, as Chapter 8's `Trainer` methods were), `precise_timer` is the clock, and the `MLPerf` class's `_run_latency_test` and `run_standard_benchmark` turn a result into a verdict. Three short functions are book code and are labelled as such: a `percentile` written out by hand so the interpolation is visible, and a `check_compliance` and `compare` that put the module's two bars on a `BenchmarkResult` and add the relative rule.
+:::
+
+We build four pieces. A percentile function does the sorting and interpolation. `BenchmarkResult` holds every timing from one run and computes the summaries. `Benchmark` performs the warmup-then-measure loop. The `MLPerf` class turns a result and an accuracy into a verdict. None of them needs a `Tensor` of its own; the model is anything with a `forward` method.
+
+### Percentiles by hand
+
+Every number this chapter reports, and every comparison Chapter 20 makes, is a position in a sorted list. A serving team that promises 20 ms to 99 percent of its users needs $P_{99}$ of the decode step from Chapter 18. A report that the KV cache made the typical step faster needs $P_{50}$ before and after. So the first thing to understand is the function that reads those positions.
+
+The naive way is to sort the timings and index with the truncated position, `s[int(0.95 * n)]`. On the seven timings of the worked trace that returns 18.40 ms for $P_{95}$, the stall itself, where NumPy reports 14.44 ms. Neither number is wrong in the abstract, but a benchmark whose $P_{95}$ disagrees with every other tool's by 4 ms is a benchmark nobody else can check. The convention that matters is the one everyone uses. NumPy treats the position as fractional and interpolates linearly between the two entries it falls between. The module's `BenchmarkResult.percentile` calls `np.percentile` for exactly that reason; here is the same rule written out, as book code, so that the arithmetic in the trace has something to point at.
+
+```python
+def percentile(values, p):
+    """The value p percent of the way through the sorted list (NumPy's linear rule). Book code."""
+    s = sorted(values)
+    pos = (p / 100) * (len(s) - 1)   # fractional index into the sorted list
+    lo = int(pos)                    # the entry at or below that position
+    hi = min(lo + 1, len(s) - 1)     # the entry above it (clamped at the end)
+    return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+```
+
+Notice that `pos` runs from 0 to `len(s) - 1`, so $P_0$ is the minimum and $P_{100}$ is the maximum, and that when `pos` lands on a whole number the interpolation term vanishes and the function returns a timing that actually happened. This is NumPy's default `method="linear"`, and `torch.quantile` follows the same rule.
+
+### The result container
+
+Chapter 20 measures a baseline and an optimized model and asks how the median moved and how the tail moved. Both answers come from the same list of timings, and so does the verdict at the end of this chapter. A report that someone else will read has to be able to show that list.
+
+Chapter 14's `Profiler` collapses its timings to a single number the moment it finishes measuring (its `measure_latency` returns the median and drops the list). That is the naive container, and what it throws away cannot be bought back. Once a hundred timings have become one number there is no $P_{99}$ to check, and no way to tell whether a high mean came from a slow model or from four stalls. On the toy model the mean is 6.5 ms and the median 6.3 ms, and the quarter millisecond between them is the whole story of the stalls, a story only the raw list can tell. Keeping a hundred floats costs nothing anyone would notice.
+
+So `BenchmarkResult` keeps the raw list and computes every summary from it.
+
+{{< include _listings/19_benchmarking/BenchmarkResult.qmd >}}
+
+It is a dataclass, so constructing one is `BenchmarkResult(name, values)` and the summaries are computed once in `__post_init__` and stored as attributes; `percentile` is the one summary computed on demand, because which tail you want depends on the question. The mean and standard deviation are still there. They are not useless, only insufficient, and a mean that sits well above the median is itself a diagnostic that says the tail is heavy. The confidence interval is the production habit the bridge describes, a 95 percent interval for the mean from $1.96\, s / \sqrt{N}$; read it as the uncertainty of the mean and nothing else, since the mean is the wrong center for a skewed distribution and the interval says nothing about the tail. `torch.utils.benchmark` makes the same choice as this class; its `Measurement` keeps `raw_times` and derives `median` and `iqr` from them.
+
+### The harness
+
+The harness is what Chapter 20 calls on every model it compares, and what you should call on the Chapter 18 decoder before believing that its step cost stopped growing. Its job is to make sure the list handed to `BenchmarkResult` was drawn from the steady-state distribution and is long enough to have a tail.
+
+The naive script from the problem section fails on both counts. Its one timing includes the 40 ms cold start, so it reports a 5 ms model at 50 ms, and the phantom 9x speedup from the problem section follows from that one number. Here is the fix. Run the model several times and throw those timings away; the count is a parameter, defaulting to 10, which is enough for allocators to settle and caches to fill on any model in this book. Then run the model 100 more times and record every one, discarding nothing, so the tail is in the list for the percentile function to find. The harness holds the models it will compare, the counts, and a note of the machine it ran on.
+
+{{< include _listings/19_benchmarking/Benchmark.qmd >}}
+
+The `system_info` is the beginning of the reproducibility habit the bridge insists on; it travels with every result as metadata. The measuring loop reuses Chapter 14's timer for the warmup and then times every run on its own.
+
+{{< include _listings/19_benchmarking/benchmark_run_latency_benchmark.qmd >}}
+
+Two details matter. The first `measure_latency` call runs the warmup and its one timing is discarded; every call after it runs one iteration with no warmup, so the list has exactly `measurement_runs` entries and each is a separate reading of `time.perf_counter`, which counts steadily forward from an arbitrary origin and is never adjusted by the system, so a difference of two readings is a duration even if the wall clock jumped in between. And the same input is used for every run, a random tensor of the requested shape built once, so the timings differ only because of the machine, not because of the data. `torch.utils.benchmark.Timer` has the same two loops inside it, with a warmup before it starts recording.
+
+Running the harness on the toy model from the problem section shows the shape of the output. I ran this exact script on my laptop while nothing else was competing for the CPU. Your values will differ, and the paragraph after the output says how.
+
+```python
+from tinytorch.perf.benchmarking import Benchmark
+
+toy = ToyModel()
+toy.name = "toy"                                    # the harness labels results by this
+bench = Benchmark(models=[toy], datasets=[], warmup_runs=10, measurement_runs=100)
+result = bench.run_latency_benchmark(input_shape=(1, 4))["toy"]
+print(result)
+print(f"p50 {result.percentile(50):.2f}  p95 {result.percentile(95):.2f}  p99 {result.percentile(99):.2f}  max {result.max_val:.2f}")
+```
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ TinyTorch Benchmark Verification Suite Active:                              │
-│ • Warmup Cycles: 10 runs discarded.                                         │
-│ • Statistical Sampling: 100 iterations.                                     │
-│ • Complete Percentiles: P50 (Median), P95, and P99 Tail Latencies.          │
-│ • MLPerf Accuracy Preservation Verification.                                │
-└─────────────────────────────────────────────────────────────────────────────┘
+toy_latency_ms: 6.5326 ± 2.2106 (n=100)
+p50 6.27  p95 6.29  p99 17.58  max 18.39
 ```
 
-We are now ready to combine all our performance optimizations into a single, unified acceleration stack.
+The 40 ms cold start never appears because warmup absorbed it. The median sits just above the 5 ms sleep, the gap being what `time.sleep` itself costs on my machine. The four stalls in the 100 measured runs occupy the top four positions of the sorted list, so $P_{95}$, which reads position 94, never sees them, while $P_{99}$ lands squarely on one. Four stalls is 4 percent, and a percentile only reports what lies at its position. The mean, meanwhile, sits above the median because the same four runs drag it up, and the confidence interval on that mean, 6.1 to 7.0 ms, brackets a number no run produced.
 
-In **Chapter 20**, we construct **The Capstone: Building the 16× Cumulative Acceleration Stack**.
+Run the same script while a browser or a build is competing for the CPU and the picture changes in an instructive way. I tried it. The median stayed within a few tenths of a millisecond of 6.3 ms, while $P_{95}$ jumped to somewhere between 10 and 15 ms, because the operating system was adding stalls of its own on top of the four the toy schedules. That is not the harness misbehaving. It is the second flaw from the problem section showing up in the data, and the tail percentile is the number that caught it while the median slept through it.
+
+### The verdict
+
+A benchmark ends in a decision, and Chapter 20 needs two kinds. The first is absolute. A model going into a service is asked to meet a latency bound, and the bound is about the slow requests, so it is a bound on $P_{99}$. The second is relative. Quantization in Chapter 15, pruning in Chapter 16, and fusion in Chapter 17 each change the numbers a model produces, some by rounding and some by removing weights outright, and a speedup is worth reporting only if the model still works afterward.
+
+The naive verdict compares means and never asks about accuracy. It passes a model that averages 5 ms and stalls to 30 ms on every hundredth request, which is the request the user remembers. And it declares an INT8 model twice as fast without asking whether the rounding cost it accuracy, which would make it a different model rather than a faster one. The fix is two bars that both have to clear, latency and accuracy, and a fixed protocol around them so that two submissions can be compared. The module's `MLPerf` class holds four such protocols, one per task of MLPerf Tiny, each a fixed input shape, an accuracy target, and a latency bound. Its timing loop uses a context manager that reads the clock on the way in and the way out.
+
+{{< include _listings/19_benchmarking/precise_timer.qmd >}}
+
+{{< include _listings/19_benchmarking/_mlperf_run_latency_test.qmd >}}
+
+This loop times one forward pass per test input, after a warmup of a tenth of the runs, and keeps the model's outputs alongside the timings so that accuracy can be scored from the same pass. The standard benchmark then builds the inputs, runs both phases, and applies the two bars.
+
+{{< include _listings/19_benchmarking/mlperf_run_standard_benchmark.qmd >}}
+
+Read the two bars carefully. The latency bar is checked at $P_{99}$, not the mean, because MLPerf's server scenario bounds the tail and a user waits on the slow requests; the mean, $P_{50}$, and $P_{90}$ are reported beside it. The accuracy bar is scored by `_run_accuracy_test` against the `labels` you pass with your `test_inputs`. Pass neither, and the class builds deterministic random inputs and draws synthetic labels from its seed, so the protocol runs but the accuracy is chance, which is the correct, informative result for a model that has never seen those labels; the docstring says so, and the trace shows both cases. What the class fixes either way is the protocol around the numbers, the same inputs for every submission, the warmup, the two bars, and a report that records the seed and the run count. Here, as book code, is the same pair of bars on a `BenchmarkResult`, plus the relative rule Chapter 20 needs.
+
+```python
+def check_compliance(result, accuracy, max_latency_ms, min_accuracy):
+    """A fast model that is wrong does not pass. Both bars, or neither. Book code."""
+    latency_ok = result.percentile(99) <= max_latency_ms
+    accuracy_ok = accuracy >= min_accuracy
+    return {
+        "p99_ms": round(result.percentile(99), 2),
+        "latency_ok": latency_ok,
+        "accuracy_ok": accuracy_ok,
+        "compliant": latency_ok and accuracy_ok,
+    }
+
+def compare(baseline, optimized, baseline_acc, optimized_acc, retain=0.99):
+    """Speedup at the median and at the tail, valid only if accuracy held. Book code."""
+    return {
+        "speedup_p50": round(baseline.percentile(50) / optimized.percentile(50), 2),
+        "speedup_p99": round(baseline.percentile(99) / optimized.percentile(99), 2),
+        "keeps_accuracy": optimized_acc >= retain * baseline_acc,
+    }
+```
+
+Notice that `check_compliance` reads $P_{99}$ and never the mean, so a model that is fast on average but stalls too often fails. `compare` reports the speedup twice, at the median and at the tail, because an optimization can improve one without the other; a KV cache shortens the typical decode step, while a change that removes allocations mostly shortens the tail. Both bars come from MLPerf's inference rules, the 99 percent accuracy target and the $P_{99}$ latency constraint of its server scenario, and the bridge below says what else those rules demand.
+
+---
+
+## A Worked Trace
+
+The trace runs ten forward passes of a transformer block with latencies chosen to show every phenomenon at once, so it uses a fixed list rather than the harness. The first three are warmup; the seventh measured run is a stall.
+
+| Run | Latency (ms) | Naive script | TinyTorch protocol | What happened |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 48.20 | included | discarded (warmup) | cold start: allocation, first touch of memory |
+| 2 | 14.50 | included | discarded (warmup) | caches still filling |
+| 3 | 7.10 | included | discarded (warmup) | allocator pools settling |
+| 4 | 5.12 | included | measured ($i = 1$) | steady state |
+| 5 | 5.08 | included | measured ($i = 2$) | steady state |
+| 6 | 4.95 | included | measured ($i = 3$) | steady state |
+| 7 | 5.20 | included | measured ($i = 4$) | steady state |
+| 8 | 5.10 | included | measured ($i = 5$) | steady state |
+| 9 | 18.40 | included | measured ($i = 6$) | stall: the OS ran something else |
+| 10 | 5.05 | included | measured ($i = 7$) | steady state |
+
+: Ten runs of one model under the naive script and under the TinyTorch protocol. {#tbl-bench-trace tbl-colwidths="[8,16,16,22,38]"}
+
+The naive script averages all ten, and the sum $48.20 + 14.50 + 7.10 + 5.12 + 5.08 + 4.95 + 5.20 + 5.10 + 18.40 + 5.05 = 118.70$ divided by 10 gives $11.87$ ms, more than twice the steady-state cost, with the cold start alone contributing 4.3 ms of the excess.
+
+The protocol keeps runs 4 through 10, sorted: $[4.95, 5.05, 5.08, 5.10, 5.12, 5.20, 18.40]$, with $N = 7$ and positions 0 through 6.
+
+- **Mean**: $48.90 / 7 = 6.99$ ms, still inflated by the stall.
+- **$P_{50}$**: position $0.5 \times 6 = 3$, the fourth entry, $5.10$ ms. This is the steady-state cost.
+- **$P_{95}$**: position $0.95 \times 6 = 5.7$, so $5.20 + 0.7 \times (18.40 - 5.20) = 5.20 + 9.24 = 14.44$ ms.
+- **$P_{99}$**: position $0.99 \times 6 = 5.94$, so $5.20 + 0.94 \times 13.20 = 17.61$ ms.
+- **Throughput**: $7 / 0.0489 \text{ s} = 143.1$ samples per second.
+
+The same numbers fall out of the container, and running it is the check that my hand arithmetic and the implementation agree.
+
+```python
+from tinytorch.perf.benchmarking import BenchmarkResult
+
+raw = [48.20, 14.50, 7.10, 5.12, 5.08, 4.95, 5.20, 5.10, 18.40, 5.05]
+
+naive = BenchmarkResult("naive", raw)             # all ten runs
+protocol = BenchmarkResult("protocol", raw[3:])   # warmup discarded
+
+print(f"naive mean:   {naive.mean:.2f} ms")
+print(f"protocol p50: {protocol.percentile(50):.2f} ms  (median attribute: {protocol.median:.2f})")
+print(f"protocol p95: {protocol.percentile(95):.2f} ms")
+print(f"protocol p99: {protocol.percentile(99):.2f} ms")
+print(f"throughput:   {protocol.count / (sum(protocol.values) / 1000):.1f} samples/s")
+assert abs(naive.mean - 11.87) < 0.01
+assert abs(protocol.percentile(50) - 5.10) < 0.01
+assert abs(protocol.percentile(99) - 17.61) < 0.01
+```
+
+Read as a report, the protocol says the model costs 5.10 ms per step and that one step in a hundred can take up to 17.61 ms. Both statements are true and useful. The naive script's 11.87 ms is neither.
+
+The verdict, on a real model, looks like this. The keyword-spotting task takes a 16,000-sample audio clip and asks for one of two classes, so a two-layer network of that shape is the smallest thing the protocol accepts.
+
+```python
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+from tinytorch.perf.benchmarking import MLPerf
+
+model = Sequential(Linear(16000, 16), ReLU(), Linear(16, 2))
+model.name = "kws-mlp"
+report = MLPerf().run_standard_benchmark(model, "keyword_spotting", num_runs=100)
+print({k: report[k] for k in ("p50_latency_ms", "p99_latency_ms", "mean_latency_ms", "accuracy", "latency_met", "accuracy_met", "compliant")})
+```
+
+```
+🧪 Running MLPerf keyword_spotting benchmark...
+   Target: 90.0% accuracy, <100ms latency
+   Warming up (10 runs)...
+   Measuring performance (100 runs)...
+   Results: 52.0% accuracy, 0.7ms mean latency, 10.2ms p99
+   Compliance: ❌ FAIL
+{'p50_latency_ms': 0.29, 'p99_latency_ms': 10.225, 'mean_latency_ms': 0.657, 'accuracy': 0.52, 'latency_met': True, 'accuracy_met': False, 'compliant': False}
+```
+
+The latency bar clears, and look at how. The median run took 0.29 ms and one run in a hundred took 10 ms, a stall thirty-five times the typical cost that pulled the mean to more than twice the median; the bar is at $P_{99}$ so that a stall like that is what gets judged, and here it still sits far under 100 ms. The accuracy bar fails at 52 percent, which is what an untrained two-class model scores against labels it has never seen, and is exactly what the verdict should say about it. Hand the same protocol a test set and it scores that instead.
+
+```python
+rng = np.random.default_rng(1)
+inputs = [Tensor(rng.standard_normal((1, 16000)).astype(np.float32)) for _ in range(50)]
+labels = np.array([int(np.argmax(model.forward(x).data)) for x in inputs])   # the model's own answers
+report = MLPerf().run_standard_benchmark(model, "keyword_spotting", test_inputs=inputs, labels=labels)
+print({k: report[k] for k in ("accuracy", "accuracy_met", "latency_met", "compliant", "num_runs")})
+```
+
+```
+{'accuracy': 1.0, 'accuracy_met': True, 'latency_met': True, 'compliant': True, 'num_runs': 50}
+```
+
+Labels the model itself produced are not a test set, and the 100 percent is not an accuracy claim; they are the check that the wiring scores what it is given, and the run count follows the inputs. Swap in a trained model and real labels, and the same call produces a verdict worth putting in a report.
+
+---
+
+## From TinyTorch to Production
+
+The largest difference between this harness and a production one is the clock, and the reason is that a GPU runs asynchronously. When PyTorch code calls `model(x)` on a CUDA tensor, the CPU places kernel launches into the GPU's work queue and returns while the GPU is still computing, so `perf_counter` around the call measures the cost of queueing, often tens of microseconds, rather than the cost of the work. Production timing either calls `torch.cuda.synchronize()` before reading the clock, which blocks the CPU until the queue drains, or records CUDA events[^fn-cuda-event-gpu-timer] into the queue itself and asks the GPU how much time passed between them. `torch.utils.benchmark.Timer` does the synchronization automatically and is the tool to reach for; a hand-rolled `perf_counter` loop around a CUDA model is one of the most common benchmarking bugs in published speedups.
+
+[^fn-cuda-event-gpu-timer]: **CUDA event**: a timestamp marker that the CPU enqueues into the GPU's stream of work. The GPU stamps it with its own clock when execution reaches it, so `start.elapsed_time(end)` between two events measures GPU time alone, untouched by whatever the CPU was doing. In PyTorch they are created with `torch.cuda.Event(enable_timing=True)`.
+
+The second difference is how much the machine itself moves. GPUs raise and lower their clock frequency with temperature and load, CPUs do the same, and a benchmark that starts on a cool chip and finishes on a hot one is measuring two different machines. Warmup partly addresses this by letting clocks settle. Serious measurement goes further, pinning clock frequencies where the driver allows, running on an otherwise idle machine, and recording the hardware state alongside the timings so that a reader can tell whether two results are comparable at all.
+
+The third difference is statistical depth. Where TinyTorch reports percentiles from one list, production tools estimate how much those percentiles would change if the experiment were repeated, typically with a bootstrap[^fn-bootstrap-confidence-interval] over the raw timings, and they run far more iterations than a hundred. There is also a choice TinyTorch does not make for you. Python's own `timeit` documentation recommends the *minimum* over repeats, on the grounds that anything above the minimum is interference rather than the code's cost. That advice is right when the question is "how expensive is this computation" and wrong when the question is "what will users experience," where the tail is the answer. Know which question you are asking before choosing the statistic.
+
+The rules that TinyTorch's compliance check imitates come from MLPerf, the benchmark suite run by the MLCommons consortium, under which hardware and software vendors submit audited results.[^fn-mlperf-inference-paper] Its inference rules make the chapter's habits mandatory. A submission must reach at least 99 percent of the reference model's accuracy or it is not counted, regardless of speed. The server scenario measures the highest throughput a system sustains while keeping $P_{99}$ latency under a fixed bound, a latency SLA turned into a rule. Every submission ships its configuration, clock settings, and logs so that results can be reproduced. TinyTorch's `MLPerf` class is a classroom version modeled on MLPerf Tiny, the suite for microcontroller-class devices,[^fn-mlperf-tiny-paper] with the same four tasks (keyword spotting, visual wake words, anomaly detection, and small image classification) and fixed accuracy and latency targets for each.
+
+[^fn-mlperf-inference-paper]: Vijay Janapa Reddi et al., "MLPerf Inference Benchmark," *International Symposium on Computer Architecture (ISCA)*, 2020.
+[^fn-mlperf-tiny-paper]: Colby Banbury et al., "MLPerf Tiny Benchmark," *NeurIPS Datasets and Benchmarks Track*, 2021.
+[^fn-bootstrap-confidence-interval]: **Bootstrap**: resample the measured timings with replacement many times, recompute the statistic on each resample, and read the spread of those recomputed values as the uncertainty of the original. With 100 timings and 1,000 resamples it takes milliseconds and needs no assumption about the distribution's shape.
+
+| Concern | TinyTorch `Benchmark` | PyTorch / MLPerf practice |
+| :--- | :--- | :--- |
+| Clock | `time.perf_counter` on the CPU, read through `Profiler` or `precise_timer` | CUDA events, or `synchronize()` before reading the CPU clock |
+| Warmup | 10 runs discarded (`MLPerf`: a tenth of the runs) | Runs discarded until clocks and allocators settle; clocks often pinned |
+| Repetition | 100 runs by default | Hundreds to thousands; MLPerf fixes the count per task |
+| Statistic reported | mean, std, median, min, max, a 95 percent interval on the mean, percentiles on demand | Same; scenario decides which one is the score |
+| Accuracy floor | a fixed target per task, scored against your labels (a synthetic stand-in when none are given) | 99 percent (sometimes 99.9) of the reference model, audited |
+| Reproducibility | same input, same counts, platform recorded in the result's metadata | Full hardware and software configuration logged with every result |
+
+: What changes between the classroom harness and production measurement, and what does not. {#tbl-bench-bridge tbl-colwidths="[20,35,45]"}
+
+What carries over unchanged is everything in the middle of the table. Warmup, repetition, percentiles over a heavy-tailed distribution, throughput as a separate number from latency, and an accuracy floor are the whole of the discipline; production adds a better clock and more samples. So when you next read a speedup claim, in a paper, a pull request, or your own notes, look for the run count, the warmup, the statistic being compared, whether the GPU was synchronized, and whether accuracy was checked. A claim missing any of those is a number, not a measurement, and the checklist for reporting the rest has been written down for years.[^fn-hoefler-twelve-ways]
+
+[^fn-hoefler-twelve-ways]: Torsten Hoefler and Roberto Belli, "Scientific Benchmarking of Parallel Computing Systems: Twelve Ways to Tell the Whole Story," *SC*, 2015. Its rules, such as reporting the number of runs and never comparing a mean against a median, are the long form of this chapter.
+
+---
+
+## Summary
+
+You built a benchmark harness that discards warmup runs, times the model many times with a steady clock, keeps every timing, and reports the median, the tail percentiles, and throughput rather than a single average. You also met the verdict that sits on top of it. The module's `MLPerf` class fixes the inputs, the warmup, and two bars, checks its latency bar at $P_{99}$, and scores accuracy against the labels you hand it; the book's `compare` adds the rule that an optimized model must keep 99 percent of the baseline's accuracy. The principle to carry forward is that a latency is a sample from a skewed distribution, so the honest report is the distribution's shape, and the honest comparison holds everything else fixed. Chapter 20 takes `BenchmarkResult`, the percentile rule, and the 99 percent accuracy floor for granted and asks how the four optimizations of Chapters 15 through 18 compound when they are stacked in one model.
+
+---
+
+## Exercises
+
+1. Change `ToyModel` so the stall happens every 10th call instead of every 25th, rerun `Benchmark.run_latency_benchmark`, and predict before running how $P_{50}$, $P_{95}$, and the mean will move. Explain which of the three changed the most and why.
+2. `run_standard_benchmark` checks the latency bound at $P_{99}$; an earlier version of the module checked the mean. Construct a list of 100 latencies for which the two rules disagree, one where the mean passes and the tail fails and one the other way around, and argue which verdict a user of the model would agree with.
+3. Using the formula from the sample-size box, compute how many runs are needed to have a 95 percent chance of observing at least one event above $P_{99.9}$. Then measure how long that many runs of `ToyModel` would take and decide whether $P_{99.9}$ is a statistic this harness can honestly report.

@@ -68,8 +68,7 @@ from tinytorch.core.tensor import Tensor
 
 # Enable autograd to add gradient tracking to Tensor
 # This module depends on Module 06 (Autograd) being available
-from tinytorch.core.autograd import enable_autograd
-enable_autograd()
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Constants for optimizer defaults
 DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
@@ -94,7 +93,7 @@ DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` - Core tensor operations
-- `tinytorch.core.autograd.enable_autograd` - Called at import to attach gradient
+- `tinytorch.core.autograd` - Imported so every operation carries its backward half
   tracking to Tensor
 
 **Dependency Flow**:
@@ -171,10 +170,11 @@ Momentum in optimization works like momentum in physics. A ball rolling down a h
 
 ```
 Narrow valley problem:            Momentum solution:
-|\•➡️ ⬅️ •/|                        |\•      /|
-| \     / | ← ping-pong            | \↘️    / | ← smoother
-|  \   /  |   motion               |  \•➡️•/  |   descent
-|    ●    |                        |     ●    |
+|\  •→  ←•  /|                    |\  •        /|
+| \   ↕    / |  ← ping-pong       | \   ↘     / |  ← smoother
+|  \  •   /  |    motion          |  \   •→• /  |    descent
+|   \    /   |                    |   \     /   |
+|     ●      |                    |     ●      |
 ```
 
 **SGD with Momentum Formula:**
@@ -515,9 +515,9 @@ Loss Surface (side view, imagine plane):
      | /  |\ gradient points uphill
      |/   | \
      ●----|--\--→ parameter
-    / \  •   \ ↘️ SGD steps downhill (opposite to gradient)
+    / \  •   \ ↘ SGD steps downhill (opposite to gradient)
    /   \         
-  /     \   ⭐ ← goal (minimum loss)     
+  /     \   ★ ← goal (minimum loss)     
  ↙       \
  other
 parameter
@@ -536,7 +536,7 @@ Narrow valley (side view, two different gradients shown as planes):
      \ / |     \ /
       \  •→ ←•  \
       /\     |  /\
-     /  \ ⭐ | /  \
+     /  \ ★  | /  \
     /    \|  |/    \
     -------+--+-------  
            |  |
@@ -816,7 +816,7 @@ Parameter Sensitivity Landscape:
     first_layer_weight              output_weight
            ↑                               ↑
            |                               |
-           |  🐌 gentle slope              |  ⛰️ steep cliff
+           |  gentle slope                 |  steep cliff
            |  (needs big steps)            |  (needs tiny steps)
            |                               |
         ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→

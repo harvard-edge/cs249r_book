@@ -68,8 +68,9 @@ from typing import List, Optional, Tuple
 from tinytorch.core.tensor import Tensor
 
 # Enable autograd for gradient tracking (required for learnable embeddings)
-from tinytorch.core.autograd import Function, enable_autograd
-enable_autograd()
+from tinytorch.core.tensor import Function
+import tinytorch.core.autograd  # completes every operation with its backward half
+from tinytorch.core.autograd import is_grad_enabled
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -121,7 +122,7 @@ Consider the tokens from our tokenizer: [1, 42, 7] - how do we turn these discre
 │           │         Each ID → vector of learned features        │
 │           │                                                     │
 │           ├─ Step 2: Add positional information                 │
-│           │         Same word at different positions → different│
+│           │         Same word, different position → new vector  │
 │           │                                                     │
 │           ├─ Step 3: Create position-aware representations      │
 │           │         Ready for attention mechanisms              │
@@ -290,9 +291,9 @@ essential — standard indexing would overwrite instead of accumulating.
 
 # %% nbgrader={"grade": false, "grade_id": "embedding-backward", "solution": true}
 #| export
-class EmbeddingBackward(Function):
+class EmbeddingFunction(Function):
     """
-    Gradient computation for embedding lookup operation.
+    The embedding lookup operation: forward gathers rows, backward scatters gradients back.
 
     **Mathematical Rule:** If Y = Embedding[indices], then:
     - ∂Loss/∂Embedding[i] = sum of all gradients where index==i
@@ -301,16 +302,12 @@ class EmbeddingBackward(Function):
     is a scatter operation that accumulates gradients to the embedding weights.
     """
 
-    def __init__(self, weight, indices):
-        """
-        Args:
-            weight: Embedding weight matrix
-            indices: Indices used for lookup
-        """
-        super().__init__(weight)
-        self.indices = indices
+    def forward(self, weight):
+        """Gather one row per token id: weight[self.indices] (self.indices is an int array)."""
+        return weight[self.indices]
 
-    def apply(self, grad_output):
+
+    def backward(self, grad_output):
         """
         Compute gradient for embedding lookup.
 
@@ -327,11 +324,11 @@ class EmbeddingBackward(Function):
         TODO: Implement gradient computation for embedding lookup.
 
         APPROACH:
-        1. Extract weight tensor from self.saved_tensors
+        1. Extract weight tensor from self.inputs
         2. Initialize grad_weight to None
         3. If weight requires gradients:
            - Create zeros array: grad_weight = np.zeros_like(weight.data)
-           - Flatten indices: indices_flat = self.indices.data.astype(int).flatten()
+           - Flatten indices: indices_flat = np.asarray(self.indices).flatten()
            - Reshape grad_output: match flattened indices with embedding dimension
            - Use np.add.at to accumulate gradients: np.add.at(grad_weight, indices_flat, grad_output_reshaped)
         4. Return tuple (grad_weight,)
@@ -351,7 +348,7 @@ class EmbeddingBackward(Function):
         - Return as single-element tuple: (grad_weight,)
         """
         ### BEGIN SOLUTION
-        weight, = self.saved_tensors
+        weight, = self.inputs
         grad_weight = None
 
         if isinstance(weight, Tensor) and weight.requires_grad:
@@ -360,7 +357,7 @@ class EmbeddingBackward(Function):
 
             # Scatter gradients back to embedding weights
             # np.add.at accumulates gradients for repeated indices
-            indices_flat = self.indices.data.astype(int).flatten()
+            indices_flat = np.asarray(self.indices).flatten()
             grad_output_reshaped = grad_output.reshape(-1, grad_output.shape[-1])
 
             np.add.at(grad_weight, indices_flat, grad_output_reshaped)
@@ -372,7 +369,7 @@ class EmbeddingBackward(Function):
 """
 ### Embedding: The Lookup Table
 
-With `EmbeddingBackward` written, the forward direction is almost anticlimactic:
+With `EmbeddingFunction.backward` written, the forward direction is almost anticlimactic:
 an embedding layer is a matrix, and a lookup is one row of it.
 
 ```
@@ -384,7 +381,7 @@ output: weight[[7, 3, 7]]            three rows, one per token
 Two things make it worth its own class. It validates that every id is in range,
 which turns a confusing IndexError deep in NumPy into a message that names the
 offending token. And it sets `requires_grad=True` on the weight, without which
-the backward class you just wrote would never be reached at all.
+the backward you just wrote would never be reached at all.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "embedding-init", "solution": true}
@@ -422,9 +419,9 @@ class Embedding:
         self.embed_dim = embed_dim
 
         # Xavier initialization for better gradient flow.
-        # requires_grad=True is not decoration: forward() only attaches
-        # EmbeddingBackward when the weight requires grad, so without this flag
-        # the entire backward path below is dead code and the table never learns.
+        # requires_grad=True is not decoration: apply() only records the
+        # lookup when the weight requires grad, so without this flag the
+        # backward you wrote above is never reached and the table never learns.
         limit = math.sqrt(6.0 / (vocab_size + embed_dim))
         self.weight = Tensor(
             rng.uniform(-limit, limit, (vocab_size, embed_dim)),
@@ -447,11 +444,10 @@ class Embedding:
         APPROACH:
         1. Validate indices are within [0, vocab_size)
         2. Perform lookup using numpy advanced indexing: weight[indices]
-        3. Attach EmbeddingBackward gradient function if weight requires grad
+        3. Run the lookup through EmbeddingFunction.apply so it is recorded for backward
 
         HINTS:
-        - Use self.weight.data[indices.data.astype(int)] for the lookup
-        - Attach result._grad_fn = EmbeddingBackward(self.weight, indices)
+        - EmbeddingFunction.apply(self.weight, indices=indices.data.astype(int))
         """
         ### BEGIN SOLUTION
         # Handle input validation
@@ -465,19 +461,10 @@ class Embedding:
                 f"  🔧 Check your tokenizer output, or increase vocab_size to at least {max_idx + 1}"
             )
 
-        # Perform embedding lookup using advanced indexing
-        # This is equivalent to one-hot multiplication but much more efficient
-        embedded = self.weight.data[indices.data.astype(int)]
-
-        result = Tensor(embedded)
-
-        # Attach gradient function for backpropagation
-        # EmbeddingBackward (defined above) handles sparse gradient accumulation
-        if self.weight.requires_grad:
-            result.requires_grad = True
-            result._grad_fn = EmbeddingBackward(self.weight, indices)
-
-        return result
+        # Perform embedding lookup through the operation (advanced indexing inside
+        # EmbeddingFunction.forward, equivalent to one-hot multiplication but much
+        # more efficient). Module 06's apply() records it for backward.
+        return EmbeddingFunction.apply(self.weight, indices=indices.data.astype(int))
         ### END SOLUTION
 
     def __call__(self, indices: Tensor) -> Tensor:
@@ -661,12 +648,15 @@ class PositionalEncoding:
         )
         ### END SOLUTION
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, start_pos: int = 0) -> Tensor:
         """
         Add positional encodings to input embeddings.
 
         Args:
             x: Input embeddings of shape (batch_size, seq_len, embed_dim)
+            start_pos: Position of the first token in x. 0 for a whole sequence;
+                       Module 18's KV cache feeds one token at a time and passes
+                       the number of tokens already cached.
 
         Returns:
             Position-encoded embeddings of same shape
@@ -675,7 +665,7 @@ class PositionalEncoding:
 
         APPROACH:
         1. Validate input is 3D with correct embed_dim and seq_len <= max
-        2. Slice position_embeddings[:seq_len] for variable-length support
+        2. Slice position_embeddings[start_pos:start_pos + seq_len] (start_pos is 0 except during cached generation)
         3. Reshape to (1, seq_len, embed_dim) for batch broadcasting
         4. Add to input embeddings
 
@@ -700,10 +690,10 @@ class PositionalEncoding:
 
         batch_size, seq_len, embed_dim = x.shape
 
-        if seq_len > self.max_seq_len:
+        if start_pos + seq_len > self.max_seq_len:
             raise ValueError(
-                f"Sequence length exceeds maximum: {seq_len} > {self.max_seq_len}\n"
-                f"  ❌ Input sequence has {seq_len} positions, but max_seq_len is {self.max_seq_len}\n"
+                f"Sequence runs past the maximum: positions {start_pos}..{start_pos + seq_len - 1} with max_seq_len={self.max_seq_len}\n"
+                f"  ❌ Input has {seq_len} positions starting at {start_pos}, but only {self.max_seq_len} are available\n"
                 f"  💡 Learned positional encodings have a fixed maximum length set at initialization\n"
                 f"  🔧 Either truncate input to {self.max_seq_len} tokens, or create a new PositionalEncoding(max_seq_len={seq_len}, ...)"
             )
@@ -717,7 +707,7 @@ class PositionalEncoding:
             )
 
         # Slice position embeddings for this sequence length using Tensor slicing
-        pos_embeddings = self.position_embeddings[:seq_len]  # (seq_len, embed_dim)
+        pos_embeddings = self.position_embeddings[start_pos:start_pos + seq_len]  # (seq_len, embed_dim)
 
         # Reshape to add batch dimension: (1, seq_len, embed_dim).
         # Use Tensor.reshape, not Tensor(pos_embeddings.data[np.newaxis]).
@@ -732,9 +722,9 @@ class PositionalEncoding:
         return result
         ### END SOLUTION
 
-    def __call__(self, x: Tensor) -> Tensor:
+    def __call__(self, x: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the positional encoding to be called like a function."""
-        return self.forward(x)
+        return self.forward(x, start_pos)
 
     def parameters(self) -> List[Tensor]:
         """Return trainable parameters."""
@@ -1152,7 +1142,7 @@ The production embedding layer that powers modern transformers combines multiple
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Representations│
+│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Vectors      │
 ├───────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
 │ INPUT: Token IDs [1, 42, 7, 99]                                           │
@@ -1304,9 +1294,9 @@ class EmbeddingLayer:
             )
         ### END SOLUTION
 
-    def __call__(self, tokens: Tensor) -> Tensor:
+    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the embedding layer to be called like a function."""
-        return self.forward(tokens)
+        return self.forward(tokens, start_pos)
 
     def parameters(self) -> List[Tensor]:
         """Return all trainable parameters."""
@@ -1401,9 +1391,13 @@ EmbeddingLayer.forward pipeline:
 #| export
 
 # Continue the EmbeddingLayer class with forward and utility methods
-def emblayer_forward(self, tokens: Tensor) -> Tensor:
+def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     """
     Forward pass through complete embedding system.
+
+    start_pos is the position of the first token in `tokens`. It is 0 for a whole
+    sequence; Module 18's KV cache feeds one token at a time and passes how many
+    tokens are already cached, so each new token gets its true position.
 
     TODO: Compose token embed + optional scaling + positional encoding
 
@@ -1422,8 +1416,8 @@ def emblayer_forward(self, tokens: Tensor) -> Tensor:
     (2, 3, 64)
 
     HINTS:
-    - For sinusoidal PE, slice the table to seq_len and add a batch dim with np.newaxis
-    - For learned PE, just call self.pos_encoding.forward(token_embeds)
+    - For sinusoidal PE, slice the table from start_pos to start_pos + seq_len and add a batch dim with np.newaxis
+    - For learned PE, just call self.pos_encoding.forward(token_embeds, start_pos)
     - Remember to squeeze the batch dim for 1D inputs at the end
     """
     ### BEGIN SOLUTION
@@ -1446,11 +1440,11 @@ def emblayer_forward(self, tokens: Tensor) -> Tensor:
     # Add positional encoding
     if self.pos_encoding_type == 'learned':
         # Use learnable positional encoding
-        output = self.pos_encoding.forward(token_embeds)
+        output = self.pos_encoding.forward(token_embeds, start_pos)
     elif self.pos_encoding_type == 'sinusoidal':
         # Use fixed sinusoidal encoding (not learnable)
         batch_size, seq_len, embed_dim = token_embeds.shape
-        pos_embeddings = self.pos_encoding[:seq_len]  # Slice using Tensor slicing
+        pos_embeddings = self.pos_encoding[start_pos:start_pos + seq_len]  # Slice using Tensor slicing
 
         # Reshape to add batch dimension
         # Deliberately a fresh constant tensor: sinusoidal encodings are fixed,

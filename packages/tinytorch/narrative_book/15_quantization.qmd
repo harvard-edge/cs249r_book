@@ -1,202 +1,275 @@
-# INT8 Quantization: Compressing Floats into Symmetric Integers {#sec-quantization}
+# INT8 Quantization: Compressing Floats into 8-Bit Integers {#sec-quantization}
 
-In Chapter 14, our Roofline Profiler revealed the central bottleneck of transformer inference: deep models are severely **memory-bound**. During autoregressive token generation, the processor spends over $80\%$ of its time stalled waiting for 32-bit floating-point weight tensors to travel across the off-chip DRAM bus.
+Chapter 14 ended with a diagnosis. When our transformer generates one token at a time, every weight is read from memory once and used for two arithmetic operations, so the processor spends nearly all of its time waiting for weights to arrive rather than computing with them. The question a practitioner asks next is blunt. Can we make the weights smaller without retraining the model, and what does that cost in accuracy?
 
-In this chapter, we engineer **Post-Training INT8 Symmetric Quantization (`Quantizer`, `QuantizedLinear`)**. We explore why 8-bit integers cut memory traffic by **$4\times$**, derive the affine scale factor equation $S = \max(|X|) / 127$, and construct quantized matrix multiplication engines with offline calibration.
+This chapter answers with the simplest form of **quantization**: storing each weight as an 8-bit integer instead of a 32-bit float. One scale factor per tensor turns floats into integers and back, the matrix multiply runs on integers, and a single multiply at the end restores floating-point units. We build `quantize_int8`, `dequantize_int8`, and a `QuantizedLinear` layer, trace one multiply by hand, and measure the rounding error the integers introduce.
 
-![INT8 Quantization Geometry: Mapping Continuous 32-bit Floating Point Distributions into 8-bit Signed Integer Buckets](assets/images/diagrams/15_quantization-diag-1.svg){#fig-quantization-geometry}
-
----
-
-## The Crisis: The 4-Byte DRAM Bandwidth Tax
-
-Every single FP32 floating-point number occupies **32 bits (4 bytes)** of memory:
-
-```
-IEEE 754 32-bit Single-Precision Float:
-┌──────────┬──────────────────┬───────────────────────────────────────────────┐
-│ Sign (1) │ Exponent (8 bits)│ Mantissa Fraction (23 bits)                   │
-└──────────┴──────────────────┴───────────────────────────────────────────────┘
-```
-
-When evaluating a linear layer $Y = XW^T$ with weight matrix $W \in \mathbb{R}^{4096 \times 4096}$:
-
-$$\text{Weight Footprint} = 4096 \times 4096 \times 4 \text{ bytes} = 67,108,864 \text{ bytes} \quad (67.1 \text{ MB})$$
-
-During batch-1 token generation, our arithmetic units perform:
-
-$$\text{FLOPs} = 2 \times 1 \times 4096 \times 4096 = 33,554,432 \text{ operations}$$
-
-$$\text{Arithmetic Intensity} = \frac{33,554,432 \text{ FLOPs}}{67,108,864 \text{ Bytes}} = 0.50 \text{ FLOPs/Byte}$$
-
-At $0.50\text{ FLOPs/Byte}$, our compute hardware is executing at **less than $1\%$ of its peak capability**.
-
-If we can compress each 32-bit float into an **8-bit signed integer (`int8`)**, which occupies only **1 byte**:
-1. Memory footprint drops by **$4\times$** ($67.1\text{ MB} \to 16.7\text{ MB}$).
-2. DRAM memory bus traffic drops by **$75\%$**.
-3. Modern hardware Integer Units (DP4A and INT8 Tensor Cores) execute INT8 arithmetic at **$2\times$ to $4\times$ higher throughput** than FP32 ALUs.
+![Quantization maps a continuous range of floats onto 255 evenly spaced integer buckets. Every float in a bucket is stored as the same 8-bit code; the scale factor says how wide a bucket is.](assets/images/diagrams/15_quantization-diag-1.svg){#fig-quantization-geometry}
 
 ---
 
-## The Mental Model: Symmetric Affine Quantization
+## The Problem
 
-Quantization is the process of mapping continuous real numbers $x \in [-\alpha, +\alpha]$ into a discrete grid of signed 8-bit integers $q \in [-127, +127]$:
+A 32-bit float costs 4 bytes. That is the whole problem, and a napkin shows how much it hurts. A single square linear layer with 4096 inputs and 4096 outputs holds $4096 \times 4096 = 16{,}777{,}216$ weights, which is 67 MB in FP32. Generating one token multiplies one activation vector by that matrix, so the processor must stream all 67 MB through memory to do $2 \times 4096 \times 4096 \approx 33.5$ million arithmetic operations. That is 0.5 operations per byte, the arithmetic intensity Chapter 14 taught us to compute, and it sits far below the ridge point of any processor built in the last decade. At a memory bandwidth of 100 GB/s, streaming the weights alone takes 0.67 ms per token per layer. No amount of faster arithmetic changes that number. The only lever left is the byte count.
 
+
+::: {#nbk-quantization-int8-memory-compute-gains .callout-notebook title="Napkin math for a 4096 by 4096 layer"}
+- Weights: $16{,}777{,}216$. FP32 storage: $67.1$ MB. INT8 storage: $16.8$ MB.
+- Bytes streamed per generated token drop by $4\times$; at $100$ GB/s the streaming time drops from $671\ \mu\text{s}$ to $168\ \mu\text{s}$.
+- Arithmetic operations per token are unchanged at $33.5$ million. The intensity rises from $0.5$ to $2.0$ operations per byte, still memory-bound, but four times less so.
+:::
+
+The obvious first attempt fails immediately. Weights in a trained network are small numbers; Kaiming initialization (Chapter 3) puts them within a few tenths of zero, and training rarely moves them past $\pm 1$. Cast them to integers and they vanish:
+
+```python
+weights = [0.0123, -0.0871, 0.0456, -0.0012]
+print([int(w) for w in weights])   # every weight becomes 0
 ```
-Continuous Float Domain:       -α ─────────── 0.0 ─────────── +α
-                               │               │               │
-                               ▼               ▼               ▼
-Discrete INT8 Grid:          -127 ───────────  0  ─────────── +127
-```
 
-### The Symmetric Quantization Formula
-
-In **Symmetric Uniform Quantization**, zero in float space maps exactly to zero in integer space (zero-point $Z = 0$).
-
-We determine the scale factor $S$ from the maximum absolute value in the tensor:
-
-$$S = \frac{\max(|X|)}{127}$$
-
-To **Quantize** a floating-point tensor $X$:
-
-$$q = \text{clamp}\left( \left\lfloor \frac{X}{S} \right\rceil, \; -128, \; 127 \right)$$
-
-where $\lfloor \cdot \rceil$ denotes rounding to the nearest integer.
-
-To **Dequantize** an 8-bit integer tensor back to floating-point:
-
-$$\hat{X} = q \times S$$
-
-### Quantized Matrix Multiplication Mathematics
-
-When multiplying a quantized activation matrix $Q_X$ by a quantized weight matrix $Q_W$:
-
-$$Y = X W^T = (S_X Q_X) \cdot (S_W Q_W)^T = (S_X \cdot S_W) \cdot \left( Q_X Q_W^T \right)$$
-
-```
-Quantized Integer Matrix Multiplication Pipeline:
-1. Integer Matrix Multiply: Compute integer sum C_int = Q_X @ Q_W^T using INT32 accumulators.
-2. Scalar Rescaling       : Multiply C_int by combined float scale factor S_Y = (S_X * S_W).
-3. Zero Float Multiply   : The heavy matrix multiplication occurs entirely in INT8/INT32 hardware!
-```
+The integers $-128$ through $127$ are perfectly good for counting, but the weights do not live on that grid. Quantization is the trick of moving them onto it.
 
 ---
 
-## The Pure TinyTorch Construction
+## The Idea
 
-We implement INT8 quantization and the `QuantizedLinear` layer in TinyTorch:
+### One scale and one zero point
+
+Take a tensor whose values lie between $x_{\min}$ and $x_{\max}$. Stretch that interval so that it includes $0.0$ (if the values are all positive, as the output of a ReLU is, the interval grows down to zero), and then spread it evenly over the 256 codes a signed byte can hold. The width of one step is the **scale**:
+
+$$S = \frac{x_{\max} - x_{\min}}{255}$$
+
+Divide every value by $S$ and the tensor spans 255 steps. Shifting it so that $x_{\min}$ lands on $-128$ takes one integer offset, the **zero point** $Z$, which is the code that represents $0.0$:
+
+$$Z = \text{round}\!\left(-128 - \frac{x_{\min}}{S}\right), \qquad q = \text{clamp}\!\left(\text{round}\!\left(\frac{x}{S}\right) + Z,\; -128,\; 127\right)$$
+
+Here $x$ is the original float and $q$ is its 8-bit code; the clamp is a safety net, since nothing escapes the byte by construction when $S$ and $Z$ come from the tensor itself, but a scale chosen from other data might let something through. Stretching the interval to include zero is what keeps $Z$ inside the byte, and it costs at most one step of precision. To get a float back, undo the shift and the division:
+
+$$\hat{x} = (q - Z) \times S$$
+
+The hat marks that $\hat{x}$ is a reconstruction, not the original. Because $q$ was rounded, $\hat{x}$ differs from $x$ by at most half a step:
+
+$$|x - \hat{x}| \le \frac{S}{2} = \frac{x_{\max} - x_{\min}}{510}$$
+
+That bound is the entire accuracy story of this chapter. Every value is reconstructed to within $0.2\%$ of the tensor's range, regardless of the tensor's size. The bound is also the warning. It is relative to the range, not to $x$. A weight of $0.001$ in a tensor whose values span $[-1, 1]$ is rounded to the grid step $S \approx 0.0078$, and comes back as $0$. Small values in a tensor with one large outlier are where quantization loses information.
+
+This mapping is called **asymmetric** because the grid does not have to be centered on zero; it is the form Module 15 uses, the form PyTorch and TFLite default to, and the one every listing in this chapter carries. The **symmetric** special case takes $x_{\min} = -x_{\max}$, so that $Z = 0$ and the formulas lose a term; it wastes codes when a tensor is all positive, which is why the general form earns its extra integer. A tensor of all one value has no range at all, and the module handles it with a separate branch that encodes every element as code $0$ and lets $Z$ and $S$ carry the constant.
+
+### Multiplying integers instead of floats
+
+The scale does more than shrink storage, and this is the half of the model that makes the chapter worth a layer rather than a storage format. Write the activation row $x$ and the weight matrix $W$ in terms of their codes, $x = S_x (Q_x - Z_x)$ and $W = S_W (Q_W - Z_W)$, and the linear layer's product factors:
+
+$$y = x W^{T} = (S_x S_W)\,\big((Q_x - Z_x)(Q_W - Z_W)^{T}\big)$$
+
+Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and they multiply the result exactly once per output value. That is the whole reason for insisting on a single scale per tensor. Because the scale is one number, it can be pulled out of an entire matrix multiply and applied at the end, so the dot products, which are all the work, run on 1-byte operands.
+
+Everything in this chapter happens after training, with no gradient in sight. It is **post-training quantization**, the version a practitioner reaches for first because it needs nothing but the finished weights.
+
+---
+
+## The Code
+
+::: {.callout-note title="Source Code Mapping"}
+The listings in this chapter are extracted from Module 15 (`src/15_quantization/15_quantization.py`), which the package exports as `tinytorch.perf.quantization`. Its `quantize_int8` and `dequantize_int8` work on the NumPy-backed `Tensor` from Chapter 6, and `QuantizedLinear` wraps a Chapter 3 `Linear`. The one piece of code below that is not in the module is `int8_forward`, a short book function that runs the layer's multiply on the integer codes; the module's own `forward` dequantizes the weights and multiplies in float, and the text says why.
+:::
+
+### Quantize and dequantize
+
+Start with the weights, because they are the bytes we are trying to shrink. The 4096 by 4096 layer from The Problem holds 16.8 million floats, and I want each of them stored as one byte, with a way to get a float back whenever the arithmetic needs one. Everything else in the chapter sits on this pair of functions, and Chapter 16 takes the bytes they produce as its starting point.
+
+The Problem already showed the naive version. Cast each weight to an integer and every one of them, being smaller than 1 in magnitude, becomes 0. The layer would still occupy 16.8 MB and would compute nothing but its bias. So the real question is whether 16.8 million small floats can be moved onto the integer grid and still be told apart afterward. The scale is the answer. Measure the tensor's range, divide everything by the step that spreads that range across the byte, shift so the smallest value lands on $-128$, and round. The weights now spread across the whole byte, and each one comes back to within $S/2$ of where it started.
+
+`quantize_int8` does the measuring, dividing, shifting, rounding, and clamping.
+
+{{< include _listings/15_quantization/quantize_int8.qmd >}}
+
+Steps 3 through 6 are the formulas from The Idea, in order. Step 2 is the case the formulas cannot handle, a tensor with no range, which the module encodes as all zeros and lets the scale and zero point reconstruct. Step 3 is the one that is easy to skip and wrong to skip: without it, an all-positive tensor puts $Z$ below $-128$, the clamp on the next line silently moves it, and every value comes back shifted. The comments say so because a student who removes the line sees no error, only worse accuracy. Getting the float back is one line.
+
+{{< include _listings/15_quantization/dequantize_int8.qmd >}}
+
+Run the pair on three numbers.
 
 ```python
 import numpy as np
-from typing import Tuple, List, Optional
-from .tensor import Tensor
-from .layers import Layer, Linear
+from tinytorch.core.tensor import Tensor
+from tinytorch.perf.quantization import quantize_int8, dequantize_int8
 
-def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
-    """Symmetrically quantize FP32 tensor into INT8 with scale factor.
-
-    Returns:
-        Tuple of (Quantized INT8 Tensor, Float Scale Factor, Zero Point = 0)
-    """
-    data = tensor.data
-    max_val = float(np.max(np.abs(data)))
-
-    # Guard against division by zero for all-zero tensors
-    scale = max(max_val / 127.0, 1e-8)
-    zero_point = 0
-
-    # Round to nearest integer and clamp into signed 8-bit range [-128, 127]
-    q_data = np.clip(np.round(data / scale), -128, 127).astype(np.int8)
-
-    return Tensor(q_data, requires_grad=False), scale, zero_point
-
-def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int = 0) -> Tensor:
-    """Dequantize INT8 tensor back to continuous FP32 representation."""
-    fp_data = (q_tensor.data.astype(np.float32) - zero_point) * scale
-    return Tensor(fp_data, requires_grad=False)
-
-class QuantizedLinear(Layer):
-    """Linear Layer executing with INT8 quantized weight buffers."""
-    def __init__(self, original_linear: Linear):
-        super().__init__()
-        self.in_features = original_linear.in_features
-        self.out_features = original_linear.out_features
-
-        # Quantize original FP32 weights into INT8
-        self.q_weight, self.weight_scale, self.weight_zero_point = quantize_int8(original_linear.weight)
-
-        # Keep bias in FP32 / INT32 for precision preservation
-        self.bias = original_linear.bias if original_linear.bias is not None else None
-        self.activation_scale = 1.0
-
-    def calibrate(self, sample_inputs: List[Tensor]):
-        """Calibrate input activation scale factor using sample calibration batches."""
-        max_vals = [np.max(np.abs(x.data)) for x in sample_inputs]
-        global_max = float(np.max(max_vals))
-        self.activation_scale = max(global_max / 127.0, 1e-8)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward inference using INT8 quantized weights."""
-        # 1. Quantize incoming activations on-the-fly
-        q_x, x_scale, _ = quantize_int8(x)
-
-        # 2. Execute Integer Matrix Multiply using 32-bit accumulation
-        int_out = np.matmul(q_x.data.astype(np.int32), self.q_weight.data.astype(np.int32).T)
-
-        # 3. Rescale back to continuous float space
-        combined_scale = x_scale * self.weight_scale
-        out_data = int_out.astype(np.float32) * combined_scale
-
-        if self.bias is not None:
-            out_data = out_data + self.bias.data
-
-        return Tensor(out_data, requires_grad=False)
-
-    def memory_usage(self) -> Dict[str, float]:
-        """Return memory usage in bytes comparing FP32 vs INT8."""
-        fp32_bytes = self.in_features * self.out_features * 4
-        int8_bytes = self.in_features * self.out_features * 1
-        return {
-            'fp32_bytes': fp32_bytes,
-            'int8_bytes': int8_bytes,
-            'savings_ratio': fp32_bytes / int8_bytes
-        }
+x = Tensor(np.array([0.5, -0.3, 0.1], dtype=np.float32))
+q, scale, zero_point = quantize_int8(x)
+print(q.data, scale, zero_point)          # [127. -128.    0.] 0.003137... -32
+print(dequantize_int8(q, scale, zero_point).data)   # [0.4988 -0.3012  0.1004]
 ```
+
+The range is $[-0.3, 0.5]$, so the scale is $0.8 / 255 = 0.003137$ and the zero point is $\text{round}(-128 + 0.3 / 0.003137) = -32$. The code for $0.1$ is $\text{round}(31.9) - 32 = 0$, which is the zero point doing its job: $0.1$ is not zero, but it sits 32 steps above $-0.3$ and the grid records that. Every reconstruction is within $S/2 \approx 0.0016$ of its original, as the bound promised. One thing to notice about the printout is that the codes print as `127.` with a decimal point. `quantize_int8` does produce an `int8` array, but it hands the array to `Tensor`, and Chapter 6's `Tensor` stores everything as float32. So in this NumPy framework the codes occupy four bytes each the moment they are wrapped, and the memory saving is accounted for by `memory_usage` below rather than realized in RAM. The arithmetic of quantization is all here; the byte saving needs a container that keeps int8, which is what PyTorch's quantized tensors are. PyTorch's names for this pair are `torch.quantize_per_tensor` and `.dequantize()`, and the "per tensor" says what ours does too, one scale and one zero point for the whole array.
+
+### The quantized layer
+
+Now the layer. Picture the decode step Chapter 14 diagnosed. One activation vector arrives, it has to be multiplied by the 4096 by 4096 matrix, and that matrix now lives in memory as 16.8 MB of int8 codes instead of 67 MB of floats. The bytes we wanted to save are saved. What remains is to consume them without handing the saving back.
+
+The tempting way to hand it back is to call `dequantize_int8` on the weights, write the float matrix somewhere, and run the ordinary float multiply. Count the traffic. Reading the codes moves 16.8 MB, writing the float matrix moves 67 MB, and the multiply reads those 67 MB again, so the layer moves about 150 MB per token where the unquantized layer moved 67 MB. At 100 GB/s that is 1.5 ms per token per layer, more than twice as slow as what we started with. Storing the weights small and expanding them in memory before use is worse than never quantizing.
+
+The factored product from The Idea is the way out. Run the multiply on the codes themselves, so every dot product happens on 1-byte operands, and let the float work shrink to one multiply by $S_x S_W$ per output value. The weights never become floats at all.
+
+That leaves the activations, which have a scale of their own in the product and no obvious place to get it from. For weights, the range is known the moment training ends; look at the matrix and take its minimum and maximum. Activations depend on the input, so their range is not known until the input arrives. There are two honest options. **Dynamic quantization** computes $S_x$ and $Z_x$ from each input as it comes, which is exact but costs a pass over the activations before every multiply. **Static quantization** runs a few representative inputs through the model offline, records the range the layer sees, and freezes that as the layer's input grid. This offline step is called **calibration**, and the recorded range is only as good as the samples were representative.
+
+`QuantizedLinear` is built from an existing `Linear`. It quantizes the weights once, at construction, and the bias too, each with its own scale and zero point, and keeps the codes.
+
+{{< include _listings/15_quantization/QuantizedLinear.qmd >}}
+
+Read `forward` against the traffic argument above. It dequantizes the weights on every call and multiplies in float, which is exactly the path The Problem warned against, and the comment says why: NumPy has no integer matrix multiply worth calling, and `Tensor` would widen the codes to float32 anyway. What this `forward` reproduces faithfully is the arithmetic of the rounding. The weights carry their grid error, and if `calibrate` has run, the input is rounded onto the calibrated grid and back before the multiply, so an input that falls outside the calibrated range saturates at the edge of the byte exactly as it would on integer hardware. That saturation is the price of skipping the per-input scan, and the last exercise makes it visible. `memory_usage` is where the $4\times$ lives; it counts the bytes the codes would occupy in an int8 container, plus eight bytes for the two scales.
+
+The integer path is what production hardware runs, and it is the version worth having in your head, so here it is as book code against the same layer. It quantizes the input on the fly, subtracts both zero points, takes the dot products in 32-bit integers, and rescales once per output.
+
+```python
+def int8_forward(layer: QuantizedLinear, x: Tensor) -> np.ndarray:
+    """The integer path: codes in, one rescale out. Not in Module 15."""
+    q_x, x_scale, x_zero = quantize_int8(x)
+    lhs = q_x.data.astype(np.int32) - x_zero                              # [rows, in]
+    rhs = layer.q_weight.data.astype(np.int32) - layer.weight_zero_point  # [in, out]
+    acc = lhs @ rhs                                                       # int32 dot products
+    y = acc * (x_scale * layer.weight_scale)                              # one float multiply per output
+    if layer.q_bias is not None:
+        y = y + dequantize_int8(layer.q_bias, layer.bias_scale, layer.bias_zero_point).data
+    return y
+```
+
+One detail matters for the accumulator. After the zero points are subtracted each operand spans up to 255, so one product can reach $255 \times 255 = 65{,}025$, and a dot product over $K$ inputs sums $K$ of them. A 32-bit accumulator holds up to $2{,}147{,}483{,}647$, enough for $K$ up to about $33{,}000$ inputs at the worst case; a 16-bit accumulator cannot hold even one worst-case product. Every INT8 matrix multiply, in this function or in hardware, accumulates in 32 bits. NumPy's `int32` does it here, and the trace checks that the sums stay far from the edge. PyTorch's `torch.ao.nn.quantized.dynamic.Linear` is `int8_forward` with the dot products done on vector instructions.
+
+### Quantizing a whole model
+
+One layer is not a model. Every block of Chapter 13's transformer has six linear layers, four projections in attention and two in the MLP, and a model of any real size has dozens of blocks. Nobody is going to construct a `QuantizedLinear` for each one by hand, and doing it by hand invites a specific mistake. Calibrate every layer against the activations of the original float model, then swap the quantized layers in, and layer 3 ends up with a grid measured on inputs it will never see, because its inputs are now the outputs of a quantized layer 2. That is a wrong number rather than a slow one, and it shows up as lost accuracy with no error message.
+
+So the loop has two jobs. Walk the model, swapping every `Linear` for its integer twin and passing everything else through untouched; and, when there is calibration data, measure each layer's inputs only after the layers before it have already been quantized. `quantize_model` does both, in place on a `Sequential`.
+
+{{< include _listings/15_quantization/quantize_model.qmd >}}
+
+The ordering is in the loop itself. Layer `i` is replaced before the loop reaches layer `i + 1`, so when the helper below runs calibration data forward through layers `0` to `i - 1`, it runs through the quantized versions, and layer `i` is calibrated on the activations it will actually receive.
+
+{{< include _listings/15_quantization/_collect_layer_inputs.qmd >}}
+
+`_quantize_single_layer` is the two lines you would expect, construct and calibrate. The `max_samples` cap of ten keeps calibration cheap for a demo and is far too few for a real model, where the range of a layer's inputs is measured over hundreds of batches; the trace shows what ten samples cost. PyTorch's `quantize_dynamic(model, {nn.Linear})` is the same loop with a set of layer types where we wrote `isinstance`, and its static variant attaches an observer to each layer that plays the part of `_collect_layer_inputs`.
 
 ---
 
-## The Production Bridge: PyTorch `torch.ao.quantization` and AWQ
+## A Worked Trace
 
-In production deep learning (e.g. `bitsandbytes`, `AutoGPTQ`, `AWQ`):
+A 2 by 2 weight matrix and a 2-element input are enough to check every step by hand.
+
+$$W = \begin{bmatrix} 1.27 & -0.638 \\ 0.253 & -1.019 \end{bmatrix}, \qquad x = \begin{bmatrix} 0.5 & -0.3 \end{bmatrix}$$
+
+**Weight grid.** The weights range from $-1.019$ to $1.27$, so $S_W = 2.289 / 255 = 0.008976$ and $Z_W = \text{round}(-128 + 1.019 / 0.008976) = \text{round}(-14.48) = -14$.
+
+**Weight codes.** Dividing by the scale, adding the zero point, and rounding: $1.27 / 0.008976 - 14 = 127.48 \to 127$, $-0.638 / 0.008976 - 14 = -85.08 \to -85$, $0.253 / 0.008976 - 14 = 14.18 \to 14$, and $-1.019 / 0.008976 - 14 = -127.52 \to -128$.
+
+**Input grid and codes.** The input ranges from $-0.3$ to $0.5$, so $S_x = 0.8 / 255 = 0.003137$ and $Z_x = \text{round}(-128 + 0.3 / 0.003137) = -32$. Then $0.5 / 0.003137 - 32 = 127.4 \to 127$ and $-0.3 / 0.003137 - 32 = -127.6 \to -128$.
+
+$$Q_W = \begin{bmatrix} 127 & -85 \\ 14 & -128 \end{bmatrix}, \qquad Q_x = \begin{bmatrix} 127 & -128 \end{bmatrix}$$
+
+**Products.** Subtracting the zero points gives the integer operands, $Q_x - Z_x = [159, -96]$ and, row by row, $Q_W - Z_W = [141, -71]$ and $[28, -114]$. The accumulators and the rescale by $S_x S_W = 2.816 \times 10^{-5}$ give the two outputs in @tbl-int8-quant-trace, alongside the exact float result.
+
+| Output | Exact FP32 | Integer accumulator | Rescaled INT8 result | Error |
+| :--- | :--- | :--- | :--- | :--- |
+| $y_0$ | $0.5(1.27) + (-0.3)(-0.638) = 0.8264$ | $159(141) + (-96)(-71) = 29{,}235$ | $29{,}235 \times 2.816 \times 10^{-5} = 0.8233$ | $-0.0031$ |
+| $y_1$ | $0.5(0.253) + (-0.3)(-1.019) = 0.4322$ | $159(28) + (-96)(-114) = 15{,}396$ | $15{,}396 \times 2.816 \times 10^{-5} = 0.4336$ | $+0.0014$ |
+
+: One INT8 linear layer traced against exact FP32 arithmetic. {#tbl-int8-quant-trace tbl-colwidths="[10,30,26,26,8]"}
+
+The first output is off by $0.003$, about a third of a percent, and the trace shows where it came from. The reconstructions are $\hat{x} = [0.4988, -0.3012]$ and, for the first row of $W$, $[1.2657, -0.6373]$; multiply those out and you get $0.8233$ exactly. Each is within its $S/2$ bound, $0.0016$ for the input and $0.0045$ for the weights, and on this row their errors pushed the same direction. Four weights that took 16 bytes now take 4 bytes plus a 4-byte scale and a zero point, and for a matrix of any real size that overhead is noise; `memory_usage` on the 4096 by 4096 layer from The Problem reports 67,125,248 bytes against 16,781,320, a ratio of 4.0.
+
+Before trusting the class on 16 million weights, I want it to agree with the four I traced by hand. The codes, the scale, and the zero point should match the arithmetic above digit for digit, and the two forwards should land within a few thousandths of the exact product. Chapter 3's `Linear` stores its weight as inputs by outputs, so $W$ goes in transposed.
+
+```python
+from tinytorch.core.layers import Linear
+from tinytorch.perf.quantization import QuantizedLinear
+
+W = np.array([[1.27, -0.638], [0.253, -1.019]], dtype=np.float32)   # rows are outputs
+linear = Linear(2, 2)
+linear.weight.data[:] = W.T
+linear.bias.data[:] = 0.0
+
+layer = QuantizedLinear(linear)
+print(layer.q_weight.data.T, layer.weight_scale, layer.weight_zero_point)
+# [[ 127.  -85.]
+#  [  14. -128.]] 0.008976... -14
+
+x = Tensor(np.array([[0.5, -0.3]], dtype=np.float32))
+print(x.data @ W.T)                 # [[0.8264 0.4322]]  exact
+print(layer.forward(x).data)        # [[0.824  0.4327]]  module: weights rounded, float multiply
+print(int8_forward(layer, x))       # [[0.8233 0.4336]]  integer path: both operands rounded
+```
+
+The module's `forward` lands closer to the exact answer than the integer path does, and that is not a virtue. It rounds only the weights, because it never quantizes the input, so it reports about half the error a real INT8 layer would make on this input. The integer path is the honest number. Both are within the bound, and both are what you should expect from 8 bits.
+
+Now the calibration cost. Quantize a small two-layer network twice, once with dynamic scales and once calibrated on eight samples, and compare each against the float model on sixteen fresh inputs.
+
+```python
+from tinytorch.core.layers import Sequential
+from tinytorch.core.activations import ReLU
+from tinytorch.perf.quantization import quantize_model
+
+rng = np.random.default_rng(0)
+inputs = Tensor(rng.standard_normal((16, 4)).astype(np.float32))
+calibration = [Tensor(rng.standard_normal((1, 4)).astype(np.float32)) for _ in range(8)]
+for data in (None, calibration):
+    model = Sequential(Linear(4, 8), ReLU(), Linear(8, 2))
+    reference = model.forward(inputs).data.copy()
+    quantize_model(model, data)
+    print(np.abs(model.forward(inputs).data - reference).max())
+```
 
 ```
-Modern Production Quantization Regimes:
-
-1. Weight-Only INT8 / INT4 (W8A16, W4A16):
-   • Weights stored in INT4 (0.5 bytes/param) in DRAM.
-   • Dequantized on-the-fly inside GPU SRAM registers during matmul.
-   • Cuts memory footprint by 8x with near-zero perplexity loss!
-
-2. AWQ (Activation-Aware Weight Quantization - Lin et al., 2023):
-   • Discovers that 1% of salient weights protect 99% of model accuracy.
-   • Keeps salient channels in FP16 while quantizing the remaining 99% to INT4.
+0.0204
+0.3448
 ```
+
+Rounding the weights alone moves the outputs by two hundredths. Calibrating on eight samples moves them by a third, because several of the sixteen test inputs fall outside the range those eight samples happened to cover, and every one of those saturates at the edge of the byte. The weights were quantized identically in both runs. The whole difference is the input grid, and it is why static quantization in production calibrates on hundreds of batches, not eight.
 
 ---
 
-## Building the System: How It All Connects
+## From TinyTorch to Production
 
-With Chapter 15, we achieve our first massive hardware systems win:
+PyTorch ships the mechanism above under `torch.ao.quantization`. The one-line entry point is dynamic quantization:
 
+```python
+import torch
+import torch.ao.quantization as tq
+
+model_fp32 = torch.nn.Sequential(torch.nn.Linear(4096, 4096))
+model_int8 = tq.quantize_dynamic(model_fp32, {torch.nn.Linear}, dtype=torch.qint8)
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ INT8 Quantization Benchmark Results:                                        │
-│ • Model Parameter Memory: 12.8 MB (FP32) ──► 3.2 MB (INT8) [4.0x Savings!]  │
-│ • DRAM Memory Bus Bandwidth: 75% reduction in bytes transferred per token.  │
-│ • Accuracy Retention: >99.4% on TinyDigits and TinyGPT language benchmarks. │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
 
-We have cut memory footprint by $4\times$. But can we also physically eliminate redundant weights and dimensions entirely?
+What comes out is our `QuantizedLinear` with two upgrades. The weights get one scale *per output row* rather than one per tensor, so a single large weight in one row no longer coarsens the grid for every other row; this is called per-channel quantization and it is the default because it is nearly free and reliably more accurate. And the integer dot products run on vector instructions that multiply several int8 pairs and accumulate into 32-bit lanes in one step, which is where the promised speedup is realized on a CPU. Static quantization, with a calibration pass over sample data, is the same call sequence with an observer attached to each layer; the observer is our `calibrate` method with better statistics than a bare minimum and maximum.
 
-In **Chapter 16**, we engineer **Model Compression: Pruning, Low-Rank SVD, and Distillation**.
+On GPUs the picture splits by workload. For large batches, where the matrix multiply is compute-bound, INT8 tensor cores execute the integer products at about twice the rate of the same chip's FP16 units, and the full path we traced (integer inputs, integer weights, 32-bit accumulation, one rescale) is what runs. For batch-1 language model decoding, the workload Chapter 14 diagnosed, the multiply is memory-bound, so the activations are usually left in floating point. The weights are stored at 8 or even 4 bits, streamed from memory in that form, and expanded back to 16-bit floats in registers immediately before the multiply. This **weight-only** quantization (written W8A16 or W4A16: 8- or 4-bit weights, 16-bit activations) gets the entire bandwidth win, since the bytes crossing the memory bus are the compressed ones, while paying nothing in activation precision. The dequantize step is exactly our `dequantize_int8`, run inside the kernel instead of ahead of it.
+
+Going to 4 bits is where the $S/2$ bound starts to bite, because a 4-bit grid has 16 codes instead of 256. Production methods fight this on two fronts. They shrink the group that shares a scale, from a whole tensor down to 64 or 128 consecutive weights, so that one outlier coarsens only its own small group. And they spend a small calibration set to decide how to round. GPTQ rounds each weight so as to minimize the error in the layer's *output* rather than in the weight itself, compensating for one weight's rounding when it rounds the next; AWQ rescales the few weight channels that the activations hit hardest so they land on finer grid points. Both are post-training methods that start from the same scale-and-round idea as this chapter. When even that is not enough, the model can be fine-tuned with the rounding simulated in the forward pass, a procedure called quantization-aware training.[^fn-ste-qat]
+
+| | TinyTorch `QuantizedLinear` | PyTorch `quantize_dynamic` (CPU) | LLM weight-only (GPU decode) |
+| :--- | :--- | :--- | :--- |
+| Weight storage | int8 codes, one scale and zero point per tensor | int8, one scale per output row | int4 or int8, one scale per group of 64 to 128 |
+| Activations | float, rounded onto a calibrated grid when one is set | int8, scale per input | 16-bit float, never quantized |
+| Multiply | weights dequantized, float multiply; integer path as book code | integer vector instructions, then rescale | weights expanded to 16-bit in registers, float multiply |
+| What it wins | the mental model | CPU throughput | memory bandwidth per token |
+
+: The same scale-round-clamp mechanism in three settings. {#tbl-quantization-production-comparison tbl-colwidths="[18,27,27,28]"}
+
+What carries over unchanged is the arithmetic. A scale, a rounding, a clamp, a wide accumulator, and one rescale at the end describe every quantization scheme in the table; the differences are how many scales there are, which tensors get them, and whether the integer products run on integer hardware or are undone in registers first. The $S/2$ error bound and the outlier problem it implies are the same everywhere too.
+
+Three things are worth looking for in your own work. When a quantized model loses accuracy, find the tensor whose largest magnitude is far from its typical magnitude, because that is where the grid is too coarse, and ask whether per-row or per-group scales fix it before reaching for training. When a quantized model is not faster, check whether the kernel actually consumes integers or dequantizes first, and whether the workload was memory-bound to begin with; a compute-bound matrix multiply does not care that its weights were stored small. And treat a calibration set with suspicion until you have seen how far the activations at inference wander outside it.
+
+[^fn-ste-qat]: **Straight-through estimator**: the rule that lets gradients flow through a rounding step during training. Rounding has zero derivative almost everywhere, so backpropagation would stop at it; the estimator pretends the derivative is one, so the weights learn to sit near grid points. It is the standard trick behind quantization-aware training.
+
+---
+
+## Summary
+
+You built a quantizer that maps a tensor of floats onto 8-bit integers with a single scale and zero point, and a `QuantizedLinear` layer that stores its weights as those codes and reports the bytes they would occupy. The invariant to keep is the factored product, $y = (S_x S_W)(Q_x - Z_x)(Q_W - Z_W)^{T}$, with the integer sums accumulated in 32 bits; it is why the bytes shrink by $4\times$ while the arithmetic stays exact up to rounding, and `int8_forward` is that product in eight lines. The rounding itself is bounded by half a grid step, $S/2$, and that bound is relative to the tensor's range, which is why outliers, not typical weights, decide whether a quantized model keeps its accuracy. Weights can be quantized the moment training ends; activations need either a per-input scan or an offline calibration pass, and a calibration set that misses the range saturates every input outside it. Chapter 16 takes for granted that every weight now costs one byte instead of four and asks whether the matrices need all of their rows and columns at all.
+
+---
+
+## Exercises
+
+1. **Outliers.** Quantize `Tensor(np.array([0.01, 0.02, -0.015, 0.03, 8.0]))` with `quantize_int8` and dequantize it. Which values survive, and what does the reconstruction of `0.01` come back as? Then quantize the first four values without the `8.0` and compare. Write one sentence explaining why per-row scales help.
+
+2. **Accumulator width.** Change `int8_forward` to accumulate in `np.int16` instead of `np.int32`; NumPy wraps silently on overflow rather than raising. Feed it inputs and weights whose codes sit at the edges of the byte, find the smallest input length at which the 16-bit result is wrong, and confirm it matches the figure derived beside `int8_forward` in The Code.
+
+3. **Calibration drift.** Build a `QuantizedLinear` from the trace matrix $W$, call `calibrate` with `[Tensor(np.array([[0.4, -0.2]])), Tensor(np.array([[0.1, 0.5]]))]`, then call `forward` on `Tensor(np.array([[2.0, -1.5]]))`. Compare the result against an uncalibrated layer and against the exact float product. Work out by hand which code each input was clamped to, and identify the line of `forward` that produced the discrepancy.

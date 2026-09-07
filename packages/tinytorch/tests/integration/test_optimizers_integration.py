@@ -19,14 +19,11 @@ import pytest
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.activations import ReLU, Sigmoid, Softmax, Tanh
 from tinytorch.core.layers import Linear, Layer, Dropout
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam, AdamW
 
 # Enable autograd
-enable_autograd()
-
-
 def test_sgd_with_linear_layer():
     """Test SGD optimizer with Linear layer and autograd."""
     print("🔬 Integration Test: SGD + Linear Layer + Autograd")

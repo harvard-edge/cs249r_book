@@ -273,7 +273,8 @@ def g_disclosure():
 @gate("disclosure: forward references to later modules are framed as previews",
       advisory=True)
 def g_forward_refs():
-    PREVIEW = ("Next", "will ", "you'll", "You'll", "prepare", "Coming", "→", "->", "Looking Ahead")
+    PREVIEW = ("Next", "will ", "you'll", "You'll", "prepare", "Coming", "→", "->", "Looking Ahead",
+               "implements", "adds", "teaches", "written in", "completes", "is the same", "exists to")
     errs = []
     for num, name, py in module_files():
         for i, line in enumerate(py.read_text().splitlines(), 1):

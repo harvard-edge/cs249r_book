@@ -67,7 +67,8 @@ rng = np.random.default_rng(7)
 
 from tinytorch.core.activations import GELU
 from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.autograd import Function
+from tinytorch.core.tensor import Function
+from tinytorch.core.autograd import is_grad_enabled
 from tinytorch.core.embeddings import EmbeddingLayer
 from tinytorch.core.layers import Linear
 
@@ -163,9 +164,9 @@ Before transformers, language models used RNNs or CNNs that processed text seque
 │  │  ┌─────────────┐       ┌─────────────────────────────┐    │  │
 │  │  │Token Embed  │   +   │ Positional Embedding        │    │  │
 │  │  │15496→[0.1,  │       │ pos_0→[0.05, -0.02, ...]    │    │  │
-│  │  │     0.3,..]│       │ pos_1→[0.12,  0.08, ...]     │    │  │
+│  │  │     0.3,..] │       │ pos_1→[0.12,  0.08, ...]    │    │  │
 │  │  │1917→[0.2,   │       │                             │    │  │
-│  │  │    -0.1,..]│       │                              │    │  │
+│  │  │    -0.1,..] │       │                             │    │  │
 │  │  └─────────────┘       └─────────────────────────────┘    │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                ↓                                │
@@ -427,9 +428,10 @@ Without normalization, deep networks suffer from "internal covariate shift" - th
 #| export
 
 
-class _LayerNormBackward(Function):
+class LayerNormFunction(Function):
     """
-    Gradient computation for the full layer normalization operation.
+    The layer normalization operation: forward normalizes across the last axis, backward
+    computes the gradients.
 
     Computes gradients for x, gamma, and beta in one pass.
     output = gamma * ((x - mean) / std) + beta
@@ -438,15 +440,41 @@ class _LayerNormBackward(Function):
         dx = (gamma/std) * (grad - mean(grad) - normalized * mean(grad * normalized))
     """
 
-    def __init__(self, x, gamma, beta, normalized_data, std_data):
-        """Initialize with forward pass values needed for gradient computation."""
-        super().__init__(x, gamma, beta)
-        self.normalized_data = normalized_data
-        self.std_data = std_data
+    def forward(self, x, gamma, beta):
+        """
+        Apply layer normalization to a NumPy array.
 
-    def apply(self, grad_output):
+        TODO: Implement the normalization formula
+
+        APPROACH:
+        1. Compute mean and variance across the last dimension
+        2. Normalize: (x - mean) / sqrt(variance + eps)
+        3. Keep the normalized values and std on self (backward needs them)
+        4. Apply learnable scale and shift: gamma * normalized + beta
+
+        MATHEMATICAL FORMULA:
+        y = (x - μ) / σ * γ + β
+        where μ = mean(x), σ = sqrt(var(x) + ε)
+
+        HINT: Use keepdims=True to maintain tensor dimensions for broadcasting
+        """
+        ### BEGIN SOLUTION
+        # Compute statistics across last dimension (features)
+        mean_data = np.mean(x, axis=-1, keepdims=True)
+        # Compute variance: E[(x - μ)²]
+        diff = x - mean_data
+        variance = np.mean(diff * diff, axis=-1, keepdims=True)
+        # Normalize: (x - mean) / sqrt(variance + eps)
+        self.std_data = np.sqrt(variance + self.eps)
+        self.normalized_data = diff / self.std_data
+        # Apply learnable transformation: gamma * normalized + beta
+        return gamma * self.normalized_data + beta
+        ### END SOLUTION
+
+
+    def backward(self, grad_output):
         """Compute gradients for LayerNorm (x, gamma, beta)."""
-        x, gamma, beta = self.saved_tensors
+        x, gamma, beta = self.inputs
 
         grad_x = grad_gamma = grad_beta = None
         normalized = self.normalized_data
@@ -521,44 +549,10 @@ class LayerNorm:
         """
         Apply layer normalization.
 
-        TODO: Implement layer normalization formula
-
-        APPROACH:
-        1. Compute mean and variance across the last dimension
-        2. Normalize: (x - mean) / sqrt(variance + eps)
-        3. Apply learnable scale and shift: gamma * normalized + beta
-
-        MATHEMATICAL FORMULA:
-        y = (x - μ) / σ * γ + β
-        where μ = mean(x), σ = sqrt(var(x) + ε)
-
-        HINT: Use keepdims=True to maintain tensor dimensions for broadcasting
+        The normalization itself lives in LayerNormFunction.forward above;
+        apply() records it so gamma and beta train.
         """
-        ### BEGIN SOLUTION
-        # Compute statistics across last dimension (features)
-        mean_data = np.mean(x.data, axis=-1, keepdims=True)
-
-        # Compute variance: E[(x - μ)²]
-        diff = x.data - mean_data
-        variance = np.mean(diff * diff, axis=-1, keepdims=True)
-
-        # Normalize: (x - mean) / sqrt(variance + eps)
-        std_data = np.sqrt(variance + self.eps)
-        normalized_data = diff / std_data
-
-        # Apply learnable transformation: gamma * normalized + beta
-        output_data = self.gamma.data * normalized_data + self.beta.data
-        output = Tensor(output_data)
-
-        # Attach gradient function for full LayerNorm backward
-        if x.requires_grad or self.gamma.requires_grad or self.beta.requires_grad:
-            output.requires_grad = True
-            output._grad_fn = _LayerNormBackward(
-                x, self.gamma, self.beta, normalized_data, std_data
-            )
-
-        return output
-        ### END SOLUTION
+        return LayerNormFunction.apply(x, self.gamma, self.beta, eps=self.eps)
 
     def __call__(self, x):
         """Allows the layer norm to be called like a function."""
@@ -902,13 +896,11 @@ Think of the residual connections as a "stream" that carries information through
 ```
 Residual Stream Flow:
 
-Layer 1: [original embeddings] ─┐
-                                 ├─→ + attention info ─┐
-Attention adds information ──────┘                      │
-                                                        ├─→ + MLP info ─┐
-MLP adds information ───────────────────────────────────┘               │
-                                                                        │
-Layer 2: carries accumulated information ───────────────────────────────┘
+x (embeddings) ───┬─────────────────(+)──┬──────────────(+)──→ x₄ (to next block)
+                  │                  ↑   │               ↑
+                  └── LN → Attention ┘   └── LN → MLP ───┘
+
+Each branch reads the stream and adds its result back; nothing overwrites it.
 ```
 
 Each layer adds information to this stream rather than replacing it, creating a rich representation.
@@ -1303,9 +1295,13 @@ class GPT:
         self.lm_head = Linear(embed_dim, vocab_size, bias=False)
         ### END SOLUTION
 
-    def forward(self, tokens):
+    def forward(self, tokens, start_pos=0):
         """
         Forward pass through GPT model.
+
+        start_pos is the position of the first token (0 for a whole sequence).
+        Module 18's KV cache feeds one token at a time and passes the number of
+        tokens already cached, so the embedding layer gives it the right position.
 
         TODO: Implement the complete GPT forward pass
 
@@ -1322,13 +1318,13 @@ class GPT:
         For autoregressive generation, we need to prevent tokens from
         seeing future tokens. This is handled by the attention mask.
 
-        HINT: Create position indices as range(seq_len) for positional embedding
+        HINT: Pass start_pos to the embedding layer; it slices the positions from there
         """
         ### BEGIN SOLUTION
         batch_size, seq_len = tokens.shape
 
         # Pass tokens to embedding layer to get token embeddings and positional embeddings
-        x = self.embedding_layer.forward(tokens)
+        x = self.embedding_layer.forward(tokens, start_pos)
 
         # Create causal mask for autoregressive generation
         mask = self._create_causal_mask(seq_len)
@@ -1346,9 +1342,9 @@ class GPT:
         return logits
         ### END SOLUTION
 
-    def __call__(self, tokens):
+    def __call__(self, tokens, start_pos=0):
         """Allows the GPT model to be called like a function."""
-        return self.forward(tokens)
+        return self.forward(tokens, start_pos)
 
     def _create_causal_mask(self, seq_len):
         """Create causal mask to prevent attending to future positions."""

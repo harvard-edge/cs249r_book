@@ -557,7 +557,8 @@ class BenchmarkReport:
         1. Parameter count - Model capacity indicator
         2. Model size (MB) - Deployment cost (assumes FP32)
         3. Accuracy - Task performance (classification accuracy)
-        4. Latency (mean ± std) - Inference speed and consistency
+        4. Latency (mean ± std, and the median) - Inference speed and consistency,
+           timed with perf_counter after a few untimed warmup runs (Module 19)
         5. Throughput - Maximum samples/second capacity
         """
         # Count parameters
@@ -569,16 +570,22 @@ class BenchmarkReport:
         pred_labels = np.argmax(predictions.data, axis=1)
         accuracy = np.mean(pred_labels == y_test)
 
-        # Measure latency (average over multiple runs)
+        # Warm up first: the first calls pay allocation and cache costs that a
+        # steady-state latency should not include (Module 19)
+        for _ in range(min(5, num_runs)):
+            _ = model.forward(X_test[:1])
+
+        # Measure latency over multiple runs, each timed on its own
         # Why multiple runs? See "Variance" section in Foundations
         latencies = []
         for _ in range(num_runs):
-            start = time.time()
+            start = time.perf_counter()
             _ = model.forward(X_test[:1])  # Single sample inference
-            latencies.append((time.time() - start) * 1000)  # Convert to ms
+            latencies.append((time.perf_counter() - start) * 1000)  # Convert to ms
 
         avg_latency = np.mean(latencies)
         std_latency = np.std(latencies)
+        median_latency = np.median(latencies)
 
         # Store metrics (all as Python native types for JSON serialization)
         self.metrics = {
@@ -587,10 +594,9 @@ class BenchmarkReport:
             'accuracy': float(accuracy),
             'latency_ms_mean': float(avg_latency),
             'latency_ms_std': float(std_latency),
-            # time.time()'s resolution is coarse enough (~15.6ms on Windows)
-            # that a fast forward pass can measure exactly 0.0 elapsed time;
-            # floor the denominator so throughput stays a large-but-finite
-            # positive number instead of raising ZeroDivisionError.
+            'latency_ms_median': float(median_latency),
+            # Floor the denominator so an empty model that measures 0.0 ms
+            # cannot divide by zero
             'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
         }
 
@@ -598,7 +604,7 @@ class BenchmarkReport:
         print(f"  Parameters: {param_count:,}")
         print(f"  Size: {model_size_mb:.2f} MB")
         print(f"  Accuracy: {accuracy*100:.1f}%")
-        print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms")
+        print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
 
         return self.metrics
 
@@ -609,22 +615,25 @@ class BenchmarkReport:
         TODO: Time single-sample inference over multiple runs
 
         APPROACH:
-        1. Run inference num_runs times
-        2. Measure each run with time.time()
-        3. Convert to milliseconds
-        4. Return list of latencies
+        1. Run a few untimed warmup calls first (Module 19)
+        2. Run inference num_runs times
+        3. Measure each run with time.perf_counter()
+        4. Convert to milliseconds
+        5. Return list of latencies
 
         HINTS:
-        - Use time.time() before and after model.forward()
+        - Use time.perf_counter() before and after model.forward()
         - Multiply by 1000 to convert seconds to milliseconds
         - Use X_sample[:1] for single-sample timing
         """
         ### BEGIN SOLUTION
+        for _ in range(min(5, num_runs)):
+            _ = model.forward(X_sample[:1])
         latencies = []
         for _ in range(num_runs):
-            start = time.time()
+            start = time.perf_counter()
             _ = model.forward(X_sample[:1])
-            latencies.append((time.time() - start) * 1000)
+            latencies.append((time.perf_counter() - start) * 1000)
         return latencies
         ### END SOLUTION
 
@@ -788,14 +797,17 @@ def generate_submission(
         }
 
         # Calculate improvement metrics
-        baseline_latency = baseline_report.metrics['latency_ms_mean']
-        optimized_latency = optimized_report.metrics['latency_ms_mean']
+        # Compare medians when both reports carry one (Module 19: the median is
+        # the honest center of a skewed latency distribution); a report that
+        # recorded only a mean still compares
+        key = 'latency_ms_median' if all('latency_ms_median' in r.metrics for r in (baseline_report, optimized_report)) else 'latency_ms_mean'
+        baseline_latency = baseline_report.metrics[key]
+        optimized_latency = optimized_report.metrics[key]
         baseline_size = baseline_report.metrics['model_size_mb']
         optimized_size = optimized_report.metrics['model_size_mb']
 
         submission['improvements'] = {
-            # See the matching guard in benchmark_model: time.time()'s coarse
-            # resolution can measure a fast model's latency as exactly 0.0.
+            # Floor the denominator so an empty model that measures 0.0 ms cannot divide by zero
             'speedup': float(baseline_latency / max(optimized_latency, 1e-6)),
             'compression_ratio': float(baseline_size / optimized_size),
             'accuracy_delta': float(
@@ -1818,7 +1830,7 @@ Effective benchmarking requires rigorous methodology that bridges scientific mea
 ```
 1. REPEATABILITY (Same Experiment → Same Result)
    ┌─────────────────────────────────────────┐
-   │ • Fixed random seeds (default_rng)       │
+   │ • Fixed random seeds (default_rng)      │
    │ • Same test dataset across runs         │
    │ • Consistent environment (same hardware)│
    │ • Multiple runs to capture variance     │
@@ -1967,9 +1979,9 @@ Your submission format uses JSON Schema validation—a powerful pattern for ensu
 WITHOUT Schema:                     WITH Schema:
 ┌──────────────────────────┐       ┌──────────────────────────┐
 │ {                        │       │ {                        │
-│   "accuracy": "92%",     │ ❌    │   "accuracy": 0.92,      │ ✅
-│   "latency": 10.5,       │ ❌    │   "latency_ms_mean": 10.5│ ✅
-│   "time": "today"        │ ❌    │   "timestamp": "2025..." │ ✅
+│   "accuracy": "92%",     │  bad  │   "accuracy": 0.92,      │  ok
+│   "latency": 10.5,       │  bad  │   "latency_ms_mean": 10.5│  ok
+│   "time": "today"        │  bad  │   "timestamp": "2025..." │  ok
 │ }                        │       │ }                        │
 │                          │       │                          │
 │ Problems:                │       │ Benefits:                │

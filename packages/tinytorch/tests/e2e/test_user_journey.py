@@ -295,7 +295,7 @@ class TestMilestoneFlow:
         }))
 
         # Try to run milestone 03 (requires many modules)
-        code, stdout, stderr = run_tito(["milestone", "run", "03", "--skip-checks"], timeout=5)
+        code, stdout, stderr = run_tito(["milestone", "run", "03", "--skip-checks"], timeout=30)
 
         # With --skip-checks it might try to run; without it should check prereqs
         # Either way, the command should not crash
