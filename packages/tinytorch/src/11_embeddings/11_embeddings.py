@@ -722,9 +722,9 @@ class PositionalEncoding:
         return result
         ### END SOLUTION
 
-    def __call__(self, x: Tensor) -> Tensor:
+    def __call__(self, x: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the positional encoding to be called like a function."""
-        return self.forward(x)
+        return self.forward(x, start_pos)
 
     def parameters(self) -> List[Tensor]:
         """Return trainable parameters."""
@@ -1294,9 +1294,9 @@ class EmbeddingLayer:
             )
         ### END SOLUTION
 
-    def __call__(self, tokens: Tensor) -> Tensor:
+    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the embedding layer to be called like a function."""
-        return self.forward(tokens)
+        return self.forward(tokens, start_pos)
 
     def parameters(self) -> List[Tensor]:
         """Return all trainable parameters."""
