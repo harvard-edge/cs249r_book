@@ -43,7 +43,7 @@ This chapter examines the systems architecture of prefix caching, virtual memory
 
 :::
 
-## Introduction to Prefix Caching and Paging: The State Reuse Imperative {#sec-vol3-caching-intro}
+## The State Reuse Imperative {#sec-vol3-caching-intro}
 
 In classical web serving and early large language model deployments, the serving runtime treated every inference request as an independent, stateless event [@vaswani2017; @zaharia2018accelerating]. In autonomous agent systems, this assumption fails completely. An agent session is an extended, stateful feedback loop spanning tens to hundreds of turns where each subsequent invocation appends a modest delta of new observations (shell command outputs, file diffs, API responses) to an identical prefix of system guidelines, tool schemas, and accumulated conversation history.
 
@@ -58,7 +58,7 @@ However, prefix caching in agentic systems introduces four core systems challeng
 
 This chapter establishes the systems architecture of prefix caching, virtual memory paging, and disaggregated memory tiers designed specifically for stateful agent trajectories. In @sec-vol3-caching-prefix-locality-in-multi-turn, we analyze empirical prefix locality and quantify the computational penalty of stateless serving. In @sec-vol3-caching-kv-cache-anatomy-tensor-layouts, we dissect KV-cache tensor layouts and allocation overheads. We formalize PagedAttention virtual memory page tables in @sec-vol3-caching-pagedattention-virtual-memory-page, and develop Radix tree indexing, invalidation protocols, and hierarchical memory paging across subsequent sections.
 
-## Prefix Locality in Multi-Turn Trajectories: Empirical Workload Analysis {#sec-vol3-caching-prefix-locality-in-multi-turn}
+## Prefix Locality in Trajectories {#sec-vol3-caching-prefix-locality-in-multi-turn}
 
 Stateless large language model serving benchmarks traditionally assume independent, identically distributed requests where each prompt arrives with little or no shared history. In contrast, real-world autonomous agents—such as software engineering agents executing on SWE-bench, autonomous research assistants, and tool-augmented workflow orchestrators—generate highly stateful, clustered request traces characterized by extreme prefix locality.
 
@@ -102,7 +102,7 @@ $$T_{\text{prefill}} = \frac{4.59 \times 10^{15} \text{ FLOPs}}{500 \times 10^{1
 
 In a 20-turn agent session, recomputing the prompt from scratch on every turn forces the GPU cluster to expend over $180$ seconds of pure prefill compute on identical tokens. This redundant computation degrades Time-to-First-Token (TTFT), consumes immense electrical power, and starves concurrent requests of accelerator compute. If the serving runtime caches and reuses the KV states corresponding to $X^{(t)}$, the prefill for turn $t+1$ requires computing only the incremental delta $\Delta = |\mathbf{x}_{\text{action}}^{(t)}| + |\mathbf{x}_{\text{obs}}^{(t+1)}|$ (e.g., $500$ tokens), slashing the turn's TTFT from $9.18$ seconds down to approximately $140$ milliseconds—a $65\times$ latency reduction [@zheng2024sglang; @kwon2023].
 
-## KV-Cache Anatomy: Tensor Layouts, GQA/MQA, and Allocation Overhead {#sec-vol3-caching-kv-cache-anatomy-tensor-layouts}
+## KV-Cache Anatomy and Layouts {#sec-vol3-caching-kv-cache-anatomy-tensor-layouts}
 
 To exploit prefix locality, the runtime must store and manipulate Key-Value tensors directly in memory. Understanding the precise memory footprint and tensor structure of the KV cache is essential for designing efficient memory management policies.
 
@@ -154,7 +154,7 @@ Because the runtime cannot predict the final output sequence length of an agent 
 - **Internal Fragmentation:** Memory reserved for tokens up to $L_{\max}$ remains completely unused if the agent generates only a brief response. In typical serving deployments, internal fragmentation wastes between 60% and 80% of accelerator memory [@kwon2023].
 - **External Fragmentation:** Over time, as requests of variable sequence lengths finish and release memory, physical device memory becomes fragmented into discontinuous blocks. Even if total free memory exceeds the size required for a new request, the runtime cannot schedule the request because no single contiguous memory segment is large enough.
 
-## PagedAttention: Virtual Memory Page Tables for Non-Contiguous KV Blocks {#sec-vol3-caching-pagedattention-virtual-memory-page}
+## PagedAttention and Page Tables {#sec-vol3-caching-pagedattention-virtual-memory-page}
 
 To overcome the fatal fragmentation of static contiguous allocation, Kwon et al. introduced PagedAttention, an architecture inspired by classic operating system virtual memory paging [@kwon2023; @denning1970].
 
@@ -194,7 +194,7 @@ Under standard contiguous allocation, creating $K$ parallel branches requires du
 
 This mechanism slashes the memory footprint of branched reasoning from $O(K \cdot L)$ down to $O(L_{\text{prefix}} + K \cdot L_{\text{branch}})$, unlocking massive parallel search on single-node GPU clusters.
 
-## Radix Tree Indexing: Dynamic Prefix Matching, Insertion, and Eviction {#sec-vol3-caching-radix-tree-indexing-dynamic}
+## Radix Tree Prefix Indexing {#sec-vol3-caching-radix-tree-indexing-dynamic}
 
 While PagedAttention manages physical memory pages for active requests, it does not inherently recognize when two independent requests—or consecutive turns of an agent session—share common prompt prefixes. To achieve automatic, zero-overhead prefix reuse across arbitrary workflows, modern inference runtimes implement Radix Tree KV-cache indexing, pioneered by SGLang's RadixAttention [@zheng2024sglang; @fredkin1960].
 
@@ -246,7 +246,7 @@ This design ensures that if the agent issues its next turn before memory pressur
 
 ![Radix Tree Architecture for Dynamic Prefix Caching. The logical Radix tree indexes token sequences and maps them directly to physical non-contiguous PagedAttention memory blocks in GPU HBM with reference-counted LRU eviction.](images/svg/radix_prefix_tree_architecture.svg){#fig-vol3-caching-radix-tree}
 
-## Cache Invalidation Protocols: Mutating Workspace State vs. Prefix Invalidation {#sec-vol3-caching-cache-invalidation-protocols-mutating}
+## Cache Invalidation Protocols {#sec-vol3-caching-cache-invalidation-protocols-mutating}
 
 In stateless text processing, a token sequence $T$ maps deterministically to a fixed semantic meaning. In agentic systems, however, the environment is mutable. An agent modifies files on disk (`write_to_file`), executes database transactions, adjusts configuration variables, or runs build commands that alter environment state.
 
@@ -292,7 +292,7 @@ To maximize prefix cache reuse while isolating mutations, prompt engineers must 
 
   Appending deltas preserves the entire historical prefix in the Radix tree, allowing 100% cache hit on the prompt history while adding only the minimal delta tokens to the prefill phase.
 
-## Multi-Tier Memory Hierarchies: KV-Swapping over PCIe and CXL {#sec-vol3-caching-multi-tier-memory-hierarchies-kv-swapping}
+## Multi-Tier KV Memory Hierarchies {#sec-vol3-caching-multi-tier-memory-hierarchies-kv-swapping}
 
 In human-in-the-loop interactions and complex agent workflows, agent execution is dominated by heavy-tailed idle gaps. While an LLM generates tokens in a few hundred milliseconds, an external bash command (e.g., running an entire regression test suite), an API call to a rate-limited external service, or a human reviewing an approval request can stall the agent for $15$ seconds to several hours.
 
@@ -354,7 +354,7 @@ swapping out the KV cache is immediately profitable because the physical HBM fra
 
 ![Hierarchical KV-Cache Paging and Swapping Topology. Multi-tier memory hierarchy offloading idle agent contexts over PCIe Gen5 and CXL 3.0 to host DRAM and NVMe storage during tool execution pauses, reclaiming scarce accelerator HBM.](images/svg/hierarchical_kv_paging_topology.svg){#fig-vol3-caching-hierarchical-paging}
 
-## Prefill-Decode Disaggregation: Splitwise and DistServe Architectures {#sec-vol3-caching-prefill-decode-disaggregation-splitwise-and}
+## Prefill-Decode Disaggregation {#sec-vol3-caching-prefill-decode-disaggregation-splitwise-and}
 
 Traditional LLM serving engines co-locate the prompt prefill phase and the autoregressive token decoding phase on the same physical GPUs. In multi-turn agent workloads, this co-location induces severe phase interference that destroys serving predictability.
 
@@ -396,7 +396,7 @@ Because $42\text{ ms}$ is orders of magnitude smaller than the seconds required 
 
 ![Disaggregated Serving Architecture. Physical separation of compute-bound prompt prefill nodes from memory-bandwidth-bound decode nodes interconnected by 400–800 Gbps RoCEv2/InfiniBand RDMA to eliminate phase interference and maximize serving goodput.](images/svg/prefill_decode_disaggregation.svg){#fig-vol3-caching-disaggregation}
 
-## KVCache-Centric Datacenter Architectures: RDMA Streaming and Mooncake {#sec-vol3-caching-kvcache-centric-datacenter-architectures-rdma}
+## KV-Centric Datacenter Architectures {#sec-vol3-caching-kvcache-centric-datacenter-architectures-rdma}
 
 As agentic systems scale to enterprise fleets, managing KV caches solely within the confines of individual server nodes becomes unsustainable. If an agent executes turn 1 on Node A, and turn 2 is routed to Node B, Node B lacks the cached prefix and is forced to execute a redundant prefill from scratch.
 
@@ -412,7 +412,7 @@ In Mooncake:
 
 By decoupling prefix caching from the physical placement of compute, KVCache-centric datacenter architectures achieve global cache hit rates exceeding 90% across thousands of distributed agent workflows, transforming multi-turn agent serving economics.
 
-## Branching Speculation: Prefix Cache Sharing Across Best-of-N and MCTS Trees {#sec-vol3-caching-branching-speculation-prefix-cache}
+## Branching Speculation {#sec-vol3-caching-branching-speculation-prefix-cache}
 
 Frontier reasoning agents increasingly rely on inference-time search algorithms—such as Best-of-$N$ sampling, Tree-of-Thoughts, and Monte Carlo Tree Search (MCTS)—to explore vast decision spaces [@yao2023tree; @snell2024scaling]. In these workloads, the inference engine must support massive parallel tree expansions branching from common parent prefixes.
 
@@ -440,7 +440,7 @@ $$S_{\text{MCTS}} = S_{\text{token}} \cdot \left( L_{\text{root}} + \sum_{j=1}^{
 
 instead of duplicating $L_{\text{root}}$ across all $N_{\text{branches}}$ leaves. By eliminating root duplication, Radix caching enables inference engines to sustain hundreds of parallel speculative reasoning branches on a single 8-GPU node, unlocking real-time MCTS rollouts for complex agentic problem solving [@snell2024scaling].
 
-## Chunked Prefill and Continuous Batching Under Stateful Agent Traffic {#sec-vol3-caching-chunked-prefill-and-continuous}
+## Chunked Prefill and Batching {#sec-vol3-caching-chunked-prefill-and-continuous}
 
 In production serving engines running continuous iteration-level batching (such as Orca), new requests join the active batch at every token generation step [@yu2022orca]. However, when an agent submits a large multi-turn prompt requiring prefix prefill, inserting the entire prompt into the active batch creates an extreme compute imbalance.
 
@@ -454,13 +454,9 @@ To maintain stable decode latencies while serving bursty multi-turn agent traffi
 
 $$\text{Active Batch} = \left\{ \text{Chunked Prefill}(512 \text{ tokens}) \right\} \cup \left\{ \text{Decode Tokens}(r_1, r_2, \dots, r_{32}) \right\}$$
 
-Piggybacking achieves optimal hardware efficiency:
+Because decode tokens require loading the entire model parameter weight matrix $\mathbf{W}$ from HBM to compute only a single token per request, "piggybacking" a chunked prefill forwards those same weights through arithmetic tensor cores with zero additional memory read overhead. Operational intensity surges from $I \approx 1$ FLOP/byte up toward the accelerator saturation point, eliminating decode idle bubbles and ensuring that time-to-first-token (TTFT) and inter-token latency (ITL) remain completely stable even under bursty agent loads.
 
-1. The $512$-token prefill chunk elevates the iteration's overall Arithmetic Intensity, shifting execution into the compute-bound regime and achieving high Tensor Core utilization.
-2. The decode tokens execute concurrently within the same forward pass with virtually zero marginal latency overhead, because the memory transfers for model weights are amortized across the prefill GEMM operations.
-3. Because prefill chunks are strictly bounded in size, no single request can monopolize the GPU for more than $15\text{ to } 25\text{ ms}$, ensuring that decode Inter-Token Latency (ITL) remains well within strict real-time thresholds.
-
-## Production Postmortem: Radix Cache Thrashing and GPU OOMs in vLLM {#sec-vol3-caching-production-postmortem-radix-cache}
+## Radix Cache Thrashing Postmortem {#sec-vol3-caching-production-postmortem-radix-cache}
 
 The catastrophic failure modes of prefix caching rarely stem from algorithmic bugs in the Radix tree data structure itself; instead, they emerge from subtle interactions between prompt construction and physical memory allocation.
 
