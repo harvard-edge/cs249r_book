@@ -148,8 +148,29 @@ The systems trade-offs between Plan-and-Solve and ReAct are governed by the **En
 
 When the environment is deterministic or highly predictable ($\mathcal{H}(\mathcal{T}) \to 0$, such as mathematical proof verification, static code refactoring, or document parsing), Plan-and-Solve delivers overwhelming performance advantages:
 
-- **Asynchronous Parallelism:** Independent sub-tasks execute concurrently across distinct GPU workers. If a plan contains $M$ independent tasks of average duration $\tau$, wall-clock execution time collapses from $M \cdot \tau$ to $\max(\tau_1, \dots, \tau_M) + \epsilon_{\text{sched}}$. However, governed by **Amdahl's Law**, the maximum achievable speedup is strictly bounded by the sequential fraction of the topology: the initial Decomposition Phase (planner inference) and the terminal node (aggregator synthesis). As $M$ scales, these sequential synchronization barriers dominate system latency.
+- **Asynchronous Parallelism:** Independent sub-tasks execute concurrently across distinct GPU workers. If a plan contains $M$ independent tasks of average duration $\tau$, wall-clock execution time collapses from $M \cdot \tau$ to $\max(\tau_1, \dots, \tau_M) + \epsilon_{\text{sched}}$. However, governed by **Amdahl's Law**, the maximum achievable speedup is strictly bounded by the sequential fraction of the topology, which here is the initial Decomposition Phase (planner inference) plus the terminal node (aggregator synthesis). As $M$ scales, these sequential synchronization barriers dominate system latency.
+
 - **Context Hygiene and Token Efficiency:** Worker agents execute sub-tasks in clean, isolated context windows containing only their immediate instructions. They do not inherit the massive, noisy conversation history of the parent planner, eliminating the quadratic KV cache penalty $\mathcal{O}(K^2)$ of ReAct.
+
+That sequential fraction is worth putting a number on, because the ceiling it sets sits lower than the topology diagram suggests.
+
+::: {#nbk-topologies-fan-out-ceiling .callout-notebook title="The ceiling on fanning out"}
+
+**Problem**: A planner decomposes a task into independent subtasks, workers run them concurrently, and an aggregator synthesizes the result. How much can adding workers actually buy?
+
+**Variables**: planner inference $8\text{ s}$, aggregator synthesis $12\text{ s}$, and $120\text{ s}$ of subtask work that genuinely parallelizes. All three are scenario assumptions.
+
+**Math**: Run sequentially the plan costs $8 + 120 + 12 = 140\text{ s}$, of which $20\text{ s}$ cannot be parallelized, so the serial fraction is $s = 20/140 = 0.143$. With $M$ workers:
+
+$$T(M) = 8 + \frac{120}{M} + 12$$
+
+which gives $80\text{ s}$ at $M=2$, $40\text{ s}$ at $M=6$, and $30\text{ s}$ at $M=12$.
+
+**Result**: Six workers return $3.5\times$. Doubling to twelve returns $4.7\times$, not $7\times$. However many workers are added, the plan cannot finish faster than the $20\text{ s}$ the planner and aggregator consume, so the ceiling is $140/20 = 7\times$, which is $1/s$.
+
+**Systems insight**: The ceiling is set by the two nodes that cannot be parallelized, and in an agentic topology those are both model inference calls, so they do not shrink when workers are added. This is why the fan-out decision is bounded before any coordination cost is counted, and the coordination tax then pulls the achievable figure below this ceiling rather than toward it.
+
+:::
 
 Conversely, when the environment exhibits high entropy and stochasticity ($\mathcal{H}(\mathcal{T}) \gg 0$, such as web browsing over dynamic user interfaces, interacting with volatile third-party REST APIs, or debugging complex legacy codebases), static Plan-and-Solve becomes exceptionally fragile. If the observation $o_1$ from Task 1 invalidates an underlying assumption made by the planner during step 0, the remaining tasks in $\mathcal{G}_{\text{plan}}$ become invalid. The runtime must either execute invalid tasks (burning compute uselessly) or trigger an expensive, full-graph replanning cycle.
 
