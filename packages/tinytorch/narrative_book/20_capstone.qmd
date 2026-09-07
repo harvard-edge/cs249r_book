@@ -43,10 +43,10 @@ That last observation is the practical content of the chapter. The marginal spee
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 20 (`src/20_capstone/20_capstone.py`) is the NumPy-backed benchmarking and submission workflow students build at the end of the TinyTorch course. It provides a `BenchmarkReport` that measures a model's parameter count, size, accuracy, and latency, and a `generate_submission` that compares a baseline report against an optimized one and records the speedup, compression ratio, and accuracy change in a JSON file. The listings in this chapter are a stripped-down pure-Python model of that comparison, preceded by a napkin cost model the module does not contain, small enough to show every term that goes into a stacked speedup. They run on their own, without `Tensor` or `TinyGPT`.
+Module 20 (`src/20_capstone/20_capstone.py`) is the NumPy-backed benchmarking and submission workflow students build at the end of the TinyTorch course. It provides a `BenchmarkReport` that measures a model's parameter count, size, accuracy, and latency, and a `generate_submission` that compares a baseline report against an optimized one and records the speedup, compression ratio, and accuracy change in a JSON file. Those two pieces are quoted from the module below. The cost model that precedes them is book code, a napkin the module does not contain, and it runs on its own without `Tensor` or `TinyGPT`; the measured trace runs the real model through the real submission.
 :::
 
-The code has three parts. A cost model turns a machine and a model configuration into an estimated decode time. Four one-line levers edit the configuration, and a waterfall prints what each lever does alone and in a stack. A measuring harness then replaces the estimate with timings from real code, using Chapter 19's warmup-and-percentile protocol, and reports the comparison in the shape Module 20's submission uses.
+The code has three parts. A cost model turns a machine and a model configuration into an estimated decode time. Four one-line levers edit the configuration, and a waterfall prints what each lever does alone and in a stack. Module 20's report and submission then replace the estimate with timings from real code, fed by Chapter 19's warmup-and-percentile protocol.
 
 ### The machine and the model as a handful of numbers
 
@@ -54,15 +54,15 @@ Picture the moment this code exists for. A team has `TinyGPT` serving and the fo
 
 The thorough way to answer is to build every variant. Four levers, each on or off, is sixteen configurations, each a model to quantize, factorize, fuse, or cache, and each a run of Chapter 19's warmup-and-percentile protocol. Sixteen builds and sixteen timing runs is days of work, and the answer is only good for one model size, one generation length, and one machine. Change any of the three and the work starts over. The shortcut of measuring each lever alone and multiplying is faster and, as The Problem showed, wrong.
 
-So the real question is how few numbers it takes to predict where a decode step's time goes. Here is the answer I use. Three for the machine, three for the model, and one per lever. The machine numbers are the two ceilings I measured on my laptop in Chapter 14, 33 GB/s and 1.2 TFLOP/s, plus the few microseconds per launch that Chapter 17 described, which I round to 5. They are round figures for a napkin, not a datasheet. The model numbers describe Chapter 13's `TinyGPT` at the size Chapter 14 counted, and the four fields after them are the levers, each starting in the off position.
+So the real question is how few numbers it takes to predict where a decode step's time goes. Here is the answer I use. Three for the machine, three for the model, and one per lever. The machine numbers are the two ceilings I measured on my laptop in Chapter 14, 46 GB/s and 1.7 TFLOP/s, plus the few microseconds per launch that Chapter 17 described, which I round to 5. They are round figures for a napkin, not a datasheet. The model numbers describe Chapter 13's `TinyGPT` at the size Chapter 14 counted, and the four fields after them are the levers, each starting in the off position.
 
 ```python
 from dataclasses import dataclass, replace
 
 @dataclass
 class Machine:
-    bandwidth_gbs: float = 33.0    # bytes per second the weights stream at
-    peak_gflops: float = 1200.0    # arithmetic operations per second at the ceiling
+    bandwidth_gbs: float = 46.0    # bytes per second the weights stream at
+    peak_gflops: float = 1700.0    # arithmetic operations per second at the ceiling
     launch_us: float = 5.0         # fixed cost of every separate operation
 
 @dataclass
@@ -95,7 +95,7 @@ def all_params(cfg):
 
 A decode step is the unit a serving system pays for. Every generated token is one step, so a 128-token reply is 128 steps and the user waits for all of them; whatever one step costs, multiply it by the length of the reply. The cost model's job is to price that one step.
 
-The naive price is a FLOP count, and Chapter 14 already showed why it misleads. For `TinyGPT` at this size the miss is worse than it was there. The first step's arithmetic is 1.8 million operations, which at 1.2 TFLOP/s takes 0.0015 ms. The 4.2 MB of weights it has to stream take 0.126 ms, eighty times longer. And the 213 separate operations it launches, at 5 microseconds each, take 1.065 ms, more than eight times longer again. A FLOP count is off by a factor of about 800 on this step, and even Chapter 14's roofline, which fixes the first miss, is off by nine because it does not know about launches.
+The naive price is a FLOP count, and Chapter 14 already showed why it misleads. For `TinyGPT` at this size the miss is worse than it was there. The first step's arithmetic is 1.8 million operations, which at 1.7 TFLOP/s takes 0.0011 ms. The 4.2 MB of weights it has to stream take 0.091 ms, eighty-five times longer. And the 213 separate operations it launches, at 5 microseconds each, take 1.065 ms, nearly twelve times longer again. A FLOP count is off by a factor of about a thousand on this step, and even Chapter 14's roofline, which fixes the first miss, is off by thirteen because it does not know about launches.
 
 So the step is priced by the equation from The Idea. Take the larger of the bytes term and the arithmetic term, then add the launch floor on top, since a launch cannot hide under either roofline term. Where does 213 come from? From counting the separate operations in an unfused transformer block, which @tbl-capstone-op-count does, before and after fusion folds the elementwise chains into the matrix multiplies they follow.
 
@@ -183,37 +183,17 @@ Two things to notice. `replace` returns a new configuration and leaves the old o
 
 The cost model predicts. A report needs a measurement, and the course's Module 20 needs it in a specific shape, a JSON file that records what was applied and what it bought, which is what a grader or a reviewer reads instead of the code.
 
-The naive measurement is to time the baseline once, time the optimized model once, and report the ratio. Chapter 19 showed why one timing is noise and why a mean hides the tail. There is a second omission that is easier to miss. A speedup on its own says nothing about what the lever spent to get it. INT8 spends accuracy and the KV cache spends memory, and a report that carries only the speedup lets both bills go unpaid. In the measured trace below the cache nearly quadruples the model's footprint, and a speedup-only line would never show it.
+The naive measurement is to time the baseline once, time the optimized model once, and report the ratio. Chapter 19 showed why one timing is noise and why a mean hides the tail. There is a second omission that is easier to miss. A speedup on its own says nothing about what the lever spent to get it. INT8 spends accuracy and the KV cache spends memory, and a report that carries only the speedup lets both bills go unpaid. In the measured trace below the cache adds a quarter to the model's footprint, and a speedup-only line would never show it.
 
-So the harness does two things Chapter 19 already taught and one thing Module 20 adds. `measure_ms` is Chapter 19's protocol (warm up, time many runs, sort, read the percentiles) reduced to the two numbers this chapter needs; Chapter 19's `Benchmark.run_latency` keeps the full list and is the version to use when the tail matters. `submission` then compares a baseline against an optimized variant in the shape Module 20's `generate_submission` writes to disk, with the same three keys, so that the bytes and the accuracy travel with the speedup.
+Module 20's own measuring method is where the report's numbers usually come from, and it is worth reading as the honest baseline it is.
 
-```python
-import time
+{{< include _listings/20_capstone/BenchmarkReport_benchmark_model.qmd >}}
 
-def measure_ms(fn, warmup=5, repeats=50):
-    """p50 and p99 of fn() in milliseconds, after warmup (Chapter 19's protocol)."""
-    for _ in range(warmup):
-        fn()
-    times = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
-        fn()
-        times.append((time.perf_counter() - t0) * 1000.0)
-    times.sort()
-    rank = lambda p: times[min(len(times) - 1, int(p / 100.0 * len(times)))]
-    return {"p50_ms": rank(50), "p99_ms": rank(99)}
+It counts parameters, scores accuracy on a test set, times single-sample inference a hundred times, and stores six numbers in `self.metrics`. Measure it against Chapter 19 and it comes up short in three places, which the comment about `time.time()` half admits. There is no warmup, so the first of the hundred runs is a cold one; the clock is `time.time()`, whose resolution is coarse enough on some systems to read zero for a fast model; and the summary is a mean and a standard deviation, with no percentile. For a `SimpleMLP` on a laptop the numbers still come out about right, which is why the module gets away with it, and the fix is not to rewrite the method but to fill `metrics` from a measurement done Chapter 19's way, which the trace does. What Module 20 adds that Chapter 19 lacks is the comparison.
 
-def submission(baseline, optimized, techniques):
-    """Compare two measured variants the way Module 20's generate_submission does."""
-    return {
-        "techniques_applied": techniques,
-        "speedup": baseline["p50_ms"] / optimized["p50_ms"],
-        "compression_ratio": baseline["bytes"] / optimized["bytes"],
-        "accuracy_delta": optimized["accuracy"] - baseline["accuracy"],
-    }
-```
+{{< include _listings/20_capstone/generate_submission.qmd >}}
 
-Three things in `submission` deserve a look. The speedup is a ratio of medians, not of means, for the reason Chapter 19 gave. The compression ratio compares bytes, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one; the harness does not hide that. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves. The timing half is the shape `torch.utils.benchmark.Timer` reports too, a median over warmed-up runs; the two fields beside it are what Module 20 adds.
+Three things in `generate_submission` deserve a look. The speedup is a ratio of the two reports' `latency_ms_mean` fields, so what goes into those fields decides whether it is a ratio of means or of medians; the trace puts medians there. The compression ratio compares the two `model_size_mb` fields, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one if its cache is counted in the size; the module does not count it for you, so the trace does. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves. Everything else in the record, the platform, the Python and NumPy versions, and a timestamp, is the reproducibility habit from Chapter 19's bridge, filled in by `BenchmarkReport` when it is constructed. `save_submission` writes the dictionary as JSON.
 
 ---
 
@@ -223,9 +203,9 @@ The trace has two halves. The first runs `TinyGPT` through the cost model by han
 
 ### The baseline, by hand
 
-Take $D = 128$, $L = 4$, $V = 1000$, and the napkin machine, meaning the three round numbers in `Machine`. The step that produces the first token ($t = 0$) has $n = 1$. It streams $1{,}042{,}432 \times 4 = 4{,}169{,}728$ bytes, which at 33 GB/s takes 0.126 ms. Its arithmetic is $2 \times 914{,}432 + 4 \times 128 \times 4 = 1{,}830{,}912$ operations, the same count Chapter 14 arrived at for one decode row, which at 1.2 TFLOP/s takes 0.0015 ms. The roofline term is the larger of the two, 0.126 ms. Launching $4 \times 50 + 13 = 213$ operations at 5 microseconds each adds 1.065 ms. The step costs 1.191 ms, and nine tenths of that is launches.
+Take $D = 128$, $L = 4$, $V = 1000$, and the napkin machine, meaning the three round numbers in `Machine`. The step that produces the first token ($t = 0$) has $n = 1$. It streams $1{,}042{,}432 \times 4 = 4{,}169{,}728$ bytes, which at 46 GB/s takes 0.091 ms. Its arithmetic is $2 \times 914{,}432 + 4 \times 128 \times 4 = 1{,}830{,}912$ operations, the same count Chapter 14 arrived at for one decode row, which at 1.7 TFLOP/s takes 0.0011 ms. The roofline term is the larger of the two, 0.091 ms. Launching $4 \times 50 + 13 = 213$ operations at 5 microseconds each adds 1.065 ms. The step costs 1.156 ms, and more than nine tenths of that is launches.
 
-The step that produces the last token ($t = 127$) has $n = 128$. The bytes are unchanged. The arithmetic is $1{,}828{,}864 \times 128 + 4 \times 128^2 \times 128 \times 4 = 267{,}649{,}024$ operations, 0.223 ms, which now exceeds the bytes term, so the roofline term is 0.223 ms and the step costs 1.288 ms. Summing all 128 steps gives 155.0 ms for the generation. `step_ms(Config(), Machine(), 0)` and `step_ms(Config(), Machine(), 127)` return 1.1914 and 1.2880, and `generation_ms` returns 155.00.
+The step that produces the last token ($t = 127$) has $n = 128$. The bytes are unchanged. The arithmetic is $1{,}828{,}864 \times 128 + 4 \times 128^2 \times 128 \times 4 = 267{,}649{,}024$ operations, 0.157 ms, which now exceeds the bytes term, so the roofline term is 0.157 ms and the step costs 1.222 ms. Summing all 128 steps gives 149.6 ms for the generation. `step_ms(Config(), Machine(), 0)` and `step_ms(Config(), Machine(), 127)` return 1.1556 and 1.2224, and `generation_ms` returns 149.62.
 
 ### The waterfall
 
@@ -233,69 +213,76 @@ Running `waterfall(Config(), Machine(), 128)` produces the numbers in @tbl-capst
 
 | Stage | Total for 128 tokens | Marginal speedup | Cumulative speedup | Lever alone vs. baseline |
 | :--- | :---: | :---: | :---: | :---: |
-| Baseline FP32, dense, unfused, no cache | 155.00 ms | | 1.00x | |
-| + INT8 weights | 150.42 ms | 1.03x | 1.03x | 1.03x |
-| + MLP factorized at rank 32 | 145.36 ms | 1.03x | 1.07x | 1.04x |
-| + fusion | 34.00 ms | 4.27x | 4.56x | 3.55x |
-| + KV cache | 28.63 ms | 1.19x | 5.41x | 1.01x |
+| Baseline FP32, dense, unfused, no cache | 149.62 ms | | 1.00x | |
+| + INT8 weights | 146.28 ms | 1.02x | 1.02x | 1.02x |
+| + MLP factorized at rank 32 | 142.71 ms | 1.03x | 1.05x | 1.03x |
+| + fusion | 31.35 ms | 4.55x | 4.77x | 3.91x |
+| + KV cache | 27.59 ms | 1.14x | 5.42x | 1.01x |
 
-: The four levers stacked in the order the book taught them, on `TinyGPT` and the napkin machine, for a 128-token generation. The product of the four solo speedups is 3.86x; the stack delivers 5.41x. {#tbl-capstone-waterfall tbl-colwidths="[34,17,16,16,17]"}
+: The four levers stacked in the order the book taught them, on `TinyGPT` and the napkin machine, for a 128-token generation. The product of the four solo speedups is 4.15x; the stack delivers 5.42x. {#tbl-capstone-waterfall tbl-colwidths="[34,17,16,16,17]"}
 
-Read the last column first. Alone, three of the four levers do almost nothing, and the product of the four solo numbers is 3.86x. The stack delivers 5.41x. The reason is in the hand trace above. The launch floor is 1.065 ms of a 1.19 ms step, so INT8, factorization, and the cache are all shrinking terms that hide under it. Fusion is the lever that removes the floor, and it delivers 3.55x alone and 4.27x once the earlier levers have already trimmed the roofline term it exposes. The KV cache then delivers 1.19x, because by the last steps the recomputed arithmetic had climbed above the bytes term, and the cache brings it back down.
+Read the last column first. Alone, three of the four levers do almost nothing, and the product of the four solo numbers is 4.15x. The stack delivers 5.42x. The reason is in the hand trace above. The launch floor is 1.065 ms of a 1.16 ms step, so INT8, factorization, and the cache are all shrinking terms that hide under it. Fusion is the lever that removes the floor, and it delivers 3.91x alone and 4.55x once the earlier levers have already trimmed the roofline term it exposes. The KV cache then delivers 1.14x, because by the last steps the recomputed arithmetic had climbed above the bytes term, and the cache brings it back down.
 
-Reverse the order and the total is identical while every marginal factor moves. `waterfall(Config(), Machine(), 128, order=dict(reversed(list(LEVERS.items()))))` reports the cache at 1.01x, then fusion at 3.64x, then factorization at 1.15x, then INT8 at 1.28x, for the same 28.63 ms and 5.41x. The INT8 lever that was worth 1.03x in the first order is worth 1.28x in the second. Its byte savings did not change; what changed is that fusion had already removed the floor that hid them.
+Reverse the order and the total is identical while every marginal factor moves. `waterfall(Config(), Machine(), 128, order=dict(reversed(list(LEVERS.items()))))` reports the cache at 1.01x, then fusion at 3.99x, then factorization at 1.12x, then INT8 at 1.21x, for the same 27.59 ms and 5.42x. The INT8 lever that was worth 1.02x in the first order is worth 1.21x in the second. Its byte savings did not change; what changed is that fusion had already removed the floor that hid them.
 
-The same code answers the question of where a 16x-class number would come from. Set `Config(D=768, L=12, V=50257)`, a model the size of GPT-2 small, and price a 1024-token generation on the napkin machine. The model puts the baseline at 123 seconds and the stack at 5.6 seconds, a 22x speedup, and the KV cache applied last is worth 15.4x on its own margin, because without it each of the last steps re-projects a thousand tokens through some 85 million weights. Price only 128 tokens from that same model and the stack is worth 5.4x again. There is no 16x property of the four levers. There is a cost model, a model size, a generation length, and a machine, and the number falls out of those.
+The same code answers the question of where a 16x-class number would come from. Set `Config(D=768, L=12, V=50257)`, a model the size of GPT-2 small, and price a 1024-token generation on the napkin machine. The model puts the baseline at 88 seconds and the stack at 4.2 seconds, a 21x speedup, and the KV cache applied last is worth 14.6x on its own margin, because without it each of the last steps re-projects a thousand tokens through some 85 million weights. Price only 128 tokens from that same model and the stack is worth 5.3x again. There is no 16x property of the four levers. There is a cost model, a model size, a generation length, and a machine, and the number falls out of those.
 
 ### Measuring one lever
 
-The cache exists for the decode phase of a serving loop, the part that runs once per generated token after the prompt has been processed, and every decode step needs the keys and values of every token before it. The naive step projects all of them again; the cached step projects only the newest token and appends. The pure-Python listings in this book cannot run a million-parameter `TinyGPT` fast enough to time a generation, so for the measured half of the trace I apply that one lever to a small attention loop with the same shape, 64 steps, each attending over every token before it. Both versions produce the same output, so the accuracy delta is zero by construction, and the compression ratio comes out below one because the cache is bytes spent to save arithmetic.
+The cache exists for the decode phase of a serving loop, the part that runs once per generated token after the prompt has been processed, and every decode step needs the keys and values of every token before it. The naive step projects all of them again; the cached step projects only the newest token and appends. For the measured half of the trace I apply that one lever to Chapter 14's TinyGPT itself, generating 64 tokens from a four-token prompt, and time both versions Chapter 19's way: three warmup generations, fifteen timed ones, every timing kept in a `BenchmarkResult`. The cached model produces the same logits as the uncached one at every position (Chapter 18's equivalence check), so the accuracy delta is a rounding error by construction, and the compression ratio comes out below one because the cache is bytes spent to save arithmetic.
 
 ```python
-import math, random
+import numpy as np, time
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.transformers import GPT
+from tinytorch.perf.profiling import Profiler
+from tinytorch.perf.benchmarking import BenchmarkResult
+from tinytorch.perf.memoization import enable_kv_cache, _cached_generate
+from tinytorch.olympics import BenchmarkReport, generate_submission
 
-D, T = 16, 64
-rng = random.Random(0)
-def mat(n, m):
-    return [[rng.gauss(0, 1) / math.sqrt(m) for _ in range(m)] for _ in range(n)]
-Wq, Wk, Wv = mat(D, D), mat(D, D), mat(D, D)
-tokens = [[rng.gauss(0, 1) for _ in range(D)] for _ in range(T)]
+model = GPT(vocab_size=1000, embed_dim=128, num_layers=4, num_heads=4, max_seq_len=256)
+prompt, new_tokens = [3, 7, 2, 9], 64
+weight_mb = Profiler().count_parameters(model) * 4 / (1024 * 1024)
 
-def matvec(M, v):
-    return [sum(m * vi for m, vi in zip(row, v)) for row in M]
+def timed(fn, warmup=3, repeats=15):
+    for _ in range(warmup):
+        fn()
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        times.append((time.perf_counter() - t0) * 1000.0)
+    return BenchmarkResult("generation_ms", times)
 
-def attend(q, K, V):
-    scores = [sum(qi * ki for qi, ki in zip(q, k)) / math.sqrt(D) for k in K]
-    top = max(scores)
-    w = [math.exp(s - top) for s in scores]
-    z = sum(w)
-    return [sum(wi * v[j] for wi, v in zip(w, V)) / z for j in range(D)]
+naive = timed(lambda: model.generate(Tensor(np.array([prompt])), max_new_tokens=new_tokens, temperature=1.0))
+cache = enable_kv_cache(model)
+cached = timed(lambda: _cached_generate(model, prompt, new_tokens, 1.0, cache))
+cache_mb = cache.get_memory_usage()["total_mb"]
 
-def generate_recompute():
-    outs = []
-    for t in range(T):
-        K = [matvec(Wk, x) for x in tokens[:t + 1]]   # every step, every token again
-        V = [matvec(Wv, x) for x in tokens[:t + 1]]
-        outs.append(attend(matvec(Wq, tokens[t]), K, V))
-    return outs
+def report(name, result, size_mb, accuracy):
+    r = BenchmarkReport(name)
+    r.metrics = {"parameter_count": Profiler().count_parameters(model), "model_size_mb": size_mb,
+                 "accuracy": accuracy, "latency_ms_mean": result.percentile(50),
+                 "latency_ms_std": result.std, "throughput_samples_per_sec": 1000 / result.percentile(50)}
+    return r
 
-def generate_cached():
-    K, V, outs = [], [], []
-    for t in range(T):
-        K.append(matvec(Wk, tokens[t]))               # the new token, once
-        V.append(matvec(Wv, tokens[t]))
-        outs.append(attend(matvec(Wq, tokens[t]), K, V))
-    return outs
-
-worst = max(abs(a - b) for oa, ob in zip(generate_recompute(), generate_cached())
-                       for a, b in zip(oa, ob))
-base = dict(measure_ms(generate_recompute), bytes=3 * D * D * 4, accuracy=1.0)
-fast = dict(measure_ms(generate_cached), bytes=3 * D * D * 4 + 2 * T * D * 4,
-            accuracy=1.0 - worst)
-print(submission(base, fast, ["kv_cache"]))
+baseline = report("tinygpt-fp32", naive, weight_mb, accuracy=1.0)
+optimized = report("tinygpt-kv-cache", cached, weight_mb + cache_mb, accuracy=1.0)
+submission = generate_submission(baseline, optimized, techniques_applied=["kv_cache"])
+print(f"naive  p50 {naive.percentile(50):.1f} ms  p99 {naive.percentile(99):.1f} ms")
+print(f"cached p50 {cached.percentile(50):.1f} ms  p99 {cached.percentile(99):.1f} ms")
+print(submission["improvements"])
 ```
 
-On my laptop, one run printed a speedup of 9.7x, a compression ratio of 0.27, and an accuracy delta of 0.0; your timing will differ, and the harness is the point rather than the value. The 9.7x is what a count of the multiplies predicts. The recomputing version performs $2 \times T(T+1)/2 + T = 4{,}224$ projections of 256 multiplies each, the cached version performs $3T = 192$, and both perform the same attention arithmetic, about 67,000 multiplies over the whole generation. The ratio of the two totals is 9.9, and the attention work that both versions share is what keeps the lever from delivering the 22x that the projection counts alone would suggest. The 0.27 is the honest price of the lever. Three $16 \times 16$ weight matrices are 3 KB, the cache for 64 tokens is 8 KB, and a submission that reported only the speedup would have hidden that the model's footprint nearly quadrupled.
+On my laptop, one run printed the following, with the cache's own report in between.
+
+```
+naive  p50 106.6 ms  p99 122.0 ms
+cached p50 40.6 ms  p99 42.4 ms
+{'speedup': 2.625, 'compression_ratio': 0.805, 'accuracy_delta': 0.0}
+```
+
+The 2.6x is what Chapter 18 measured for 60 tokens, now with a tail beside it, and both tails sit close to their medians because nothing else was running. The cost model with the napkin machine predicts 1.01x for this lever alone at 128 tokens, and the gap is the cost model's launch term. On this laptop TinyGPT's per-operation overhead is Python, not a kernel launch, and the naive loop pays it on every one of the $t$ tokens it re-projects, so the recomputation the cache removes is a larger share of the step than the napkin's 5 microseconds per launch allows; the exercise on the launch cost asks you to find the value of `launch_us` at which the model and the measurement agree. The 0.805 is the honest price of the lever. The weights are 4.13 MB, the cache for 256 positions is 1.0 MB, and a submission that reported only the speedup would have hidden that the model's footprint grew by a quarter. The `accuracy_delta` of zero is what the equivalence check promised; the largest difference between the cached and uncached logits over a six-token prompt is $3 \times 10^{-6}$, and `techniques_applied` records which lever the number belongs to.
 
 ---
 
@@ -315,7 +302,7 @@ For your own work, three habits follow. Before optimizing, write down the three 
 
 ## Summary
 
-You built a three-term cost model for a decode step, bytes over bandwidth, arithmetic over peak, and a per-launch floor, and wired the four optimizations of Chapters 15 through 18 into it as edits to a configuration. Tracing `TinyGPT` through it showed that the launch floor hid three of the four levers until fusion removed it, that the stack delivered 5.4x where the product of the solo speedups said 3.9x, and that reversing the order changed every marginal factor while leaving the total alone. The principle to keep is that speedups multiply only when each lever acts on the whole of what the previous one left, which is rare; otherwise the stacked number comes from the cost model or from a measurement of the complete stack, never from multiplying solo results. You also built the measuring side, a harness in Chapter 19's shape that reports a stack as a speedup at the median, a compression ratio that can fall below one, and an accuracy delta, which is the comparison Module 20 writes to a submission file. Milestone III takes the four levers, the cost model's vocabulary of which term dominates, and the `submission` comparison for granted and asks whether one stacked model can clear an accuracy floor, a memory budget, and a latency target at the same time.
+You built a three-term cost model for a decode step, bytes over bandwidth, arithmetic over peak, and a per-launch floor, and wired the four optimizations of Chapters 15 through 18 into it as edits to a configuration. Tracing `TinyGPT` through it showed that the launch floor hid three of the four levers until fusion removed it, that the stack delivered 5.4x where the product of the solo speedups said 4.2x, and that reversing the order changed every marginal factor while leaving the total alone. The principle to keep is that speedups multiply only when each lever acts on the whole of what the previous one left, which is rare; otherwise the stacked number comes from the cost model or from a measurement of the complete stack, never from multiplying solo results. You also measured one lever for real, with Chapter 19's protocol feeding Module 20's `generate_submission`, which reports a stack as a speedup, a compression ratio that can fall below one, and an accuracy delta. Milestone III takes the four levers, the cost model's vocabulary of which term dominates, and that submission for granted and asks whether one stacked model can clear an accuracy floor, a memory budget, and a latency target at the same time.
 
 ---
 
@@ -325,4 +312,4 @@ You built a three-term cost model for a decode step, bytes over bandwidth, arith
 
 2. **The break-even length.** For `Config(D=768, L=12, V=50257)` with the other three levers applied, sweep the generation length from 16 to 1024 tokens and find where the KV cache's marginal speedup crosses 2x. Then change `bytes_per_weight` back to 4 and repeat. Explain why the crossover moves.
 
-3. **Measure a second lever.** Add a `generate_cached_int8` variant to the measured trace that stores `Wk` and `Wv` as Python integers with one scale each, using Chapter 15's `quantize_int8`, and time it. Report the speedup, compression ratio, and accuracy delta the harness gives. Then explain why the speedup is near 1.0x in pure Python even though the bytes term fell, and what the cost model would need to know about the interpreter to predict that.
+3. **Measure a second lever.** Wrap every `Linear` in TinyGPT's blocks in Chapter 15's `QuantizedLinear` (the four attention projections and the two MLP layers of each block), time a 64-token generation as the measured trace did, and report the speedup, compression ratio, and accuracy delta through `generate_submission`, counting the int8 weights at one byte each. Then explain why the speedup is near 1.0x, or below it, in NumPy even though the bytes term fell, and what the cost model would need to know about the interpreter to predict that.
