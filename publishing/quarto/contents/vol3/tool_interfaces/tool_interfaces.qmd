@@ -253,7 +253,25 @@ As illustrated in @fig-vol3-tools-grammar-decoding, this architecture yields thr
 - **Elimination of Self-Correction Loops:** The system never incurs the latency or token cost of re-prompting the model with error tracebacks to fix malformed syntax.
 - **Sub-Millisecond Overhead:** Because the allowed token bitmasks $A(q)$ are precomputed ahead of time into dense bit vectors, the GPU kernel overhead is less than $0.5\text{ ms}$ per step, completely dwarfed by Transformer matrix multiplications.
 
-Modern serving runtimes such as Outlines, Guidance, SGLang, and vLLM provide native support for grammar-constrained decoding.
+Modern serving runtimes such as Outlines, Guidance, SGLang, and vLLM provide native support for grammar-constrained decoding. Whether the per-step mask kernel earns its place depends on how often an unconstrained decoder would have emitted a malformed call in the first place.
+
+::: {#nbk-tools-mask-breakeven .callout-notebook title="When logit masking pays for itself"}
+
+**Problem**: Grammar-constrained decoding adds a mask kernel to every decode step but removes the repair turn that follows a malformed tool call. How often must unconstrained decoding fail before the mask is the cheaper option?
+
+**Variables**: a typed JSON tool call of $150$ output tokens, a decode latency of $20\text{ ms}$ per output token, the mask kernel overhead of $0.5\text{ ms}$ per step stated above, a structured error diff of $250$ tokens appended on a validation failure, and prefill at $20{,}000$ tokens per second. Every figure except the mask overhead is a scenario assumption.
+
+**Math**: Constrained decoding pays the mask on every step, so the tax per call is $150 \times 0.5 = 75\text{ ms}$. Generating the call once costs $150 \times 20 = 3000\text{ ms}$. A repair turn re-prefills the failed call plus the diff, $(150 + 250)/20{,}000 = 20\text{ ms}$, then regenerates the call, giving $20 + 3000 = 3020\text{ ms}$. Writing $p$ for the unconstrained failure rate, the two paths cost
+
+$$3000 + 75 \quad \text{versus} \quad 3000 + p \cdot 3020$$
+
+and they cross at $p^{*} = 75/3020 = 0.0248$.
+
+**Result**: The crossover sits at a $2.5\%$ syntax failure rate, one malformed call in $40$. The mask tax itself is $75\text{ ms}$, or $2.5\%$ of the call's decode time. Framed over the $30$-step trajectory used earlier, masking every step of every call costs $30 \times 75 = 2250\text{ ms}$, less than the $3020\text{ ms}$ a single repair turn costs, so one bad call anywhere in the trajectory already pays for masking on all thirty steps.
+
+**Systems insight**: The call length cancels out of the crossover, leaving $p^{*} \approx 0.5/20$, the ratio of mask time to decode time per token, so the break-even is a property of the serving kernel rather than of any individual tool schema. A runtime that clears it clears it for every tool at once, which is why grammar-constrained decoding is enabled globally at the engine instead of negotiated schema by schema.
+
+:::
 
 ## JSON Schema Validation and Healing {#sec-vol3-tools-json-schema-validation-coercion}
 

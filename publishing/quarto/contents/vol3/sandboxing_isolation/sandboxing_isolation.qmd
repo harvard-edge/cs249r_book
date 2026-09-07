@@ -255,8 +255,30 @@ MicroVMs combine the isolation strength of hardware-assisted virtualization with
 | **Legacy VM (QEMU)** | Full PC Emulation | 15 – 45 s | 512 MB – 2 GB | Full Hardware Hypervisor | [Safe] Impractical at scale |
 : **Isolation Technologies Comparison**: Quantitative comparison of isolation mechanisms for autonomous agent execution runtimes. {#tbl-isolation-comparison}
 
-As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection.
+As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection. The sub-$100\text{ ms}$ startup bar stated at the opening of this section, and the "impractical at scale" verdict in the table's last row, both follow from a single accounting question: how often is a sandbox torn down and rebuilt inside one agent trajectory, and what does each rebuild cost against the work it contains.
 
+::: {#nbk-sandboxing-boot-budget .callout-notebook title="How fast a sandbox has to boot"}
+
+**Problem**: An agent runtime provisions a fresh sandbox for every tool call and discards it afterward. What cold-boot latency keeps isolation a rounding error on trajectory wall-clock time rather than the dominant cost?
+
+**Variables**: a trajectory of $40$ tool calls, each turn spending $2.0\text{ s}$ on model inference and $1.5\text{ s}$ on tool execution, and an engineering budget that allows isolation to consume at most $5$ percent of wall clock. Those four are scenario assumptions. The boot latencies are the slow end of each range in @tbl-isolation-comparison: Firecracker $45\text{ ms}$, gVisor $250\text{ ms}$ plus its $35$ percent I/O degradation, Docker $400\text{ ms}$, and QEMU $30\text{ s}$.
+
+**Math**: Productive work per call is $2.0 + 1.5 = 3.5\text{ s}$, so one trajectory contains $40 \times 3.5 = 140\text{ s}$ of it. Writing $T$ for boot latency per call, isolation's share of wall clock is $T/(3.5 + T)$. Setting that equal to $0.05$ and solving:
+
+$$T = \frac{0.05 \times 3.5}{0.95} = 0.184\text{ s}$$
+
+The call count cancels, so the budget does not move with trajectory length. Charging each row of the table against a $140\text{ s}$ trajectory:
+
+- Firecracker: $40 \times 0.045 = 1.8\text{ s}$ of boot, so $1.8/141.8 = 1.3$ percent of wall clock.
+- gVisor: $40 \times 0.250 = 10\text{ s}$ of boot plus $40 \times 1.5 \times 0.35 = 21\text{ s}$ of I/O tax, so $31/171 = 18.1$ percent.
+- Docker: $40 \times 0.400 = 16\text{ s}$ of boot, so $16/156 = 10.3$ percent.
+- QEMU: $40 \times 30 = 1200\text{ s}$ of boot, so $1200/1340 = 89.6$ percent, which is $1200/140 = 8.6$ times the productive work it wraps.
+
+**Result**: The budget is $184\text{ ms}$ per sandbox. Firecracker at $45\text{ ms}$ sits $4.1\times$ inside it, Docker overruns it by $2.2\times$, gVisor by $4.2\times$ once its I/O tax is charged, and QEMU by $163\times$. Isolation reaches half of wall clock at $T = 3.5\text{ s}$, the crossover where building a sandbox costs as much as using it, and QEMU sits an order of magnitude past that line. This is what "impractical at scale" means arithmetically.
+
+**Systems insight**: The threshold is fixed by the productive time of one tool call, not by how long the trajectory runs, so an ephemeral-per-call design has exactly one tunable term and it is the per-call cost of the isolation boundary. gVisor shows that this term is not the boot column alone: its steady-state I/O degradation costs roughly twice what its cold start does, so a technology has to be scored on the full per-call charge, and a runtime that cannot meet the budget is pushed toward reusing sandboxes across calls, which trades the boot cost back for cross-turn contamination risk.
+
+:::
 
 ## Firecracker MicroVMs and KVM {#sec-vol3-sandboxing-aws-firecracker-microvms}
 

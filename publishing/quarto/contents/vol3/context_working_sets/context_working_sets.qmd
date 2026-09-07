@@ -100,7 +100,29 @@ where $b$ is batch size, $L$ is layer depth, $h_{\text{kv}}$ is the number of ke
 
 ![Denning's Working Set Applied to Neural Agent Context. Contrasting unbounded append-only context accumulation against active eviction-driven working set management $W(t, \Delta t)$.](images/svg/context_working_set_dynamics.svg){#fig-vol3-context-working-set-dynamics}
 
-As illustrated in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged, append-only repository inexorably drives the system toward the High-Bandwidth Memory capacity ceiling. On an NVIDIA H100 SXM5 GPU with 80 GB of HBM3 (yielding 3.35 TB/s bandwidth), model weights for a 70-billion-parameter model in 8-bit precision consume 70 GB, leaving barely 10 GB for KV cache and scratchpad activations. An unmanaged agent running 128k tokens under standard multi-head attention exhausts this headroom in fewer than 20 trajectory steps.
+As illustrated in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged, append-only repository inexorably drives the system toward the High-Bandwidth Memory capacity ceiling. On an NVIDIA H100 SXM5 GPU with 80 GB of HBM3 (yielding 3.35 TB/s bandwidth), model weights for a 70-billion-parameter model in 8-bit precision consume 70 GB, leaving barely 10 GB for KV cache and scratchpad activations. How long an unmanaged agent survives inside that residual budget depends entirely on what a single token of KV cache costs under the model's attention scheme.
+
+::: {#nbk-context-kv-headroom-ceiling .callout-notebook title="How far the residual HBM headroom goes"}
+
+**Problem**: On an H100 whose model weights leave $10\text{ GB}$ of HBM free, how many trajectory steps can an unmanaged agent run before its KV cache exhausts that headroom?
+
+**Variables**: A 70-billion-parameter model with the published Llama-3-70B shape (@dubey2024llama), so $L = 80$ layers, $d_{\text{head}} = 128$, and $h_q = 64$ query heads, decoding in FP16 at $2$ bytes per element. Standard multi-head attention caches all $64$ heads, while Grouped-Query Attention at group ratio $g = 8$ caches $8$. The $10\text{ GB}$ of residual headroom carries over from the paragraph above. Per-step growth of $17{,}214$ tokens is the chapter's own production trace, which records $482{,}000$ raw trajectory tokens at step 28 (@sec-vol3-context-production-case-study-context). Capacities use binary units, so $1\text{ GB} = 1{,}024\text{ MB}$.
+
+**Math**: Evaluating @eq-vol3-context-kv-footprint at batch size $b = 1$ and a single token gives the resident cost of one cached position across the whole model:
+
+$$\mathcal{M}_{\text{KV}}/\text{token} = 2 \times 80 \times h_{\text{kv}} \times 128 \times 2\text{ bytes}$$
+
+At $h_{\text{kv}} = 64$ (MHA) that is $2{,}621{,}440$ bytes, or $2.5\text{ MB}$ per token. At $h_{\text{kv}} = 8$ (GQA) it is $327{,}680$ bytes, or $0.3125\text{ MB}$ per token. Dividing the $10{,}240\text{ MB}$ of headroom by each cost gives the token ceiling:
+
+$$\frac{10{,}240\text{ MB}}{2.5\text{ MB}} = 4{,}096\text{ tokens}, \qquad \frac{10{,}240\text{ MB}}{0.3125\text{ MB}} = 32{,}768\text{ tokens}$$
+
+Converting to trajectory steps at $17{,}214$ tokens per step yields $4{,}096 / 17{,}214 = 0.24$ steps under MHA and $32{,}768 / 17{,}214 = 1.90$ steps under GQA.
+
+**Result**: Multi-head attention exhausts the headroom about a quarter of the way into the first tool observation, and Grouped-Query Attention reaches only the second step. Actually holding the advertised 128k window would demand $131{,}072 \times 2.5\text{ MB} = 320\text{ GB}$ of KV cache under MHA, four entire H100s of HBM, and still $40\text{ GB}$ under GQA.
+
+**Systems insight**: The operative context ceiling is set by residual HBM rather than by the model's advertised window, and the factor of $8$ that GQA buys moves that ceiling from one step to two, not to the roughly 45 steps a median SWE-bench trajectory consumes. Eviction is therefore a precondition for running the agent at all, not a latency optimization bolted on once the trajectory grows long.
+
+:::
 
 ## Autoregressive Decode Economics {#sec-vol3-context-autoregressive-decode-economics-memory}
 

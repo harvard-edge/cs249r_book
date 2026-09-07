@@ -511,7 +511,33 @@ $$\begin{cases}
 \text{Otherwise} & \implies \text{\textbf{Continue Sampling}}
 \end{cases}$$ {#eq-vol3-sprt-decision}
 
-If a deployed candidate version contains a severe bug (e.g. crashing on $40\%$ of trajectories), SPRT detects the anomaly within 15 to 20 trajectories, triggering an automated instantaneous rollback before widespread customer disruption occurs.
+The engineering value of the sequential test lies in where those boundaries get crossed. A fixed-sample gate withholds its verdict until all $N = 2{,}000$ canary trajectories have run, exposing every user in that window to a candidate that may be crashing on $40\%$ of its runs, while the sequential test stops the moment the accumulated evidence turns decisive.
+
+::: {#nbk-telemetry-sprt-rollback .callout-notebook title="When the rollback boundary actually trips"}
+
+**Problem**: A canary agent is failing on $40\%$ of its trajectories rather than at the baseline rate. How many canary trajectories does the sequential test consume before it crosses the rollback boundary, and how much production exposure does that save against a fixed-sample gate?
+
+**Variables**: baseline failure rate $p_0 = 0.15$, degraded failure rate $p_1 = 0.40$, Type I error $\alpha = 0.05$, Type II error $\beta = 0.20$, and a fixed-sample comparison gate of $N = 2{,}000$ trajectories. The two error rates are conventional; the baseline failure rate and the fixed-sample size are scenario assumptions.
+
+**Math**: The rollback boundary from @eq-vol3-sprt-decision sits at
+
+$$\ln\left(\frac{1 - \beta}{\alpha}\right) = \ln\left(\frac{0.80}{0.05}\right) = \ln 16 = 2.773$$
+
+Every completed trajectory moves $\Lambda_m$ by one of two fixed increments, a failure pushing it up and a success pulling it down:
+
+$$\ln\frac{p_1}{p_0} = \ln\frac{0.40}{0.15} = +0.981, \qquad \ln\frac{1 - p_1}{1 - p_0} = \ln\frac{0.60}{0.85} = -0.348$$
+
+Because the candidate really does fail $40\%$ of the time, the expected drift per trajectory is
+
+$$\mathbb{E}[\Delta\Lambda] = 0.40 \times 0.981 + 0.60 \times (-0.348) = 0.392 - 0.209 = 0.183$$
+
+so the boundary is reached after $2.773 / 0.183 = 15.1$ trajectories and the rollback fires on trajectory $16$. Of those, $16 \times 0.40 = 6.4$ are failures. The fixed-sample gate instead absorbs $2{,}000 \times 0.40 = 800$ failures before it rules at all.
+
+**Result**: The sequential gate rolls back after roughly $16$ trajectories and $6$ failed runs, against $2{,}000$ trajectories and $800$ failed runs under the fixed-sample gate, a $125\times$ reduction in exposure.
+
+**Systems insight**: Detection speed is governed by the drift term, not by the confidence level. The boundary grows only as $\ln(1/\alpha)$, so tightening the false-alarm rate from $5\%$ to $1\%$ moves it from $2.773$ to $4.382$ and costs just $8$ additional trajectories, whereas halving the regression under test to $p_1 = 0.275$ collapses the drift to $0.051$ and stretches the same gate out to $54$ trajectories. A canary gate must therefore be provisioned against the smallest regression it is required to catch, because that quantity, and not the significance level, decides how much production traffic the gate consumes.
+
+:::
 
 ## Human Oversight Telemetry {#sec-vol3-telemetry-supervisory-observability-and-human}
 
