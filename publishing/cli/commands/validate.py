@@ -45,6 +45,11 @@ from . import reference_check
 console = Console()
 
 
+SELF_XREF_SPAN_RE = re.compile(
+    r"@[Ss]ec(-[a-zA-Z0-9_-]+)\s+(?:through|to)\s+@[Ss]ec(-[a-zA-Z0-9_-]+)"
+)
+
+
 @dataclass
 class ValidationIssue:
     file: str
@@ -8353,11 +8358,28 @@ class ValidateCommand:
                 if not stack or stripped.startswith("#") or stripped.startswith("//"):
                     continue
 
+                # A chapter's own H1 id is in scope for the whole file, so
+                # book-level structure that legitimately names this chapter
+                # alongside its siblings would otherwise always self-trigger.
+                # Two such shapes are not "see this section" references:
+                #   - a range endpoint: "@sec-boundary through @sec-brain"
+                #   - a roadmap or synthesis table that lists every chapter,
+                #     as a row ("| ... | @sec-frontier | ...") or its caption
+                # Rewriting either to "this section" would corrupt the artifact.
+                is_table_row = stripped.startswith("|") or stripped.startswith(": ")
+                span_ids = {
+                    ("sec" + sid).lower()
+                    for pair in SELF_XREF_SPAN_RE.findall(stripped)
+                    for sid in pair
+                }
+
                 xrefs = xref_pattern.findall(stripped)
                 if xrefs:
                     active_ids = {s['sec_id'] for s in stack}
                     for xref in xrefs:
                         ref_id = xref.lstrip('@').lower()
+                        if is_table_row or ref_id in span_ids:
+                            continue
                         if ref_id in active_ids:
                             context = stripped[max(0, stripped.find(xref) - 15) : min(len(stripped), stripped.find(xref) + len(xref) + 15)].strip()
                             issues.append(

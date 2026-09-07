@@ -21,6 +21,7 @@ For years, the trajectory of artificial intelligence was governed by pretraining
 Frontier machine learning systems have consequently crossed into a new scaling regime: scaling test-time compute. Rather than treating inference as a passive, single-pass oracle, an agent runtime can allocate variable inference compute dynamically to explore alternative action branches, verify intermediate candidate states, and backtrack when dead-ends are encountered.
 
 This chapter formalizes test-time search topologies over agent tool action spaces. We progress from zero-search linear baselines to full stochastic trees:
+
 - **Chain of Thought (CoT) and ReAct:** Linear, zero-search baselines where reasoning and acting are interleaved in a single continuous trajectory.
 - **Best-of-$N$ Sampling:** Embarrassingly parallel candidate re-ranking.
 - **Beam Search and Tree of Thoughts (ToT):** Step-level pruning and heuristic-guided tree expansion.
@@ -28,6 +29,7 @@ This chapter formalizes test-time search topologies over agent tool action space
 - **Graph of Thoughts (GoT):** Directed acyclic graphs enabling branch merging and synthesis.
 
 We also:
+
 - Derive the Verification Tax ($C_{\text{ver}}$), proving that the optimal test-time policy balances generation compute against verification compute.
 - Identify the systems bottlenecks of multi-branch search, including KV-cache duplication and environment state corruption.
 - Formulate the Pareto frontiers that allow compact local models with deliberate search to systematically outperform massive static models.
@@ -75,7 +77,6 @@ Test-time compute scaling fundamentally decouples task difficulty from model par
 As illustrated in @fig-test-time-compute-scaling, scaling test-time compute shifts the system's performance envelope along a new scaling axis:
 
 - **Parameter Scaling vs. Search Scaling:** On complex reasoning benchmarks, allocating $10\times$ to $100\times$ more inference tokens through structured search on a compact model (e.g., 7B or 14B) yields accuracy improvements equivalent to scaling pretraining parameters by an order of magnitude, at a fraction of pretraining capital expenditure.
-
 - **The Test-Time Trade-off Space:** The system operates over four interconnected dimensions: task success probability $P(\text{success})$, wall-clock latency deadline $L_{\max}$, token generation expenditure $T_{\text{gen}}$, and verification compute $C_{\text{ver}}$.
 
 ::: {#pri-vol3-inference-scaling .callout-principle title="The Inference Scaling Invariant"}
@@ -123,9 +124,7 @@ $$
 While Best-of-$N$ is embarrassingly parallel—saturating GPU tensor cores by batching all $N$ rollouts concurrently—it exhibits severe systems inefficiencies:
 
 - **Redundant Prefix Duplication:** All $N$ trajectories share the exact same prompt prefix $x$ (often spanning 8,000 to 32,000 tokens of documentation and tool schemas). Without advanced prefix caching, the runtime redundantly re-computes or stores millions of identical Key-Value tokens across branches.
-
 - **All-or-Nothing Token Waste:** If an agent commits an unrecoverable syntax error or hallucinated path argument on step 1, the remaining 40 steps of trajectory $\tau_i$ continue generating tokens to completion, consuming GPU FLOPs on an already doomed branch.
-
 - **Reward Model Overoptimization (Goodhart's Law):** As $N$ scales to thousands of candidates, learned neural reward models suffer from extreme value overestimation [@gao2023scaling; @goodhart1984]. The policy exploits subtle blind spots in the reward network, selecting adversarial outputs that receive high scores from the verifier despite being functionally incorrect.
 
 ## Beam Search and Tree of Thoughts (ToT) {#sec-vol3-search-beam-search-and-tot}
@@ -229,13 +228,13 @@ Graph of Thoughts introduces three topological transformations:
 
 The architectural trade-offs governing these search topologies are summarized in @tbl-search-topologies.
 
-| Search Topology | Action Space | Memory Complexity | Pruning Granularity | Backtracking Support | Serving Profile |
-|:---|:---|:---|:---|:---|:---|
-| **Best-of-$N$** | Trajectory | $\mathcal{O}(N \cdot T)$ | Terminal only | None | Embarrassingly Parallel |
-| **Beam Search** | Step | $\mathcal{O}(B \cdot T)$ | Synchronous per ply | None (Hard Prune) | Lock-Step Barrier |
-| **Tree of Thoughts** | Thought | $\mathcal{O}(b \cdot d)$ | Step-level heuristic | Native Backtracking | Dynamic Stack |
-| **MCTS** | Action / Step | $\mathcal{O}(|\mathcal{V}|)$ | Dynamic (UCT) | Soft Value Backup | Asynchronous Tree |
-| **Graph of Thoughts** | Arbitrary DAG | $\mathcal{O}(|\mathcal{V}| + |\mathcal{E}|)$ | Multi-edge evaluation | Network Synthesis | Graph Scheduler |
+| Search Topology       | Action Space  | Memory Complexity        | Pruning Granularity  | Backtracking Support | Serving Profile         |                   |                       |                   |                 |
+|:----------------------|:--------------|:-------------------------|:---------------------|:---------------------|:------------------------|-------------------|-----------------------|-------------------|-----------------|
+| **Best-of-$N$**       | Trajectory    | $\mathcal{O}(N \cdot T)$ | Terminal only        | None                 | Embarrassingly Parallel |                   |                       |                   |                 |
+| **Beam Search**       | Step          | $\mathcal{O}(B \cdot T)$ | Synchronous per ply  | None (Hard Prune)    | Lock-Step Barrier       |                   |                       |                   |                 |
+| **Tree of Thoughts**  | Thought       | $\mathcal{O}(b \cdot d)$ | Step-level heuristic | Native Backtracking  | Dynamic Stack           |                   |                       |                   |                 |
+| **MCTS**              | Action / Step | $\mathcal{O}(            | \mathcal{V}          | )$                   | Dynamic (UCT)           | Soft Value Backup | Asynchronous Tree     |                   |                 |
+| **Graph of Thoughts** | Arbitrary DAG | $\mathcal{O}(            | \mathcal{V}          | +                    | \mathcal{E}             | )$                | Multi-edge evaluation | Network Synthesis | Graph Scheduler |
 : **Comparative Systems Architecture of Test-Time Search Topologies**: Action space, memory complexity, pruning granularity, backtracking support, and serving profile for each topology. {#tbl-search-topologies}
 
 ## Verifier Oracles and Process Critics {#sec-vol3-search-verifier-oracles-and-process}
@@ -268,7 +267,6 @@ The economic rationale for the Verification Tax is search space collapse:
 Agent systems integrate two distinct classes of verifiers:
 
 - **Deterministic Environmental Oracles:** Compilers (`gcc`, `rustc`), test runners (`pytest`, `go test`), linters (`ruff`, `eslint`), and formal theorem provers (Lean, Z3). These provide unambiguous binary signals ($R \in \{0, 1\}$) with zero reward hacking vulnerability. Their primary systems constraint is execution latency (container startup and compilation time).
-
 - **Learned Process Reward Models (PRMs):** Neural classifiers trained on step-by-step human annotations or synthetic verification datasets [@lightman2023let]. PRMs grade arbitrary natural language thoughts ($r_{\text{PRM}} \in [-1, 1]$). While highly versatile, PRMs introduce two critical failure modes:
   - **False Positives (Reward Hacking):** Emitting high confidence on plausible-sounding but mathematically false derivations.
   - **False Negatives (Premature Pruning):** Penalizing unconventional or creative reasoning paths, killing viable solutions early.
@@ -284,7 +282,6 @@ Tree search algorithms impose massive compute demands during node expansion. In 
 Instead of using the large target model $\mathcal{M}_{\text{target}}$ (e.g., a 70B parameter agent) to sequentially generate every search branch, the runtime pairs the target model with a small, high-throughput draft model $\mathcal{M}_{\text{draft}}$ (e.g., a 1B to 3B parameter model):
 
 - **Draft Branch Speculation:** The draft model rapidly samples a $\gamma$-step candidate reasoning sequence $\tilde{y}_{1:\gamma}$ from leaf state $s$. Because $\mathcal{M}_{\text{draft}}$ is small, it executes at $5\times$ to $10\times$ higher token generation speed.
-
 - **Parallel Target Verification:** The target model $\mathcal{M}_{\text{target}}$ processes all $\gamma$ speculative tokens concurrently in a single forward pass:
   $$
   P_{\text{target}}(y_t \mid x, \tilde{y}_{<t}) \quad \text{for } t = 1, \dots, \gamma
@@ -373,7 +370,6 @@ $$
 On complex benchmarks, @snell2024scaling demonstrated that:
 
 - **The Inversion Point:** A compact 8B parameter model equipped with optimal test-time search matches or exceeds the accuracy of a 70B parameter model operating under greedy decoding.
-
 - **Cost-per-Resolved-Task Inversion:** Because serving an 8B model is an order of magnitude cheaper per token than serving a 70B or 405B model (due to reduced GPU tensor parallelism, smaller HBM footprints, and higher batch throughput), running 10 search rollouts on an 8B model is frequently **cheaper in raw dollar cost** than running a single greedy forward pass on a 70B model—while achieving superior benchmark pass rates.
 
 In production engineering, the system architect does not pick a static model; they tune an operational dial between parameter scale and search depth depending on whether the workload is latency-critical (favoring larger models with shallow search) or cost/accuracy-critical (favoring compact models with deep deliberate search).

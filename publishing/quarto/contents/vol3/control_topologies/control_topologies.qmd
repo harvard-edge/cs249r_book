@@ -53,22 +53,18 @@ The architecture of an agentic machine learning system is fundamentally defined 
 :::
 
 - **Prompt Chaining (The leftmost archetype)**: Decomposes a complex task into a fixed sequential pipeline of discrete model invocations. Each step executes a dedicated prompt with strict input and output schemas, passing its transformed output as the input to the subsequent stage. Because the execution graph is hardcoded, the runtime exhibits predictable latency ($\mathcal{O}(1)$ forward passes) and bounded token consumption. Verification is straightforward: unit tests and deterministic schema validators inspect intermediate outputs between stages. However, prompt chaining lacks dynamic flexibility; it cannot branch or adapt to unexpected intermediate results.
-
 - **Routing and Dispatch**: Introduces dynamic conditional branching. An initial classifier or router model inspects the user query or input state and directs execution to one of several specialized downstream pipelines. Routing establishes clean domain separation and minimizes the blast radius of downstream model failures. For example, a customer support agent routes billing questions to a deterministic database query pipeline while routing technical troubleshooting queries to a diagnostic workflow.
-
 - **Parallel Fan-Out (Map-Reduce)**: Exploits the independence of sub-tasks to maximize hardware throughput. When a complex problem can be partitioned into orthogonal sub-problems—such as analyzing distinct source files in a large repository or evaluating multiple code candidates—a dispatch node spawns concurrent worker invocations across available GPU serving infrastructure. An aggregator node collects, filters, and synthesizes the parallel outputs once a barrier synchronization condition is met.
-
 - **Supervisor-Workers**: Represents the production standard for non-trivial agentic automation. A central supervisor agent maintains the global Agent Control Block (ACB, @sec-vol3-descriptors-the-agent-control-block), formulates a dynamic plan, and delegates discrete sub-tasks down to isolated worker agents. Workers do not communicate directly with one another; instead, they execute scoped tasks within isolated sandbox boundaries and return schema-validated artifacts back to the supervisor. This architecture embodies the Anti-Swarm Principle, enforcing strict hierarchy, context isolation, and bounded delegation.
-
 - **Autonomous Loops (Evaluator-Optimizer & ReAct)**: Introduces closed-loop feedback where models iteratively generate hypotheses, execute tool actions, observe environment state changes, and refine their reasoning. While offering the highest problem-solving capability, autonomous loops introduce heavy-tailed runtime distributions and vulnerability to semantic livelocks.
 
-| Control Archetype | Graph Structure | Autonomy Level | Latency Complexity | Token Variance | Failure Blast Radius | Primary Verification Mechanism |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Prompt Chaining** | Static Line | Zero (Fixed) | $\mathcal{O}(1)$ deterministic | Low ($\sigma^2 \approx 0$) | Minimal (Isolated step) | JSON Schema / Assertions |
-| **Routing & Dispatch** | Static Tree | Constrained Branch | $\mathcal{O}(1)$ bounded | Low | Low (Domain contained) | Classifier Confusion Matrix |
-| **Parallel Fan-Out** | Map-Reduce DAG | Partitioned Concurrent | $\mathcal{O}(\max t_i)$ parallel | Medium (Concurrent sum) | Medium (Worker isolated) | Barrier Invariants / Voting |
-| **Supervisor-Workers** | Hierarchical Tree | Supervised Delegation | $\mathcal{O}(D)$ tree depth | Controlled Dynamic | Low (Sandbox boundary) | Verifier Gatekeepers / ACLs |
-| **Autonomous Loops** | Cyclic Statechart | Open-Ended Deliberation | $\mathcal{O}(K)$ heavy-tailed | High (Unbounded worst-case) | Severe (Unchecked mutation) | Circuit Breakers / State Hashes |
+| Control Archetype      | Graph Structure   | Autonomy Level          | Latency Complexity               | Token Variance              | Failure Blast Radius        | Primary Verification Mechanism  |
+|:-----------------------|:------------------|:------------------------|:---------------------------------|:----------------------------|:----------------------------|:--------------------------------|
+| **Prompt Chaining**    | Static Line       | Zero (Fixed)            | $\mathcal{O}(1)$ deterministic   | Low ($\sigma^2 \approx 0$)  | Minimal (Isolated step)     | JSON Schema / Assertions        |
+| **Routing & Dispatch** | Static Tree       | Constrained Branch      | $\mathcal{O}(1)$ bounded         | Low                         | Low (Domain contained)      | Classifier Confusion Matrix     |
+| **Parallel Fan-Out**   | Map-Reduce DAG    | Partitioned Concurrent  | $\mathcal{O}(\max t_i)$ parallel | Medium (Concurrent sum)     | Medium (Worker isolated)    | Barrier Invariants / Voting     |
+| **Supervisor-Workers** | Hierarchical Tree | Supervised Delegation   | $\mathcal{O}(D)$ tree depth      | Controlled Dynamic          | Low (Sandbox boundary)      | Verifier Gatekeepers / ACLs     |
+| **Autonomous Loops**   | Cyclic Statechart | Open-Ended Deliberation | $\mathcal{O}(K)$ heavy-tailed    | High (Unbounded worst-case) | Severe (Unchecked mutation) | Circuit Breakers / State Hashes |
 
 : **Architectural Archetypes of Agentic Control**: Comparison of control topologies across determinism, latency, token variance, and failure containment {#tbl-vol3-topologies-archetypes}
 
@@ -124,7 +120,6 @@ However, the systems tax of the ReAct topology is severe:
    Because every step requires a complete forward pass over the accumulated context, the total token processing burden across $K$ steps scales quadratically: $\mathcal{O}(K^2)$.
 
 2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies. To prevent long-running external tools from tying up GPU VRAM while waiting for $o_t$, production runtimes implement **Asynchronous Yielding** via the context swapping mechanics detailed in @sec-vol3-execution-descriptors: the agent process yields execution, its KV cache is asynchronously offloaded to host DRAM or Non-Volatile Memory Express (NVMe) storage when the tool wait exceeds the breakeven threshold $T_{\text{breakeven}}$, and the GPU is freed for other requests until the tool completes and issues a hardware interrupt to resume the loop.
-
 3. **Error Compounding (Cognitive Drift):** If an observation $o_t$ contains misleading, noisy, or truncated information, the model's subsequent thought $x_{t+1}$ frequently rationalizes the error rather than correcting it. Without external verifier gates, ReAct loops frequently diverge into hallucinated sub-goals.
 
 ## Plan-and-Solve vs. Reactive Topologies {#sec-vol3-topologies-plan-and-solve-vs-reactive-topologies}
@@ -149,7 +144,6 @@ The systems trade-offs between Plan-and-Solve and ReAct are governed by the **En
 When the environment is deterministic or highly predictable ($\mathcal{H}(\mathcal{T}) \to 0$, such as mathematical proof verification, static code refactoring, or document parsing), Plan-and-Solve delivers overwhelming performance advantages:
 
 - **Asynchronous Parallelism:** Independent sub-tasks execute concurrently across distinct GPU workers. If a plan contains $M$ independent tasks of average duration $\tau$, wall-clock execution time collapses from $M \cdot \tau$ to $\max(\tau_1, \dots, \tau_M) + \epsilon_{\text{sched}}$. However, governed by **Amdahl's Law**, the maximum achievable speedup is strictly bounded by the sequential fraction of the topology, which here is the initial Decomposition Phase (planner inference) plus the terminal node (aggregator synthesis). As $M$ scales, these sequential synchronization barriers dominate system latency.
-
 - **Context Hygiene and Token Efficiency:** Worker agents execute sub-tasks in clean, isolated context windows containing only their immediate instructions. They do not inherit the massive, noisy conversation history of the parent planner, eliminating the quadratic KV cache penalty $\mathcal{O}(K^2)$ of ReAct.
 
 That sequential fraction is worth putting a number on, because the ceiling it sets sits lower than the topology diagram suggests.
@@ -231,7 +225,6 @@ The structural failure modes of peer-to-peer swarms stem directly from distribut
    As $N$ increases, the message passing volume explodes. In a collaborative programming task, if Agent A proposes an edit, Agents B, C, and D all receive and respond to the proposal. Their responses prompt counter-responses, leading to exponential context bloat and catastrophic token burn [@brooks1975mythical].
 
 2. **Context Dilution and Attention Bleed:** When all agents share a single global message bus, every agent's context window becomes polluted with the conversational metadata, conversational filler, and unverified intermediate assertions of all other agents. The model's attention mechanism suffers from attention bleed: critical constraints provided in the initial user prompt are drowned out by dozens of turns of inter-agent conversational chatter.
-
 3. **Diffuse Accountability and Terminal Livelock:** In a flat mesh, no single process owns the terminal state invariant. Agent A waits for Agent B to finalize the specification; Agent B assumes Agent C is writing tests; Agent C assumes Agent A has already verified the code. Without an explicit root supervisor tracking global task completion, swarms degenerate into infinite mutual appreciation loops (*"Great job, Agent B! I agree with your plan. Let us proceed when you are ready."*).
 
 To solve these failure modes, production architectures standardize on **Hierarchical Supervisor Trees**:
@@ -290,12 +283,12 @@ In all four iterations, the model is executing the exact same semantic operation
 
 Production agent runtimes deploy a **Multi-Tier Semantic Cycle Detection Engine** combining exact hashing, semantic vector distance, and environment state mutation metrics.
 
-| Detection Tier | Invariant Monitored | Mathematical Metric | Computational Cost | False Positive Rate | Action on Detection |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Tier 1: Tool Hashing** | Exact syntactic tool invocation | $H(a_t) = H(a_{t-k})$ | $\mathcal{O}(1)$ hash lookup | Zero | Immediate action rejection; prompt mutation |
-| **Tier 2: Action Distance** | Paraphrased tool intent | $\Delta s_{\text{action}} < \epsilon_a$ | $\mathcal{O}(W)$ dot product | Very Low | Warning inject; force verbal scratchpad critique |
-| **Tier 3: Observation Equivalence** | Repeated environment response | $\Delta s_{\text{obs}} < \epsilon_o$ | $\mathcal{O}(W)$ dot product | Low | Invalidate tool cache; trigger fallback tool |
-| **Tier 4: $\epsilon$-Progress Metric** | Measurable environment mutation | $\Delta \mathcal{S}_{\text{env}} < \delta_{\text{env}}$ | $\mathcal{O}(1)$ snapshot diff | Extremely Low | Trip circuit breaker to HALF-OPEN |
+| Detection Tier                         | Invariant Monitored             | Mathematical Metric                                     | Computational Cost             | False Positive Rate | Action on Detection                              |
+|:---------------------------------------|:--------------------------------|:--------------------------------------------------------|:-------------------------------|:--------------------|:-------------------------------------------------|
+| **Tier 1: Tool Hashing**               | Exact syntactic tool invocation | $H(a_t) = H(a_{t-k})$                                   | $\mathcal{O}(1)$ hash lookup   | Zero                | Immediate action rejection; prompt mutation      |
+| **Tier 2: Action Distance**            | Paraphrased tool intent         | $\Delta s_{\text{action}} < \epsilon_a$                 | $\mathcal{O}(W)$ dot product   | Very Low            | Warning inject; force verbal scratchpad critique |
+| **Tier 3: Observation Equivalence**    | Repeated environment response   | $\Delta s_{\text{obs}} < \epsilon_o$                    | $\mathcal{O}(W)$ dot product   | Low                 | Invalidate tool cache; trigger fallback tool     |
+| **Tier 4: $\epsilon$-Progress Metric** | Measurable environment mutation | $\Delta \mathcal{S}_{\text{env}} < \delta_{\text{env}}$ | $\mathcal{O}(1)$ snapshot diff | Extremely Low       | Trip circuit breaker to HALF-OPEN                |
 
 : **Multi-Tier Cycle Detection Architecture**: Algorithmic layers detecting livelocks across token, semantic, and environment boundaries {#tbl-vol3-topologies-cycle-detection}
 

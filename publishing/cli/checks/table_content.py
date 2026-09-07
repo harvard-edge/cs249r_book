@@ -39,8 +39,24 @@ def find_grid_tables(lines: List[str]) -> List[TableSpan]:
     """Find all grid tables in a QMD file."""
     tables = []
     i = 0
+    in_fence = False
+    fence = ""
     while i < len(lines):
         line = lines[i]
+        stripped = line.lstrip()
+        # Fenced code blocks hold ASCII-art diagrams whose box-drawing looks
+        # like grid-table rules. Converting one to pipe syntax, or demanding a
+        # caption for it, is wrong.
+        if not in_fence and stripped.startswith("```"):
+            in_fence = True
+            fence = stripped[: len(stripped) - len(stripped.lstrip("`"))]
+            i += 1
+            continue
+        if in_fence:
+            if stripped.startswith(fence) and not stripped[len(fence):].strip():
+                in_fence = False
+            i += 1
+            continue
         if re.match(r'^\+[-:=+]+\+\s*$', line):
             start = i
             j = i + 1
