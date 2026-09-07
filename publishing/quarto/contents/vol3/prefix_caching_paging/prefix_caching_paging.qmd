@@ -446,7 +446,45 @@ The total memory footprint required to maintain the entire search tree in GPU HB
 
 $$S_{\text{MCTS}} = S_{\text{token}} \cdot \left( L_{\text{root}} + \sum_{j=1}^{N_{\text{branches}}} L_{\text{branch}}^{(j)} \right)$$
 
-instead of duplicating $L_{\text{root}}$ across all $N_{\text{branches}}$ leaves. By eliminating root duplication, Radix caching enables inference engines to sustain hundreds of parallel speculative reasoning branches on a single 8-GPU node, unlocking real-time MCTS rollouts for complex agentic problem solving [@snell2024scaling].
+instead of duplicating $L_{\text{root}}$ across all $N_{\text{branches}}$ leaves. By eliminating root duplication, Radix caching moves the limit on search width from the size of the shared prompt to the size of the divergent suffixes, and the distance between those two regimes on one 8-GPU node is what decides whether real-time MCTS rollouts are affordable at all [@snell2024scaling].
+
+::: {#nbk-caching-branch-capacity .callout-notebook title="How many speculative branches fit on one node"}
+
+**Problem**: On a single 8-GPU H100 node serving Llama-3-70B, how many parallel branches from a shared $24{,}000$-token root fit in accelerator memory when each branch duplicates the root, and how many fit once the root is shared?
+
+**Variables**:
+
+* Node capacity $8 \times 80\text{ GB} = 640\text{ GB}$ of HBM.
+* Model weights at $70 \times 10^9$ parameters and $2\text{ bytes}$ per parameter in FP16.
+* A free-block reserve of $10\%$ of node HBM held back by admission control. Scenario assumption.
+* Llama-3-70B attention geometry from @tbl-vol3-caching-model-kv-footprint, with $n_{\text{layers}} = 80$, $n_{\text{kv\_heads}} = 8$, $d_{\text{head}} = 128$, and $b = 2$.
+* $L_{\text{root}} = 24{,}000$ tokens for the search prompt and $L_{\text{branch}} = 2{,}000$ generated tokens per rollout. Both are scenario assumptions.
+
+**Math**: The per-token footprint follows the derivation in @sec-vol3-caching-kv-cache-anatomy-tensor-layouts:
+
+$$S_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes}$$
+
+Weights consume $70 \times 10^9 \times 2 = 140\text{ GB}$ and the reserve holds back $0.10 \times 640 = 64\text{ GB}$, leaving a KV budget of
+
+$$640 - 140 - 64 = 436\text{ GB}$$
+
+The root prefix and one rollout suffix cost
+
+$$S_{\text{root}} = 24{,}000 \times 327{,}680 = 7.86\text{ GB}, \qquad S_{\text{branch}} = 2{,}000 \times 327{,}680 = 0.655\text{ GB}$$
+
+Under contiguous allocation each branch carries a private copy of the root, so a branch costs $7.86 + 0.655 = 8.52\text{ GB}$ and the node holds
+
+$$N_{\text{naive}} = \left\lfloor \frac{436}{8.52} \right\rfloor = 51$$
+
+Under Copy-on-Write page sharing the root is paid once and only the suffixes scale:
+
+$$N_{\text{shared}} = \left\lfloor \frac{436 - 7.86}{0.655} \right\rfloor = 653$$
+
+**Result**: 51 concurrent branches with root duplication against 653 with prefix sharing, a $12.8\times$ widening of the search from the same $640\text{ GB}$ of HBM.
+
+**Systems insight**: The duplicated prefix, not the generated text, is what caps search width. At these lengths the root is twelve times the suffix, so roughly $92\%$ of the naive footprint is 51 identical copies of the same tokens. Once the root is shared, capacity is governed by rollout length rather than prompt length, which inverts the tuning knob. Doubling the reasoning budget per branch halves the achievable width, while doubling the task prompt costs about $2\%$ of it.
+
+:::
 
 ## Chunked Prefill and Batching {#sec-vol3-caching-chunked-prefill-and-continuous}
 

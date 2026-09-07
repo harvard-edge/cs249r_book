@@ -157,6 +157,22 @@ Eliminating the Critic network fundamentally transforms the systems profile of l
 
 3. **The Reference Model Constraint:** While the Critic is eliminated, GRPO still requires a forward pass through a frozen Reference Model ($\pi_{\text{ref}}$) to compute the KL divergence penalty. Because this model requires no gradients or optimizer states, systems engineers typically offload its weights to CPU RAM, apply 8-bit quantization, or host it on a separate tier of older, high-memory inference GPUs to preserve premium HBM on the primary training nodes.
 
+Whether that reclaimed capacity amounts to the clean halving quoted above is a question of counting bytes per parameter across every model that stays resident during a training step.
+
+::: {#nbk-rl-critic-elimination-hbm .callout-notebook title="What critic elimination actually reclaims"}
+
+**Problem**: In a 70B parameter agent training cluster, how much high-bandwidth memory does eliminating the Critic network reclaim, and does the saving reach the 50 percent figure quoted for GRPO?
+
+**Variables**: $P = 70 \times 10^9$ parameters, with $1\text{ GB} = 10^9$ bytes. Mixed-precision Adam holds, per trainable parameter, $2\text{ bytes}$ of BF16 weights, $2\text{ bytes}$ of BF16 gradients, $4\text{ bytes}$ of FP32 master weights, and $4\text{ bytes} + 4\text{ bytes}$ of FP32 momentum and variance. The frozen reference model holds BF16 weights only, at $2\text{ bytes}$ per parameter. Accelerators carry $80\text{ GB}$ of HBM each, eight to a node. Two values are scenario assumptions: the Critic matches the Actor in parameter capacity, and the byte budget counts persistent state only, excluding activations and KV cache, so every total below is a floor.
+
+**Math**: A trainable model costs $2 + 2 + 4 + 4 + 4 = 16\text{ bytes}$ per parameter, so the Actor occupies $70 \times 10^9 \times 16 = 1120\text{ GB}$ and a Critic of equal capacity occupies another $1120\text{ GB}$. The frozen reference model, carrying no gradients and no optimizer states, costs $70 \times 10^9 \times 2 = 140\text{ GB}$. PPO therefore holds $1120 + 1120 + 140 = 2380\text{ GB}$ of persistent state against GRPO's $1120 + 140 = 1260\text{ GB}$, and the fraction reclaimed is $1120 / 2380 = 0.471$. Converting to hardware, $2380 / 80 = 29.75$ rounds up to $30$ accelerators, while $1260 / 80 = 15.75$ rounds up to $16$.
+
+**Result**: Critic elimination reclaims $1120\text{ GB}$, a reduction of **47 percent**, and takes the resident training state from **four eight-GPU nodes down to two**.
+
+**Systems insight**: The 50 percent headline is the ceiling of critic elimination rather than its value in a working cluster, and the missing three points are the frozen reference model that the KL penalty keeps resident. That residual is also the only resident model carrying no gradients and no optimizer states, which is why production GRPO stacks push it to CPU RAM, 8-bit weights, or a cheaper inference tier. Doing so moves the last $140\text{ GB}$ off premium HBM and lets nearly the entire $1120\text{ GB}$ saving land on the training tier, where it funds a larger rollout group $G$ or a longer context window without adding nodes.
+
+:::
+
 ## DeepSeek-R1 and Emergent Reasoning {#sec-vol3-rl-deepseek-r1-and-emergent-reasoning}
 
 The emergence of models such as DeepSeek-R1-Zero [@deepseekai2025deepseekr1] and OpenAI o1 [@openai2024o1] revealed an unexpected phenomenon in machine learning systems: when large base models are trained with large-scale RLVR *without any prior supervised fine-tuning*, sophisticated reasoning, self-reflection, and backtracking behaviors emerge spontaneously.

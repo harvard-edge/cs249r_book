@@ -281,7 +281,35 @@ Notice that the normalization factor is $\sum_{t=1}^T M_t$ (the total count of a
 
 Agent trajectories inherently span tens of thousands of tokens due to multi-turn interactions, verbose tool outputs, and expansive reasoning scratchpads. Standard Supervised Fine-Tuning infrastructure, which typically limits sequence lengths to 4,096 or 8,192 tokens, is insufficient for end-to-end trajectory training.
 
-Training on trajectories of 32K, 64K, or 128K tokens introduces severe memory constraints. While Data Parallelism (DP) and Tensor Parallelism (TP) partition model weights across accelerators, the activation memory required for the forward and backward passes scales quadratically with sequence length in standard attention. A single 128K-token trajectory batch can easily consume hundreds of gigabytes of GPU High-Bandwidth Memory (HBM), resulting in immediate Out-Of-Memory (OOM) errors even on 80GB H100 clusters.
+Training on trajectories of 32K, 64K, or 128K tokens introduces severe memory constraints. While Data Parallelism (DP) and Tensor Parallelism (TP) partition model weights across accelerators, the activation memory required for the forward and backward passes scales quadratically with sequence length in standard attention. Even after FlashAttention-style streaming removes the materialized score matrix and full gradient checkpointing discards every intermediate tensor, an activation footprint survives at each layer boundary, and whether one 128K-token trajectory fits in the High-Bandwidth Memory (HBM) of an 80 GB H100 is settled entirely by that residual.
+
+::: {#nbk-finetuning-activation-memory .callout-notebook title="Activation memory for one 128K-token trajectory"}
+
+**Problem**: How much accelerator memory does a single 128K-token agent trajectory consume in activations alone, and how far must that sequence be split before it fits?
+
+**Variables**: A 70-billion-parameter dense transformer, taken as a scenario assumption rather than a measurement: $n_{\text{layers}} = 80$, $d_{\text{model}} = 8192$, bfloat16 at $2\text{ bytes}$ per value, micro-batch size 1, sequence length $T = 131{,}072\text{ tokens}$. Full gradient checkpointing is assumed, so only the input activation to each transformer layer survives the forward pass and every intermediate tensor is recomputed during the backward pass. An un-checkpointed layer instead retains roughly $34\text{ bytes}$ per token per hidden dimension against the $2\text{ bytes}$ counted here. The device is an $80\text{ GB}$ H100, and a training node holds eight of them.
+
+**Math**: A layer boundary stores one bfloat16 vector of width $d_{\text{model}}$ per token.
+
+$$\text{per token per layer} = 8192 \times 2\text{ bytes} = 16{,}384\text{ bytes}$$
+
+$$\text{per layer} = 131{,}072 \times 16{,}384\text{ bytes} = 2.147\text{ GB}$$
+
+$$\text{per trajectory} = 80 \times 2.147\text{ GB} = 171.8\text{ GB}$$
+
+Measured against one device, and then split across the eight devices of a node:
+
+$$\frac{171.8\text{ GB}}{80\text{ GB}} = 2.15 \qquad \frac{171.8\text{ GB}}{8} = 21.5\text{ GB per rank}$$
+
+Dropping checkpointing multiplies the per-layer residency by $34 / 2 = 17$:
+
+$$171.8\text{ GB} \times 17 = 2{,}921\text{ GB} \approx 2.9\text{ TB}$$
+
+**Result**: $171.8\text{ GB}$, which is $2.15\times$ the entire HBM of one H100 before a single parameter, gradient, or optimizer moment is stored. Three ranks is the bare arithmetic minimum and leaves nothing for weights; splitting the sequence across a full eight-device node brings activations to $21.5\text{ GB}$ per rank, about a quarter of each device. The same trajectory trained without checkpointing needs $2.9\text{ TB}$.
+
+**Systems insight**: The binding constraint is the sequence dimension, not the parameter count, and the two are partitioned along different axes. Tensor and data parallelism reduce the $171.8\text{ GB}$ not at all, because every rank in a tensor-parallel group still carries the full sequence of layer-boundary activations. Only a split along $T$ divides that number, which is why long-trajectory fine-tuning has to budget Sequence Parallelism or Ring Attention into the parallelism plan from the start rather than reaching for it after the first out-of-memory failure.
+
+:::
 
 To support full-trajectory fine-tuning, training platforms must implement **Sequence Parallelism (SP)** [@korthikanti2023activation] or **Ring Attention** [@liu2023ringAttention].
 

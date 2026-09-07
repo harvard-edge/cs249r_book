@@ -296,7 +296,25 @@ In naive LLM serving engines, each concurrent sequence maintains an independent 
 
 ![Tree-Structured KV-Cache Allocation and Radix Prefix Sharing. Panel A illustrates naive independent branch serving, where identical system prompt and execution trace prefixes are duplicated across all candidate branches, causing rapid HBM exhaustion. Panel B demonstrates RadixAttention with Copy-on-Write page allocation, where shared prefixes are retained once in memory and child branches store only incremental delta tokens.](images/svg/tree_kv_cache_radix.svg){#fig-tree-kv-cache-radix width=100%}
 
-To solve the search memory wall, modern agent serving runtimes must implement **Tree-Structured Radix KV-Caches**. Rather than duplicating the prefix memory for every branch, the serving layer uses Copy-on-Write (CoW) page sharing to reuse the parent's memory, allocating new pages only for divergent tokens. This slashes HBM consumption by 60% to 85% during multi-branch search, allowing production systems to scale search width $B$ from 4 to 32 concurrent branches on identical server hardware. We will deconstruct the full systems architecture of Radix tree indexing, PagedAttention, and cache eviction in @sec-vol3-prefix-caching-paging.
+To solve the search memory wall, modern agent serving runtimes must implement **Tree-Structured Radix KV-Caches**. Rather than duplicating the prefix memory for every branch, the serving layer uses Copy-on-Write (CoW) page sharing to reuse the parent's memory, allocating new pages only for divergent tokens. Whether that changes the search width a server can sustain, rather than merely trimming its memory bill, depends on the relative size of the shared prefix and the divergent suffix.
+
+::: {#nbk-search-prefix-sharing .callout-notebook title="What prefix sharing buys at a fixed memory budget"}
+
+**Problem**: A tree search shares one long prompt prefix across every branch. How many concurrent branches fit in a fixed KV-cache budget with and without Copy-on-Write sharing, and how large is the resulting memory saving?
+
+**Variables**: The shared prefix is $8{,}000$ tokens and costs $2.5\text{ GB}$ for the 70B FP16 model above, so the per-token KV cost is $2.5\text{ GB}/8{,}000 = 0.3125\text{ MB}$. Two scenario assumptions: each branch diverges for $1{,}000$ tokens of its own thoughts and tool observations, and $12.5\text{ GB}$ of HBM remains for KV cache after model weights and activation workspace.
+
+**Math**: Without sharing, each branch stores its own full context of $8{,}000 + 1{,}000 = 9{,}000$ tokens, or $9{,}000 \times 0.3125\text{ MB} = 2.8125\text{ GB}$ per branch, so the budget holds $12.5/2.8125 = 4.44$, meaning $4$ branches. With sharing, the prefix is stored once at $2.5\text{ GB}$ and each branch adds only its $1{,}000$ divergent tokens at $0.3125\text{ GB}$, so the budget holds $(12.5 - 2.5)/0.3125 = 32$ branches.
+
+The saving therefore depends on width. At $B = 4$, independent allocation needs $4 \times 2.8125 = 11.25\text{ GB}$ against a shared $2.5 + 4 \times 0.3125 = 3.75\text{ GB}$, a $1 - 3.75/11.25 = 66.7\%$ reduction. At $B = 32$, independent allocation would need $32 \times 2.8125 = 90\text{ GB}$ against a shared $12.5\text{ GB}$, an $86.1\%$ reduction.
+
+**Result**: The same $12.5\text{ GB}$ holds $4$ independent branches or $32$ shared ones, an $8\times$ increase in search width, and the memory saving climbs from $66.7\%$ at four branches to $86.1\%$ at thirty-two.
+
+**Systems insight**: Prefix sharing is not a fixed discount on KV memory. It is a discount that grows with the very width it makes affordable, because the prefix is paid for once no matter how many branches read it. Capacity planning for a search runtime should therefore budget one prefix plus a per-branch delta, which makes the ceiling on search width a function of how far branches diverge rather than of how long the prompt is.
+
+:::
+
+We will deconstruct the full systems architecture of Radix tree indexing, PagedAttention, and cache eviction in @sec-vol3-prefix-caching-paging.
 
 ## Environment State Forking and Snapshotting {#sec-vol3-search-environment-state-forking}
 
