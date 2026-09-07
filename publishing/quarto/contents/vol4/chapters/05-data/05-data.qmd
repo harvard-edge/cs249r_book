@@ -42,6 +42,12 @@ After studying this chapter, you will be able to:
 <!-- BEGIN -->
 In digital machine learning, datasets exist independently of the model. Text corpora, web images, and audio waveforms are scraped, tokenized, and shuffled with zero impact on the physical universe. In Physical AI, data acquisition is an endogenous physical process governed by the closed causal loop $s_{t+1} \sim P(s \mid s_t, a_t)$. Every recorded camera frame, joint angle, and force-torque vector requires commanding electrical current through motor coils, overcoming mechanical stiction, cycling gearbox teeth, and pushing physical mass through space.
 
+::: {#dfn-data-physical-ai-system .callout-definition title="Physical AI System"}
+
+***Physical AI system***\index{Physical AI system!definition} is an artificial intelligence system embodied in a physical machine that interacts with the real world through sensors and actuators, forming a closed causal loop $s_{t+1} \sim P(s \mid s_t, a_t)$. Unlike digital AI systems that process static datasets, physical AI systems must generate their own experience through mechanical movement, consuming energy, time, and hardware fatigue life for every recorded state transition.
+
+:::
+
 Within the physical AI architecture stack (@fig-05-locator), data acquisition forms the physical substrate feeding the Brain organ, bridging the unyielding mechanics of the Body with the statistical representations of learned policies. Because every training sample requires physical movement, demonstration data cannot be scaled by scraping or passive logging. A single hour of scheduled facility time on a robotic workcell yields only a fraction of active, usable trajectory records once startup overhead, sensor calibration routines, human fatigue, and physical scene resets are accounted for. Furthermore, because a robot cannot observe an environment without executing actions, the recorded data distribution is strictly closed under the control policy of the collecting agent. If an operator or scripted routine navigates only narrow, collision-free corridors, the dataset remains entirely silent on how to recover from boundary excursions, baking severe compounding drift into downstream imitation policies.
 
 Training dependable physical AI systems requires treating demonstration data as an expensive, perishable physical asset with explicit kinematic contracts and documented operational support boundaries. Characterizing a physical dataset demands accounting for four fundamental systems dimensions:
@@ -368,17 +374,9 @@ The pipeline scans backwards across a lookback window ($\Delta t_{\text{lookback
 
 **Intervention curation** is the causal data-cleaning protocol that truncates an autonomous rollout at its divergence timestamp $t_{\text{div}}$ rather than the physical override timestamp $t_{\text{takeover}}$, excising human perceptual reaction delay ($300\text{--}800\text{ ms}$) and unmodeled drift transitions to prevent learned policies from acquiring spurious attractor basins toward safety boundaries.
 
-The necessity of isolating divergence points and training on recovery trajectories is governed by how compounding errors accumulate over an operational horizon of $T$ control steps [@ross2011reduction].[^fn-math-dagger-bound] Let the autonomous policy $\hat{\pi}$ have an expected single-step decision error:
-$$\epsilon = \mathbb{E}_{s \sim d^{\pi^*}} [\|\hat{\pi}(s) - \pi^*(s)\|]$$
-relative to an expert policy $\pi^*$. The mathematical contrast between naive behavioral cloning and corrective aggregation follows a clear three-step derivation:
+The necessity of isolating divergence points and training on recovery trajectories is governed by how compounding errors accumulate over an operational horizon of $T$ control steps [@ross2011reduction]. Under standard behavioral cloning trained only on nominal demonstrations, the expert provides zero supervision outside the nominal support. Once a small decision error pushes the system outside the demonstrated tube, the expected downstream cost per step is unconstrained. Integrating these failure probabilities across the full operational horizon yields a cumulative trajectory error that grows quadratically ($O(T^2 \epsilon)$).[^fn-math-bc-bound]
 
-1. **Probability of First Excursion**: At time step $t$, the probability that the policy made at least one mistake in the preceding $t$ steps is $1 - (1 - \epsilon)^t \le t \epsilon$.
-2. **Unconstrained Loss Outside Support**: Under standard behavioral cloning trained only on nominal demonstrations, the expert provides zero supervision outside $d^{\pi^*}$. Once the system exits the demonstrated tube, the expected downstream cost per step is unconstrained, bounded only by the maximum task penalty $C_{\max} = 1$.
-3. **Quadratic Cumulative Bound**: Integrating these failure probabilities across the full operational horizon of $T$ steps yields a cumulative trajectory error that grows quadratically:
-$$\mathbb{E}[\text{Error}_{\text{BC}}] \le \sum_{t=1}^{T} t \epsilon = \epsilon \frac{T(T+1)}{2} = O(T^2 \epsilon).$$
-
-When interventions are logged, cut at $t_{\text{div}}$, and ingested through **corrective aggregation** (such as DAgger [@ross2011reduction]), the expert provides demonstrations initialized directly from the empirical state distribution $d^{\hat{\pi}}$ induced by the running policy. Because the dataset now contains corrective demonstrations for off-manifold states, an error at step $t$ does not cause unrecoverable divergence on step $t+1$. The policy learns to return to the nominal tube, collapsing the per-step error to a constant $\epsilon$ across the entire horizon:
-$$\mathbb{E}[\text{Error}_{\text{CA}}] \le \sum_{t=1}^T \epsilon = T \epsilon = O(T \epsilon).$$
+When interventions are logged, cut at $t_{\text{div}}$, and ingested through **corrective aggregation** (such as DAgger [@ross2011reduction]), the expert provides demonstrations initialized directly from the empirical state distribution $d^{\hat{\pi}}$ induced by the running policy. Because the dataset now contains corrective demonstrations for off-manifold states, an error at step $t$ does not cause unrecoverable divergence on step $t+1$. The policy learns to return to the nominal tube, collapsing the cumulative error bound to a linear growth ($O(T \epsilon)$).[^fn-math-dagger-bound]
 
 For an assembly task running for $T = 500\text{ steps}$ ($5.0\text{ s}$ at $100\text{ Hz}$) with a per-step error probability of $\epsilon = 0.01$, quadratic compounding yields a theoretical error factor of $T^2 \epsilon = 2500$, whereas corrective aggregation holds the error factor to $T \epsilon = 5$, representing a $500\times$ reduction in cumulative drift (@fig-05-compounding-error-flywheel).
 
@@ -679,7 +677,9 @@ To prevent downstream training algorithms from interpolating across unvisited re
 
 [^fn-math-passivity-teleop]: In bilateral teleoperation with force feedback, variable network transport latency injects virtual energy into the control loop ($\Delta E > 0$). Without time-domain passivity controllers (TDPC) or wave-variable transformations, this non-passive energy triggers destructive high-frequency mechanical limit cycles and contact chatter.
 
-[^fn-math-dagger-bound]: Dean Pomerleau's ALVINN (1989) first encountered behavioral cloning drift. Stéphane Ross and J. Andrew Bagnell formalized this in 2011 with DAgger [@ross2011reduction], proving that querying the expert over the learner's induced distribution collapses quadratic compounding error ($O(T^2 \epsilon)$) to linear bounds ($O(T \epsilon)$).
+[^fn-math-bc-bound]: Let the single-step decision error be $\epsilon = \mathbb{E}_{s \sim d^{\pi^*}} [\|\hat{\pi}(s) - \pi^*(s)\|]$. At time step $t$, the probability of at least one preceding mistake is bounded by $t \epsilon$. With unconstrained downstream loss outside the nominal support, the cumulative error grows quadratically: $\mathbb{E}[\text{Error}_{\text{BC}}] \le \sum_{t=1}^{T} t \epsilon = \epsilon \frac{T(T+1)}{2} = O(T^2 \epsilon)$.
+
+[^fn-math-dagger-bound]: By providing expert supervision over the learner's induced distribution, corrective aggregation ensures the per-step error collapses to a constant $\epsilon$. Thus, the cumulative error is bounded linearly: $\mathbb{E}[\text{Error}_{\text{CA}}] \le \sum_{t=1}^T \epsilon = T \epsilon = O(T \epsilon)$, as formalized by Stéphane Ross and J. Andrew Bagnell with DAgger [@ross2011reduction].
 
 [^fn-std-iso-records]: Under ISO 13849 PLe and ISO 26262 ASIL D, disengagements require deterministic hardware fault logging into non-volatile ring buffers before software task termination.
 
