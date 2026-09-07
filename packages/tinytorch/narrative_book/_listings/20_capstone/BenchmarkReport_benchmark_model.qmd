@@ -13,16 +13,22 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     pred_labels = np.argmax(predictions.data, axis=1)
     accuracy = np.mean(pred_labels == y_test)
 
-    # Measure latency (average over multiple runs)
+    # Warm up first: the first calls pay allocation and cache costs that a
+    # steady-state latency should not include (Module 19)
+    for _ in range(min(5, num_runs)):
+        _ = model.forward(X_test[:1])
+
+    # Measure latency over multiple runs, each timed on its own
     # Why multiple runs? See "Variance" section in Foundations
     latencies = []
     for _ in range(num_runs):
-        start = time.time()
+        start = time.perf_counter()
         _ = model.forward(X_test[:1])  # Single sample inference
-        latencies.append((time.time() - start) * 1000)  # Convert to ms
+        latencies.append((time.perf_counter() - start) * 1000)  # Convert to ms
 
     avg_latency = np.mean(latencies)
     std_latency = np.std(latencies)
+    median_latency = np.median(latencies)
 
     # Store metrics (all as Python native types for JSON serialization)
     self.metrics = {
@@ -31,10 +37,9 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
         'accuracy': float(accuracy),
         'latency_ms_mean': float(avg_latency),
         'latency_ms_std': float(std_latency),
-        # time.time()'s resolution is coarse enough (~15.6ms on Windows)
-        # that a fast forward pass can measure exactly 0.0 elapsed time;
-        # floor the denominator so throughput stays a large-but-finite
-        # positive number instead of raising ZeroDivisionError.
+        'latency_ms_median': float(median_latency),
+        # Floor the denominator so an empty model that measures 0.0 ms
+        # cannot divide by zero
         'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
     }
 
@@ -42,7 +47,7 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     print(f"  Parameters: {param_count:,}")
     print(f"  Size: {model_size_mb:.2f} MB")
     print(f"  Accuracy: {accuracy*100:.1f}%")
-    print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms")
+    print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
 
     return self.metrics
 ```

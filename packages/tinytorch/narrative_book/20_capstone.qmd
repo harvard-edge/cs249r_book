@@ -189,11 +189,11 @@ Module 20's own measuring method is where the report's numbers usually come from
 
 {{< include _listings/20_capstone/BenchmarkReport_benchmark_model.qmd >}}
 
-It counts parameters, scores accuracy on a test set, times single-sample inference a hundred times, and stores six numbers in `self.metrics`. Measure it against Chapter 19 and it comes up short in three places, which the comment about `time.time()` half admits. There is no warmup, so the first of the hundred runs is a cold one; the clock is `time.time()`, whose resolution is coarse enough on some systems to read zero for a fast model; and the summary is a mean and a standard deviation, with no percentile. For a `SimpleMLP` on a laptop the numbers still come out about right, which is why the module gets away with it, and the fix is not to rewrite the method but to fill `metrics` from a measurement done Chapter 19's way, which the trace does. What Module 20 adds that Chapter 19 lacks is the comparison.
+It counts parameters, scores accuracy on a test set, warms up with five untimed calls, times single-sample inference a hundred times on `perf_counter`, and stores seven numbers in `self.metrics`, the median among them. Measure it against Chapter 19 and one thing is still missing. The list of timings is not kept, so there is no tail percentile to read, and a report that needs $P_{99}$ beside the median fills `metrics` from a Chapter 19 measurement instead, which the trace does. What Module 20 adds that Chapter 19 lacks is the comparison.
 
 {{< include _listings/20_capstone/generate_submission.qmd >}}
 
-Three things in `generate_submission` deserve a look. The speedup is a ratio of the two reports' `latency_ms_mean` fields, so what goes into those fields decides whether it is a ratio of means or of medians; the trace puts medians there. The compression ratio compares the two `model_size_mb` fields, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one if its cache is counted in the size; the module does not count it for you, so the trace does. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves. Everything else in the record, the platform, the Python and NumPy versions, and a timestamp, is the reproducibility habit from Chapter 19's bridge, filled in by `BenchmarkReport` when it is constructed. `save_submission` writes the dictionary as JSON.
+Three things in `generate_submission` deserve a look. The speedup is a ratio of the two reports' `latency_ms_median` fields when both carry one, and of the means only for a report that recorded nothing else, so it is a ratio of medians for the reason Chapter 19 gave. The compression ratio compares the two `model_size_mb` fields, and a lever that spends memory to save time, as the KV cache does, will report a ratio below one if its cache is counted in the size; the module does not count it for you, so the trace does. And the accuracy delta is a separate field rather than a pass/fail flag, so that the reader of the JSON can apply Chapter 19's 99 percent floor themselves. Everything else in the record, the platform, the Python and NumPy versions, and a timestamp, is the reproducibility habit from Chapter 19's bridge, filled in by `BenchmarkReport` when it is constructed. `save_submission` writes the dictionary as JSON.
 
 ---
 
@@ -262,7 +262,7 @@ cache_mb = cache.get_memory_usage()["total_mb"]
 def report(name, result, size_mb, accuracy):
     r = BenchmarkReport(name)
     r.metrics = {"parameter_count": Profiler().count_parameters(model), "model_size_mb": size_mb,
-                 "accuracy": accuracy, "latency_ms_mean": result.percentile(50),
+                 "accuracy": accuracy, "latency_ms_mean": result.mean, "latency_ms_median": result.percentile(50),
                  "latency_ms_std": result.std, "throughput_samples_per_sec": 1000 / result.percentile(50)}
     return r
 
