@@ -43,6 +43,21 @@ This chapter examines the systems architecture of prefix caching, virtual memory
 
 :::
 
+## Introduction to Prefix Caching and Paging: The State Reuse Imperative {#sec-vol3-caching-intro}
+
+In classical web serving and early large language model deployments, the serving runtime treated every inference request as an independent, stateless event [@vaswani2017; @zaharia2018accelerating]. In autonomous agent systems, this assumption fails completely. An agent session is an extended, stateful feedback loop spanning tens to hundreds of turns where each subsequent invocation appends a modest delta of new observations (shell command outputs, file diffs, API responses) to an identical prefix of system guidelines, tool schemas, and accumulated conversation history.
+
+In empirical agent workloads, consecutive turns share between $85\%$ and $95\%$ of their prompt tokens. Furthermore, in test-time search topologies such as Tree-of-Thoughts and Monte Carlo Tree Search (MCTS), dozens of speculative candidate branches stem from identical parent prefixes. If the serving runtime naively recomputes the Key-Value (KV) cache from scratch on every turn, GPU clusters expend over $90\%$ of their compute cycles re-executing redundant prefill forward passes on identical tokens. Reusing previously computed KV states through prefix caching collapses Time-to-First-Token (TTFT) by over an order of magnitude and slashes cluster electrical power consumption [@kwon2023; @zheng2024sglang].
+
+However, prefix caching in agentic systems introduces four core systems challenges that do not exist in stateless serving:
+
+1. **Virtual Memory Fragmentation:** Static contiguous tensor allocation causes severe internal and external memory fragmentation (wasting up to $60\%\text{--}80\%$ of GPU memory), necessitating virtual memory page tables that map non-contiguous physical blocks (PagedAttention).
+2. **Dynamic Prefix Tree Indexing:** Organizing, matching, and evicting millions of cached tokens across concurrent, asynchronous trajectories requires sub-millisecond Radix tree indexing algorithms.
+3. **Environment Mutation and Semantic Invalidation:** When an agent mutates its external environment—editing source code, altering database schemas, or writing files—cached representations of previous directory listings or file reads become semantically stale, demanding fine-grained cache invalidation protocols.
+4. **Hierarchical Memory Tiering (Paging):** When an agent pauses to execute long-running external tools, run test suites, or await human review, leaving multi-gigabyte KV caches pinned in scarce GPU High Bandwidth Memory (HBM) starves concurrent jobs. The runtime must decouple context retention from physical GPU residency through hierarchical paging over PCIe Gen5 and CXL to Host DRAM and NVMe storage.
+
+This chapter establishes the systems architecture of prefix caching, virtual memory paging, and disaggregated memory tiers designed specifically for stateful agent trajectories. In @sec-vol3-caching-prefix-locality-in-multi-turn, we analyze empirical prefix locality and quantify the computational penalty of stateless serving. In @sec-vol3-caching-kv-cache-anatomy-tensor-layouts, we dissect KV-cache tensor layouts and allocation overheads. We formalize PagedAttention virtual memory page tables in @sec-vol3-caching-pagedattention-virtual-memory-page, and develop Radix tree indexing, invalidation protocols, and hierarchical memory paging across subsequent sections.
+
 ## Prefix Locality in Multi-Turn Trajectories: Empirical Workload Analysis {#sec-vol3-caching-prefix-locality-in-multi-turn}
 
 Stateless large language model serving benchmarks traditionally assume independent, identically distributed requests where each prompt arrives with little or no shared history. In contrast, real-world autonomous agents—such as software engineering agents executing on SWE-bench, autonomous research assistants, and tool-augmented workflow orchestrators—generate highly stateful, clustered request traces characterized by extreme prefix locality.
