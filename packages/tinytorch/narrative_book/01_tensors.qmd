@@ -2,9 +2,9 @@
 
 The introduction described TinyTorch as a small framework you can read in full, and promised that each chapter would start from a concrete problem. This chapter starts from the most basic one. Every model you will build in this book is a pile of matrices, and a computer's memory has no idea what a matrix is. Memory is a flat array of bytes, numbered from zero. Something has to translate "row 2, column 1" into "byte number 20," and the choice of how to do that translation decides which operations are free and which ones cost a full copy.
 
-The practical question is one that every PyTorch user meets sooner or later. Why is `x.T` instantaneous on a matrix with a billion entries, and why does the very next line sometimes fail with `view size is not compatible with input tensor's size and stride`, insisting that you call `.contiguous()` first? The answer is a single small data structure, the strided tensor, and this chapter builds it in about a hundred lines of Python.
+The practical question is one that every PyTorch user meets sooner or later. Why is `x.T` instantaneous on a matrix with a billion entries, and why does the very next line sometimes fail with `view size is not compatible with input tensor's size and stride`, insisting that you call `.contiguous()` first? The answer is a single small data structure, the strided tensor. This chapter reads it off Module 01's `Tensor`, which wraps a NumPy array, and writes out in a few short functions the stride arithmetic that NumPy performs underneath.
 
-By the end you will have a `Tensor` class that stores its numbers in one flat buffer, reads and writes any coordinate by arithmetic on a tuple of strides, transposes and broadcasts without copying, and can copy itself back into plain row order when an operation demands it. Every later chapter builds on this idea. Their listings keep the same `Tensor` name and interface, and where they hold numbers in a NumPy array instead of a hand-rolled buffer, they say so.
+By the end you will know what a `Tensor` holds, one flat buffer of 32-bit floats plus the shape and strides that read it, and why every operation on it is a small class with a `forward` method. You will also know how a transpose and a broadcast can leave the buffer alone, and where the deferred copy back to plain row order is finally paid. Every later chapter builds on this `Tensor`.
 
 ![The Multi-Dimensional Tensor Abstraction: Flat 1D Memory Buffers Interpreted Through Coordinate Strides and Shape Descriptors](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-strides}
 
@@ -89,7 +89,7 @@ Notice the systemic contract this creates for the rest of the framework. If forw
 
 $$\frac{\partial \mathcal{L}}{\partial w} = \sum_{i} \frac{\partial \mathcal{L}}{\partial y_i} \frac{\partial y_i}{\partial w}.$$
 
-Because a zero stride causes one physical element to be read $B$ times, the backward engine is mathematically obligated to sum, that is, to reduce, the incoming gradients along every dimension that was broadcast. The forward zero-stride view directly mandates the `_reduce_broadcast_grad` backward reduction. Which situation in a framework needs a vector to pose as a matrix, and what the pose saves, is the job of the Broadcast listing in the next section.
+Because a zero stride causes one physical element to be read $B$ times, the backward engine is mathematically obligated to sum, that is, to reduce, the incoming gradients along every dimension that was broadcast. The forward zero-stride view directly mandates the `_reduce_broadcast_grad` backward reduction. Which situation in a framework needs a vector to pose as a matrix, and what the pose saves, is the job of the `Add` listing in the next section.
 
 ### Contiguity is a property you can check
 
@@ -100,284 +100,164 @@ After a transpose or a broadcast, the buffer is unchanged but the view no longer
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 01 (`src/01_tensor/01_tensor.py`) is the NumPy-backed implementation students build in the TinyTorch course. Its `Tensor` wraps an `np.ndarray`, which already carries shape, strides, and a flat buffer internally. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of stride arithmetic that NumPy performs for the real module behind the scenes.
+Every listing in this section but one is extracted from Module 01 (`src/01_tensor/01_tensor.py`) by name when the book is built, so a renamed method in the module fails the build instead of drifting from the chapter. The exception is the stride model. Module 01's `Tensor` wraps a NumPy array, and NumPy does the stride arithmetic for it, so the chapter writes that arithmetic out in a few short functions, marked as a model, to show what the array is doing underneath.
 :::
 
-Every number a model owns, weights, activations, gradients, has to live somewhere, and the opening of this chapter priced the obvious somewhere. A list of lists put nine floats in 560 bytes, scattered wherever the allocator felt like putting them, and any change of shape meant rebuilding the lists. What a framework wants is the reverse. It wants one run of memory with the values side by side, and a shape that is a description of that memory rather than a structure built out of it. So the model has two classes. `Storage` is the flat buffer and knows nothing about shape. `Tensor` is the descriptor that interprets a `Storage` through shape, strides, and offset. Here is the buffer.
+Every number a model owns, weights, activations, gradients, has to live somewhere, and the opening of this chapter priced the obvious somewhere. A list of lists put nine floats in 560 bytes, scattered wherever the allocator felt like putting them, and any change of shape meant rebuilding the lists. What a framework wants is the reverse. It wants one run of memory with the values side by side, and a shape that is a description of that memory rather than a structure built out of it. Module 01 gets both from NumPy. An `np.ndarray` is exactly the object the Idea section described, a flat buffer plus a shape, a strides tuple, and a pointer to the first element, and the `Tensor` class is a thin wrapper that owns one.
+
+### The Tensor class
+
+Here is the constructor, which is the whole of what a `Tensor` holds.
+
+{{< include _listings/01_tensors/Tensor_init.qmd >}}
+
+The line that does the work is the `np.array` call. It takes whatever it is given, a nested list, a scalar, another array, and lays the values out as one contiguous run of 32-bit floats, so the nine numbers from the opening now take 36 bytes and sit side by side. The shape, size, and dtype lines are conveniences that copy fields the array already carries. The four lines after them are the reason the class exists at all rather than a bare array. A tensor needs room for a gradient, and for a record of the operation that produced it, and Module 06 fills those in; until then they are `None` and `False` and cost nothing. The strides and the offset are not stored on the `Tensor` because the array already has them, and `A.data.strides` will print them, in bytes rather than elements, in the worked trace.
+
+One property of the constructor matters more than it looks. It always copies. Whatever array it is handed, `np.array` allocates a fresh buffer for the result, so every `Tensor` owns its own memory and no two tensors ever alias. That is a deliberate simplification that keeps the rest of the framework, and especially the autograd engine of Chapter 6, free of aliasing questions, and the transpose listing below is where it costs something.
+
+### What the array is doing: a model of strides
+
+::: {.callout-warning title="Model, not module code"}
+The next listing is not in Module 01. It is the arithmetic NumPy performs inside the array that `Tensor` wraps, written out so it can be read. The worked trace checks it against NumPy's own numbers.
+:::
+
+Think about one weight matrix inside a training loop. The forward pass reads it as $\mathbf{W}$, the backward pass (Chapter 6) reads it as $\mathbf{W}^T$, and both happen on every step. If each reading were its own buffer, the $4096 \times 4096$ layer from the opening would spend its 64 MB copy on every step for nothing but a change of viewpoint. What the array does instead is keep one buffer and describe it with a shape, a strides tuple, and an offset, and let every view be a new description of the same bytes. Four functions capture the whole mechanism. The first is the stride formula from the Idea section transcribed. The second is the mapping equation. The third is a transpose, which swaps two shape entries and two stride entries and leaves the buffer alone. The fourth is a broadcast, which pads a smaller shape on the left with size-1 dimensions and gives every stretched dimension a stride of zero.
 
 ```python
-from itertools import product
-from typing import List, Optional, Tuple, Union
+def contiguous_strides(shape):
+    """Row-major strides, in elements, computed from the last dimension leftward."""
+    strides = [1] * len(shape)
+    for k in range(len(shape) - 2, -1, -1):
+        strides[k] = strides[k + 1] * shape[k + 1]
+    return tuple(strides)
 
-class Storage:
-    """A flat, contiguous 1D array of numbers."""
-    def __init__(self, size: int):
-        self.size = size
-        self.data: List[float] = [0.0] * size
+def physical_index(strides, offset, indices):
+    """The mapping equation: one slot number for an N-D coordinate."""
+    return offset + sum(i * s for i, s in zip(indices, strides))
 
-    def __getitem__(self, index: int) -> float:
-        return self.data[index]
+def transpose(shape, strides, dim0, dim1):
+    """Swap two dimensions. The buffer is untouched."""
+    shape, strides = list(shape), list(strides)
+    shape[dim0], shape[dim1] = shape[dim1], shape[dim0]
+    strides[dim0], strides[dim1] = strides[dim1], strides[dim0]
+    return tuple(shape), tuple(strides)
 
-    def __setitem__(self, index: int, value: float) -> None:
-        self.data[index] = float(value)
-
-    def __len__(self) -> int:
-        return self.size
+def broadcast_to(shape, strides, target):
+    """Stretch size-1 dimensions to the target shape with stride 0. No copy."""
+    pad = len(target) - len(shape)
+    shape, strides = (1,) * pad + tuple(shape), (0,) * pad + tuple(strides)
+    out = []
+    for dim, stride, want in zip(shape, strides, target):
+        if dim == want:
+            out.append(stride)
+        elif dim == 1:
+            out.append(0)              # stretched: reread the same slot
+        else:
+            raise ValueError(f"cannot broadcast {shape} to {target}")
+    return tuple(target), tuple(out)
 ```
 
-A Python list is standing in for what would be a block of raw memory in C. Notice that `Storage` has exactly one kind of index, an integer. Everything about dimensions lives one level up. PyTorch's `c10::Storage` is the same object with a reference count and a device attached.
+Notice that `physical_index` never looks at the data and never asks what kind of view it is serving; the strides carry that information, so a transposed or broadcast view takes the same path as a fresh one. Notice also that `transpose` and `broadcast_to` allocate nothing. The $4 \text{ MB}$ that a naive framework would spend copying a bias into 256 rows is simply gone, because a stride of zero makes every row read the same 16 KB. NumPy stores exactly these tuples, with one cosmetic difference. It reports strides in bytes, so a $(2, 3)$ array of 32-bit floats shows `(12, 4)` where the model says $(3, 1)$, and its transpose shows `(4, 12)`. A view is contiguous when its strides are the ones `contiguous_strides` would produce for its shape; NumPy exposes that check as `flags["C_CONTIGUOUS"]`, and `np.ascontiguousarray` is the copy that restores row order when something needs it. Both appear in the module code below.
 
-### The descriptor
+### Operations as objects
 
-The descriptor is where a framework gets its money's worth from that split. Think about one weight matrix inside a training loop. The forward pass reads it as $\mathbf{W}$, the backward pass (Chapter 6) reads it as $\mathbf{W}^T$, and both happen on every step. If each reading were its own buffer, the $4096 \times 4096$ layer from the opening would spend its 64 MB copy on every step for nothing but a change of viewpoint. We want one buffer and several cheap descriptions of it, which is why the `Tensor` constructor takes a shape and, optionally, an existing storage to share plus the strides and offset with which to read it. When no storage is given it allocates a fresh contiguous one; when no strides are given it computes the row-major strides from the formula above.
+The naive way to give `Tensor` a `+` is to write the arithmetic inside `__add__`. Module 01 does something that looks roundabout, and the reason is five chapters away. Every operation is a class, an *operation object*, with a `forward` method that computes the result from raw arrays, and a `backward` method that Module 06 fills in. The class is the record of what happened. When Chapter 6 needs to know which operation produced a tensor and from which inputs, the object is already there to say so. Here is the base class, from Module 01.
 
-```python
-class Tensor:
-    """A shape, strides, and offset that interpret a flat Storage."""
-    def __init__(
-        self,
-        shape: Tuple[int, ...],
-        storage: Optional[Storage] = None,
-        strides: Optional[Tuple[int, ...]] = None,
-        storage_offset: int = 0,
-    ):
-        self.shape = tuple(shape)
-        self.storage_offset = storage_offset
-        self.strides = (tuple(strides) if strides is not None
-                        else self._contiguous_strides(self.shape))
-        self.storage = (storage if storage is not None
-                        else Storage(self._num_elements(self.shape)))
+{{< include _listings/01_tensors/Function.qmd >}}
 
-    @staticmethod
-    def _contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Row-major strides, computed from the last dimension leftward."""
-        strides = [1] * len(shape)
-        for k in range(len(shape) - 2, -1, -1):
-            strides[k] = strides[k + 1] * shape[k + 1]
-        return tuple(strides)
+The constructor stores the input tensors and any parameters the operation needs, an axis for a reduction, a shape for a reshape. The `apply` classmethod is the only entry point the rest of the framework uses. It builds the operation object, unwraps every input to its NumPy array, calls `forward` on the arrays, and wraps the result in a new `Tensor`. Two things are worth noticing. `forward` never sees a `Tensor`; it works on arrays and can lean entirely on NumPy. And the wrap at the end goes through the constructor above, so every result owns a fresh buffer. A helper turns scalars into tensors so that `x + 1` works.
 
-    @staticmethod
-    def _num_elements(shape: Tuple[int, ...]) -> int:
-        count = 1
-        for dim in shape:
-            count *= dim
-        return count
-```
+{{< include _listings/01_tensors/as_tensor.qmd >}}
 
-The loop in `_contiguous_strides` is the stride formula transcribed. It starts at the second-to-last dimension and walks left, each stride the product of the one to its right and that dimension's size. The property of the constructor that matters most is the one that is easy to miss. Two `Tensor` objects may hold a reference to the same `Storage`, and nothing stops them from describing it with different shapes and strides. That is the whole license for everything that follows, and PyTorch's `TensorImpl` grants it with the same four fields.
+With those two in place, the operator method on `Tensor` is one line, and the operation class is barely more.
 
-### Reading and writing a coordinate
+{{< include _listings/01_tensors/Tensor_add.qmd >}}
 
-This is the method that does the translation the chapter opened with, from "row 2, column 1" to a slot number. Every read and write in this chapter and the ones after it goes through it; the `matmul` loop at the end of this section calls it twice per multiply-add. A list of lists answers the same question by chasing two pointers, and its answer is only right for one layout. We want one answer that stays right after a transpose or a broadcast, which is exactly what the mapping equation gives us, and it costs a handful of integer multiplies and no allocation.
+{{< include _listings/01_tensors/Add.qmd >}}
 
-```python
-    def _physical_index(self, indices: Tuple[int, ...]) -> int:
-        """Map an N-D coordinate to a slot in the flat storage."""
-        if len(indices) != len(self.shape):
-            raise IndexError(f"expected {len(self.shape)} indices, got {len(indices)}")
-        index = self.storage_offset
-        for i, stride in zip(indices, self.strides):
-            index += i * stride
-        return index
+The whole of addition is `a + b` on two arrays, and the reason that line is enough is the model above. NumPy's `+` broadcasts. When a $(256, 4096)$ product meets a $(4096,)$ bias, NumPy pads the bias to $(1, 4096)$, gives the stretched dimension a stride of zero, and reads the same 16 KB for every row, which is `broadcast_to` performed inside the C loop rather than in Python. No intermediate matrix is allocated. That is the zero-stride trick doing its job on every linear layer in every forward pass, and it is also the reason Chapter 6's `_reduce_broadcast_grad` has to exist, because a value read 256 times on the way forward collects 256 gradients on the way back.
 
-    def __getitem__(self, indices: Union[int, Tuple[int, ...]]) -> float:
-        if isinstance(indices, int):
-            indices = (indices,)
-        return self.storage[self._physical_index(indices)]
+### Matrix multiplication
 
-    def __setitem__(self, indices: Union[int, Tuple[int, ...]], value: float) -> None:
-        if isinstance(indices, int):
-            indices = (indices,)
-        self.storage[self._physical_index(indices)] = value
+The other operation a linear layer needs is the matrix multiply, and Module 01 writes it as the textbook triple loop on purpose.
 
-    def _all_indices(self):
-        """Every coordinate of this tensor, in row-major order."""
-        return product(*(range(d) for d in self.shape))
-```
+{{< include _listings/01_tensors/MatMul.qmd >}}
 
-Notice that `_physical_index` never looks at the data and never asks what kind of view it is serving; the strides carry that information, so a transposed or broadcast tensor takes the same path as a fresh one. `_all_indices` is a convenience the later methods use to visit every coordinate. PyTorch's elementwise kernels run the same stride arithmetic, in bulk, through its `TensorIterator`. To make examples easy to write, one more helper turns a nested Python list into a contiguous tensor.
+Each output entry is one dot product of a row of `a` with a column of `b`. Read the inner call closely. `a[i, :]` is a row, contiguous in memory, and `b[:, j]` is a column, which on a row-major array is a strided view that skips a whole row between consecutive elements. Here that view costs nothing beyond the Python loop, because NumPy resolves the strides for us. On real hardware, walking down a column is the case the production section comes back to, and it is why a $1024 \times 1024$ multiply that ignores layout can run at a fraction of the speed of one that respects it. Shapes were validated by `Tensor.matmul` before `apply` was called, which is why `forward` does not check them again.
 
-```python
-    @classmethod
-    def from_list(cls, values) -> 'Tensor':
-        """Build a contiguous tensor from a (possibly nested) list."""
-        shape, probe = [], values
-        while isinstance(probe, list):
-            shape.append(len(probe))
-            probe = probe[0]
-        tensor = cls(tuple(shape))
-        flat: List[float] = []
-        def flatten(v):
-            if isinstance(v, list):
-                for item in v:
-                    flatten(item)
-            else:
-                flat.append(float(v))
-        flatten(values)
-        for slot, x in enumerate(flat):
-            tensor.storage[slot] = x
-        return tensor
-```
+### Transpose and the deferred copy
 
-Notice that `from_list` fills the storage in flat order and lets the constructor supply the strides, so every tensor it returns is contiguous by construction. `torch.tensor(nested_list)` does the same flattening.
+Transposes are everywhere in a framework. PyTorch's `nn.Linear` stores its weight as $(\text{out}, \text{in})$ and computes $\mathbf{x}\mathbf{W}^T$ on every forward pass, the backward pass multiplies by the transpose of whatever the forward pass used, and multi-head attention (Chapter 12) splits and merges its heads with a reshape and a transpose on every call. `Tensor.transpose` works out which axes to swap, defaulting to the last two, and hands the permutation to an operation object.
 
-### Transpose
+{{< include _listings/01_tensors/Tensor_transpose.qmd >}}
 
-Transposes are everywhere in a framework. PyTorch's `nn.Linear` stores its weight as $(\text{out}, \text{in})$ and computes $\mathbf{x}\mathbf{W}^T$ on every forward pass, the backward pass multiplies by the transpose of whatever the forward pass used, and multi-head attention (Chapter 12) splits and merges its heads with a reshape and a transpose on every call. The naive transpose is the one from the opening. Allocate a second buffer, move every element, 64 MB for one $4096 \times 4096$ weight, and do it again next step. Does a transpose have to move anything at all? The mapping equation already answered that. Swapping the roles of two indices is swapping two shape entries and two stride entries, so the method does exactly that and hands the *same* storage and offset to a new descriptor.
+{{< include _listings/01_tensors/Permute.qmd >}}
 
-```python
-    def transpose(self, dim0: int = 0, dim1: int = 1) -> 'Tensor':
-        """A view with two dimensions swapped. No data is copied."""
-        shape, strides = list(self.shape), list(self.strides)
-        shape[dim0], shape[dim1] = shape[dim1], shape[dim0]
-        strides[dim0], strides[dim1] = strides[dim1], strides[dim0]
-        return Tensor(tuple(shape), self.storage, tuple(strides), self.storage_offset)
-```
+`np.transpose` is the model's `transpose` function. It returns a view with the shape and stride entries swapped and the buffer untouched, and the worked trace confirms that the view shares memory with the original. Then `apply` wraps that view in a new `Tensor`, and the constructor copies. So a TinyTorch transpose does allocate, which PyTorch's does not, and that is the price of the no-aliasing rule from the constructor. The copy is not a plain row-major one, though. `np.array` preserves the layout of what it is given, so the new buffer holds the transposed values in column order with strides `(4, 12)`, and the result is a tensor that owns its memory and is still not contiguous.
 
-Four lines, and the cost does not depend on the size of the matrix. Writing through the transposed view writes into the original's storage, because there is only one storage. PyTorch's `.t()`, `.transpose()`, and `.permute()` are this same swap performed on a `TensorImpl`.
+That is where the deferred copy is finally paid. In a real framework the request for row order comes from the code that does the arithmetic. A BLAS matrix multiply, a NumPy reduction, a CUDA kernel, each wants a pointer to a run of memory laid out the way the stride formula says, and the `view size is not compatible` error at the top of this chapter is PyTorch telling you the buffer is not in that order and that `view()` will not copy it for you. Module 01 answers the request with one more operation object.
 
-### Broadcast
+{{< include _listings/01_tensors/Tensor_contiguous.qmd >}}
 
-Here is the case the zero stride exists for. A linear layer (Chapter 3) computes $\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$. With a batch of $B = 256$ examples and an output width of $4096$, the product $\mathbf{X}\mathbf{W}$ has shape $(256, 4096)$, a little over a million entries, and the bias $\mathbf{b}$ has shape $(4096,)$. Mathematically the same 4096 numbers get added to every one of the 256 rows. A naive framework makes that literal. It allocates a fresh $256 \times 4096$ buffer, copies $\mathbf{b}$ into all 256 rows, which is 4 MB of memory holding 16 KB of information, and only then does the addition. Every linear layer pays that on every forward pass, and attention (Chapter 12) has the same shape of problem with its causal mask, one $(S, S)$ pattern that every head of every example in the batch applies.
+{{< include _listings/01_tensors/Copy.qmd >}}
 
-Can a vector of size $(D,)$ act as a $(B, D)$ matrix without copying a byte? The previous section showed the trick. Give the vector shape $(B, D)$ and strides $(0, 1)$, and the row index multiplies zero, so every row reads the same $D$ slots. What the code adds is the bookkeeping that decides which shapes may stretch against which. NumPy and PyTorch use the same short rules and TinyTorch copies them. Align the two shapes from the right, treat missing leading dimensions as size 1, and for each pair of dimensions either the sizes match or one of them is 1. A dimension of size 1 that is stretched to match the other gets stride 0. In code that is two halves. A static helper computes the output shape two inputs would broadcast to, and a method produces a view of one tensor at a target shape, assigning stride 0 to each dimension that is being stretched.
-
-```python
-    @staticmethod
-    def _broadcast_shapes(shape_a: Tuple[int, ...], shape_b: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Output shape of a binary op on shape_a and shape_b."""
-        rank = max(len(shape_a), len(shape_b))
-        pad_a = (1,) * (rank - len(shape_a)) + shape_a
-        pad_b = (1,) * (rank - len(shape_b)) + shape_b
-        out = []
-        for da, db in zip(pad_a, pad_b):
-            if da == db or db == 1:
-                out.append(da)
-            elif da == 1:
-                out.append(db)
-            else:
-                raise ValueError(f"cannot broadcast {shape_a} with {shape_b}")
-        return tuple(out)
-
-    def broadcast_to(self, target: Tuple[int, ...]) -> 'Tensor':
-        """A view of this tensor at a larger shape. No data is copied."""
-        if self.shape == target:
-            return self
-        pad = len(target) - len(self.shape)
-        shape = (1,) * pad + self.shape
-        strides = (0,) * pad + self.strides
-        new_strides = []
-        for dim, stride, want in zip(shape, strides, target):
-            if dim == want:
-                new_strides.append(stride)
-            elif dim == 1:
-                new_strides.append(0)      # stretched: reread the same slot
-            else:
-                raise ValueError(f"cannot broadcast {self.shape} to {target}")
-        return Tensor(target, self.storage, tuple(new_strides), self.storage_offset)
-```
-
-The padding step prepends size-1 dimensions to the shape and matching zero strides, which is what makes a vector of shape $(3,)$ line up against a matrix of shape $(4, 3)$. After that, the loop only ever writes a real stride or a zero. Notice what `broadcast_to` does not do. It allocates nothing, so the 4 MB the naive version spent is simply gone and the bias is read straight out of its own 16 KB. PyTorch's `.expand()` is this method, and the production section shows the zero stride it reports.
-
-### Contiguity
-
-Every free view above left the buffer in an order the view does not read it in, and sooner or later something asks for plain row order back. In this model nothing strictly needs it, because `__getitem__` reads any view correctly. In a real framework the request comes from the code that does the arithmetic. A BLAS matrix multiply, a NumPy reduction, a CUDA kernel, each wants a pointer to a run of memory laid out the way the stride formula says, and the `view size is not compatible` error at the top of this chapter is PyTorch telling you the buffer is not in that order and that `view()` will not copy it for you. The naive policy is to copy after every transpose so the layout is always plain, which throws away everything the views just saved. The better policy is to defer. Keep the view, check on demand whether its strides already match the formula, and copy only when they do not and someone actually needs them to. Those are the two methods here. The check compares the strides a tensor has against the strides its shape would get from the formula. The copy allocates a fresh tensor of the same shape and walks every coordinate, reading through the view's strides and writing through row-major ones.
-
-```python
-    def is_contiguous(self) -> bool:
-        return self.strides == self._contiguous_strides(self.shape)
-
-    def contiguous(self) -> 'Tensor':
-        """This tensor if already contiguous, otherwise a row-major copy."""
-        if self.is_contiguous():
-            return self
-        out = Tensor(self.shape)
-        for idx in self._all_indices():
-            out[idx] = self[idx]
-        return out
-```
-
-This is the one method in the chapter whose cost grows with the number of elements, and it is the only one that allocates. Everything the views deferred is paid here. Notice that the copy loop reads through `self[idx]`, so the view's own strides do the unscrambling; there is no special case for transposed versus broadcast input. PyTorch's `.contiguous()` is the same check followed by the same copy.
-
-### Elementwise addition and matrix multiplication
-
-The linear layer needs exactly two operations from this class, a matrix multiply and an addition that accepts a bias, and Chapter 2 will call both without looking inside. Written the naive way, `+` would insist on identical shapes and leave the caller to build the 4 MB bias matrix by hand, and `matmul` would be correct only on row-major operands, so every transposed weight would need a copy first. Neither restriction is necessary. Addition broadcasts both operands to a common shape through `broadcast_to`, which allocates nothing, and then walks every coordinate of the output. Matrix multiplication is the textbook triple loop, reading each operand through `__getitem__` so it works unchanged on transposed or broadcast views.
-
-```python
-    def __add__(self, other: 'Tensor') -> 'Tensor':
-        out_shape = self._broadcast_shapes(self.shape, other.shape)
-        a, b = self.broadcast_to(out_shape), other.broadcast_to(out_shape)
-        out = Tensor(out_shape)
-        for idx in out._all_indices():
-            out[idx] = a[idx] + b[idx]
-        return out
-
-    def matmul(self, other: 'Tensor') -> 'Tensor':
-        """(M, K) @ (K, N) -> (M, N), each entry a dot product."""
-        (m, k), (k2, n) = self.shape, other.shape
-        if k != k2:
-            raise ValueError(f"cannot multiply {self.shape} by {other.shape}")
-        out = Tensor((m, n))
-        for i in range(m):
-            for j in range(n):
-                acc = 0.0
-                for p in range(k):
-                    acc += self[i, p] * other[p, j]
-                out[i, j] = acc
-        return out
-
-    def __matmul__(self, other: 'Tensor') -> 'Tensor':
-        return self.matmul(other)
-```
-
-Notice two things. First, `__add__` never asks whether its inputs are contiguous, because indexing through strides is correct either way; that is the payoff of routing every access through `_physical_index`. Second, the inner loop of `matmul` reads `other[p, j]` with `p` advancing, which walks *down a column* of `other`. On a row-major matrix that means jumping a full row's worth of slots on every step. Here it costs nothing beyond the Python loop, and the production section comes back to why it matters on real hardware.
-
-The real Module 01 exposes the same surface (`shape`, `transpose`, `contiguous`, `reshape`, `+`, `@`, and reductions such as `sum` and `mean`) but delegates the arithmetic to NumPy. The reductions are not modeled here; they are ordinary loops over `_all_indices` and add nothing to the stride story.
+`np.ascontiguousarray` walks every element through the old strides and writes it in row order, the model's contiguity check followed by the copy. It is the one operation in this section whose cost grows with the number of elements, and everything the views deferred is paid here. Notice that neither listing needs a special case for transposed versus broadcast input; the strides in the array do the unscrambling. The module exposes the same surface for the rest of the book, `reshape`, `permute`, indexing through `Slice`, and reductions such as `sum` and `mean`, and every one of them is another small class with a `forward` that is one NumPy call. They add nothing to the stride story, so the chapter stops here.
 
 ---
 
 ## A Worked Trace
 
-The following script exercises every method on a $2 \times 3$ matrix. Run it after the listings above.
+The following script exercises the model and the module together on a $2 \times 3$ matrix. It needs the model functions from above and an installed `tinytorch` package.
 
 ```python
-A = Tensor.from_list([[1.0, 2.0, 3.0],
-                      [4.0, 5.0, 6.0]])
-print("storage ", A.storage.data)
-print("A       ", A.shape, A.strides, A.is_contiguous())
+import numpy as np
+from tinytorch.core.tensor import Tensor
 
-At = A.transpose()
-print("A.T     ", At.shape, At.strides, At.is_contiguous())
-print("A.T[1,0]", At[1, 0], " A.T[2,1]", At[2, 1])
-print("shared  ", At.storage is A.storage)
+A = Tensor([[1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0]])
+print("A       ", A.shape, A.data.strides, A.data.flags["C_CONTIGUOUS"])
+print("model   ", contiguous_strides(A.shape))
 
-C = At.contiguous()
-print("copy    ", C.storage.data, C.strides)
+V = np.transpose(A.data)                       # what Permute.forward does
+print("view    ", V.shape, V.strides, V.flags["C_CONTIGUOUS"])
+print("model   ", transpose(A.shape, contiguous_strides(A.shape), 0, 1))
+print("V[1,0]  ", V[1, 0], " V[2,1]", V[2, 1])
+print("shared  ", np.shares_memory(V, A.data))
 
-b = Tensor.from_list([10.0, 20.0, 30.0])
-B = b.broadcast_to((2, 3))
+C = np.ascontiguousarray(V)                    # what Copy.forward does
+print("copy    ", C.ravel().tolist(), C.strides)
+
+b = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+B = np.broadcast_to(b, (2, 3))                 # what Add.forward does inside a + b
 print("bias    ", B.shape, B.strides, " B[1,2] =", B[1, 2])
+print("model   ", broadcast_to(b.shape, contiguous_strides(b.shape), (2, 3)))
 
-Y = A + b
-print("A + b   ", Y.storage.data)
-print("A @ A.T ", (A @ At).storage.data)
+print("A + b   ", (A + Tensor(b)).data.tolist())
+At = A.transpose()
+print("A @ A.T ", (A @ At).data.tolist())
+print("A.T     ", At.data.strides, At.data.flags["C_CONTIGUOUS"], np.shares_memory(At.data, A.data))
+print("contig  ", At.contiguous().data.strides, At.contiguous().data.flags["C_CONTIGUOUS"])
 ```
 
 ```
-storage  [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-A        (2, 3) (3, 1) True
-A.T      (3, 2) (1, 3) False
-A.T[1,0] 2.0  A.T[2,1] 6.0
+A        (2, 3) (12, 4) True
+model    (3, 1)
+view     (3, 2) (4, 12) False
+model    ((3, 2), (1, 3))
+V[1,0]   2.0  V[2,1] 6.0
 shared   True
-copy     [1.0, 4.0, 2.0, 5.0, 3.0, 6.0] (2, 1)
-bias     (2, 3) (0, 1)  B[1,2] = 30.0
-A + b    [11.0, 22.0, 33.0, 14.0, 25.0, 36.0]
-A @ A.T  [14.0, 32.0, 32.0, 77.0]
+copy     [1.0, 4.0, 2.0, 5.0, 3.0, 6.0] (8, 4)
+bias     (2, 3) (0, 4)  B[1,2] = 30.0
+model    ((2, 3), (0, 1))
+A + b    [[11.0, 22.0, 33.0], [14.0, 25.0, 36.0]]
+A @ A.T  [[14.0, 32.0], [32.0, 77.0]]
+A.T      (4, 12) False False
+contig   (8, 4) True
 ```
 
-Each line can be checked by hand against the mapping equation. The transposed view has strides $(1, 3)$, so `At[1, 0]` reads slot $1 \times 1 + 0 \times 3 = 1$, which holds `2.0`, and `At[2, 1]` reads slot $2 \times 1 + 1 \times 3 = 5$, which holds `6.0`. Those are the entries of $\mathbf{A}^T$ at $(1, 0)$ and $(2, 1)$, obtained without touching the buffer. The `shared` line confirms there is still only one buffer. The `contiguous()` call then produces a *second* buffer in which the transposed values sit in row order, `[1, 4, 2, 5, 3, 6]`, with fresh strides $(2, 1)$.
+Every model line agrees with the NumPy line above it once the bytes are divided by four. The fresh array has strides `(12, 4)`, which is the model's $(3, 1)$ for 4-byte floats, and NumPy confirms it is contiguous. The transposed view has strides `(4, 12)`, the model's $(1, 3)$, and the mapping equation now reads it by hand. `V[1, 0]` is slot $1 \times 1 + 0 \times 3 = 1$, which holds `2.0`, and `V[2, 1]` is slot $2 \times 1 + 1 \times 3 = 5$, which holds `6.0`. Those are the entries of $\mathbf{A}^T$ at $(1, 0)$ and $(2, 1)$, obtained without touching the buffer, and the `shared` line confirms there is still only one buffer. `np.ascontiguousarray` then produces a *second* buffer in which the transposed values sit in row order, `[1, 4, 2, 5, 3, 6]`, with the strides `(8, 4)` that the formula gives a $(3, 2)$ shape.
 
-The bias trace is the stride-0 mechanism in the open. After padding, the vector has shape $(1, 3)$ and strides $(0, 1)$; stretching the first dimension from 1 to 2 leaves the zero in place. Every coordinate of the $(2, 3)$ view resolves to one of three slots.
+The bias trace is the stride-0 mechanism in the open. After padding, the vector has shape $(1, 3)$ and strides $(0, 1)$; stretching the first dimension from 1 to 2 leaves the zero in place, and NumPy reports the same thing as `(0, 4)`. Every coordinate of the $(2, 3)$ view resolves to one of three slots.
 
 | Coordinate $(i, j)$ | $i \times 0 + j \times 1$ | Slot | Value |
 | :---: | :---: | :---: | :---: |
@@ -390,15 +270,15 @@ The bias trace is the stride-0 mechanism in the open. After padding, the vector 
 
 : Stride-0 broadcast of a length-3 vector to shape $(2, 3)$. Six coordinates, three slots, no copy. {#tbl-stride0-trace tbl-colwidths="[25,35,20,20]"}
 
-The `A + b` line uses exactly that view, and the result `[[11, 22, 33], [14, 25, 36]]` shows each row receiving the same bias. The last line multiplies $\mathbf{A}$ by its own transpose, $\begin{bmatrix} 14 & 32 \\ 32 & 77 \end{bmatrix}$, with `matmul` reading the right operand through the transposed strides and never noticing.
+The `A + b` line is that view consumed by `Add.forward`, and the result `[[11, 22, 33], [14, 25, 36]]` shows each row receiving the same bias. The matrix product multiplies $\mathbf{A}$ by its own transpose, $\begin{bmatrix} 14 & 32 \\ 32 & 77 \end{bmatrix}$, with `MatMul.forward` reading its right operand through the transposed strides and never noticing. The last two lines are the module's own transpose rather than the raw view. `A.transpose()` owns a separate buffer, so `shares_memory` is false, but that buffer keeps the transposed strides `(4, 12)` and is not contiguous, and it takes `contiguous()` to produce the row-order `(8, 4)` layout. That pair of lines is the deferred copy, first deferred and then paid, in two calls.
 
 ---
 
 ## From TinyTorch to Production
 
-PyTorch's tensor is the same four fields with the same jobs. Its C++ core (`c10/core/TensorImpl.h`) holds, in paraphrase, a reference-counted `Storage`, a packed sizes-and-strides record, an integer `storage_offset_`, and a data type. When you write `y = x.t()`, PyTorch allocates a new descriptor of a few dozen bytes, bumps the reference count on the shared storage, and returns. `x.stride()` prints the stride tuple, `x.is_contiguous()` runs the same comparison as ours, and `x.expand(4, 3)` on a length-3 vector reports strides `(0, 1)`, the zero stride made visible. NumPy's `ndarray` carries the same fields too, which is why the real Module 01 can wrap an array and inherit all of this; the only cosmetic difference is that NumPy reports strides in bytes, so a `(2, 3)` array of 32-bit floats shows strides `(12, 4)` and its transpose `(4, 12)`.
+PyTorch's tensor is the same four fields with the same jobs. Its C++ core (`c10/core/TensorImpl.h`) holds, in paraphrase, a reference-counted `Storage`, a packed sizes-and-strides record, an integer `storage_offset_`, and a data type. When you write `y = x.t()`, PyTorch allocates a new descriptor of a few dozen bytes, bumps the reference count on the shared storage, and returns. `x.stride()` prints the stride tuple, `x.is_contiguous()` runs the same comparison as ours, and `x.expand(4, 3)` on a length-3 vector reports strides `(0, 1)`, the zero stride made visible. NumPy's `ndarray` carries the same fields, which is what lets Module 01 wrap an array and inherit all of this, and the worked trace already showed the one cosmetic difference, strides reported in bytes.
 
-What production adds is a hard boundary that TinyTorch does not have. The model in this chapter reads any view correctly through `__getitem__`, so contiguity is a curiosity. In PyTorch the heavy operations are not Python loops; they are calls into tuned libraries, and those libraries are written for hardware that moves memory in fixed-size blocks. A CPU fetches a whole cache line[^fn-cache-line-column-walk] at a time, and its vector units[^fn-simd-contiguous-runs] operate on several adjacent floats in one instruction. Both assumptions hold on a row-major buffer and break on a column walk. Napkin math for a $1024 \times 1024$ matrix of 32-bit floats makes the gap concrete. Walking a row uses all 64 bytes of each line fetched, while walking a column jumps 4096 bytes per step and uses 4 of every 64 bytes it pulls in, about 6 percent. The matrix multiply itself goes to a BLAS[^fn-blas-leading-dimension] routine, typically the general matrix multiply, or GEMM,[^fn-gemm-matmul-name] which accepts a pointer, a transpose flag, and one "leading dimension" per operand (the stride between rows) and nothing more exotic. A plain transpose fits that interface, so `A.T @ B` needs no copy. A view produced by slicing and permuting several dimensions does not fit, and the framework must call `.contiguous()` for you before the library can run. That copy is the deferred cost of the free views.
+What production adds is a hard boundary that TinyTorch does not have. Every operation in Module 01 hands its arrays to NumPy, which reads any view correctly through its strides, so contiguity is a curiosity there. In PyTorch the heavy operations are not Python loops; they are calls into tuned libraries, and those libraries are written for hardware that moves memory in fixed-size blocks. A CPU fetches a whole cache line[^fn-cache-line-column-walk] at a time, and its vector units[^fn-simd-contiguous-runs] operate on several adjacent floats in one instruction. Both assumptions hold on a row-major buffer and break on a column walk. Napkin math for a $1024 \times 1024$ matrix of 32-bit floats makes the gap concrete. Walking a row uses all 64 bytes of each line fetched, while walking a column jumps 4096 bytes per step and uses 4 of every 64 bytes it pulls in, about 6 percent. The matrix multiply itself goes to a BLAS[^fn-blas-leading-dimension] routine, typically the general matrix multiply, or GEMM,[^fn-gemm-matmul-name] which accepts a pointer, a transpose flag, and one "leading dimension" per operand (the stride between rows) and nothing more exotic. A plain transpose fits that interface, so `A.T @ B` needs no copy. A view produced by slicing and permuting several dimensions does not fit, and the framework must call `.contiguous()` for you before the library can run. That copy is the deferred cost of the free views.
 
 [^fn-cache-line-column-walk]: **Cache line**: the unit in which a processor moves data between main memory and its on-chip cache, 64 bytes on nearly every current CPU, or 16 single-precision floats. A read of one float pays for the whole line, so a stride that skips a line per element throws away most of what was fetched.
 
@@ -416,14 +296,14 @@ The same boundary appears on the GPU with one extra step. The storage lives in V
 
 PyTorch exposes the distinction in two pairs of methods. `view()` promises never to copy and raises the error quoted at the top of this chapter when the requested shape cannot be expressed as new strides over the existing buffer; `reshape()` tries a view first and silently falls back to `contiguous()`. Likewise `expand()` builds a stride-0 view, while `repeat()` allocates and fills the repeats. The cheap member of each pair is exactly the operation this chapter implemented.
 
-| Operation | TinyTorch model | PyTorch |
+| Operation | TinyTorch (Module 01) | PyTorch |
 | :--- | :--- | :--- |
-| Descriptor | `shape`, `strides`, `storage_offset`, `storage` | `sizes()`, `stride()`, `storage_offset()`, `untyped_storage()` |
-| Transpose | swap two shape and stride entries | `.t()`, `.transpose()`, `.permute()`; same swap |
-| Broadcast | `broadcast_to`, stride 0 | `.expand()`, stride 0; `.repeat()` copies |
-| Contiguity check | compare against the stride formula | `.is_contiguous()` |
-| Restore row order | `contiguous()` copies through the view | `.contiguous()`; on GPU, a copy kernel |
-| Matrix multiply | triple loop through `__getitem__` | BLAS or cuBLAS GEMM; needs a leading dimension |
+| Descriptor | `shape` on the `Tensor`; `strides` and the buffer inside its NumPy array | `sizes()`, `stride()`, `storage_offset()`, `untyped_storage()` |
+| Transpose | `Permute`: `np.transpose` swaps two stride entries, then the constructor copies | `.t()`, `.transpose()`, `.permute()`; same swap |
+| Broadcast | NumPy broadcasting inside `Add.forward`, stride 0 | `.expand()`, stride 0; `.repeat()` copies |
+| Contiguity check | `flags["C_CONTIGUOUS"]` on the array | `.is_contiguous()` |
+| Restore row order | `Copy`: `np.ascontiguousarray` | `.contiguous()`; on GPU, a copy kernel |
+| Matrix multiply | `MatMul`: one dot product per entry, the column read through a strided view | BLAS or cuBLAS GEMM; needs a leading dimension |
 
 : The same mechanism at two scales. {#tbl-tinytorch-vs-pytorch tbl-colwidths="[22,38,40]"}
 
@@ -433,12 +313,12 @@ What should a practitioner now expect? When an operation fails with the `view` e
 
 ## Summary
 
-You built a `Tensor` that keeps its numbers in one flat `Storage` and interprets them through a shape, a strides tuple, and an offset. One equation, $\text{index} = \text{offset} + \sum_k i_k S_k$, resolves every coordinate. Transposing swaps two strides, broadcasting sets a stride to zero, and neither touches the buffer; `contiguous()` is where that deferred copy is finally paid, and it is the only method here whose cost grows with the data. The invariant to carry forward is that a tensor is a *view* of storage, so several tensors can describe one buffer and a write through any of them is visible through all. Production frameworks keep exactly this design and add a boundary at which contiguous memory is demanded by the hardware libraries underneath. Chapter 2 takes the strided `Tensor`, its broadcasting `+`, and `matmul` for granted and asks what goes wrong when you stack several linear layers with nothing between them.
+Module 01's `Tensor` keeps its numbers in one flat NumPy buffer that a shape, a strides tuple, and an offset interpret. One equation, $\text{index} = \text{offset} + \sum_k i_k S_k$, resolves every coordinate. Transposing swaps two strides, broadcasting sets a stride to zero, and neither touches the buffer; `contiguous()` is where that deferred copy is finally paid, and it is the only operation here whose cost grows with the data. Every operation is an object whose `forward` is one NumPy call, a shape that Chapter 6 fills in with a `backward`. The invariant to carry forward is that a tensor is a *view* of storage, so several views can describe one buffer and a write through any of them is visible through all, which is exactly why TinyTorch's constructor copies and PyTorch's does not. Production frameworks keep exactly this design and add a boundary at which contiguous memory is demanded by the hardware libraries underneath. Chapter 2 takes the strided `Tensor`, its broadcasting `+`, and `matmul` for granted and asks what goes wrong when you stack several linear layers with nothing between them.
 
 ---
 
 ## Exercises
 
-1. **Permutation.** Generalize `transpose(dim0, dim1)` to `permute(*dims)`, which reorders all dimensions at once. For a tensor of shape $(B, C, H, W)$ with row-major strides, write out the shape and strides that `permute(0, 2, 3, 1)` produces, and confirm with `is_contiguous()` that the result is a non-contiguous view of the same storage.
-2. **Slicing.** Add a zero-copy `slice(dim, start, end, step)` method. Work out how `storage_offset`, `shape[dim]`, and `strides[dim]` must change, including the case `step > 1`, and check your answer against `contiguous()` on a small example.
+1. **Permutation.** Generalize the model's `transpose(shape, strides, dim0, dim1)` to `permute(shape, strides, *dims)`, which reorders all dimensions at once. For a tensor of shape $(B, C, H, W)$ with row-major strides, write out the shape and strides that `permute(0, 2, 3, 1)` produces, and confirm against the strides and `C_CONTIGUOUS` flag NumPy reports for `np.transpose(A.data, (0, 2, 3, 1))` that the result is a non-contiguous view of the same buffer.
+2. **Slicing.** Write a zero-copy `slice(shape, strides, offset, dim, start, end, step)` for the model. Work out how the offset, `shape[dim]`, and `strides[dim]` must change, including the case `step > 1`, and check your answer against the strides NumPy reports for `A.data[:, 1::2]`, which is what Module 01's `Slice.forward` returns.
 3. **When is a view possible?** Write `can_view(tensor, new_shape) -> bool`, which returns whether `new_shape` can be produced by recomputing strides alone. Two adjacent dimensions can be merged into one only when a certain relation holds between their strides; state it, and use it to explain why the transposed matrix in the worked trace cannot be viewed as a length-6 vector.
