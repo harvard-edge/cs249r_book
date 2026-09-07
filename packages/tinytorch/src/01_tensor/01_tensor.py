@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in src/01_tensor/01_tensor.py
+**Learning Side:** You work in `modules/01_tensor/tensor.ipynb`
 **Building Side:** Code exports to tinytorch.core.tensor
 
 ```python
@@ -337,17 +337,21 @@ class Tensor:
         TODO: Initialize a Tensor by wrapping data in a NumPy array and setting attributes.
 
         APPROACH:
-        1. Convert data to NumPy array with dtype=float32
-        2. Store the array as self.data
+        1. If data is a list of Tensors, stack their arrays along a new first axis
+           (the same convenience as torch.stack)
+        2. Convert data to NumPy array with dtype=float32 and store it as self.data
         3. Set self.shape from the array's shape
         4. Set self.size from the array's size
         5. Set self.dtype from the array's dtype
+
         EXAMPLE:
         >>> t = Tensor([1, 2, 3])
         >>> print(t.shape)
         (3,)
         >>> print(t.size)
         3
+        >>> Tensor([t, t]).shape
+        (2, 3)
 
         HINT: Use np.array(data, dtype=np.float32) to convert data to NumPy array
         """
@@ -1345,13 +1349,12 @@ Operation Performance (for 1000×1000 matrix):
 ├─────────────────┼──────────────┼─────────────────────┼─────────────────┤
 │ reshape()       │ ~0.001 ms    │ No data copy        │ No cache impact │
 │ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
-│ view() (future) │ ~0.001 ms    │ No data copy        │ No cache impact │
 └─────────────────┴──────────────┴─────────────────────┴─────────────────┘
 
-Why transpose() is slower:
-- Non-contiguous layout: same values, different stride interpretation
-- Poor cache locality (accessing columns)
-- Can't be parallelized easily
+Both calls are free: they only change how the same bytes are indexed. The bill
+arrives later. Reading a transposed matrix walks memory column by column, so
+consecutive elements land in different cache lines, and whatever consumes the
+transposed view runs slower even though transpose() itself did no work.
 ```
 
 This is why frameworks like PyTorch often use "lazy" transpose operations that defer the actual data movement until necessary.
@@ -1815,7 +1818,7 @@ def analyze_memory_layout():
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
     print("   • Image processing libraries use specific memory formats for cache efficiency")
     print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
-    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it creates a non-contiguous view with poor cache locality")
+    print(f"   • Walking columns costs {slowdown:.1f}× more than walking rows; a transposed view pays this on every read")
     print("   • Hardware-optimized libraries leverage memory layout for better performance")
 
     print("\n" + "=" * 60)

@@ -42,7 +42,7 @@ Let's add intelligence to your tensors!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/02_activations/activations.ipynb
+**Learning Side:** You work in `modules/02_activations/activations.ipynb`
 **Building Side:** Code exports to tinytorch.core.activations
 
 ```python
@@ -111,14 +111,15 @@ Consider two scenarios:
 
 **Without Activations (Linear Only):**
 ```
-Input → Linear Transform → Output
-[1, 2] → [3, 4] → [11]  # Just weighted sum
+Input → Linear → Linear → Linear → Output
+Three matrix multiplies collapse into one: W3·(W2·(W1·x)) = (W3·W2·W1)·x
 ```
 
 **With Activations (Nonlinear):**
 ```
-Input → Transform → Activation → Transform → Activation → Output
-[1, 2] → [3, 4] → [3, 4] → [7] → [7] → Complex Pattern!
+Input → Linear → ReLU → Linear → ReLU → Linear → Output
+Each ReLU zeroes a different subset of features, so the layers no longer
+collapse and the network can bend its decision boundary.
 ```
 
 The magic happens in those activation functions. They introduce **nonlinearity** - the ability to curve, bend, and create complex decision boundaries instead of just straight lines.
@@ -244,12 +245,11 @@ class SigmoidFunction(Function):
         # selected value never overflows for large |x|. np.where still evaluates
         # both branches, so errstate silences the harmless overflow in the
         # discarded branch (whose result is thrown away).
-        x_data = x
         with np.errstate(over="ignore", invalid="ignore"):
             result = np.where(
-                x_data >= 0,
-                1.0 / (1.0 + np.exp(-x_data)),
-                np.exp(x_data) / (1.0 + np.exp(x_data)),
+                x >= 0,
+                1.0 / (1.0 + np.exp(-x)),
+                np.exp(x) / (1.0 + np.exp(x)),
             )
         return result
         ### END SOLUTION
@@ -609,15 +609,15 @@ Output: [-0.15, 0, 0.85]
 ### ASCII Visualization
 ```
 GELU Function:
-        ╱
-    1  ╱
-      ╱
-     ╱
-    ╱
-   ╱ ↙ (smooth curve, no sharp corner)
-  ╱
-─┴─────
--2  0  2
+                  ╱
+     1           ╱
+                ╱
+               ╱
+              ╱
+     0 ───────╱─────── x
+         ╰───╯  ↑ smooth through zero, no corner
+   dip: GELU(-0.75) ≈ -0.17, the curve goes slightly negative
+        -2    0    2
 ```
 
 **Why GELU matters**: Used in GPT, BERT, and other modern architectures. The smoothness helps with optimization compared to ReLU's sharp corner.
@@ -781,8 +781,8 @@ class SoftmaxFunction(Function):
         [0.090, 0.245, 0.665]  # Sums to 1.0, larger inputs get higher probability
 
         HINTS:
-        - Use np.max(x, axis=dim, keepdims=True) for max
-        - Use np.sum(exp_values, axis=dim, keepdims=True) for sum
+        - Use np.max(x, axis=self.dim, keepdims=True) for max
+        - Use np.sum(exp_values, axis=self.dim, keepdims=True) for sum
         - The max subtraction prevents overflow in exponentials
         """
         ### BEGIN SOLUTION
@@ -963,7 +963,7 @@ def test_module():
     # Test 3: Activation chaining (simulating neural network)
     print("🧪 Integration Test: Activation chaining...")
 
-    # Simulate: Input → Linear → ReLU → Linear → Softmax (like a simple network)
+    # Chain activations the way a network does between its layers: ReLU → Softmax
     x = Tensor([[-1, 0, 1, 2]])  # Batch of 1, 4 features
 
     # Apply ReLU (hidden layer activation)
@@ -1003,7 +1003,7 @@ Answer these to deepen your understanding of activation functions and their syst
 - What operations does Sigmoid require? (hint: exponentials)
 - If you have a hidden layer with 1 million neurons, how many exp() calls does each activation require?
 
-**Real-world context**: In production models with billions of parameters, even small per-element costs add up. ReLU's simplicity makes it 3-4x faster than Sigmoid.
+**Real-world context**: In production models with billions of parameters, even small per-element costs add up. ReLU's simplicity makes it several times cheaper than Sigmoid per element.
 
 ---
 
@@ -1224,7 +1224,7 @@ Congratulations! You've built the intelligence engine of neural networks!
 - **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **ReLU efficiency**: Simple max operation makes it 3-4x faster than exponential-based activations
+- **ReLU efficiency**: A max is far cheaper than an exponential, so ReLU costs a fraction of Sigmoid or Tanh per element
 - **Numerical stability**: Softmax's max subtraction prevents overflow without changing results
 - **Sparsity benefits**: ReLU's zero outputs create sparse representations
 - **Activation selection**: Different layers need different activations (ReLU for hidden, Softmax for output)
