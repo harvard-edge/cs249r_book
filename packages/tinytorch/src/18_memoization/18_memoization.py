@@ -1333,6 +1333,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     ### BEGIN SOLUTION
     generated = []
+    cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
 
     # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
     # Each token goes through the CachedAttention stand-ins, which write its
