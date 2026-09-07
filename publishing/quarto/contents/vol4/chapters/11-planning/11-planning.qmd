@@ -44,6 +44,12 @@ After studying this chapter, you will be able to:
 <!-- BEGIN -->
 At the wrist of an articulated industrial robot lowering a cutting tool onto a moving workpiece, the joint tracking loop executes deterministically on a Real-Time Microcontroller Unit (MCU) every $10\text{ ms}$. At this $100\text{ Hz}$ cadence (with inner field-oriented current loops cycling at $1000\text{ Hz}$), the nervous system queries joint optical encoders, evaluates closed-loop PID or computed torque control laws, and writes pulse-width modulation (PWM) current setpoints to motor phase inverters. The physical body possesses inertia $J$ and kinetic energy $E_k = \frac{1}{2} J \dot{\mathbf{q}}^2$. Physical time cannot pause for an operating system thread switch, a GPU kernel launch, or a memory bus contention spike. If the tracking loop receives a continuous, smooth stream of position and velocity references, the tool makes contact with controlled force and begins its traverse across the surface. If the reference stream stutters, drops, or halts, physical inertia takes over.
 
+::: {#dfn-physical-ai-systems .callout-definition title="Physical AI Systems"}
+
+***Physical AI Systems***\index{Physical AI systems!definition} are cyber-physical architectures that couple high-capacity neural deliberation (the "brain") with high-frequency deterministic tracking and safety enforcement (the "nervous system") to exert physical work in the real world. Unlike software-only AI, physical AI systems must generate commands that satisfy dynamic feasibility, respect actuator limits, and execute continuously in hard real time despite stochastic inference latency.
+
+:::
+
 As mapped in the systems organ locator (@fig-11-locator), the trajectory planner sits within the Brain tier, tasked with translating discrete neural proposals into continuous, dynamically feasible motions that the deterministic Nervous System can safely track. A plan is a promise about the near future, and the central engineering challenge of trajectory generation is what happens when that promise runs out before the next one arrives.
 
 This temporal invariant governs machines across all Three Physical Machine Archetypes:
@@ -237,12 +243,13 @@ $$q(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5$$
 To satisfy second-order derivative continuity, the polynomial coefficients $\mathbf{a} = [a_0, a_1, a_2, a_3, a_4, a_5]^T$ must satisfy six simultaneous boundary conditions:
 $$q(0) = q_0, \quad \dot{q}(0) = \dot{q}_0, \quad \ddot{q}(0) = \ddot{q}_0$$
 $$q(T_{\mathrm{blend}}) = q_1, \quad \dot{q}(T_{\mathrm{blend}}) = \dot{q}_1, \quad \ddot{q}(T_{\mathrm{blend}}) = \ddot{q}_1$$
-where $(q_0, \dot{q}_0, \ddot{q}_0)$ is the terminal physical state of chunk $A$ at the handoff instant, and $(q_1, \dot{q}_1, \ddot{q}_1)$ is the target state on incoming chunk $B$ at $t = T_{\mathrm{blend}}$. Solving this linear algebraic system yields closed-form algebraic expressions for all six coefficients:
-$$a_0 = q_0, \quad a_1 = \dot{q}_0, \quad a_2 = \frac{1}{2}\ddot{q}_0$$
-$$a_3 = \frac{20(q_1 - q_0) - (8\dot{q}_1 + 12\dot{q}_0)T_{\mathrm{blend}} - (3\ddot{q}_0 - \ddot{q}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^3}$$
-$$a_4 = \frac{30(q_0 - q_1) + (14\dot{q}_1 + 16\dot{q}_0)T_{\mathrm{blend}} + (3\ddot{q}_0 - 2\ddot{q}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^4}$$
-$$a_5 = \frac{12(q_1 - q_0) - 6(\dot{q}_1 + \dot{q}_0)T_{\mathrm{blend}} - (\ddot{q}_1 - \ddot{q}_0)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^5}$$
-Because these equations require only basic arithmetic operations ($O(1)$ computational complexity), an embedded real-time MCU evaluates them in less than $5\,\mu\text{s}$, well within a $1\text{ kHz}$ servo timer interrupt.
+where $(q_0, \dot{q}_0, \ddot{q}_0)$ is the terminal physical state of chunk $A$ at the handoff instant, and $(q_1, \dot{q}_1, \ddot{q}_1)$ is the target state on incoming chunk $B$ at $t = T_{\mathrm{blend}}$. Solving this linear algebraic system yields closed-form algebraic expressions for all six coefficients.[^fn-quintic-coeffs] Because these equations require only basic arithmetic operations ($O(1)$ computational complexity), an embedded real-time MCU evaluates them in less than $5\,\mu\text{s}$, well within a $1\text{ kHz}$ servo timer interrupt.
+
+[^fn-quintic-coeffs]: The closed-form algebraic expressions for the six coefficients are:
+    $$a_0 = q_0, \quad a_1 = \dot{q}_0, \quad a_2 = \frac{1}{2}\ddot{q}_0$$
+    $$a_3 = \frac{20(q_1 - q_0) - (8\dot{q}_1 + 12\dot{q}_0)T_{\mathrm{blend}} - (3\ddot{q}_0 - \ddot{q}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^3}$$
+    $$a_4 = \frac{30(q_0 - q_1) + (14\dot{q}_1 + 16\dot{q}_0)T_{\mathrm{blend}} + (3\ddot{q}_0 - 2\ddot{q}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^4}$$
+    $$a_5 = \frac{12(q_1 - q_0) - 6(\dot{q}_1 + \dot{q}_0)T_{\mathrm{blend}} - (\ddot{q}_1 - \ddot{q}_0)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^5}$$
 
 The resulting dynamic **jerk profile** is linear and continuous:
 $$\dddot{q}(t) = 6 a_3 + 24 a_4 t + 60 a_5 t^2$$
@@ -368,11 +375,13 @@ The deterministic execution loop that unifies receding-horizon chunk ingestion, 
    - Verify invariants: $\|\Delta \dot{\mathbf{q}}\| \le \Delta \dot{\mathbf{q}}_{\mathrm{allow}}$ and $\|\Delta \mathbf{q}\| \le \Delta \mathbf{q}_{\mathrm{tol}}$. If valid, proceed to Stage 3; else reject candidate and set `ERR_SEAM_DISCONTINUITY`.
 3. **Closed-Form $\mathcal{C}^2$ Quintic Spline Synthesis (Stage 3):**
    Determine available blend duration $T_{\mathrm{blend}} \leftarrow \min(T_{\mathrm{nominal\_blend}}, \mathcal{C}_{\mathrm{active}}.t_{\mathrm{commit}} - t_{\mathrm{now}})$.
-   Solve closed-form quintic coefficients $\mathbf{a}_0 \dots \mathbf{a}_5$ for each active joint channel:
-   $$\mathbf{a}_0 = \mathbf{q}_0, \quad \mathbf{a}_1 = \dot{\mathbf{q}}_0, \quad \mathbf{a}_2 = \frac{1}{2}\ddot{\mathbf{q}}_0,$$
-   $$\mathbf{a}_3 = \frac{20(\mathbf{q}_1 - \mathbf{q}_0) - (8\dot{\mathbf{q}}_1 + 12\dot{\mathbf{q}}_0)T_{\mathrm{blend}} - (3\ddot{\mathbf{q}}_0 - \ddot{\mathbf{q}}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^3},$$
-   $$\mathbf{a}_4 = \frac{30(\mathbf{q}_0 - \mathbf{q}_1) + (14\dot{\mathbf{q}}_1 + 16\dot{\mathbf{q}}_0)T_{\mathrm{blend}} + (3\ddot{\mathbf{q}}_0 - 2\ddot{\mathbf{q}}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^4},$$
-   $$\mathbf{a}_5 = \frac{12(\mathbf{q}_1 - \mathbf{q}_0) - 6(\dot{\mathbf{q}}_1 + \dot{\mathbf{q}}_0)T_{\mathrm{blend}} - (\ddot{\mathbf{q}}_1 - \ddot{\mathbf{q}}_0)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^5}.$$
+   Solve closed-form quintic coefficients $\mathbf{a}_0 \dots \mathbf{a}_5$ for each active joint channel.[^fn-quintic-coeffs-vector]
+
+[^fn-quintic-coeffs-vector]: The closed-form algebraic expressions for the six coefficients in vector form are:
+    $$\mathbf{a}_0 = \mathbf{q}_0, \quad \mathbf{a}_1 = \dot{\mathbf{q}}_0, \quad \mathbf{a}_2 = \frac{1}{2}\ddot{\mathbf{q}}_0,$$
+    $$\mathbf{a}_3 = \frac{20(\mathbf{q}_1 - \mathbf{q}_0) - (8\dot{\mathbf{q}}_1 + 12\dot{\mathbf{q}}_0)T_{\mathrm{blend}} - (3\ddot{\mathbf{q}}_0 - \ddot{\mathbf{q}}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^3},$$
+    $$\mathbf{a}_4 = \frac{30(\mathbf{q}_0 - \mathbf{q}_1) + (14\dot{\mathbf{q}}_1 + 16\dot{\mathbf{q}}_0)T_{\mathrm{blend}} + (3\ddot{\mathbf{q}}_0 - 2\ddot{\mathbf{q}}_1)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^4},$$
+    $$\mathbf{a}_5 = \frac{12(\mathbf{q}_1 - \mathbf{q}_0) - 6(\dot{\mathbf{q}}_1 + \dot{\mathbf{q}}_0)T_{\mathrm{blend}} - (\ddot{\mathbf{q}}_1 - \ddot{\mathbf{q}}_0)T_{\mathrm{blend}}^2}{2 T_{\mathrm{blend}}^5}.$$
    Verify interior peak acceleration $\max_{t} |\ddot{\mathbf{q}}_{\mathrm{blend}}(t)| \le \mathbf{a}_{\max}$ and jerk $\max_{t} |\dddot{\mathbf{q}}_{\mathrm{blend}}(t)| \le \dddot{\mathbf{q}}_{\max}$. If verified, atomically swap $\mathcal{C}_{\mathrm{active}} \leftarrow \mathcal{C}_{\mathrm{blend\_then\_cand}}$, mark `BUFFER_SPLICED`, and set $\mathrm{Regime} \leftarrow \text{BLEND\_SPLINE}$. Else, drop candidate chunk and escalate to Stage 4.
 
 4. **Stopping Suffix Fallback Engagement (Stage 4):**
