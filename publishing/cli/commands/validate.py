@@ -3067,8 +3067,10 @@ class ValidateCommand:
                             )
                         )
 
-                # Check inline footnotes (always forbidden)
-                for m in inline_fn_pat.finditer(line):
+                # Check inline footnotes (always forbidden). Mask inline code
+                # first: a regex such as `^[0-9]+$` is not footnote syntax.
+                line_no_code = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
+                for m in inline_fn_pat.finditer(line_no_code):
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
@@ -7652,6 +7654,10 @@ class ValidateCommand:
                 if stripped.startswith("#|"):
                     continue
                 if stripped.startswith(":::"):
+                    continue
+                # Authoring scaffold, not prose: a @sec- inside an HTML comment
+                # renders nowhere and has no sentence position.
+                if stripped.startswith("<!--"):
                     continue
                 if footnote_def.match(line):
                     continue

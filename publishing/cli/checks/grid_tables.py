@@ -115,9 +115,24 @@ def find_grid_tables(content: str) -> list[tuple[int, int, list[str]]]:
     lines = content.split('\n')
     tables = []
     i = 0
+    in_fence = False
+    fence = ""
 
     while i < len(lines):
         line = lines[i]
+        stripped = line.lstrip()
+        # Fenced code blocks hold ASCII-art diagrams that look like grid tables.
+        # Converting one to pipe syntax would destroy the drawing.
+        if not in_fence and stripped.startswith("```"):
+            in_fence = True
+            fence = stripped[: len(stripped) - len(stripped.lstrip("`"))]
+            i += 1
+            continue
+        if in_fence:
+            if stripped.startswith(fence) and not stripped[len(fence):].strip():
+                in_fence = False
+            i += 1
+            continue
         if re.match(r'^\+[-:=+]+\+\s*$', line):
             start = i
             table_lines = [line]
