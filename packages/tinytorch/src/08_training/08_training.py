@@ -61,14 +61,14 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 #| export
 
 import numpy as np
-rng = np.random.default_rng(7)
 import pickle
 import time
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from pathlib import Path
-import sys
 import os
 import inspect
+
+rng = np.random.default_rng(7)
 
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
@@ -172,7 +172,7 @@ For effective batch size B_eff = accumulation_steps * B_actual:
 ### Train vs Eval Modes
 
 Some layers behave differently during training vs inference:
-- Some layers behave differently (e.g., dropout is active during training but disabled during inference)
+- **Dropout**: Active during training, disabled during inference
 - **Gradient computation**: Enabled during training, disabled during evaluation for efficiency
 
 This mode switching is crucial for proper model behavior and performance.
@@ -388,7 +388,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
             if isinstance(param.grad, np.ndarray):
                 grad_data = param.grad
             else:
-                # Trust that Tensor has .data attribute
+                # grad set by hand as a Tensor; take its array
                 grad_data = param.grad.data
             total_norm += np.sum(grad_data ** 2)
 
@@ -403,7 +403,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
                 if isinstance(param.grad, np.ndarray):
                     param.grad = param.grad * clip_coef
                 else:
-                    # Trust that Tensor has .data attribute
+                    # grad set by hand as a Tensor; take its array
                     param.grad.data = param.grad.data * clip_coef
 
     return float(total_norm)
@@ -424,10 +424,6 @@ This test validates our gradient clipping implementation.
 def test_unit_clip_grad_norm():
     """🧪 Test clip_grad_norm implementation."""
     print("🧪 Unit Test: Gradient Clipping...")
-
-    # Use real Tensor from Module 01
-    import sys
-    # Tensor already imported at module level
 
     # Test case 1: Large gradients that need clipping
     param1 = Tensor([1.0, 2.0], requires_grad=True)
@@ -450,7 +446,7 @@ def test_unit_clip_grad_norm():
         if isinstance(param.grad, np.ndarray):
             grad_data = param.grad
         else:
-            # Trust that Tensor has .data attribute
+            # grad set by hand as a Tensor; take its array
             grad_data = param.grad.data
         new_norm += np.sum(grad_data ** 2)
     new_norm = np.sqrt(new_norm)
@@ -1242,7 +1238,7 @@ def test_unit_trainer_evaluate():
             return self.layer.parameters()
 
     cls_model = ClassificationModel()
-    cls_trainer = Trainer(cls_model, SGD(cls_model.parameters(), lr=0.01), MSELoss())
+    cls_trainer = Trainer(cls_model, SGD(cls_model.parameters(), lr=0.01), CrossEntropyLoss())
 
     cls_dataloader = [
         (Tensor([[1.0, 0.5]]), Tensor([0])),   # integer class label
@@ -1652,7 +1648,6 @@ def demonstrate_complete_training_pipeline():
     print(f"✓ Evaluation - Loss: {eval_loss:.6f}, Accuracy: {accuracy:.6f}")
 
     # Clean up
-    import os
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
 
@@ -1795,8 +1790,10 @@ def analyze_checkpoint_overhead():
     print(f"{'Model Size':<12} {'Raw Params':<15} {'Checkpoint':<15} {'Overhead':<10}")
     print("-" * 70)
 
-    import pickle
-    import sys
+    def format_size(nbytes):
+        if nbytes < 1024:
+            return f"{nbytes}B"
+        return f"{nbytes/1024:.1f}KB"
 
     for size in sizes:
         # Create model and trainer
@@ -1812,17 +1809,11 @@ def analyze_checkpoint_overhead():
         checkpoint_path = f"/tmp/checkpoint_test_{size}.pkl"
         trainer.save_checkpoint(checkpoint_path)
 
-        import os
         checkpoint_size = os.path.getsize(checkpoint_path)
         overhead = (checkpoint_size / raw_size - 1) * 100
 
         # Clean up
         os.remove(checkpoint_path)
-
-        def format_size(bytes):
-            if bytes < 1024:
-                return f"{bytes}B"
-            return f"{bytes/1024:.1f}KB"
 
         print(f"{size}×{size:<8} {format_size(raw_size):<15} "
               f"{format_size(checkpoint_size):<15} {overhead:.1f}%")
@@ -1830,7 +1821,7 @@ def analyze_checkpoint_overhead():
     print("\n💡 Key Insights:")
     print("- Checkpoints include model state + optimizer state + training metadata")
     print("- Pickle serialization adds 10-30% overhead")
-    print("- Adam optimizer doubles checkpoint size vs SGD")
+    print("- Adam's two moment buffers would triple the parameter bytes (this Trainer checkpoints SGD momentum only)")
     print("- Use checkpoint frequency wisely in production (memory vs fault tolerance)")
 
 # Run the systems analysis
@@ -1936,7 +1927,7 @@ def test_module():
     if isinstance(large_params[0].grad, np.ndarray):
         grad_data = large_params[0].grad
     else:
-        # Trust that Tensor has .data attribute
+        # grad set by hand as a Tensor; take its array
         grad_data = large_params[0].grad.data
     new_norm = np.linalg.norm(grad_data)
     assert abs(new_norm - 1.0) < 1e-6, "Clipped norm should equal max_norm"
@@ -1952,7 +1943,6 @@ def test_module():
     assert trainer.epoch == original_epoch, "Checkpoint should restore state"
 
     # Clean up
-    import os
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
 
@@ -2043,7 +2033,6 @@ def demo_training():
     print("=" * 45)
 
     # Simple linear regression: learn y = 2x + 1
-    rng = np.random.default_rng(7)
     X = Tensor(rng.standard_normal((20, 1)))
     y = Tensor(X.data * 2 + 1)  # True relationship
 
