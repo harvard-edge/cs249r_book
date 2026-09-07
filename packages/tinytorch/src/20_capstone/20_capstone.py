@@ -42,7 +42,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `src/20_capstone/20_capstone.py`
+**Learning Side:** You work in `modules/20_capstone/capstone.ipynb`
 **Building Side:** Code exports to `tinytorch.olympics`
 
 ```python
@@ -65,10 +65,6 @@ submission.save("my_submission.json")
 - **Reproducibility:** Schema-validated submissions ensure results can be verified and trusted
 """
 
-# %% nbgrader={"grade": false, "grade_id": "exports", "solution": false}
-#| default_exp olympics
-#| export
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -86,7 +82,6 @@ submission.save("my_submission.json")
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.layers` (Linear layer from Module 03)
 - `tinytorch.core.activations` (ReLU from Module 02)
-- `tinytorch.core.losses` (CrossEntropyLoss from Module 04)
 - Optimization modules 14-18 (optional, for advanced workflows)
 
 **Dependency Flow**:
@@ -149,6 +144,7 @@ Let's build a benchmarking and submission system worthy of production ML!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp olympics
 #| export
 import numpy as np
 rng = np.random.default_rng(7)
@@ -159,16 +155,10 @@ from typing import Dict, List, Tuple, Optional, Any
 import platform
 import sys
 
-# %% nbgrader={"grade": false, "grade_id": "imports2", "solution": false}
-# Import TinyTorch modules (not exported - used for module development only)
+# TinyTorch modules the capstone builds on
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
-from tinytorch.core.losses import CrossEntropyLoss
-
-if __name__ == "__main__":
-    print("✅ Capstone modules imported!")
-    print("📊 Ready to benchmark and submit results")
 
 # %% [markdown]
 """
@@ -400,25 +390,15 @@ class SimpleMLP:
         1. Create fc1 Linear layer (input_size -> hidden_size)
         2. Create ReLU activation
         3. Create fc2 Linear layer (hidden_size -> output_size)
-        4. Initialize weights with small random values (scale 0.01)
-        5. Initialize biases to zeros
 
         HINTS:
-        - Use Linear(in_features, out_features) for layers
-        - Weight shape is (in_features, out_features)
-        - Small initial weights (0.01 scale) help training stability
+        - Use Linear(in_features, out_features) for layers; Module 03's Linear
+          already initializes weights sensibly and biases to zero
         """
         ### BEGIN SOLUTION
         self.fc1 = Linear(input_size, hidden_size)
         self.relu = ReLU()
         self.fc2 = Linear(hidden_size, output_size)
-
-        # Initialize with small random weights
-        # Linear layer expects weight shape: (in_features, out_features)
-        self.fc1.weight.data = rng.standard_normal((input_size, hidden_size)) * 0.01
-        self.fc1.bias.data = np.zeros(hidden_size)
-        self.fc2.weight.data = rng.standard_normal((hidden_size, output_size)) * 0.01
-        self.fc2.bias.data = np.zeros(output_size)
         ### END SOLUTION
 
     def forward(self, x):
@@ -446,7 +426,7 @@ class SimpleMLP:
 
     def parameters(self):
         """Return model parameters for perf."""
-        return [self.fc1.weight, self.fc1.bias, self.fc2.weight, self.fc2.bias]
+        return self.fc1.parameters() + self.fc2.parameters()
 
     def count_parameters(self):
         """Count total number of parameters."""
@@ -454,9 +434,6 @@ class SimpleMLP:
         for param in self.parameters():
             total += param.data.size
         return total
-
-if __name__ == "__main__":
-    print("✅ SimpleMLP model defined")
 
 # %% [markdown]
 """
@@ -561,27 +538,18 @@ class BenchmarkReport:
            timed with perf_counter after a few untimed warmup runs (Module 19)
         5. Throughput - Maximum samples/second capacity
         """
-        # Count parameters
+        # Count parameters and stored size (see measure_memory)
         param_count = model.count_parameters()
-        model_size_mb = (param_count * 4) / (1024 * 1024)  # Assuming FP32
+        model_size_mb = self.measure_memory(model)
 
         # Measure accuracy
         predictions = model.forward(X_test)
         pred_labels = np.argmax(predictions.data, axis=1)
         accuracy = np.mean(pred_labels == y_test)
 
-        # Warm up first: the first calls pay allocation and cache costs that a
-        # steady-state latency should not include (Module 19)
-        for _ in range(min(5, num_runs)):
-            _ = model.forward(X_test[:1])
-
-        # Measure latency over multiple runs, each timed on its own
+        # Latency: untimed warmup, then num_runs single-sample calls timed one by one
         # Why multiple runs? See "Variance" section in Foundations
-        latencies = []
-        for _ in range(num_runs):
-            start = time.perf_counter()
-            _ = model.forward(X_test[:1])  # Single sample inference
-            latencies.append((time.perf_counter() - start) * 1000)  # Convert to ms
+        latencies = self.measure_latency(model, X_test, num_runs)
 
         avg_latency = np.mean(latencies)
         std_latency = np.std(latencies)
@@ -641,11 +609,12 @@ class BenchmarkReport:
         """
         Measure model memory footprint.
 
-        TODO: Calculate model size in MB assuming FP32 weights
+        TODO: Calculate model size in MB
 
         APPROACH:
-        1. Count total parameters
-        2. Multiply by 4 bytes (FP32)
+        1. If the model reports its own storage via size_bytes() (a quantized or
+           pruned model does), trust it
+        2. Otherwise count parameters and multiply by 4 bytes (FP32)
         3. Convert to MB (divide by 1024*1024)
 
         HINTS:
@@ -654,12 +623,11 @@ class BenchmarkReport:
         - 1 MB = 1024 * 1024 bytes
         """
         ### BEGIN SOLUTION
+        if hasattr(model, 'size_bytes'):
+            return model.size_bytes() / (1024 * 1024)
         param_count = model.count_parameters()
         return (param_count * 4) / (1024 * 1024)
         ### END SOLUTION
-
-if __name__ == "__main__":
-    print("✅ BenchmarkReport class defined")
 
 # %% [markdown]
 """
@@ -832,9 +800,6 @@ def save_submission(submission: Dict[str, Any], filepath: str = "submission.json
     print(f"\n✅ Submission saved to: {filepath}")
     return filepath
 
-if __name__ == "__main__":
-    print("✅ Submission generation functions defined")
-
 # %% [markdown]
 """
 ### Understanding the Improvements Calculation
@@ -986,7 +951,6 @@ def run_example_benchmark():
 
     # Step 1: Create toy dataset
     print("\n🔧 Step 1: Creating toy dataset...")
-    rng = np.random.default_rng(7)
     X_test = Tensor(rng.standard_normal((100, 10)))
     y_test = rng.integers(0, 3, 100)
     print(f"  Dataset: {X_test.shape[0]} samples, {X_test.shape[1]} features, 3 classes")
@@ -1022,9 +986,6 @@ def run_example_benchmark():
     print("  4. Share your submission.json with the TinyTorch community!")
 
     return submission
-
-if __name__ == "__main__":
-    print("✅ Example workflow defined")
 
 
 # Run the systems analysis
@@ -1082,7 +1043,7 @@ This is the COMPLETE story: Profile → Optimize → Benchmark → Submit
 **What Students Learn:**
 - How to import and use APIs from previous modules
 - How to combine multiple optimizations (quantization + pruning)
-- How to measure cumulative impact (2× from quant + 1.5× from pruning = 3× total)
+- How to measure cumulative impact (memory savings from pruning and INT8 compound; latency does not, in NumPy)
 - How to document techniques for reproducibility
 """
 
@@ -1102,81 +1063,52 @@ def run_optimization_workflow_example():
     print("="*70)
     print("TINYTORCH CAPSTONE: OPTIMIZATION WORKFLOW")
     print("="*70)
-    print("\nThis workflow demonstrates using Modules 14-19 together:")
-    print("  📊 Module 14: Profiling")
-    print("  🔢 Module 15: Quantization (optional - API imported for demonstration)")
-    print("  ✂️  Module 16: Compression (optional - API imported for demonstration)")
-    print("  ⚡ Module 17: Acceleration (optional - API imported for demonstration)")
-    print("  💾 Module 18: Memoization (optional - API imported for demonstration)")
-    print("  📈 Module 19: Benchmarking")
+    print("\nThis workflow uses Modules 14, 15, 16, 19, and 20 together:")
+    print("  📊 Module 14: Profiling (parameter count)")
+    print("  ✂️  Module 16: Compression (magnitude pruning)")
+    print("  🔢 Module 15: Quantization (INT8 weights)")
+    print("  📈 Module 19: Benchmarking (warmup, repeated timing)")
     print("  📝 Module 20: Submission Generation")
 
-    # Demonstrate API imports (students can use these for their own optimizations)
-    print("\n🔧 Importing optimization APIs...")
-    try:
-        from tinytorch.perf.profiling import Profiler, quick_profile
-        print("  ✅ Module 14 (Profiling) imported")
-    except ImportError:
-        print("  ⚠️  Module 14 (Profiling) not available - using basic profiling")
-        Profiler = None
-
-    try:
-        from tinytorch.perf.compression import magnitude_prune, structured_prune
-        print("  ✅ Module 16 (Compression) imported")
-    except ImportError:
-        print("  ⚠️  Module 16 (Compression) not available - skipping pruning demo")
-        magnitude_prune = None
-
-    try:
-        from tinytorch.perf.benchmarking import BenchmarkSuite, BenchmarkResult
-        print("  ✅ Module 19 (Benchmarking) imported")
-    except ImportError:
-        print("  ⚠️  Module 19 (Benchmarking) not available - using basic benchmarking")
-        BenchmarkSuite = None
+    import copy
+    from tinytorch.perf.profiling import Profiler
+    from tinytorch.perf.quantization import QuantizedLinear
+    from tinytorch.perf.compression import magnitude_prune
 
     # Step 1: Create dataset
     print("\n" + "="*70)
     print("STEP 1: Create Test Dataset")
     print("="*70)
-    rng = np.random.default_rng(7)
     X_test = Tensor(rng.standard_normal((100, 10)))
     y_test = rng.integers(0, 3, 100)
     print(f"  Dataset: {X_test.shape[0]} samples, {X_test.shape[1]} features, 3 classes")
 
-    # Step 2: Create and profile baseline model
+    # Step 2: Profile and benchmark the baseline (Modules 14 and 19)
     print("\n" + "="*70)
     print("STEP 2: Baseline Model - Profile & Benchmark")
     print("="*70)
     baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    print(f"  Model: {baseline_model.count_parameters():,} parameters")
+    profiler = Profiler()
+    print(f"  Model: {profiler.count_parameters(baseline_model):,} parameters (Module 14's count)")
 
-    # Benchmark baseline using BenchmarkReport
     baseline_report = BenchmarkReport(model_name="baseline_mlp")
-    baseline_metrics = baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=50)
+    baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=50)
 
-    # Optional: Demonstrate using Module 14's Profiler if available
-    if Profiler:
-        print("\n  📊 Optional: Using Module 14's Profiler for detailed analysis...")
-        profiler = Profiler()
-        # Note: Profiler integration would go here
-        # This demonstrates the API is available for students to use
-
-    # Step 3: (DEMO ONLY) Show optimization APIs available
+    # Step 3: Optimize with Module 16 (pruning) and Module 15 (INT8 weights)
     print("\n" + "="*70)
-    print("STEP 3: Optimization APIs Available (Demo)")
+    print("STEP 3: Optimize - Prune, then Quantize")
     print("="*70)
-    print("\n  📚 Students can apply these optimizations:")
-    print("     - Module 15: quantize_model(model, calibration_data)")
-    print("     - Module 16: magnitude_prune(model, sparsity=0.5)")
-    print("     - Module 17: Use accelerated ops (vectorized_matmul, etc.)")
-    print("     - Module 18: enable_kv_cache(model)  # For transformers")
-    print("\n  💡 For this demo, we'll simulate an optimized model")
-    print("     (Students can replace this with real optimizations!)")
+    optimized_model = copy.deepcopy(baseline_model)
+    magnitude_prune(optimized_model, sparsity=0.5)  # zero the smallest half of the weights
+    nonzero_params = sum(int(np.count_nonzero(p.data)) for p in optimized_model.parameters())
+    optimized_model.fc1 = QuantizedLinear(optimized_model.fc1)  # INT8 weights, FP32 arithmetic
+    optimized_model.fc2 = QuantizedLinear(optimized_model.fc2)
+    # A deployment stores one INT8 byte per surviving weight; BenchmarkReport.measure_memory uses this
+    optimized_model.size_bytes = lambda: nonzero_params
+    print(f"  Kept {nonzero_params:,} of {baseline_model.count_parameters():,} parameters, stored as INT8")
 
-    # Create "optimized" model (students would apply real optimizations here)
-    optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)  # Smaller for demo
     optimized_report = BenchmarkReport(model_name="optimized_mlp")
-    optimized_metrics = optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=50)
+    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=50)
 
     # Step 4: Generate submission with before/after comparison
     print("\n" + "="*70)
@@ -1187,7 +1119,7 @@ def run_optimization_workflow_example():
         baseline_report=baseline_report,
         optimized_report=optimized_report,
         student_name="TinyTorch Optimizer",
-        techniques_applied=["model_sizing", "architecture_search"]  # replace with what you applied
+        techniques_applied=["magnitude_pruning_0.5", "int8_quantization"]
     )
 
     # Display improvement summary
@@ -1213,14 +1145,11 @@ def run_optimization_workflow_example():
     print("  ✅ How to generate professional submissions with improvement metrics")
     print("  ✅ How TinyTorch modules work together as a complete framework")
     print("\n💡 Next steps:")
-    print("  - Apply real optimizations (quantization, pruning, etc.)")
+    print("  - Try other sparsities, calibration data, or leaving a sensitive layer in FP32")
     print("  - Benchmark milestone models (XOR, TinyDigits MLP/CNN, Transformer, etc.)")
     print("  - Share your optimized results with the community!")
 
     return submission
-
-if __name__ == "__main__":
-    print("✅ Optimization workflow example defined")
 
 
 # Run the systems analysis
@@ -1234,7 +1163,7 @@ if __name__ == "__main__":
 In production ML, you often stack optimizations for cumulative benefits:
 
 ```
-Stacking Optimizations:
+Stacking Optimizations (illustrative numbers):
 ┌─────────────────────────────────────────────────────────────┐
 │ Baseline Model                                              │
 │   Size: 4.0 MB, Latency: 10.0ms, Accuracy: 92.0%            │
@@ -1900,9 +1829,9 @@ TRAP 1: Measuring the Wrong Thing
   ❌ Measuring batch=32 when production uses batch=1
 
   ✅ FIX: Isolate exactly what you're measuring
-     start = time.time()
+     start = time.perf_counter()
      output = model.forward(x)  # ONLY this
-     latency = time.time() - start
+     latency = time.perf_counter() - start
 
 TRAP 2: Ignoring System Noise
   ❌ Running benchmarks while streaming video
