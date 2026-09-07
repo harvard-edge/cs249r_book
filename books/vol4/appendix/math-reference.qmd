@@ -22,7 +22,7 @@ As summarized in @tbl-stopping-distance-decomp, stopping distance decomposes int
 |:-------------------------------|:--------------------------------------------------------------------|:---------------------------------------------------|:-------------------------------------------------|
 | **Phase 1: Reaction Drift**    | Sensor exposure, neural inference, network transport, inverter rise | $d_{\text{drift}} = v \cdot \tau_{\text{latency}}$ | $t \in [0, \tau_{\text{latency}}]$               |
 | **Phase 2: Kinematic Braking** | Counter-EMF braking, friction, ground adhesion                      | $d_{\text{brake}} = \dfrac{v^2}{2 a_{\text{max}}}$ | $t \in [\tau_{\text{latency}}, t_{\text{stop}}]$ |
-: **Physical Decomposition of Total Stopping Distance**: Breakdown of drift and braking components ($d_{\text{stop}} = d_{\text{drift}} + d_{\text{brake}}$). {#tbl-stopping-distance-decomp}
+: **Physical Decomposition of Total Stopping Distance**: Breakdown of drift and braking components ($d_{\text{stop}} = d_{\text{drift}} + d_{\text{brake}}$). {#tbl-stopping-distance-decomp tbl-colwidths="[20,25,35,20]"}
 
 Integrating Newtonian dynamics under constant deceleration $a(t) = -a_{\text{max}}$:
 
@@ -186,6 +186,31 @@ $$\begin{aligned}
 where $\mathbf{W} \succ 0$ is a positive-definite weighting metric.
 
 * **Minimal Intervention Principle:** When $\mathbf{u}_{\text{cand}}$ satisfies all barrier inequalities, the objective is minimized at $\mathbf{u}^* = \mathbf{u}_{\text{cand}}$ with zero active constraints, passing the AI policy's action unmodified. When $\mathbf{u}_{\text{cand}}$ violates a barrier, the QP executes an orthogonal projection onto the safe half-space boundary $\partial \mathcal{U}_{\text{safe}}$, modifying the command by the minimum Euclidean perturbation required to preserve invariance.
+
+### Closed-form single-barrier projection derivation
+
+In reflex-tier microcontrollers operating under strict microsecond execution budgets ($<10\,\mu\text{s}$), a single dominant safety barrier (e.g., minimum stopping clearance along the forward heading, $M=1$) with isotropic weight $\mathbf{W} = \mathbf{I}_{m \times m}$ admits an exact closed-form analytical solution that bypasses iterative numerical solvers entirely.
+
+Consider the single-barrier quadratic program:
+
+$$\min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2} \|\mathbf{u} - \mathbf{u}_{\text{cand}}\|_2^2 \quad \text{subject to} \quad \mathbf{a}^T \mathbf{u} \ge b$$
+
+where $\mathbf{a} = (L_g h(\mathbf{x}))^T \in \mathbb{R}^m$ and $b = -L_f h(\mathbf{x}) - \gamma h(\mathbf{x}) \in \mathbb{R}$.
+
+1. **Unconstrained Case:** If $\mathbf{a}^T \mathbf{u}_{\text{cand}} \ge b$, the nominal candidate already satisfies the barrier condition. The constraint is inactive ($\lambda^* = 0$), yielding $\mathbf{u}^* = \mathbf{u}_{\text{cand}}$.
+2. **Constrained Case:** If $\mathbf{a}^T \mathbf{u}_{\text{cand}} < b$, the safety constraint is violated and must become active at the optimum ($\mathbf{a}^T \mathbf{u}^* = b$). The stationarity condition yields $\mathbf{u}^* = \mathbf{u}_{\text{cand}} + \lambda^* \mathbf{a}$. Taking the dot product with $\mathbf{a}$:
+
+$$\mathbf{a}^T \mathbf{u}^* = \mathbf{a}^T \mathbf{u}_{\text{cand}} + \lambda^* \|\mathbf{a}\|_2^2 = b \implies \lambda^* = \frac{b - \mathbf{a}^T \mathbf{u}_{\text{cand}}}{\|\mathbf{a}\|_2^2} > 0$$
+
+Substituting $\lambda^*$ back into the stationarity equation yields the closed-form projection:
+
+$$\mathbf{u}^* = \mathbf{u}_{\text{cand}} + \max\left(0, \, \frac{b - \mathbf{a}^T \mathbf{u}_{\text{cand}}}{\|\mathbf{a}\|_2^2}\right) \mathbf{a}$$
+
+Expanding the Lie derivative definitions:
+
+$$\mathbf{u}^* = \mathbf{u}_{\text{cand}} + \max\left(0, \, \frac{-L_f h(\mathbf{x}) - \gamma h(\mathbf{x}) - L_g h(\mathbf{x})\mathbf{u}_{\text{cand}}}{\|L_g h(\mathbf{x})\|_2^2}\right) (L_g h(\mathbf{x}))^T$$
+
+* **Computational Determinism:** Evaluating this closed-form expression on an ARM Cortex-M7 requires exactly one dot product, one norm-squared calculation, and one scalar multiply-add, completing in $<0.8\,\mu\text{s}$ with zero iteration branching or numerical ill-conditioning.
 
 ### Multi-variable KKT matrix system and active-set derivation
 Writing the CBF-QP in standard matrix inequality form:
@@ -412,7 +437,7 @@ $$\text{PM}_{\text{effective}} = \text{PM}_{\text{nominal}} - \omega_c \tau_{\te
 | **$50\text{ Hz}$** (Action Chunk) | $20\text{ ms}$      | $10\text{ ms}$             | **$-14.3^\circ$**                                         | **$+20.7^\circ$ (Reduced Damping, Mild Overshoot)** |
 | **$1000\text{ Hz}$** (MCU Reflex) | $1.0\text{ ms}$     | $0.5\text{ ms}$            | **$-0.72^\circ$**                                         | **$+34.3^\circ$ (Robust Closed-Loop Stability)**    |
 
-: **Frequency-Domain Phase Lag Impact across Physical AI Cadences**: Demonstrating why high-frequency execution is mathematically mandatory for physical stability. {#tbl-math-phase-lag}
+: **Frequency-Domain Phase Lag Impact across Physical AI Cadences**: Demonstrating why high-frequency execution is mathematically mandatory for physical stability. {#tbl-math-phase-lag tbl-colwidths="[18,18,18,24,22]"}
 
 ---
 
@@ -887,19 +912,61 @@ For $T_{\text{blend}} = 150.0\text{ ms}$ and a maximum torque discrepancy of $40
 
 ### Compounding covariate shift bounds under behavioral cloning
 
-When training a policy $\pi_\theta$ via supervised behavioral cloning on logged human teleoperation data $\mathcal{D} = \{(s_t, a_t^*)\}$, let $\epsilon$ denote the expected single-step error rate under the training distribution:
+When training a policy $\pi_\theta$ via offline supervised behavioral cloning on expert teleoperation demonstrations $\mathcal{D} = \{(s_t, a_t^*)\}$, let $\epsilon$ denote the expected single-step decision error under the expert state distribution $d_{\pi^*}$:
 
 $$\mathbb{E}_{s \sim d_{\pi^*}} \left[ \ell(\pi_\theta(s), \pi^*(s)) \right] \le \epsilon$$
 
-Under autonomous closed-loop execution, small errors shift the state distribution away from the demonstration support. Following Ross, Gordon, and Bagnell [-@ross2011reduction], the compounding total variation distance between the expert state distribution $d_{\pi^*}$ and the learned policy distribution $d_{\pi_\theta}$ over horizon $T$ is bounded by:
+where $\ell(s, a) \in [0, 1]$ represents a normalized surrogate task loss (such as $0\text{--}1$ loss $\mathbb{I}(\pi_\theta(s) \ne \pi^*(s))$ or bounded tracking discrepancy).
 
-$$D_{\text{TV}}(d_{\pi^*}, d_{\pi_\theta}) \le 2 (1 - (1 - \epsilon)^T) \le 2 \epsilon T$$
+Under autonomous closed-loop rollout, small execution errors deflect the robot into states outside the demonstration manifold. We formalize the quadratic regret bound established by Ross, Gordon, and Bagnell [-@ross2011reduction].
 
-The cumulative task loss over horizon $T$ compounds quadratically:
+#### Inductive proof of the quadratic error compounding bound
 
-$$J(\pi_\theta) \le J(\pi^*) + \epsilon \cdot T^2$$
+Let $d_{\pi^*}^t(s)$ and $d_{\pi_\theta}^t(s)$ denote the state probability distributions induced at discrete time step $t \in \{1, \dots, T\}$ by executing the expert $\pi^*$ and learned policy $\pi_\theta$, respectively.
 
-* **DAgger Policy Gradient Formulation:** To prevent quadratic error compounding, dataset aggregation (DAgger) samples states from the running policy's own induced distribution $d_{\pi_\theta}$ and queries an expert oracle for corrections $a_t^* = \pi^*(s_t)$. Truncating the pre-takeover drift phase prevents the policy from learning spurious associations between dangerous drift and recovery maneuvers.
+1. **Probability of First Mistake:** The probability that $\pi_\theta$ executes the exact expert action at any step given that it has remained on the expert trajectory is at least $1 - \epsilon$. Thus, the probability that the policy makes *zero mistakes* through time step $t$ is:
+
+$$P(\text{No mistake up to step } t) \ge (1 - \epsilon)^t$$
+
+2. **Total Variation Distance at Step $t$:** By the coupling lemma, the total variation distance between the expert state distribution and the learned policy distribution at step $t$ is bounded by the probability that their execution paths have diverged:
+
+$$D_{\text{TV}}(d_{\pi^*}^t, d_{\pi_\theta}^t) \le 1 - P(\text{No mistake up to step } t) \le 1 - (1 - \epsilon)^t$$
+
+Using Bernoulli's inequality $(1 - \epsilon)^t \ge 1 - \epsilon t$ for $\epsilon \in [0, 1]$:
+
+$$D_{\text{TV}}(d_{\pi^*}^t, d_{\pi_\theta}^t) \le \epsilon t$$
+
+3. **Step-Wise Expected Loss:** Under bounded loss $\ell(s, a) \le 1$, the expected loss incurred at step $t$ under the running policy's distribution $d_{\pi_\theta}^t$ decomposes into on-distribution and drifted components:
+
+$$\begin{aligned}
+\mathbb{E}_{s \sim d_{\pi_\theta}^t} [\ell(s, \pi_\theta(s))] &= \mathbb{E}_{s \sim d_{\pi^*}^t} [\ell(s, \pi_\theta(s))] + \int_{\mathcal{S}} \ell(s, \pi_\theta(s)) \left( d_{\pi_\theta}^t(s) - d_{\pi^*}^t(s) \right) ds \\
+&\le \epsilon + \|\ell\|_\infty D_{\text{TV}}(d_{\pi^*}^t, d_{\pi_\theta}^t) \\
+&\le \epsilon + 1 \cdot (\epsilon t) = \epsilon(1 + t)
+\end{aligned}$$
+
+4. **Cumulative Trajectory Regret:** Summing the step-wise losses over the total task horizon $T$:
+
+$$J(\pi_\theta) = \sum_{t=1}^T \mathbb{E}_{s \sim d_{\pi_\theta}^t} [\ell(s, \pi_\theta(s))] \le \sum_{t=1}^T \epsilon(1 + t) = \epsilon \left( T + \frac{T(T+1)}{2} \right) = \frac{1}{2}\epsilon T^2 + \frac{3}{2}\epsilon T$$
+
+In asymptotic notation:
+
+$$J(\pi_\theta) \le J(\pi^*) + \mathcal{O}(\epsilon T^2)$$
+
+* **The Behavioral Cloning Failure Mode:** Even with an exceptional single-step accuracy of $99\%$ ($\epsilon = 0.01$), over a 10-second manipulation trajectory at $50\text{ Hz}$ ($T = 500$ steps), the quadratic compounding penalty evaluates to $\epsilon T^2 = 0.01 \times 250{,}000 = 2{,}500$, guaranteeing that the robot drifts irrevocably into an unrecoverable out-of-distribution state.
+
+#### Interactive dataset aggregation (DAgger) linear reduction
+
+To overcome quadratic compounding, Dataset Aggregation (DAgger) trains the policy under its *own* induced state distribution [@ross2011reduction]. In each iteration $i \in \{1, \dots, N\}$, the agent executes policy $\pi_i$, collects states $s \sim d_{\pi_i}$, queries an expert oracle for corrective actions $a^* = \pi^*(s)$, and appends the corrected tuples to dataset $\mathcal{D}$.
+
+Training the policy to minimize loss over the aggregate distribution $\mu = \frac{1}{N}\sum_{i=1}^N d_{\pi_i}$ guarantees that:
+
+$$\mathbb{E}_{s \sim d_{\pi_\theta}} \left[ \ell(\pi_\theta(s), \pi^*(s)) \right] \le \epsilon_{\text{DAgger}}$$
+
+Because the policy is explicitly trained on the states it visits during execution, there is zero distribution shift ($D_{\text{TV}} = 0$). Summing over horizon $T$ yields a **strictly linear bound**:
+
+$$J(\pi_{\text{DAgger}}) \le J(\pi^*) + \epsilon_{\text{DAgger}} T = \mathcal{O}(\epsilon T)$$
+
+Converting error compounding from $\mathcal{O}(\epsilon T^2)$ to $\mathcal{O}(\epsilon T)$ is the mathematical prerequisite for deploying learned neural policies in long-horizon physical autonomy.
 
 ---
 
@@ -1173,3 +1240,183 @@ In multi-agent fleets, each agent's bare-metal microcontroller evaluates recipro
 Because pairwise half-space projection calculations are decoupled ($L_f h_{ij} + L_g h_{ij}\mathbf{u}_i + \frac{1}{2}\gamma h_{ij} \ge 0$), filtering candidate 3D acceleration vectors $\mathbf{u}_{\text{cand}} \in \mathbb{R}^3$ requires only $O(N_{\text{nbr}})$ dot products in static memory (`malloc = 0`). On an ARM Cortex-M7 at $480\text{ MHz}$, evaluating 8 neighbor barrier certificates and projecting onto the safe velocity half-space executes in under $2.8\,\mu\text{s}$ ($\text{WCET} \le 5.0\,\mu\text{s}$), providing distributed forward set invariance with minimal compute overhead.
 
 ---
+
+## 15. Thermodynamic Limits of Physical Computation
+
+In Physical AI systems, cognitive deliberations and perception pipelines are bound by the fundamental laws of statistical mechanics and quantum physics. When computing interacts with irreversible physical state changes, thermodynamic and quantum bounds define the non-negotiable floor on power dissipation, processing cadence, and volumetric intelligence [@landauer1961; @moravec1988mind; @horowitz2014computing].
+
+### Landauer's principle and information erasure
+
+Landauer [-@landauer1961] proved that physical computation can, in principle, be performed reversibly without energy dissipation, *except* whenever information is erased or merged (a many-to-one logical operation).
+
+Consider a binary memory register possessing two discrete, equal-probability physical states ($0$ and $1$) in thermodynamic equilibrium with a thermal heat bath at absolute temperature $T$. The initial statistical entropy of the bit is:
+
+$$S_{\text{initial}} = -k_B \sum_{i \in \{0, 1\}} p_i \ln p_i = -k_B \left( \frac{1}{2} \ln \frac{1}{2} + \frac{1}{2} \ln \frac{1}{2} \right) = k_B \ln 2$$
+
+where $k_B = 1.380649 \times 10^{-23}\text{ J/K}$ is the Boltzmann constant.
+
+When the bit is reset to a known state (e.g., $0$) regardless of its prior value, the final entropy drops to:
+
+$$S_{\text{final}} = -k_B (1 \ln 1 + 0) = 0$$
+
+The change in information entropy within the computational device is:
+
+$$\Delta S_{\text{device}} = S_{\text{final}} - S_{\text{initial}} = -k_B \ln 2$$
+
+By the Second Law of Thermodynamics, the total entropy of an isolated system (device plus surrounding thermal reservoir) cannot decrease:
+
+$$\Delta S_{\text{total}} = \Delta S_{\text{device}} + \Delta S_{\text{reservoir}} \ge 0 \implies \Delta S_{\text{reservoir}} \ge k_B \ln 2$$
+
+The minimum heat energy $Q$ dissipated into the thermal reservoir during the erasure of a single classical bit is therefore:
+
+$$E_{\text{Landauer}} = Q \ge T \Delta S_{\text{reservoir}} = k_B T \ln 2$$
+
+At standard operational ambient temperature $T = 300\text{ K}$ ($26.85^\circ\text{C}$):
+
+$$E_{\text{Landauer}} = (1.380649 \times 10^{-23}\text{ J/K}) \times (300\text{ K}) \times \ln 2 \approx 2.871 \times 10^{-21}\text{ J} \approx 0.01792\text{ eV}$$
+
+* **Thermodynamic Inefficiency Factor:** A contemporary edge tensor processor dissipates approximately $10\text{--}50\text{ pJ}$ ($10^{-11}\text{ J}$) per 8-bit multiply-accumulate operation, which operates roughly seven orders of magnitude ($10^7\times$) above the Landauer limit [@horowitz2014computing]. In contrast, mammalian biological synapses operate at approximately $1\text{--}10\text{ fJ}$ ($10^{-14}\text{ J}$) per event, illustrating why biological embodiment achieves extraordinary energy efficiency within sealed, passively cooled biological frames.
+
+### The Margolus-Levitin quantum speed limit
+
+Beyond classical thermodynamics, quantum mechanics imposes an absolute upper bound on the rate at which any physical system can transition between distinct orthogonal states [@moravec1988mind].
+
+According to the Margolus-Levitin theorem, the minimum time $\tau_{\text{min}}$ required for an arbitrary quantum system with average energy $E$ (relative to its ground state energy $E_0 = 0$) to evolve into an orthogonal state is:
+
+$$\tau_{\text{min}} \ge \frac{\pi \hbar}{2 E}$$
+
+where $\hbar = \frac{h}{2\pi} \approx 1.0545718 \times 10^{-34}\text{ J}\cdot\text{s}$ is the reduced Planck constant.
+
+The maximum operational switching frequency $f_{\text{max}} = \frac{1}{\tau_{\text{min}}}$ per unit energy is:
+
+$$\frac{f_{\text{max}}}{E} = \frac{2}{\pi \hbar} \approx 6.04 \times 10^{33} \text{ operations / (second} \cdot \text{Joule)}$$
+
+Multiplying by total compute power $P_{\text{compute}} = E / \Delta t$ yields the ultimate quantum speed limit for an embodied computer consuming electrical power $P$:
+
+$$\text{OPS}_{\text{quantum}} \le \frac{2 P}{\pi \hbar}$$
+
+For an edge robot allocating $P = 15\text{ W}$ to its onboard perception computer, the absolute quantum limit on processing throughput is $9.06 \times 10^{34}\text{ operations/s}$.
+
+### Bremermann's computational limit
+
+Combining Einstein's mass-energy equivalence $E = mc^2$ with the quantum uncertainty relation yields Bremermann's limit for the maximum computational throughput of matter:
+
+$$C_{\text{max}} = \frac{m c^2}{h} \approx 1.36 \times 10^{50} \text{ bits / (second} \cdot \text{kilogram)}$$
+
+In physical robotics, these fundamental limits confirm that processing capacity is ultimately constrained not by abstract algorithmic logic, but by mass, thermal dissipation surface area, and electrical power density.
+
+---
+
+## 16. Actuator Electromechanical and Thermal Lumped-Parameter Models
+
+In physical actuation, motor torque generation and mechanical bandwidth are tightly constrained by copper winding heating, magnetic core saturation, and transmission reflected inertia [@spong1987modeling; @seok2015design]. This section formalizes the electromechanical dynamics, the two-body thermal network, and the positive feedback runaway boundary.
+
+### Brushless motor electromechanics and torque production
+
+Under Field-Oriented Control with direct-axis current regulated to zero ($i_d = 0$), electromagnetic motor torque $\tau_m$ is strictly proportional to quadrature current $i_q$:
+
+$$\tau_m = K_t i_q$$
+
+where $K_t$ is the motor torque constant ($\text{N}\cdot\text{m/A}$).
+
+The terminal phase voltage equation along the quadrature axis is:
+
+$$V_q = R(T_w) i_q + L_q \frac{d i_q}{dt} + K_e \omega_m$$
+
+where $R(T_w)$ is the temperature-dependent winding resistance, $L_q$ is the phase inductance, $K_e = K_t$ is the back-EMF voltage constant ($\text{V}\cdot\text{s/rad}$), and $\omega_m$ is the mechanical rotor angular velocity ($\text{rad/s}$).
+
+At electrical steady state ($\frac{d i_q}{dt} = 0$), solving for phase current under available DC bus voltage $V_{\text{bus}}$:
+
+$$i_q = \frac{V_q - K_e \omega_m}{R(T_w)}$$
+
+The electrical power dissipated as waste heat through resistive Joule heating across the three stator phases is:
+
+$$P_{\text{loss}}(t) = 3 I_{\text{rms}}^2 R(T_w) = \frac{3}{2} i_q^2 R(T_w) = \frac{3}{2} \frac{\tau_m^2}{K_t^2} R(T_w)$$
+
+### Coupled two-body lumped-parameter thermal network
+
+The thermal dissipation path of a robotic actuator consists of two coupled thermal nodes:
+
+1. **Winding Node ($w$):** The internal copper coils where heat is generated ($P_{\text{loss}}$), possessing thermal capacitance $C_{\text{th,w}}$ ($\text{J/K}$) and temperature $T_w$.
+2. **Stator Core & Housing Node ($s$):** The surrounding iron laminations and aluminum motor housing, possessing thermal capacitance $C_{\text{th,s}}$ ($\text{J/K}$) and temperature $T_s$.
+
+Heat transfers from the copper coils through electrical slot insulation to the stator core across thermal resistance $R_{\text{th,ws}}$ ($\text{K/W}$), and subsequently from the housing into the surrounding ambient air ($T_a$) across thermal resistance $R_{\text{th,sa}}$ ($\text{K/W}$).
+
+The dynamic thermal evolution is governed by the coupled ordinary differential equations:
+
+$$\begin{aligned}
+C_{\text{th,w}} \frac{d T_w(t)}{dt} &= P_{\text{loss}}(t) - \frac{T_w(t) - T_s(t)}{R_{\text{th,ws}}} \\
+C_{\text{th,s}} \frac{d T_s(t)}{dt} &= \frac{T_w(t) - T_s(t)}{R_{\text{th,ws}}} - \frac{T_s(t) - T_a}{R_{\text{th,sa}}}
+\end{aligned}$$
+
+Because the copper winding mass is compact compared to the aluminum casing, the thermal capacitances exhibit a clear timescale separation:
+
+* Winding thermal time constant: $\tau_w = R_{\text{th,ws}} C_{\text{th,w}} \approx 5\text{--}25\text{ s}$.
+* Stator/housing thermal time constant: $\tau_s = R_{\text{th,sa}} C_{\text{th,s}} \approx 120\text{--}600\text{ s}$.
+
+### Positive thermal feedback and runaway criterion
+
+The electrical resistivity of copper increases linearly with temperature according to the temperature coefficient $\alpha_{\text{Cu}} \approx 0.00393\text{ K}^{-1}$ referenced to $T_0 = 20^\circ\text{C}$:
+
+$$R(T_w) = R_0 \left[ 1 + \alpha_{\text{Cu}} (T_w - T_0) \right]$$
+
+When an actuator is commanded to deliver a constant continuous torque $\tau_m$ (requiring constant quadrature current $i_q$), heating the coils increases winding resistance $R(T_w)$, which in turn increases Joule power dissipation $P_{\text{loss}}$, inducing a positive feedback loop:
+
+$$\frac{\partial P_{\text{loss}}}{\partial T_w} = \frac{3}{2} i_q^2 R_0 \alpha_{\text{Cu}}$$
+
+In steady state ($dT/dt = 0$), the total thermal resistance from winding to ambient is $R_{\text{th,total}} = R_{\text{th,ws}} + R_{\text{th,sa}}$. The heat dissipation rate is:
+
+$$\frac{\partial P_{\text{dissipated}}}{\partial T_w} = \frac{1}{R_{\text{th,total}}}$$
+
+To ensure that the temperature reaches a stable equilibrium rather than escalating into destructive thermal runaway, heat dissipation must grow faster than heat generation:
+
+$$\frac{\partial P_{\text{loss}}}{\partial T_w} < \frac{\partial P_{\text{dissipated}}}{\partial T_w} \implies \frac{3}{2} i_q^2 R_0 \alpha_{\text{Cu}} < \frac{1}{R_{\text{th,total}}}$$
+
+This yields the **Critical Thermal Runaway Current Limit**:
+
+$$i_{q,\text{runaway}} = \sqrt{\frac{2}{3 R_0 \alpha_{\text{Cu}} R_{\text{th,total}}}}$$
+
+Operating above $i_{q,\text{runaway}}$ causes unmitigated exponential temperature escalation that terminates in stator enamel melting and phase short circuits.
+
+### Continuous thermal torque versus transient peak acceleration
+
+At steady state, the equilibrium winding temperature is:
+
+$$T_{w,\text{eq}} = T_a + P_{\text{loss}} R_{\text{th,total}} = T_a + \frac{3}{2} i_q^2 R_0 \left[ 1 + \alpha_{\text{Cu}} (T_{w,\text{eq}} - T_0) \right] R_{\text{th,total}}$$
+
+Solving for the maximum permissible continuous current $i_{q,\text{cont}}$ such that $T_{w,\text{eq}} \le T_{\text{max}}$ (where $T_{\text{max}} \approx 120\text{--}150^\circ\text{C}$ is determined by the insulation rating Class F/H):
+
+$$i_{q,\text{cont}} = \sqrt{\frac{T_{\text{max}} - T_a}{\frac{3}{2} R_0 \left[ 1 + \alpha_{\text{Cu}} (T_{\text{max}} - T_0) \right] R_{\text{th,total}}}}$$
+
+The **Continuous Rated Torque** is:
+
+$$\tau_{\text{cont}} = K_t i_{q,\text{cont}}$$
+
+* **Transient Acceleration Overdrive:** For short dynamic pulses ($\Delta t \ll \tau_w \approx 10\text{ s}$), heat does not have time to conduct across the thermal resistances, and the temperature rise is governed solely by winding heat capacity: $\Delta T_w \approx \frac{P_{\text{loss}} \Delta t}{C_{\text{th,w}}}$. The actuator can safely deliver **Peak Torque** ($\tau_{\text{peak}} \approx 3\text{--}5 \times \tau_{\text{cont}}$) up to the magnetic core flux saturation limit without violating thermal ceilings, provided the root-mean-square torque over any rolling window $\tau_w$ satisfies:
+
+$$\tau_{\text{RMS}} = \sqrt{\frac{1}{\tau_w} \int_{t - \tau_w}^t \tau_m^2(\tau) d\tau} \le \tau_{\text{cont}}$$
+
+### Reflected inertia and actuator transmission mechanics
+
+When coupling a high-speed motor to a robot joint link through a mechanical reducer (gearbox) with reduction ratio $N = \frac{\omega_m}{\omega_{\text{joint}}} > 1$, the kinetic energy of the joint mechanism is:
+
+$$E_k = \frac{1}{2} J_m \omega_m^2 + \frac{1}{2} J_L \omega_{\text{joint}}^2 = \frac{1}{2} \left( N^2 J_m + J_L \right) \omega_{\text{joint}}^2$$
+
+The **Effective Reflected Joint Inertia** seen by the external environment at the output joint is:
+
+$$J_{\text{joint}} = N^2 J_m + J_L$$
+
+where $J_m$ is the rotor moment of inertia ($\text{kg}\cdot\text{m}^2$) and $J_L$ is the link load inertia [@spong1987modeling; @seok2015design].
+
+* **The Reflected Inertia Square Law ($N^2$):** A motor with a modest rotor inertia of $J_m = 1.0 \times 10^{-4}\text{ kg}\cdot\text{m}^2$ paired with a $N = 100:1$ strain-wave reducer reflects $N^2 J_m = 10{,}000 \times (1.0 \times 10^{-4}) = 1.0\text{ kg}\cdot\text{m}^2$ of inertia to the joint. Upon collision with an obstacle, this reflected mass cannot be decelerated quickly by electromagnetic back-EMF, transmitting massive shock wrenches into gearbox teeth and causing brittle tooth shear.
+* **Optimal Gear Ratio for Peak Joint Acceleration:** The maximum joint angular acceleration under motor torque $\tau_m$ is:
+
+$$\ddot{q}_{\text{joint}} = \frac{\tau_{\text{joint}}}{J_{\text{joint}}} = \frac{N \tau_m}{N^2 J_m + J_L}$$
+
+Differentiating with respect to gear ratio $N$ and setting $\frac{\partial \ddot{q}}{\partial N} = 0$:
+
+$$\frac{\tau_m (N^2 J_m + J_L) - N \tau_m (2 N J_m)}{(N^2 J_m + J_L)^2} = 0 \implies J_L - N^2 J_m = 0$$
+
+$$\therefore N^* = \sqrt{\frac{J_L}{J_m}}$$
+
+The optimal gear ratio matching link inertia to rotor inertia ($N^2 J_m = J_L$) maximizes output angular acceleration $\ddot{q}$, providing the design basis for modern Quasi-Direct Drive (QDD) legged and humanoid robots [@seok2015design].
