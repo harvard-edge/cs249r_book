@@ -104,7 +104,7 @@ _LOWERCASE_OK = {
     "nn", "torch", "jax", "tf", "autocast", "cublas", "cudnn", "cusparse",
     "onednn", "oneccl", "grpc", "vllm", "im2col", "mmap", "bfloat16",
     "k-anonymity", "k-center", "p50", "p95", "p99", "pj", "bitter",
-    "coreboot", "iPhone", "eBPF", "gRPC", "cuDNN", "vLLM", "iOS",
+    "coreboot", "iPhone", "eBPF", "gRPC", "cuDNN", "vLLM", "iOS", "gVisor",
 }
 
 # NOTE: no closing quote/paren allowed between the punctuation and the space.

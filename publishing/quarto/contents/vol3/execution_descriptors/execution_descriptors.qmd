@@ -57,6 +57,7 @@ The PCB encapsulates the entire execution state of a thread or process:
 - **Scheduling and Accounting State:** Process priority, CPU execution time, wait channels, and pending POSIX signal masks.
 
 When a classical operating system performs a context switch, it executes an invariant contract:
+
 - The kernel saves the current register values into the PCB
 - Updates scheduling accounting
 - Switches the virtual memory address space by modifying the page table root register
@@ -68,20 +69,21 @@ When systems engineers construct autonomous, multi-turn agent runtimes, the urge
 
 While this metaphor provides useful architectural intuition, it breaks down violently across three fundamental systems boundaries:
 
-### 1. Determinism vs. Stochasticity
+### 1. Determinism vs. stochasticity
 A hardware CPU is a deterministic state transition machine. Given an identical register state and instruction stream, a processor executes the exact same operations every time. A foundation model is an autoregressive probability distribution over tokens:
 $$P(x_t \mid x_{<t}; \theta)$$
 Even when temperature is set to zero ($T=0$), hardware floating-point non-associativity across distributed matrix multiplication kernels (tensor parallelism, warp scheduling, and dynamic batching) introduces token non-determinism across runs. A runtime cannot guarantee bit-exact trajectory reproduction merely by restoring an execution snapshot.
 
-### 2. Physical Memory vs. Neural Activation Footprints
+### 2. Physical memory vs. neural activation footprints
 In a classical OS, context switching a thread incurs a latency on the order of microseconds ($1\text{--}10\,\mu\text{s}$) because only the small architectural register file (hundreds of bytes) must be saved, while the physical page tables remain mapped in host DRAM.
 
 In an agentic system, the in-flight cognitive state of an agent is encoded in its **Key-Value (KV) cache**—a multi-gigabyte activation footprint resident in scarce, high-cost GPU High Bandwidth Memory (HBM). For an agent operating over a $128\text{K}$-token horizon with a 70-billion parameter model, the active KV cache occupies dozens of gigabytes of VRAM. A runtime cannot instantly "switch" agents without either retaining that memory footprint idle on the GPU or paying massive PCIe transfer latencies ($10\text{--}100\,\text{ms}$) to swap activations to host DRAM.
 
-### 3. Isolated Address Spaces vs. Mutating Environmental Side Effects
+### 3. Isolated address spaces vs. mutating environmental side effects
 The classical process isolation contract relies on hardware-enforced virtual memory boundaries (MMUs, page fault traps, and ring protection domains) [@saltzer1975]. A process can write freely to its private virtual address space without corrupting neighboring processes. If a process faults, the kernel reclaims its memory and terminates the descriptor cleanly.
 
 An autonomous agent, by contrast, executes actions by invoking external tools:
+
 - Modifying remote filesystems
 - Provisioning cloud virtual machines
 - Querying SQL databases
@@ -112,13 +114,9 @@ uniquely identifying an active agent instance $\text{AID}$, binding it to an aut
 The nine structural fields of the ACB serve dedicated systems responsibilities:
 
 1. **Agent Identifier ($\text{AID}$):** A globally unique, cryptographically random 128-bit identifier (UUIDv7 or ULID) encoding creation timestamp and node locality.
-
 2. **Principal Identity ($\mathcal{P}_{\text{id}}$):** The authenticated human or service account on whose behalf the agent executes. Contains cryptographic public keys, OAuth subject tokens, and tenant organizational boundaries used to authorize all downstream actions.
-
 3. **Goal Envelope ($\mathcal{G}$):** The immutable operational specification of the task, containing the natural language prompt, formal completion predicates (e.g., unit test suites that must pass), invariant constraints (e.g., "do not modify files outside `/src`"), and execution bounds.
-
 4. **Capability Leases ($\mathcal{K}_{\text{leases}}$):** A set of cryptographically signed, time-limited tokens granting access to specific external tools and sandboxed APIs, parameterized with parameter white-lists and monotonic access restrictions.
-
 5. **Resource Quotas and Budgets ($\mathcal{Q}_{\text{budget}}$):** Multi-dimensional resource constraints tracking accumulated and remaining allowances:
    $$\mathcal{Q} = \langle T_{\text{in}}, T_{\text{out}}, C_{\text{dollar}}, \Delta t_{\text{wall}}, K_{\text{tools}}, D_{\text{depth}} \rangle$$
    representing input tokens, output tokens, financial expenditure in dollars, maximum wall-clock duration, maximum tool invocations, and maximum subagent delegation recursion depth.
@@ -127,23 +125,22 @@ The nine structural fields of the ACB serve dedicated systems responsibilities:
    - *Physical KV-Cache Table Pointer:* Identifies the virtual block IDs allocated in PagedAttention tables across inference servers.
    - *Episodic Audit Log URI:* Append-only transactional log recording every prompt, reasoning thought, tool call, and observation.
    - *Working Scratchpad Store:* In-memory key-value state for volatile scratchpad variables.
-
 7. **Lifecycle State ($\mathcal{S}_{\text{fsm}}$):** The active state of the agent within the kernel finite state machine (e.g., `ACTIVE_PREFILL`, `SUSPENDED_TOOL_WAIT`, `TERMINATED`).
-
 8. **Lineage and Ancestry ($\mathcal{L}_{\text{lineage}}$):** Parent agent identifier ($\text{PID}$), child subagent list ($\{\text{CID}_1, \text{CID}_2, \dots\}$), and delegation depth counter, establishing the process tree.
-
 9. **Causality Vector ($\mathcal{V}_{\text{clock}}$):** A vector clock tracking logical time across concurrent tool dispatches and multi-agent interactions, guaranteeing causal event ordering.
 
-| Architectural Dimension | Classical POSIX PCB | Agent Control Block (ACB) |
-|:---|:---|:---|
-| **Primary Identifier** | Process ID (`pid_t`, integer) | Agent ID (`AID`, 128-bit UUID/ULID) |
-| **Execution State** | Hardware registers (`RIP`, `RSP`, general registers) | Context working set (see @sec-vol3-context-working-sets), KV-cache block IDs, lifecycle FSM |
-| **Memory Isolation** | MMU page tables (CR3 register, virtual 4 KB pages) | Attention prefix boundaries, PagedAttention block tables |
-| **System Interface** | POSIX system call table (`sys_enter`, int 0x80) | Tool Execution Interface / Model Context Protocol (MCP) |
-| **Authority Model** | POSIX permissions (`rwx`, UID/GID, capabilities) | Monotonic capability leases, parameter schema filters |
-| **Resource Accounting** | CPU user/kernel ticks, Resident Set Size (RSS) | Token burn velocity, GPU HBM bytes, tool API cost |
-| **Context Switch Overhead** | Microseconds ($1\text{--}10\,\mu\text{s}$) | Milliseconds to seconds ($10\text{--}5000\,\text{ms}$) |
-| **Failure Recovery** | Core dump, signal handler (`SIGSEGV`), process restart | Compensating Sagas transactions, reflection loops |
+Every one of these fields has a counterpart in the POSIX process control block, but the counterparts are not equivalents. In each row of @tbl-pcb-acb-comparison, a hardware-enforced kernel mechanism gives way to a software convention with no silicon behind it, and the context switch that an MMU performs in microseconds takes the agent runtime milliseconds to seconds.
+
+| Architectural Dimension     | Classical POSIX PCB                                    | Agent Control Block (ACB)                                                                   |
+|:----------------------------|:-------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| **Primary Identifier**      | Process ID (`pid_t`, integer)                          | Agent ID (`AID`, 128-bit UUID/ULID)                                                         |
+| **Execution State**         | Hardware registers (`RIP`, `RSP`, general registers)   | Context working set (see @sec-vol3-context-working-sets), KV-cache block IDs, lifecycle FSM |
+| **Memory Isolation**        | MMU page tables (CR3 register, virtual 4 KB pages)     | Attention prefix boundaries, PagedAttention block tables                                    |
+| **System Interface**        | POSIX system call table (`sys_enter`, int 0x80)        | Tool Execution Interface / Model Context Protocol (MCP)                                     |
+| **Authority Model**         | POSIX permissions (`rwx`, UID/GID, capabilities)       | Monotonic capability leases, parameter schema filters                                       |
+| **Resource Accounting**     | CPU user/kernel ticks, Resident Set Size (RSS)         | Token burn velocity, GPU HBM bytes, tool API cost                                           |
+| **Context Switch Overhead** | Microseconds ($1\text{--}10\,\mu\text{s}$)             | Milliseconds to seconds ($10\text{--}5000\,\text{ms}$)                                      |
+| **Failure Recovery**        | Core dump, signal handler (`SIGSEGV`), process restart | Compensating Sagas transactions, reflection loops                                           |
 
 : **Architectural Comparison between POSIX PCB and ACB**: Systems dimensions, kernel execution structures, and operational failure modes. {#tbl-pcb-acb-comparison}
 
@@ -173,7 +170,7 @@ The runtime kernel must treat the neural belief state as strictly speculative. W
 
 Within the agent process itself, memory must be stratified based on durability, mutability, and transactional commitment. An agent runtime distinguishes two tiers of internal memory:
 
-### 1. Ephemeral Working Memory (Volatile Scratchpad)
+### 1. Ephemeral working memory (volatile scratchpad)
 During multi-step reasoning, foundation models generate chain-of-thought tokens, intermediate hypotheses, decomposition trees, and draft tool parameters. This working memory resides in:
 
 - The active GPU Key-Value cache activations.
@@ -182,7 +179,7 @@ During multi-step reasoning, foundation models generate chain-of-thought tokens,
 
 Ephemeral memory is volatile and speculative. If an agent explores a reasoning branch that proves invalid (e.g., generating code that fails compilation), this working memory should be pruned or rolled back without polluting the persistent execution history.
 
-### 2. Authoritative State and Write-Ahead Logging (WAL)
+### 2. Authoritative state and write-ahead logging (WAL)
 When an agent takes an action that crosses the boundary into the physical environment—such as executing an external API call, modifying a persistent file, or spawning a child subagent—the transaction must be recorded authoritatively.
 
 Following classical database recovery theory [@gray1992; @mohan1992aries], an agentic runtime implements a **Write-Ahead Logging (WAL)** protocol for agent actions:
@@ -203,7 +200,7 @@ $$\mathcal{K} = \langle \text{CID}, \text{AID}, \text{URI}_{\text{target}}, \mat
 authorizing the agent $\text{AID}$ to invoke the set of operations $\mathcal{O}_{\text{ops}}$ on target resource $\text{URI}_{\text{target}}$, subject to parameter schema constraints $\mathcal{C}_{\text{params}}$, expiring at wall-clock timestamp $\tau_{\text{expire}}$, and verified by kernel signature $\text{Sig}_{K_{\text{kernel}}}$.
 :::
 
-### The Monotonic Capability Attenuation Principle
+### The monotonic capability attenuation principle
 When a primary agent decomposes a complex objective into smaller sub-tasks, it spawns child subagents. A foundational security invariant of execution descriptors is the **Monotonic Capability Attenuation Principle**:
 
 $$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}}$$
@@ -242,12 +239,12 @@ When an agent invokes a `delegate_task()` or `spawn_subagent()` primitive, the r
 
 Managing hierarchical agent trees introduces critical systems failure modes that the runtime kernel must resolve:
 
-### 1. The Orphaned Agent Problem and Cascading Cancellation
+### 1. The orphaned agent problem and cascading cancellation
 If a parent agent terminates prematurely—due to budget exhaustion, fatal exception, or user cancellation—unsupervised child subagents can continue executing in the background, consuming thousands of dollars in GPU inference and API calls.
 
 To eliminate orphaned processes, the runtime implements **Cascading Cancellation**. Every child ACB maintains an active heartbeat connection to its parent. If the parent transitions to `TERMINATED` or `FAILED`, the kernel automatically broadcasts a `SIGTERM`-equivalent cancellation signal down the lineage tree, aborting all descendant ACBs, terminating in-flight model inference requests, and revoking outstanding tool capability leases.
 
-### 2. Subagent Deadlocks and Circular Delegation
+### 2. Subagent deadlocks and circular delegation
 If subagents are permitted to delegate tasks laterally, circular dependencies can emerge (e.g., Agent A delegates a query to Agent B, which delegates a verification to Agent C, which queries Agent A). This results in distributed deadlock and rapid token budget exhaustion.
 
 The runtime kernel prevents circular delegation by enforcing a **Strictly Acyclic Directed Lineage Rule**:
@@ -262,10 +259,10 @@ The runtime kernel prevents circular delegation by enforcing a **Strictly Acycli
 
 When multi-agent systems coordinate, they require mechanisms analogous to POSIX Inter-Process Communication (IPC). Classical operating systems implement IPC via either **Message Passing** (pipes, sockets) or **Shared Memory** (`shmget`, `mmap`). In an agentic runtime, these paradigms map directly to physical hardware memory management and multi-node network topologies.
 
-### Message Passing (Actor Model)
+### Message passing (actor model)
 When agents are highly decoupled—such as a Planner Agent written in Python communicating with a Coder Agent on a separate physical node—IPC is implemented via asynchronous message passing (e.g., passing serialized JSON or natural language over an event bus). Because the agents maintain separate ACBs and do not share physical GPU memory, they communicate by appending observations to each other's episodic working memory . This mirrors the Actor Model [@hewitt1973actor] and provides strong fault isolation, but incurs high latency and token-ingestion costs, as every received message must be re-processed through the model's compute-bound prefill phase.
 
-### Shared Memory (KV-Cache Prefix Sharing)
+### Shared memory (KV-cache prefix sharing)
 When a parent agent spawns multiple parallel child subagents (e.g., to concurrently evaluate three different candidate solutions), copying the identical system instructions, task context, and tool schemas into each child's independent context window wastes massive GPU HBM and compute.
 
 To resolve this, modern agent runtimes implement **Shared Memory IPC** through **KV-Cache Prefix Sharing** (such as RadixAttention [@zheng2024sglang] or native prompt caching, see @sec-vol3-prefix-caching-paging). Analogous to operating system virtual memory paging with Copy-On-Write (COW) semantics:
@@ -276,7 +273,7 @@ To resolve this, modern agent runtimes implement **Shared Memory IPC** through *
 
 This systems-level memory sharing dramatically increases serving throughput for tree-search and parallel multi-agent topologies (see @sec-vol3-control-topologies) by eliminating redundant prefill computation and compressing the physical memory footprint.
 
-### Agent Synchronization and Mutexes
+### Agent synchronization and mutexes
 When concurrent agents act upon a shared external environment, they face classic concurrency hazards (e.g., race conditions, lost updates). If Agent A and Agent B simultaneously attempt to edit the same source code file via a file-editing tool, their interleaved operations can corrupt the file.
 
 The runtime must provide **Agent Mutexes** or distributed locks, exposed as tool capabilities. Before mutating a shared external resource, the agent must acquire a time-bounded lease on the resource. If the lock is held by another ACB, the requesting agent receives a `ResourceLocked` observation, allowing it to either wait, yield its execution slice, or pivot to another task.
@@ -316,7 +313,7 @@ $$\mathbf{q}_t = \big[ T_{\text{in}}(t), \, T_{\text{out}}(t), \, C_{\text{cost}
 
 Every autoregressive forward pass and tool execution updates these counters atomically. If any component exceeds its allocated envelope $\mathbf{q}_{\text{max}}$, the runtime kernel fires an immediate hardware trap, interrupting the model dispatch and forcing the ACB into `TERMINATED_FAILED` (or triggering an emergency checkpoint).
 
-### Token Burn Velocity and Degeneracy Detection
+### Token burn velocity and degeneracy detection
 Static budget caps are insufficient to protect large-scale production fleets. If an agent with a $50 budget enters an infinite loop, it will burn the entire $50 before halting. To detect pathological loops early, the ACB tracks the **Token Burn Velocity** ($v_{\text{burn}}$) and **Action Entropy**:
 
 $$v_{\text{burn}}(t) = \frac{\Delta T_{\text{in}} + \Delta T_{\text{out}}}{\Delta t} \quad \left[ \frac{\text{tokens}}{\text{second}} \right]$$
@@ -327,7 +324,7 @@ The runtime computes the **Action Repetition Jaccard Distance** over a sliding w
 $$J(a_t, a_{t-1}) = \frac{|T(a_t) \cap T(a_{t-1})|}{|T(a_t) \cup T(a_{t-1})|}$$
 where $T(a)$ is the token set of the serialized tool call. If $J(a_t, a_{t-1}) > 0.95$ for three consecutive steps ($N_{\text{repeat}} \ge 3$), the runtime halts execution for **Livelock Degeneracy**, regardless of remaining token budget.
 
-### Proportional Share Scheduling
+### Proportional share scheduling
 When hundreds of agent trajectories contend for limited GPU inference capacity, naive First-Come-First-Served (FCFS) scheduling causes head-of-line blocking. Long-running, high-token trajectories starve short interactive agents.
 
 Following lottery and stride scheduling principles [@waldspurger1994], the agent scheduler (see @sec-vol3-trajectory-scheduling) uses the ACB's remaining quota and assigned priority weight $W_i$ to schedule chunked prefill batches [@agrawal2024sarathi], ensuring that active agents receive proportional shares of memory bandwidth and tensor core cycles.
@@ -349,7 +346,6 @@ governed by the following transition invariants:
    $$\mathbf{V}_i[i] \leftarrow \mathbf{V}_i[i] + 1$$
 
 2. **Message / Tool Dispatch:** Every tool request message sent by agent $i$ carries a snapshot of its current vector $\mathbf{V}_i$.
-
 3. **Observation Receipt and Merge:** When agent $i$ receives an observation $o$ carrying vector $\mathbf{V}_{\text{msg}}$, it updates its internal clock via component-wise maximum before processing the observation:
    $$\mathbf{V}_i[k] \leftarrow \max(\mathbf{V}_i[k], \, \mathbf{V}_{\text{msg}}[k]) \quad \forall k \in \{1, \dots, M\}$$
    $$\mathbf{V}_i[i] \leftarrow \mathbf{V}_i[i] + 1$$
@@ -382,7 +378,7 @@ The runtime memory manager resolves this through **Asynchronous Multi-Tier Conte
 
 :::
 
-### Mathematical Derivation of the Breakeven Suspension Duration
+### Mathematical derivation of the breakeven suspension duration
 Swapping a multi-gigabyte KV cache over the PCIe bus consumes memory bus bandwidth and introduces prefetch latency when the agent resumes. Therefore, swapping should only occur if the expected suspension duration exceeds a mathematical breakeven threshold $T_{\text{breakeven}}$.
 
 Let:
@@ -436,7 +432,31 @@ Prompting an LLM with `"You are a safe assistant. You must never delete user fil
 
 **Pitfall**: *Holding GPU High Bandwidth Memory during blocking tool I/O.*
 
-Failing to implement context swapping causes idle agents awaiting HTTP responses to lock up physical GPU VRAM. In a 100-agent cluster, if each agent blocks for an average of 5 seconds on web tools, serving concurrency collapses by over $80\%$, driving GPU utilization to near zero while memory allocation remains at $100\%$.
+Failing to implement context swapping causes idle agents awaiting HTTP responses to lock up physical GPU VRAM. The size of that loss is worth computing rather than asserting, because it is what decides whether swapping is worth its own cost.
+
+::: {#nbk-descriptors-tool-wait-concurrency .callout-notebook title="What tool waits cost a resident cluster"}
+
+**Problem**: A node holds 100 agent sessions resident in HBM. Each step generates a short tool call, then blocks on a web request. How many of those 100 VRAM allocations are doing GPU work at any instant?
+
+**Variables**:
+
+* $N = 100$ resident agent sessions.
+* $t_{\text{gen}} = 1.2\text{ s}$, the decode time for one tool-call turn. Scenario assumption.
+* $t_{\text{wait}} = 5.0\text{ s}$, the average external tool latency. Scenario assumption.
+
+**Math**: Each session completes one step every $W = t_{\text{gen}} + t_{\text{wait}} = 1.2 + 5.0 = 6.2\text{ s}$, so the node's step arrival rate is
+
+$$\lambda = \frac{N}{W} = \frac{100}{6.2} = 16.1\ \text{steps/s}$$
+
+Applying Little's Law to the decode stage alone, where the residence time is $t_{\text{gen}}$ rather than the whole step:
+
+$$L_{\text{gpu}} = \lambda \, t_{\text{gen}} = 16.1 \times 1.2 = 19.4$$
+
+**Result**: About 19 of the 100 resident sessions occupy the accelerator at any instant. The other 81 hold their KV cache in HBM while contributing nothing, so memory allocation reads $100\%$ while useful concurrency sits near $19\%$.
+
+**Systems insight**: The collapse is a duty cycle, $t_{\text{gen}} / (t_{\text{gen}} + t_{\text{wait}})$, and it is set by the environment rather than by the model. Faster decoding makes it worse, because shrinking $t_{\text{gen}}$ shrinks the numerator while the tool latency stays fixed. This is why the descriptor has to be able to release memory during a suspension, and it is the term $T_{\text{breakeven}}$ is weighed against: swapping is worth its round-trip only when the wait is long enough that those idle allocations exceed the cost of moving them.
+
+:::
 
 :::
 
@@ -455,6 +475,10 @@ When a user closes an agent session or a parent coordinator reaches an error sta
 Allowing an agent to commit scratchpad thoughts directly to permanent database records before tool verification is complete causes state corruption. If the downstream action fails, the database retains the invalid speculative data. All environmental mutations must follow strict Write-Ahead Logging and two-phase commitment.
 
 :::
+
+The Agent Control Block is what makes principle \ref{pri-vol3-trajectory-encapsulation} implementable. Treating the trajectory as the atomic unit is a claim about scope until some structure actually holds that scope, and the ACB is that structure: it is where a token allowance, a capability lease and a recovery handle outlive the request that created them.
+
+Principle \ref{pri-vol3-acb-binding} is refined here into a field list and a state machine. The descriptor must bind principal identity, allowance and lease because each is a quantity a single request cannot bound, and the lifecycle states exist because an agent suspended on a tool call is neither running nor finished.
 
 ## Chapter Summary {#sec-vol3-descriptors-summary}
 

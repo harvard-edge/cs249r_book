@@ -148,7 +148,11 @@ def apply_mechanical_fixes_to_text(text: str) -> str:
 
     out: list[str] = []
     if preamble and preamble[0].strip():
-        out.append(preamble[0].rstrip() + "\n\n")
+        # One newline, not two: bibtex-tidy strips a blank line between a
+        # leading comment block and the first entry, so emitting one here made
+        # the two bib hooks undo each other on every run and no commit touching
+        # a bibliography with a header could ever pass.
+        out.append(preamble[0].rstrip() + "\n")
     for entry in entries:
         out.append(format_entry(entry, align_col=0))
         out.append("\n\n")

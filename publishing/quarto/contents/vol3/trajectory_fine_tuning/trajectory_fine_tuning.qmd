@@ -60,14 +60,12 @@ In early agent prototypes, engineers relied entirely on prompting: the system pr
    In an agent executing a 30-turn interaction where each turn appends tool definitions, execution logs, and intermediate reasoning, $T$ readily surpasses 32,000 tokens. In a 70-billion-parameter model using 16-bit precision, serving a single agent session requires over 8 GB of high-bandwidth memory (HBM) exclusively for KV tensors. When thousands of concurrent agents run in parallel, memory bandwidth and capacity become the primary throughput bottleneck [@kaplan2020scaling].
 
 2. **Attention Degradation and the "Lost in the Middle" Phenomenon:**
-   Transformer attention distributions do not remain uniformly sharp over extensive sequence contexts. As established by Liu et al. [@liu2024lost], language models exhibit pronounced U-shaped performance curves: retrieval accuracy is highest for tokens placed at the extreme beginning or end of the prompt context, while information located in the middle suffers severe degradation. When an agent relies on in-context exemplars embedded amidst lengthy API documentation, tool parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
+   Transformer attention distributions do not remain uniformly sharp over extensive sequence contexts. As established by @liu2024lost, language models exhibit pronounced U-shaped performance curves: retrieval accuracy is highest for tokens placed at the extreme beginning or end of the prompt context, while information located in the middle suffers severe degradation. When an agent relies on in-context exemplars embedded amidst lengthy API documentation, tool parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
 
 3. **Inference Latency and Cost Inefficiencies:**
    Re-processing thousands of prompt tokens on every interaction step imposes substantial prefill latency. Even with prefix caching (detailed in @sec-vol3-prefix-caching-paging), dynamic changes in session history invalidate cache entries, forcing recurring recomputations. Economically, sending 10,000 prefix tokens across a 40-step trajectory consumes 400,000 input tokens per task resolution, driving API operating expenses to unsustainable levels.
 
-::: {#pri-vol3-weight-compilation .callout-principle title="The Context Compilation Principle"}
-Supervised fine-tuning on agent trajectories is mathematically equivalent to compiling dynamic runtime context into static parameter weights. By absorbing API schemas, structural syntax rules, and common decision paths directly into neural network weights, SFT compresses prompt lengths by over 80 percent, reduces per-step prefill latency, and eliminates attention dispersion across repetitive system instructions.
-:::
+**Context compilation**: Supervised fine-tuning on agent trajectories is mathematically equivalent to compiling dynamic runtime context into static parameter weights. By absorbing API schemas, structural syntax rules, and common decision paths directly into neural network weights, SFT compresses prompt lengths by over 80 percent, reduces per-step prefill latency, and eliminates attention dispersion across repetitive system instructions.
 
 ## The Trajectory Data Flywheel {#sec-vol3-fine-tuning-the-trajectory-data-flywheel}
 
@@ -85,15 +83,16 @@ In frontier engineering practice [@dubey2024llama; @openai2023gpt4], the traject
 
 1. **Telemetry Logging and Session Capture:**
    Every live agent interaction is captured as a structured execution graph. The telemetry pipeline records:
+
    - User intents
    - Raw model completions
    - External tool payloads
    - Network response codes
    - Execution latencies
    - Human feedback signals (such as accepted pull requests or user interventions)
-
 2. **Sanitization and Redaction:**
    Production traces contain sensitive enterprise information, including:
+
    - Private database records
    - Proprietary source code
    - Security credentials (API keys, OAuth tokens)
@@ -109,7 +108,6 @@ In frontier engineering practice [@dubey2024llama; @openai2023gpt4], the traject
      $$\tau^* = \arg\min_{\tau \in \mathcal{T}(x)} |\tau| \quad \text{subject to} \quad R(\tau) = 1$$
 
    - *Syntactic and Schema Validity:* Every intermediate tool call must strictly adhere to the declared OpenAPI or JSON Schema specification without syntax errors or runtime exceptions.
-
 4. **Continuous Retraining and Policy Rollout:**
    Curated trajectories are formatted into multi-turn SFT datasets. The fine-tuned policy is deployed to production, where its enhanced capabilities solve more complex user problems, generating richer execution traces that feed subsequent training cycles.
 
@@ -117,11 +115,11 @@ In frontier engineering practice [@dubey2024llama; @openai2023gpt4], the traject
 
 Early attempts at tool integration relied on manual human demonstrations, where human annotators explicitly wrote API calls into text datasets. This approach is unscalable and fails to teach models *when* tool assistance is genuinely beneficial.
 
-The seminal Toolformer architecture introduced by Schick et al. [@schick2023toolformer] demonstrated that language models can autonomously teach themselves to invoke external tools via self-supervised bootstrapping without human annotation.
+The seminal Toolformer architecture introduced by @schick2023toolformer demonstrated that language models can autonomously teach themselves to invoke external tools via self-supervised bootstrapping without human annotation.
 
 The core intuition of Toolformer is straightforward: an API call is valuable if and only if knowing the API's execution output reduces the model's perplexity when predicting future tokens in the text.
 
-### The Self-Supervised Optimization Criterion
+### The self-supervised optimization criterion
 
 Let $x = (x_1, \dots, x_N)$ be a sequence of natural language text. The Toolformer bootstrapping algorithm proceeds in three phases:
 
@@ -169,7 +167,8 @@ As illustrated in @fig-vol3-trajectory-pipeline, the synthetic trajectory pipeli
    A high-capacity teacher policy $\pi^*_{\theta}$ (such as an ensemble of frontier models or a model augmented with test-time Monte Carlo Tree Search) executes multi-turn rollouts within isolated sandboxes. The teacher samples stochastic actions across multiple temperature settings to explore alternative reasoning branches.
 
 3. **Execution-Based Rejection Sampling:**
-   Candidate trajectories are verified strictly by execution. Rather than using an LLM-as-a-judge (which is vulnerable to style bias and circular hallucinations), verification relies on:
+   Candidate trajectories are verified strictly by execution. Rather than using a large language model (LLM) as a judge (which is vulnerable to style bias and circular hallucinations), verification relies on:
+
    - Deterministic unit test harnesses
    - Compiler return codes
    - Schema linters
@@ -181,25 +180,26 @@ As illustrated in @fig-vol3-trajectory-pipeline, the synthetic trajectory pipeli
    - *Passing Traces ($R(\tau) = 1$):* Filtered to extract the minimal golden execution path, stripping away dead-end exploratory retries.
    - *Failing Traces ($R(\tau) = 0$):* Routed to an error-recovery synthesis engine, where deliberate self-correction is incentivized.
 
-### Sandboxing and Verification Infrastructure
+### Sandboxing and verification infrastructure
 
 Executing millions of untrusted, model-generated actions during synthetic trajectory generation requires a highly scalable and secure sandboxing infrastructure (detailed in @sec-vol3-sandboxing-isolation). Launching heavyweight virtual machines for each trajectory rollout introduces prohibitive latency. Modern synthetic generation pipelines leverage lightweight containerized runtimes or WebAssembly (Wasm) micro-environments.
 
 These execution sandboxes must provide:
+
 - **State Isolation:** Each trajectory must run in an isolated environment with clean database schemas and mock file systems to prevent cross-contamination between parallel rollouts.
 - **Deterministic Reset:** Environments must reset to their exact initial state in milliseconds after a rollout completes, enabling high-throughput worker pools.
 - **Resource Quotas:** Strict bounds on CPU, memory, and network I/O must be enforced (e.g., via Linux cgroups) to prevent hallucinated code from executing infinite loops or consuming excessive memory.
 
-@tbl-vol3-synthesis-strategies compares the primary methodologies employed in modern trajectory generation pipelines.
+@Tbl-vol3-synthesis-strategies compares the primary methodologies employed in modern trajectory generation pipelines.
 
-| Strategy | Exploration Method | Verification Mechanism | Systems Complexity | Data Yield Efficiency |
-| :--- | :--- | :--- | :--- | :--- |
-| **Teacher Rollout** | Temperature sampling ($T \in [0.6, 0.9]$) | Static regex + unit tests | Low (batch inference) | Moderate (20% to 40%) |
-| **MCTS Search Trees** | Tree expansion + value rollouts | Stepwise environment reward | High (stateful backtracking) | Low (<10% optimal traces) |
-| **STaR Bootstrapping** | Self-generation + hint injection | Final answer correctness | Moderate (iterative epochs) | Moderate (30% to 50%) |
-| **Execution Rejection** | Multi-path parallel execution | Sandboxed pytest / test harness | High (Docker/Wasm sandbox) | High (95%+ verified purity) |
+| Strategy                | Exploration Method                        | Verification Mechanism          | Systems Complexity           | Data Yield Efficiency       |
+|:------------------------|:------------------------------------------|:--------------------------------|:-----------------------------|:----------------------------|
+| **Teacher Rollout**     | Temperature sampling ($T \in [0.6, 0.9]$) | Static regex + unit tests       | Low (batch inference)        | Moderate (20% to 40%)       |
+| **MCTS Search Trees**   | Tree expansion + value rollouts           | Stepwise environment reward     | High (stateful backtracking) | Low (<10% optimal traces)   |
+| **STaR Bootstrapping**  | Self-generation + hint injection          | Final answer correctness        | Moderate (iterative epochs)  | Moderate (30% to 50%)       |
+| **Execution Rejection** | Multi-path parallel execution             | Sandboxed pytest / test harness | High (Docker/Wasm sandbox)   | High (95%+ verified purity) |
 
-: Comparison of Trajectory Synthesis and Verification Methodologies. {#tbl-vol3-synthesis-strategies}
+: **Trajectory Synthesis and Verification Methodologies**: Exploration method, verification mechanism, systems complexity, and data yield efficiency across the four dominant trajectory generation pipelines. {#tbl-vol3-synthesis-strategies}
 
 ## Trajectory Distillation {#sec-vol3-fine-tuning-trajectory-distillation}
 
@@ -207,7 +207,7 @@ Deploying frontier teacher models (or models running test-time search, detailed 
 
 **Trajectory Distillation** resolves this operational constraint by compressing the search capabilities of large teacher models into compact, single-pass student policies [@hinton2015distilling; @zeng2023agenttuning].
 
-### Search Tree Collapsing
+### Search tree collapsing
 
 Consider an agent task requiring complex debugging across a code repository. During synthetic data generation, a frontier teacher uses Monte Carlo Tree Search (MCTS), exploring 120 candidate actions across 15 tree levels, generating 80,000 total tokens before discovering the correct four-step patch.
 
@@ -225,9 +225,9 @@ When an agent model is fine-tuned exclusively on flawless, expert trajectories w
 
 This triggers **Autoregressive Covariate Shift**: the model emits a nonsensical repeat command, hallucinations cascade, and the agent enters an unrecoverable infinite failure loop [@ross2011reduction].
 
-### The DAgger Formulation for Agents
+### The DAgger formulation for agents
 
-In classical imitation learning, Ross et al. [@ross2011reduction] established that training a policy on expert demonstrations leads to quadratic error compounding in trajectory length: $\mathcal{O}(\epsilon H^2)$, where $\epsilon$ is the single-step error rate and $H$ is the trajectory horizon.
+In classical imitation learning, @ross2011reduction established that training a policy on expert demonstrations leads to quadratic error compounding in trajectory length: $\mathcal{O}(\epsilon H^2)$, where $\epsilon$ is the single-step error rate and $H$ is the trajectory horizon.
 
 To achieve linear error bounds $\mathcal{O}(\epsilon H)$, the training distribution must match the policy's own rollout distribution through Dataset Aggregation (DAgger).
 
@@ -265,7 +265,7 @@ As demonstrated in @fig-vol3-trajectory-loss, computing loss over environment to
 3. **Gradient Swamping:**
    A single verbose compiler stack trace or JSON payload can contain 8,000 tokens. If loss is computed over observation tokens, the massive volume of external data swamps the gradient updates of the 40-token tool call, diluting the learning signal for decision-making logic.
 
-### Mathematical Formulation of Masked Trajectory Loss
+### Mathematical formulation of masked trajectory loss
 
 Let $\tau = (x_1, x_2, \dots, x_T)$ be a tokenized multi-turn trajectory sequence of length $T$. We define a binary loss mask vector $M \in \{0, 1\}^T$:
 
@@ -277,30 +277,55 @@ $$\mathcal{L}_{\text{trajectory}}(\theta) = - \frac{1}{\sum_{t=1}^T M_t} \sum_{t
 
 Notice that the normalization factor is $\sum_{t=1}^T M_t$ (the total count of active policy tokens) rather than the full sequence length $T$. Normalizing by $T$ would artificially penalize trajectories that received verbose tool observations, dampening gradient steps on long-context execution traces [@deepseek2024v3; @zheng2023judging].
 
-::: {#pri-vol3-loss-masking .callout-principle title="The Environmental Causality Masking Principle"}
-During multi-turn agent fine-tuning, backpropagation must propagate gradients exclusively through tokens generated by the model's internal policy. All tokens injected by external environments—including stdout logs, API response payloads, and database query results—must be assigned a loss mask of zero.
-:::
+**Environmental causality masking**: During multi-turn agent fine-tuning, backpropagation must propagate gradients exclusively through tokens generated by the model's internal policy. All tokens injected by external environments—including stdout logs, API response payloads, and database query results—must be assigned a loss mask of zero.
 
 ## Long-Context Training Infrastructure {#sec-vol3-fine-tuning-long-context-infrastructure}
 
 Agent trajectories inherently span tens of thousands of tokens due to multi-turn interactions, verbose tool outputs, and expansive reasoning scratchpads. Standard Supervised Fine-Tuning infrastructure, which typically limits sequence lengths to 4,096 or 8,192 tokens, is insufficient for end-to-end trajectory training.
 
-Training on trajectories of 32K, 64K, or 128K tokens introduces severe memory constraints. While Data Parallelism (DP) and Tensor Parallelism (TP) partition model weights across accelerators, the activation memory required for the forward and backward passes scales quadratically with sequence length in standard attention. A single 128K-token trajectory batch can easily consume hundreds of gigabytes of GPU High-Bandwidth Memory (HBM), resulting in immediate Out-Of-Memory (OOM) errors even on 80GB H100 clusters.
+Training on trajectories of 32K, 64K, or 128K tokens introduces severe memory constraints. While Data Parallelism (DP) and Tensor Parallelism (TP) partition model weights across accelerators, the activation memory required for the forward and backward passes scales quadratically with sequence length in standard attention. Even after FlashAttention-style streaming removes the materialized score matrix and full gradient checkpointing discards every intermediate tensor, an activation footprint survives at each layer boundary, and whether one 128K-token trajectory fits in the HBM of an 80 GB H100 is settled entirely by that residual.
+
+::: {#nbk-finetuning-activation-memory .callout-notebook title="Activation memory for one 128K-token trajectory"}
+
+**Problem**: How much accelerator memory does a single 128K-token agent trajectory consume in activations alone, and how far must that sequence be split before it fits?
+
+**Variables**: A 70-billion-parameter dense transformer, taken as a scenario assumption rather than a measurement: $n_{\text{layers}} = 80$, $d_{\text{model}} = 8192$, bfloat16 at $2\text{ bytes}$ per value, micro-batch size 1, sequence length $T = 131{,}072\text{ tokens}$. Full gradient checkpointing is assumed, so only the input activation to each transformer layer survives the forward pass and every intermediate tensor is recomputed during the backward pass. An un-checkpointed layer instead retains roughly $34\text{ bytes}$ per token per hidden dimension against the $2\text{ bytes}$ counted here. The device is an $80\text{ GB}$ H100, and a training node holds eight of them.
+
+**Math**: A layer boundary stores one bfloat16 vector of width $d_{\text{model}}$ per token.
+
+$$\text{per token per layer} = 8192 \times 2\text{ bytes} = 16{,}384\text{ bytes}$$
+
+$$\text{per layer} = 131{,}072 \times 16{,}384\text{ bytes} = 2.147\text{ GB}$$
+
+$$\text{per trajectory} = 80 \times 2.147\text{ GB} = 171.8\text{ GB}$$
+
+Measured against one device, and then split across the eight devices of a node:
+
+$$\frac{171.8\text{ GB}}{80\text{ GB}} = 2.15 \qquad \frac{171.8\text{ GB}}{8} = 21.5\text{ GB per rank}$$
+
+Dropping checkpointing multiplies the per-layer residency by $34 / 2 = 17$:
+
+$$171.8\text{ GB} \times 17 = 2{,}921\text{ GB} \approx 2.9\text{ TB}$$
+
+**Result**: $171.8\text{ GB}$, which is $2.15\times$ the entire HBM of one H100 before a single parameter, gradient, or optimizer moment is stored. Three ranks is the bare arithmetic minimum and leaves nothing for weights; splitting the sequence across a full eight-device node brings activations to $21.5\text{ GB}$ per rank, about a quarter of each device. The same trajectory trained without checkpointing needs $2.9\text{ TB}$.
+
+**Systems insight**: The binding constraint is the sequence dimension, not the parameter count, and the two are partitioned along different axes. Tensor and data parallelism reduce the $171.8\text{ GB}$ not at all, because every rank in a tensor-parallel group still carries the full sequence of layer-boundary activations. Only a split along $T$ divides that number, which is why long-trajectory fine-tuning has to budget Sequence Parallelism or Ring Attention into the parallelism plan from the start rather than reaching for it after the first out-of-memory failure.
+
+:::
 
 To support full-trajectory fine-tuning, training platforms must implement **Sequence Parallelism (SP)** [@korthikanti2023activation] or **Ring Attention** [@liu2023ringAttention].
 
 1. **Sequence Parallelism:** In Megatron-LM style sequence parallelism, the sequence dimension of activation tensors is partitioned across multiple GPUs operating within the same tensor parallel group. Instead of each GPU retaining the full sequence of activations, each GPU computes attention for its designated sequence chunk, performing all-gather and reduce-scatter operations over the sequence dimension during the forward and backward passes.
 2. **Ring Attention:** For extreme sequence lengths (e.g., 1M+ tokens), Ring Attention physically distributes the KV cache across a ring topology of GPUs. During attention computation, GPUs compute local block attention while asynchronously passing KV blocks to the next device in the ring, perfectly overlapping communication with computation and ensuring memory usage scales linearly with sequence length rather than quadratically.
 
-::: {#pri-vol3-sequence-parallelism .callout-principle title="The Sequence Partitioning Principle"}
-When fine-tuning models on extended agent trajectories, activation memory becomes the primary bottleneck, not model weights. System architectures must partition the context window across distributed memory pools using Sequence Parallelism or Ring Attention to avoid truncated context windows that artificially break multi-turn causality.
-:::
+**Sequence partitioning**: When fine-tuning models on extended agent trajectories, activation memory becomes the primary bottleneck, not model weights. System architectures must partition the context window across distributed memory pools using Sequence Parallelism or Ring Attention to avoid truncated context windows that artificially break multi-turn causality.
 
 ## Alignment vs. Execution: DPO and RLHF {#sec-vol3-fine-tuning-alignment-vs-execution}
 
 Supervised Fine-Tuning (SFT) is fundamentally a behavioral cloning technique: it teaches the agent *how to do* a task by mimicking positive trajectories. However, standard cross-entropy loss cannot effectively teach an agent *what not to do*. SFT cannot assign negative probability mass to catastrophic actions or penalize inefficient search behavior.
 
-To bridge this gap, agent post-training pairs SFT with preference optimization algorithms such as **Direct Preference Optimization (DPO)** or **Reinforcement Learning from Human Feedback (RLHF)** (explored formally in @sec-vol3-reinforcement-learning). These algorithms introduce an essential duality in agent training:
+To bridge this gap, agent post-training pairs SFT with preference optimization algorithms such as **direct preference optimization (DPO)** or **Reinforcement Learning from Human Feedback (RLHF)** (explored formally in @sec-vol3-reinforcement-learning). These algorithms introduce an essential duality in agent training:
+
 1. **Execution (SFT):** Bootstrapping the mechanical ability to invoke tools, format JSON, and generate syntax-valid code.
 2. **Alignment (DPO/RLHF):** Shaping the agent's decision-making policy over the search space, heavily penalizing trajectory paths that violate user constraints, trigger destructive commands (e.g., `rm -rf`), or waste test-time compute on cyclic reasoning.
 
@@ -316,26 +341,24 @@ Full-parameter fine-tuning (modifying all 70 billion parameters of a frontier mo
 ![](images/svg/lora_adapter_swapping.svg){width=100%}
 :::
 
-### Low-Rank Parameter Decomposition
+### Low-rank parameter decomposition
 
 As detailed in @fig-vol3-lora-adapters, rather than updating the massive base weight matrices during training, LoRA approximates the necessary weight updates using a pair of much smaller, low-rank matrices. (The formal algebraic derivation of this matrix decomposition, initialization distributions, and forward-pass scaling is detailed in @sec-vol3-appendix-math-lora).
 
 Because these low-rank matrices represent only a tiny fraction of the original parameter count, they can be trained quickly and stored efficiently. In QLoRA [@dettmers2023qlora], the base weights are further quantized to 4-bit NormalFloat (NF4) with double dequantization, reducing the memory footprint of a 70B parameter model from 140 GB to approximately 35 GB, allowing fine-tuning to execute on commodity server hardware.
 
-### Dynamic Multi-Tenant Adapter Swapping
+### Dynamic multi-tenant adapter swapping
 
 For agent serving systems, the true power of LoRA lies in runtime multi-tenancy. Modern serving runtimes (such as S-LoRA and Punica) exploit the property that a LoRA adapter for rank $r=16$ occupies less than 50 megabytes of memory.
 
 Instead of deploying separate model replicas:
 
 1. A single shared instance of the 70B quantized base model is loaded into GPU HBM alongside a shared PagedAttention KV-cache pool (see @sec-vol3-caching-pagedattention-virtual-memory-page).
-
 2. Multiple specialized agent adapters are cached in host memory (CPU RAM) and streamed to GPU HBM on demand:
    - $\mathcal{A}_{\text{bash}}$: Fine-tuned on terminal execution, AST refactoring, and shell error recovery.
    - $\mathcal{A}_{\text{SQL}}$: Fine-tuned on relational database schemas, join planning, and syntax validation.
    - $\mathcal{A}_{\text{browser}}$: Fine-tuned on DOM tree accessibility structures and browser interaction primitives.
-
-3. When an Agent Control Block (ACB, detailed in @sec-vol3-descriptors-the-agent-control-block) dispatches an execution step, the runtime applies batched matrix-vector multiplication (batched GEMM) using the corresponding adapter without reloading base model weights, achieving sub-millisecond adapter switching latency.
+3. When an Agent Control Block (ACB, detailed in @sec-vol3-descriptors-the-agent-control-block) dispatches an execution step, the runtime applies a batched general matrix multiplication (GEMM) using the corresponding adapter without reloading base model weights, achieving sub-millisecond adapter switching latency.
 
 ## Schema Generalization vs. Memorization {#sec-vol3-fine-tuning-schema-generalization-vs-memorization}
 
@@ -343,7 +366,7 @@ A recurring dilemma in agent training is balancing schema memorization against s
 
 If an agent is fine-tuned repeatedly on five specific corporate APIs (e.g., Jira, Slack, GitHub, Datadog, AWS S3), its attention layers overfit to the exact property names and parameter orderings of those APIs [@patil2023gorilla]. When subsequently presented with an unseen OpenAPI tool specification at runtime, the model's zero-shot execution collapses: it hallucinates argument names matching its memorized training schemas rather than reading the new schema provided in context.
 
-### Regularization via Schema Perturbation
+### Regularization via schema perturbation
 
 To prevent catastrophic schema memorization, trajectory synthesis pipelines employ **Schema Regularization** [@tang2023toolalpaca]:
 
@@ -366,7 +389,7 @@ Prominent agent benchmarks—such as SWE-bench [@jimenez2024swebench] (resolving
 
 A contaminated model does not learn generalizable problem-solving policies; it merely reproduces memorized patches, resulting in spectacular benchmark scores that collapse completely when deployed on private enterprise repositories.
 
-### Robust Decontamination Pipelines
+### Robust decontamination pipelines
 
 Production agent training pipelines implement three layers of decontamination:
 
@@ -414,6 +437,8 @@ Failing to set $M_t = 0$ on external environment tokens causes models to memoriz
 Fine-tuning small adapters ($r \le 8$) exclusively on a narrow set of static tool schemas causes the adapter to act as a hardcoded macro generator. The model loses its capacity to understand schema variations, breaking down when an API endpoint updates its optional argument list.
 
 :::
+
+Principle \ref{pri-vol3-trajectory-post-training} is quantified in this chapter rather than restated. The reason a base model cannot act as an agent without trajectory post-training is that the behaviors an agent needs, recovering from a failed tool call and carrying a scratchpad across turns, appear in no single-turn corpus, so no amount of prompting recovers them.
 
 ## Chapter Summary {#sec-vol3-fine-tuning-summary}
 

