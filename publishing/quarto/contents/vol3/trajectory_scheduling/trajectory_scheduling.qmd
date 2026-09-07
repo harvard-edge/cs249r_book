@@ -143,6 +143,22 @@ When total aggregate KV-cache demand exceeds physical accelerator capacity, the 
 
 In production clusters without predictive admission control, Coffman deadlocks manifest as sudden, cluster-wide CUDA Out-of-Memory (OOM) fatal crashes [@sheng2024fairness]. Because standard GPU allocators lack kernel-level page swapping when HBM is completely exhausted, the runtime crashes worker processes, destroying hundreds of active workflows simultaneously.
 
+The expanding footprint is not unique to accelerator memory, and neither is the way a cluster loses the ability to save itself once that footprint outgrows the capacity that was provisioned for it. A managed database control plane crossed the same boundary in 2015, and the published postmortem is unusually explicit about what stopped working (\ref{ws-scheduling-dynamodb-2015}).
+
+::: {#ws-scheduling-dynamodb-2015 .callout-war-story title="The DynamoDB metadata service overload (2015)"}
+
+**Context**: Each DynamoDB storage server holds an assigned group of table partitions, called a membership, and periodically retrieves that assignment from a shared metadata service. Over the months preceding September 2015, customers rapidly adopted Global Secondary Indexes, and because a global secondary index carries its own partitions on storage servers, every membership message grew [@aws2015dynamodb].
+
+**Mechanism**: A storage server that cannot retrieve its membership within a fixed time budget retries the request and temporarily disqualifies itself from accepting traffic. On September 20, 2015 at 2:19am PDT, a brief network disruption caused a portion of the US-East storage fleet to request membership at once. The messages were now large enough that a share of the responses exceeded the retrieval and transmission time the storage servers allowed. Those servers timed out, removed themselves from service, and retried, and the retries held the metadata service at saturation. AWS reported that it lacked detailed monitoring of membership size and had not allocated enough metadata service capacity for the heavier requests.
+
+**Impact**: By 2:37am PDT the DynamoDB error rate had stabilized at approximately $55\%$, a level beyond anything the service had seen in the previous three years. Operators could not add capacity, because the administrative requests that would have added it had to pass through the same saturated service. Service was restored only after they paused requests to the metadata service at 5:06am PDT, which cut retry load enough for capacity to be added; error rates returned to normal at 7:10am PDT. EC2 Auto Scaling, which depends on DynamoDB, remained delayed until 10:52am PDT.
+
+**Fix**: AWS increased metadata service capacity, instrumented monitoring on membership size, reduced the rate at which storage nodes request membership data, lengthened the time allowed to process those queries, and segmented the service so each metadata instance serves only a portion of the storage fleet.
+
+**Systems lesson**: Capacity had been sized against a per-client footprint that then grew with an unrelated product feature, and nothing measured the growth. Once aggregate demand crossed capacity, the timeout-and-retry path converted a shortfall into a multiplier, and the system retained no way to refuse work, including the work of its own repair. This is the shape a trajectory scheduler inherits when it admits sessions on their current context length: the footprint that decides whether the cluster survives is the one at step 35, not the one at step 1, and a runtime with no gate on that quantity loses its capacity to recover along with its capacity to serve. Admission control is what preserves the ability to act.
+
+:::
+
 ## Predictive Admission Control {#sec-vol3-scheduling-predictive-horizon-sizing-and}
 
 To eliminate OOM crashes and admission deadlocks, the cluster scheduler must decouple admission from instantaneous memory availability. It must implement **Capacity-Aware Predictive Admission Control**, reserving memory based on predicted trajectory horizons [@agrawal2024sarathi; @ferguson2012jockey].
