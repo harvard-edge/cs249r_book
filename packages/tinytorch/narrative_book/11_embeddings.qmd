@@ -60,58 +60,34 @@ There are two ways to fill $P$. The first is to learn it, exactly like $W$; GPT-
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 11 (`src/11_embeddings/11_embeddings.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of the gather, the scatter-add, and the position tables. The listings use the `Tensor` from Chapter 6 (with its `_parents` set and `_backward_fn` hook) and the `Layer` base class from Chapter 3, so they run only after those two definitions are loaded.
+The listings in this section are extracted from Module 11 (`src/11_embeddings/11_embeddings.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. The module keeps the learned position table and the fixed sinusoidal table as separate things, and a third class, `EmbeddingLayer`, composes a token table with either; its `forward` is written in its own cell and attached to the class, the way Module 08 attaches the `Trainer` methods. Only `__repr__` methods are elided.
 :::
 
 ### The embedding table
 
-Every language model starts with this layer, and it is the first thing a training step touches. GPT-2 has $V = 50{,}257$ and $D = 768$, and a step hands the model a batch of 1,024 token IDs. The Problem priced the one-hot route for exactly this case: a $1{,}024 \times 50{,}257$ matrix of 206 MB and a matrix multiply of 39 billion products, almost all of them by zero. I timed that multiply on my machine (an M5 Max, NumPy 1.26) and it takes about 66 milliseconds; the same 1,024 rows read straight out of the table take about a tenth of a millisecond, several hundred times faster, and the two results are identical to the last bit. The one-hot form computes the right answer by the most expensive route available.
+Every language model starts with this layer, and it is the first thing a training step touches. GPT-2 has $V = 50{,}257$ and $D = 768$, and a step hands the model a batch of 1,024 token IDs. The Problem priced the one-hot route for exactly this case: a $1{,}024 \times 50{,}257$ matrix of 206 MB and a matrix multiply of 39 billion products, almost all of them by zero. I timed that multiply on my machine and it takes about 47 milliseconds; the same 1,024 rows read straight out of the table take about half a millisecond, a hundred times faster, and the two results are identical to the last bit. The one-hot form computes the right answer by the most expensive route available.
 
 So the question the layer answers is whether we can skip the multiply entirely and copy the row. The Idea showed that the product *is* row $i$, so we can. Row $i$ starts $i \times D \times 4$ bytes into the table's buffer, and the forward pass copies $D$ floats out from there. For GPT-2's width that is 3,072 bytes per token, and the whole batch is 3.1 MB of reads and no arithmetic.
 
-The layer holds one `Tensor`, the table `W`, initialized with the Xavier-uniform bound from Chapter 3 so that row magnitudes match what the first `Linear` layer downstream expects. `forward` takes a NumPy array of integer IDs rather than a `Tensor`, because Chapter 6's `Tensor` stores `float32` and IDs are integers. Three things to watch for: the range check, the one-line gather, and the backward closure that scatters.
+Module 11 follows the pattern of every layer since Chapter 2: an operation that does the work on arrays, and a layer that owns the table and calls it. The operation is the interesting half, because the lookup is the first operation in the book whose backward is not a formula but a routing rule. Three things to watch for: the one-line gather, the way the indices travel, and the scatter-add.
 
-```python
-import numpy as np
+{{< include _listings/11_embeddings/EmbeddingFunction.qmd >}}
 
-class Embedding(Layer):
-    """A learnable table with one row per token ID."""
-    def __init__(self, vocab_size: int, embed_dim: int):
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
-        limit = np.sqrt(6.0 / (vocab_size + embed_dim))       # Xavier-uniform bound
-        data = np.random.uniform(-limit, limit, (vocab_size, embed_dim))
-        self.weight = Tensor(data, requires_grad=True)
+`weight[self.indices]` is NumPy's fancy indexing, and it does exactly what the math says. The indices are not an input to the operation, they are a parameter of it, passed as `indices=` when the layer calls `apply` and stored on the node; the table is the only input, so it is the only tensor the graph records, which is right, because nothing differentiates with respect to a token ID. `indices` can be a flat array of $S$ IDs or a $B \times S$ batch; the result has one extra trailing dimension of size $D$ either way.
 
-    def forward(self, ids) -> Tensor:
-        ids = np.asarray(ids, dtype=np.int64)
-        if ids.min() < 0 or ids.max() >= self.vocab_size:
-            raise ValueError(f"token ID out of range for vocab_size={self.vocab_size}")
+The backward is where the operation earns its class. Here is the trap. The obvious way to send gradients back to the table is `grad_weight[indices] += grad_output`, and for the sequence `[2, 0, 3]` it works. For `[2, 0, 2]` it silently gives the wrong number. NumPy evaluates that line as a read, an add, and a write, so the two gradients for row 2 are both added to the *original* row and the second write overwrites the first. Row 2 ends up with one gradient instead of two, and nothing warns you. Chapter 6's rule that a tensor used twice receives two contributions has to hold for table rows as well, which is why the method uses `np.add.at`. That is the scatter-add. For every flattened index it adds the matching gradient row into `grad_weight`, and repeated indices accumulate instead of racing. Rows that were never looked up stay zero. Notice what the method allocates, though. `grad_weight` is a full $V \times D$ array, 154 MB for GPT-2, of which a batch of 1,024 tokens fills at most 1,024 rows. We pay to zero it and pay again when the optimizer reads it. The production bridge below shows what PyTorch's `sparse=True` does about that.
 
-        out = Tensor(self.weight.data[ids], requires_grad=self.weight.requires_grad)  # gather
+The layer holds the table, initialized with the Xavier-uniform bound from Chapter 3 so that row magnitudes match what the first `Linear` layer downstream expects, checks the IDs, and calls the operation.
 
-        if out.requires_grad:
-            out._parents = {self.weight}
-            def _backward():
-                grad_w = np.zeros_like(self.weight.data)
-                np.add.at(grad_w, ids.reshape(-1), out.grad.reshape(-1, self.embed_dim))  # scatter-add
-                self.weight.grad = grad_w if self.weight.grad is None else self.weight.grad + grad_w
-            out._backward_fn = _backward
-        return out
-```
+{{< include _listings/11_embeddings/Embedding.qmd >}}
 
-`self.weight.data[ids]` is NumPy's fancy indexing, and it does exactly what the math says. `ids` can be a flat list of $S$ IDs or a $B \times S$ batch; the result has one extra trailing dimension of size $D$ either way. The range check exists because an ID of `vocab_size` or larger would otherwise fail deep inside NumPy with a message that names neither the token nor the table. PyTorch's `nn.Embedding` is this class with the same `weight` attribute and the same gather.
-
-The backward is where the layer earns its own class. Here is the trap. The obvious way to send gradients back to the table is `grad_w[ids] += out.grad`, and for the sequence `[2, 0, 3]` it works. For `[2, 0, 2]` it silently gives the wrong number. NumPy evaluates that line as a read, an add, and a write, so the two gradients for row 2 are both added to the *original* row and the second write overwrites the first. Row 2 ends up with one gradient instead of two, and nothing warns you. Chapter 6's rule that a tensor used twice receives two contributions has to hold for table rows as well, which is why the closure uses `np.add.at`. That is the scatter-add. For every flattened index it adds the matching gradient row into `grad_w`, and repeated indices accumulate instead of racing. Rows that were never looked up stay zero.
-
-Notice what the closure allocates, though. `grad_w` is a full $V \times D$ array, 154 MB for GPT-2, of which a batch of 1,024 tokens fills at most 1,024 rows. We pay to zero it and pay again when the optimizer reads it. The production bridge below shows what PyTorch's `sparse=True` does about that.
+The IDs arrive as a `Tensor`, because that is what the loader of Chapter 5 hands over, and Chapter 1's `Tensor` stores `float32`, so `forward` casts them to integers before the lookup. The range check exists because an ID of `vocab_size` or larger would otherwise fail deep inside NumPy with a message that names neither the token nor the table. And the table is created with `requires_grad=True` for a reason the module's own comment spells out: `apply` records an operation only when some input requires a gradient, so a table created without the flag would look up correctly forever and never learn. PyTorch's `nn.Embedding` is this class with the same `weight` attribute and the same gather.
 
 ### The sinusoidal table
 
 The reason we need a position table at all is Chapter 12. Attention treats its inputs as a set, and The Problem showed what a set does to *"the dog bit the man"*. Chapter 13's GPT puts this table at the very front of the model, so every token that enters a transformer block has already been stamped with where it sits.
 
-The obvious way to fill $P$ is to learn it, and GPT-2 does. That costs $S_{\max} \times D$ parameters, which for GPT-2 is $1{,}024 \times 768 \approx 0.8$ million, small next to the 38.6 million in $W$. The real costs are elsewhere. Row $t$ only gets a gradient from sequences that are at least $t$ tokens long, so the rows for late positions see far less training data than the rows for early ones. And the table is a hard wall: position 1,025 has no row, so a sequence one token longer than the longest one in training cannot be processed at all.
+The obvious way to fill $P$ is to learn it, and GPT-2 does; that is the `PositionalEncoding` class below. It costs $S_{\max} \times D$ parameters, which for GPT-2 is $1{,}024 \times 768 \approx 0.8$ million, small next to the 38.6 million in $W$. The real costs are elsewhere. Row $t$ only gets a gradient from sequences that are at least $t$ tokens long, so the rows for late positions see far less training data than the rows for early ones. And the table is a hard wall: position 1,025 has no row, so a sequence one token longer than the longest one in training cannot be processed at all.
 
 The question is whether a fixed formula can give every position a distinct row, for free, with no length limit built in, and with the extra property that nearby positions get nearby rows. Vaswani et al. (2017) answered it with sines and cosines. For position $t$ and dimension pair $(2k, 2k+1)$:
 
@@ -119,21 +95,13 @@ $$P[t, 2k] = \sin(\omega_k t), \qquad P[t, 2k+1] = \cos(\omega_k t), \qquad \ome
 
 Here $\omega_k$ is the angular frequency of pair $k$, and the frequencies fall off geometrically. Pair 0 has $\omega_0 = 1$ and completes a cycle every $2\pi \approx 6$ positions; the last pair has $\omega \approx 1/10000$ and barely moves across an entire document. Think of a clock with $D/2$ hands, each turning slower than the one before. The fast hands distinguish neighboring positions, the slow hands distinguish distant ones, and no two positions share the same reading on every hand until the slowest hand completes a full turn, about 63,000 positions later.
 
-The table is a plain function of two integers. It builds the frequencies once, then fills even columns with sines and odd columns with cosines. `embed_dim` must be even, so the columns pair up.
+The table is a plain function of two integers. It builds the frequencies once, writing $10000^{-2k/D}$ as $\exp(-2k \ln 10000 / D)$, then fills even columns with sines and odd columns with cosines, with a guard for an odd width so the last column is not left empty.
 
-```python
-def sinusoidal_table(max_len: int, embed_dim: int) -> np.ndarray:
-    """P[t, 2k] = sin(w_k t), P[t, 2k+1] = cos(w_k t), with w_k = 10000^(-2k/D)."""
-    t = np.arange(max_len, dtype=np.float32)[:, None]               # (max_len, 1)
-    two_k = np.arange(0, embed_dim, 2, dtype=np.float32)            # 0, 2, 4, ...
-    omega = 1.0 / (10000.0 ** (two_k / embed_dim))                  # (D/2,) frequencies
-    P = np.zeros((max_len, embed_dim), dtype=np.float32)
-    P[:, 0::2] = np.sin(t * omega)                                  # (max_len, D/2) broadcast
-    P[:, 1::2] = np.cos(t * omega)
-    return P
-```
+{{< include _listings/11_embeddings/sinusoidal_table.qmd >}}
 
-`t * omega` multiplies a column of positions by a row of frequencies, so each entry is one position times one frequency, which is the stride-0 broadcast of Chapter 1 doing the work of a double loop. Row 0 is always `[0, 1, 0, 1, ...]`, because $\sin 0 = 0$ and $\cos 0 = 1$; that is a quick sanity check when something looks wrong. PyTorch has no layer for this table. The original Transformer stores it as a buffer, a tensor saved with the model but never trained, which is exactly what the `learned=False` branch of the next listing does.
+{{< include _listings/11_embeddings/create_sinusoidal.qmd >}}
+
+`position * div_term` multiplies a column of positions by a row of frequencies, so each entry is one position times one frequency, which is the stride-0 broadcast of Chapter 1 doing the work of a double loop. Row 0 is always `[0, 1, 0, 1, ...]`, because $\sin 0 = 0$ and $\cos 0 = 1$; that is a quick sanity check when something looks wrong. `create_sinusoidal_embeddings` wraps the array in a `Tensor` without `requires_grad`, so nothing ever records it and no optimizer ever sees it. PyTorch has no layer for this table. The original Transformer stores it as a buffer, a tensor saved with the model but never trained, which is exactly what this function returns.
 
 Two properties of the formula are worth keeping, because the production schemes lean on both. First, each sine and cosine pair has length exactly one, so every row of $P$ has length $\sqrt{D/2}$ and adding it to a token row shifts that row by the same fixed amount at every position. Second, the row for position $t + \Delta$ is a fixed linear function of the row for position $t$, one that depends on the offset $\Delta$ and not on $t$. Within each pair, the angle-addition identities for sine and cosine give
 
@@ -143,56 +111,25 @@ The $2 \times 2$ matrix is a rotation by the angle $\omega_k \Delta$. A layer th
 
 ### The positional layer
 
-Now the addition. In training, the model sees a batch of $B$ sequences, and the same $S \times D$ slice of the position table has to be added to every one of them. The naive way is to build a $B \times S \times D$ copy of the table first, then add. For a batch of 8 sequences of 2,048 tokens at $D = 4{,}096$, that copy is 268 MB of memory that holds nothing new. I measured it: tiling the table and then adding takes about 65 milliseconds on my machine, and adding the untiled table takes about 11. The difference is one whole pass over memory that did not need to happen.
+Now the addition. In training, the model sees a batch of $B$ sequences, and the same $S \times D$ slice of the position table has to be added to every one of them. The naive way is to build a $B \times S \times D$ copy of the table first, then add. For a batch of 8 sequences of 2,048 tokens at $D = 4{,}096$, that copy is 268 MB of memory that holds nothing new. I measured it: tiling the table and then adding takes about 54 milliseconds on my machine, and adding the untiled table takes about 8. The difference is one whole pass over memory that did not need to happen.
 
-The fix is the one Chapter 1 built for the bias of a `Linear` layer. Can a table slice of shape $(S, D)$ act as a $(B, S, D)$ tensor without copying a byte? It can, because a stride of zero on the batch axis makes every sequence read the same rows. NumPy applies that rule on its own when the shapes line up, so `x.data + P` is the whole forward.
+The fix is the one Chapter 1 built for the bias of a `Linear` layer. Can a table slice of shape $(S, D)$ act as a $(B, S, D)$ tensor without copying a byte? It can, because a stride of zero on the batch axis makes every sequence read the same rows. NumPy applies that rule on its own when the shapes line up, so the addition is one `+`.
 
-The backward is where the broadcast has to be undone. Row $t$ of the table was added to position $t$ of every sequence in the batch, so it was used $B$ times, and Chapter 6's rule is that a value used $B$ times collects $B$ gradient contributions. The output gradient therefore has to be summed over the batch axis before it can land in the table. That is the reduction `_reduce_broadcast_grad` performs for every broadcast add in Chapter 6; here it is written out by hand, because the table was also sliced to `seq_len` rows on the way in. It is the same "used many times, add many contributions" rule as the embedding table's scatter-add, along a different axis.
+The backward is where the broadcast has to be undone. Row $t$ of the table was added to position $t$ of every sequence in the batch, so it was used $B$ times, and Chapter 6's rule is that a value used $B$ times collects $B$ gradient contributions. The output gradient therefore has to be summed over the batch axis before it can land in the table, and the slice that picked `seq_len` rows out of the table has to be undone as well, so that the gradient lands in the right rows and the rest stay zero. Module 11 writes none of that. Its learned `PositionalEncoding` slices the table with `Tensor` indexing, reshapes with `Tensor.reshape`, and adds with `+`, three operations Chapter 6 already knows how to reverse: `Add` reduces the broadcast batch axis with `_reduce_broadcast_grad`, `Reshape` restores the $(S, D)$ shape, and `Slice` scatters the rows back into a zero table. The layer's job is only to use tensor operations and stay out of the way.
 
-`PositionalEncoding` owns the second table and adds the first `seq_len` rows of it to whatever it receives. The `learned` flag decides whether the table is a parameter or a fixed sinusoidal fill.
+{{< include _listings/11_embeddings/PositionalEncoding.qmd >}}
 
-```python
-class PositionalEncoding(Layer):
-    """Adds a per-position row to each token vector."""
-    def __init__(self, max_len: int, embed_dim: int, learned: bool = False):
-        super().__init__()
-        if learned:
-            limit = np.sqrt(2.0 / embed_dim)                        # modest bound, since the row is added to a token row
-            data = np.random.uniform(-limit, limit, (max_len, embed_dim))
-            self.table = Tensor(data, requires_grad=True)
-        else:
-            self.table = Tensor(sinusoidal_table(max_len, embed_dim))   # fixed, no gradient
+Most of the method is checking, because the failure it guards against is silent otherwise; a 2D input would broadcast the wrong way and produce plausible numbers. The three lines that do the work are the slice, the reshape, and the addition. Read the module's comment above the reshape carefully, because it names a bug that looks like correct code: rewrapping `pos_embeddings.data` in a fresh `Tensor` would produce the same forward output and cut the table out of the graph, so the gradient would never arrive and the positions would never learn. The `start_pos` argument is for Chapter 18, whose cache feeds one token at a time and has to say which position that token holds. GPT-2 keeps its learned table as a second `nn.Embedding` indexed by `arange(seq_len)`, which is the same lookup with the position standing in for the token ID.
 
-    def forward(self, x: Tensor) -> Tensor:
-        seq_len, D = x.data.shape[-2], x.data.shape[-1]
-        P = self.table.data[:seq_len]                               # (seq_len, D) broadcasts over a batch
-        out = Tensor(x.data + P, requires_grad=(x.requires_grad or self.table.requires_grad))
+### Putting the two tables together
 
-        if out.requires_grad:
-            out._parents = {x, self.table}
-            def _backward():
-                if x.requires_grad:
-                    x.grad = out.grad.copy() if x.grad is None else x.grad + out.grad
-                if self.table.requires_grad:
-                    g = out.grad.reshape(-1, seq_len, D).sum(axis=0)   # every sequence shares row t
-                    grad_t = np.zeros_like(self.table.data)
-                    grad_t[:seq_len] = g
-                    self.table.grad = grad_t if self.table.grad is None else self.table.grad + grad_t
-            out._backward_fn = _backward
-        return out
-```
+The last step is wiring the tables together, and this is where Chapter 13 picks up. `EmbeddingLayer` owns a token table and one of three position choices: a learned `PositionalEncoding`, the fixed sinusoidal table, or nothing. Its `forward` is written in a separate cell and attached to the class.
 
-The gradient with respect to `x` passes straight through, since adding a constant has derivative one. The `reshape(-1, seq_len, D).sum(axis=0)` line is the batch sum, and it works whether `x` arrived as one sequence or as a batch, because a single sequence reshapes to a batch of one. In the sinusoidal case `self.table.requires_grad` is `False`, the second branch never runs, and `Layer.parameters()` from Chapter 3 reports nothing for this layer. GPT-2 keeps its learned table as a second `nn.Embedding` indexed by `arange(seq_len)`, which is the same lookup with the position standing in for the token ID.
+{{< include _listings/11_embeddings/EmbeddingLayer.qmd >}}
 
-The last step is wiring the two layers together, and this is where Chapter 13 picks up. The GPT there begins with exactly these two lines. The tokenizer's list of IDs goes in; a matrix of shape `(seq_len, embed_dim)` comes out, and for a batch of ID rows the output gains a leading batch dimension.
+{{< include _listings/11_embeddings/emblayer_forward.qmd >}}
 
-```python
-embed = Embedding(vocab_size=50257, embed_dim=768)
-pos = PositionalEncoding(max_len=1024, embed_dim=768)
-ids = [464, 1892, 22]                  # from BPETokenizer.encode(...) in Chapter 10
-h = pos(embed(ids))
-print(h.data.shape)                    # (3, 768)
-```
+Three things to notice. `parameters()` reports the position table only when it is learned, so an optimizer handed a sinusoidal model never sees the fixed rows; that is Chapter 3's explicit-list design paying off. The sinusoidal branch does exactly the rewrapping the learned branch's comment forbids, and the module says why: those rows are constants by design, so cutting them out of the graph is correct, and the addition still carries the gradient back through `token_embeds`, which is the part that learns. And the optional `scale_embeddings` multiplies the token rows by $\sqrt{D}$ before the positions are added, the convention from the original Transformer, which keeps a token row from being swamped by the unit-length position row when $D$ is large. Chapter 13's GPT begins with exactly this layer. The tokenizer's IDs go in; a `(batch, seq_len, embed_dim)` block comes out.
 
 ---
 
@@ -207,7 +144,7 @@ $$W = \begin{bmatrix}
 +0.30 & -0.90 & +0.70 & +0.00
 \end{bmatrix}$$
 
-and feed it the sequence `[2, 0, 3]` with sinusoidal positions. With $D = 4$ there are two frequency pairs, $\omega_0 = 1/10000^{0} = 1$ and $\omega_1 = 1/10000^{2/4} = 0.01$, so position $t$ produces the row $[\sin t, \cos t, \sin 0.01t, \cos 0.01t]$. @tbl-embedding-pe-trace runs the three positions through both layers.
+and feed it the sequence `[2, 0, 3]` with sinusoidal positions. With $D = 4$ there are two frequency pairs, $\omega_0 = 1/10000^{0} = 1$ and $\omega_1 = 1/10000^{2/4} = 0.01$, so position $t$ produces the row $[\sin t, \cos t, \sin 0.01t, \cos 0.01t]$. @tbl-embedding-pe-trace runs the three positions through both tables.
 
 | Position $t$ | Token ID | Gathered row $W[\text{ID}, :]$ | Position row $P[t, :]$ | Sum |
 | :--- | :--- | :--- | :--- | :--- |
@@ -219,40 +156,43 @@ and feed it the sequence `[2, 0, 3]` with sinusoidal positions. With $D = 4$ the
 
 The fast pair (columns 0 and 1) already differs noticeably between positions 0, 1, and 2; the slow pair (columns 2 and 3) has barely moved from $[0, 1]$. That is the clock with two hands, one turning a hundred times faster than the other.
 
-For the backward, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. The scatter-add sends row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$, so `W.grad` has ones in rows 0, 2, and 3 and zeros in row 1, the token that never appeared. Had the sequence been `[2, 0, 2]` instead, row 2 would hold twos and row 3 zeros; that second case is the one `grad_w[ids] += ...` gets wrong. The script below checks the forward table and both backward cases against the listings above.
+For the backward, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. The scatter-add sends row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$, so `W.grad` has ones in rows 0, 2, and 3 and zeros in row 1, the token that never appeared. Had the sequence been `[2, 0, 2]` instead, row 2 would hold twos and row 3 zeros; that second case is the one `grad_weight[indices] += ...` gets wrong. The script below runs the forward table and both backward cases through the module. The IDs go in as a batch of one sequence, which is the shape the layer expects, and the output has the matching leading dimension.
 
 ```python
-# Verification: runs after the Embedding and PositionalEncoding listings are loaded.
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.embeddings import EmbeddingLayer
+import tinytorch.core.autograd
+
 W_data = np.array([[+0.50, -0.20, +0.10, +0.80],
                    [-0.10, +0.40, -0.30, +0.20],
                    [+1.20, +0.10, -0.50, -0.40],
                    [+0.30, -0.90, +0.70, +0.00]], dtype=np.float32)
 
-embed = Embedding(vocab_size=4, embed_dim=4)
-embed.weight.data[:] = W_data                      # overwrite the random init with the trace table
-pos = PositionalEncoding(max_len=8, embed_dim=4)
+layer = EmbeddingLayer(vocab_size=4, embed_dim=4, max_seq_len=8, pos_encoding='sinusoidal')
+layer.token_embedding.weight.data[:] = W_data          # overwrite the random init with the trace table
 
-h = pos(embed([2, 0, 3]))
-print(np.round(h.data, 2))
-assert np.allclose(h.data[0], [1.20, 1.10, -0.50, 0.60], atol=1e-2)
-assert np.allclose(h.data[1], [1.34, 0.34, 0.11, 1.80], atol=1e-2)
-assert np.allclose(h.data[2], [1.21, -1.32, 0.72, 1.00], atol=1e-2)
+h = layer(Tensor([[2, 0, 3]]))                          # one sequence in a batch of one
+print(h.shape, np.round(h.data[0], 2))                  # (1, 3, 4) and the Sum column above
+assert np.allclose(h.data[0, 0], [1.20, 1.10, -0.50, 0.60], atol=1e-2)
+assert np.allclose(h.data[0, 1], [1.34, 0.34, 0.11, 1.80], atol=1e-2)
+assert np.allclose(h.data[0, 2], [1.21, -1.32, 0.72, 1.00], atol=1e-2)
 
-h.sum().backward()                                 # loss = sum of every entry, so the upstream gradient is all ones
-print(embed.weight.grad)                           # rows 0, 2, 3 are ones; row 1 is zeros
-assert np.array_equal(embed.weight.grad[1], np.zeros(4))
+h.sum().backward()                                      # loss = sum of every entry, so the upstream gradient is all ones
+W_grad = layer.token_embedding.weight.grad
+print(W_grad)                                           # rows 0, 2, 3 are ones; row 1 is zeros
+assert np.array_equal(W_grad[1], np.zeros(4))
 
-embed.weight.grad = None
-h2 = pos(embed([2, 0, 2]))
-h2.sum().backward()
-assert np.array_equal(embed.weight.grad[2], np.full(4, 2.0))   # token 2 appeared twice
+layer.token_embedding.weight.grad = None
+layer(Tensor([[2, 0, 2]])).sum().backward()
+assert np.array_equal(layer.token_embedding.weight.grad[2], np.full(4, 2.0))   # token 2 appeared twice
 ```
 
 ---
 
 ## From TinyTorch to Production
 
-PyTorch's `torch.nn.Embedding` is the same table with the same gather, and its `weight` attribute has the same $V \times D$ shape you would find in ours. Three options are bolted on. `padding_idx` names one row that is held at zero and excluded from gradient updates, so that the filler token used to make sequences in a batch the same length contributes nothing and never learns. `max_norm` renormalizes any row whose length grows past a bound, a guard against rare tokens whose rows drift. `sparse=True` changes what the backward returns. Instead of the dense $V \times D$ gradient that our closure allocates, mostly zeros, the layer hands the optimizer only the rows that were touched, which for GPT-2's table is the difference between allocating 154 MB per step and allocating the 3 MB that a batch of 1,024 tokens actually touches. On a GPU the forward is a single gather kernel. The backward has to sum the gradients of repeated IDs without two threads writing the same row at once, the parallel version of the `grad_w[ids] +=` race, so the CUDA implementation sorts the indices first, which places equal IDs next to each other, and then lets one thread reduce each run. That is `np.add.at` with a sort in front of it, and the sort is what makes the result deterministic.
+PyTorch's `torch.nn.Embedding` is the same table with the same gather, and its `weight` attribute has the same $V \times D$ shape you would find in ours. Three options are bolted on. `padding_idx` names one row that is held at zero and excluded from gradient updates, so that the filler token used to make sequences in a batch the same length contributes nothing and never learns. `max_norm` renormalizes any row whose length grows past a bound, a guard against rare tokens whose rows drift. `sparse=True` changes what the backward returns. Instead of the dense $V \times D$ gradient that `EmbeddingFunction.backward` allocates, mostly zeros, the layer hands the optimizer only the rows that were touched, which for GPT-2's table is the difference between allocating 154 MB per step and allocating the 3 MB that a batch of 1,024 tokens actually touches. On a GPU the forward is a single gather kernel. The backward has to sum the gradients of repeated IDs without two threads writing the same row at once, the parallel version of the `grad_w[ids] +=` race, so the CUDA implementation sorts the indices first, which places equal IDs next to each other, and then lets one thread reduce each run. That is `np.add.at` with a sort in front of it, and the sort is what makes the result deterministic.
 
 The table's memory is worth a napkin. GPT-2's table is $50{,}257 \times 768$ floats, about 154 MB in 32-bit, and 38.6 million of the model's 124 million parameters. LLaMA 3's is $128{,}256 \times 4{,}096$ in 16-bit, about 1.05 GB. Only the looked-up rows move per step, though, and that traffic is small next to the matrix multiplies that follow.
 
@@ -272,7 +212,7 @@ Position is where production has moved furthest from what we built. @tbl-positio
 
 : Three ways to tell a model where a token sits. {#tbl-position-encodings tbl-colwidths="[24,28,14,16,18]"}
 
-Rotary position embedding, or RoPE,[^fn-rope-production-positions] is the rotation we found under `sinusoidal_table`, applied multiplicatively instead of additively. Rather than adding $P[t, :]$ to the token vector, it rotates each pair of coordinates in the query and key vectors (two projections of the token vector that Chapter 12 introduces) by the angle $\omega_k t$. Because a rotation by $\omega m$ followed by the inverse of a rotation by $\omega n$ is a rotation by $\omega(m - n)$, the dot product between positions $m$ and $n$ depends only on their distance. The model gets relative position for free, without a learned table and without a hard maximum length. The frequencies $\omega_k$ are the same geometric sequence, and the $2 \times 2$ matrix is the same one; what changed is where in the network it is applied. The original Transformer also multiplied the embedding output by $\sqrt{D}$ before adding positions, so that a small Xavier-initialized row would not be swamped by position values of magnitude one; the real Module 11 keeps that as a `scale_embeddings` flag.
+Rotary position embedding, or RoPE,[^fn-rope-production-positions] is the rotation we found under `_compute_sinusoidal_table`, applied multiplicatively instead of additively. Rather than adding $P[t, :]$ to the token vector, it rotates each pair of coordinates in the query and key vectors (two projections of the token vector that Chapter 12 introduces) by the angle $\omega_k t$. Because a rotation by $\omega m$ followed by the inverse of a rotation by $\omega n$ is a rotation by $\omega(m - n)$, the dot product between positions $m$ and $n$ depends only on their distance. The model gets relative position for free, without a learned table and without a hard maximum length. The frequencies $\omega_k$ are the same geometric sequence, and the $2 \times 2$ matrix is the same one; what changed is where in the network it is applied. The original Transformer also multiplied the embedding output by $\sqrt{D}$ before adding positions, so that a small Xavier-initialized row would not be swamped by position values of magnitude one; the real Module 11 keeps that as a `scale_embeddings` flag.
 
 What carries over unchanged is the whole mental model. A vocabulary is a table, a token is a row index, a lookup is a gather that costs no arithmetic, and the gradient is a scatter-add in which repeated tokens accumulate. Position is a second row added in, or in RoPE's case a rotation by an angle that grows with position. Every one of the production variants above is a change to the contents of a table or to where its rows are applied, not a change to the mechanism.
 
@@ -284,7 +224,7 @@ For your own work, three habits follow. Count the embedding table when you count
 
 ## Summary
 
-You built the two tables that turn a tokenizer's integers into vectors. `Embedding` stores one learnable row per token ID and looks a token up by copying its row, a gather with no arithmetic; its backward is a scatter-add in which every occurrence of a token contributes to the same row. `PositionalEncoding` stores one row per position and adds it to the token's row, either as a second learned table or as a fixed sine and cosine fill whose rows for positions $t$ and $t + \Delta$ differ by a rotation that depends only on $\Delta$. The invariant to keep is that a token ID is a row index and nothing more; every meaning the vector carries was put there by gradient descent, and every position it carries was added by the second table. Chapter 12 takes for granted a sequence of $D$-dimensional vectors, one per token, each already carrying its position, and asks how those vectors can look at one another.
+Module 11 builds the two tables that turn a tokenizer's integers into vectors. `Embedding` stores one learnable row per token ID and looks a token up by copying its row, a gather with no arithmetic; its operation's backward is a scatter-add in which every occurrence of a token contributes to the same row. The position row that `EmbeddingLayer` adds to each token's row comes either from a learned `PositionalEncoding` table or from a fixed sine and cosine fill whose rows for positions $t$ and $t + \Delta$ differ by a rotation that depends only on $\Delta$. The invariant to keep is that a token ID is a row index and nothing more; every meaning the vector carries was put there by gradient descent, and every position it carries was added by the second table. Chapter 12 takes for granted a sequence of $D$-dimensional vectors, one per token, each already carrying its position, and asks how those vectors can look at one another.
 
 ---
 
@@ -292,6 +232,6 @@ You built the two tables that turn a tokenizer's integers into vectors. `Embeddi
 
 1. For a $4 \times 3$ table $W$ and the ID sequence `[2, 0, 2]`, build the $3 \times 4$ one-hot matrix by hand, compute the product with $W$ using `np.dot`, and confirm it equals `W[[2, 0, 2]]`. Count the multiplications each method performs, and repeat the count for $V = 50{,}257$.
 
-2. Add a `padding_idx` argument to `Embedding` so that the named row is initialized to zero and receives no gradient, and verify with a sequence that contains the padding ID three times. Then replace `np.add.at` with `grad_w[ids] += ...` and explain, using the `[2, 0, 2]` case, what goes wrong.
+2. Add a `padding_idx` argument to `Embedding` so that the named row is initialized to zero and receives no gradient, and verify with a sequence that contains the padding ID three times. Then replace `np.add.at` in `EmbeddingFunction.backward` with `grad_weight[indices] += ...` and explain, using the `[2, 0, 2]` case, what goes wrong.
 
-3. With $D = 4$, build `sinusoidal_table(16, 4)` and find, for offset $\Delta = 1$, the two $2 \times 2$ rotation matrices that map row $t$ to row $t + 1$ in each coordinate pair. Check numerically that the same two matrices work for every $t$ from 0 to 14. Then build a learned `PositionalEncoding(max_len=16, embed_dim=4, learned=True)` and show that no such fixed matrix exists for it.
+3. With $D = 4$, build `_compute_sinusoidal_table(16, 4)` and find, for offset $\Delta = 1$, the two $2 \times 2$ rotation matrices that map row $t$ to row $t + 1$ in each coordinate pair. Check numerically that the same two matrices work for every $t$ from 0 to 14. Then build a learned `PositionalEncoding(max_seq_len=16, embed_dim=4)` and show that no such fixed matrix exists for it.
