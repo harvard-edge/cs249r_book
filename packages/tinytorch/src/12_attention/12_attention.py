@@ -12,9 +12,6 @@
 #     name: python3
 # ---
 
-#| default_exp core.attention
-#| export
-
 # %% [markdown]
 """
 # Module 12: Attention - Learning to Focus
@@ -60,6 +57,7 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.attention
 #| export
 
 import numpy as np
@@ -82,8 +80,8 @@ MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0
 
 **Prerequisites**: Modules 01-11 must be complete
 - Module 01: Tensor (core data structure)
-- Module 03: Layers (Linear for projections)
 - Module 02: Activations (Softmax for attention weights)
+- Module 03: Layers (Linear for projections)
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
@@ -98,7 +96,7 @@ MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0
 
 **Dependency Flow**:
 ```
-Tensor → Layers → Activations → Attention
+Tensor → Activations → Layers → Attention
    ↓                                  ↓
 Foundation for              Core mechanism for
 all operations             transformer models
@@ -493,9 +491,8 @@ a recipe: compute scores, scale them, optionally mask, softmax, apply to values.
 Pipeline: Q,K -> scores -> scale -> mask -> softmax -> weights @ V -> output
 ```
 
-The following commented-out code shows how attention works conceptually
-using explicit loops. While easier to understand, this approach is
-NOT used here because:
+The sketch below shows how attention works conceptually using explicit
+loops. While easier to read, this is NOT the implementation because:
 1. It is extremely slow (Python loops vs optimized C/BLAS)
 2. It breaks the autograd graph unless we manually implement the backward pass
 
@@ -1080,9 +1077,9 @@ Sequence Length = 2048 (GPT-3):
 │ Memory: 16 MB (float32)        │ <- 256x larger than 128!
 └────────────────────────────────┘
 
-For a 96-layer model (GPT-3):
-Total Attention Memory = 96 layers x 16 MB = 1.5 GB
-Just for attention matrices!
+That is one head. For GPT-3 (96 layers x 96 heads):
+Total Attention Memory = 96 x 96 x 16 MB ≈ 144 GB
+Just for attention matrices, for a single sequence!
 ```
 """
 
@@ -1139,9 +1136,9 @@ def analyze_attention_timing():
         # Time multiple runs for stability
         times = []
         for _ in range(5):
-            start_time = time.time()
+            start_time = time.perf_counter()
             _ = mha.forward(x)
-            end_time = time.time()
+            end_time = time.perf_counter()
             times.append((end_time - start_time) * 1000)  # Convert to ms
 
         avg_time = np.mean(times)
@@ -1165,30 +1162,28 @@ def analyze_attention_memory_overhead():
     """📊 Analyze memory overhead during training (forward + backward passes)."""
     print("\n📊 Analyzing Attention Memory Overhead During Training...")
 
-    embed_dim, num_heads = 128, 8
     sequence_lengths = [128, 256, 512, 1024]
 
-    print("\nMemory Overhead Analysis (Training vs Inference):")
-    print("Seq Len | Forward | + Gradients | + Optimizer | Total Memory")
-    print("-" * 65)
+    print("\nAttention Activation Memory per Head (Training vs Inference):")
+    print("Seq Len | Inference | Saved for backward | Gradient | Training total")
+    print("-" * 70)
 
     for seq_len in sequence_lengths:
-        # Forward pass memory (attention matrix)
+        # Inference: the attention matrix lives only while the layer runs
         attention_matrix_mb = (seq_len * seq_len * 4) / (1024 * 1024)
 
-        # Backward pass adds gradient storage (1× forward: one gradient tensor)
-        backward_memory_mb = attention_matrix_mb
+        # Training: the softmax weights are saved for backward, and backward
+        # materializes a gradient of the same shape
+        saved_mb = attention_matrix_mb
+        gradient_mb = attention_matrix_mb
+        training_total_mb = saved_mb + gradient_mb
 
-        # Optimizer state (Adam: +2× for momentum and velocity, incremental)
-        optimizer_memory_mb = 2 * attention_matrix_mb
+        print(f"{seq_len:7d} | {attention_matrix_mb:7.2f}MB | {saved_mb:16.2f}MB | {gradient_mb:6.2f}MB | {training_total_mb:12.2f}MB")
 
-        # Total = forward + gradients + optimizer state
-        total_memory_mb = attention_matrix_mb + backward_memory_mb + optimizer_memory_mb
-
-        print(f"{seq_len:7d} | {attention_matrix_mb:6.2f}MB | {backward_memory_mb:10.2f}MB | {optimizer_memory_mb:10.2f}MB | {total_memory_mb:11.2f}MB")
-
-    print(f"\n💡 KEY INSIGHT: Training requires ~4x memory of inference (1x forward + 1x gradients + 2x optimizer state)")
-    print(f"🚀 For GPT-3 (96 layers, 2048 context): ~6GB just for attention gradients!")
+    print("\n💡 KEY INSIGHT: Training roughly doubles attention's activation memory: the softmax")
+    print("   weights are saved for backward and their gradient is the same size.")
+    print("   Optimizer state (Adam's two moments) scales with parameters, not sequence length.")
+    print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16MB per head becomes ~144GB of saved weights per sequence!")
 
 # Run the analysis
 if __name__ == "__main__":
@@ -1202,8 +1197,8 @@ Our analysis reveals the fundamental challenge that drives modern attention rese
 
 **Memory Scaling Crisis:**
 - Attention matrix grows as n^2 with sequence length
-- For GPT-3 context (2048 tokens): 16MB just for attention weights per layer
-- With 96 layers: 1.5GB just for attention matrices!
+- For GPT-3 context (2048 tokens): 16MB of attention weights per head per layer
+- With 96 layers x 96 heads: ~144GB of attention matrices per sequence!
 - This excludes activations, gradients, and other tensors
 
 **Time Complexity Validation:**
@@ -1215,14 +1210,14 @@ Our analysis reveals the fundamental challenge that drives modern attention rese
 ```
 Model Scale Impact:
 
-Small Model (6 layers, 512 context):
-Attention Memory = 6 x 1MB = 6MB - Manageable
+Small Model (6 layers, 8 heads, 512 context):
+Attention Memory = 6 x 8 x 1MB = 48MB - Manageable
 
-GPT-3 Scale (96 layers, 2048 context):
-Attention Memory = 96 x 16MB = 1.5GB - Significant
+GPT-3 Scale (96 layers, 96 heads, 2048 context):
+Attention Memory = 96 x 96 x 16MB ≈ 144GB - Far beyond one GPU
 
-GPT-4 Scale (hypothetical: 120 layers, 32K context):
-Attention Memory = 120 x 4GB = 480GB - Impossible on single GPU!
+32K context (hypothetical: 120 layers, 128 heads):
+Attention Memory = 120 x 128 x 4GB ≈ 60TB - Impossible without a different algorithm
 ```
 
 **Why This Matters:**
@@ -1481,13 +1476,13 @@ Answer these to deepen your understanding of attention operations and their syst
 **Question**: Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
 
 **Calculate**:
-- Forward memory: attention matrix = n^2 values
-- Backward memory: gradients also n^2 values
-- Total training memory: forward + backward = _____ x inference memory
-- With Adam optimizer (stores momentum + velocity): _____ x inference memory
-- For GPT-3 scale (96 layers, 2048 context): _____ GB just for attention gradients
+- Inference memory: the attention matrix, n^2 values per head, freed after use
+- Training memory: the softmax weights saved for backward (n^2) plus their gradient (n^2)
+- Training total: _____ x inference memory per head
+- Adam's momentum and velocity are per parameter: how many parameters does the attention matrix add? _____
+- For GPT-3 scale (96 layers, 96 heads, 2048 context): _____ GB of saved attention weights per sequence
 
-**Key insight**: Training requires 4x memory of inference (forward + grad + 2x optimizer state).
+**Key insight**: Training roughly doubles attention's activation memory; optimizer state scales with parameters, not sequence length.
 """
 
 # %% [markdown]
@@ -1548,7 +1543,7 @@ Congratulations! You've built the attention mechanism that revolutionized deep l
 
 ### Systems Insights Discovered
 - **Quadratic scaling**: Attention memory grows as n^2, limiting context lengths
-- **Memory bottlenecks**: Attention matrices dominate memory in transformers (1.5GB+ for GPT-3)
+- **Memory bottlenecks**: Attention matrices dominate memory in transformers (~144GB per sequence at GPT-3 scale)
 - **Multi-head parallelism**: Different heads can specialize in different relationship types
 - **Production challenges**: Understanding why attention efficiency research is crucial
 
