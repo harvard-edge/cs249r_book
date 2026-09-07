@@ -1127,8 +1127,9 @@ class KnowledgeDistillation:
         student_soft = self._softmax(student_logits / self.temperature)
         teacher_soft = self._softmax(teacher_logits / self.temperature)
 
-        # Soft target loss (KL divergence)
-        soft_loss = self._kl_divergence(student_soft, teacher_soft)
+        # Soft target loss: KL(teacher || student), the teacher's distribution
+        # is the reference the student is pulled toward (Hinton et al., 2015)
+        soft_loss = self._kl_divergence(teacher_soft, student_soft)
 
         # Hard target loss (cross-entropy)
         student_hard = self._softmax(student_logits)
