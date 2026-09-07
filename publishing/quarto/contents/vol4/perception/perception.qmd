@@ -32,17 +32,6 @@ After studying this chapter, you will be able to:
 
 ## Photons to Spatial Claims {#sec-perception-8-1}
 
-<!-- SECTION 8.1 -->
-<!-- claim: The policy Part II produced may implement one of these stages, several, or all of them at once. What follows specifies what each stage must guarantee, not that each must be a separate module. -->
-<!-- covers: Open on the joint: Part II delivered a policy with a record attached, and that record is the input to every contract in this chapter. -->
-<!-- covers: An end-to-end policy and a staged stack are the same machine at different granularities; the stages are responsibilities that must be discharged somewhere, not boxes that must exist. -->
-<!-- covers: What you lose when a stage is implicit: you cannot inspect it, bound it, expire it, or refuse on it. -->
-<!-- covers: Why enforcement is the one responsibility that can never be absorbed into the policy, which is the thread Part III follows to its end. -->
-<!-- covers: Set up perception as the first handoff: what the machine is allowed to believe it saw, and when it saw it. -->
-<!-- GROUNDING: mechanism — the three properties an observation carries, and what each is for -->
-<!-- FIGURE: A timeline showing accumulated latency at each physical and software stage between photon arrival and downstream model consumption. -->
-
-<!-- BEGIN -->
 Part II established what a learned policy can deliver and what its evaluation record can prove. That record documents empirical performance across a test distribution, bounds the distribution shifts under which the policy was evaluated, and lists the latency and compute budgets required to execute a forward pass. Yet a policy residing in memory does not act on the physical world in isolation. To govern physical mass, it must receive measurements that reflect true mechanical states and issue commands that execute through real actuators under strict temporal deadlines. The architectural contracts developed across Part III take that evaluation record as their baseline input. The task of the system architecture is to wrap the learned model in the sensing pipelines, synchronization mechanisms, state representations, and execution runtimes necessary to convert statistical inference into safe physical movement.
 
 ::: {#dfn-physical-ai-systems .callout-definition title="Physical AI Systems"}
@@ -79,22 +68,8 @@ By the time the perception stage yields an observation tensor, $75\text{ ms}$ of
 
 [^fn-hist-marr-levels]: Marr (1982) decomposed vision into theory, algorithm, and hardware. In Physical AI, perception is a real-time pipeline where transport latency directly erodes stability margins.
 
-<!-- END -->
-
 ## What Perception Hands Over {#sec-perception-8-2}
 
-<!-- SECTION 8.2 -->
-<!-- claim: Downstream cannot use a measurement it cannot date, locate, or bound. -->
-<!-- covers: Contrast raw sensor measurements with the state representations required by downstream control, planning, and memory subsystems. -->
-<!-- covers: Define the capture timestamp property ($t_0$) at the integration midpoint and show how using arrival time ($t_{\text{recv}}$) injects phase lag and tracking instability into downstream estimators. -->
-<!-- covers: Define the reference frame property ($\mathcal{F}_{\text{sensor}}$ relative to $\mathcal{F}_{\text{body}}$) and explain why uncalibrated mounting extrinsics cause spatial planning errors. -->
-<!-- covers: Define the uncertainty envelope property ($\Sigma_z$) and explain how downstream optimizers fail when sensor noise is treated as ground truth. -->
-<!-- covers: Establish the handoff contract: downstream components must reject any observation lacking a timestamp, frame identifier, and validity envelope. -->
-<!-- GROUNDING: mechanism — the three properties, and what breaks downstream when each is missing -->
-<!-- FIGURE: A comparison showing state estimation trajectory tracking error when fed true capture-time observations versus arrival-time observations for a moving body. -->
-<!-- DERIVE: The tracking error $\Delta x = v \cdot \tau$ induced when downstream state estimators treat delivery time as capture time for a body moving at velocity $v$ over transport delay $\tau$. -->
-
-<!-- BEGIN -->
 Raw sensor hardware yields electrical measurements such as photodiode voltages, time-of-flight counter values, or capacitive displacements. These unstructured signals bear little resemblance to the state variables required by downstream autonomy. An actuator controller cannot track a desired force using a two-dimensional grid of raw pixel intensities, and a trajectory optimizer cannot plan collision-free paths using unorganized time-of-flight returns. Downstream estimation, planning, and memory subsystems require structured representations of physical state, including metric positions, velocities, bounding volumes, surface normals, and semantic classifications. Translating raw sensor streams into these representations is the operational responsibility of the perception pipeline. However, downstream consumers cannot safely interpret a perceived state without explicit metadata that anchors the measurement in physical reality. To be consumable by downstream software, an observation must carry three formal properties, comprising a capture timestamp, an assigned reference frame, and an uncertainty envelope.
 
 The first mandatory property is the **capture timestamp**\index{Capture timestamp!definition} $t_0$, which specifies the temporal midpoint of the physical energy integration window. Sensors do not take instantaneous snapshots; a camera integrates photons across an exposure duration, and a mechanical lidar sweeps laser pulses over an azimuth arc across several milliseconds. Downstream state estimators require $t_0$ to integrate the measurement into the machine's dynamic equations of motion. A common architectural failure in embedded systems is recording the arrival timestamp $t_{\text{recv}}$, the moment the operating system kernel completes the direct memory access transfer, and passing $t_{\text{recv}}$ downstream as the observation epoch. Because pipeline execution, serial bus transfers, and driver scheduling introduce a transport delay $\tau = t_{\text{recv}} - t_0$, substituting arrival time for capture time corrupts the state estimator.
@@ -131,23 +106,9 @@ Never pass a perception tensor downstream without an acquisition timestamp latch
 These three properties define the formal handoff contract between perception and the remainder of the autonomy stack. Downstream state estimators, planners, and safety watchdogs must reject any observation packet that lacks an explicit capture timestamp $t_0$, a verified coordinate frame $\mathcal{F}_{\text{sensor}}$, and an uncertainty covariance $\mathbf{\Sigma}_z$. Dropping an incomplete or unbounded observation allows a downstream estimator to propagate its state forward using physical dynamics, degrading uncertainty smoothly over time. Accepting an ungrounded packet, by contrast, injects unmodeled delays, spatial distortions, and false confidence directly into the control loop. Enforcing this contract requires tracing how an observation originates, beginning at the hardware interface where physical phenomena are first sampled.
 
 [^fn-std-rep105-frames]: REP 105 (*Coordinate Frames for Mobile Platforms*) standardizes transform trees ($\mathcal{F}_{\text{earth}} \to \mathcal{F}_{\text{map}} \to \mathcal{F}_{\text{odom}} \to \mathcal{F}_{\text{body}} \to \mathcal{F}_{\text{sensor}}$). It isolates high-frequency continuous odometry from discrete map corrections, preventing step discontinuities in low-level motor controllers during global relocalization.
-<!-- END -->
 
 ## Transduction, Hardware Sampling, and Temporal Calibration {#sec-perception-8-3}
 
-<!-- SECTION 8.3 -->
-<!-- claim: Lag has already accumulated before software receives anything at all. -->
-<!-- covers: Model physical exposure as a temporal integral over interval $t_{\text{exp}}$, establishing that every frame is a time-averaged measurement rather than an instantaneous snapshot. -->
-<!-- covers: Compare global shutter exposure with rolling shutter line-by-line readout, showing how body motion during readout introduces spatial distortion across the image plane. -->
-<!-- covers: Trace serialization and transport delays across physical camera interfaces (MIPI CSI-2, GMSL2, USB3, and GigE Vision) into receiver buffers. -->
-<!-- covers: Analyze clock domain crossing and quantify oscillator drift between sensor internal crystals and host CPU/SoC monotonic system clocks. -->
-<!-- covers: Establish hardware synchronization mechanisms, comparing software polling against hardware GPIO triggers and IEEE 1588 PTP network timestamping. -->
-<!-- covers: Account for the total age of a frame at the exact moment DMA completes in host memory: $t_{\text{age}} = t_{\text{exp}}/2 + t_{\text{readout}} + t_{\text{transport}}$. -->
-<!-- GROUNDING: number — exposure and rolling shutter as skew, in millimetres at a speed -->
-<!-- FIGURE: A geometric diagram showing rolling shutter scanline distortion on a vertical object passed at speed, mapping row index to spatial displacement. -->
-<!-- DERIVE: The spatial skew $\Delta x(y) = v \cdot y \cdot t_{\text{row}}$ across scanlines and the motion blur width $\Delta x_{\text{blur}} = v \cdot t_{\text{exp}}$ as functions of body velocity $v$. -->
-
-<!-- BEGIN -->
 Lag accumulates before software receives anything at all, beginning at the photosite where physical phenomena are converted into electrical charge. A camera does not capture an instantaneous snapshot of the physical world. Photons collect on a photodiode over a finite exposure duration $t_{\text{exp}}$, which means the recorded pixel intensity represents the temporal integral of scene radiance $I(t)$ over that interval:
 $$I_{\text{pixel}} = \int_{0}^{t_{\text{exp}}} I(t)\,dt$$
 When the sensor or the observed environment moves at velocity $v$ during exposure, a sharp physical boundary spreads across multiple photosites. The resulting motion blur width in the direction of motion is given by $\Delta x_{\text{blur}} = v \cdot t_{\text{exp}}$. Because light accumulates continuously across the exposure window, the effective point in time that corresponds to the accumulated charge is the temporal midpoint of the interval, introducing an unavoidable physical measurement lag of $t_{\text{exp}}/2$ relative to the start of exposure.
@@ -261,22 +222,8 @@ Tracing this latency progression across the entire perception and inference pipe
 | **7. Covariance Packaging & Dispatch**: Spatial bounding, bitfield check, shmem ring  | $0.5 \pm 0.1\text{ ms}$            | $4.5\text{ ms}$               | $0.5\text{--}4.5\text{ ms}$   | **$38.0\text{--}110.0\text{ ms}$** | **$76\text{--}220\text{ mm}$**   | **$380\text{--}1100\text{ mm}$**  | Downstream lock contention; deploy lock-free shared memory and hard age-drop rules       |
 : **End-to-End Information Age Accumulation and Physical Displacement Budget**: Stage-by-stage temporal accounting from initial photon arrival at the sensor photosite through hardware deserialization, direct memory access (DMA), neural backbone inference, and inter-process communication (IPC) dispatch. Information age $\Delta t$ reflects the elapsed time from physical energy integration midpoint ($t_{\text{exp}}/2$) to downstream availability. Nominal metrics reflect optimized embedded hardware pipelines (e.g., $60\text{ Hz}$ global-shutter camera, hardware ISP, INT8 NPU acceleration); worst-case bounds ($P_{99.9}$) reflect thermal clock throttling, memory bus saturation, and OS scheduling jitter. Physical displacement $\Delta x = v \cdot t_{\text{age}}$ demonstrates how latency converts directly into unrecoverable spatial drift across operational speeds. {#tbl-08-latency-budget tbl-colwidths="[20,10,10,10,12,10,10,18]"}
 
-<!-- END -->
-
 ## The Cost of Ingestion {#sec-perception-8-4}
 
-<!-- SECTION 8.4 -->
-<!-- claim: Getting a frame into memory takes bandwidth from the same resource the permission path needs, and the quantity that matters is the delay that imposes on a refusal. -->
-<!-- covers: Trace one sensor stream end to end and convert it into two numbers only: the age it adds to the observation, and the delay it imposes on the enforcement path competing for the same resource. -->
-<!-- covers: Derive the maximum admissible ingestion load from the enforcement deadline and the slack measured in @sec-body, rather than from what the interface can sustain. -->
-<!-- covers: Show why the interesting quantity is burst behaviour rather than average bandwidth, because an average that fits can still push one refusal past its deadline. -->
-<!-- covers: State the design consequence: resolution, frame rate, and sensor count are safety parameters, because each is a withdrawal from the budget that pays for refusing. -->
-<!-- covers: Name the implementation mechanisms and stop there, citing a systems text. How a descriptor chain is programmed is below the floor. -->
-<!-- GROUNDING: number — bandwidth for one capture configuration, against what the bus has -->
-<!-- FIGURE: A memory subsystem diagram showing camera DMA streams, OS page caches, and neural inference engines contending for memory controller bandwidth. -->
-<!-- DERIVE: Derive the admissible ingestion load from the enforcement deadline and measured slack, not from interface throughput. -->
-
-<!-- BEGIN -->
 Getting sensory data into main memory is not free, and it does not happen in an isolated subsystem. When raw pixel streams arrive across physical links such as MIPI CSI-2 or Ethernet, hardware engines write those bytes directly into dynamic random-access memory (DRAM) through DMA. That transfer shares the physical interconnect, cache hierarchies, and memory controllers with every other executing workload on the machine, including neural inference engines, operating system drivers, and safety monitors. Every sensory stream therefore imposes two numbers on the machine. The first number is the age the transport pipeline adds to the observation before compute cores can read it. The second number is the delay that incoming data stream imposes on the safety enforcement path competing for the exact same memory bus. The first number delays when the policy knows what happened. The second number delays whether the safety reflex can veto an unsafe actuation command before a physical deadline expires.
 
 To see the scale of this competition across physical archetypes, consider their respective ingress demands: an industrial manipulator synchronizing dual high-speed eye-in-hand cameras with tactile arrays ($600\text{ MB/s}$ burst ingress); a laser powder-bed fusion process scanner streaming coaxial NIR pyrometry at $1000\text{ Hz}$ ($1.2\text{ GB/s}$ continuous ingress); or an autonomous mobile machine equipped with four high-resolution surround cameras and dual lidars. In the mobile configuration, suppose the four global shutter cameras capture $3840 \times 2160$ images at $30\text{ Hz}$ using a raw 12-bit format packed into $1.5\text{ B}$ per pixel. Each uncompressed frame occupies $3840 \times 2160 \times 1.5\text{ B} \approx 12.44\text{ MB}$ of memory. Across four cameras at $30\text{ Hz}$, the sustained write traffic generated by frame ingestion alone is:
@@ -300,23 +247,9 @@ Sensor resolution, frame rate, and channel count are safety parameters, not perc
 This relationship establishes that sensor resolution, frame rate, and sensor count are safety parameters rather than purely perception parameters. In machine learning pipelines, engineering teams routinely increase camera resolution or add sensor modalities to improve open-loop model accuracy. In a physical machine, every additional pixel, bit of quantization depth, and exposure frame is an unavoidable withdrawal from the memory bandwidth budget that pays for timely refusal. Upgrading four cameras from $1080\text{p}$ ($1920 \times 1080$) to $4\text{K}$ ($3840 \times 2160$) quadruples the burst volume $V_{\text{burst}}$ from $3.11\text{ MB}$ to $12.44\text{ MB}$ per frame. On a system with the timing margins derived above, that single change pushes the worst-case memory stall from $155.5\,\mu\text{s}$ to $622.0\,\mu\text{s}$, exceeding the $250\,\mu\text{s}$ slack and causing the safety enforcement loop to overrun its period. The higher-resolution image may produce a more confident detection in the learned model, but it removes the machine's guarantee of stopping in time.[^fn-std-iso-mpam]
 
 The hardware mechanisms governing how frames move into memory, including PCIe scatter-gather descriptor rings, I/O memory management unit (IOMMU) page tables, and DRAM bank conflict schedulers, are standard computer systems topics treated in depth by @hennessy2019computer as well as @bryant2015computer. For the physical AI architect, the implementation details of descriptor rings sit below the floor. The quantity to budget is the latency penalty that sensory ingress inflicts on safety-critical memory transactions. When perception traffic claims the bus, the delay propagates directly into the physical domain. Every millisecond that memory contention steals from the enforcement loop is a millisecond during which the body continues along its existing trajectory without permission, converting a digital stall in the memory controller into an irrevocable loss of physical stopping distance.
-<!-- END -->
 
 ## Spatial Error, 3D Foundation Models, and Physical Clearance {#sec-perception-8-5}
 
-<!-- SECTION 8.5 -->
-<!-- claim: A spatial error is not a number in a representation. Used to authorize motion, it becomes a displacement, and it is spent out of the same clearance that keeps the machine off the obstacle. -->
-<!-- covers: Convert each source of spatial error into millimetres of displacement at the point of contact: scale error, frame error, calibration drift, and depth uncertainty. -->
-<!-- covers: Propagate it: show how an error at the sensor becomes an error at the end effector through the transform chain, and which term dominates at realistic distances. -->
-<!-- covers: Subtract it from clearance. The margin an enforcer defends must be inset by the spatial error of everything upstream of it, and a margin that has not been inset is a fiction. -->
-<!-- covers: State the units contract that makes this checkable at an interface: what the number means, in which frame, at which epoch, with what stated uncertainty. -->
-<!-- covers: Name the condition under which spatial error must revoke permission rather than merely widen a margin, which is when the error is unbounded or unknown rather than large. -->
-<!-- covers: Cite projection, triangulation, and rigid-transform mathematics to a vision or robotics text. The book consumes the error term and does not derive it. -->
-<!-- GROUNDING: mechanism — metric grounding, and what depth unprojection assumes -->
-<!-- FIGURE: A plot showing depth estimation error scaling quadratically with distance for stereo vision versus constant error for time-of-flight LiDAR. -->
-<!-- DERIVE: Derive the clearance inset from the propagated spatial error; cite the projection and triangulation mathematics that produce the error term. -->
-
-<!-- BEGIN -->
 A spatial error is not a number in a representation. When downstream control logic uses an estimated coordinate to authorize motion, that error becomes a physical displacement, and it is spent out of the same clearance that keeps the machine off the obstacle. Transforming a sensor observation into physical authority requires **metric grounding**\index{Metric grounding!definition}, which maps raw detector measurements into geometric space. This grounding relies on unprojecting two-dimensional sensor coordinates into three dimensions, an inversion that assumes known optics, rigid mounting, and predictable surface properties.
 
 The mathematical principles of projection and triangulation, detailed by @hartley2003multiple as well as @szeliski2022computer, govern how measurement noise converts into spatial displacement. In passive stereo vision, depth $z$ is computed from baseline $b$, focal length $f$, and disparity $d$ through the relationship $z = \frac{f b}{d}$. Differentiating this unprojection with respect to disparity yields the depth uncertainty:
@@ -413,24 +346,9 @@ The complete operational protocol for metric unprojection, kinematic covariance 
 [^fn-math-unprojection-covariance]: The complete mathematical derivation for metric unprojection and covariance propagation is as follows. For passive stereo triangulation, the 3D optical coordinates are $x_s = \frac{(u - c_x) z}{f_x}$, $y_s = \frac{(v - c_y) z}{f_y}$, $z_s = z$. The depth variance is $\sigma_{z,s}^2 = \left( \frac{z^2}{f_x b} \right)^2 \sigma_d^2$, while lateral variances are $\sigma_{x,s}^2 = \left(\frac{u - c_x}{f_x}\right)^2 \sigma_{z,s}^2 + \left(\frac{z}{f_x}\right)^2 \sigma_u^2$ and $\sigma_{y,s}^2 = \left(\frac{v - c_y}{f_y}\right)^2 \sigma_{z,s}^2 + \left(\frac{z}{f_y}\right)^2 \sigma_v^2$. These form the diagonal sensor covariance $\mathbf{\Sigma}_{\text{sensor}}$. This is transformed to the body frame via $\mathbf{p}_{\text{body}} = \mathbf{R}_{\text{sensor}}^{\text{body}} \mathbf{p}_{\text{sensor}} + \mathbf{p}_{\text{sensor}}^{\text{body}} + \Delta \mathbf{p}_{\text{age}}$. The spatial covariance is projected via $\mathbf{\Sigma}_{\text{body}} = \mathbf{J}_p \mathbf{\Sigma}_{\text{sensor}} \mathbf{J}_p^T + \mathbf{J}_{\text{ext}} \mathbf{\Sigma}_{\text{ext}} \mathbf{J}_{\text{ext}}^T + \|\mathbf{v}\|^2 \sigma_{\tau}^2 \mathbf{I}_{3\times 3}$. The $99\text{th}$-percentile error radius is $\|\boldsymbol{\epsilon}_{\text{spatial}}\|_{P_{99}} = \kappa_{99} \sqrt{\max \operatorname{eig}(\mathbf{\Sigma}_{\text{body}})}$. If valid, $C_{\text{inset}} = C_{\text{safe}} + \|\boldsymbol{\epsilon}_{\text{spatial}}\|_{P_{99}}$.
 
 A fundamental invariant emerges from this propagation chain: a nominal clearance boundary that has not been expanded by the ninety-ninth percentile propagated perception covariance is an optical fiction that guarantees physical collision.
-<!-- END -->
 
 ## How Observations Go Wrong {#sec-perception-8-6}
 
-<!-- SECTION 8.6 -->
-<!-- claim: Most perception failures are silent, and a timestamp that lies is worse than a frame that is missing. -->
-<!-- covers: Classify perception failures into detectable faults (frame drop, CRC error, timeout) versus silent failures (motion blur, lens flare, optical saturation, out-of-distribution hallucinations). -->
-<!-- covers: Analyze physical degradation modes: dynamic range saturation under direct sunlight, low-light SNR collapse, and lens occlusion from rain, dust, or mud. -->
-<!-- covers: Analyze transport and timing failures: packet drops, deserializer bit slips, clock jitter, and corrupted timestamps that misreport observation age. -->
-<!-- covers: Construct runtime health monitors: pixel intensity histograms, watchdog timers, optical flow plausibility limits, and cross-sensor IMU consistency checks. -->
-<!-- covers: Analyze the fundamental boundary of runtime monitors: why single-sensor self-monitoring cannot detect in-distribution semantic errors or optical illusions. -->
-<!-- covers: Present a real-world incident case study where an undetected perception failure (such as sensor clock desynchronization or unflagged saturation) propagated directly to an actuator command. -->
-<!-- GROUNDING: failure — blur, saturation, dropout, desynchronisation, and a timestamp that lies -->
-<!-- INCIDENT: needs a documented, citable case. Do not invent one. -->
-<!-- FIGURE: A taxonomy matrix categorizing perception failure modes by observability, detection latency, and required mitigation strategy. -->
-<!-- DERIVE: The state estimation error bound $\Delta p = v \cdot \delta t + \frac{1}{2} a \cdot (\delta t)^2$ resulting from an undetected clock desynchronization $\delta t$ under velocity $v$ and acceleration $a$. -->
-
-<!-- BEGIN -->
 Perception failures divide into two distinct operational classes. Detectable faults occur when the physical sensor or the communication transport reports an explicit error condition. A serializer-deserializer link drops a lock, a cyclical redundancy check detects a corrupted payload, a frame buffer overflows, or a transport bus times out. These failures are straightforward to handle because the hardware driver asserts an error flag at the boundary of the nervous system. Downstream planning algorithms immediately register the missing frame, invalidate stale state estimates, and transition the machine into a degraded operating mode or command a controlled stop. In contrast, **silent failures**\index{Silent failure!definition} occur when the sensor hardware and transport pipeline function without error, delivering a fully populated, structurally valid tensor whose numerical values misrepresent the physical world.
 
 Physical degradation of the optical channel represents the most common source of silent error.[^fn-hw-lidar-drift] When direct sunlight enters an optical aperture, incident photons exceed the full-well capacity of the CMOS photodiodes, clamping pixel intensities at their maximum quantization limit across large patches of the array. This dynamic range saturation destroys local spatial gradients. Feature extractors, optical flow estimators, and disparity matching algorithms fail because mathematical optimization on a uniform flat field yields zero information, yet the driver emits a valid frame at nominal line rate. Low-light environments introduce the opposite failure mode. As ambient illumination drops, photon shot noise and sensor read noise dominate the measurement. The signal-to-noise ratio collapses, causing downstream neural networks to extract geometric features from random thermal fluctuations rather than physical scene boundaries. Environmental contaminants on the protective lens or dome window (such as water droplets, airborne dust, or mud splatters) act as irregular refractive elements and optical low-pass filters. They attenuate contrast, distort spatial geometry, and obscure obstacles while the transport bus continues to operate without asserting a single fault flag. Across physical archetypes, these silent degradation modes take distinct manifestations: in Mobile Systems, low-angle sun glare saturates forward cameras on highway asphalt or rain droplets refract LiDAR beams; in Manipulators, specular reflections off polished metallic workpieces blind active stereo depth cameras and coolant mist coats eye-in-hand lenses; and in Process / Energy Systems, metallic vapor plumes, incandescent spatter, and soot deposits attenuate pyrometer optical sight glasses in laser additive powder-bed fusion, causing temperature estimators to report nominal states while melt pool temperatures surge uncontrollably.
@@ -468,21 +386,9 @@ A sensor frame that arrives on time with a corrupted timestamp is far more dange
 :::
 
 When an observation crosses from the perception pipeline into the nervous system, downstream tracking loops and safety enforcers cannot deduce whether the underlying sensors were saturated, delayed, or misaligned. The perception subsystem cannot simply output a tensor and rely on downstream components to infer its integrity. To prevent silent failures from corrupting physical control, every observation must arrive packaged with an explicit, immutable record of its temporal origin, reference frame, and validated health metrics.
-<!-- END -->
 
 ## The Observation Contract {#sec-perception-8-7}
 
-<!-- SECTION 8.7 -->
-<!-- claim: What must be stated about perception before anything downstream is permitted to trust it. -->
-<!-- covers: State only the fields this chapter adds to the notebook. The schema, its provenance rules, and its versioning are established in @sec-nervous and are not restated here. -->
-<!-- covers: Define the formal schema of the immutable observation record passed across the perception boundary to downstream subsystems. -->
-<!-- covers: Specify mandatory record fields: capture timestamp epoch ($t_{\text{exp-mid}}$), sequence index, sensor frame identifier ($\mathcal{F}_{\text{sensor}}$), raw tensor payload, and spatial covariance matrix ($\Sigma_z$). -->
-<!-- covers: Specify metadata fields: active camera intrinsics, temperature calibration coefficients, and sensor firmware revision hash. -->
-<!-- covers: Define the contract for validity flags: degraded confidence, partial occlusion markers, and sensor health status bits. -->
-<!-- covers: Specify the test interface: how fault injectors in @sec-enforcement and verification suites in @sec-verification mutate observation record fields to validate downstream resilience. -->
-<!-- FIGURE: A memory layout diagram showing the typed byte structure and header fields of the observation record. -->
-
-<!-- BEGIN -->
 The boundary between the perception pipeline and the nervous system is a memory interface governed by an explicit serialization contract. A downstream tracking loop, state estimator, or safety monitor cannot inspect camera registers, probe optical hardware, or reconstruct sensor exposure history. If the perception pipeline provides only an isolated array of floats or a raw pixel buffer, downstream consumers are forced to make unverified assumptions about when the data was captured, where the sensor was pointed, and how much noise corrupts the signal. To eliminate these unstated assumptions, the perception pipeline packages every observation into an immutable **observation record**\index{Observation record!definition}, laid out in contiguous, byte-aligned memory. The top-level message envelope, transport header, and schema versioning adhere to the universal notebook contract established in @sec-nervous. This chapter extends that baseline envelope by defining the perception payload, consisting of five mandatory physical channels, three metadata blocks, and a fixed-width validity bitfield.
 
 The **observation record**\index{Observation record!definition} is the immutable engineering notebook schema extension that encapsulates raw sensor measurements and learned feature tokens with nanosecond-precise energy integration timestamps ($t_{\text{exp-mid}}$), kinematic reference frame keys ($\mathcal{F}_{\text{sensor}}$), spatial uncertainty covariance matrices ($\mathbf{\Sigma}_z$), thermal calibration offsets, and a $64\text{-bit}$ hardware health bitmask.
@@ -520,19 +426,9 @@ Before reading the tensor payload or executing matrix operations, downstream tra
 The explicit byte structure of the observation record defines the fault injection interface used for system verification. Rather than simulating complex physical environments or modifying sensor hardware, fault injectors in @sec-enforcement manipulate observation records directly on the shared memory bus before downstream delivery. An injector can add a systematic offset of $50\text{ ms}$ to $t_{\text{exp-mid}}$ to simulate clock drift, drop every fifth record by introducing gaps in the sequence index, inflate the diagonal elements of $\mathbf{\Sigma}_z$ by a factor of ten, or set the partial occlusion bit while leaving the raw tensor intact. Verification suites in @sec-verification execute these structured mutations deterministically against candidate software builds. If a downstream motion planner fails to transition into a safe fallback state when the sensor health bitfield indicates a communication fault, or if an estimator diverges because timestamp jitter reached $100\text{ ms}$, the verification suite pinpoints the failure directly in the software interface. The record layout ensures that every failure mode observed on physical test tracks can be reproduced, audited, and tested in regression pipelines without physical hardware in the loop.
 
 An observation record provides the complete spatial, physical, and operational context of a measurement at a single instant in time. Yet having a fully formed, mathematically validated observation record does not guarantee that the measurement can be acted upon. Once the record is committed to memory, its value decays with every microsecond of transport delay, queuing stall, and processing latency across the system bus.
-<!-- END -->
 
 ## Fallacies and Pitfalls {#sec-perception-8-8}
 
-<!-- claim: An observation that is accurate and useless because of when it arrived. -->
-<!-- covers: Stress-test 1: The high-confidence stale observation — demonstrate how an accurate but delayed frame causes an obstacle avoidance planner to clear a collision path that has already closed. -->
-<!-- covers: Stress-test 2: Inter-sensor clock skew — demonstrate how two cameras with a $15\text{ ms}$ clock offset observing a target moving at $30\text{ m/s}$ generate phantom duplicate obstacles in downstream state estimators. -->
-<!-- covers: Stress-test 3: Bus saturation under optical transients — evaluate how a sudden scene change triggers burst transmission that starves high-priority safety interrupts on a shared interconnect. -->
-<!-- covers: Architectural mitigations: enforce freshness deadlines with hard frame drops, hardware-synchronized PTP triggers, and QoS-prioritized DMA channels. -->
-<!-- FIGURE: A timing diagram showing how clock skew between two sensors observing a moving vehicle creates phantom split tracks in the downstream world model. -->
-<!-- DERIVE: The phantom spatial separation $\Delta d = v_{\text{target}} \cdot \Delta t_{\text{skew}}$ generated between two unsynchronized sensor observations of an object moving at velocity $v_{\text{target}}$. -->
-
-<!-- BEGIN -->
 An observation that arrives with zero sensor noise, perfect spatial resolution, and high semantic classification confidence is useless if it arrives late. In an embodied system moving through space, perceptual validity decays with every millisecond of transport latency, queuing stall, and processing jitter. When software queues or memory buses decouple a measurement timestamp from the physical state of the machine, acting on that measurement forces the controller to execute actions against a world that no longer exists. The following fallacies and pitfalls examine the failure modes that emerge when timing, synchronization, and interconnect bandwidth break down across the perception pipeline:
 
 ::: {.fallacy-pitfall}
@@ -571,18 +467,8 @@ An observation that arrives with zero sensor noise, perfect spatial resolution, 
 
 :::
 
-<!-- END -->
-
 ## Summary {#sec-perception-8-9}
 
-<!-- SECTION 8.9 -->
-<!-- claim: @sec-training receives an observation that knows how old it is. -->
-<!-- covers: Summarize perception as the physical and computational process of producing dated, localized, and bounded observation records. -->
-<!-- covers: Reiterate that latency and bus bandwidth are finite physical budgets consumed during ingestion rather than software afterthoughts. -->
-<!-- covers: Reiterate that downstream components require explicit metric coordinates and uncertainty bounds to avoid catastrophic control errors. -->
-<!-- covers: State the handoff to @sec-memory: how the system maintains coherent physical belief across time when observations are delayed, noisy, or occluded. -->
-
-<!-- BEGIN -->
 Perception in a physical AI system is the physical and computational process of producing dated, localized, and bounded observation records. An observation is not an abstract tensor of activations or a list of uncalibrated bounding boxes generated by an isolated neural network. In a machine that moves through physical space, sensory data begins as physical energy interacting with a detector array, passes through analog-to-digital converters and direct memory access controllers, and undergoes neural processing before reaching downstream consumers. To be usable by a learned policy or a state estimator, every observation record must carry three physical invariants. First, it requires a hardware-latched timestamp capturing the temporal midpoint of sensor integration, allowing downstream loops to compute exactly how old the observation is. Second, it requires an explicit geometric transform that maps coordinates from the local sensor frame into the physical body frame of the machine. Third, it requires an uncertainty envelope that bounds measurement noise, lens distortion, and model dispersion. Without these three metadata fields, perception delivers ungrounded numbers that force downstream controllers to treat historical measurements as present reality.
 
 The resources required to ingest sensory data represent finite physical budgets that must be accounted for during system design rather than treated as software overhead. High-rate cameras, LiDAR units, and radar arrays generate continuous streams of digital payloads that compete directly for shared memory buses, direct memory access channels, and cache capacity. Consider an analytical example of an autonomous vehicle equipped with four high-resolution cameras operating at $30\text{ Hz}$. If each camera streams raw Bayer frames of $1920 \times 1080$ pixels at $16\text{ bits}$ per pixel, the four sensors continuously generate $497.7\text{ MB/s}$ of raw ingress traffic across the system interconnect. When image pipelines debayer these frames, convert color spaces, and populate input tensors for neural network backbones, the aggregate memory read and write volume exceeds $1.5\text{ GB/s}$. If this data stream shares a silicon crossbar with the microcontroller bus without hardware-enforced quality-of-service priorities, memory bus saturation can stall safety-critical telemetry. If an inertial measurement unit interrupt running at $1000\text{ Hz}$ experiences a $P_{99}$ scheduling delay of $5.0\text{ ms}$ because camera direct memory access transfers congest the bus, a vehicle traveling at $10.0\text{ m/s}$ travels $50\text{ mm}$ without active acceleration feedback. Ingestion latency cannot be masked through asynchronous software queues, because software buffering does not alter the physical time elapsed between photon arrival and actuator response. Every millisecond consumed by serialization, sensor driver dispatch, and neural inference ages the observation record and widens the physical distance traveled by the machine.
@@ -600,9 +486,6 @@ An observation record that knows its age, its spatial frame, and its uncertainty
 :::
 
 This requirement defines the handoff to @sec-memory. Where perception produces isolated, dated observation records bounded in space and uncertainty, the memory and state estimation subsystem fuses these asynchronous records against forward kinematic and dynamic models. By maintaining an explicit state distribution, the nervous system propagates physical belief forward during sensory dead times, reconciles delayed observation records through historical state buffers, and preserves object permanence when obstacles are temporarily occluded. Perception answers what physical quantities were measured, when they occurred, and how imprecise they might be. The memory and state architecture consumes those bounded records to determine what the world is doing right now, providing the continuous, low-latency state vector required to govern physical action safely.
-<!-- END -->
-
-<!-- FOOTNOTES -->
 
 [^fn-hw-rolling-shutter]: In rolling shutter sensors, sequential row readout ($t_{\text{readout}} = (H-1)t_{\text{row}}$) warps epipolar lines under angular velocity $\boldsymbol{\omega}$, breaking rigid multi-view geometry unless continuous-time pose interpolation $\mathbf{T}_{wb}(t(y))$ is modeled.
 
