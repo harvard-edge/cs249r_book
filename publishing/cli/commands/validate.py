@@ -1670,15 +1670,28 @@ class ValidateCommand:
         )
 
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
-        """Resolve the shared book references.bib for a book .qmd."""
+        """Resolve the bibliography a .qmd actually renders against.
+
+        Volumes I and II share contents/references.bib; Volumes III and IV each
+        have their own. Resolve by volume rather than assuming the shared file,
+        because "backmatter" appears in every volume's path: matching on that
+        segment alone checked vol4's appendices against vol1/vol2's bibliography
+        and reported seven of its real entries as missing, while vol3 and vol4
+        chapters matched no segment at all and were never citation-checked.
+        """
         try:
             rel = file.relative_to(self.config_manager.book_dir)
         except ValueError:
             return None
-        parts = rel.parts
-        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & set(parts)):
+        parts = set(rel.parts)
+        contents = self.config_manager.book_dir / "contents"
+        for vol in ("vol3", "vol4"):
+            if vol in parts:
+                bib_file = contents / f"references-{vol}.bib"
+                return bib_file if bib_file.exists() else None
+        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & parts):
             return None
-        bib_file = self.config_manager.book_dir / "contents" / "references.bib"
+        bib_file = contents / "references.bib"
         return bib_file if bib_file.exists() else None
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
@@ -1702,6 +1715,11 @@ class ValidateCommand:
             qmd_content_no_code = re.sub(r"<style\b[^>]*>.*?</style>", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"```.*?```", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"`[^`]+`", "", qmd_content_no_code)
+            # Strip math. Pandoc's `@` citation syntax has no meaning inside
+            # math mode, but "Pass@k", "Pass@100" and "pass@1" are ordinary
+            # notation there, and each was reported as a missing citation key.
+            qmd_content_no_code = re.sub(r"\$\$.*?\$\$", "", qmd_content_no_code, flags=re.DOTALL)
+            qmd_content_no_code = re.sub(r"(?<!\\)\$[^$\n]+\$", "", qmd_content_no_code)
             refs = set(CITATION_REF_PATTERN.findall(qmd_content_no_code))
             refs = {r.rstrip(".,;:") for r in refs if not r.startswith(EXCLUDED_CITATION_PREFIXES)}
             refs = {r for r in refs if not re.match(r"^\d+\.\d+", r)}
@@ -4949,6 +4967,7 @@ class ValidateCommand:
             self.config_manager.book_dir / "contents" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol1" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol2" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "contents" / "vol3" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol4" / "parts" / "summaries.yml",
         ]
 
