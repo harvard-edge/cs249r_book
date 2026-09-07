@@ -315,6 +315,16 @@ When an agent embarks on a complex trajectory:
 3. **Speculative Rollback:** Because all mutations occurred in an ephemeral microVM UpperDir, rolling back $B_1$ is instantaneous: the UpperDir is purged in under 2 milliseconds, and the active context window rewinds to $S_0$.
 4. **Counterfactual Exploration:** The agent proceeds down alternative branch $B_2$, committing state mutations only when the terminal verifier passes.
 
+### Circuit Breakers and Runaway Execution Limits
+
+While test-time search algorithms like Best-of-$N$ and ToT provide powerful algorithmic mechanisms to navigate around failed verification gates, they introduce a critical system-level vulnerability: infinite retry loops. If an agent encounters an unsolvable constraint or structurally flawed test oracle, unconstrained search will aggressively consume GPU inference budgets without making forward progress.
+
+Classical distributed architectures prevent cascading resource exhaustion via the **Circuit Breaker** pattern [@nygard2018release]. In agentic ML runtimes, circuit breakers must be implemented at three distinct tiers to contain stochastic runaway execution:
+
+1. **Token Budgets (Cost Breakers):** A hard limit on the total input and output tokens consumed per trajectory. Once the threshold is breached, the execution is preemptively aborted to prevent unbounded billing overruns.
+2. **Consecutive Failure Breakers:** If an agent fails the identical verification gate $N$ consecutive times, the stategraph is locked and the task is escalated to a human supervisor.
+3. **Wall-Clock Timeouts:** A bounding deadline on task execution. Because agents may block on external APIs or hallucinate infinite loops in sandboxed bash sessions, the orchestrator must enforce preemptive OS-level thread and container timeouts.
+
 
 ## The Reversibility Boundary {#sec-vol3-recovery-the-reversibility-boundary-reversible}
 
@@ -360,6 +370,16 @@ In classical database theory [@gray1992], atomicity across distributed systems i
 
 **Two-phase commit is impossible in autonomous agent architectures.**
 External SaaS APIs (Stripe, Twilio, GitHub, AWS) do not expose prepare/vote interfaces. They execute requests immediately upon receiving an authenticated HTTP POST. Furthermore, agent decision cycles take seconds or minutes, vastly exceeding distributed lock timeouts. Holding database row locks open while waiting for an LLM to generate its next inference turn would freeze enterprise databases and cause catastrophic connection starvation.
+
+### Idempotency Keys and the Two Generals' Problem
+
+When crossing the Reversibility Boundary, agentic systems inevitably collide with the classic Two Generals' Problem: a network timeout does not imply transaction failure. If an agent dispatches an HTTP POST to trigger a cloud deployment and the connection drops, the deployment may have actually succeeded. 
+
+If the agent's stochastic retry loop simply issues another identical tool call, the system risks catastrophic duplication (e.g., spinning up redundant infrastructure, or executing double payments). To survive network partitions safely, all state-mutating external actuations must enforce **Idempotency Keys**:
+
+$$ \text{Idempotency-Key} = \text{Hash}(\text{Trajectory\_ID} \parallel \text{Step\_ID} \parallel \text{Action\_Payload}) $$
+
+By injecting cryptographic idempotency tokens into external API headers, the runtime ensures that even if an agent hallucinates a retry loop or the network partitions, the downstream service will safely deduplicate the request, ensuring exactly-once execution semantics.
 
 ### The $10^6\times$ Human Oversight Latency Tax
 
@@ -694,14 +714,23 @@ Piping multi-thousand-line raw terminal tracebacks and compiler logs directly in
 
 :::
 
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Over-permissioning agent tool catalogs across the Reversibility Boundary.*
+
+A common violation of the **Principle of Least Privilege** is equipping an agent with coarse-grained administrative credentials (e.g., AWS `AdministratorAccess` or unfiltered shell capabilities) under the assumption that the LLM will only invoke the specific subset of tools required. When an agent experiences semantic hallucination or encounters adversarial prompt injections, it will aggressively exploit all available permissions. Runtimes must restrict tool catalogs dynamically per-task and employ strictly bounded IAM roles before executing external actuations.
+
+:::
+
 
 ## Chapter Summary {#sec-vol3-recovery-summary}
 
 - **The Fail-Plausible Fault Model:** Autonomous agents introduce a new failure class where models emit syntactically flawless, highly confident outputs that harbor destructive semantic defects. Checksums cannot detect semantic flaws; unverified retries compound error through confirmation bias.
 - **Exponential Error Compounding:** If single-step accuracy is $p$, an unverified trajectory's success probability decays exponentially as $P_{\text{success}} \le p^N$. A model with 98 percent accuracy has only a 13.3 percent chance of succeeding across 100 unverified steps. Scaling model parameters cannot overcome the horizon exponent $N$ without intermediate verification.
 - **The Verification Tax ($C_{\text{ver}}$):** Verification consumes latency and compute. The optimal checkpoint cadence $K^*$ balances verification tax against the cost of discarded forward progress, scaling with $\sqrt{\lambda_{\text{error}} \cdot C_{\text{gen}} / C_{\text{ver}}}$.
+- **Circuit Breakers for Runaway Execution:** To prevent infinite algorithmic retry loops from exhausting GPU compute and token budgets, robust agent runtimes enforce token cost limiters, consecutive failure breakers, and preemptive wall-clock timeouts.
 - **Deterministic Test Oracles:** Software oracles (AST validators, compilers, linters, and unit test suites) strictly dominate stochastic "LLM-as-a-judge" critics. They provide unforgeable, bit-exact correctness boundaries at sub-second latency and zero token cost.
 - **The Reversibility Boundary:** Systems state bifurcates into the reversible internal domain (context working sets, git worktrees, OverlayFS UpperDir) where rollbacks are instantaneous and zero-cost, and the irreversible external actuation domain (databases, cloud APIs, emails, financial transactions) where true inverses do not exist.
-- **Distributed Agent Sagas:** Multi-step external workflows cannot use 2-phase commit. They must be orchestrated as Sagas: forward transactions paired with pre-compiled, deterministic compensating handlers ($A^{-1}$) executed in reverse order upon failure.
+- **Distributed Agent Sagas and Idempotency:** Multi-step external workflows cannot use 2-phase commit. They must be orchestrated as Sagas: forward transactions paired with pre-compiled, deterministic compensating handlers ($A^{-1}$) executed in reverse order upon failure. Furthermore, all state-mutating forward actions must enforce cryptographic Idempotency Keys to survive network partitions without duplicating executions.
 - **State Checkpointing and Event Sourcing:** Resilient agents record transitions to append-only Write-Ahead Logs (WAL). In-flight execution can be snapshotted, dehydrated during multi-hour human approval gates, and hydrated onto replacement nodes within 50 milliseconds.
 - **Deterministic Replay Engines:** Debugging non-deterministic, rare stochastic agent failures requires capturing PRNG seeds, freezing system clocks, and recording external network I/O bytes to enable bit-exact offline reproduction.

@@ -258,6 +258,29 @@ The runtime kernel prevents circular delegation by enforcing a **Strictly Acycli
 
 - A subagent can only return results upward to its explicit parent; it cannot delegate tasks upward or to siblings without traversing the parent coordinator.
 
+## Inter-Agent Communication (IPC) and Synchronization {#sec-vol3-descriptors-ipc-and-synchronization}
+
+When multi-agent systems coordinate, they require mechanisms analogous to POSIX Inter-Process Communication (IPC). Classical operating systems implement IPC via either **Message Passing** (pipes, sockets) or **Shared Memory** (`shmget`, `mmap`). In an agentic runtime, these paradigms map directly to physical hardware memory management and multi-node network topologies.
+
+### Message Passing (Actor Model)
+When agents are highly decoupled—such as a Planner Agent written in Python communicating with a Coder Agent on a separate physical node—IPC is implemented via asynchronous message passing (e.g., passing serialized JSON or natural language over an event bus). Because the agents maintain separate ACBs and do not share physical GPU memory, they communicate by appending observations to each other's episodic working memory. This mirrors the Actor Model [@hewitt1973] and provides strong fault isolation, but incurs high latency and token-ingestion costs, as every received message must be re-processed through the model's compute-bound prefill phase.
+
+### Shared Memory (KV-Cache Prefix Sharing)
+When a parent agent spawns multiple parallel child subagents (e.g., to concurrently evaluate three different candidate solutions), copying the identical system instructions, task context, and tool schemas into each child's independent context window wastes massive GPU HBM and compute.
+
+To resolve this, modern agent runtimes implement **Shared Memory IPC** through **KV-Cache Prefix Sharing** (such as RadixAttention [@zheng2023sglang] or native prompt caching). Analogous to operating system virtual memory paging with Copy-On-Write (COW) semantics:
+
+1. The kernel computes the Key-Value tensors for the shared preamble once.
+2. It maps the same physical PagedAttention block IDs into the $\mathcal{M}_{\text{handles}}$ of all child ACBs.
+3. As each child agent diverges and autoregressively generates its own unique reasoning tokens, the kernel allocates new, private physical KV blocks for the divergent sequences.
+
+This systems-level memory sharing dramatically increases serving throughput for tree-search and parallel multi-agent topologies by eliminating redundant prefill computation and compressing the physical memory footprint.
+
+### Agent Synchronization and Mutexes
+When concurrent agents act upon a shared external environment, they face classic concurrency hazards (e.g., race conditions, lost updates). If Agent A and Agent B simultaneously attempt to edit the same source code file via a file-editing tool, their interleaved operations can corrupt the file. 
+
+The runtime must provide **Agent Mutexes** or distributed locks, exposed as tool capabilities. Before mutating a shared external resource, the agent must acquire a time-bounded lease on the resource. If the lock is held by another ACB, the requesting agent receives a `ResourceLocked` observation, allowing it to either wait, yield its execution slice, or pivot to another task.
+
 ## The ACB Lifecycle State Machine {#sec-vol3-descriptors-the-acb-lifecycle-state}
 
 An agent is not a continuous script; it is a stateful systems entity that transitions across distinct operational phases. The runtime kernel manages this lifecycle through a formal **Finite State Machine (FSM)** [@harel1987; @opentelemetry2024genai].

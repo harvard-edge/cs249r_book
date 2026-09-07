@@ -42,7 +42,7 @@ An unconstrained `while True:` loop wrapped around a stochastic model is an arch
 
 ## The Spectrum of Control {#sec-vol3-topologies-the-spectrum-of-control}
 
-The architecture of an agentic machine learning system is fundamentally defined by where it draws the boundary between deterministic software engineering and stochastic neural inference. In naive implementations, developers often assume an all-or-nothing dichotomy: either a program is a hardcoded procedural script, or it is a fully unconstrained, autonomous agent that decides its own control flow. Production engineering reveals that robust systems exist along a continuous architectural spectrum [@anthropic2024effective].
+The architecture of an agentic machine learning system is fundamentally defined by where it draws the boundary between deterministic software engineering and stochastic neural inference. A rigorous systems perspective models this as the separation of the **Control Plane** (the stochastic model deciding *what* to do next via routing and planning) from the **Data Plane** (the deterministic tools executing physical side-effects and data transformations). In naive implementations, developers often assume an all-or-nothing dichotomy: either a program is a hardcoded procedural script, or it is a fully unconstrained, autonomous agent that decides its own control flow. Production engineering reveals that robust systems exist along a continuous architectural spectrum [@anthropic2024effective], progressively shifting more routing and execution responsibilities from the deterministic data plane to the stochastic control plane.
 
 @Fig-vol3-topologies-spectrum illustrates this progression across five canonical archetypes: prompt chaining, routing and dispatch, parallel fan-out, supervisor-worker hierarchies, and autonomous loops. As an architecture moves from left to right along this spectrum, model autonomy and problem-solving flexibility increase, but so do non-determinism, verification complexity, latency variance, and the risk of catastrophic failure.
 
@@ -123,7 +123,7 @@ However, the systems tax of the ReAct topology is severe:
 
    Because every step requires a complete forward pass over the accumulated context, the total token processing burden across $K$ steps scales quadratically: $\mathcal{O}(K^2)$.
 
-2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies.
+2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies. To prevent long-running external tools from tying up GPU VRAM while waiting for $o_t$, production runtimes implement **Asynchronous Yielding**: the agent process yields execution, its KV cache is offloaded to CPU memory or NVMe (context swapping), and the GPU is freed for other requests until the tool completes and issues a hardware interrupt to resume the loop.
 
 3. **Error Compounding (Cognitive Drift):** If an observation $o_t$ contains misleading, noisy, or truncated information, the model's subsequent thought $x_{t+1}$ frequently rationalizes the error rather than correcting it. Without external verifier gates, ReAct loops frequently diverge into hallucinated sub-goals.
 
@@ -148,7 +148,7 @@ The systems trade-offs between Plan-and-Solve and ReAct are governed by the **En
 
 When the environment is deterministic or highly predictable ($\mathcal{H}(\mathcal{T}) \to 0$, such as mathematical proof verification, static code refactoring, or document parsing), Plan-and-Solve delivers overwhelming performance advantages:
 
-- **Asynchronous Parallelism:** Independent sub-tasks execute concurrently across distinct GPU workers. If a plan contains $M$ independent tasks of average duration $\tau$, wall-clock execution time collapses from $M \cdot \tau$ to $\max(\tau_1, \dots, \tau_M) + \epsilon_{\text{sched}}$, achieving near-linear speedup.
+- **Asynchronous Parallelism:** Independent sub-tasks execute concurrently across distinct GPU workers. If a plan contains $M$ independent tasks of average duration $\tau$, wall-clock execution time collapses from $M \cdot \tau$ to $\max(\tau_1, \dots, \tau_M) + \epsilon_{\text{sched}}$. However, governed by **Amdahl's Law**, the maximum achievable speedup is strictly bounded by the sequential fraction of the topology: the initial Decomposition Phase (planner inference) and the terminal node (aggregator synthesis). As $M$ scales, these sequential synchronization barriers dominate system latency.
 - **Context Hygiene and Token Efficiency:** Worker agents execute sub-tasks in clean, isolated context windows containing only their immediate instructions. They do not inherit the massive, noisy conversation history of the parent planner, eliminating the quadratic KV cache penalty $\mathcal{O}(K^2)$ of ReAct.
 
 Conversely, when the environment exhibits high entropy and stochasticity ($\mathcal{H}(\mathcal{T}) \gg 0$, such as web browsing over dynamic user interfaces, interacting with volatile third-party REST APIs, or debugging complex legacy codebases), static Plan-and-Solve becomes exceptionally fragile. If the observation $o_1$ from Task 1 invalidates an underlying assumption made by the planner during step 0, the remaining tasks in $\mathcal{G}_{\text{plan}}$ become invalid. The runtime must either execute invalid tasks (burning compute uselessly) or trigger an expensive, full-graph replanning cycle.
@@ -421,6 +421,13 @@ Appending all intermediate thoughts, tool calls, and verbose JSON payloads into 
 :::
 
 ::: {.fallacy-pitfall}
+**Pitfall**: *Exposing non-idempotent tools to autonomous retry loops.*
+
+Because agent control topologies inherently rely on non-deterministic retries, fallback routing, and error recovery, exposing non-idempotent state-mutating tools (e.g., `charge_credit_card()`, `append_to_file()`) without transactional safety leads to catastrophic state corruption. When an agent loops or replans, it may re-execute previously invoked actions. Systems must enforce strict **Idempotency** at the tool API boundary (e.g., requiring deterministic `idempotency_key` arguments derived from the execution graph hash) or implement compensating transactional rollbacks before allowing the agent to retry.
+
+:::
+
+::: {.fallacy-pitfall}
 **Pitfall**: *Using regex-based edge parsing for state transitions.*
 
 Using brittle string matching or regular expressions (e.g., searching for `"Action:"` or `"Thought:"` strings) to parse edge transitions in autonomous graphs makes the runtime fragile. Minor formatting variations, markdown syntax highlighting, or model conversational disclaimers break edge transitions silently, causing runtime exceptions. Production architectures enforce native structured decoding (constrained JSON generation) where the serving engine restricts logits to guarantee schema-valid transitions.
@@ -429,10 +436,10 @@ Using brittle string matching or regular expressions (e.g., searching for `"Acti
 
 ## Chapter Summary {#sec-vol3-topologies-summary}
 
-- **Bounded Autonomy:** Unconstrained `while True:` loops wrapped around stochastic models are architectural denial-of-service vulnerabilities. Reliable execution requires formal control topologies: Directed Acyclic Graphs (DAGs) and hierarchical statecharts.
+- **Bounded Autonomy:** Unconstrained `while True:` loops wrapped around stochastic models are architectural denial-of-service vulnerabilities. Reliable execution requires formal control topologies (Directed Acyclic Graphs and hierarchical statecharts) and strict separation of the stochastic control plane from the deterministic data plane.
 - **The Control Spectrum:** System architectures span a continuum from deterministic prompt chains, routing trees, and parallel Map-Reduce DAGs to supervisor-worker trees and autonomous loops. Engineers should deploy the least autonomous topology that satisfies task requirements.
 - **Trajectories as DAGs:** Formulating agent trajectories as POMDPs and execution DAGs $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ enables critical path scheduling, deterministic replay, and localized fault recovery.
-- **ReAct Systems Dynamics:** Generating verbal thoughts prior to action selection establishes an ephemeral working memory scratchpad in the KV cache, significantly reducing action hallucinations at the cost of quadratic token scaling $\mathcal{O}(K^2)$ and sequential latency.
+- **ReAct Systems Dynamics:** Generating verbal thoughts prior to action selection establishes an ephemeral working memory scratchpad in the KV cache, significantly reducing action hallucinations at the cost of quadratic token scaling $\mathcal{O}(K^2)$ and sequential latency. Efficient runtimes mitigate latency and compute stalls via asynchronous yielding and context swapping.
 - **The Anti-Swarm Principle:** Production systems reject unconstrained peer-to-peer swarms in favor of hierarchical supervisor trees. Supervisors enforce unidirectional command flow, strict context isolation boundaries, and schema-gated verification.
 - **Semantic Cycle Detection:** Because livelocked agents paraphrase actions rather than repeating bit-exact strings, runtimes deploy multi-tier detection combining canonical tool hashing, semantic embedding distance ($\Delta s < \epsilon$), and environment mutation metrics ($\Delta \mathcal{S}_{\text{env}}$).
 - **Out-of-Band Circuit Breakers:** Dynamic circuit breakers operate across three states (`CLOSED`, `HALF-OPEN`, `OPEN`), monitoring step ceilings, token budgets, and error bursts to halt runaway loops, roll back dirty writes, and escalate to human operators.

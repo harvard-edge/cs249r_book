@@ -396,6 +396,27 @@ In classical deep learning inference, the KV cache for a sequence is allocated a
 
 For complex search topologies (like Best-of-$N$ and Tree of Thoughts), **RadixAttention** (introduced by SGLang, @zheng2023sglang) extends PagedAttention by structuring the physical blocks into a Radix Trie. When a parent context forks into multiple search branches, RadixAttention ensures that the shared prefix tokens are physically cached exactly once. The branches simply maintain lightweight pointers to the shared Radix nodes, dropping the marginal memory cost of test-time search to near zero for the shared prefix.
 
+## Distributed Context and Execution Scheduling {#sec-vol3-context-distributed-execution}
+
+Beyond single-node physical memory allocation, production agentic platforms must manage context across asynchronous workloads and cluster-wide resources. The extreme latency and memory characteristics of context windows dictate specialized scheduling and distributed overlays.
+
+### Chunked Prefill for Head-of-Line Blocking
+
+When an inference node interleaves multiple concurrent agent streams, the stark operational dichotomy between the compute-bound prefill and memory-bound decode creates severe head-of-line blocking. If Agent A requires a 100k-token prefill for a new repository map, the dense GEMM computation monopolizes the GPU's streaming multiprocessors (SMs) for several seconds. During this time, Agent B and Agent C—who only need quick autoregressive decode steps—are completely stalled.
+
+To resolve this scheduling conflict, modern inference engines employ **Chunked Prefill** (e.g., Sarathi, @agrawal2024sarathi). Instead of processing Agent A's entire 100k-token prompt as a single monolithic block, the prefill is sliced into smaller, fixed-size chunks (e.g., 2,048 tokens). The scheduler interleaves one prefill chunk from Agent A with a batch of decode steps from Agents B and C. This converts the prefill from a massive latency spike into a sustained background stream, maintaining strict tail-latency guarantees for interactive decode generation while keeping GPU compute units saturated.
+
+### Distributed KV Cache Migration and Disaggregation
+
+As agent trajectories expand, binding an agent to a single physical GPU node becomes a severe availability bottleneck. If a long-running agent waits 30 seconds for an external bash command to complete, holding its multi-gigabyte KV cache in accelerator HBM wastes critical memory capacity. To solve this, production clusters implement **Distributed Context Management** and **Prefill-Decode Disaggregation** (e.g., DistServe, @zhong2024distserve; Mooncake, @mooncake2024).
+
+This architecture treats the KV cache not as a hardware-bound artifact, but as a migratable operating state:
+
+1. **Hardware Specialization:** The compute-heavy prefill phase is routed to a cluster of **Prefill Nodes** optimized for high batch size and dense compute. Once materialized, the KV cache is transmitted over high-bandwidth RDMA networks to memory-heavy **Decode Nodes** optimized for low-latency autoregressive generation.
+2. **Distributed KV Tiering:** Rather than trapping the KV cache in GPU HBM, the cluster manages it as a tiered asset across GPU HBM (active), host DRAM (paused agents), and a cluster-wide distributed memory pool (idle state). When a background task awakens an agent, its KV cache is dynamically routed to the least-loaded decode node.
+
+By decoupling the physical context state from the inference execution hardware, ML systems achieve elastic load balancing, multiplexing thousands of concurrent asynchronous agents over a finite GPU cluster without triggering catastrophic OOM thrashing.
+
 ## Recursive Context Compaction {#sec-vol3-context-compaction-via-recursive-summarization}
 
 While KV-cache eviction algorithms operate at the sub-token tensor level inside the inference engine, autonomous agent runtimes also require **Semantic Context Compaction** operating at the application layer. When an agent engages in extended tasks spanning 50 to 100 turns, token accumulation inevitably approaches the model's context threshold $\theta_{\text{compact}}$ (typically 75% of maximum context capacity).
@@ -645,6 +666,7 @@ Allowing chain-of-thought scratchpad tokens to accumulate in persistent trajecto
 - **Decode Economics:** While prompt prefill is compute-bound, autoregressive decode is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\ \text{FLOP/Byte}$). Generating tokens over multi-gigabyte KV caches throttles throughput and explodes inference cost.
 - **Denning's Working Set for Agents:** Peter Denning's 1968 Working Set theory applies directly to token sequences. Agents do not access history uniformly; less than 8% of tokens capture over 85% of attention mass. Active working set management $W(t, \Delta t)$ prevents memory thrashing.
 - **Attention Sinks and Sparsification:** Window-based attention collapses unless initial **Attention Sinks** ($S \approx 4$ tokens) are retained to absorb surplus softmax probability mass. Dynamic sparsification algorithms (H2O, FastGen) track cumulative attention scores to retain heavy-hitter tokens.
+- **OS-Level and Distributed Scheduling:** PagedAttention prevents memory fragmentation by virtualizing the KV cache, while Chunked Prefill and Prefill-Decode Disaggregation decouple context state from physical execution hardware for cluster-wide load balancing.
 - **Structural Codebase Representation:** Production coding agents navigate large codebases by replacing raw file ingestion with Tree-Sitter Abstract Syntax Tree (AST) skeletonization and PageRank-ordered symbol repomaps.
 - **Hierarchical Compaction:** When context exceeds budget thresholds ($\theta_{\text{compact}}$), runtimes combine deterministic structural pruning (head/tail slicing, git diffs) with structured state synthesis.
 - **Invariant Enclosures:** To prevent semantic drift and entropy collapse across multi-step compaction, immutable user constraints, security boundaries, and test criteria must be anchored verbatim.

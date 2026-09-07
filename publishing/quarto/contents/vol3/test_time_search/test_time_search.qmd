@@ -312,6 +312,20 @@ As diagrammed in @fig-tree-kv-cache-radix, the KV-cache is organized as a radix 
 
 Tree-structured KV-caching slashes HBM consumption by 60% to 85% during multi-branch search, allowing production systems to scale search width $B$ from 4 to 32 concurrent branches on identical server hardware.
 
+## Environment State Forking and Snapshotting {#sec-vol3-search-environment-state-forking}
+
+While RadixAttention solves the branching memory bottleneck for the LLM's internal state (KV cache), agentic search introduces an equally severe bottleneck for *external* state: the environment.
+
+When an agent explores multiple reasoning branches that invoke side-effecting tools (e.g., writing to a file, dropping a database table, or modifying global variables in a Python REPL), the underlying execution environment must diverge. If Branch A executes `rm config.json` and Branch B attempts to `cat config.json`, executing both within the same shared container will result in non-deterministic race conditions and state corruption.
+
+To support true test-time search over tool actions, the MLSys runtime must implement **Environment State Forking**:
+
+- **Copy-on-Write (CoW) Filesystems:** Sandboxes must be backed by CoW filesystems (e.g., OverlayFS, Btrfs, or ZFS). When a search node expands into $K$ children, the runtime creates $K$ lightweight filesystem layers rather than copying gigabytes of workspace data.
+- **MicroVM Snapshotting:** For memory-resident state (such as a running Jupyter kernel or a database daemon), runtimes leverage microVM snapshots (e.g., AWS Firecracker snapshotting). The entire memory page state of the virtual machine is frozen. Child branches boot from this shared memory snapshot, with page faults triggering copy-on-write allocations only when a branch mutates memory.
+- **Stateless Tool Design:** Where possible, tools are refactored to be purely functional or idempotent. Instead of mutating a global database in-place, the agent emits declarative patches or operates on isolated transaction scopes that can be rolled back upon branch pruning.
+
+Without environment snapshotting, test-time search is strictly limited to read-only observational tools or passive reasoning benchmarks, crippling the agent's ability to navigate complex combinatorial action spaces.
+
 ## Dynamic Search Budgeting and Early Stopping {#sec-vol3-search-dynamic-search-budgeting-and}
 
 Allocating a static search budget (e.g., always expanding 100 MCTS rollouts or sampling 64 candidates) across all queries is economically unsustainable. A trivial git branch status check requires 1 step and zero search, whereas diagnosing a subtle race condition in an asynchronous event loop may require 200 rollouts.
@@ -376,12 +390,18 @@ Allowing an agent to branch across arbitrary bash commands or python snippets yi
 Deploying tree search on top of standard stateless inference endpoints duplicates prompt prefixes across all branches, triggering immediate GPU HBM Out-of-Memory crashes. Production tree search requires native tree-structured KV-cache engines with Copy-on-Write page sharing.
 :::
 
+::: {.fallacy-pitfall}
+**Pitfall**: *Shared environment mutation during multi-branch search.*
+Allowing concurrent search branches to execute mutating tool calls (e.g., file writes, shell commands) against a single shared sandbox leads to state corruption and catastrophic interference. Multi-branch search requires isolated, copy-on-write environment snapshots to guarantee branch independence.
+:::
+
 ## Chapter Summary {#sec-vol3-search-summary}
 
 - **The Test-Time Paradigm Shift:** Test-time compute scaling decouples reasoning accuracy from static model parameter capacity, allowing runtimes to allocate variable inference FLOPs dynamically to match problem complexity.
 - **The Search Topology Spectrum:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search enforces linear memory bounds through synchronous per-ply pruning; MCTS provides asymptotically optimal lookahead balancing exploration and exploitation; Graph of Thoughts enables multi-path synthesis and aggregation.
 - **The Verification Tax:** Allocating compute to intermediate verification ($C_{\text{ver}}$) collapses the combinatorial branching explosion ($b^d \to b_{\text{eff}}^d$), drastically reducing total net compute while eliminating error propagation.
 - **Tree-Structured Memory Management:** Naive independent branch allocation causes catastrophic HBM exhaustion. RadixAttention and PagedAttention provide Copy-on-Write page sharing and reference counting, slashing search memory footprints by up to 85%.
+- **Environment State Forking:** Multi-branch search over tool actions requires isolating external state. Runtimes must employ CoW filesystems or microVM snapshots to prevent state corruption across diverging candidate trajectories.
 - **Macro-Economic Pareto Inversion:** On compositional reasoning tasks, scaling test-time search on compact foundation models systematically outperforms order-of-magnitude larger models running greedy decode, establishing a superior dollar-cost-per-resolved-task frontier.
 
 ```{=latex}

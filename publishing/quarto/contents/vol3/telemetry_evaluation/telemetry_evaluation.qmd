@@ -243,6 +243,7 @@ Hosting and executing judge models at scale introduces significant systems compl
 1. **Concurrency and Quota Management:** Evaluating 1,000 trajectories using an external API requires aggressive rate-limit handling, exponential backoff, and concurrent batching to avoid API `HTTP 429` blockades.
 2. **Judge Consistency and Self-Calibration:** Single-pass judge models exhibit position biases (favoring the first option in a list) and length biases (equating verbosity with quality). Systems must execute **Self-Consistency** pipelines—swapping the order of candidate trajectories and averaging the judge's score across multiple distinct permutations.
 3. **Reward Signal Bootstrapping:** In RLHF and DPO training, an LLM-as-a-Judge (acting as an AI feedback provider, RLAIF) bootstraps the reward signal for thousands of synthetic trajectories, fully automating the preference pair generation pipeline without human annotators.
+4. **Judge Prefix Caching (RadixAttention):** When an LLM-as-a-Judge evaluates 100 candidate trajectories for a single SWE-bench issue, the system prompt and the 20,000-token repository context are identical across all 100 requests. Naively dispatching 100 independent requests forces the inference server to recompute the exact same prefill $O(L^2)$ attention matrix 100 times. Serving backends for LLM-as-a-Judge pipelines must utilize Prefix Caching (RadixAttention) to share the KV cache for the shared prefix context in GPU memory, reducing the $O(L^2)$ prefill compute to an $O(1)$ memory mapping and accelerating evaluation throughput by $5\text{--}10\times$.
 
 ## Hierarchical Distributed Tracing {#sec-vol3-telemetry-hierarchical-distributed-tracing-opentelemetry}
 
@@ -278,6 +279,20 @@ The OpenTelemetry GenAI working group standardized semantic attributes to ensure
 - `gen_ai.token_type`: Categorization of token usage (`prefill` vs. `decode`), vital for separating compute-bound prefill latency from memory-bandwidth-bound decode latency.
 - `gen_ai.usage.cost_usd`: Derived monetary cost computed from token counts and provider rate cards.
 
+### Telemetry Payload Offloading
+
+A critical systems failure mode in agent observability is span bloat. Distributed tracing backends (such as Jaeger, Datadog, and Zipkin) are engineered for high-throughput, low-latency ingestion of small structural metadata spans (typically strictly capped at 64KB per span). 
+
+When an agent interacts with long-context environments, a single prompt may contain 100,000 tokens of bash logs and retrieved source code. Injecting megabytes of raw text strings directly into span attributes (`gen_ai.prompt.content`) causes catastrophic ingestion queues, network saturation, and Out-Of-Memory (OOM) crashes in the telemetry collector.
+
+::: {#pri-vol3-telemetry-offloading .callout-principle title="Telemetry Payload Offloading"}
+
+**Invariant**: Observability infrastructure must decouple structured causal metadata (latency, tree topology, token counts) from unstructured high-volume payload data (prompts, raw image bytes, and tool stdout).
+
+**Implication**: Tracing runtimes must implement **Payload Offloading**. OpenTelemetry spans must remain strictly lightweight. The massive prompt strings and tool outputs are asynchronously flushed to scalable object storage (e.g., Amazon S3) or columnar datastores (e.g., ClickHouse). The span attributes merely record lightweight URI pointers (`gen_ai.prompt.url = "s3://traces/4bf9.../prompt.json"`).
+
+:::
+
 ::: {#lst-vol3-otel-genai-span lst-cap="**OpenTelemetry GenAI Structured Span**: JSON payload showing standardized attributes including provider system, model requested, token counts, TTFT, and decode throughput."}
 
 ```json
@@ -306,6 +321,14 @@ The OpenTelemetry GenAI working group standardized semantic attributes to ensure
 :::
 
 As demonstrated in @lst-vol3-otel-genai-span, capturing structured attributes allows enterprise telemetry systems (ClickHouse, Snowflake, Datadog) to run real-time online analytical processing (OLAP) aggregations across millions of production agent steps: computing p99 decode latencies, identifying which subagent roles incur the highest token costs, and isolating tools with high error rates.
+
+### Tail-Based Tracing Sampling
+
+In traditional microservices processing 100,000 requests per second, telemetry systems employ **Head-based Sampling**: the ingress gateway flips a weighted coin (e.g., $1\%$) at the root span and discards $99\%$ of traces instantly to save storage and network bandwidth. 
+
+For autonomous agents, head-based sampling is an anti-pattern. Agent trajectories are relatively low-throughput but extremely high-value. If an agent hallucinates and drops a database table $0.5\%$ of the time, dropping $99\%$ of traces randomly guarantees that systems engineers will have zero diagnostic data when the catastrophic failure occurs.
+
+Because agent failures are sparse and unpredictable, runtimes must deploy **Tail-based Sampling** architectures. The telemetry collector buffers the full hierarchical span tree in memory or fast NVMe caches during the trajectory's execution. Once the trajectory terminates, the collector makes a retroactive sampling decision based on the terminal state: retaining $100\%$ of `FAILED` trajectories, trajectories that tripped a safety policy, or trajectories that exceeded a monetary cost threshold, while aggressively downsampling routine `SUCCESS` trajectories.
 
 ## Distributed Context Propagation {#sec-vol3-telemetry-distributed-context-propagation-across}
 
@@ -563,6 +586,14 @@ In multi-step trajectories, dumping 500,000 unformatted tokens into flat log str
 
 ::: {.fallacy-pitfall}
 
+**Pitfall**: *Applying head-based trace sampling to agentic systems.*
+
+In high-throughput microservices, dropping $99\%$ of traces at the ingress gateway (head-based sampling) is standard practice to save telemetry storage. In agentic fleets, this is a catastrophic anti-pattern. Agent trajectories are low-throughput but extremely high-value, and failures are non-deterministic and rare. Dropping random traces guarantees that engineers will lack diagnostic data when a $1\%$ edge-case hallucination occurs. Agent runtimes must use tail-based sampling, buffering the trace in memory and retroactively saving $100\%$ of failed or anomalous trajectories.
+
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Benchmark contamination via unrestricted internet access.*
 
 Allowing an agentic evaluation gym to access public DNS and the internet is fatal. When evaluated on real-world coding benchmarks, an unconstrained agent will search the web, locate the canonical GitHub pull request that originally resolved the issue, and copy the human committer's patch verbatim. Evaluation gyms must enforce complete network air-gapping with loopback-only interfaces and local mock servers.
@@ -590,7 +621,7 @@ Comparing two agent architectures on small benchmark samples (e.g. $N = 30$ task
 - **Interactive Hermetic Gyms:** Static question-answering benchmarks have collapsed under data contamination and open-loop limitations. Agents must be evaluated inside interactive, stateful software environments (SWE-bench, WebArena) featuring Copy-on-Write filesystem snapshotting, micro-VM isolation, and complete network air-gapping.
 - **Trajectory Goodput and Fleet Economics:** Algorithmic capability is measured by the unbiased Pass@$k$ estimator, while serving economics are governed by Trajectory Goodput ($G = N_{\text{success}} / (C_{\text{tokens}} + C_{\text{compute}})$). Sparse MoE architectures maximize Goodput by reducing active compute per token by $3.6\text{--}5.4\times$ during long-context agent loops.
 - **Statistical Significance under Non-Determinism:** Hardware floating-point non-associativity, MoE collective routing jitter, and tool latencies make agent execution stochastic. Detecting meaningful capability deltas requires formal sample size sizing ($N \ge 1,\!000$) and non-parametric Monte Carlo bootstrap confidence intervals.
-- **OpenTelemetry GenAI Tracing:** Production observability requires structured distributed tracing conforming to OpenTelemetry GenAI conventions, organizing telemetry into a three-tier span hierarchy (`agent.trajectory` $\to$ `agent.step` $\to$ `gen_ai.inference` / `tool.execution`) with W3C TraceContext propagation across asynchronous queues and stochastic search trees.
+- **OpenTelemetry GenAI Tracing:** Production observability requires structured distributed tracing conforming to OpenTelemetry GenAI conventions, organizing telemetry into a three-tier span hierarchy (`agent.trajectory` $\to$ `agent.step` $\to$ `gen_ai.inference` / `tool.execution`) with W3C TraceContext propagation across asynchronous queues and stochastic search trees. To prevent telemetry systems from crashing under massive context windows, architectures must employ **Payload Offloading** (storing raw prompts in S3 and embedding URIs in spans) and **Tail-based Sampling** (retroactively preserving $100\%$ of failed agent traces while downsampling routine successes).
 - **Deterministic Event Sourcing and Time Travel:** Capturing non-deterministic boundary interactions into immutable event streams enables bit-exact offline replay at zero token cost. Time-travel debuggers empower engineers to rewind state vectors, restore CoW filesystem checkpoints, and fork counterfactual exploration branches to isolate root causes.
 - **Trajectory Profiling and Causal Localization:** Profiling decomposes total latency across prefill, decode, and tool I/O, applying Amdahl's Law to target true systems bottlenecks. Automated contrastive trace diffing isolates the exact failure-inducing step and context snippet.
 - **Canary Gates and Supervisory Oversight:** Automated CI/CD pipelines utilize Sequential Probability Ratio Testing (SPRT) to detect regressions within 20 canary trajectories. Supervisory telemetry tracks the $10^6\times$ human-tool latency asymmetry, monitoring dwell times and intervention rates to prevent catastrophic rubber-stamping automation bias.
