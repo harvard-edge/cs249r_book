@@ -845,6 +845,28 @@ def process_search_json_file(search_file: Path, base_dir: Path):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _active_output_dir() -> Path | None:
+    """Return the output-dir of the currently active _quarto.yml, if resolvable.
+
+    The build scripts symlink _quarto.yml to config/_quarto-<fmt>-<vol>.yml before
+    invoking quarto, so this identifies exactly which volume is being rendered.
+    Returns None when the file or key is absent, in which case callers fall back
+    to the mtime heuristic.
+    """
+    cfg = Path("_quarto.yml")
+    if not cfg.exists():
+        return None
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"^\s*output-dir:\s*(\S+)\s*$", text, re.M)
+    if not m:
+        return None
+    out = Path(m.group(1).strip().strip("\"'"))
+    return out if out.exists() else None
+
+
 def main():
     """
     Main entry point. Runs in three modes:
@@ -859,24 +881,41 @@ def main():
     else:
         print("⚠️  No QMD sources found — cross-reference mapping will be empty")
 
-    skip_patterns = [
-        "search.html", "404.html", "site_libs",
+    # Matched against the file NAME, never as a substring of the whole path.
+    # A substring test silently skipped any chapter whose slug ends in one of
+    # these names: "test_time_search.html" contains "search.html", so vol3's
+    # test-time-search chapter was never patched and shipped literal
+    # `?@sec-...` refs that the build then failed on. (Fixed 2026-09-07.)
+    skip_filenames = {
+        "search.html", "404.html",
         "nav.xhtml", "cover.xhtml", "title_page.xhtml",
-    ]
+    }
+    skip_dirs = {"site_libs"}
 
     if len(sys.argv) == 1:
         # MODE 1: Running as Quarto post-render hook
         build_root = Path("_build")
-        html_candidates = sorted(
-            [p for p in build_root.glob("html*") if p.is_dir()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        epub_candidates = sorted(
-            [p for p in build_root.glob("epub*") if p.is_dir()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+
+        # Prefer the output-dir declared by the *active* _quarto.yml. The old
+        # behaviour picked whichever _build/html* directory had the newest mtime,
+        # which is only correct when a single volume has ever been built in the
+        # tree. Building several volumes in sequence locally (vol4, then vol3,
+        # then vol1...) leaves stale sibling build dirs whose mtime can win the
+        # race, so the hook patched the wrong volume and left the volume that was
+        # actually just rendered with literal `?@sec-...` refs. CI never hit this
+        # because each volume builds in a fresh checkout. (Fixed 2026-09-07.)
+        active_out = _active_output_dir()
+
+        def _rank(paths: list[Path]) -> list[Path]:
+            ordered = sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
+            if active_out is not None:
+                for i, p in enumerate(ordered):
+                    if p.resolve() == active_out.resolve():
+                        return [ordered.pop(i)] + ordered
+            return ordered
+
+        html_candidates = _rank([p for p in build_root.glob("html*") if p.is_dir()])
+        epub_candidates = _rank([p for p in build_root.glob("epub*") if p.is_dir()])
 
         epub_mapping = None
         if html_candidates:
@@ -913,7 +952,7 @@ def main():
         all_unmapped: set[str] = set()
 
         for file in files:
-            if any(skip in str(file) for skip in skip_patterns):
+            if file.name in skip_filenames or skip_dirs & set(file.parts):
                 continue
 
             rel_path, fixed_count, unmapped = process_html_file(file, build_dir, epub_mapping)
