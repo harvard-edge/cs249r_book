@@ -4,9 +4,6 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     """
     Execute a single cached generation step for one new token.
     """
-    import numpy as np
-    from tinytorch.core.tensor import Tensor
-
     batch_size = x.shape[0]
     num_heads = attention.num_heads
     head_dim = attention.head_dim
@@ -16,16 +13,10 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     K_new = attention.k_proj.forward(x)
     V_new = attention.v_proj.forward(x)
 
-    # Step 2: Reshape to multi-head format (batch, num_heads, 1, head_dim)
-    Q_heads = Tensor(np.transpose(
-        Q_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    K_heads = Tensor(np.transpose(
-        K_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    V_heads = Tensor(np.transpose(
-        V_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
+    # Step 2: Split into heads (batch, num_heads, 1, head_dim), reusing Module 12's helper
+    Q_heads = attention._split_heads(Q_new, batch_size, 1)
+    K_heads = attention._split_heads(K_new, batch_size, 1)
+    V_heads = attention._split_heads(V_new, batch_size, 1)
 
     # Step 3: Update cache with new K, V
     cache_obj.update(layer_idx, K_heads, V_heads)
@@ -52,9 +43,8 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     # Apply attention to values
     attention_output = np.matmul(attention_weights, V_all.data)
 
-    # Step 6: Reshape and project to output
-    attention_output_transposed = np.transpose(attention_output, (0, 2, 1, 3))
-    concat_output = Tensor(attention_output_transposed.reshape(batch_size, 1, num_heads * head_dim))
+    # Step 6: Merge heads back (Module 12's helper) and project to output
+    concat_output = attention._merge_heads(Tensor(attention_output), batch_size, 1)
 
     return attention.out_proj.forward(concat_output)
 ```
