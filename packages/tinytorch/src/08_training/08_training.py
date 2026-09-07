@@ -68,6 +68,7 @@ from typing import Dict, List, Optional, Tuple, Any, Callable
 from pathlib import Path
 import sys
 import os
+import inspect
 
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
@@ -561,6 +562,20 @@ class Trainer:
             if hasattr(self.scheduler, key):
                 setattr(self.scheduler, key, value)
 
+    def _forward(self, inputs):
+        """Run the model, passing the training flag to a forward() that accepts one.
+
+        Module 03's Sequential takes training= so that Dropout knows which path
+        to run; a bare layer or a GPT (Module 13) takes only the inputs.
+        """
+        try:
+            takes_flag = 'training' in inspect.signature(self.model.forward).parameters
+        except (TypeError, ValueError):
+            takes_flag = False
+        if takes_flag:
+            return self.model.forward(inputs, training=self.training_mode)
+        return self.model.forward(inputs)
+
 # %% [markdown]
 """
 ### 🏗️ Trainer.__init__ - Setting Up the Training System
@@ -761,7 +776,7 @@ def _trainer_process_batch(self, inputs, targets, accumulation_steps):
     TODO: Implement the forward-backward cycle for a single batch
 
     APPROACH:
-    1. Forward pass: model.forward(inputs)
+    1. Forward pass: self._forward(inputs), which passes the training flag to models that take one
     2. Compute loss: loss_fn.forward(outputs, targets)
     3. Scale loss by 1/accumulation_steps
     4. Backward pass with scaled gradient
@@ -769,8 +784,8 @@ def _trainer_process_batch(self, inputs, targets, accumulation_steps):
     HINT: scaled_gradient = np.ones_like(loss.data) / accumulation_steps
     """
     ### BEGIN SOLUTION
-    # Forward pass
-    outputs = self.model.forward(inputs)
+    # Forward pass (training flag on, so Dropout draws a mask)
+    outputs = self._forward(inputs)
     loss = self.loss_fn.forward(outputs, targets)
 
     # Scale loss for accumulation
@@ -843,11 +858,13 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     APPROACH:
     1. Set model.training = True and self.training_mode = True
     2. Loop over batches, calling self._process_batch for each
-    3. Every accumulation_steps batches, call self._optimizer_update
-    4. Handle remaining accumulated gradients after the loop
+    3. Count the batches since the last update; when the count reaches
+       accumulation_steps, call self._optimizer_update and reset it
+    4. Any batches left over after the loop still need one update
     5. Record average loss, update scheduler, increment epoch
 
-    HINT: Check (batch_idx + 1) % accumulation_steps == 0 for update timing
+    HINT: A pending-batch counter handles the short tail at the end of an epoch;
+          a modulus on the batch index would leave those gradients in the buffers
     """
     ### BEGIN SOLUTION
     self.model.training = True
@@ -860,27 +877,32 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
         self.history['learning_rates'].append(current_lr)
 
     total_loss = 0.0
-    num_batches = 0
+    num_steps = 0
     accumulated_loss = 0.0
+    pending = 0                      # batches waiting for an optimizer step
 
-    for batch_idx, (inputs, targets) in enumerate(dataloader):
+    for inputs, targets in dataloader:
         accumulated_loss += self._process_batch(inputs, targets, accumulation_steps)
+        pending += 1
 
-        # Update parameters every accumulation_steps
-        if (batch_idx + 1) % accumulation_steps == 0:
+        # Update parameters every accumulation_steps batches
+        if pending == accumulation_steps:
             self._optimizer_update()
             total_loss += accumulated_loss
             accumulated_loss = 0.0
-            num_batches += 1
+            pending = 0
+            num_steps += 1
             self.step += 1
 
-    # Handle remaining accumulated gradients
-    if accumulated_loss > 0:
+    # A short tail (batch count not divisible by accumulation_steps) still gets its step,
+    # so no gradient is thrown away or carried into the next epoch
+    if pending > 0:
         self._optimizer_update()
         total_loss += accumulated_loss
-        num_batches += 1
+        num_steps += 1
+        self.step += 1
 
-    avg_loss = total_loss / max(num_batches, 1)
+    avg_loss = total_loss / max(num_steps, 1)
     self.history['train_loss'].append(avg_loss)
 
     self.epoch += 1
@@ -1102,7 +1124,7 @@ def trainer_evaluate(self, dataloader):
 
     APPROACH:
     1. Set model.training = False and self.training_mode = False
-    2. For each batch: forward pass only, accumulate loss
+    2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity), accumulate loss
     3. For classification: compute accuracy from argmax predictions
     4. Record average loss in self.history['eval_loss']
     5. Return (avg_loss, accuracy)
@@ -1126,8 +1148,8 @@ def trainer_evaluate(self, dataloader):
     num_batches = 0
 
     for inputs, targets in dataloader:
-        # Forward pass only
-        outputs = self.model.forward(inputs)
+        # Forward pass only, with the training flag off
+        outputs = self._forward(inputs)
         loss = self.loss_fn.forward(outputs, targets)
 
         total_loss += loss.data
