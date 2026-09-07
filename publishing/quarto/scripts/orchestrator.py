@@ -72,7 +72,7 @@ async def run_agent_on_chapter(chapter_idx: int, pass_id: str):
                     # but modern models have large contexts. 
                     # We inject the current text of previous chapters as read-only context.
                     content = prev_path.read_text(encoding="utf-8")
-                    context += f"\n==== PREVIOUS CHAPTER: {CHAPTERS[i]} ====\n{content[:5000]}... [TRUNCATED FOR LENGTH]\n"
+                    context += f"\n==== PREVIOUS CHAPTER: {CHAPTERS[i]} ====\n{content}\n"
 
     prompt = f"""
 You are an expert Systems and Machine Learning Editor.

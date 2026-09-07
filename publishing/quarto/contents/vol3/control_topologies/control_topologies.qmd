@@ -76,7 +76,7 @@ The engineering rule governing this spectrum is straightforward: *never use a mo
 
 ## Trajectories as Directed Acyclic Graphs {#sec-vol3-topologies-trajectories-as-directed-acyclic}
 
-In classical operating systems, process execution is modeled as a linear instruction stream periodically interrupted by system calls and context switches. In agentic systems, execution is fundamentally a graph traversal. Formally, an agent operates over a Partially Observable Markov Decision Process (POMDP) [@kaelbling1998; @zaharia2012resilient]. Because the agent cannot directly inspect the complete state of the external environment, it maintains an internal *belief state* or *trajectory context*—represented by the sequence of past observations, thoughts, and actions. (The formal mathematical derivation of the POMDP 7-tuple and belief state is detailed in @sec-vol3-appendix-math-pomdp).
+In classical operating systems, process execution is modeled as a linear instruction stream periodically interrupted by system calls and context switches. In agentic systems, execution is fundamentally a graph traversal. As established in @sec-vol3-execution-descriptors, an agent formally operates over a Partially Observable Markov Decision Process (POMDP) [@kaelbling1998; @zaharia2012resilient]. Because the agent cannot directly inspect the complete authoritative state of the external environment, its internal *belief state* (or *trajectory context*) is represented by the sequence of past observations, thoughts, and actions. (The formal mathematical derivation of the POMDP 7-tuple and belief state is detailed in @sec-vol3-appendix-math-pomdp).
 
 When this interaction is unrolled over time, it forms an execution graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. The vertex set $\mathcal{V}$ contains three distinct node types:
 
@@ -117,13 +117,13 @@ By generating $x_t$, the model constructs an ephemeral scratchpad in its key-val
 
 However, the systems tax of the ReAct topology is severe:
 
-1. **Quadratic KV Cache Growth:** In a ReAct loop of $K$ steps, the total context length $L_k$ at step $k$ grows monotonically:
+1. **Quadratic KV Cache Growth:** As identified by the Context Accumulation Wall in @sec-vol3-introduction, in a ReAct loop of $K$ steps, the total context length $L_k$ at step $k$ grows monotonically:
 
    $$L_k = L_{\text{system}} + \sum_{i=1}^k \left( |x_i| + |a_i| + |o_i| \right)$$
 
    Because every step requires a complete forward pass over the accumulated context, the total token processing burden across $K$ steps scales quadratically: $\mathcal{O}(K^2)$.
 
-2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies. To prevent long-running external tools from tying up GPU VRAM while waiting for $o_t$, production runtimes implement **Asynchronous Yielding**: the agent process yields execution, its KV cache is offloaded to CPU memory or NVMe (context swapping), and the GPU is freed for other requests until the tool completes and issues a hardware interrupt to resume the loop.
+2. **Serial Latency Bottleneck:** Each transition from $x_t \to a_t \to o_t \to x_{t+1}$ enforces a hard barrier synchronization. The runtime cannot prefetch or pipeline step $t+1$ because the thought $x_{t+1}$ is strictly conditioned on the observation $o_t$ returned by the external tool. Consequently, total latency is the sum of $K$ sequential model inference passes plus $K$ external network/sandbox execution latencies. To prevent long-running external tools from tying up GPU VRAM while waiting for $o_t$, production runtimes implement **Asynchronous Yielding** via the context swapping mechanics detailed in @sec-vol3-execution-descriptors: the agent process yields execution, its KV cache is asynchronously offloaded to host DRAM or NVMe when the tool wait exceeds the breakeven threshold $T_{\text{breakeven}}$, and the GPU is freed for other requests until the tool completes and issues a hardware interrupt to resume the loop.
 
 3. **Error Compounding (Cognitive Drift):** If an observation $o_t$ contains misleading, noisy, or truncated information, the model's subsequent thought $x_{t+1}$ frequently rationalizes the error rather than correcting it. Without external verifier gates, ReAct loops frequently diverge into hallucinated sub-goals.
 

@@ -57,7 +57,7 @@ Autonomous agent workloads dismantle every foundational assumption of this class
 1. **Heavy-Tailed Pareto Service Times:** Unlike stateless queries with well-behaved, narrow latency distributions, agent trajectories exhibit extreme service-time variance ($1.0 < \alpha < 1.4$). A tiny fraction ($3\%\text{--}5\%$) of complex debugging tasks expand into massive multi-step journeys that consume the majority of cluster compute resources.
 2. **Bimodal Execution and Blocking Tool Delays:** Agent execution alternates between sub-second GPU decode bursts and lengthy external tool delays (compiling codebases, executing integration test suites, or awaiting human approval). Holding multi-gigabyte KV caches pinned in high-cost GPU High Bandwidth Memory (HBM) during these blocking delays induces severe memory starvation.
 3. **Expanding Memory Footprints and Admission Deadlocks:** An agent admitted at Step 1 with a compact $2\text{k}$-token context may expand to $64\text{k}$ or $128\text{k}$ tokens by Step 30. Oblivious schedulers that admit sessions based only on current context size suffer catastrophic out-of-memory (OOM) thrashing and deadlock.
-4. **The Reversibility Boundary under Preemption:** In classical batch clusters, an interrupted job can be killed and restarted from scratch. In an agent trajectory, intermediate actions perform real mutations on external filesystems, databases, and network APIs. Schedulers cannot simply abort an in-flight trajectory without executing compensating actions or preserving checkpointed event streams.
+4. **Irreversible Actions under Preemption:** In classical batch clusters, an interrupted job can be killed and restarted from scratch. In an agent trajectory, intermediate actions perform real mutations on external filesystems, databases, and network APIs. Schedulers cannot simply abort an in-flight trajectory without executing compensating actions or preserving checkpointed event streams.
 
 To achieve high cluster efficiency, an agentic scheduler must optimize for **Trajectory Goodput** ($G$)—the rate of successfully certified task completions per unit cost. This requires co-designing:
 
@@ -307,7 +307,7 @@ Holding server threads, connection sockets, or accelerator memory across human r
 
 ## Gang Scheduling and Co-Allocation {#sec-vol3-scheduling-gang-scheduling-and-co-allocation}
 
-When autonomous agents collaborate in swarms—such as an architect agent orchestrating three parallel coding agents that communicate via a shared message broker—scheduling individual agents independently causes synchronization deadlocks.
+When an agent is deployed as part of a cooperating swarm—where multiple parallel agent instances communicate to solve a joint task (e.g., an architect orchestrating three parallel coding workers via a shared message broker)—scheduling individual agents independently causes synchronization deadlocks.
 
 ### The Co-Allocation Deadlock
 
@@ -349,27 +349,23 @@ In classical operating systems, process preemption is universally assumed to be 
 
 In agentic systems, this fundamental systems invariant is completely destroyed. Agents interact directly with external physical and digital environments. Once an agent performs a mutating action in an external system, that action cannot be undone by simply rewinding GPU memory.
 
-### The Reversibility Boundary
+### External Side Effects and Preemption
 
-::: {.callout-definition}
-The systems boundary separating safe, repeatable compute from permanent external mutations is the **Reversibility Boundary** [@garciamolina1987sagas].
-:::
-
-As formalized in @fig-vol3-scheduling-preemption-matrix, agent operations partition into four distinct execution zones across this boundary:
+As formalized in @fig-vol3-scheduling-preemption-matrix, agent operations partition into four distinct execution zones based on their side effects:
 
 1. **Zone 1: Pure LLM Compute (100% Fully Reversible):** In-GPU prompt prefill, token decoding, and internal scratchpad reasoning. State exists solely as ephemeral activations and KV tensors in GPU memory. Preemption policy: **Instantaneous Preemption / Kill**. The scheduler may evict or discard the job at any moment with zero external side effects.
 2. **Zone 2: Idempotent Tool Reads (Safe Preemption):** Read-only operations (`read_file`, `grep_search`, `web_search`, database `SELECT`). By definition of idempotency ($f(x) = f(f(x))$), executing the action multiple times produces identical results without altering environment state. Preemption policy: **Safe Preemption**. The scheduler can abort an in-flight network call; restarting simply re-executes the query.
-3. **Zone 3: Reversible Writes with Compensating Actions (Semi-Reversible):** Operations that alter environment state but possess a formally defined compensating inverse operation $C_i$ (e.g., committing changes to a temporary Git branch, writing temporary scratch files, executing an SQL transaction within a database rollback log) [@garciamolina1987sagas]. Preemption policy: **Conditional Preemption (Compensating Sagas)**. The scheduler cannot simply kill the agent; it must trigger the compensating workflow $C_i$ (e.g., executing `git reset --hard` or `ROLLBACK`) before reclaiming cluster resources.
+3. **Zone 3: Reversible Writes with Compensating Actions (Semi-Reversible):** Operations that alter environment state but possess a formally defined compensating inverse operation $C_i$ (e.g., committing changes to a temporary Git branch, writing temporary scratch files, executing an SQL transaction within a database rollback log). Preemption policy: **Conditional Preemption**. The scheduler cannot simply kill the agent; it must trigger the compensating workflow $C_i$ (e.g., executing `git reset --hard` or `ROLLBACK`) before reclaiming cluster resources.
 4. **Zone 4: Irreversible Real-World Actions (Strictly Non-Preemptible):** Operations that produce permanent, non-undoable real-world state changes (e.g., transferring funds via banking API, sending an external email or Slack message, deploying code to production servers, actuating a physical robotic arm). Preemption policy: **Strictly Non-Preemptible (Pinned Execution)**. Preemption is legally and architecturally forbidden. The scheduler is strictly barred from aborting or migrating the job until the transaction confirms terminal status.
 
 | Execution Zone | Action Type | Typical Operations | State Residency | Reversibility Guarantee | Preemption Feasibility | Scheduler Action on Memory Shortage |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Zone 1** | Pure Compute | Prefill, autoregressive decode | GPU HBM / SRAM | 100% Functional | Instantaneous | Evict / Discard / Recompute |
 | **Zone 2** | Idempotent Read | `read_file`, `grep`, `web_search` | Sandbox socket / cache | Read Idempotent $f(f(x)) = f(x)$ | Safe Suspend | Abort network call; re-issue on wake |
-| **Zone 3** | Reversible Write | Git commit, SQL transaction | Workspace filesystem / DB | Semi-Reversible ($C_i$ inverse) | Conditional (Saga) | Execute compensating action $C_i$; revert |
+| **Zone 3** | Reversible Write | Git commit, SQL transaction | Workspace filesystem / DB | Semi-Reversible ($C_i$ inverse) | Conditional (Compensating) | Execute compensating action $C_i$; revert |
 | **Zone 4** | Irreversible Side Effect | Wire transfer, email, live deploy | External physical world | 0% Non-Reversible | Strictly Forbidden | Pin execution; allocate emergency HBM |
 
-: Preemption, suspension, and eviction policies across the four execution zones governed by the Reversibility Boundary. {#tbl-vol3-scheduling-policy-matrix}
+: Preemption, suspension, and eviction policies across the four execution zones governed by external irreversibility. {#tbl-vol3-scheduling-policy-matrix}
 
 ### Scheduling Invariant Under Irreversible Actions
 
@@ -377,7 +373,7 @@ If an agent trajectory enters Zone 4, the scheduling controller must elevate the
 
 If cluster-wide memory pressure reaches emergency thresholds while a Zone 4 action is in flight, the scheduler must shed load exclusively from Zone 1 and Zone 2 tasks, preserving the integrity of irreversible physical world operations.
 
-![The Reversibility Boundary and Preemption Decision Matrix. Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated via Sagas, or must remain strictly pinned to completion.](images/svg/reversibility_boundary_preemption_matrix.svg){#fig-vol3-scheduling-preemption-matrix}
+![The Preemption Decision Matrix. Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated, or must remain strictly pinned to completion.](images/svg/reversibility_boundary_preemption_matrix.svg){#fig-vol3-scheduling-preemption-matrix}
 
 ## Production Scheduler Architecture {#sec-vol3-scheduling-production-architecture-building-a}
 
@@ -426,7 +422,7 @@ Standard load balancers possess zero awareness of accelerator memory state. In a
 
 **Fallacy**: *Schedulers can safely treat agent tasks like traditional OS processes that can be killed and restarted at will.*
 
-Unlike operating system threads whose state is confined to virtual memory, agents mutate external databases, issue API calls, and modify remote files. Arbitrarily terminating an agent that has crossed the Reversibility Boundary leaves corrupted, half-committed external state that cannot be fixed by restarting the neural network.
+Unlike operating system threads whose state is confined to virtual memory, agents mutate external databases, issue API calls, and modify remote files. Arbitrarily terminating an agent that has performed irreversible external actions leaves corrupted, half-committed external state that cannot be fixed by restarting the neural network.
 
 :::
 
@@ -461,5 +457,5 @@ In stateless web serving, if a request fails, the client simply retries. If an a
 - **Least Attained Service (LAS) Scheduling:** By prioritizing sessions with the least cumulative service, LAS provides an instantaneous fast-path for short tasks while automatically throttling runaway reasoning loops.
 - **Preemption Across Bimodal I/O Gaps:** Decoupling active compute from tool waits allows schedulers to asynchronously swap idle KV caches to Host DRAM over PCIe Gen5, freeing scarce HBM page frames during multi-second tool stalls.
 - **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65%.
-- **The Reversibility Boundary:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating Saga workflows, and irreversible actions must remain pinned to completion.
+- **Irreversible Side Effects:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating workflows, and irreversible actions must remain pinned to completion.
 - **Fault Tolerance via WAL:** Schedulers treat agent contexts as append-only event ledgers. Using Write-Ahead Logging ensures that if a worker crashes, the trajectory can be deterministically rehydrated via a single chunked prefill without re-executing non-idempotent side effects.

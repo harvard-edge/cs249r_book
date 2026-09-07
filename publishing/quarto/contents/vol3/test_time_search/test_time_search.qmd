@@ -29,7 +29,7 @@ This chapter formalizes test-time search topologies over agent tool action space
 
 We also:
 - Derive the Verification Tax ($C_{\text{ver}}$), proving that the optimal test-time policy balances generation compute against verification compute.
-- Deconstruct tree-structured KV-cache memory management (RadixAttention).
+- Identify the systems bottlenecks of multi-branch search, including KV-cache duplication and environment state corruption.
 - Formulate the Pareto frontiers that allow compact local models with deliberate search to systematically outperform massive static models.
 
 ::: {.content-visible when-format="pdf"}
@@ -296,35 +296,15 @@ In naive LLM serving engines, each concurrent sequence maintains an independent 
 
 ![Tree-Structured KV-Cache Allocation and Radix Prefix Sharing. Panel A illustrates naive independent branch serving, where identical system prompt and execution trace prefixes are duplicated across all candidate branches, causing rapid HBM exhaustion. Panel B demonstrates RadixAttention with Copy-on-Write page allocation, where shared prefixes are retained once in memory and child branches store only incremental delta tokens.](images/svg/tree_kv_cache_radix.svg){#fig-tree-kv-cache-radix width=100%}
 
-### RadixAttention and Copy-on-Write (CoW)
-
-To solve the search memory wall, modern agent serving runtimes (such as SGLang [@zheng2024sglang] and vLLM PagedAttention [@kwon2023]) implement **Tree-Structured Radix KV-Caches**.
-
-As diagrammed in @fig-tree-kv-cache-radix, the KV-cache is organized as a radix tree where:
-
-- **Shared Prefix Block Dedup:** Physical memory pages for the shared system prompt, problem description, and intermediate completed turns are stored exactly once.
-
-- **Reference Counting:** Each physical KV page maintains a reference counter $rc$. When a parent node expands into 4 child branches, the reference counters of ancestral pages increment: $rc \leftarrow rc + 4$.
-
-- **Copy-on-Write (CoW):** Child branches share read-only access to ancestral prefix pages. Only when a branch generates its unique incremental delta tokens are new physical pages allocated from the free memory pool.
-
-- **LRU Tree Eviction:** When HBM capacity is saturated, the eviction manager traverses the radix tree, evicting leaf nodes whose reference count has dropped to zero ($rc = 0$), preserving shared root prefixes that serve active ongoing searches.
-
-Tree-structured KV-caching slashes HBM consumption by 60% to 85% during multi-branch search, allowing production systems to scale search width $B$ from 4 to 32 concurrent branches on identical server hardware.
+To solve the search memory wall, modern agent serving runtimes must implement **Tree-Structured Radix KV-Caches**. Rather than duplicating the prefix memory for every branch, the serving layer uses Copy-on-Write (CoW) page sharing to reuse the parent's memory, allocating new pages only for divergent tokens. This slashes HBM consumption by 60% to 85% during multi-branch search, allowing production systems to scale search width $B$ from 4 to 32 concurrent branches on identical server hardware. We will deconstruct the full systems architecture of Radix tree indexing, PagedAttention, and cache eviction in the upcoming Serving part of this book.
 
 ## Environment State Forking and Snapshotting {#sec-vol3-search-environment-state-forking}
 
-While RadixAttention solves the branching memory bottleneck for the LLM's internal state (KV cache), agentic search introduces an equally severe bottleneck for *external* state: the environment.
+While tree-structured KV-caching solves the branching memory bottleneck for the LLM's internal state, agentic search introduces an equally severe bottleneck for *external* state: the environment.
 
 When an agent explores multiple reasoning branches that invoke side-effecting tools (e.g., writing to a file, dropping a database table, or modifying global variables in a Python REPL), the underlying execution environment must diverge. If Branch A executes `rm config.json` and Branch B attempts to `cat config.json`, executing both within the same shared container will result in non-deterministic race conditions and state corruption.
 
-To support true test-time search over tool actions, the MLSys runtime must implement **Environment State Forking**:
-
-- **Copy-on-Write (CoW) Filesystems:** Sandboxes must be backed by CoW filesystems (e.g., OverlayFS, Btrfs, or ZFS). When a search node expands into $K$ children, the runtime creates $K$ lightweight filesystem layers rather than copying gigabytes of workspace data.
-- **MicroVM Snapshotting:** For memory-resident state (such as a running Jupyter kernel or a database daemon), runtimes leverage microVM snapshots (e.g., AWS Firecracker snapshotting). The entire memory page state of the virtual machine is frozen. Child branches boot from this shared memory snapshot, with page faults triggering copy-on-write allocations only when a branch mutates memory.
-- **Stateless Tool Design:** Where possible, tools are refactored to be purely functional or idempotent. Instead of mutating a global database in-place, the agent emits declarative patches or operates on isolated transaction scopes that can be rolled back upon branch pruning.
-
-Without environment snapshotting, test-time search is strictly limited to read-only observational tools or passive reasoning benchmarks, crippling the agent's ability to navigate complex combinatorial action spaces.
+To support true test-time search over tool actions, the MLSys runtime must implement **Environment State Forking**: the ability to instantly fork the environment sandbox for each search branch using copy-on-write filesystems and memory-resident microVM snapshots. Without environment snapshotting, test-time search is strictly limited to read-only observational tools or passive reasoning benchmarks. We will explore the implementation of these sub-50 ms ephemeral microVM sandboxes and copy-on-write storage overlays in the Sandboxing and Isolation chapters.
 
 ## Dynamic Search Budgeting and Early Stopping {#sec-vol3-search-dynamic-search-budgeting-and}
 
