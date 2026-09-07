@@ -77,67 +77,36 @@ The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 04 (`src/04_losses/04_losses.py`) is the NumPy-backed implementation students build in the TinyTorch course. The listings in this chapter are a stripped-down pure-Python model of the same design, small enough to show every step of the max-shifted log-softmax and the losses built on it. The real module also ships a `BinaryCrossEntropyLoss` that works on probabilities rather than logits; the first exercise asks you to improve on it.
+The listings in this section are extracted from Module 04 (`src/04_losses/04_losses.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. The module also ships a `BinaryCrossEntropyLoss` that works on probabilities rather than logits; the first exercise asks you to improve on it.
 :::
 
-The listings need only one thing from a `Tensor`, the array of numbers it holds, so they reuse the small NumPy-backed stand-in that Chapter 3 introduced in place of Chapter 1's strided `Tensor`. It is repeated here, minus the parts this chapter does not use, so the chapter runs on its own.
+Module 04 follows the pattern Chapter 2 set. Each loss is a pair of classes: an operation, a `Function` subclass whose `forward` takes NumPy arrays and returns one, and a thin wrapper that takes tensors and hands them to the operation through `apply`. The operation is what Chapter 6 records and completes with a `backward`; the wrapper is what the training loop calls.
 
 ### A loss is one scalar in a `Tensor`
 
 Here is where the number goes. The training loop we assemble in Chapter 8 does the same three things every step: run a batch forward, call `backward()` on the loss, let the optimizer take one step. Chapter 6's `backward()` needs one number to start from, and Chapter 7's optimizer needs one direction to push in. Hand them the 64 per-example errors of a Chapter 5 batch as a vector and neither has what it needs, because 64 errors point in 64 directions. The mean over the batch is the answer, chosen once and written into the loss, so no caller has to remember it.
 
-The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in Chapter 6, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value. A base class fixes that contract, and `MSELoss` is the smallest thing that satisfies it.
+The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in Chapter 6, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value, and `apply` guarantees it: whatever the operation's `forward` returns, even a NumPy scalar, comes back wrapped. `MSELoss` is the smallest pair that satisfies the contract.
 
-```python
-import numpy as np
+{{< include _listings/04_losses/MSEFunction.qmd >}}
 
-class Tensor:
-    """Stand-in for Chapter 1's Tensor: an array plus a trainable flag."""
-    def __init__(self, data, requires_grad=False):
-        self.data = np.asarray(data, dtype=np.float32)
-        self.requires_grad = requires_grad
-        self.grad = None
-
-class Loss:
-    """Every loss maps (predictions, targets) to one scalar Tensor."""
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        return self.forward(predictions, targets)
-
-class MSELoss(Loss):
-    """Mean squared error: the average of (prediction - target)^2."""
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        diff = predictions.data - targets.data
-        return Tensor(np.mean(diff ** 2))
-```
+{{< include _listings/04_losses/MSELoss.qmd >}}
 
 The output is a `Tensor` holding a single float and nothing else. For now it is a number in a box; Chapter 6 makes that box the root of the backward pass, the one node every gradient is measured against. Notice that `np.mean` does two jobs at once, the average over examples and the collapse to a scalar. PyTorch's `nn.MSELoss` exposes that choice as `reduction="mean"`, its default, with `"sum"` and `"none"` as the alternatives.
 
-### `log_softmax`, the max shift in code
+### `LogSoftmax`, the max shift in code
 
-Every classifier in this book ends here. Chapter 3's ten-class network hands the loss a `[64, 10]` block of logits for a batch of 64. Chapter 13's language model hands it one row of $V$ logits per position, one entry per word in a vocabulary of tens of thousands, for every position in every sequence. Chapter 12's attention runs the same softmax over every row of a score matrix. Each row needs its own log-probabilities, there may be thousands of rows a step, and the helper has to be correct on any row and cheap on all of them.
+Every classifier in this book ends here. Chapter 3's ten-class network hands the loss a `[64, 10]` block of logits for a batch of 64. Chapter 13's language model hands it one row of $V$ logits per position, one entry per word in a vocabulary of tens of thousands, for every position in every sequence. Chapter 12's attention runs the same softmax over every row of a score matrix. Each row needs its own log-probabilities, there may be thousands of rows a step, and the operation has to be correct on any row and cheap on all of them.
 
 The naive way is to write the textbook down as `np.log(np.exp(z) / np.sum(np.exp(z)))`. The Problem showed the loud failure, `nan` for any logit past 88.7. There is a quiet one too. Even when nothing overflows, a probability that underflows to `0.0` goes into `log` and comes out `-inf`. On my machine `log(softmax([-110, 0]))` prints `[-inf, 0.]`, where the right answer is `[-110, 0]`; the naive form has thrown away a perfectly finite number. And it makes four passes over the row (exponentiate, sum, divide, log) to do it.
 
-The fix is The Idea's two moves, in that order. Subtract each row's maximum, so every exponential is at most 1 and every sum is at least 1. Then take the log of the sum and subtract it from the shifted logits, so no probability is ever formed and nothing is ever divided. It is four lines of NumPy. The helper takes a `Tensor` of logits with shape `[N, C]`, one row per example, and returns a `Tensor` of log-probabilities with the same shape.
+The fix is The Idea's two moves, in that order. Subtract each row's maximum, so every exponential is at most 1 and every sum is at least 1. Then take the log of the sum and subtract it from the shifted logits, so no probability is ever formed and nothing is ever divided. The operation takes an array of logits, one row per example along `dim`, and returns log-probabilities of the same shape; a one-line function wraps it for callers holding a `Tensor`.
 
-```python
-def log_softmax(x: Tensor) -> Tensor:
-    """log(softmax(z)) for each row of a [N, C] tensor, without overflow."""
-    logits = x.data
-    # 1. One maximum per row, kept as an [N, 1] column so it broadcasts.
-    max_logits = np.max(logits, axis=-1, keepdims=True)
-    # 2. Shifted logits are all <= 0, so exp() never exceeds 1.0.
-    shifted = logits - max_logits
-    # 3. The sum is >= 1.0 because the max term contributes exp(0) = 1.
-    log_sum_exp = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
-    # 4. log p_i = (z_i - max) - log(sum). The shift happens first.
-    return Tensor(shifted - log_sum_exp)
-```
+{{< include _listings/04_losses/LogSoftmax.qmd >}}
 
-Notice two things. The `keepdims=True` keeps the per-row maximum as a column of shape `[N, 1]` rather than a flat vector of length `N`, so that subtracting it from the `[N, C]` logits lines up one maximum with each row; that is the broadcasting rule from Chapter 1 doing the work. And the return value is `shifted - log_sum_exp`, not `logits - (max_logits + log_sum_exp)`. Both are equal on paper; only the first is exact in float32, for the reason the trace makes visible. PyTorch ships this same function as `torch.log_softmax`, and its scalar half, $c + \log \sum_j e^{z_j - c}$, as `torch.logsumexp`.
+{{< include _listings/04_losses/log_softmax.qmd >}}
+
+Notice two things. The `keepdims=True` keeps the per-row maximum as a column of shape `[N, 1]` rather than a flat vector of length `N`, so that subtracting it from the `[N, C]` logits lines up one maximum with each row; that is the broadcasting rule from Chapter 1 doing the work. And the last line is `x - max_vals - log_sum_exp`, which Python evaluates left to right, so the shift happens first and the log of the sum is subtracted from a number that is already small. Written as `x - (max_vals + log_sum_exp)` it would be equal on paper and wrong in float32, for the reason the trace makes visible. PyTorch ships this same function as `torch.log_softmax`, and its scalar half, $c + \log \sum_j e^{z_j - c}$, as `torch.logsumexp`.
 
 ### `CrossEntropyLoss` gathers instead of multiplying
 
@@ -147,30 +116,21 @@ The textbook formula does not say "pick." It says $-\sum_i y_i \log p_i$ with a 
 
 NumPy can. Indexing an array with two integer arrays of the same length pairs them up elementwise, so `log_probs[np.arange(N), target_idx]` pairs row `i` with column `target_idx[i]`, reads exactly `N` entries, and touches nothing else.
 
-```python
-class CrossEntropyLoss(Loss):
-    """Cross-entropy over a batch of logits and integer class targets."""
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        logits = predictions.data                   # shape [N, C]
-        N, C = logits.shape
-        target_idx = targets.data.astype(np.int64)  # shape [N]
+{{< include _listings/04_losses/CrossEntropyFunction.qmd >}}
 
-        # NumPy would accept a negative index silently; refuse it here.
-        if np.any((target_idx < 0) | (target_idx >= C)):
-            raise ValueError(f"target index outside [0, {C - 1}]")
+{{< include _listings/04_losses/CrossEntropyLoss.qmd >}}
 
-        log_probs = log_softmax(predictions).data   # shape [N, C]
-        picked = log_probs[np.arange(N), target_idx]  # one entry per row
-        return Tensor(-np.mean(picked))
-```
-
-Targets stay integers from the loader to the gather; nothing builds the one-hot matrix just to multiply most of it by zero. The range check exists because NumPy treats a negative index as counting from the end, so a corrupted label of `-1` would silently select the last class instead of failing. PyTorch calls this gather, negate, and average step `nll_loss`, and its `cross_entropy` is `nll_loss` applied to the output of `log_softmax`, the same two functions in the same order.
+Targets stay integers from the loader to the gather; nothing builds the one-hot matrix just to multiply most of it by zero. The range check exists because NumPy treats a negative index as counting from the end, so a corrupted label of `-1` would silently select the last class instead of failing. Notice also that the first line calls `LogSoftmax().forward` on the array directly rather than `log_softmax` on a tensor. Inside an operation everything is NumPy, and Chapter 6 will want the log-probabilities as an array anyway, because the backward pass of cross-entropy is one subtraction from them. PyTorch calls the gather, negate, and average step `nll_loss`, and its `cross_entropy` is `nll_loss` applied to the output of `log_softmax`, the same two functions in the same order.
 
 [^fn-one-hot-targets]: **One-hot**: a vector with a 1 in the position of the correct class and 0 everywhere else, so a label of class 2 among 5 classes becomes `[0, 0, 1, 0, 0]`. For a batch of $N$ examples it takes $N \times C$ numbers to store what $N$ integers already say, which is why the code indexes with the integers instead.
 
 Here is a short run of both, on numbers small enough to check by hand. I keep a run like this next to every loss I write, because a loss that returns a plausible-looking wrong number is the kind of bug that trains for a week before anyone notices.
 
 ```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.losses import MSELoss, CrossEntropyLoss
+
 logits = Tensor(np.array([[2.0, 1.0, 0.1],
                           [0.5, 1.5, 0.8]], dtype=np.float32))
 targets = Tensor(np.array([0, 1]))
@@ -188,7 +148,7 @@ The second number is $(0.5^2 + 0.5^2 + 0.2^2) / 3 = 0.18$, which you can do in y
 
 ## A Worked Trace
 
-Take the first row of the batch above, logits $\mathbf{z} = [2.0, 1.0, 0.1]$ with target $t = 0$, and follow it through `log_softmax` one line at a time.
+Take the first row of the batch above, logits $\mathbf{z} = [2.0, 1.0, 0.1]$ with target $t = 0$, and follow it through `LogSoftmax.forward` one line at a time.
 
 | Step | Computation | Value |
 | :--- | :--- | :--- |
@@ -233,7 +193,7 @@ for base in (1e3, 1e6):
 # logits near 1e+06: 0.437500 vs 0.407606
 ```
 
-On my machine that prints the two lines in the comments. At logits near a thousand the error sits in the fifth decimal place. At logits near a million, where float32 can only represent multiples of 0.0625, the "big numbers first" form is off by 0.03, a 7 percent error in the loss, while the form the code uses is unchanged. This is why `log_softmax` returns `shifted - log_sum_exp` and why `CrossEntropyLoss` gathers from that array rather than computing the log-sum-exp as a separate scalar. Overflow is the loud failure; loss of precision is the quiet one, and the same subtraction order fixes both.
+On my machine that prints the two lines in the comments. At logits near a thousand the error sits in the fifth decimal place. At logits near a million, where float32 can only represent multiples of 0.0625, the "big numbers first" form is off by 0.03, a 7 percent error in the loss, while the form the code uses is unchanged. This is why `LogSoftmax` subtracts the maximum before the log of the sum and why `CrossEntropyFunction` gathers from that array rather than computing the log-sum-exp as a separate scalar. Overflow is the loud failure; loss of precision is the quiet one, and the same subtraction order fixes both.
 
 ---
 
@@ -241,7 +201,7 @@ On my machine that prints the two lines in the comments. At logits near a thousa
 
 PyTorch's `nn.CrossEntropyLoss` is the same design as the listing above. It takes logits, not probabilities, applies the max shift inside `log_softmax`, gathers the target entries with `nll_loss`, and averages over the batch by default. The mental model carries over unchanged, and so does the most common mistake built on it. Because the loss applies softmax internally, feeding it the output of a softmax layer squashes the logits into $[0, 1]$ before they are shifted and exponentiated again; the network still trains, but slowly and to a worse answer, and nothing warns you. The PyTorch version adds options the TinyTorch one lacks, such as `ignore_index` for padding tokens, `label_smoothing`, per-class weights, and targets given as class probabilities instead of indices, but each is a small variation on the gather-and-average step.
 
-What production changes is not the math but the number of passes over memory. The TinyTorch `log_softmax` walks the logits three times, once for the maximum, once for the exponentials and their sum, and once for the subtraction, and each pass writes an `[N, C]` temporary that the next pass reads back. The operation does almost no arithmetic per element, one `exp` and a couple of subtractions, so its cost is set by how many bytes move rather than how many operations run; it is memory bound, in the sense Chapter 2 introduced. A GPU kernel therefore computes the whole thing in one pass. Each thread holds a few logits of one row in registers, the threads of a warp[^fn-warp-softmax-reduction] exchange partial maximums and partial sums among themselves without writing to memory, and the row is read from memory exactly once. PyTorch keeps a family of such kernels in `aten/src/ATen/native/cuda/SoftMax.cu`, chosen by row length.
+What production changes is not the math but the number of passes over memory. Module 04's `LogSoftmax` walks the logits half a dozen times, once for the maximum, once for the shift, once each for the exponentials and their sum, and twice for the final subtraction, and each NumPy pass writes an `[N, C]` temporary that the next pass reads back. The operation does almost no arithmetic per element, one `exp` and a couple of subtractions, so its cost is set by how many bytes move rather than how many operations run; it is memory bound, in the sense Chapter 2 introduced. A GPU kernel therefore computes the whole thing in one pass. Each thread holds a few logits of one row in registers, the threads of a warp[^fn-warp-softmax-reduction] exchange partial maximums and partial sums among themselves without writing to memory, and the row is read from memory exactly once. PyTorch keeps a family of such kernels in `aten/src/ATen/native/cuda/SoftMax.cu`, chosen by row length.
 
 [^fn-warp-softmax-reduction]: **Warp**: a group of 32 GPU threads that execute the same instruction at the same moment. Threads in a warp can pass values to one another directly through registers, without touching memory, which is what makes a 32-way maximum or sum nearly free compared with the cost of reading the row.
 
@@ -254,7 +214,7 @@ Precision is the other production concern. Modern training runs most of the netw
 | Input | Logits, shape `[N, C]` | Logits, shape `(N, C)` or with extra spatial dimensions |
 | Targets | Integer class indices | Indices or class probabilities; `ignore_index`, `label_smoothing`, class weights |
 | Stability | Max shift inside `log_softmax` | Same |
-| Passes over the logits | Three, with `[N, C]` temporaries | One fused kernel per row; fused with the final `Linear` in some libraries |
+| Passes over the logits | Half a dozen NumPy passes, each with an `[N, C]` temporary | One fused kernel per row; fused with the final `Linear` in some libraries |
 | Precision | float32 throughout | Promoted to float32 even when the model runs in 16-bit |
 
 : What carries over from the TinyTorch loss to `torch.nn.CrossEntropyLoss` and what production adds. {#tbl-losses-tinytorch-vs-pytorch tbl-colwidths="[22,34,44]"}
@@ -265,7 +225,7 @@ For the practitioner, three habits follow. Pass logits to the loss and let it do
 
 ## Summary
 
-You built `MSELoss` and `CrossEntropyLoss`, and the `log_softmax` helper that makes the second one safe. Cross-entropy is the negative log of the probability the model gives the right class, and the textbook softmax that produces that probability overflows float32 as soon as a logit passes 88.7. Subtracting the row maximum before exponentiating leaves the probabilities unchanged on paper and makes every exponential at most 1 and every denominator at least 1, so nothing overflows and nothing divides by zero. The invariant to carry forward is that softmax is shift invariant, and the shift by the maximum is the one that fits in a float. Inside that fix, subtract the maximum from the target logit before subtracting the log of the sum, or precision leaks in the last digits. Production systems keep exactly this math and change how many times the logits cross memory, fusing the three passes into one kernel and promoting the computation to float32 when the model runs in 16-bit. Chapter 5 takes for granted that a batch of logits and a batch of integer targets collapse to one scalar loss, and asks where those batches come from and how to keep the model fed with them.
+Module 04 builds `MSELoss` and `CrossEntropyLoss` as operation-plus-wrapper pairs, and the `LogSoftmax` operation that makes the second one safe. Cross-entropy is the negative log of the probability the model gives the right class, and the textbook softmax that produces that probability overflows float32 as soon as a logit passes 88.7. Subtracting the row maximum before exponentiating leaves the probabilities unchanged on paper and makes every exponential at most 1 and every denominator at least 1, so nothing overflows and nothing divides by zero. The invariant to carry forward is that softmax is shift invariant, and the shift by the maximum is the one that fits in a float. Inside that fix, subtract the maximum from the target logit before subtracting the log of the sum, or precision leaks in the last digits. Production systems keep exactly this math and change how many times the logits cross memory, fusing the three passes into one kernel and promoting the computation to float32 when the model runs in 16-bit. Chapter 5 takes for granted that a batch of logits and a batch of integer targets collapse to one scalar loss, and asks where those batches come from and how to keep the model fed with them.
 
 ---
 
