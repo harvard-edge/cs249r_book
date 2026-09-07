@@ -15,9 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.activations import GELU, Sigmoid
-# Try to import transformer for mean/sqrt monkey-patches (Module 13)
+# Try to import the transformer module (Module 13) for the mean/sqrt gradient checks
 # This is optional - tests will skip if not available
 try:
     from tinytorch.core import transformer
@@ -125,28 +125,28 @@ def test_gelu_gradient_flow():
 
 
 def test_gelu_backward_large_magnitude_input_does_not_overflow():
-    """GELUBackward.apply() computes its own sigmoid term for the derivative.
+    """GELUFunction.backward() computes its own sigmoid term for the derivative.
     The naive 1/(1+exp(-z)) formula overflows np.exp for large |z| (z here is
     1.702*x), so large-magnitude inputs must not raise or warn, and the
     gradient must saturate to the correct limiting values."""
-    from tinytorch.core.autograd import GELUBackward
+    from tinytorch.core.activations import GELUFunction
 
     print("Testing GELU backward large-magnitude stability...")
 
     for scale in [10.0, 200.0, 1000.0]:
         x = Tensor(np.array([-scale, scale]), requires_grad=True)
-        backward_fn = GELUBackward(x)
+        backward_fn = GELUFunction(x)
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            grad = backward_fn.apply(np.array([1.0, 1.0]))
+            grad = backward_fn.backward(np.array([1.0, 1.0]))
 
         assert np.all(np.isfinite(grad[0])), f"Non-finite GELU gradient at scale={scale}: {grad}"
 
     # At a large enough magnitude, GELU behaves like the identity for x>>0
     # (gradient -> 1) and like a hard zero for x<<0 (gradient -> 0).
     x = Tensor(np.array([-1000.0, 1000.0]), requires_grad=True)
-    grad = GELUBackward(x).apply(np.array([1.0, 1.0]))
+    grad = GELUFunction(x).backward(np.array([1.0, 1.0]))
     assert grad[0][0] == pytest.approx(0.0, abs=1e-6)
     assert grad[0][1] == pytest.approx(1.0, abs=1e-6)
 
@@ -217,12 +217,11 @@ def test_sigmoid_large_magnitude_input_does_not_overflow():
 def test_reflected_operator_gradients():
     """
     Gradient-level regression for __radd__/__rsub__/__rmul__/__rtruediv__
-    and sum(). These previously computed their result via a duplicate
-    formula inside the autograd monkeypatch (tracked_radd/rsub/rmul/rdiv,
-    sum_op) instead of calling Module 01's own methods, so a bug
+    and sum(). An earlier autograd design recomputed these through
+    duplicate formulas instead of calling Module 01's own methods, so a bug
     introduced into Module 01's source would never have been caught by
-    any test exercising the built package. They now delegate to the
-    original implementations, this locks in both the value and the
+    any test exercising the built package. Every operator now goes through
+    its Module 01 operation class, so this locks in both the value and the
     gradient for each.
     """
     # __radd__: 5 + x

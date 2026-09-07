@@ -772,18 +772,19 @@ For CIFAR-10 and similar image datasets:
 ```
 RandomHorizontalFlip (50% probability):
 ┌──────────┐     ┌──────────┐
-│  🐱 →    │  →  │    ← 🐱  │
+│ cat →    │  →  │    ← cat │
 │          │     │          │
 └──────────┘     └──────────┘
 Cars, cats, dogs look similar when flipped!
 
 RandomCrop with Padding:
 ┌──────────┐     ┌────────────┐     ┌──────────┐
-│   🐱     │  →  │░░░░░░░░░░░░│  →  │  🐱      │
-│          │     │░░  🐱     ░│     │          │
+│   cat    │  →  │░░░░░░░░░░░░│  →  │  cat     │
+│          │     │░░  cat   ░░│     │          │
 └──────────┘     │░░░░░░░░░░░░│     └──────────┘
-  Original        Pad edges        Random crop
-                  (with zeros)     (back to 32×32)
+  Original       └────────────┘       Random crop
+                   Pad edges         (back to 32×32)
+                  (with zeros)
 ```
 
 ### Training vs Evaluation

@@ -19,12 +19,9 @@ import pytest
 import numpy as np
 rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd
-enable_autograd()
-
-
 def test_tokenization_basic():
     """
     Test Module 10: Tokenization
@@ -64,7 +61,7 @@ def test_embedding_gradient_flow():
     Verifies:
     1. Embedding lookup preserves requires_grad
     2. Gradients flow back to embedding weights
-    3. EmbeddingBackward correctly accumulates gradients
+    3. EmbeddingFunction correctly accumulates gradients
     """
     print("Testing Module 11: Embedding gradient flow...")
 

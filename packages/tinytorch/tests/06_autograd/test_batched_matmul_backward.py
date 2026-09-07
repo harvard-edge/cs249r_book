@@ -13,12 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 import numpy as np
 rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd
-enable_autograd()
-
-
 def test_batched_3d_matmul_backward():
     """Test gradient flow through batched 3D matrix multiplication."""
     print("Testing batched 3D matmul backward...")

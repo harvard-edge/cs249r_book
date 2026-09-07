@@ -283,7 +283,7 @@ Every quantization system uses this fundamental relationship:
 ```
 Quantization (FP32 → INT8):
 ┌─────────────────────────────────────────────────────────┐
-│  quantized = round(float_value / scale + zero_point)     │
+│  quantized = round(float_value / scale + zero_point)    │
 └─────────────────────────────────────────────────────────┘
 
 Dequantization (INT8 → FP32):
@@ -925,9 +925,12 @@ class QuantizedLinear:
 
         all_values = np.array(all_values)
 
-        # Calculate input quantization parameters
-        min_val = float(np.min(all_values))
-        max_val = float(np.max(all_values))
+        # Calculate input quantization parameters, widening the range to
+        # straddle zero exactly as quantize_int8 does (post-ReLU inputs are
+        # all non-negative, and a zero_point outside the INT8 range would
+        # otherwise be clamped and corrupt every value)
+        min_val = min(float(np.min(all_values)), 0.0)
+        max_val = max(float(np.max(all_values)), 0.0)
 
         if abs(max_val - min_val) < EPSILON:
             self.input_scale = 1.0
@@ -935,7 +938,7 @@ class QuantizedLinear:
         else:
             self.input_scale = (max_val - min_val) / (INT8_RANGE - 1)
             self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
-            self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
+            self.input_zero_point = int(np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
         ### END SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
@@ -958,6 +961,8 @@ class QuantizedLinear:
         (1, 3)
 
         HINTS:
+        - If calibrate() has set input_scale, round the input onto its grid and
+          back first (clip to the INT8 range), so saturation is visible
         - Use dequantize_int8() to restore weights to FP32 before computation
         - Use x.matmul() for matrix multiplication
         - Add bias after matmul if it exists (dequantize bias first)
@@ -967,6 +972,13 @@ class QuantizedLinear:
         ### BEGIN SOLUTION
         # For educational purposes, we dequantize and compute in FP32
         # Production systems use specialized INT8 GEMM operations
+
+        # Round the input onto the calibrated grid and back, so the activations
+        # carry the same rounding (and saturation) they would on INT8 hardware
+        if self.input_scale is not None:
+            q_x = np.clip(np.round(x.data / self.input_scale + self.input_zero_point),
+                          INT8_MIN_VALUE, INT8_MAX_VALUE)
+            x = Tensor((q_x - self.input_zero_point) * self.input_scale)
 
         # Dequantize weights
         weight_fp32 = dequantize_int8(self.q_weight, self.weight_scale, self.weight_zero_point)
@@ -1460,8 +1472,12 @@ def test_unit_quantize_model():
     x = Tensor(rng.standard_normal((2, 4)))
     original_output = model.forward(x)
 
-    # Create calibration data
-    calibration_data = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
+    # Create calibration data. Calibration fixes each layer's input range, and
+    # an input outside that range saturates, so the set must cover the inputs
+    # the layer will see; the batch under test is included so this check
+    # measures rounding error, not saturation (the calibration exercise in the
+    # book shows what saturation does).
+    calibration_data = [x] + [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
 
     # Quantize model
     quantize_model(model, calibration_data)
@@ -1522,8 +1538,8 @@ Byte Accounting per Layer Type:
   ┌─────────────────────────┐      ┌─────────────────────────────────┐
   │ weight: N × 4 bytes     │      │ q_weight: N × 1 byte            │
   │ bias:   M × 4 bytes     │      │ q_bias:   M × 1 byte            │
-  │                         │      │ overhead: ~8 bytes (scale+zp)    │
-  │ Total: (N+M) × 4       │      │ Total: (N+M) × 1 + overhead     │
+  │                         │      │ overhead: ~8 bytes (scale+zp)   │
+  │ Total: (N+M) × 4        │      │ Total: (N+M) × 1 + overhead     │
   └─────────────────────────┘      └─────────────────────────────────┘
 ```
 """
@@ -1917,7 +1933,7 @@ This analysis compares different quantization approaches used in production syst
 ```
 Strategy Comparison Framework:
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────────────────┐
 │                          Three Advanced Strategies                             │
 ├──────────────────────────┬──────────────────────────┬──────────────────────────┤
 │       Strategy 1         │       Strategy 2         │       Strategy 3         │
@@ -1925,9 +1941,9 @@ Strategy Comparison Framework:
 ├──────────────────────────┼──────────────────────────┼──────────────────────────┤
 │                          │                          │                          │
 │ ┌──────────────────────┐ │ ┌──────────────────────┐ │ ┌──────────────────────┐ │
-│ │ Weights:             │ │ │ Channel 1: scale₁   │ │ │ Sensitive: FP32      │ │
-│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂   │ │ │ Regular: INT8        │ │
-│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃   │ │ │                      │ │
+│ │ Weights:             │ │ │ Channel 1: scale₁    │ │ │ Sensitive: FP32      │ │
+│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂    │ │ │ Regular: INT8        │ │
+│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃    │ │ │                      │ │
 │ │ [W₃₁ W₃₂ W₃₃]        │ │ │                      │ │ │ Input: FP32          │ │
 │ └──────────────────────┘ │ │ Better precision     │ │ │ Output: FP32         │ │
 │                          │ │ per channel          │ │ │ Hidden: INT8         │ │
@@ -1967,10 +1983,10 @@ Pros: Better precision       Cons: More complex
 ```
 Model Architecture:            Precision Assignment:
 ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Input Layer  (sensitive) │     │ Keep in FP32 (precision) │
-│ Hidden 1     (bulk)     │ →   │ Quantize to INT8        │
-│ Hidden 2     (bulk)     │     │ Quantize to INT8        │
-│ Output Layer (sensitive)│     │ Keep in FP32 (quality)   │
+│ Input Layer (sensitive) │     │ Keep in FP32 (precision)│
+│ Hidden 1    (bulk)      │ →   │ Quantize to INT8        │
+│ Hidden 2    (bulk)      │     │ Quantize to INT8        │
+│ Output Layer (sensitive)│     │ Keep in FP32 (quality)  │
 └─────────────────────────┘     └─────────────────────────┘
 
 Pros: Optimal trade-off      Cons: Requires expertise
@@ -1981,11 +1997,11 @@ Pros: Optimal trade-off      Cons: Requires expertise
 Comparative Testing Protocol:
 
 1. Create identical test model   →  2. Apply each strategy        →  3. Measure results
-   ┌───────────────────────┐     ┌───────────────────────┐     ┌───────────────────────┐
-   │ 128 → 64 → 10 MLP      │     │ Per-tensor quantization │     │ MSE error calculation  │
-   │ Identical weights       │     │ Per-channel simulation  │     │ Compression measurement│
-   │ Same test input         │     │ Mixed precision setup   │     │ Speed comparison       │
-   └───────────────────────┘     └───────────────────────┘     └───────────────────────┘
+   ┌─────────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
+   │ 128 → 64 → 10 MLP       │     │ Per-tensor quantization │     │ MSE error calculation   │
+   │ Identical weights       │     │ Per-channel simulation  │     │ Compression measurement │
+   │ Same test input         │     │ Mixed precision setup   │     │ Speed comparison        │
+   └─────────────────────────┘     └─────────────────────────┘     └─────────────────────────┘
 ```
 
 **Expected Strategy Rankings:**
@@ -2275,30 +2291,12 @@ For a model with 100M parameters:
 - Quantized memory usage: _____ GB
 - Memory bandwidth reduction when loading from disk: _____ ×
 
-### BEGIN SOLUTION
-**Answer 1: Memory Architecture Impact**
-- Original memory usage: **0.4 GB** (100M parameters × 4 bytes = 400MB = 0.4 GB)
-- Quantized memory usage: **0.1 GB** (100M parameters × 1 byte = 100MB = 0.1 GB)
-- Memory bandwidth reduction: **4×** (loading 100MB instead of 400MB from disk)
-
-**Key Insight**: Quantization reduces not just RAM usage, but also disk I/O, network transfer time, and memory bandwidth pressure. A 4× reduction in bandwidth means 4× faster model loading and 4× less network traffic when deploying models.
-### END SOLUTION
-
 ### Question 2: Quantization Error Analysis
 Your quantization maps a continuous range to 256 discrete values (INT8).
 For weights uniformly distributed in [-0.1, 0.1]:
 - Quantization scale: _____
 - Maximum quantization error: _____
 - Signal-to-noise ratio approximately: _____ dB
-
-### BEGIN SOLUTION
-**Answer 2: Quantization Error Analysis**
-- Quantization scale: **0.0007843** (range 0.2 / 255 steps = 0.0007843)
-- Maximum quantization error: **±0.000392** (scale / 2 = ±0.0003922)
-- Signal-to-noise ratio: **~48 dB** (20 × log10(signal_range / quantization_step) ≈ 20 × log10(255) ≈ 48 dB)
-
-**Key Insight**: For 8-bit quantization, theoretical SNR is approximately 6 dB per bit × 8 bits = 48 dB. This is sufficient for neural networks because weights typically have bounded ranges and networks are robust to small perturbations.
-### END SOLUTION
 
 ### Question 3: Hardware Efficiency
 Modern processors have specialized INT8 instructions (like AVX-512 VNNI).
@@ -2307,46 +2305,17 @@ Compared to FP32 operations:
 - Why might actual speedup be less than this theoretical maximum? _____
 - What determines whether quantization improves or hurts performance? _____
 
-### BEGIN SOLUTION
-**Answer 3: Hardware Efficiency**
-- INT8 operations per SIMD: **4× more** (512-bit register can hold 64 INT8 values vs 16 FP32 values)
-- Why actual speedup is less: **Dequantization overhead, memory bandwidth bottlenecks, and non-compute operations** (data movement, activation functions, etc. remain in FP32)
-- Performance determinant: **Hardware INT8 support availability** (modern CPUs with VNNI, GPUs with Tensor Cores, mobile chips with Neural Engine) and **compute vs memory-bound workload** (compute-bound benefits more from INT8 ops, memory-bound benefits from reduced bandwidth)
-
-**Key Insight**: Theoretical 4× speedup requires: (1) Hardware with native INT8 instructions, (2) Large matrix multiplications where compute dominates, (3) Minimal dequantization overhead. Real-world speedups are typically 2-3× due to mixed precision operations and data movement costs.
-### END SOLUTION
-
 ### Question 4: Calibration Strategy Trade-offs
 Your calibration process finds optimal scales using sample data.
 - Too little calibration data: Risk of _____
 - Too much calibration data: Cost of _____
 - Per-channel vs per-tensor quantization trades _____ for _____
 
-### BEGIN SOLUTION
-**Answer 4: Calibration Strategy Trade-offs**
-- Too little calibration data: Risk of **suboptimal quantization parameters that don't represent the true activation distribution**, leading to **clipping of outliers and accuracy degradation**
-- Too much calibration data: Cost of **increased calibration time** and **diminishing returns** (accuracy stops improving after ~100-1000 samples typically)
-- Per-channel vs per-tensor trades: **Complexity and overhead** (more scales to store/compute) for **better precision** (each channel optimized independently, preserving more information)
-
-**Key Insight**: Calibration is about finding representative data statistics. The rule of thumb: 100-1000 diverse samples usually suffice. Per-channel quantization is worth the complexity for sensitive layers (first/last layers, attention) but overkill for bulk middle layers.
-### END SOLUTION
-
 ### Question 5: Production Deployment
 In mobile/edge deployment scenarios:
 - When is 4× memory reduction worth <1% accuracy loss? _____
 - Why might you keep certain layers in FP32? _____
 - How does quantization affect battery life? _____
-
-### BEGIN SOLUTION
-**Answer 5: Production Deployment**
-- When 4× reduction worth <1% loss: **Always in memory-constrained environments** (mobile devices with <4GB RAM, edge devices with <512MB, embedded systems). Also when **serving cost matters** (4× smaller = 4× more users per server) or **latency critical** (4× faster loading from disk/network).
-
-- Keep layers in FP32: **First layer** (input quantization loses information), **last layer** (output precision matters for final predictions), **attention layers** (sensitive to precision for softmax stability), and **layers with extreme activation ranges** (quantization error amplifies).
-
-- Battery life impact: **2-4× improvement** due to (1) **less memory access** = lower DRAM power, (2) **INT8 operations use less energy** than FP32 ALUs, (3) **faster inference** = shorter active time. Typical mobile inference: 60% energy from memory, 30% from compute, 10% other.
-
-**Key Insight**: Quantization is essential for edge AI. The 1% accuracy loss is usually imperceptible to users, but 4× memory savings and 2-3× speedup enable entirely new applications (real-time on-device AI, offline functionality, privacy-preserving local inference).
-### END SOLUTION
 """
 
 # %% [markdown]

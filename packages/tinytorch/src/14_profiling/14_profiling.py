@@ -236,10 +236,10 @@ Latency measurement is tricky because systems have variance, warmup effects, and
 ```
 Measurement Protocol:
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                │
-│ 2. Timed runs (100+)  → Statistical significance              │
-│ 3. Outlier handling   → Use median, not mean                  │
-│ 4. Memory cleanup     → Prevent contamination                 │
+│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                 │
+│ 2. Timed runs (100+)  → Statistical significance               │
+│ 3. Outlier handling   → Use median, not mean                   │
+│ 4. Memory cleanup     → Prevent contamination                  │
 └────────────────────────────────────────────────────────────────┘
 
 Timeline:
@@ -261,17 +261,17 @@ Now let's implement our profiler step by step. We'll start with the foundation a
 Profiler Class Structure:
 ┌─────────────────────────────────────────────────────────────┐
 │ Core Measurement Methods:                                   │
-│ • count_parameters() → Model size analysis                 │
-│ • count_flops() → Computational cost estimation            │
-│ • measure_memory() → Memory usage tracking                 │
-│ • measure_latency() → Performance timing                   │
+│ • count_parameters() → Model size analysis                  │
+│ • count_flops() → Computational cost estimation             │
+│ • measure_memory() → Memory usage tracking                  │
+│ • measure_latency() → Performance timing                    │
 ├─────────────────────────────────────────────────────────────┤
 │ Advanced Profiling Methods:                                 │
-│ • profile_layer() → Layer-wise analysis                    │
-│ • profile_forward_pass() → Complete forward analysis       │
-│ • profile_backward_pass() → Training analysis              │
+│ • profile_layer() → Layer-wise analysis                     │
+│ • profile_forward_pass() → Complete forward analysis        │
+│ • profile_backward_pass() → Training analysis               │
 ├─────────────────────────────────────────────────────────────┤
-│ Integration:                                                 │
+│ Integration:                                                │
 │ All methods work together for comprehensive insights        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -901,7 +901,8 @@ class Profiler:
         APPROACH:
         1. Identify model type by class name
         2. Dispatch to count_linear_flops, self._count_conv_flops, or self._count_sequential_flops
-        3. Fall back to 1 FLOP per element for activations
+        3. A GPT-style model (it has .blocks and .embed_dim) goes to self._count_transformer_flops
+        4. Fall back to 1 FLOP per element for activations
 
         EXAMPLE:
         >>> linear = Linear(128, 64)
@@ -921,9 +922,33 @@ class Profiler:
             return _count_conv_flops(model, input_shape)
         elif model_name == 'Sequential' or hasattr(model, 'layers'):
             return self._count_sequential_flops(model, input_shape)
+        elif hasattr(model, 'blocks') and hasattr(model, 'embed_dim'):
+            return self._count_transformer_flops(model, input_shape)
         else:
             return int(np.prod(input_shape))
         ### END SOLUTION
+
+    def _count_transformer_flops(self, model, input_shape: Tuple[int, ...]) -> int:
+        """
+        Count FLOPs for one sequence through a GPT-style model (Module 13).
+
+        input_shape is (batch, seq_len) of token ids. Like the other counters this
+        is per sample: every Linear layer costs 2 * in * out per token, so a
+        sequence of seq_len tokens pays seq_len times that, and each block adds the
+        two attention products Q K^T and weights V, 4 * seq_len^2 * embed_dim.
+        Embeddings, LayerNorm, GELU, and softmax are a few operations per element
+        and are left out.
+        """
+        seq_len = input_shape[-1]
+        embed_dim = model.embed_dim
+        flops = 0
+        for block in model.blocks:
+            attn, mlp = block.attention, block.mlp
+            for layer in (attn.q_proj, attn.k_proj, attn.v_proj, attn.out_proj, mlp.linear1, mlp.linear2):
+                flops += seq_len * _count_linear_flops(layer, (1, layer.in_features))
+            flops += 4 * seq_len * seq_len * embed_dim
+        flops += seq_len * _count_linear_flops(model.lm_head, (1, embed_dim))
+        return flops
 
     def _calculate_parameter_memory(self, model) -> float:
         """
@@ -946,6 +971,17 @@ class Profiler:
         param_count = self.count_parameters(model)
         return (param_count * BYTES_PER_FLOAT32) / MB_TO_BYTES
         ### END SOLUTION
+
+    def _dummy_input(self, model, input_shape: Tuple[int, ...]) -> Tensor:
+        """
+        Build an input the model can consume, for timing and memory runs.
+
+        A token model (anything with a vocab_size, like Module 13's GPT) takes
+        integer ids; every other layer in TinyTorch takes float activations.
+        """
+        if hasattr(model, 'vocab_size'):
+            return Tensor(rng.integers(0, model.vocab_size, size=input_shape))
+        return Tensor(rng.standard_normal(input_shape))
 
 
     def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float]:
@@ -974,7 +1010,7 @@ class Profiler:
 
         parameter_memory_mb = self._calculate_parameter_memory(model)
 
-        dummy_input = Tensor(rng.standard_normal(input_shape))
+        dummy_input = self._dummy_input(model, input_shape)
         activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
 
         _ = model.forward(dummy_input)
@@ -1068,7 +1104,7 @@ class Profiler:
         """
         ### BEGIN SOLUTION
         # Create dummy input for latency measurement
-        dummy_input = Tensor(rng.standard_normal(input_shape))
+        dummy_input = self._dummy_input(layer, input_shape)
 
         # Gather all measurements
         params = self.count_parameters(layer)
@@ -1485,20 +1521,20 @@ FLOPs measure the computational work required for model operations. Unlike laten
 Linear Layer FLOP Breakdown:
 ┌────────────────────────────────────────────────────────────────┐
 │ Input (batch=32, features=768) × Weight (768, 3072) + Bias     │
-│                         ↓                                       │
+│                         ↓                                      │
 │ Matrix Multiplication: 32 × 768 × 3072 × 2 = 150,994,944 FLOPs │
 │ Bias Addition:         32 × 3072 × 1      =      98,304 FLOPs  │
-│                         ↓                                       │
+│                         ↓                                      │
 │ Total FLOPs:                                 151,093,248 FLOPs │
 └────────────────────────────────────────────────────────────────┘
 
 Convolution FLOP Breakdown:
 ┌────────────────────────────────────────────────────────────────┐
 │ Input (batch=1, channels=3, H=224, W=224)                      │
-│ Kernel (out=64, in=3, kH=7, kW=7)                             │
-│                         ↓                                       │
-│ Output size: (224×224) → (112×112) with stride=2              │
-│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs    │
+│ Kernel (out=64, in=3, kH=7, kW=7)                              │
+│                         ↓                                      │
+│ Output size: (224×224) → (112×112) with stride=2               │
+│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -2022,9 +2058,9 @@ Training requires both forward and backward passes. The backward pass typically 
 Training Memory Timeline:
 ┌────────────────────────────────────────────────────────────────┐
 │ Forward Pass:   [Parameters] + [Activations]                   │
-│                      ↓                                          │
+│                      ↓                                         │
 │ Backward Pass:  [Parameters] + [Activations] + [Gradients]     │
-│                      ↓                                          │
+│                      ↓                                         │
 │ Optimizer:      [Parameters] + [Gradients] + [Optimizer State] │
 └────────────────────────────────────────────────────────────────┘
 
@@ -2413,10 +2449,10 @@ Operation Types and Their Characteristics:
 
 Optimization Strategy:
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Profile first      → Identify bottlenecks                  │
-│ 2. Compute-bound ops  → Algorithmic improvements              │
-│ 3. Memory-bound ops   → Data movement optimization            │
-│ 4. Measure again      → Verify improvements                   │
+│ 1. Profile first      → Identify bottlenecks                   │
+│ 2. Compute-bound ops  → Algorithmic improvements               │
+│ 3. Memory-bound ops   → Data movement optimization             │
+│ 4. Measure again      → Verify improvements                    │
 └────────────────────────────────────────────────────────────────┘
 ```
 """

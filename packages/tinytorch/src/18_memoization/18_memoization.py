@@ -110,10 +110,10 @@ In machine learning systems, memoization is a fundamental optimization pattern: 
 Memoization Pattern:
 ┌─────────────────────────────────────────────────────────────┐
 │  Without Memoization (Naive):                               │
-│  f(x) called 100 times → 100 computations                  │
+│  f(x) called 100 times → 100 computations                   │
 │                                                             │
-│  With Memoization (Cached):                                │
-│  f(x) called 100 times → 1 computation + 99 cache lookups  │
+│  With Memoization (Cached):                                 │
+│  f(x) called 100 times → 1 computation + 99 cache lookups   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -773,17 +773,17 @@ if __name__ == "__main__":
 
 ### Integration Strategy
 
-Now we need a clean way to enable KV caching in our existing transformer models without breaking the existing code. We'll create an `enable_kv_cache()` function that:
+Now we need a clean way to enable KV caching in our existing transformer models without editing Module 12 or Module 13. We'll write an `enable_kv_cache()` function that:
 
 1. Creates a KVCache instance sized for the model
-2. Patches the model's attention layers to use caching
+2. Puts a `CachedAttention` stand-in in front of each block's attention layer
 3. Returns the cache for manual control if needed
 
-The actual integration with attention happens through monkey-patching where we:
-1. Check if cache is enabled
-2. Only compute K,V for new token (not all tokens)
-3. Update cache with new K,V
-4. Use cached K,V for attention computation
+The stand-in owns the original attention layer and decides, on every call, which of two paths to take:
+1. A full sequence (training, or an ordinary forward pass) goes straight to the original attention
+2. A single new token is projected to K,V once, written into the cache, and attended against everything cached so far
+
+`disable_kv_cache()` removes the stand-ins and the model is exactly as it was. Nothing inside the model is patched: `block.attention` simply points at a different object for a while, the same wrapping pattern PyTorch uses for `DataParallel` and quantization stubs, which stand in front of a module and forward to it.
 
 ### Generation Flow Comparison
 
@@ -821,7 +821,7 @@ We built KV caching in Module 18 (this module), but our transformer (Modules 12-
 - Violates clean module boundaries
 
 **✅ GOOD Solution**: Module 18 ADDS caching to existing models without modification!
-- Use composition + monkey-patching (like `enable_autograd()`)
+- Use composition (wrap the model, keep its classes untouched)
 - Module 18 wraps/enhances Module 12, not modifies it
 - Students learn systems engineering: "Add capabilities, don't break old code"
 
@@ -1135,146 +1135,125 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _cached_attention_forward -- Path Dispatch for Cached Attention
+### CachedAttention -- The Stand-In That Chooses the Path
 
-This helper decides which attention path to take for a given input.
-It separates the DECISION logic from the COMPUTATION logic, making
-both independently testable.
+`CachedAttention` takes the place of a block's attention layer while the cache is
+enabled. It keeps the original layer as `self.attention` and decides which path
+each call takes. Keeping the DECISION here and the COMPUTATION in
+`_cached_generation_step` makes both independently testable.
 
 ```
-Input x arrives at attention layer:
+Input x arrives at the stand-in:
 
-  x.shape[1] > 1?  ──YES──→ PATH 1: TRAINING
-       │                     Use original attention (gradient flow)
+  x.shape[1] > 1?  ──YES──→ FULL SEQUENCE
+       │                     Forward to the original attention (mask, gradients, training)
        NO
        │
-  cache.seq_pos == 0? ──YES──→ PATH 2: FIRST TOKEN
-       │                       Use original attention (nothing cached yet)
-       NO
-       │
-       └──→ PATH 3: CACHED GENERATION
-            Use _cached_generation_step() for O(n) computation
+       └──→ ONE NEW TOKEN
+            _cached_generation_step(): project K,V once, write them into the
+            cache, attend over everything cached so far (O(n), not O(n²))
 ```
 
-This three-path dispatch is the core decision logic that determines
-whether to use the cache or fall back to standard attention.
+The first token of a prompt takes the single-token path too. The cache is empty,
+so it attends only to itself, and its K,V are written for every later token to
+use. The position each token needs comes from the model: `_cached_generate` calls
+`model.forward(token, start_pos=cache.seq_pos)`, which is why Module 13's
+`GPT.forward` and Module 11's embedding layer accept `start_pos`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-attention", "solution": true}
 #| export
-def _cached_attention_forward(block, x, cache_obj, layer_idx, original_forward):
+class CachedAttention:
     """
-    Dispatch attention through the correct path based on context.
+    Stand-in for one block's attention layer while a KV cache is enabled.
 
-    TODO: Implement three-path dispatch for cached attention
-
-    APPROACH:
-    1. Check if seq_len > 1 (training mode) -> use original_forward
-    2. Check if cache is empty (seq_pos == 0) -> use original_forward
-    3. Otherwise (cached generation) -> use _cached_generation_step
-
-    EXAMPLE:
-    >>> # Training path (seq_len=10 > 1):
-    >>> output = _cached_attention_forward(block, x_train, cache, 0, orig_fwd)
-    >>> # -> calls original_forward(x_train, None)
-    >>>
-    >>> # Cached path (seq_len=1, cache has history):
-    >>> output = _cached_attention_forward(block, x_gen, cache, 0, orig_fwd)
-    >>> # -> calls _cached_generation_step(x_gen, block.attention, cache, 0)
-
-    HINTS:
-    - x.shape[1] gives the sequence length
-    - cache_obj.seq_pos tracks how many tokens are already cached
-    - PATH 1 and PATH 2 both call original_forward(x, mask=None)
-    - PATH 3 calls _cached_generation_step(x, block.attention, cache_obj, layer_idx)
-
-    Args:
-        block: Transformer block containing the attention layer
-        x: Input tensor, shape (batch, seq_len, embed_dim)
-        cache_obj: KVCache instance
-        layer_idx: Which transformer layer (0-indexed)
-        original_forward: The original (un-patched) attention forward method
-
-    Returns:
-        Output tensor from whichever path was selected
+    Holds the original attention layer and the cache. enable_kv_cache() puts one
+    of these at block.attention; disable_kv_cache() puts the original back.
     """
-    ### BEGIN SOLUTION
-    seq_len = x.shape[1]
 
-    # PATH 1: TRAINING (seq_len > 1)
-    # Full sequence - use original attention for gradient flow
-    if seq_len > 1:
-        return original_forward(x, None)
+    def __init__(self, attention, cache_obj, layer_idx):
+        self.attention = attention      # the original MultiHeadAttention layer
+        self.cache = cache_obj
+        self.layer_idx = layer_idx
 
-    # PATH 2: FIRST TOKEN (cache empty)
-    # Nothing to retrieve yet - use original attention
-    if cache_obj.seq_pos == 0:
-        return original_forward(x, None)
+    def parameters(self):
+        """The stand-in owns no weights of its own."""
+        return self.attention.parameters()
 
-    # PATH 3: CACHED GENERATION
-    # Use helper function for the O(n) cached computation
-    return _cached_generation_step(x, block.attention, cache_obj, layer_idx)
-    ### END SOLUTION
+    def forward(self, x, mask=None):
+        """
+        Route one call to the right path.
+
+        TODO: Implement the two-path dispatch
+
+        APPROACH:
+        1. If x holds more than one position (x.shape[1] > 1), this is a full
+           sequence: return self.attention.forward(x, mask) unchanged
+        2. Otherwise x is one new token: return
+           _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+
+        EXAMPLE:
+        >>> stand_in = CachedAttention(block.attention, cache, layer_idx=0)
+        >>> stand_in.forward(x_train)   # (1, 10, D): original attention, cache untouched
+        >>> stand_in.forward(x_token)   # (1, 1, D): cached step, cache updated
+
+        HINTS:
+        - x.shape[1] is the sequence length
+        - The cached step handles an empty cache itself (the first token attends to itself)
+        """
+        ### BEGIN SOLUTION
+        if x.shape[1] > 1:
+            return self.attention.forward(x, mask)
+        return _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+        ### END SOLUTION
+
+    def __call__(self, x, mask=None):
+        return self.forward(x, mask)
 
 # %% [markdown]
 """
-### 🧪 Unit Test: _cached_attention_forward
+### 🧪 Unit Test: CachedAttention
 
-**What we're testing**: Three-path dispatch logic for cached attention
-**Why it matters**: Wrong path selection causes silent correctness bugs (training uses cache, or generation ignores cache)
-**Expected**: Training inputs use original forward; cached generation uses _cached_generation_step
+**What we're testing**: The stand-in routes full sequences to the original attention and single tokens through the cache, and the cached path reproduces uncached causal attention
+**Why it matters**: Wrong routing causes silent correctness bugs (training reads the cache, or generation ignores it), and a cache that changes the numbers is not an optimization
+**Expected**: Full-sequence output identical to the original layer with the cache untouched; token-by-token outputs match the causal attention output at every position
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-cached-attention", "locked": true, "points": 10}
-def test_unit_cached_attention_forward():
-    """🧪 Test _cached_attention_forward dispatches to correct path."""
-    print("🧪 Unit Test: _cached_attention_forward...")
+def test_unit_cached_attention():
+    """🧪 Test CachedAttention routes calls correctly and matches uncached attention."""
+    print("🧪 Unit Test: CachedAttention...")
+    from tinytorch.core.attention import MultiHeadAttention
 
-    # Track which path was taken
-    path_taken = []
+    embed_dim, num_heads, seq_len = 32, 4, 5
+    attention = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
+    cache = KVCache(batch_size=1, max_seq_len=16, num_layers=1,
+                    num_heads=num_heads, head_dim=embed_dim // num_heads)
+    stand_in = CachedAttention(attention, cache, layer_idx=0)
 
-    class MockBlock:
-        def __init__(self):
-            self.attention = self
+    # Path 1: a full sequence goes to the original layer, unchanged
+    x = Tensor(rng.standard_normal((1, seq_len, embed_dim)))
+    causal = Tensor(np.tril(np.ones((1, seq_len, seq_len))))
+    full = attention.forward(x, causal)
+    routed = stand_in.forward(x, causal)
+    assert np.allclose(routed.data, full.data), "Full sequences must use the original attention"
+    assert cache.seq_pos == 0, "A full-sequence call must not touch the cache"
 
-    block = MockBlock()
+    # Path 2: one token at a time through the cache reproduces the causal result
+    for t in range(seq_len):
+        out_t = stand_in.forward(x[:, t:t+1, :])
+        cache.advance()
+        assert out_t.shape == (1, 1, embed_dim), "One token in, one token out"
+        assert np.allclose(out_t.data[0, 0], full.data[0, t], atol=1e-5), \
+            f"Cached output at position {t} differs from uncached causal attention"
+    assert cache.seq_pos == seq_len, "Each advance() should cache one more token"
 
-    def mock_original_forward(x, mask=None):
-        path_taken.append("original")
-        return x
-
-    # Create a real cache for testing
-    cache = KVCache(batch_size=1, max_seq_len=64, num_layers=2,
-                    num_heads=4, head_dim=32)
-
-    # Test PATH 1: Training (seq_len > 1)
-    path_taken.clear()
-    x_train = Tensor(rng.standard_normal((1, 10, 128)))  # seq_len=10
-    result = _cached_attention_forward(block, x_train, cache, 0, mock_original_forward)
-    assert "original" in path_taken, "Training path should use original forward"
-    assert result.shape == x_train.shape, "Should return same shape"
-
-    # Test PATH 2: First token (cache empty, seq_pos=0)
-    path_taken.clear()
-    cache.reset()
-    assert cache.seq_pos == 0
-    x_first = Tensor(rng.standard_normal((1, 1, 128)))  # seq_len=1, but cache empty
-    result = _cached_attention_forward(block, x_first, cache, 0, mock_original_forward)
-    assert "original" in path_taken, "First token should use original forward"
-
-    # Test PATH 3: Cached generation (seq_len=1, cache has history)
-    # We can't easily test the full _cached_generation_step path without
-    # real attention layers, so we verify the dispatch logic by checking
-    # that PATH 1 and PATH 2 conditions are correctly handled above.
-    # PATH 3 would be triggered when seq_len=1 and cache.seq_pos > 0.
-    print("   PATH 1 (training): dispatches to original forward")
-    print("   PATH 2 (first token): dispatches to original forward")
-    print("   PATH 3 (cached): would dispatch to _cached_generation_step")
-
-    print("✅ _cached_attention_forward path dispatch works correctly!")
+    print("   Full sequence: routed to the original attention, cache untouched")
+    print(f"   {seq_len} single tokens: cached path matches causal attention at every position")
+    print("✅ CachedAttention routes correctly and matches uncached attention!")
 
 if __name__ == "__main__":
-    test_unit_cached_attention_forward()
+    test_unit_cached_attention()
 
 
 # %% [markdown]
@@ -1310,6 +1289,7 @@ Step 2: Generate token_5
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-generate", "solution": true}
+#| export
 def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     Run autoregressive generation using the KV cache.
@@ -1321,7 +1301,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     2. Get the last token's logits and sample next token
     3. Loop for max_new_tokens steps:
        a. Feed ONLY the new token through the model (seq_len=1)
-       b. Cache is automatically updated by patched attention
+       b. The CachedAttention stand-ins write each token's K,V into the cache
        c. Advance cache position after each token
        d. Sample next token from logits with temperature scaling
     4. Return list of generated token indices
@@ -1333,16 +1313,16 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     >>> len(generated)  # 5 new tokens
 
     HINTS:
-    - Prefill: feed each prompt token one at a time via model.forward(token_tensor)
-      so the patched attention populates the cache through PATH 3
-    - Generation: model.forward(single_token_tensor) processes one token
+    - Prefill: feed each prompt token one at a time via model.forward(token_tensor, start_pos=cache.seq_pos)
+      so every token, including the first, writes its K,V into the cache at its true position
+    - Generation: model.forward(single_token_tensor, start_pos=cache.seq_pos) processes one token
     - Use temperature scaling: logits / temperature before softmax
     - Use rng.choice with softmax probabilities to sample
     - Advance cache.advance() after each token (both prefill and generation)
     - Stable softmax: subtract max before exp to avoid overflow
 
     Args:
-        model: Transformer model with cached attention (already patched)
+        model: Transformer model whose attention layers are wrapped by enable_kv_cache
         prompt_tokens: List of integer token IDs for the prompt
         max_new_tokens: Number of new tokens to generate
         temperature: Sampling temperature (higher = more random)
@@ -1353,17 +1333,16 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     ### BEGIN SOLUTION
     generated = []
+    cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
 
     # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
-    # We feed each token individually so the patched attention dispatches
-    # through PATH 3 (_cached_generation_step) for tokens after the first,
-    # which writes their K,V into the cache.  The first token (seq_pos==0)
-    # goes through PATH 2 (original forward) -- its K,V slot stays zero,
-    # but subsequent generation tokens still attend to the rest of the
-    # populated cache, which is far better than an entirely empty cache.
+    # Each token goes through the CachedAttention stand-ins, which write its
+    # K,V into the cache. start_pos=cache.seq_pos gives the token its true
+    # position, so a single-token forward computes exactly what the full
+    # sequence would have computed for that position.
     for i in range(len(prompt_tokens)):
         token_tensor = Tensor(np.array([[prompt_tokens[i]]]))  # (1, 1)
-        logits = model.forward(token_tensor)
+        logits = model.forward(token_tensor, start_pos=cache.seq_pos)
         cache.advance()
 
     # Get logits for last prompt token (predicts next token)
@@ -1383,7 +1362,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
 
         # Feed single token through model (cache handles history)
         token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
-        logits = model.forward(token_tensor)  # (1, 1, vocab_size)
+        logits = model.forward(token_tensor, start_pos=cache.seq_pos)  # (1, 1, vocab_size)
         cache.advance()
 
         last_logits = logits.data[0, -1, :]
@@ -1416,7 +1395,7 @@ def test_unit_cached_generate():
             self.max_seq_len = 128
             self.blocks = []
 
-        def forward(self, x):
+        def forward(self, x, start_pos=0):
             # Return random logits shaped (batch, seq_len, vocab_size)
             batch_size = x.shape[0]
             seq_len = x.shape[1]
@@ -1460,7 +1439,7 @@ if __name__ == "__main__":
 
 This is the main entry point that composes the helpers above. It:
 1. Creates cache storage via `_create_cache_storage()`
-2. Patches each block's attention via `_cached_attention_forward()`
+2. Puts a `CachedAttention` stand-in in front of each block's attention
 3. Returns the cache for manual control
 
 ```
@@ -1470,8 +1449,7 @@ enable_kv_cache(model)
        │         └──→ KVCache created & attached
        │
        ├──→ For each block:
-       │       └──→ Patch attention.forward to use
-       │            _cached_attention_forward()
+       │       └──→ block.attention = CachedAttention(block.attention, cache, layer_idx)
        │
        └──→ Return cache object
 ```
@@ -1481,19 +1459,21 @@ enable_kv_cache(model)
 #| export
 def enable_kv_cache(model):
     """
-    Enable KV caching for a transformer model WITHOUT modifying Module 12/13 code.
+    Enable KV caching for a transformer model without editing its layers.
 
-    TODO: Compose helpers to create cache and patch attention layers
+    TODO: Compose helpers to create the cache and wrap the attention layers
 
     APPROACH:
-    1. Call _create_cache_storage(model) to validate and create cache
-    2. For each block, save original forward and patch with _cached_attention_forward
+    1. Call _create_cache_storage(model) to validate and create the cache
+    2. For each block, replace block.attention with a CachedAttention stand-in
+       that owns the original layer (unwrap first if one is already there)
     3. Print confirmation with cache statistics
-    4. Return cache object
+    4. Return the cache object
 
-    This function demonstrates **non-invasive optimization** - adding capabilities
-    to existing systems without breaking them. Similar to how Module 06 (Autograd)
-    uses enable_autograd() to add gradient tracking to Tensors.
+    This is the wrapping pattern: a stand-in owns the original object and
+    forwards to it, and removing the stand-in restores the original. Module 06
+    used a different pattern, completing each operation class with @method_of,
+    because there the added half is permanent; here it has to be removable.
 
     Args:
         model: A GPT-style transformer model with:
@@ -1516,33 +1496,18 @@ def enable_kv_cache(model):
 
     HINTS:
     - _create_cache_storage handles validation, KVCache creation, and model attachment
-    - Use a factory function (make_cached_forward) to capture layer_idx in closure
-    - Save original forward as block._original_attention_forward before patching
-    - _cached_attention_forward handles the three-path dispatch logic
+    - isinstance(block.attention, CachedAttention) tells you a stand-in is already in place
+    - The stand-in needs the original layer, the cache, and its layer index
     """
     ### BEGIN SOLUTION
     # Step 1: Validate model and create cache
     cache, head_dim = _create_cache_storage(model)
 
-    # Step 2: Patch each transformer block's attention
+    # Step 2: Put a stand-in in front of each block's attention layer
     for layer_idx, block in enumerate(model.blocks):
-        # Save original forward (avoid double-patching)
-        # hasattr() is LEGITIMATE: monkey-patching safety check
-        if not hasattr(block, '_original_attention_forward'):
-            block._original_attention_forward = block.attention.forward
-
-        # Create cached version using factory for correct closure binding
-        def make_cached_forward(layer_idx, original_forward, cache_obj):
-            """Factory to create cached forward with correct layer_idx closure."""
-            def cached_forward(x, mask=None):
-                return _cached_attention_forward(
-                    block, x, cache_obj, layer_idx, original_forward
-                )
-            return cached_forward
-
-        block.attention.forward = make_cached_forward(
-            layer_idx, block._original_attention_forward, cache
-        )
+        if isinstance(block.attention, CachedAttention):   # enabled twice: start from the original
+            block.attention = block.attention.attention
+        block.attention = CachedAttention(block.attention, cache, layer_idx)
 
     # Step 3: Print confirmation
     print(f"⚡ KV Cache enabled for model!")
@@ -1572,23 +1537,17 @@ def disable_kv_cache(model):
         disable_kv_cache(model)  # Back to normal
         ```
     """
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # Checking if monkey-patch markers exist before restoration
-    if not hasattr(model, '_cache_enabled') or not model._cache_enabled:
+    if not getattr(model, '_cache_enabled', False):
         print("⚠️  KV cache not enabled on this model")
         return
 
-    # Restore original attention forwards
+    # Take the stand-ins out; each one still holds the original layer
     for block in model.blocks:
-        # Educational Note: hasattr() is LEGITIMATE here because:
-        # Checking for monkey-patch backup before restoration
-        if hasattr(block, '_original_attention_forward'):
-            block.attention.forward = block._original_attention_forward
+        if isinstance(block.attention, CachedAttention):
+            block.attention = block.attention.attention
 
     # Clean up
     model._cache_enabled = False
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # Safe cleanup check before deleting dynamically added attribute
     if hasattr(model, '_kv_cache'):
         delattr(model, '_kv_cache')
 
@@ -1835,7 +1794,7 @@ def test_module():
     print()
     test_unit_create_cache_storage()
     print()
-    test_unit_cached_attention_forward()
+    test_unit_cached_attention()
     print()
     test_unit_cached_generate()
     print()

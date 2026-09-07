@@ -25,12 +25,9 @@ import pytest
 import numpy as np
 rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd once for all tests
-enable_autograd()
-
-
 def test_regression_batched_matmul():
     """
     Regression test for Issue #1: np.dot doesn't handle batched 3D matmul.

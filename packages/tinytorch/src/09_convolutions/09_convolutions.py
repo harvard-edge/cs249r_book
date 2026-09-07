@@ -66,8 +66,10 @@ import time
 from tinytorch.core.tensor import Tensor
 
 # Enable autograd for gradient tracking (required for BatchNorm2d learnable parameters)
-from tinytorch.core.autograd import enable_autograd, Function, ReLUBackward
-enable_autograd()
+from tinytorch.core.tensor import Function
+from tinytorch.core.activations import ReLUFunction
+import tinytorch.core.autograd  # completes every operation with its backward half
+from tinytorch.core.autograd import is_grad_enabled
 
 # Constants for convolution defaults
 DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
@@ -166,14 +168,14 @@ Convolution achieves dramatic parameter reduction (more than 1000×!) while pres
 Convolution sounds complex, but it's just a "sliding window dot product".
 Let's see exactly how it works:
 
-<pre>
+```
 Step 1: Position the kernel over input
-Input:          Kernel:
-┌─────────┐     ┌─────┐
-│ <span style="color:blue">1 2</span> 3 4 │     │ 1 0 │  ← If we place kernel at position (0,0)
-│ <span style="color:blue">5 6</span> 7 8 │  ×  │ 0 1 │
-│ 9 0 1 2 │     └─────┘
-└─────────┘
+Input:            Kernel:
+┌───────────┐     ┌─────┐
+│ [1 2] 3 4 │     │ 1 0 │  ← Kernel placed at position (0,0)
+│ [5 6] 7 8 │  ×  │ 0 1 │    covers the bracketed 2×2 patch
+│  9 0 1 2  │     └─────┘
+└───────────┘
 
 Step 2: Multiply corresponding elements
 Overlap:        Computation:
@@ -201,7 +203,7 @@ Final Output:  ┌────────┐
                │ 7 9 11 │
                │ 5 7 9  │
                └────────┘
-</pre>
+```
 
 ### The Mathematical Formula
 
@@ -480,9 +482,10 @@ The 7 nested loops iterate over:
 # %% nbgrader={"grade": false, "grade_id": "conv2d-class", "solution": true}
 #| export
 
-class Conv2dBackward(Function):
+class Conv2dFunction(Function):
     """
-    Gradient computation for 2D convolution.
+    The 2D convolution operation: forward runs the layer's sliding-window loops,
+    backward computes the gradients.
 
     Computes gradients for Conv2d backward pass:
     - grad_input: gradient w.r.t. input (for backprop to previous layer)
@@ -493,21 +496,23 @@ class Conv2dBackward(Function):
     the educational approach of the forward pass.
     """
 
-    def __init__(self, x, weight, bias, stride, padding, kernel_size, padded_shape):
-        # Register all tensors that need gradients with autograd
+    def forward(self, x, weight, bias=None):
+        """
+        Convolve the (already validated) input. The layer that owns the weights
+        is passed as `layer`, so the student-written helpers below do the work:
+        _apply_padding and _convolve_loops.
+        """
+        batch_size = x.shape[0]
+        out_height, out_width = self.layer._compute_output_shape(x.shape[2], x.shape[3])
+        padded_input = self.layer._apply_padding(x)
+        output = self.layer._convolve_loops(padded_input, batch_size, out_height, out_width)
         if bias is not None:
-            super().__init__(x, weight, bias)
-        else:
-            super().__init__(x, weight)
-        self.x = x
-        self.weight = weight
-        self.bias = bias
-        self.stride = stride
-        self.padding = padding
-        self.kernel_size = kernel_size
-        self.padded_shape = padded_shape
+            for out_ch in range(self.layer.out_channels):
+                output[:, out_ch, :, :] += bias[out_ch]
+        return output
 
-    def apply(self, grad_output):
+
+    def backward(self, grad_output):
         """
         Compute gradients for convolution inputs and parameters.
 
@@ -518,22 +523,26 @@ class Conv2dBackward(Function):
         Returns:
             Tuple of (grad_input, grad_weight, grad_bias)
         """
+        x, weight = self.inputs[0], self.inputs[1]
+        bias = self.inputs[2] if len(self.inputs) > 2 else None
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+
         batch_size, out_channels, out_height, out_width = grad_output.shape
-        _, in_channels, in_height, in_width = self.x.shape
-        kernel_h, kernel_w = self.kernel_size
+        _, in_channels, in_height, in_width = x.shape
+        kernel_h, kernel_w = kernel_size
 
         # Apply padding to input if needed (for gradient computation)
-        if self.padding > 0:
-            padded_input = np.pad(self.x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+        if padding > 0:
+            padded_input = np.pad(x.data,
+                                ((0, 0), (0, 0), (padding, padding), (padding, padding)),
                                 mode='constant', constant_values=0)
         else:
-            padded_input = self.x.data
+            padded_input = x.data
 
         # Initialize gradients
         grad_input_padded = np.zeros_like(padded_input)
-        grad_weight = np.zeros_like(self.weight.data)
-        grad_bias = None if self.bias is None else np.zeros_like(self.bias.data)
+        grad_weight = np.zeros_like(weight.data)
+        grad_bias = None if bias is None else np.zeros_like(bias.data)
 
         # Compute gradients using explicit loops (educational approach)
         for b in range(batch_size):
@@ -541,8 +550,8 @@ class Conv2dBackward(Function):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
                         # Position in input
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
 
                         # Gradient value flowing back to this position
                         grad_val = grad_output[b, out_ch, out_h, out_w]
@@ -562,7 +571,7 @@ class Conv2dBackward(Function):
 
                                     # Gradient w.r.t. input
                                     grad_input_padded[b, in_ch, in_h, in_w] += (
-                                        self.weight.data[out_ch, in_ch, k_h, k_w] * grad_val
+                                        weight.data[out_ch, in_ch, k_h, k_w] * grad_val
                                     )
 
         # Compute gradient w.r.t. bias (sum over batch and spatial dimensions)
@@ -571,15 +580,15 @@ class Conv2dBackward(Function):
                 grad_bias[out_ch] = grad_output[:, out_ch, :, :].sum()
 
         # Remove padding from input gradient
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
-        # Tuple length must match saved_tensors: (x, weight) or (x, weight, bias).
-        if self.bias is None:
+        # One gradient per input: (x, weight) or (x, weight, bias).
+        if bias is None:
             return grad_input, grad_weight
         return grad_input, grad_weight, grad_bias
 
@@ -776,7 +785,7 @@ class Conv2d:
         2. Compute output spatial dimensions
         3. Pad input if needed
         4. Run the sliding window convolution loops
-        5. Add bias and attach gradient tracking
+        5. Add bias (steps 3-5 run inside Conv2dFunction.apply, which records the operation)
 
         Each step is a separate helper you implement below.
         See the individual helper docstrings for details.
@@ -796,29 +805,11 @@ class Conv2d:
         # Step 2: Compute output dimensions
         out_height, out_width = self._compute_output_shape(in_height, in_width)
 
-        # Step 3: Apply padding
-        padded_input = self._apply_padding(x.data)
-
-        # Step 4: Run convolution loops
-        output = self._convolve_loops(padded_input, batch_size, out_height, out_width)
-
-        # Step 5: Add bias if present
+        # Steps 3-5: pad, convolve, add bias. The operation runs the helpers
+        # (via `layer=self`) and Module 06's apply() records it for backward.
         if self.bias is not None:
-            for out_ch in range(self.out_channels):
-                output[:, out_ch, :, :] += self.bias.data[out_ch]
-
-        # Return Tensor with gradient tracking enabled
-        result = Tensor(output, requires_grad=(x.requires_grad or self.weight.requires_grad))
-
-        # Attach backward function for gradient computation (following TinyTorch protocol)
-        if result.requires_grad:
-            result._grad_fn = Conv2dBackward(
-                x, self.weight, self.bias,
-                self.stride, self.padding, self.kernel_size,
-                padded_input.shape
-            )
-
-        return result
+            return Conv2dFunction.apply(x, self.weight, self.bias, layer=self)
+        return Conv2dFunction.apply(x, self.weight, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -1246,7 +1237,7 @@ For input (1, 64, 224, 224) with 2×2 pooling:
 # %% nbgrader={"grade": false, "grade_id": "maxpool2d-class", "solution": true}
 #| export
 
-class MaxPool2dBackward(Function):
+class MaxPool2dFunction(Function):
     """
     Gradient computation for 2D max pooling.
 
@@ -1254,17 +1245,19 @@ class MaxPool2dBackward(Function):
     as the maximum in the forward pass.
     """
 
-    def __init__(self, x, output_shape, kernel_size, stride, padding):
-        super().__init__(x)
-        self.x = x
-        self.output_shape = output_shape
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        # Store max positions for gradient routing
-        self.max_positions = {}
+    def forward(self, x):
+        """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
+        if self.layer.padding > 0:
+            padded_input = np.pad(x,
+                                ((0, 0), (0, 0), (self.layer.padding, self.layer.padding), (self.layer.padding, self.layer.padding)),
+                                mode='constant', constant_values=-np.inf)
+        else:
+            padded_input = x
+        return self.layer._maxpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def apply(self, grad_output):
+    def backward(self, grad_output):
         """
         Route gradients back to max positions.
 
@@ -1274,27 +1267,29 @@ class MaxPool2dBackward(Function):
         Returns:
             Gradient w.r.t. input
         """
-        batch_size, channels, in_height, in_width = self.x.shape
-        _, _, out_height, out_width = self.output_shape
-        kernel_h, kernel_w = self.kernel_size
+        x, = self.inputs
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        batch_size, channels, in_height, in_width = x.shape
+        _, _, out_height, out_width = self.output.shape
+        kernel_h, kernel_w = kernel_size
 
         # Apply padding if needed
-        if self.padding > 0:
-            padded_input = np.pad(self.x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+        if padding > 0:
+            padded_input = np.pad(x.data,
+                                ((0, 0), (0, 0), (padding, padding), (padding, padding)),
                                 mode='constant', constant_values=-np.inf)
             grad_input_padded = np.zeros_like(padded_input)
         else:
-            padded_input = self.x.data
-            grad_input_padded = np.zeros_like(self.x.data)
+            padded_input = x.data
+            grad_input_padded = np.zeros_like(x.data)
 
         # Route gradients to max positions
         for b in range(batch_size):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
 
                         # Find max position in this window
                         max_val = -np.inf
@@ -1312,10 +1307,10 @@ class MaxPool2dBackward(Function):
                         grad_input_padded[b, c, max_h, max_w] += grad_output[b, c, out_h, out_w]
 
         # Remove padding
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
@@ -1467,26 +1462,9 @@ class MaxPool2d:
         # Step 2: Compute output dimensions
         out_height, out_width = self._compute_pool_output_shape(in_height, in_width)
 
-        # Step 3: Apply padding (use -inf for max pooling so padded values are never selected)
-        if self.padding > 0:
-            padded_input = np.pad(x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
-                                mode='constant', constant_values=-np.inf)
-        else:
-            padded_input = x.data
-
-        # Step 4: Run max pooling loops
-        output = self._maxpool_loops(padded_input, batch_size, channels, out_height, out_width)
-
-        # Step 5: Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad)
-
-        if result.requires_grad:
-            result._grad_fn = MaxPool2dBackward(
-                x, result.shape, self.kernel_size, self.stride, self.padding
-            )
-
-        return result
+        # Steps 3-5: pad and pool inside the operation (via `layer=self`);
+        # Module 06's apply() records it for backward.
+        return MaxPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -1666,7 +1644,7 @@ Memory access pattern identical to MaxPool, just different aggregation!
 # %% nbgrader={"grade": false, "grade_id": "avgpool2d-class", "solution": true}
 #| export
 
-class AvgPool2dBackward(Function):
+class AvgPool2dFunction(Function):
     """
     Gradient computation for 2D average pooling.
 
@@ -1675,15 +1653,19 @@ class AvgPool2dBackward(Function):
     that contributed, accumulating where windows overlap.
     """
 
-    def __init__(self, x, output_shape, kernel_size, stride, padding):
-        super().__init__(x)
-        self.x = x
-        self.output_shape = output_shape
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
+    def forward(self, x):
+        """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
+        if self.layer.padding > 0:
+            padded_input = np.pad(x,
+                                ((0, 0), (0, 0), (self.layer.padding, self.layer.padding), (self.layer.padding, self.layer.padding)),
+                                mode='constant', constant_values=0)
+        else:
+            padded_input = x
+        return self.layer._avgpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def apply(self, grad_output):
+    def backward(self, grad_output):
         """
         Distribute each output gradient equally across its pooling window.
 
@@ -1693,39 +1675,41 @@ class AvgPool2dBackward(Function):
         Returns:
             Gradient w.r.t. input
         """
-        batch_size, channels, in_height, in_width = self.x.shape
-        _, _, out_height, out_width = self.output_shape
-        kernel_h, kernel_w = self.kernel_size
+        x, = self.inputs
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        batch_size, channels, in_height, in_width = x.shape
+        _, _, out_height, out_width = self.output.shape
+        kernel_h, kernel_w = kernel_size
         kernel_area = kernel_h * kernel_w
 
         # Average pooling pads with zeros, so the gradient buffer is padded with
         # zeros too (matching the forward pass).
-        if self.padding > 0:
+        if padding > 0:
             grad_input_padded = np.zeros(
                 (batch_size, channels,
-                 in_height + 2 * self.padding,
-                 in_width + 2 * self.padding)
+                 in_height + 2 * padding,
+                 in_width + 2 * padding)
             )
         else:
-            grad_input_padded = np.zeros_like(self.x.data)
+            grad_input_padded = np.zeros_like(x.data)
 
         # Spread each output gradient equally over its window, accumulating overlaps.
         for b in range(batch_size):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
                         share = grad_output[b, c, out_h, out_w] / kernel_area
                         for k_h in range(kernel_h):
                             for k_w in range(kernel_w):
                                 grad_input_padded[b, c, in_h_start + k_h, in_w_start + k_w] += share
 
         # Remove padding
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
@@ -1876,26 +1860,9 @@ class AvgPool2d:
         # Step 2: Compute output dimensions
         out_height, out_width = self._compute_pool_output_shape(in_height, in_width)
 
-        # Step 3: Apply padding (use zeros for average pooling)
-        if self.padding > 0:
-            padded_input = np.pad(x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
-                                mode='constant', constant_values=0)
-        else:
-            padded_input = x.data
-
-        # Step 4: Run average pooling loops
-        output = self._avgpool_loops(padded_input, batch_size, channels, out_height, out_width)
-
-        # Step 5: Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad)
-
-        if result.requires_grad:
-            result._grad_fn = AvgPool2dBackward(
-                x, result.shape, self.kernel_size, self.stride, self.padding
-            )
-
-        return result
+        # Steps 3-5: pad and pool inside the operation (via `layer=self`);
+        # Module 06's apply() records it for backward.
+        return AvgPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -2094,9 +2061,9 @@ passes, decided by a boolean.
 
 # %% nbgrader={"grade": false, "grade_id": "batchnorm2d-backward", "solution": false}
 #| export
-class BatchNorm2dBackward(Function):
+class BatchNorm2dFunction(Function):
     """
-    Gradient computation for BatchNorm2d.
+    The BatchNorm2d operation: normalize with the given statistics, then scale and shift.
 
     Computes gradients for x, gamma, and beta in one pass.
     output = gamma * ((x - mean) / sqrt(var + eps)) + beta
@@ -2106,16 +2073,22 @@ class BatchNorm2dBackward(Function):
     only the direct term survives.
     """
 
-    def __init__(self, x, gamma, beta, normalized_data, inv_std, training):
-        """Initialize with forward pass values needed for gradient computation."""
-        super().__init__(x, gamma, beta)
-        self.normalized_data = normalized_data   # x_hat, shape (N, C, H, W)
-        self.inv_std = inv_std                   # 1/sqrt(var+eps), shape (1, C, 1, 1)
-        self.training = training
+    def forward(self, x, gamma, beta):
+        """Normalize with self.mean / self.var (chosen by the layer), then scale and shift."""
+        channels = x.shape[1]
+        mean_reshaped = np.asarray(self.mean).reshape(1, channels, 1, 1)
+        var_reshaped = np.asarray(self.var).reshape(1, channels, 1, 1)
+        # Keep 1/std: the forward needs it, and so does every term of the backward
+        self.inv_std = 1.0 / np.sqrt(var_reshaped + self.eps)
+        self.normalized_data = (np.asarray(x) - mean_reshaped) * self.inv_std
+        gamma_reshaped = np.asarray(gamma).reshape(1, channels, 1, 1)
+        beta_reshaped = np.asarray(beta).reshape(1, channels, 1, 1)
+        return gamma_reshaped * self.normalized_data + beta_reshaped
 
-    def apply(self, grad_output):
+
+    def backward(self, grad_output):
         """Compute gradients for BatchNorm2d (x, gamma, beta)."""
-        x, gamma, beta = self.saved_tensors
+        x, gamma, beta = self.inputs
 
         grad_x = grad_gamma = grad_beta = None
         normalized = self.normalized_data
@@ -2340,42 +2313,20 @@ class BatchNorm2d:
 
         HINTS:
         - Reshape mean/var/gamma/beta to (1, C, 1, 1) for broadcasting
-        - Attach BatchNorm2dBackward, like Conv2d attaches Conv2dBackward.
-          Setting requires_grad without a _grad_fn is worse than setting
-          neither: the tensor advertises gradients it will never deliver, the
-          optimizer updates nothing, and the network silently does not learn
+        - Run the normalization through BatchNorm2dFunction.apply, like Conv2d
+          runs through Conv2dFunction.apply. A Tensor built by hand would
+          advertise no gradients, the optimizer would update nothing, and the
+          network would silently not learn
         """
         ### BEGIN SOLUTION
         self._validate_input(x)
 
         batch_size, channels, height, width = x.shape
         mean, var = self._get_stats(x)
-
-        # Normalize: (x - mean) / sqrt(var + eps)
-        # Reshape mean and var for broadcasting: (C,) -> (1, C, 1, 1)
-        mean_reshaped = np.asarray(mean).reshape(1, channels, 1, 1)
-        var_reshaped = np.asarray(var).reshape(1, channels, 1, 1)
-
-        # Keep 1/std: the forward needs it, and so does every term of the backward
-        inv_std = 1.0 / np.sqrt(var_reshaped + self.eps)
-        x_normalized = (np.asarray(x.data) - mean_reshaped) * inv_std
-
-        # Apply scale (gamma) and shift (beta)
-        gamma_reshaped = np.asarray(self.gamma.data).reshape(1, channels, 1, 1)
-        beta_reshaped = np.asarray(self.beta.data).reshape(1, channels, 1, 1)
-
-        output = gamma_reshaped * x_normalized + beta_reshaped
-
-        result = Tensor(output)
-
-        # Attach the gradient function so gamma and beta actually train
-        if x.requires_grad or self.gamma.requires_grad or self.beta.requires_grad:
-            result.requires_grad = True
-            result._grad_fn = BatchNorm2dBackward(
-                x, self.gamma, self.beta, x_normalized, inv_std, self.training
-            )
-
-        return result
+        # Normalize, scale, and shift inside the operation; Module 06's apply()
+        # records it so gamma and beta actually train.
+        return BatchNorm2dFunction.apply(x, self.gamma, self.beta,
+                                         mean=mean, var=var, eps=self.eps, training=self.training)
         ### END SOLUTION
 
     def parameters(self):
@@ -2980,7 +2931,7 @@ CNN Approach:                    Dense Approach:
 │ Conv2: 16→32, 3×3  │          │ Params: 1.57M      │
 │ Params: 4,640      │          ├────────────────────┤
 ├────────────────────┤          │ Dense: 512→10      │
-│ Dense: 2048→10     │          │ Params: 5,120      │
+│ Dense: 2048→10     │          │ Params: 5,130      │
 │ Params: 20,490     │          └────────────────────┘
 └────────────────────┘          Total: 1.58M params
 Total: 25,578 params
@@ -3090,12 +3041,7 @@ class SimpleCNN:
 
     def relu(self, x):
         """ReLU activation with gradient tracking for CNN."""
-        result_data = np.maximum(0, x.data)
-        result = Tensor(result_data)
-        if x.requires_grad:
-            result.requires_grad = True
-            result._grad_fn = ReLUBackward(x)
-        return result
+        return ReLUFunction.apply(x)
 
     def parameters(self):
         """Return all trainable parameters."""

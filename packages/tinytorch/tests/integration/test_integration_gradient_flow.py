@@ -29,11 +29,9 @@ from tinytorch.core.activations import ReLU, Sigmoid, Softmax
 from tinytorch.core.losses import MSELoss, BinaryCrossEntropyLoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
 from tinytorch.core.spatial import Conv2d, MaxPool2d
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd
-enable_autograd()
-
 def test_simple_linear_gradient_flow():
     """Test gradients flow through a single linear layer"""
     print("\n" + "="*70)

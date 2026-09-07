@@ -36,11 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.core.autograd import enable_autograd
-
-enable_autograd()
-
-
+import tinytorch.core.autograd  # completes every operation with its backward half
 class TestSGDBasics:
     """
     Test SGD (Stochastic Gradient Descent) optimizer.

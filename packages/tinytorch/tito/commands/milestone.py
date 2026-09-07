@@ -197,7 +197,7 @@ MODULE_EXPORT_CHECKS = {
     3: [("tinytorch", "Linear"), ("tinytorch.core.layers", "Linear")],
     4: [("tinytorch", "CrossEntropyLoss"), ("tinytorch.core.losses", "CrossEntropyLoss")],
     5: [("tinytorch", "DataLoader"), ("tinytorch.core.dataloader", "DataLoader")],
-    6: [("tinytorch", "enable_autograd"), ("tinytorch.core.autograd", "enable_autograd")],
+    6: [("tinytorch", "no_grad"), ("tinytorch.core.autograd", "no_grad")],
     7: [("tinytorch", "SGD"), ("tinytorch.core.optimizers", "SGD")],
     8: [("tinytorch", "Trainer"), ("tinytorch.core.training", "Trainer")],
     9: [("tinytorch", "Conv2d"), ("tinytorch.core.spatial", "Conv2d")],
