@@ -438,6 +438,22 @@ To neutralize DNS tunneling, the sandbox DNS proxy enforces strict hygiene:
 
 3. **Internal Sinkholing:** Sandboxes cannot query external DNS resolvers (such as `8.8.8.8` or `1.1.1.1`). All queries are resolved through an internal caching DNS server backed by threat intelligence feeds that sinkholes newly registered domains (NRDs).
 
+Each of these layers decides whether a destination is permitted. Permitted and safe are separable properties once an allowlisted host will itself fetch an arbitrary URL on request, and a critical advisory Microsoft published in 2025 records an exfiltration chain that ends in that gap (\ref{ws-sandboxing-echoleak-2025}).
+
+::: {#ws-sandboxing-echoleak-2025 .callout-war-story title="EchoLeak in Microsoft 365 Copilot (2025)"}
+
+**Context**: Microsoft 365 Copilot answers employee questions by retrieving from the Microsoft Graph across the mailbox, OneDrive storage, internal SharePoint sites, and Teams chat history, so an email delivered to an employee becomes candidate retrieval context whether or not anyone opens it. Aim Labs disclosed a chain against that design to Microsoft, which published it on June 11, 2025 as CVE-2025-32711 [@aimlabs2025echoleak; @msrc2025echoleak].
+
+**Mechanism**: Four deployed controls were bypassed in sequence. The attacker's email was phrased as instructions to a human recipient and never named an assistant, so Microsoft's XPIA classifier for cross-prompt injection attacks did not flag it. Copilot's output filter stripped inline markdown links but did not recognize reference-style markdown, so a crafted target survived into the rendered answer. Reference-style image syntax then made the client fetch that target automatically, with no click. The final control was the `img-src` content security policy, an allowlist of the domains the page may load images from, and the attack did not defeat it. The domain `*.teams.microsoft.com` was on the list, and a Teams preview endpoint accepts a URL as a query parameter and retrieves it server side, so a Microsoft service fetched the attacker's address with the stolen text carried in it.
+
+**Impact**: Everything in the Copilot context was reachable, including the chat history, resources already retrieved from the Microsoft Graph, and data preloaded into the conversation such as user and organization names. Microsoft classified the flaw as information disclosure over the network requiring no privileges and no user interaction, scored it 9.3, and rated it critical. Aim Labs reported no customers known to have been affected, and the advisory records no observed exploitation.
+
+**Fix**: Microsoft mitigated the vulnerability inside its own service and stated that no action was required from users of it. The tenant-side controls that remained available, which exclude external mail and sensitivity-labeled documents from Copilot processing, narrow what the assistant is allowed to read rather than where it is allowed to reach.
+
+**Systems lesson**: A domain allowlist authorizes destinations, not flows. Any allowlisted host that will fetch a URL on request is a relay straight through the boundary, which makes the allowlist an attack surface in its own right, to be audited for redirectors, preview services, and link unfurlers rather than extended for convenience. The order of failure matters as much as the endpoint. The classifier, the output filter, and the renderer were each defeated by content, which left the network layer as the only control with a structural guarantee still to give, and it had been configured to ask where a request was going instead of what was leaving.
+
+:::
+
 ## Information Flow Control {#sec-vol3-sandboxing-information-flow-control-ifc}
 
 While sandboxes contain physical system damage and exfiltration, software agents also face logical privilege escalation within their multi-turn reasoning loops. Classical operating systems addressed this using **Information Flow Control (IFC)** [@krohn2007information; @myers1997complete]. Applying IFC to agentic architectures provides a formal mechanism for tracking the propagation of untrusted data across tool turns.
