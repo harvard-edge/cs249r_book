@@ -113,12 +113,13 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">📖</td>
       <td><b>Textbook Series</b></td>
       <td>Four-volume MIT Press textbook series on Machine Learning Systems Architecture:
-        <br>• <a href="https://mlsysbook.ai/vol1/"><b>Vol I: Introduction to Machine Learning Systems</b></a> <i>(Foundations & Release Edition)</i>
-        <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview / Work in Progress)</i>
-        <br>• <a href="https://mlsysbook.ai/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
-        <br>• <a href="https://mlsysbook.ai/vol4/"><b>Vol IV: Physical AI: Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
+        <br>• <a href="https://mlsysbook.ai/vol1/"><b>Vol I: Introduction to Machine Learning Systems</b></a> <i>(Released)</i><br>&nbsp;&nbsp;&nbsp;The foundations, abstractions, lifecycle, data, training, inference, evaluation, deployment, and responsible systems.
+        <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview)</i><br>&nbsp;&nbsp;&nbsp;Distributed computation, accelerators, memory, communication, parallelism, serving, reliability, and efficiency.
+        <br>• <a href="books/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Reasoning and acting loops, memory, tools, planning, search, orchestration, evaluation, security, and multi-agent systems.
+        <br>• <a href="books/vol4/"><b>Vol IV: Physical AI Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Sensing, perception, world models, control, robotics, embodiment, real-time constraints, safety, and hardware.
+        <br><br>⚠️ <i>Volumes III and IV are unfinished drafts that I am actively writing. Please do not cite or teach from them yet. Feedback is welcome through the <a href="https://github.com/harvard-edge/cs249r_book/issues/new/choose">Book feedback</a> issue forms.</i>
       </td>
-      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="https://mlsysbook.ai/vol3/">Vol III (Draft)</a> · <a href="https://mlsysbook.ai/vol4/">Vol IV (Draft)</a></td>
+      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="books/vol3/">Vol III (Draft)</a> · <a href="books/vol4/">Vol IV (Draft)</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
