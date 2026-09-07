@@ -4,7 +4,7 @@
 **Author:** Prof. Vijay Janapa Reddi (Harvard University)
 **Design Philosophy:** Completely Self-Contained Standalone Textbook
 **Scope:** 100% Digital & Software Agents (Code, Shells, Browsers, APIs, Operating Systems)
-**Status:** 🟢 **Formally Settled 15-Chapter (5×3) MLSys Lifecycle Architecture**
+**Status:** 🟣 **Working plan, in development.** Chapter list matches the current build configuration; scope and content are still changing.
 
 ---
 
