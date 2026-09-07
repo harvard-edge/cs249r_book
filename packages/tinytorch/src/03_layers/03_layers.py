@@ -61,6 +61,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| default_exp core.layers
 #| export
 
+import inspect
 import numpy as np
 # Module-level RNG is seeded so Linear weight init is deterministic by default.
 # This is what the integration test suite (and any cross-run reproducibility)
@@ -934,9 +935,10 @@ class Sequential:
             output = model.forward(x, training=True)    # train: Dropout active
         """
         for layer in self.layers:
-            try:
+            # Only layers whose forward takes a `training` flag (Dropout) receive it
+            if 'training' in inspect.signature(layer.forward).parameters:
                 x = layer.forward(x, training=training)
-            except TypeError:
+            else:
                 x = layer.forward(x)
         return x
 
