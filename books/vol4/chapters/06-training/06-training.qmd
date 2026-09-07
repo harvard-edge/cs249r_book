@@ -1,4 +1,4 @@
-# Policy Synthesis & Training {#sec-training}
+# Policy Training {#sec-training}
 
 ::: {.column-margin}
 
@@ -45,7 +45,7 @@ After studying this chapter, you will be able to:
 <!-- DERIVE: The introduction must trace at least one training assumption through the policy to a physical failure instead of presenting the buy-and-charge formulation as a slogan. -->
 
 <!-- BEGIN -->
-\lettrine{C}{onsider} two learned controllers designed to regulate liquid flow through a proportional valve before a mechanical placement head seats a component onto a seal. Both models achieve an identical validation score of $0.002$ mean squared error on their respective offline benchmarks. The first policy was trained by behavioral cloning on recorded operator demonstrations, while the second was trained through trial and error inside a physics simulator. When deployed to identical physical test benches, both policies regulate steady flow at $1.50\text{ L/min}$ under nominal supply pressure. When a supply pump transient drops line pressure by $12\text{ kPa}$, their failure modes diverge immediately. The demonstrated policy issues a correction that undershoots slightly, landing in a pressure-flow state that never appeared in the human demonstrations. Because the operator never visited this offset, the model generates an erratic valve command, compounds its tracking error over consecutive $20\text{ ms}$ control steps, and overflows the reservoir. The simulated policy responds to the same pressure drop by commanding high-frequency valve reversals at $50\text{ Hz}$, reflecting the simulator's assumption that the valve actuator accelerates instantaneously. On physical hardware, where the solenoid spool requires $35\text{ ms}$ to transit between positions, the valve cannot track the commanded reversals, causing pressure oscillations that blow out an upstream pipe seal. Both policies succeeded on their training metrics, but each inherited a distinct physical destruction mode determined entirely by how it was trained.
+Consider two learned controllers designed to regulate liquid flow through a proportional valve before a mechanical placement head seats a component onto a seal. Both models achieve an identical validation score of $0.002$ mean squared error on their respective offline benchmarks. The first policy was trained by behavioral cloning on recorded operator demonstrations, while the second was trained through trial and error inside a physics simulator. When deployed to identical physical test benches, both policies regulate steady flow at $1.50\text{ L/min}$ under nominal supply pressure. When a supply pump transient drops line pressure by $12\text{ kPa}$, their failure modes diverge immediately. The demonstrated policy issues a correction that undershoots slightly, landing in a pressure-flow state that never appeared in the human demonstrations. Because the operator never visited this offset, the model generates an erratic valve command, compounds its tracking error over consecutive $20\text{ ms}$ control steps, and overflows the reservoir. The simulated policy responds to the same pressure drop by commanding high-frequency valve reversals at $50\text{ Hz}$, reflecting the simulator's assumption that the valve actuator accelerates instantaneously. On physical hardware, where the solenoid spool requires $35\text{ ms}$ to transit between positions, the valve cannot track the commanded reversals, causing pressure oscillations that blow out an upstream pipe seal. Both policies succeeded on their training metrics, but each inherited a distinct physical destruction mode determined entirely by how it was trained.
 
 From a systems engineering perspective, a **policy synthesis regime** is defined as the specific boundary conditions of its data pipeline, optimization objective, and execution environment. These boundary conditions comprise three specific elements: the manifold of physical states the policy is permitted to explore during optimization, the sensory observations and disturbance profiles it records across those states, and the mechanism that provides the target signal. Whether that target signal is an operator's joint torque log, a scalar reward evaluating liquid throughput, an analytical cost function, or a self-supervised reconstruction loss on next-frame camera telemetry, the learned model remains completely ignorant of physical mechanics outside the envelope of that evidence.
 
@@ -108,57 +108,73 @@ Furthermore, in high-frequency single-step control loops ($50\text{--}100\text{ 
 
 ### Overcoming multimodality: The three action decoder paradigms {.unnumbered}
 
-Modern imitation learning resolves the multimodality breakdown by replacing deterministic single-step regression with expressive action decoder architectures. Three dominant paradigms define the state of the art:
+Modern imitation learning resolves the multimodality breakdown by replacing deterministic single-step regression with expressive action decoder architectures. Four dominant paradigms define the state of the art:
 
 1. **Discrete Token Binning (RT-1, RT-2, OpenVLA)**: Discrete token binning discretizes each dimension of a continuous action vector $a_t \in [-1, 1]^{D_a}$ into $B$ uniform categorical bins (e.g., $B = 256$ tokens) [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. The policy treats action prediction as autoregressive sequence generation over discrete action tokens $(a_{t,1}, \dots, a_{t,D_a})$, optimizing standard cross-entropy loss:
 $$\mathcal{L}_{\text{CE}}(\theta) = -\sum_{d=1}^{D_a} \log p_\theta(a_{t,d} \mid o_t, a_{t,<d})$$
 *What it buys:* Natively represents arbitrary multimodal probability distributions over discrete bins without mode collapse, and integrates directly into pretrained Vision-Language-Action (VLA) foundation models.
 *What it charges:* Discretization quantization error bounded by $\Delta a = \frac{a_{\text{max}} - a_{\text{min}}}{B}$ (e.g., $\Delta a = 2/256 \approx 0.0078$ normalized units), generating stair-stepped commands; high inference latency due to autoregressive sequential token generation ($D_a$ forward passes per control step); and lack of native inter-step kinematic smoothness, requiring downstream low-pass filtering on the Real-Time MCU.
 
-2. **Continuous Trajectory Diffusion (Diffusion Policy)**: Diffusion Policy treats policy synthesis as conditional denoising diffusion over continuous multi-step action trajectory chunks $A_t = (a_t, a_{t+1}, \dots, a_{t+K-1}) \in \mathbb{R}^{K \times D_a}$ conditioned on an observation history $O_t = (o_{t-H+1}, \dots, o_t)$ [@chi2023diffusionpolicy]. An apparent paradox often confuses practitioners: *if Mean Squared Error causes mode averaging in direct policy regression, why does Diffusion Policy optimize an MSE loss?* The crucial distinction lies in the target of the loss function. In standard BC, MSE is applied directly across the multimodal action space $p(a \mid o)$, forcing the network to predict the geometric centroid. In Diffusion Policy, the neural network $\epsilon_\theta(A^k, O_t, k)$ is trained via MSE to predict the standard Gaussian noise vector $\epsilon \sim \mathcal{N}(0, \mathbf{I})$ added at diffusion step $k \in \{1, \dots, N_{\text{diff}}\}$:[^fn-gpu-diffusion-denoising]
+2. **Continuous Trajectory Diffusion (Diffusion Policy)**: Diffusion Policy treats policy synthesis as conditional denoising diffusion over continuous multi-step action trajectory chunks $A_t = (a_t, a_{t+1}, \dots, a_{t+K-1}) \in \mathbb{R}^{K \times D_a}$ conditioned on an observation history $O_t = (o_{t-H+1}, \dots, o_t)$ [@chi2024diffusionpolicy], as schematized in @fig-diffusion-policy-architecture. An apparent paradox often confuses practitioners: *if Mean Squared Error causes mode averaging in direct policy regression, why does Diffusion Policy optimize an MSE loss?* The crucial distinction lies in the target of the loss function. In standard BC, MSE is applied directly across the multimodal action space $p(a \mid o)$, forcing the network to predict the geometric centroid. In Diffusion Policy, the neural network $\epsilon_\theta(A^k, O_t, k)$ is trained via MSE to predict the standard Gaussian noise vector $\epsilon \sim \mathcal{N}(0, \mathbf{I})$ added at diffusion step $k \in \{1, \dots, N_{\text{diff}}\}$:[^fn-gpu-diffusion-denoising]
 $$\mathcal{L}_{\text{diff}}(\theta) = \mathbb{E}_{k, A^0, \epsilon} \left[ \| \epsilon - \epsilon_\theta(\sqrt{\bar{\alpha}_k} A^0 + \sqrt{1 - \bar{\alpha}_k}\epsilon, O_t, k) \|_2^2 \right]$$
 Because the noise prediction target $\epsilon$ is strictly unimodal Gaussian, MSE is the exact maximum-likelihood objective. At inference time, sampling begins by drawing pure Gaussian noise $A^{N_{\text{diff}}} \sim \mathcal{N}(0, \mathbf{I})$ and iteratively denoises it through the learned score field $\nabla_A \log p(A \mid O_t)$ over $N_{\text{diff}}$ reverse steps. The non-linear stochastic integration breaks symmetry, causing the trajectory to settle into one distinct demonstrated mode without mode collapse or centroid averaging. Furthermore, trajectory-level diffusion inherently enforces kinematic smoothness across physical inertia, amortizing the effect of high-frequency observation noise.
 
-3. **Latent Variable Action Chunking (ACT)**: ACT reformulates policy synthesis by predicting an entire sequence of future actions $A_t = (a_t, a_{t+1}, \dots, a_{t+K-1}) \in \mathbb{R}^{K \times D_a}$ across a receding horizon $K$ given the current observation $o_t$ [@zhao2023learning]. To capture multimodality, ACT employs a Conditional Variational Autoencoder (CVAE) parameterized by a Transformer encoder-decoder. During training, a Transformer encoder compresses demonstrated action chunks and current observations into a low-dimensional latent style variable $z \sim q_\phi(z \mid o_t, A_t)$ regularized by KL divergence against a unit Gaussian prior $\mathcal{N}(0, \mathbf{I})$. At inference time, the latent code is sampled from $z \sim \mathcal{N}(0, \mathbf{I})$ and fed into the Transformer decoder $\pi_\theta(o_t, z)$. Sampling a specific latent code $z$ selects a single coherent demonstrated intention (e.g., "navigate left"), generating an internally consistent, continuous multi-step trajectory chunk without averaging across distinct modes. To prevent discontinuous jerks across chunk boundaries, ACT applies *temporal ensembling* across overlapping receding horizons. At global execution time $t$, multiple prior chunks $A_{t-i}$ (for $i \in \{0, \dots, \min(t, K-1)\}$) provide overlapping predictions for step $t$. ACT computes the executed action as an exponentially decaying weighted blend:
+::: {#fig-diffusion-policy-architecture fig-env="figure" fig-pos="t" fig-cap="**Diffusion Policy architecture and closed-loop action chunk denoising**: An authentic continuous trajectory diffusion architecture for visuomotor control. The policy conditions on an observation horizon ($T_o$) of multi-camera images and robot state vectors. Starting from pure Gaussian noise, the noise-prediction backbone (parameterized as either a 1D Temporal Convolutional U-Net or a Time-Transformer) iteratively denoises a candidate action trajectory across $K$ diffusion iterations. The resulting action chunk spans a prediction horizon ($T_p$), from which a prefix of execution steps ($T_a$) is dispatched to real-time motor controllers before receding-horizon re-planning occurs. This decouples slow generative inference from high-rate motor actuation while natively modeling multimodal demonstration distributions without mode collapse. (Adapted from Chi et al., arXiv:2303.04137)." fig-alt="Diffusion Policy architecture and closed-loop action chunk denoising. An authentic continuous trajectory diffusion architecture for visuomotor control. The policy conditions on an observation horizon of multi-camera images and robot state vectors. Starting from pure Gaussian noise, the noise-prediction backbone (parameterized as either a 1D Temporal Convolutional U-Net or a Time-Transformer) iteratively denoises a candidate action trajectory across diffusion iterations. The resulting action chunk spans a prediction horizon, from which an execution horizon is dispatched to real-time motor controllers before receding-horizon re-planning occurs. This decouples slow generative inference from high-rate motor actuation while natively modeling multimodal demonstration distributions without mode collapse. (Adapted from Chi et al., arXiv:2303.04137)."}
+![](figures/fig06_real_diffusion_policy_architecture.png){width="95%"}
+:::
+
+3. **Continuous Flow Matching (Flow Matching Policy / Rectified Flow)**: While Diffusion Policy relies on stochastic differential equations (SDEs) or curved reverse diffusion trajectories that require $N_{\text{diff}} \in [10, 100]$ denoising evaluations (or $4\text{--}16$ steps under accelerated solvers), **Continuous Flow Matching** formulates trajectory generation as a deterministic Ordinary Differential Equation (ODE) along straight probability paths between a standard Gaussian prior and the target action chunk distribution. A neural network $v_\theta(A_t^\tau, O_t, \tau)$ parameterizes the time-dependent velocity field $\dot{A}^\tau = v_\theta(A^\tau, O_t, \tau)$ along the normalized flow time $\tau \in [0, 1]$. Training optimizes the Conditional Flow Matching (CFM) objective:
+$$\mathcal{L}_{\text{CFM}}(\theta) = \mathbb{E}_{\tau \sim \mathcal{U}[0, 1], A^0 \sim \mathcal{N}(0, \mathbf{I}), A^1 \sim \mathcal{D}} \left[ \| v_\theta((1 - \tau) A^0 + \tau A^1, O_t, \tau) - (A^1 - A^0) \|_2^2 \right]$$
+where $(1 - \tau)A^0 + \tau A^1$ defines a straight interpolation trajectory with constant target velocity $u(A^\tau) = A^1 - A^0$.
+*What it buys:* Because the probability paths are straight, numerical integration requires far fewer integration steps (Euler or midpoint steps $N_{\text{steps}} \in [2, 4]$) to generate high-fidelity continuous action chunks, reducing inference latency on embedded NPUs from $35\text{--}65\text{ ms}$ down to $8\text{--}15\text{ ms}$ while natively modeling multimodal action distributions without mode averaging.
+*What it charges:* Demands stable numerical ODE solvers on the host MPU; boundary trajectories can still suffer extrapolation errors if the velocity field is evaluated outside the support of the training data.
+
+4. **Latent Variable Action Chunking (ACT)**: ACT reformulates policy synthesis by predicting an entire sequence of future actions $A_t = (a_t, a_{t+1}, \dots, a_{t+K-1}) \in \mathbb{R}^{K \times D_a}$ across a receding horizon $K$ given the current observation $o_t$ [@zhao2023learning]. To capture multimodality, ACT employs a Conditional Variational Autoencoder (CVAE) parameterized by a Transformer encoder-decoder. During training, a Transformer encoder compresses demonstrated action chunks and current observations into a low-dimensional latent style variable $z \sim q_\phi(z \mid o_t, A_t)$ regularized by KL divergence against a unit Gaussian prior $\mathcal{N}(0, \mathbf{I})$. At inference time, the latent code is sampled from $z \sim \mathcal{N}(0, \mathbf{I})$ and fed into the Transformer decoder $\pi_\theta(o_t, z)$. Sampling a specific latent code $z$ selects a single coherent demonstrated intention (e.g., "navigate left"), generating an internally consistent, continuous multi-step trajectory chunk without averaging across distinct modes. To prevent discontinuous jerks across chunk boundaries, ACT applies *temporal ensembling* across overlapping receding horizons. At global execution time $t$, multiple prior chunks $A_{t-i}$ (for $i \in \{0, \dots, \min(t, K-1)\}$) provide overlapping predictions for step $t$. ACT computes the executed action as an exponentially decaying weighted blend:
 $$a_t = \frac{\sum_{i=0}^{\min(t, K-1)} w_i A_{t-i}[i]}{\sum_{i=0}^{\min(t, K-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
 where $i$ represents the lookback age of the prediction chunk and $m \ge 0$ parameterizes the decay weight, giving highest priority to fresher observations while smoothing out single-step actuator jitter.
 
 ### Algorithmic formulation: Trajectory diffusion and asynchronous decoupling {.unnumbered}
 
-Deploying generative imitation architectures introduces significant computational latency ($20\text{--}80\text{ ms}$ for multi-step diffusion denoising or multi-head Transformer self-attention on embedded GPUs/NPUs). In a canonical heterogeneous dual-brain edge System-on-Chip (SoC) architecture, this latency requires strict physical decoupling: the unprivileged Linux MPU runs the generative policy asynchronously at a lower rate ($10\text{--}20\text{ Hz}$), populating an action chunk ring buffer. Meanwhile, the deterministic Real-Time MCU samples the chunk buffer at $500\text{--}1000\text{ Hz}$, executing smooth cubic spline interpolation, velocity envelope governor checks, and hard torque-slew limiters ($d\tau/dt \le \dot{\tau}_{\text{max}}$). This complete pipeline is formalized in Algorithm 6.1.
+Deploying generative imitation architectures introduces significant computational latency ($20\text{--}80\text{ ms}$ for multi-step diffusion denoising or multi-head Transformer self-attention on embedded GPUs/NPUs). In a canonical heterogeneous dual-brain edge System-on-Chip (SoC) architecture, this latency requires strict physical decoupling: the unprivileged Linux MPU runs the generative policy asynchronously at a lower rate ($10\text{--}20\text{ Hz}$), populating an action chunk ring buffer. Meanwhile, the deterministic Real-Time MCU samples the chunk buffer at $500\text{--}1000\text{ Hz}$, executing smooth cubic spline interpolation, velocity envelope governor checks, and hard torque-slew limiters ($d\tau/dt \le \dot{\tau}_{\text{max}}$). This complete pipeline is formalized in @algo-diffusion-policy-trajectory.
 
-::: {.callout-example  title="Algorithm 6.1: Diffusion Policy Trajectory Chunk Denoising and Dual-Rate Actuation"}
-**Inputs:** Observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t) \in \mathbb{R}^{H \times D_{\text{obs}}}$, noise prediction network $\boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}_t, k)$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $K$ (e.g., $16$), action dimension $D_a$, MCU loop period $\Delta t_{\text{mcu}} = 1.0\text{ ms}$.
+```pseudocode
+#| label: algo-diffusion-policy-trajectory
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
 
-**Outputs:** Line-rate joint torque setpoint / action vector $\mathbf{a}_t \in \mathbb{R}^{D_a}$.
-
-**Structural Invariants:**
-
-1. *Slew-Rate Bound:* $\|\mathbf{a}_t - \mathbf{a}_{t-1}\|_2 / \Delta t_{\text{mcu}} \le \dot{\mathbf{a}}_{\max}$.
-2. *Non-Blocking Ring Buffer:* SPSC ring buffer never underflows during nominal steady-state operation.
-
-**Execution Pipeline:**
-
-1. **Linux MPU — Asynchronous Trajectory Chunk Generation ($10\text{--}20\text{ Hz}$):**
-   * Ingest observation history $\mathbf{O}_t$ and compute visual/state embedding: $\mathbf{E}_t \leftarrow \text{VisualEncoder}(\mathbf{O}_t)$.
-   * Initialize reverse diffusion trajectory from Gaussian noise: $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{K \times D_a})$.
-   * For $k = N_{\text{diff}}$ down to $1$:
-     * Predict noise component: $\hat{\boldsymbol{\epsilon}} \leftarrow \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{E}_t, k)$.
-     * Compute mean update: $\boldsymbol{\mu}_k \leftarrow \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \hat{\boldsymbol{\epsilon}} \right)$.
-     * Sample $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ for $k > 1$, else $\mathbf{z} \leftarrow \mathbf{0}$.
-     * Step reverse diffusion: $\mathbf{A}^{k-1} \leftarrow \boldsymbol{\mu}_k + \sigma_k \mathbf{z}$.
-   * Assign synthesized trajectory chunk: $\mathbf{A}_{\text{chunk}} \leftarrow \mathbf{A}^0 \in \mathbb{R}^{K \times D_a}$.
-   * Lock-free deposit $\mathbf{A}_{\text{chunk}}$ into Single-Producer Single-Consumer (SPSC) ring buffer.
-2. **Real-Time MCU — Synchronous Deterministic Actuation ($1000\text{ Hz}$):**
-   * Poll SPSC ring buffer; if new chunk available, update local spline knots.
-   * Compute interpolated nominal action: $\mathbf{a}_{\text{raw}} \leftarrow \text{CubicSplineInterpolate}(\mathbf{A}_{\text{chunk}}, t_{\text{current}})$.
-   * Enforce kinematic slew-rate governor:
-     $$\Delta \mathbf{a} \leftarrow \text{clamp}\left(\mathbf{a}_{\text{raw}} - \mathbf{a}_{\text{prev}}, -\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}, +\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}\right), \quad \mathbf{a}_{\text{clamped}} \leftarrow \mathbf{a}_{\text{prev}} + \Delta \mathbf{a}$$
-
-   * Enforce nervous-system safety envelope: $\mathbf{a}_t \leftarrow \text{SafetyGovernorClamp}(\mathbf{a}_{\text{clamped}})$.
-   * Transmit $\mathbf{a}_t$ to motor bridge PWM / inverter registers via EtherCAT / SPI.
-   * Update state memory: $\mathbf{a}_{\text{prev}} \leftarrow \mathbf{a}_t$.
-:::
+\begin{algorithm}
+\caption{Diffusion Policy Trajectory Chunk Denoising and Dual-Rate Actuation}
+\begin{algorithmic}
+\Require observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t)$, noise prediction network $\boldsymbol{\epsilon}_\theta$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $K$, MCU loop period $\Delta t_{\text{mcu}}$
+\Ensure line-rate joint torque setpoint / action vector $\mathbf{a}_t$
+\Statex
+\State \textbf{Host MPU — Asynchronous Trajectory Chunk Generation ($10\text{--}20\text{ Hz}$)}
+\State $\mathbf{E}_t \gets \Call{VisualEncoder}{\mathbf{O}_t}$
+\State $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{K \times D_a})$ \Comment{initialize reverse diffusion from Gaussian noise}
+\For{$k = N_{\text{diff}}$ \textbf{down to} $1$}
+    \State $\hat{\boldsymbol{\epsilon}} \gets \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{E}_t, k)$
+    \State $\boldsymbol{\mu}_k \gets \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \hat{\boldsymbol{\epsilon}} \right)$
+    \State $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ \textbf{if} $k > 1$ \textbf{else} $\mathbf{z} \gets \mathbf{0}$
+    \State $\mathbf{A}^{k-1} \gets \boldsymbol{\mu}_k + \sigma_k \mathbf{z}$
+\EndFor
+\State $\mathbf{A}_{\text{chunk}} \gets \mathbf{A}^0$
+\State $\Call{DepositSpscRingBuffer}{\mathbf{A}_{\text{chunk}}}$ \Comment{lock-free deposit into shared buffer}
+\Statex
+\State \textbf{Real-Time MCU — Synchronous Deterministic Actuation ($1000\text{ Hz}$)}
+\If{$\Call{HasNewChunk}{\text{SPSC}}$}
+    \State $\Call{UpdateSplineKnots}{\text{SPSC}}$
+\EndIf
+\State $\mathbf{a}_{\text{raw}} \gets \Call{CubicSplineInterpolate}{\mathbf{A}_{\text{chunk}}, t_{\text{current}}}$
+\State $\Delta \mathbf{a} \gets \Call{clamp}{\mathbf{a}_{\text{raw}} - \mathbf{a}_{\text{prev}}, -\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}, +\dot{\mathbf{a}}_{\max} \Delta t_{\text{mcu}}}$ \Comment{kinematic slew-rate governor}
+\State $\mathbf{a}_{\text{clamped}} \gets \mathbf{a}_{\text{prev}} + \Delta \mathbf{a}$
+\State $\mathbf{a}_t \gets \Call{SafetyGovernorClamp}{\mathbf{a}_{\text{clamped}}}$ \Comment{deterministic envelope enforcement}
+\State $\Call{TransmitPwmRegisters}{\mathbf{a}_t}$
+\State $\mathbf{a}_{\text{prev}} \gets \mathbf{a}_t$
+\State \Return $\mathbf{a}_t$
+\end{algorithmic}
+\end{algorithm}
+```
 
 ### Offline reinforcement learning and action distributional shift {.unnumbered}
 
@@ -185,8 +201,24 @@ To derive the standard cumulative cost bound analytically, let $c(s_t, a_t) \in 
 $$J = \sum_{t=1}^T \mathbb{E}[c(s_t, a_t)] \le \sum_{t=1}^T t \epsilon = \epsilon \frac{T(T+1)}{2} = \mathcal{O}(T^2 \epsilon)$$
 The quadratic dependency on time $T^2$ represents the structural price of open-loop supervised training applied to a closed-loop dynamical system. The first error incurs a direct penalty, and every subsequent step spends the remainder of the rollout accumulating cost because the demonstration dataset never provided examples of how to return to the nominal path.
 
-::: {.callout-important title="Compounding Covariate Drift vs. Closed-Loop Recovery"}
-*Problem statement:* An autonomous mobile delivery robot operates at a control frequency of $50\text{ Hz}$ ($\Delta t = 20\text{ ms}$) across a $10.0\text{ s}$ transit corridor ($T = 500$ steps). A learned behavioral cloning policy achieves a $99.5\%$ one-step accuracy on validation data ($\epsilon = 0.005$). If an uncorrected single-step error introduces an unmodeled lateral acceleration drift bias of $a_{\text{bias}} = 0.05\text{ m/s}^2$, calculate:
+### Why action chunking suppresses compounding error ($T \to T/H$) {.unnumbered}
+
+The emergence of Action Chunking across Diffusion, Flow Matching, and ACT provides a structural mathematical defense against this quadratic compounding error bound ($\mathcal{O}(T^2 \epsilon)$).
+
+In classical single-step imitation learning, the policy queries neural network inference at every single control cycle $t = 1, 2, \dots, T$. Because the policy makes $T$ sequential feedback decisions across the task horizon, the probability of at least one error compounds as $1 - (1 - \epsilon)^T \approx T \epsilon$, and uncorrected drift integrates across $T$ steps into quadratic cumulative cost:
+$$J_{\text{single}} \le \sum_{t=1}^T t \epsilon = \epsilon \frac{T(T+1)}{2} \approx \frac{1}{2} T^2 \epsilon.$$
+
+Now consider an **Action Chunking** policy that predicts a trajectory chunk of horizon $H$ steps (e.g., $H = 16$ or $H = 32$) at each query. The policy does not make $T$ sequential closed-loop decisions. Instead, across the global execution horizon $T$, the policy queries the neural network only $M = \lceil T / H \rceil$ times. During the execution of each chunk, actions are dispatched along an open-loop, kinematically consistent spline trajectory executed by the real-time MCU.
+
+If the per-chunk decision error is bounded by $\epsilon_H$, the compounding error analysis applies to the sequence of $M = T/H$ macro-steps rather than $T$ micro-steps:
+$$J_{\text{chunk}} \le \sum_{m=1}^M m \epsilon_H = \epsilon_H \frac{M(M+1)}{2} = \epsilon_H \frac{(T/H)(T/H + 1)}{2} \approx \frac{1}{2} \left(\frac{T}{H}\right)^2 \epsilon_H = \frac{T^2}{2 H^2} \epsilon_H.$$
+
+Compressing the sequential decision count from $T$ to $T/H$ yields a **quadratic suppression factor of $H^2$** in the compounding error term. For an execution horizon of $T = 500$ steps ($10\text{ s}$ at $50\text{ Hz}$) and a chunk horizon of $H = 16$:
+$$\frac{J_{\text{chunk}}}{J_{\text{single}}} \approx \frac{1}{H^2} = \frac{1}{16^2} = \frac{1}{256} \approx 0.0039.$$
+Action chunking reduces the compounding error multiplier by over two orders of magnitude ($256\times$). Furthermore, executing multi-step chunks along smooth spline profiles eliminates the high-frequency alternating mode chatter that destabilizes single-step policies when noise perturbs states near the decision boundary. This horizon truncation explains why action chunking represents a foundational systems architecture for modern Physical AI.
+
+::: {#nbk-training-compounding-covariate-drift-closed-loop-recovery .callout-notebook title="Compounding Covariate Drift vs. Closed-Loop Recovery"}
+**Problem statement**: An autonomous mobile delivery robot operates at a control frequency of $50\text{ Hz}$ ($\Delta t = 20\text{ ms}$) across a $10.0\text{ s}$ transit corridor ($T = 500$ steps). A learned behavioral cloning policy achieves a $99.5\%$ one-step accuracy on validation data ($\epsilon = 0.005$). If an uncorrected single-step error introduces an unmodeled lateral acceleration drift bias of $a_{\text{bias}} = 0.05\text{ m/s}^2$, calculate:
 
 1. The probability $P(\text{drift})$ that the robot encounters at least one off-distribution perturbation during transit.
 2. The expected cumulative trajectory lateral displacement drift under open-loop cloning versus closed-loop on-policy recovery (where recovery time constant $\tau_{\text{rec}} = 5\Delta t = 0.10\text{ s}$).
@@ -208,10 +240,10 @@ D_{\text{cloning}} &\approx \frac{1}{6} \times (0.05\text{ m/s}^2) \times (0.02\
 Under on-policy recovery training, the policy actively steers back to the corridor within $\tau_{\text{rec}} = 5\Delta t$, bounding local displacement per error to $d_{\text{local}} = \frac{1}{2} a_{\text{bias}} (5\Delta t)^2 = 0.5 \times 0.05 \times (0.10)^2 = 2.5\times 10^{-4}\text{ m} = 0.25\text{ mm}$. Cumulative drift scales linearly as $\mathcal{O}(T \epsilon)$:
 $$D_{\text{recovery}} = T \epsilon \cdot d_{\text{local}} = 500 \times 0.005 \times 0.25\text{ mm} = 0.625\text{ mm}$$
 
-*Systems verdict:* The ratio between open-loop cloning drift ($2.08\text{ m}$) and closed-loop recovery drift ($0.625\text{ mm}$) exceeds $3300\times$. A $99.5\%$ accurate supervised policy is completely unusable on physical mobile or robotic hardware without active closed-loop recovery training or runtime support monitors.
+**Systems insight**: The ratio between open-loop cloning drift ($2.08\text{ m}$) and closed-loop recovery drift ($0.625\text{ mm}$) exceeds $3300\times$. A $99.5\%$ accurate supervised policy is completely unusable on physical mobile or robotic hardware without active closed-loop recovery training or runtime support monitors.
 :::
 
-::: {#pri-imitation-horizon .callout-principle title="The Imitation Horizon Limit"}
+::: {#psp-training-imitation-horizon .callout-perspective title="The Imitation Horizon Limit"}
 *A behavioral cloning policy cannot safely execute beyond $T \approx 1/\epsilon$ control cycles without active closed-loop support monitoring or recovery demonstrations.*
 :::
 
@@ -266,7 +298,7 @@ Furthermore, physical degradation alters the plant during the training process i
 
 Compounding the physical burden of data collection is the structural fragility of the reward function. In trial-based learning, the scalar reward serves as the formal interface specification between the engineer's operational intent and the policy's numerical optimization. Any behavior, physical constraint, or protective boundary not explicitly measured and penalized in that scalar signal represents an unconstrained degree of freedom that the optimization algorithm will exploit. If a reward function incentivizes rapid setpoint tracking without incorporating high-order penalty terms for instantaneous jerk and winding temperature, the policy converges toward aggressive bang-bang switching that vibrates mounting brackets and overheats drive electronics. If contact force is unmeasured, the policy may discover that driving an actuator to its maximum current against a rigid mechanical stop creates a kinematic brace that artificially eliminates tracking jitter. The learned network does not satisfy the designer's unstated common sense. It satisfies the exact mathematical formula presented to its objective function.
 
-::: {#pri-contact-fidelity .callout-principle title="The Contact Fidelity Invariant"}
+::: {#psp-training-contact-fidelity .callout-perspective title="The Contact Fidelity Invariant"}
 *Never trust a simulated contact policy whose success depends on instantaneous momentum absorption or zero-delay friction engagement; if it penetrates the digital surface, it will shatter the physical workpiece.*
 :::
 
@@ -293,32 +325,20 @@ This transition substitutes computational hardware for physical mechanisms, but 
 <!-- BEGIN -->
 Treating the simulator as a development tool external to the machine is an architectural error. A compiler produces machine instructions from source code, but the resulting binary does not retain a hidden dependency on the compiler's internal memory allocator once executing on standard hardware. A simulator behaves differently. It is an upstream policy-production component whose physical assumptions, numerical approximations, and boundary simplifications become permanently embedded in the policy parameters. When the trained neural network is copied onto the target machine, the simulator is absent from the execution path, yet the policy acts as though every unmodeled dynamic in that simulator remains true. The simulator is an active component of the system architecture, with its own specification, tolerances, and failure modes.
 
-::: {.callout-definition title="Sim-to-Real Reality Gap Vector"}
-The **sim-to-real reality gap vector** is the coupled, multi-channel decomposition of physical discrepancies between simulated and hardware environments spanning dynamics and contact mechanics ($\Delta_{\text{dyn}}$), sensor transduction and noise ($\Delta_{\text{sens}}$), perceptual feature representations ($\Delta_{\text{vis}}$), and asynchronous transport latency and jitter ($\Delta_{\text{lat}}$), each carrying distinct physical units, transfer limits, and failure modes.
+::: {#dfn-training-sim-real-reality-gap-vector .callout-definition title="Sim-to-Real Reality Gap Vector"}
+
+***Sim-to-real reality gap vector***\index{Sim-to-real reality gap vector!definition}\index{Reality gap!definition} $\boldsymbol{\Delta}_{\text{sim2real}} = [\Delta_{\text{dyn}}, \Delta_{\text{sens}}, \Delta_{\text{vis}}, \Delta_{\text{lat}}]$ is the coupled, multi-channel decomposition of physical discrepancies between simulated and hardware environments spanning contact mechanics ($\Delta_{\text{dyn}}$), sensor transduction and noise ($\Delta_{\text{sens}}$), visual appearance ($\Delta_{\text{vis}}$), and asynchronous transport latency and jitter ($\Delta_{\text{lat}}$).
+
+1.  **Significance**: Treating the "reality gap" as a scalar difficulty metric or pure visual domain mismatch causes engineers to overlook dynamical and temporal divergences. Discrepancies in actuator back-EMF, gearbox compliance, or bus jitter deplete phase margin before the policy completes its first physical control step.
+2.  **Distinction**: An inaccurate parameter value (such as a $10\%$ error in link mass) preserves the causal differential equations of motion, whereas an omitted mechanism (such as zero-delay communication or unmodeled Coulomb stick-slip) entirely severs physical feedback paths, leading policies to exploit non-physical simulator artifacts.
+3.  **Common pitfall**: Relying exclusively on extreme domain randomization to bridge large gaps. Randomizing parameters across unphysical ranges dilutes policy capacity, resulting in overly conservative, sluggish behaviors that fail to achieve precision tasks on real hardware.
+
 :::
 
 Like any hardware subsystem, the simulator requires a formal interface contract defined at the first budgetable quantities. This contract specifies observation dimensions, action bounds, simulation time step $\Delta t$, transport latency between command issuance and physical actuation, actuator torque and current limits, sensor noise distributions, reset distributions, and termination conditions. If the simulator specifies an observation loop executing at $100\text{ Hz}$ with an assumed zero-delay sensor channel and Gaussian noise with variance $\sigma^2 = 1.0 \times 10^{-4}\text{ (rad/s)}^2$, the policy learns feedback gains tuned to those precise signal statistics. If the physical machine delivers those state observations at $100\text{ Hz}$ but with an unmodeled $15\text{ ms}$ bus transport delay, the phase margin built during training is depleted before the policy executes its first physical control cycle. As demonstrated in the robotic manipulation testbed in @fig-06-sim2real-dactyl, transferring a policy synthesized inside a numerical engine to physical hardware requires enforcing an exact match between the real sensor-actuator cage and its randomized simulated twin [@andrychowicz2020learning].
 
 ::: {#fig-06-sim2real-dactyl fig-env="figure" fig-pos="t" fig-cap="**Sim-to-Real Robotic Transfer Setup with Digital Twin Simulation**: Authentic experimental apparatus for vision-based dexterous in-hand manipulation from OpenAI's Dactyl project [@andrychowicz2020learning]. *(Left)* The physical experimental cage housing a 24-DoF anthropomorphic Shadow Dexterous Hand, surrounded by 16 PhaseSpace infrared motion-tracking cameras and 3 Basler RGB cameras for ground-truth state validation and multi-view vision. *(Right)* The high-throughput MuJoCo simulated digital twin environment used to train reinforcement learning policies across billions of synthetic transitions. Robust sim-to-real transfer is achieved by applying extensive domain randomization over surface friction, restitution, joint damping, actuator time constants, visual lighting, and camera calibration parameters, forcing the neural policy to treat unmodeled physical variations as noise while operating within the supported deployment envelope. Attribution: @andrychowicz2020learning." fig-alt="Sim-to-Real Robotic Transfer Setup with Digital Twin Simulation. Authentic experimental apparatus for vision-based dexterous in-hand manipulation from OpenAI's Dactyl project [@andrychowicz2020learning]. (Left) The physical experimental cage housing a 24-DoF anthropomorphic Shadow Dexterous Hand, surrounded by 16 PhaseSpace infrared motion-tracking cameras and 3 Basler RGB cameras for ground-truth state validation and multi-view vision. (Right) The high-throughput MuJoCo simulated digital twin environment used to train reinforcement learning policies across billions of synthetic transitions. Robust sim-to-real transfer is achieved by applying extensive domain randomization over surface friction, restitution, joint damping, actuator time constants, visual lighting, and camera calibration parameters, forcing the neural policy to treat unmodeled physical variations as noise while operating within the supported deployment envelope. Attribution: @andrychowicz2020learning."}
 ![](figures/fig06_real_sim2real_dactyl.jpg){width="95%"}
-:::
-
-::: {.callout-case-study title="OpenAI Dactyl In-Hand Dexterity Friction Collapse"}
-*System:* Anthropomorphic 24-DoF Shadow Dexterous Hand controlled by an end-to-end recurrent neural network policy (LSTM) trained in MuJoCo to rotate a physical cube to arbitrary target orientations using three RGB camera feeds and joint encoder telemetry.
-
-*Incident:* During early hardware deployment trials, policies that achieved $>98\%$ task success in simulation suffered catastrophic physical grasp failure within $3\text{--}8\text{ s}$ on hardware. The robotic fingers either dropped the object immediately or squeezed the cube with extreme, rigid force that stalled the tendon drive actuators and tripped thermal overcurrent protection within $45\text{ s}$.
-
-*Root cause and physics of failure:* The MuJoCo physics engine modeled fingertip contact using an idealized isotropic Coulomb friction cone with instantaneous, memoryless velocity transitions ($F_f = \mu F_N \operatorname{sgn}(v)$) and soft constraint regularization. In physical reality, the silicone rubber fingertip pads exhibit:
-
-1. Non-linear elastomeric compliance and contact area growth under normal load.
-2. Velocity-dependent Stribeck friction curves where static friction ($\mu_s \approx 0.85$) drops precipitously to dynamic friction ($\mu_k \approx 0.45$) upon microscopic slip.
-3. Severe friction hysteresis, where the effective friction coefficient during unloading lags behind that during loading due to polymer chain relaxation.
-
-The simulated policy discovered high-frequency finger gaiting maneuvers ($>35\text{ Hz}$ micro-repositioning), assuming that sticking friction would instantly re-engage the moment fingertip sliding velocity crossed zero. On physical hardware, the delayed contact re-engagement and elastomeric shear relaxation caused the cube to slip free from the grasp.
-
-*Systems resolution:* The engineering team had to introduce Automatic Domain Randomization (ADR) across fingertip friction coefficients ($\mu \in [0.1, 2.0]$), contact damping, joint damping, tendon elasticity, and actuator latencies ($0\text{--}40\text{ ms}$), forcing the LSTM hidden states to act as an implicit real-time system identification estimator capable of adapting to unmodeled contact compliance and friction hysteresis online.
-
-*Systems takeaway:* Optimization algorithms aggressively exploit the non-dissipative shortcuts of idealized contact models. Never trust a contact policy whose success depends on instantaneous friction transitions without modeling contact compliance, stiction hysteresis, and velocity-dependent Stribeck curves.
 :::
 
 A clear distinction exists between an inaccurate parameter value and an omitted physical mechanism. When a simulator uses an inaccurate rotor inertia, assigning $J = 2.0 \times 10^{-3}\text{ kg}\cdot\text{m}^2$ instead of a true $2.5 \times 10^{-3}\text{ kg}\cdot\text{m}^2$, the equations of motion still compute an acceleration-dependent inertial torque. The parameter error alters the magnitude of the response, but the causal structure remains intact. When a simulator omits an entire physical mechanism, such as drive train backlash, structural compliance, or inter-channel communication jitter, the simulator does not set the corresponding physical effect to zero in a physically supported sense. It provides no mechanism at all. An omitted delay or compliance is unsupported.[^fn-inc-dactyl-friction] A policy trained in an environment with omitted joint compliance assumes infinite structural stiffness, discovering trajectory strategies that command instantaneous torque reversals that shatter gear teeth or excite high-frequency structural resonances on physical hardware.
@@ -412,7 +432,7 @@ To prevent domain randomization from degenerating into ad-hoc parameter tuning, 
 4. **Stage 4: Paired-Trace Discrepancy Auditing**: Apply identical open-loop and closed-loop command trajectories to both the simulated digital twin and the physical hardware bench. Evaluate discrepancy metrics across all four channels against declared tolerance budgets: phase lag $\Delta \phi \le 5^\circ$ at $10\text{ Hz}$, contact impulse error $\Delta I \le 0.05\text{ N}\cdot\text{s}$, feature token offset $\le 2.0\text{ mm}$, and latency jitter $\Delta \tau \le 2.0\text{ ms}$. If discrepancies exceed budget, the simulation dynamic model must be updated before policy deployment.
 5. **Stage 5: Dual-Brain Runtime Safety Enclosure**: Because domain randomization cannot protect against omitted physical mechanisms outside the simulation graph, the unprivileged neural policy executing on the Linux MPU must be bounded by deterministic monitors on the Real-Time MCU. The real-time core enforces hardware force-derivative clamps ($dF/dt \le 1.0\times 10^4\text{ N/s}$), torque slew-rate limits ($d\tau/dt \le \dot{\tau}_{\text{max}}$), and velocity governors at $500\text{--}1000\text{ Hz}$, providing guaranteed physical protection regardless of out-of-distribution neural commands.
 
-::: {#pri-domain-randomization .callout-principle title="The Domain Randomization Boundary"}
+::: {#psp-training-domain-randomization .callout-perspective title="The Domain Randomization Boundary"}
 *Randomizing parameters covers uncertainty within the model family, but no distribution over friction or mass will teach a policy to compensate for an omitted physical mechanism.*
 :::
 
@@ -476,20 +496,6 @@ In behavioral cloning, the training exposure consists of state trajectories reco
 
 In trial-based learning within simulation, the training exposure consists of millions of synthetic interactions against a numerical physics engine. The learned dependency is the set of mathematical simplifications chosen to keep the simulation fast. When the simulator models dry friction without velocity-dependent Stribeck curves, assumes an unvarying communication latency of $0\text{ ms}$, or calculates contact forces through instantaneous penalty springs that allow penetration without restitution, the policy exploits those numerical artifacts to maximize its reward. During deployment, the machine encounters real physical dynamics. In an analytical example with an approach velocity of $0.5\text{ m/s}$, a transport delay of $16\text{ ms}$ across the digital bus means the body travels $(0.5\text{ m/s}) \times 0.016\text{ s} = 8.0\text{ mm}$ into the physical boundary before the brain receives the first contact frame and computes a deceleration command. In the simulator, where latency was set to $0\text{ ms}$ and contact was modeled as a soft penalty spring, the policy learned to decelerate within that $8.0\text{ mm}$ window without bouncing. On physical hardware, the unyielding metal contact stops the tool in less than $1.0\text{ ms}$, driving transient contact forces past $450\text{ N}$ and tripping the actuator overcurrent protection.[^fn-std-iso-robotics] This failure mode is detectable before deployment by evaluating the policy in a simulation test environment with injected latency jitter, and at runtime by tracking force derivatives and high-frequency command chatter in the nervous system.
 
-::: {.callout-case-study title="Tooling Collision from Simulation Contact and Latency Mismatch"}
-*System:* High-speed robotic pick-and-place assembly cell with direct-drive Cartesian gantry, six-axis wrist force-torque sensor, and end-to-end neural motion policy running at $50\text{ Hz}$ over an EtherCAT fieldbus.
-
-*Incident:* End-effector tooling collision during automated seating of a machined aluminum connector, fracturing the precision ceramic alignment guide, shearing the wrist load-cell mounting pins, and causing a 6-hour assembly line shutdown.
-
-*Telemetry snapshot:* At $t = 0.000\text{ s}$, the policy initiates vertical descent from $150\text{ mm}$ clearance at $v_z = 0.50\text{ m/s}$; at $t = 0.280\text{ s}$, physical contact occurs at $z = 0.0\text{ mm}$; due to a $16.7\text{ ms}$ camera exposure time and an $8.2\text{ ms}$ bus transmission delay, the first contact frame reaches the policy at $t = 0.305\text{ s}$ ($25\text{ ms}$ late); during this unobserved interval, the gantry moves $12.5\text{ mm}$ past the contact plane; at $t = 0.308\text{ s}$, peak normal force spikes to $465\text{ N}$ at a rate $dF/dt > 3.8\times 10^4\text{ N/s}$, shearing mechanical load pins before the drive controller trips on overcurrent at $t = 0.312\text{ s}$.
-
-*Root cause:* The rigid-body simulation engine modeled contact using an idealized compliant penalty spring with zero transport delay, allowing the policy to learn an unbraked plunge strategy that relied on immediate synthetic force feedback to arrest momentum.
-
-*Architectural flaw:* Absence of an independent runtime velocity-envelope governor and hardware force-derivative ($dF/dt$) clamp in the nervous system to restrict kinetic energy prior to touch-down regardless of policy command outputs.
-
-*Provenance:* Precision manufacturing cell automated commissioning incident log and post-mortem failure analysis report.
-:::
-
 Training through trial directly on physical hardware eliminates the simulation gap, but it introduces an opposite structural dependency. The training exposure consists of unconstrained physical interactions guided by an engineered scalar reward. The learned dependency is the exact mathematical formulation of that reward function. Engineers frequently treat real dynamics as a natural safeguard against unrealistic behaviors, assuming that physical execution prevents the policy from finding shortcuts. The machine, however, discovers physically valid strategies that satisfy the mathematical reward while violating unstated operational constraints. If the reward function rewards rapid velocity regulation toward a workpiece and penalizes final position error without penalizing torque derivatives, the optimizer converges on aggressive bang-bang control. The observable failure signature is unconstrained mechanical stress and thermal overload. In an analytical example where a joint motor with a winding resistance of $1.5\ \Omega$ switches between its current limits of $+12\text{ A}$ and $-12\text{ A}$ at $80\text{ Hz}$, the sustained root-mean-square current produces Joule heating of $I^2 R = (12\text{ A})^2 \times 1.5\ \Omega = 216\text{ W}$, elevating the stator core temperature past its $90^\circ\text{C}$ thermal derating limit within $180\text{ s}$. The task-level reward monitor records full success and detects no failure. Detection requires the nervous system to monitor physical observables that were omitted from the training reward, including motor coil temperatures, current spectra, and high-frequency accelerometer energy.
 
 When a base policy is fine-tuned on physical hardware to correct localized errors, the training exposure is restricted to a narrow task slice collected over a brief operating window. The learned dependency is an over-representation of recent local transitions coupled with the deliberate suppression of dangerous trajectories. When human operators intervene or safety tripwires halt execution during training, those intervention states are censored from the update buffer to avoid reinforcing abort sequences. The observable failure signature is regression and boundary instability. While the policy improves steady-state force regulation against a specific production fixture, gradient updates overwrite the parameter representations that maintained stability during free-space transit or off-axis approaches. The policy loses competence on previously verified nominal states, failing when presented with lighting angles or approach vectors that were common in the pretraining dataset but absent during the fine-tuning session. Because the neural network assigns valid output magnitudes across all inputs, this internal regression is undetectable by the policy itself. Detecting it requires a predeployment regression test suite on frozen hardware benchmarks to evaluate non-adapted operational modes before the updated weights are granted authority over physical actuators.
@@ -542,7 +548,7 @@ The training record separates empirical optimization results from the declared o
 Downstream engineering teams consume the training record throughout the design, evaluation, and release lifecycle. @Sec-evaluation uses the recorded support boundaries and simulation omissions to construct targeted empirical evaluation suites that probe the specific failure modes predicted by each training regime. Runtime safety monitors and deterministic enforcement layers in @sec-enforcement use the recorded data support bounds to parameterize out-of-distribution detectors and determine when policy authority must be curtailed. Verification frameworks in @sec-verification and the multi-layer safety case in @sec-release draw on the record to establish the provenance of every parameter update and verify that known simulation omissions are bounded by independent physical interlocks. Maintaining this complete record ensures that when a policy achieves high scores across its training benchmarks, engineers do not mistake optimization convergence for physical reliability.
 <!-- END -->
 
-## Systems Stress-Tests {#sec-training-6-9}
+## Fallacies and Pitfalls {#sec-training-6-9}
 
 <!-- SECTION 6.9 -->
 <!-- claim: A policy that is better by every training metric and worse on the machine. -->
@@ -562,31 +568,44 @@ A policy that is better by every training metric can be worse on the physical ma
 ![](figures/fig06_policy_ranking_inversion.svg){width="100%"}
 :::
 
-The following three analytical stress-tests evaluate machines that regulate motion and touch surfaces, demonstrating how nominal training gains convert into physical failure modes:
+The following fallacies and pitfalls evaluate machines that regulate motion and touch surfaces, demonstrating how nominal training gains convert into physical failure modes:
 
-### Stress-test 1: Recovery curation and policy reversal in flow regulation (state support truncation) {.unnumbered}
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Sanitizing recovery episodes to achieve lower offline validation loss.*
 
 *The scenario.* Two behavioral-cloning policies are trained to regulate fluid flow via a proportional valve at $50\text{ Hz}$. Dataset A contains 500 demonstrated runs including 50 recovery maneuvers where an operator corrected for transient supply pressure drops to $120\text{ kPa}$. Dataset B filters out the 50 recovery runs to maximize smoothness, retaining 450 nominal runs near $200\text{ kPa}$. Policy A achieves an offline validation loss of $\text{MSE} = 0.042\text{ (V)}^2$ across the full distribution, while Policy B achieves $\text{MSE} = 0.011\text{ (V)}^2$ on its held-out split, appearing nearly four times more accurate.
 
-*The systems dilemma.* Under a physical supply pressure transient dropping to $130\text{ kPa}$, Policy A restores nominal flow within $140\text{ ms}$ ($\Delta P = 15\text{ kPa}$). Policy B enters an unrecoverable diverging oscillation that breaches the reservoir overflow limit within $800\text{ ms}$. Sanitizing recovery episodes artificially lowers offline validation error by eliminating high-variance, multi-modal demonstration segments, blinding the policy to the off-nominal states its own compounding errors will generate.
+*The dilemma.* Under a physical supply pressure transient dropping to $130\text{ kPa}$, Policy A restores nominal flow within $140\text{ ms}$ ($\Delta P = 15\text{ kPa}$). Policy B enters an unrecoverable diverging oscillation that breaches the reservoir overflow limit within $800\text{ ms}$. Sanitizing recovery episodes artificially lowers offline validation error by eliminating high-variance, multi-modal demonstration segments, blinding the policy to the off-nominal states its own compounding errors will generate.
 
-*The systems verdict: State Support Invariant.* Offline validation error measures agreement with recorded history rather than closed-loop stability. Pruning recovery trajectories improves the training score while removing the negative feedback manifold required to survive physical disturbances.
+*Systems takeaway: State Support Invariant.* Offline validation error measures agreement with recorded history rather than closed-loop stability. Pruning recovery trajectories improves the training score while removing the negative feedback manifold required to survive physical disturbances.
 
-### Stress-test 2: Contact model exploitation in surface touchdown (the simulation energy sink) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating simulator contact solver simplifications as valid physical affordances.*
 
 *The scenario.* A direct-drive vertical actuator ($m = 2.5\text{ kg}$) approaches a rigid fixture at $0.40\text{ m/s}$ to establish a steady normal force $F_N = 10.0\text{ N}$. In simulation, Policy 2 achieves $28\%$ higher return than Policy 1, reaching target force in $12\text{ ms}$ (versus $45\text{ ms}$ for Policy 1) by plunging into the surface at $0.35\text{ m/s}$, exploiting an idealized linear spring-damper contact solver that arrests momentum in a single integration step ($2.0\text{ ms}$).
 
-*The systems dilemma.* On physical hardware, structural compliance ($k = 8.0\times 10^4\text{ N/m}$) and $12\text{ ms}$ sensory lag prevent instantaneous force generation. When Policy 2 strikes the surface at $0.35\text{ m/s}$, physical contact force spikes to $68.0\text{ N}$ before the first sensor measurement arrives, shattering the load-cell flexure. Policy 1 decelerates to $0.06\text{ m/s}$ prior to touchdown, seating safely in $52\text{ ms}$ with a peak force of $11.4\text{ N}$.
+*The dilemma.* On physical hardware, structural compliance ($k = 8.0\times 10^4\text{ N/m}$) and $12\text{ ms}$ sensory lag prevent instantaneous force generation. When Policy 2 strikes the surface at $0.35\text{ m/s}$, physical contact force spikes to $68.0\text{ N}$ before the first sensor measurement arrives, shattering the load-cell flexure. Policy 1 decelerates to $0.06\text{ m/s}$ prior to touchdown, seating safely in $52\text{ ms}$ with a peak force of $11.4\text{ N}$.
 
-*The systems verdict: Simulator Exploitation Law.* Optimization algorithms treat simulator simplifications as physical affordances. When a numerical contact solver permits instantaneous momentum transfer, learned policies develop high-velocity impact strategies that destroy physical hardware.
+*Systems takeaway: Simulator Exploitation Law.* Optimization algorithms treat simulator simplifications as physical affordances. When a numerical contact solver permits instantaneous momentum transfer, learned policies develop high-velocity impact strategies that destroy physical hardware.
 
-### Stress-test 3: Failure migration across regime transitions (data debt vs modeling debt) {.unnumbered}
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Transitioning from human demonstrations to simulation reinforcement learning eliminates operational debt.*
 
 *The scenario.* An assembly arm executes a $200\text{ mm}$ free-space transit at $v = 0.50\text{ m/s}$ before preloading a gasket to $12.0\text{ N}$. Behavioral cloning (Policy A) exhibits $34\%$ task failure due to compounding lateral drift. Replacing cloning with rigid-body reinforcement learning in simulation (Policy B) achieves $100\%$ simulated success and eliminates free-space drift across 100 physical trials.
 
-*The systems dilemma.* To seat the seal rapidly, Policy B learned in simulation to apply high-frequency torque chatter at $65\text{ Hz}$, exploiting the simulator's massless rotor assumption. On hardware, $65\text{ Hz}$ chatter excites drivetrain resonance, heating motor windings from $28^{\circ}\text{C}$ to the $95^{\circ}\text{C}$ thermal limit in $45\text{ s}$ and collapsing physical completion rate to $12\%$.
+*The dilemma.* To seat the seal rapidly, Policy B learned in simulation to apply high-frequency torque chatter at $65\text{ Hz}$, exploiting the simulator's massless rotor assumption. On hardware, $65\text{ Hz}$ chatter excites drivetrain resonance, heating motor windings from $28^{\circ}\text{C}$ to the $95^{\circ}\text{C}$ thermal limit in $45\text{ s}$ and collapsing physical completion rate to $12\%$.
 
-*The systems verdict: Failure Migration Law.* Changing a training regime does not eliminate engineering debt; it converts one failure currency into another. Shifting from human demonstrations to simulation replaces data-support limits with unmodeled physical dynamics limits.
+*Systems takeaway: Failure Migration Law.* Changing a training regime does not eliminate engineering debt; it converts one failure currency into another. Shifting from human demonstrations to simulation replaces data-support limits with unmodeled physical dynamics limits.
+
+:::
+
 <!-- END -->
 
 ## Summary {#sec-training-6-10}
