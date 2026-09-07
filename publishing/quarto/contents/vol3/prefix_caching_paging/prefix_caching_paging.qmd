@@ -16,9 +16,9 @@ engine: markdown
 
 _How can serving runtimes exploit massive trajectory prompt locality to maximize throughput during interactive multi-turn execution?_
 
-In multi-turn agentic workflows, step $t+1$ shares between 85% and 95% of its prompt tokens with step $t$. When an agent executes iteratively in an environment, each subsequent invocation appends a modest delta of observation tokens (command output, file content, API responses) to an identical prefix containing system instructions, tool definitions, environment descriptions, and prior conversational turns. Similarly, in test-time search algorithms such as Tree-of-Thoughts and Monte Carlo Tree Search (MCTS), dozens of speculative reasoning branches stem from shared parent prefixes. If the serving runtime recomputes the Key-Value (KV) cache from scratch on every turn, cluster throughput collapses under redundant prefill computation.
+In multi-turn agentic workflows, step $t+1$ shares between 85 and 95 percent of its prompt tokens with step $t$. When an agent executes iteratively in an environment, each subsequent invocation appends a modest delta of observation tokens (command output, file content, API responses) to an identical prefix containing system instructions, tool definitions, environment descriptions, and prior conversational turns. Similarly, in test-time search algorithms such as Tree-of-Thoughts and Monte Carlo Tree Search (MCTS), dozens of speculative reasoning branches stem from shared parent prefixes. If the serving runtime recomputes the Key-Value (KV) cache from scratch on every turn, cluster throughput collapses under redundant prefill computation.
 
-To achieve interactive response times and high serving concurrency, the inference engine must organize KV memory as a dynamic Radix Tree, matching incoming token sequences against cached physical memory blocks in sub-millisecond time. However, prefix caching in agent systems introduces unique architectural challenges that do not exist in stateless single-turn serving. First, when an agent executes environment-mutating actions, file contents and tool outputs become semantically stale, demanding granular cache invalidation protocols that prune affected subtrees without triggering catastrophic global cache flushes. Second, when an agent pauses to execute long-running external tools, query remote APIs, or await human review, leaving multi-gigabyte KV caches pinned in scarce accelerator High-Bandwidth Memory (HBM) induces cluster-wide memory starvation. The serving system must decouple logical context retention from physical GPU residency through hierarchical KV-cache paging over PCIe and CXL to Host DRAM and NVMe storage.
+To achieve interactive response times and high serving concurrency, the inference engine must organize KV memory as a dynamic Radix Tree, matching incoming token sequences against cached physical memory blocks in sub-millisecond time. However, prefix caching in agent systems introduces unique architectural challenges that do not exist in stateless single-turn serving. First, when an agent executes environment-mutating actions, file contents and tool outputs become semantically stale, demanding granular cache invalidation protocols that prune affected subtrees without triggering catastrophic global cache flushes. Second, when an agent pauses to execute long-running external tools, query remote APIs, or await human review, leaving multi-gigabyte KV caches pinned in scarce accelerator High-Bandwidth Memory (HBM) induces cluster-wide memory starvation. The serving system must decouple logical context retention from physical GPU residency through hierarchical KV-cache paging over PCIe and Compute Express Link (CXL) to Host DRAM and Non-Volatile Memory Express (NVMe) storage.
 
 This chapter examines the systems architecture of prefix caching, virtual memory paging, and disaggregated memory hierarchies designed specifically for stateful agent trajectories.
 
@@ -45,7 +45,7 @@ This chapter examines the systems architecture of prefix caching, virtual memory
 
 ## The State Reuse Imperative {#sec-vol3-caching-intro}
 
-In classical web serving and early large language model deployments, the serving runtime treated every inference request as an independent, stateless event [@vaswani2017; @zaharia2018accelerating]. In autonomous agent systems, this assumption fails completely. An agent session is an extended, stateful feedback loop spanning tens to hundreds of turns where each subsequent invocation appends a modest delta of new observations (shell command outputs, file diffs, API responses) to an identical prefix of system guidelines, tool schemas, and accumulated conversation history.
+In classical web serving and early large language model (LLM) deployments, the serving runtime treated every inference request as an independent, stateless event [@vaswani2017; @zaharia2018accelerating]. In autonomous agent systems, this assumption fails completely. An agent session is an extended, stateful feedback loop spanning tens to hundreds of turns where each subsequent invocation appends a modest delta of new observations (shell command outputs, file diffs, API responses) to an identical prefix of system guidelines, tool schemas, and accumulated conversation history.
 
 In empirical agent workloads, consecutive turns share between $85\%$ and $95\%$ of their prompt tokens. Furthermore, in test-time search topologies such as Tree-of-Thoughts and Monte Carlo Tree Search (MCTS), dozens of speculative candidate branches stem from identical parent prefixes. If the serving runtime naively recomputes the Key-Value (KV) cache from scratch on every turn, GPU clusters expend over $90\%$ of their compute cycles re-executing redundant prefill forward passes on identical tokens. Reusing previously computed KV states through prefix caching collapses Time-to-First-Token (TTFT) by over an order of magnitude and slashes cluster electrical power consumption [@kwon2023; @zheng2024sglang].
 
@@ -62,7 +62,7 @@ This chapter establishes the systems architecture of prefix caching, virtual mem
 
 Stateless large language model serving benchmarks traditionally assume independent, identically distributed requests where each prompt arrives with little or no shared history. In contrast, real-world autonomous agents—such as software engineering agents executing on SWE-bench, autonomous research assistants, and tool-augmented workflow orchestrators—generate highly stateful, clustered request traces characterized by extreme prefix locality.
 
-### Trajectory Prompt Anatomy and Token Overlap
+### Trajectory prompt anatomy and token overlap
 
 Consider an agent engaged in an iterative debugging workflow spanning $T$ turns. At turn $t$, the input sequence $X^{(t)}$ submitted to the serving engine consists of four primary token segments:
 
@@ -86,7 +86,7 @@ $$\rho(t, t+1) = \frac{|X^{(t)}|}{|X^{(t+1)}|} = \frac{|X^{(t)}|}{|X^{(t)}| + |\
 
 In empirical traces from coding agents (e.g., SWE-bench trajectories), prompt lengths frequently exceed $32\text{k}$ to $64\text{k}$ tokens while the incremental delta per turn averages between $200$ and $1\text{,}200$ tokens. Consequently, the prefix sharing ratio $\rho(t, t+1)$ consistently ranges between $92\%$ and $98\%$.
 
-### The Computational Disaster of Stateless Serving
+### The computational disaster of stateless serving
 
 When an agent interacts with a stateless serving endpoint, the inference engine treats each turn as an independent query. For a prompt of length $L = |X^{(t)}|$, the engine executes a complete prompt prefill forward pass. For a standard transformer model with $P$ active parameters, the prefill floating-point operations scale as:
 
@@ -106,7 +106,7 @@ In a 20-turn agent session, recomputing the prompt from scratch on every turn fo
 
 To exploit prefix locality, the runtime must store and manipulate Key-Value tensors directly in memory. Understanding the precise memory footprint and tensor structure of the KV cache is essential for designing efficient memory management policies.
 
-### Mathematical Derivation of Footprint per Token
+### Mathematical derivation of footprint per token
 
 In autoregressive transformer models, attention mechanisms project input hidden states into Query ($Q$), Key ($K$), and Value ($V$) tensors. For each token position $i$, the computed $K$ and $V$ vectors across all transformer layers must be retained so that subsequent tokens can compute scaled dot-product attention without recomputing previous layer activations.
 
@@ -123,7 +123,7 @@ $$S_{\text{token}} = 2 \times n_{\text{layers}} \times n_{\text{kv\_heads}} \tim
 
 The leading factor of $2$ accounts for the distinct Key and Value tensors.
 
-### Multi-Head, Multi-Query, and Grouped-Query Attention
+### Multi-head, multi-query, and grouped-query attention
 
 The ratio of Query heads ($n_{\text{q\_heads}}$) to Key-Value heads ($n_{\text{kv\_heads}}$) fundamentally governs the KV cache footprint:
 
@@ -131,19 +131,19 @@ The ratio of Query heads ($n_{\text{q\_heads}}$) to Key-Value heads ($n_{\text{k
 2. **Multi-Query Attention (MQA):** All Query heads share a single Key head and a single Value head per layer ($n_{\text{kv\_heads}} = 1$) [@shazeer2019fast]. MQA slashes the KV cache memory footprint by a factor equal to $n_{\text{q\_heads}}$, but can slightly degrade fine-grained recall on complex reasoning tasks.
 3. **Grouped-Query Attention (GQA):** Query heads are partitioned into $G$ equal groups, where all Query heads within a group share a single Key head and a single Value head ($n_{\text{kv\_heads}} = n_{\text{q\_heads}} / G$) [@ainslie2023]. GQA achieves the high task quality of MHA while delivering up to an $8\times$ reduction in KV cache memory consumption.
 
-| Model Architecture | Parameters | Attention Type | $n_{\text{layers}}$ | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ | $d_{\text{head}}$ | Bytes/Token (FP16) | 32k KV Cache Size | 64k KV Cache Size |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Llama-2-70B | 70B | MHA | 80 | 64 / 64 | 128 | 1.31 MB | 41.9 GB | 83.8 GB |
-| Llama-3-8B | 8B | GQA | 32 | 32 / 8 | 128 | 131 kB | 4.19 GB | 8.38 GB |
-| Llama-3-70B | 70B | GQA | 80 | 64 / 8 | 128 | 328 kB | 10.49 GB | 20.97 GB |
-| Qwen-2.5-72B | 72B | GQA | 80 | 64 / 8 | 128 | 328 kB | 10.49 GB | 20.97 GB |
-| DeepSeek-V3 (MLA) | 671B (37B act) | MLA | 61 | 128 / 1 (latent) | 576 | 70.2 kB | 2.25 GB | 4.49 GB |
+| Model Architecture |   Parameters   | Attention Type | $n_{\text{layers}}$ | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ | $d_{\text{head}}$ | Bytes/Token (FP16) | 32k KV Cache Size | 64k KV Cache Size |
+|:-------------------|:--------------:|:--------------:|:-------------------:|:--------------------------------------------:|:-----------------:|:------------------:|:-----------------:|:-----------------:|
+| Llama-2-70B        |      70B       |      MHA       |          80         |                   64 / 64                    |        128        |      1.31 MB       |      41.9 GB      |      83.8 GB      |
+| Llama-3-8B         |       8B       |      GQA       |          32         |                    32 / 8                    |        128        |       131 kB       |      4.19 GB      |      8.38 GB      |
+| Llama-3-70B        |      70B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
+| Qwen-2.5-72B       |      72B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
+| DeepSeek-V3 (MLA)  | 671B (37B act) |      MLA       |          61         |               128 / 1 (latent)               |        576        |      70.2 kB       |      2.25 GB      |      4.49 GB      |
 
-: KV-cache memory footprints per token and total context buffer requirements across modern frontier model architectures under 16-bit precision. {#tbl-vol3-caching-model-kv-footprint}
+: **KV-Cache Footprint by Attention Architecture**: Per-token KV bytes and total context buffer requirements for frontier model architectures at 16-bit precision. Grouped-query and latent attention cut the per-token cost by nearly an order of magnitude relative to multi-head attention, which is what makes long multi-turn agent contexts affordable at all. {#tbl-vol3-caching-model-kv-footprint}
 
 As demonstrated in @tbl-vol3-caching-model-kv-footprint, while GQA substantially reduces per-token memory overhead compared to legacy MHA, maintaining multi-turn agent contexts ($32\text{k} \text{--} 64\text{k}$ tokens) still consumes $10.5\text{ to } 21\text{ GB}$ of accelerator memory per active trajectory on 70B-class models. When dozens of autonomous agents execute concurrently across a GPU cluster, memory capacity—rather than compute throughput—becomes the primary bottleneck.
 
-### Physical Tensor Layouts and Memory Fragmentation
+### Physical tensor layouts and memory fragmentation
 
 In naive serving implementations, KV tensors are allocated as contiguous multidimensional arrays of dimension:
 
@@ -151,14 +151,14 @@ $$\mathcal{T}_{\text{KV}} \in \mathbb{R}^{2 \times n_{\text{layers}} \times n_{\
 
 Because the runtime cannot predict the final output sequence length of an agent invocation in advance, it must provision contiguous memory for the maximum possible sequence length $L_{\max}$ (e.g., $32\text{,}768$ tokens). This static pre-allocation introduces severe memory pathologies:
 
-- **Internal Fragmentation:** Memory reserved for tokens up to $L_{\max}$ remains completely unused if the agent generates only a brief response. In typical serving deployments, internal fragmentation wastes between 60% and 80% of accelerator memory [@kwon2023].
+- **Internal Fragmentation:** Memory reserved for tokens up to $L_{\max}$ remains completely unused if the agent generates only a brief response. In typical serving deployments, internal fragmentation wastes between 60 and 80 percent of accelerator memory [@kwon2023].
 - **External Fragmentation:** Over time, as requests of variable sequence lengths finish and release memory, physical device memory becomes fragmented into discontinuous blocks. Even if total free memory exceeds the size required for a new request, the runtime cannot schedule the request because no single contiguous memory segment is large enough.
 
 ## PagedAttention and Page Tables {#sec-vol3-caching-pagedattention-virtual-memory-page}
 
-As briefly introduced in @sec-vol3-context-working-sets, to overcome the fatal fragmentation of static contiguous allocation, Kwon et al. introduced PagedAttention, an architecture inspired by classic operating system virtual memory paging [@kwon2023; @denning1970].
+As briefly introduced in @sec-vol3-context-working-sets, to overcome the fatal fragmentation of static contiguous allocation, @kwon2023 introduced PagedAttention, an architecture inspired by classic operating system virtual memory paging [@denning1970].
 
-### Virtual-to-Physical Block Mapping
+### Virtual-to-physical block mapping
 
 Rather than forcing KV caches into contiguous memory buffers, PagedAttention partitions the KV cache of each sequence into fixed-size physical blocks. Each block holds the Key and Value vectors for a fixed number of tokens $B$ (typically $B = 16$ or $B = 32$ tokens).
 
@@ -174,14 +174,14 @@ $$\text{Physical Address}(i) = \text{BaseAddress}(\text{PageTable}[\text{LBN}]) 
 
 Physical blocks are allocated dynamically on-demand from a centralized global free-block pool. As the model generates new tokens, the runtime writes into the open slots of the current physical block. Only when the current block is entirely filled does the runtime allocate a new physical block from the free list.
 
-### Elimination of Fragmentation
+### Elimination of fragmentation
 
 PagedAttention fundamentally transforms accelerator memory management:
 
 1. **Elimination of External Fragmentation:** Because all physical blocks share an identical fixed size $B$, any free block in GPU HBM can satisfy an allocation request for any sequence. Memory compaction and defragmentation sweeps are rendered completely unnecessary.
 2. **Bounding Internal Fragmentation:** Internal fragmentation occurs only in the very last physical block of a sequence. The maximum memory wasted per active request is strictly bounded by $(B - 1) \times S_{\text{token}}$. For a block size of $B = 16$ tokens on Llama-3-70B, maximum internal fragmentation is under $5.2\text{ MB}$ per sequence—a negligible fraction ($< 0.05\%$) of a $32\text{k}$-token context.
 
-### Copy-on-Write for Speculative Trajectories
+### Copy-on-write for speculative trajectories
 
 In agentic decision-making, agents frequently fork speculative trajectories—such as sampling $K$ candidate solutions in Best-of-$N$ search, or exploring multiple reasoning paths in Monte Carlo Tree Search.
 
@@ -198,7 +198,7 @@ This mechanism slashes the memory footprint of branched reasoning from $O(K \cdo
 
 While PagedAttention manages physical memory pages for active requests, it does not inherently recognize when two independent requests—or consecutive turns of an agent session—share common prompt prefixes. To achieve automatic, zero-overhead prefix reuse across arbitrary workflows, modern inference runtimes implement Radix Tree KV-cache indexing, pioneered by SGLang's RadixAttention [@zheng2024sglang; @fredkin1960].
 
-### Radix Tree Data Structure
+### Radix tree data structure
 
 A Radix Tree (or compressed trie) is a space-optimized tree data structure where each edge represents a sequence of tokens rather than a single character or token [@fredkin1960]. In a serving runtime, the Radix tree acts as an inverted index mapping token sequences to cached physical PagedAttention blocks residing in GPU HBM.
 
@@ -226,7 +226,7 @@ ref_count = 2         ref_count = 1
 ref_count = 1  ref_count = 1
 ```
 
-### Tree Operations: Lookup, Chunk Prefill, and Insertion
+### Tree operations: Lookup, chunk prefill, and insertion
 
 When an agent initiates a new execution step with token sequence $T = [t_1, t_2, \dots, t_N]$, the runtime executes three deterministic steps:
 
@@ -234,7 +234,7 @@ When an agent initiates a new execution step with token sequence $T = [t_1, t_2,
 2. **Chunk Prefill:** The runtime computes KV activations only for the remaining suffix tokens $T[M+1 \dots N]$. This operation is a standard chunked prefill forward pass. The physical KV blocks corresponding to the matched prefix $T[1 \dots M]$ are simply read from HBM during attention computation without any recomputation.
 3. **Tree Insertion and Splitting:** Once the suffix prefill completes, the runtime inserts the new token sequence into the Radix tree. If the match ended in the middle of an existing edge, that edge is split into two nodes: an internal parent representing the common prefix, and two child nodes representing the diverging suffixes. The newly allocated physical blocks are assigned to the new child node.
 
-### Reference Counting and LRU Eviction
+### Reference counting and LRU eviction
 
 Because accelerator HBM has strictly finite capacity, the Radix tree cannot retain all historical prefixes indefinitely. Exploiting the system principle of **temporal locality**—the empirical observation that recently accessed trajectories are the most likely to receive new generation steps in the near future—the runtime implements reference-counted Least-Recently-Used (LRU) eviction:
 
@@ -242,15 +242,19 @@ Because accelerator HBM has strictly finite capacity, the Radix tree cannot reta
 - **Eviction Candidate Pool:** When an agent completes a turn or releases a session, the runtime decrements $\text{ref\_count}$ along its path. Nodes whose reference count reaches zero ($\text{ref\_count} = 0$) are moved into an LRU eviction pool. Crucially, the physical KV blocks belonging to these nodes remain resident in HBM; they are not immediately deallocated.
 - **Eviction Under Memory Pressure:** When a new request requires physical memory blocks and the global free list is depleted, the runtime selects the leaf node in the LRU pool with the oldest $\text{last\_accessed}$ timestamp. It evicts the leaf node, frees its physical blocks to the global allocator, and recursively prunes empty parent nodes.
 
-This design ensures that if the agent issues its next turn before memory pressure forces eviction, the system achieves a 100% cache hit on the existing prefix.
+This design ensures that if the agent issues its next turn before memory pressure forces eviction, the system achieves a 100 percent cache hit on the existing prefix, replaying a tree path whose logical nodes still resolve to the scattered physical blocks in @fig-vol3-caching-radix-tree.
 
-![Radix Tree Architecture for Dynamic Prefix Caching. The logical Radix tree indexes token sequences and maps them directly to physical non-contiguous PagedAttention memory blocks in GPU HBM with reference-counted LRU eviction.](images/svg/radix_prefix_tree_architecture.svg){#fig-vol3-caching-radix-tree}
+::: {#fig-vol3-caching-radix-tree fig-env="figure" fig-pos="htb" fig-cap="**Radix Tree Prefix Cache**: A logical Radix tree indexes agent token sequences, and each matched node maps onto non-contiguous physical PagedAttention blocks in accelerator HBM. Reference counting is what keeps the two halves consistent: internal nodes stay pinned while active children exist, so only zero-count leaves reach the LRU eviction queue and a returning turn replays its prefix with no prefill compute." fig-alt="A two-panel diagram. The left panel shows a Radix tree rooted at a system prompt node that branches into two first-turn user goal nodes and then into tool-call and search leaves, each labeled with a token range and a reference count; one branch is marked as a full cache hit and a zero-count leaf is queued for eviction. The right panel shows a logical block table mapping logical block numbers to scattered physical HBM block numbers, alongside a grid of physical blocks with the unmapped ones shown as a free pool."}
+
+![](images/svg/radix_prefix_tree_architecture.svg)
+
+:::
 
 ## Cache Invalidation Protocols {#sec-vol3-caching-cache-invalidation-protocols-mutating}
 
 In stateless text processing, a token sequence $T$ maps deterministically to a fixed semantic meaning. In agentic systems, however, the environment is mutable. An agent modifies files on disk (`write_to_file`), executes database transactions, adjusts configuration variables, or runs build commands that alter environment state.
 
-### The Semantic Invalidation Dilemma
+### The semantic invalidation dilemma
 
 Consider an agent that reads a source file `engine.py` at turn 1, producing observation tokens $\mathbf{x}_{\text{obs}}^{(1)}$ containing the file's text. At turn 2, the agent invokes a tool to modify `engine.py`. At turn 3, the agent re-reads `engine.py`.
 
@@ -263,7 +267,7 @@ If the serving runtime blindly matches prefixes, it hits the cached KV blocks fo
 
 Even worse, if an agent framework attempts to "clean" its prompt by replacing the text of `engine.py` in-place within the prompt history, the token sequence diverges at the exact position where the file text begins. This divergence completely invalidates the Radix tree path from that token onward, destroying all downstream cached KV blocks (including subsequent tool outputs and reasoning steps).
 
-### Granular Invalidation via Leases and Content Hash Tagging
+### Granular invalidation via leases and content hash tagging
 
 To prevent semantic corruption without incurring catastrophic global cache flushes, production agent platforms implement content-addressed invalidation protocols based on distributed systems leases [@gray1989leases]:
 
@@ -275,7 +279,7 @@ To prevent semantic corruption without incurring catastrophic global cache flush
 3. **Environment Mutation Interception:** The agent runtime intercepts all state-modifying tool operations (e.g., file writes, deletions). When a file modification occurs, the runtime immediately invalidates the corresponding lease in the serving engine.
 4. **Selective Subtree Pruning:** Upon lease invalidation, the Radix tree manager locates all nodes tagged with the stale resource hash. Rather than flushing the entire cache, the manager prunes only the affected branch and its descendants, returning their physical blocks to the free pool. Unaffected branches—such as system prompts, invariant tool schemas, and unmutated background documents—remain fully cached in HBM.
 
-### Prompt Structural Hygiene for Cache Maximization
+### Prompt structural hygiene for cache maximization
 
 To maximize prefix cache reuse while isolating mutations, prompt engineers must adhere to strict structural hygiene rules:
 
@@ -290,13 +294,13 @@ To maximize prefix cache reuse while isolating mutations, prompt engineers must 
 
   $$\text{"File engine.py updated: 14 lines modified."}$$
 
-  Appending deltas preserves the entire historical prefix in the Radix tree, allowing 100% cache hit on the prompt history while adding only the minimal delta tokens to the prefill phase.
+  Appending deltas preserves the entire historical prefix in the Radix tree, allowing a 100 percent cache hit on the prompt history while adding only the minimal delta tokens to the prefill phase.
 
 ## Multi-Tier KV Memory Hierarchies {#sec-vol3-caching-multi-tier-memory-hierarchies-kv-swapping}
 
 In human-in-the-loop interactions and complex agent workflows, agent execution is dominated by heavy-tailed idle gaps. While an LLM generates tokens in a few hundred milliseconds, an external bash command (e.g., running an entire regression test suite), an API call to a rate-limited external service, or a human reviewing an approval request can stall the agent for $15$ seconds to several hours.
 
-### Working Set Constraints and the Pinned Memory Crisis
+### Working set constraints and the pinned memory crisis
 
 In classical operating systems, a process's *working set* is the minimum amount of physical memory required to make forward progress without thrashing. For an active agent trajectory, the working set is strictly the entire uncompressed KV cache of its context history.
 
@@ -304,24 +308,26 @@ If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remain
 
 Conversely, if the serving runtime unilaterally discards the idle agent's KV cache to free memory, resuming the agent when the tool finishes forces a full $64\text{k}$-token prefill recomputation, incurring a 10-second latency penalty and wasting cluster compute.
 
-### Three-Tier Memory Architecture
+### Three-tier memory architecture
 
 To break this deadlock, modern agent serving runtimes adopt a multi-tier memory hierarchy that offloads idle KV blocks across physical memory boundaries [@sheng2023flexgen]:
 
 1. **Tier 1: Accelerator HBM (Device Memory):** Highest bandwidth ($3.35\text{ to } 4.8\text{ TB/s}$ on H100/H200), lowest latency ($< 1\,\mu\text{s}$), strictly constrained capacity ($80\text{ to } 141\text{ GB}$). Reserved exclusively for currently decoding requests and hot, high-frequency Radix tree prefixes (e.g., global system prompts).
-2. **Tier 2: Host System DRAM (CPU Memory):** Moderate bandwidth ($300\text{ to } 500\text{ GB/s}$ across multi-channel DDR5 or CXL 3.0 memory expanders), low latency ($10\text{ to } 50\,\mu\text{s}$), large capacity ($512\text{ GB to } 2.0\text{ TB}$ per node). Connected to accelerators via PCIe Gen5 x16 duplex buses ($64\text{ GB/s}$ theoretical, $\approx 54\text{ GB/s}$ effective DMA). Serves as the primary paging store for suspended agent sessions during tool execution.
+2. **Tier 2: Host System DRAM (CPU Memory):** Moderate bandwidth ($300\text{ to } 500\text{ GB/s}$ across multi-channel DDR5 or CXL 3.0 memory expanders), low latency ($10\text{ to } 50\,\mu\text{s}$), large capacity ($512\text{ GB to } 2.0\text{ TB}$ per node). Connected to accelerators via PCIe Gen5 x16 duplex buses that deliver $64\text{ GB/s}$ theoretically and $\approx 54\text{ GB/s}$ of effective direct memory access (DMA) bandwidth. Serves as the primary paging store for suspended agent sessions during tool execution.
 3. **Tier 3: Local NVMe SSD and Disaggregated Storage:** Low bandwidth ($14\text{ to } 28\text{ GB/s}$ over PCIe 5.0 NVMe, or network storage over RoCEv2), higher latency ($100\,\mu\text{s to } 2\text{ ms}$), massive capacity ($4\text{ to } 30\text{ TB}$). Stores hibernated agent sessions awaiting human review or long-term historical context traces.
 
-| Memory Tier | Storage Technology | Typical Capacity | Interconnect Bus | Effective Read Bandwidth | Access Latency | 32k KV Swap Time (Llama-3-70B) |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Tier 1: Device HBM** | HBM3 / HBM3e | 80 – 141 GB | On-package Silicon Interposer | 3,350 – 4,800 GB/s | < 100 ns | Instant (Resident) |
-| **Tier 2: Host DRAM** | DDR5 / CXL 3.0 | 512 – 2,048 GB | PCIe Gen5 x16 / CXL Link | 54 GB/s (DMA duplex) | 10 – 30 µs | 77.8 ms |
-| **Tier 3: Solid-State** | PCIe 5.0 NVMe SSD | 4 – 32 TB | Direct PCIe NVMe Controller | 14 – 24 GB/s | 50 – 150 µs | 350 – 600 ms |
-| **Tier 4: Distributed** | Mooncake RDMA Pool | 100+ TB | 400 Gbps RoCEv2 / InfiniBand | 45 – 50 GB/s | 100 – 300 µs | 84 – 95 ms |
+Capacity grows by roughly an order of magnitude at each step down the hierarchy, and the cost of carrying a context across each boundary rises with it, a coupling visible in the bandwidth and swap-time columns of @tbl-vol3-caching-tier-latency-tradeoffs.
 
-: Hardware characteristics, effective transfer bandwidths, and 32k-token KV cache swapping latencies across tiered memory subsystems. {#tbl-vol3-caching-tier-latency-tradeoffs}
+| Memory Tier             | Storage Technology | Typical Capacity |        Interconnect Bus       | Effective Read Bandwidth | Access Latency | 32k KV Swap Time (Llama-3-70B) |
+|:------------------------|:------------------:|:----------------:|:-----------------------------:|:------------------------:|:--------------:|:------------------------------:|
+| **Tier 1: Device HBM**  |    HBM3 / HBM3e    |   80 – 141 GB    | On-package Silicon Interposer |    3,350 – 4,800 GB/s    |    < 100 ns    |       Instant (Resident)       |
+| **Tier 2: Host DRAM**   |   DDR5 / CXL 3.0   |  512 – 2,048 GB  |    PCIe Gen5 x16 / CXL Link   |   54 GB/s (DMA duplex)   |   10 – 30 µs   |            77.8 ms             |
+| **Tier 3: Solid-State** | PCIe 5.0 NVMe SSD  |    4 – 32 TB     |  Direct PCIe NVMe Controller  |       14 – 24 GB/s       |  50 – 150 µs   |          350 – 600 ms          |
+| **Tier 4: Distributed** | Mooncake RDMA Pool |     100+ TB      |  400 Gbps RoCEv2 / InfiniBand |       45 – 50 GB/s       |  100 – 300 µs  |           84 – 95 ms           |
 
-### Mathematical Formulation: Swapping vs. Recompute Breakeven
+: **Memory Tier Characteristics and Swap Costs**: Storage technology, effective transfer bandwidth, access latency, and 32k-token KV swap time for each tier of the paging hierarchy. Swap time grows by roughly an order of magnitude per tier, which sets the tool-wait duration at which offloading to that tier becomes profitable. {#tbl-vol3-caching-tier-latency-tradeoffs}
+
+### Mathematical formulation: Swapping vs. recompute breakeven
 
 When an agent enters an idle tool-wait state, the runtime evaluates whether to swap the KV cache to Host DRAM or discard it and recompute upon resumption.
 
@@ -352,24 +358,28 @@ The breakeven condition governing whether to swap is determined by the tool-wait
 
 $$T_{\text{wait}} > T_{\text{swap\_out}} = \frac{S_{\text{KV}}}{B_{\text{pcie}}} + \tau_{\text{dma}} \approx 40.9 \text{ ms}$$
 
-swapping out the KV cache is immediately profitable because the physical HBM frames can be yielded to concurrent active requests during the tool execution window. As long as the runtime prefetches the KV blocks from Host DRAM back to HBM asynchronously as the tool completes, the agent resumes decoding with zero perceived transfer latency.
+swapping out the KV cache is immediately profitable because the physical HBM frames can be yielded to concurrent active requests during the tool execution window. A $40.9\text{ ms}$ threshold puts essentially every real tool call above the line, which makes the descent in @fig-vol3-caching-hierarchical-paging the ordinary path for an idle trajectory rather than an emergency measure taken under memory pressure. As long as the runtime prefetches the KV blocks from Host DRAM back to HBM asynchronously as the tool completes, the agent resumes decoding with zero perceived transfer latency.
 
-![Hierarchical KV-Cache Paging and Swapping Topology. Multi-tier memory hierarchy offloading idle agent contexts over PCIe Gen5 and CXL 3.0 to host DRAM and NVMe storage during tool execution pauses, reclaiming scarce accelerator HBM.](images/svg/hierarchical_kv_paging_topology.svg){#fig-vol3-caching-hierarchical-paging}
+::: {#fig-vol3-caching-hierarchical-paging fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical KV-Cache Paging**: An idle agent context migrates down three memory tiers, from accelerator HBM to host DRAM over PCIe Gen5 or CXL, and on to NVMe flash. The expected wait selects the tier: second-scale tool calls page to DRAM, while human-review pauses hibernate to flash, so a trajectory retains its logical context without holding scarce device memory." fig-alt="An upper panel stacks three memory tiers, each annotated with capacity, bandwidth, and the session state it holds: accelerator HBM at the top, host DDR5 or CXL memory in the middle reached over a PCIe Gen5 link, and NVMe flash with a pooled remote store at the bottom. A lower panel traces the tool-wait lifecycle as numbered steps, from active token generation through a non-blocking swap of key-value blocks from HBM to DRAM that frees device page frames."}
+
+![](images/svg/hierarchical_kv_paging_topology.svg)
+
+:::
 
 ## Prefill-Decode Disaggregation {#sec-vol3-caching-prefill-decode-disaggregation-splitwise-and}
 
 Traditional LLM serving engines co-locate the prompt prefill phase and the autoregressive token decoding phase on the same physical GPUs. In multi-turn agent workloads, this co-location induces severe phase interference that destroys serving predictability.
 
-### The Phase Interference Crisis
+### The phase interference crisis
 
 Prompt prefill and token decoding represent polar opposites in systems behavior:
 
-- **Prefill Phase:** Computes across all input prompt tokens simultaneously using large matrix-matrix multiplications (GEMM). Operating in the compute-bound regime of the hardware Roofline model, it achieves high Arithmetic Intensity (exceeding $100\text{ FLOPs/byte}$) and saturates Tensor Cores at peak utilization.
+- **Prefill Phase:** Computes across all input prompt tokens simultaneously using large general matrix multiplication (GEMM) kernels. Operating in the compute-bound regime of the hardware Roofline model, it achieves high Arithmetic Intensity (exceeding $100\text{ FLOPs/byte}$) and saturates Tensor Cores at peak utilization.
 - **Decode Phase:** Generates one token at a time autoregressively using matrix-vector multiplications (GEMV). Operating in the memory-bound regime of the Roofline model, it suffers from severe Arithmetic Intensity starvation (near $1\text{ FLOP/byte}$) and is bottlenecked entirely by HBM read bandwidth.
 
-When a long prompt prefill (e.g., an agent submitting a $48\text{k}$-token context) is scheduled on a GPU currently decoding active sequences, it triggers **Head-of-Line (HoL) blocking**. The compute-bound prefill monopolizes the GPU's streaming multiprocessors for hundreds of milliseconds or seconds, freezing all ongoing decode iterations. This causes catastrophic spikes in Inter-Token Latency (ITL)—producing severe stuttering in interactive user sessions and causing time-sensitive agent tool calls to breach service level objectives (SLOs).
+When a long prompt prefill (e.g., an agent submitting a $48\text{k}$-token context) is scheduled on a GPU currently decoding active sequences, it triggers **Head-of-Line (HoL) blocking**. The compute-bound prefill monopolizes the GPU's streaming multiprocessors for hundreds of milliseconds or seconds, freezing all ongoing decode iterations. This causes catastrophic spikes in Inter-Token Latency (ITL)—producing severe stuttering in interactive user sessions and causing time-sensitive agent tool calls to breach service-level objectives (SLOs).
 
-### Phase Splitting Architecture
+### Phase splitting architecture
 
 As established in @sec-vol3-context-working-sets, to eliminate phase interference, disaggregated serving architectures—pioneered by Splitwise and DistServe—physically separate the prefill compute pool from the decode compute pool [@patel2024; @zhong2024distserve]:
 
@@ -377,7 +387,7 @@ As established in @sec-vol3-context-working-sets, to eliminate phase interferenc
 2. **Decode Pool (D-Nodes):** Composed of high-memory-bandwidth accelerator nodes (e.g., NVIDIA H200 with $141\text{ GB}$ HBM3e at $4.8\text{ TB/s}$, or cost-effective memory-dense hardware). Configured with large PagedAttention block pools to host dozens of concurrent autoregressive decoding sessions, optimizing Inter-Token Latency (ITL) and serving goodput.
 3. **High-Speed Interconnect Fabric:** Prefill nodes and Decode nodes are interconnected via non-blocking $400\text{ to } 800\text{ Gbps}$ Remote Direct Memory Access (RDMA) networks running over RoCEv2 or InfiniBand [@guo2016rdma].
 
-### KV Streaming Protocols and Network Invariants
+### KV streaming protocols and network invariants
 
 In a disaggregated cluster, the execution of turn $t$ proceeds through a clean distributed pipeline:
 
@@ -394,17 +404,21 @@ With modern $400\text{ Gbps}$ ($50\text{ GB/s}$) ConnectX-7 RDMA network interfa
 
 $$T_{\text{network}} = \frac{2.1 \times 10^9 \text{ bytes}}{50 \times 10^9 \text{ bytes/s}} \approx 42 \text{ ms}$$
 
-Because $42\text{ ms}$ is orders of magnitude smaller than the seconds required for prefill compute or decode generation, network transfer adds negligible overhead to the end-to-end trajectory. Disaggregation isolates latency SLOs, eliminating ITL jitter and increasing cluster-wide serving goodput by $2.5\times$ to $4.2\times$ under rigorous production SLO targets [@zhong2024distserve].
+Because $42\text{ ms}$ is orders of magnitude smaller than the seconds required for prefill compute or decode generation, network transfer adds negligible overhead to the end-to-end trajectory. Disaggregation isolates latency SLOs, eliminating ITL jitter and increasing cluster-wide serving goodput by $2.5\times$ to $4.2\times$ under rigorous production SLO targets [@zhong2024distserve]. The split also lets each pool be provisioned for its own bottleneck, tensor-core density on one side of the fabric in @fig-vol3-caching-disaggregation and HBM bandwidth on the other, a choice a co-located deployment has to compromise on because both phases share the same silicon.
 
-![Disaggregated Serving Architecture. Physical separation of compute-bound prompt prefill nodes from memory-bandwidth-bound decode nodes interconnected by 400–800 Gbps RoCEv2/InfiniBand RDMA to eliminate phase interference and maximize serving goodput.](images/svg/prefill_decode_disaggregation.svg){#fig-vol3-caching-disaggregation}
+::: {#fig-vol3-caching-disaggregation fig-env="figure" fig-pos="htb" fig-cap="**Prefill-Decode Disaggregation**: Compute-bound prompt prefill and bandwidth-bound token decode run on separate node pools joined by an RDMA fabric, which removes the head-of-line blocking a long agent prefill inflicts on co-located decode iterations. The split pays for itself because streaming the KV slice across the network costs far less time than the prefill that produced it, so inter-token latency is isolated without measurable end-to-end delay." fig-alt="Three columns. The left column describes a compute-bound prefill node pool with high arithmetic intensity, time to first token as its metric, tensor-core hardware, and a warning about head-of-line blocking when prefill and decode are co-located. The center column shows an RDMA transfer fabric over RoCEv2 or InfiniBand carrying zero-copy writes between accelerator memories, with the invariant that transfer time stays below prefill time. The right column describes a bandwidth-bound decode node pool with low arithmetic intensity, inter-token latency as its metric, and paged attention block management."}
+
+![](images/svg/prefill_decode_disaggregation.svg)
+
+:::
 
 ## KV-Centric Datacenter Architectures {#sec-vol3-caching-kvcache-centric-datacenter-architectures-rdma}
 
 As agentic systems scale to enterprise fleets, managing KV caches solely within the confines of individual server nodes becomes unsustainable. If an agent executes turn 1 on Node A, and turn 2 is routed to Node B, Node B lacks the cached prefix and is forced to execute a redundant prefill from scratch.
 
-### Mooncake Architecture and Disaggregated Memory Pools
+### Mooncake architecture and disaggregated memory pools
 
-To overcome node-level isolation, Qin et al. introduced Mooncake (introduced conceptually in @sec-vol3-context-working-sets), a KVCache-centric disaggregated architecture that elevates the KV cache to a first-class distributed storage system across the entire datacenter [@qin2024mooncake].
+To overcome node-level isolation, @qin2024mooncake introduced Mooncake, the KVCache-centric disaggregated architecture previewed in @sec-vol3-context-working-sets, which elevates the KV cache to a first-class distributed storage system across the entire data center.
 
 In Mooncake:
 
@@ -412,9 +426,9 @@ In Mooncake:
 - **Global Radix Tree Coordinator:** A distributed metadata service maintains a cluster-wide Radix tree. When any agent submits a prompt anywhere in the cluster, the coordinator maps its prefix tokens to existing physical blocks distributed across the cluster.
 - **Zero-Copy RDMA Streaming:** If the client router dispatches an agent request to Node C, but its prefix KV cache resides in the DRAM of Node A, Node C's PagedAttention allocator does not recompute the prefix. Instead, it issues an asynchronous RDMA read over the RoCEv2 network, streaming the KV blocks directly into Node C's GPU HBM at line rate.
 
-By decoupling prefix caching from the physical placement of compute, KVCache-centric datacenter architectures achieve global cache hit rates exceeding 90% across thousands of distributed agent workflows, transforming multi-turn agent serving economics.
+By decoupling prefix caching from the physical placement of compute, KVCache-centric data center architectures achieve global cache hit rates exceeding 90 percent across thousands of distributed agent workflows, transforming multi-turn agent serving economics.
 
-### Immutability and the Absence of Cache Coherence
+### Immutability and the absence of cache coherence
 
 A foundational principle of distributed systems is that caching mutable state requires complex, latency-inducing cache coherence protocols (e.g., MESI, directory-based invalidation) to prevent nodes from reading stale data. However, autoregressive LLM KV caches possess a profound systems property: **token sequences and their corresponding KV activations are strictly immutable**. The mathematical Key and Value tensors for the sequence `[A, B, C]` will never change, regardless of how many agents access them.
 
@@ -424,7 +438,7 @@ Because KV caches are append-only and immutable, KVCache-centric architectures c
 
 Frontier reasoning agents increasingly rely on inference-time search algorithms—such as Best-of-$N$ sampling, Tree-of-Thoughts, and Monte Carlo Tree Search (MCTS)—to explore vast decision spaces [@yao2023tree; @snell2024scaling]. In these workloads, the inference engine must support massive parallel tree expansions branching from common parent prefixes.
 
-### Shared Prefix Geometry in Search Trees
+### Shared prefix geometry in search trees
 
 In an MCTS search of depth $D$ with branching factor $K$, a root state $s_0$ (e.g., the initial task description and problem specification) spawns $K$ child nodes $s_{1,1}, \dots, s_{1,K}$. Each child node in turn spawns $K$ grandchild nodes.
 
@@ -434,7 +448,7 @@ $$\text{Tokens}_{\text{naive}} = \sum_{d=0}^{D} K^d \cdot \left( L_{\text{root}}
 
 For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving requires prefilling over **$12.2\text{ million}$ tokens**, requiring hours of GPU time and rendering test-time search economically impossible.
 
-### Copy-on-Write Prefix Sharing in Radix Trees
+### Copy-on-write prefix sharing in radix trees
 
 With PagedAttention and Radix tree indexing, the runtime executes tree rollouts with zero redundant memory allocation or prefill compute:
 
@@ -446,13 +460,51 @@ The total memory footprint required to maintain the entire search tree in GPU HB
 
 $$S_{\text{MCTS}} = S_{\text{token}} \cdot \left( L_{\text{root}} + \sum_{j=1}^{N_{\text{branches}}} L_{\text{branch}}^{(j)} \right)$$
 
-instead of duplicating $L_{\text{root}}$ across all $N_{\text{branches}}$ leaves. By eliminating root duplication, Radix caching enables inference engines to sustain hundreds of parallel speculative reasoning branches on a single 8-GPU node, unlocking real-time MCTS rollouts for complex agentic problem solving [@snell2024scaling].
+instead of duplicating $L_{\text{root}}$ across all $N_{\text{branches}}$ leaves. By eliminating root duplication, Radix caching moves the limit on search width from the size of the shared prompt to the size of the divergent suffixes, and the distance between those two regimes on one 8-GPU node is what decides whether real-time MCTS rollouts are affordable at all [@snell2024scaling].
+
+::: {#nbk-caching-branch-capacity .callout-notebook title="How many speculative branches fit on one node"}
+
+**Problem**: On a single 8-GPU H100 node serving Llama-3-70B, how many parallel branches from a shared $24{,}000$-token root fit in accelerator memory when each branch duplicates the root, and how many fit once the root is shared?
+
+**Variables**:
+
+* Node capacity $8 \times 80\text{ GB} = 640\text{ GB}$ of HBM.
+* Model weights at $70 \times 10^9$ parameters and $2\text{ bytes}$ per parameter in FP16.
+* A free-block reserve of $10\%$ of node HBM held back by admission control. Scenario assumption.
+* Llama-3-70B attention geometry from @tbl-vol3-caching-model-kv-footprint, with $n_{\text{layers}} = 80$, $n_{\text{kv\_heads}} = 8$, $d_{\text{head}} = 128$, and $b = 2$.
+* $L_{\text{root}} = 24{,}000$ tokens for the search prompt and $L_{\text{branch}} = 2{,}000$ generated tokens per rollout. Both are scenario assumptions.
+
+**Math**: The per-token footprint follows the derivation in @sec-vol3-caching-kv-cache-anatomy-tensor-layouts:
+
+$$S_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes}$$
+
+Weights consume $70 \times 10^9 \times 2 = 140\text{ GB}$ and the reserve holds back $0.10 \times 640 = 64\text{ GB}$, leaving a KV budget of
+
+$$640 - 140 - 64 = 436\text{ GB}$$
+
+The root prefix and one rollout suffix cost
+
+$$S_{\text{root}} = 24{,}000 \times 327{,}680 = 7.86\text{ GB}, \qquad S_{\text{branch}} = 2{,}000 \times 327{,}680 = 0.655\text{ GB}$$
+
+Under contiguous allocation each branch carries a private copy of the root, so a branch costs $7.86 + 0.655 = 8.52\text{ GB}$ and the node holds
+
+$$N_{\text{naive}} = \left\lfloor \frac{436}{8.52} \right\rfloor = 51$$
+
+Under Copy-on-Write page sharing the root is paid once and only the suffixes scale:
+
+$$N_{\text{shared}} = \left\lfloor \frac{436 - 7.86}{0.655} \right\rfloor = 653$$
+
+**Result**: 51 concurrent branches with root duplication against 653 with prefix sharing, a $12.8\times$ widening of the search from the same $640\text{ GB}$ of HBM.
+
+**Systems insight**: The duplicated prefix, not the generated text, is what caps search width. At these lengths the root is twelve times the suffix, so roughly $92\%$ of the naive footprint is 51 identical copies of the same tokens. Once the root is shared, capacity is governed by rollout length rather than prompt length, which inverts the tuning knob. Doubling the reasoning budget per branch halves the achievable width, while doubling the task prompt costs about $2\%$ of it.
+
+:::
 
 ## Chunked Prefill and Batching {#sec-vol3-caching-chunked-prefill-and-continuous}
 
 In production serving engines running continuous iteration-level batching (such as Orca), new requests join the active batch at every token generation step [@yu2022orca]. However, when an agent submits a large multi-turn prompt requiring prefix prefill, inserting the entire prompt into the active batch creates an extreme compute imbalance.
 
-### The Piggybacking Principle: SARATHI
+### The piggybacking principle: SARATHI
 
 Building on the chunked prefill concepts introduced in @sec-vol3-context-working-sets, to maintain stable decode latencies while serving bursty multi-turn agent traffic, modern runtimes implement **Chunked Prefill** and **Piggybacking**, pioneered by SARATHI [@agrawal2023sarathi]:
 
@@ -464,15 +516,15 @@ $$\text{Active Batch} = \left\{ \text{Chunked Prefill}(512 \text{ tokens}) \righ
 
 Because decode tokens require loading the entire model parameter weight matrix $\mathbf{W}$ from HBM to compute only a single token per request, "piggybacking" a chunked prefill forwards those same weights through arithmetic tensor cores with zero additional memory read overhead. Operational intensity surges from $I \approx 1$ FLOP/byte up toward the accelerator saturation point, eliminating decode idle bubbles and ensuring that time-to-first-token (TTFT) and inter-token latency (ITL) remain completely stable even under bursty agent loads.
 
-## Radix Cache Thrashing Postmortem {#sec-vol3-caching-production-postmortem-radix-cache}
+## Radix Cache Thrashing, Traced End to End {#sec-vol3-caching-production-postmortem-radix-cache}
 
 The catastrophic failure modes of prefix caching rarely stem from algorithmic bugs in the Radix tree data structure itself; instead, they emerge from subtle interactions between prompt construction and physical memory allocation.
 
-### Incident Overview and Architectural Root Cause
+### Scenario and architectural root cause
 
-During the enterprise deployment of a fleet of autonomous software debugging agents on a 64-GPU vLLM cluster, cluster monitoring suddenly alerted on a massive drop in serving throughput accompanied by cascading out-of-memory (OOM) worker crashes.
+Consider a fleet of autonomous software debugging agents on a 64-GPU vLLM cluster. The walkthrough below is a constructed scenario rather than a documented incident, and its figures are illustrative; the causal chain is what the chapter is teaching. Cluster monitoring alerts on a massive drop in serving throughput accompanied by cascading out-of-memory (OOM) worker crashes.
 
-Prior to the incident, the cluster operated at a steady-state prefix cache hit rate of **91.4%**, maintaining an average Time-to-First-Token (TTFT) of $220\text{ ms}$. Within six minutes of a new agent software release, the prefix cache hit rate plummeted to **0.0%**.
+Prior to the incident, the cluster operated at a steady-state prefix cache hit rate of **91.4 percent**, maintaining an average Time-to-First-Token (TTFT) of $220\text{ ms}$. Within six minutes of a new agent software release, the prefix cache hit rate plummeted to **0.0 percent**.
 
 Investigation revealed that an agent developer had added an innocent telemetry header to the system prompt template:
 
@@ -488,7 +540,7 @@ Session UUID: {uuid.uuid4()}
 """
 ```
 
-### The Cascading Failure Sequence
+### The cascading failure sequence
 
 By placing the millisecond-precision dynamic timestamp and random UUID at the very beginning of the prompt string, every single request submitted to the cluster possessed a completely unique first $40$ tokens.
 
@@ -500,7 +552,7 @@ The failure propagated through five distinct stages:
 4. **Queueing Backpressure and Pinned Block Exhaustion:** Dictated by Little's Law ($L = \lambda W$), as prefill latency ($W$) exploded from $220\text{ ms}$ to over $11\text{ seconds}$ under constant arrival rate ($\lambda$), the number of concurrent requests actively trapped in the system ($L$) skyrocketed. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks completely exhausted the global free list.
 5. **Cascading Worker Death:** When an active decode step requested an additional physical block from an exhausted free pool with zero evictable zero-ref-count blocks, the allocation call failed. Rather than graceful throttling, worker processes crashed with CUDA out-of-memory exceptions, triggering cluster-wide leader election storms.
 
-### Architectural Postmortem Remedies
+### Architectural postmortem remedies
 
 The engineering team implemented three permanent architectural guardrails to eliminate this failure mode:
 
@@ -532,11 +584,13 @@ When an agent executes an environment-mutating action (such as modifying a confi
 While Copy-on-Write PagedAttention eliminates prefix duplication, speculative tree search algorithms (such as MCTS or wide Best-of-$N$) allocate new physical blocks rapidly as candidate branches diverge. If the search scheduler lacks global tree-depth bounds or memory budgets, rapid branch proliferation can exhaust GPU HBM, triggering cluster-wide OOMs. Search schedulers must coordinate directly with the serving runtime's physical page allocators.
 :::
 
+This chapter gives principle \ref{pri-vol3-prefix-coherence} both halves of its claim. Prefix sharing is what makes multi-turn serving affordable, and coherence is what keeps the saving honest, because a cached prefix is valid only while the tokens and the model that produced it are unchanged.
+
 ## Chapter Summary {#sec-vol3-caching-summary}
 
-- **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85% to 95% prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
+- **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85 to 95 percent prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
 - **PagedAttention Virtual Memory:** Adapting operating system virtual memory paging to transformer KV caches partitions tensors into fixed-size physical blocks (e.g., 16 or 32 tokens), eliminating external fragmentation, bounding internal fragmentation to $< 0.05\%$, and enabling Copy-on-Write sharing.
 - **Radix Tree Indexing:** Organizing physical KV blocks as a dynamic Radix tree allows serving runtimes (such as SGLang) to match incoming token sequences against cached GPU memory in sub-millisecond time, executing chunked prefills exclusively for new suffix tokens.
-- **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving sub-100ms swap breakevens.
+- **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving swap breakevens under $100\text{ ms}$.
 - **Prefill-Decode Disaggregation:** Physically separating compute-bound prefill nodes from memory-bandwidth-bound decode nodes over 400–800 Gbps RDMA interconnects eliminates Head-of-Line blocking, isolates latency SLOs, and increases serving goodput by up to $4\times$.
 - **Static Prefix Discipline:** Prompt templates must place immutable tokens (system instructions, tool schemas) strictly ahead of mutable variables and observation deltas to prevent catastrophic Radix cache thrashing.

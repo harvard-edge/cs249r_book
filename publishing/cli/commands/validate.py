@@ -45,6 +45,11 @@ from . import reference_check
 console = Console()
 
 
+SELF_XREF_SPAN_RE = re.compile(
+    r"@[Ss]ec(-[a-zA-Z0-9_-]+)\s+(?:through|to)\s+@[Ss]ec(-[a-zA-Z0-9_-]+)"
+)
+
+
 @dataclass
 class ValidationIssue:
     file: str
@@ -1670,15 +1675,28 @@ class ValidateCommand:
         )
 
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
-        """Resolve the shared book references.bib for a book .qmd."""
+        """Resolve the bibliography a .qmd actually renders against.
+
+        Volumes I and II share contents/references.bib; Volumes III and IV each
+        have their own. Resolve by volume rather than assuming the shared file,
+        because "backmatter" appears in every volume's path: matching on that
+        segment alone checked vol4's appendices against vol1/vol2's bibliography
+        and reported seven of its real entries as missing, while vol3 and vol4
+        chapters matched no segment at all and were never citation-checked.
+        """
         try:
             rel = file.relative_to(self.config_manager.book_dir)
         except ValueError:
             return None
-        parts = rel.parts
-        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & set(parts)):
+        parts = set(rel.parts)
+        contents = self.config_manager.book_dir / "contents"
+        for vol in ("vol3", "vol4"):
+            if vol in parts:
+                bib_file = contents / f"references-{vol}.bib"
+                return bib_file if bib_file.exists() else None
+        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & parts):
             return None
-        bib_file = self.config_manager.book_dir / "contents" / "references.bib"
+        bib_file = contents / "references.bib"
         return bib_file if bib_file.exists() else None
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
@@ -1702,6 +1720,11 @@ class ValidateCommand:
             qmd_content_no_code = re.sub(r"<style\b[^>]*>.*?</style>", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"```.*?```", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"`[^`]+`", "", qmd_content_no_code)
+            # Strip math. Pandoc's `@` citation syntax has no meaning inside
+            # math mode, but "Pass@k", "Pass@100" and "pass@1" are ordinary
+            # notation there, and each was reported as a missing citation key.
+            qmd_content_no_code = re.sub(r"\$\$.*?\$\$", "", qmd_content_no_code, flags=re.DOTALL)
+            qmd_content_no_code = re.sub(r"(?<!\\)\$[^$\n]+\$", "", qmd_content_no_code)
             refs = set(CITATION_REF_PATTERN.findall(qmd_content_no_code))
             refs = {r.rstrip(".,;:") for r in refs if not r.startswith(EXCLUDED_CITATION_PREFIXES)}
             refs = {r for r in refs if not re.match(r"^\d+\.\d+", r)}
@@ -3049,8 +3072,10 @@ class ValidateCommand:
                             )
                         )
 
-                # Check inline footnotes (always forbidden)
-                for m in inline_fn_pat.finditer(line):
+                # Check inline footnotes (always forbidden). Mask inline code
+                # first: a regex such as `^[0-9]+$` is not footnote syntax.
+                line_no_code = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
+                for m in inline_fn_pat.finditer(line_no_code):
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
@@ -4949,6 +4974,7 @@ class ValidateCommand:
             self.config_manager.book_dir / "contents" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol1" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol2" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "contents" / "vol3" / "parts" / "summaries.yml",
             self.config_manager.book_dir / "contents" / "vol4" / "parts" / "summaries.yml",
         ]
 
@@ -7634,6 +7660,10 @@ class ValidateCommand:
                     continue
                 if stripped.startswith(":::"):
                     continue
+                # Authoring scaffold, not prose: a @sec- inside an HTML comment
+                # renders nowhere and has no sentence position.
+                if stripped.startswith("<!--"):
+                    continue
                 if footnote_def.match(line):
                     continue
                 # Heading lines are governed by heading-case (Title Case for
@@ -8328,11 +8358,28 @@ class ValidateCommand:
                 if not stack or stripped.startswith("#") or stripped.startswith("//"):
                     continue
 
+                # A chapter's own H1 id is in scope for the whole file, so
+                # book-level structure that legitimately names this chapter
+                # alongside its siblings would otherwise always self-trigger.
+                # Two such shapes are not "see this section" references:
+                #   - a range endpoint: "@sec-boundary through @sec-brain"
+                #   - a roadmap or synthesis table that lists every chapter,
+                #     as a row ("| ... | @sec-frontier | ...") or its caption
+                # Rewriting either to "this section" would corrupt the artifact.
+                is_table_row = stripped.startswith("|") or stripped.startswith(": ")
+                span_ids = {
+                    ("sec" + sid).lower()
+                    for pair in SELF_XREF_SPAN_RE.findall(stripped)
+                    for sid in pair
+                }
+
                 xrefs = xref_pattern.findall(stripped)
                 if xrefs:
                     active_ids = {s['sec_id'] for s in stack}
                     for xref in xrefs:
                         ref_id = xref.lstrip('@').lower()
+                        if is_table_row or ref_id in span_ids:
+                            continue
                         if ref_id in active_ids:
                             context = stripped[max(0, stripped.find(xref) - 15) : min(len(stripped), stripped.find(xref) + len(xref) + 15)].strip()
                             issues.append(

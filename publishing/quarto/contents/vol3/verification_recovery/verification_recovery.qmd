@@ -112,7 +112,7 @@ find . -name "*.tmp" -o -name "test_*" -delete
 
 Syntactically, the command is valid bash. Epistemically, the model indicates complete confidence. Semantically, because the `-o` (OR) operator has lower precedence than the implicit `-and`, the command deletes all files whose names start with `test_*` regardless of whether they are temporary, instantly obliterating the repository's entire unit test suite.
 
-### Why Checksums and Retries Fail
+### Why checksums and retries fail
 
 In classical storage and networking, integrity is guaranteed by mathematical digests: CRC32 polynomial codes, SHA-256 hashes, or HMAC signatures. These mechanisms verify that the bit representation of data has not suffered corruption during transit or storage. They are completely blind to semantic validity. An agent outputting valid JSON containing `rm -rf /` has a valid SHA-256 checksum.
 
@@ -124,12 +124,11 @@ In autonomous agent systems, **unverified retries compound error**. Because auto
 
 Deterministic recovery mandates that fail-plausible errors are detected not by model introspection, but by **external, deterministic verifier oracles** that reject invalid actions before state mutations become permanent.
 
-
 ## Compounding Error Dynamics {#sec-vol3-recovery-compounding-error-dynamics-mathematical}
 
 The critical operational challenge of autonomous agents is trajectory length. While human software engineers can execute multi-hour development tasks spanning dozens of discrete steps, unverified agent systems suffer catastrophic reliability collapse as the horizon expands.
 
-### Independent Error Decay
+### Independent error decay
 
 Consider an agent trajectory modeled as a sequence of $N$ discrete action steps $(a_1, a_2, \dots, a_N)$. Suppose each individual step has a stationary probability $p \in (0, 1)$ of semantic correctness, and step errors are mutually independent:
 
@@ -142,18 +141,18 @@ $$P_{\text{success}}(N) = \prod_{t=1}^{N} P(\text{Step } t \text{ succeeds}) = p
 Even for frontier models exhibiting state-of-the-art reasoning ($p = 0.98$), exponential compounding induces rapid decay over realistic software engineering horizons:
 
 | Horizon ($N$) | Step Accuracy $p = 0.90$ | Step Accuracy $p = 0.95$ | Step Accuracy $p = 0.98$ | Step Accuracy $p = 0.99$ |
-|:---|:---|:---|:---|:---|
-| **$N = 5$** | 59.0% | 77.4% | 90.4% | 95.1% |
-| **$N = 10$** | 34.9% | 59.9% | 81.7% | 90.4% |
-| **$N = 25$** | 7.2% | 27.7% | 60.3% | 77.8% |
-| **$N = 50$** | 0.5% | 7.7% | 36.4% | 60.5% |
-| **$N = 100$** | 0.003% | 0.59% | 13.3% | 36.6% |
-| **$N = 200$** | 0.00000007% | 0.0035% | 1.76% | 13.4% |
+|:--------------|:-------------------------|:-------------------------|:-------------------------|:-------------------------|
+| **$N = 5$**   | 59.0%                    | 77.4%                    | 90.4%                    | 95.1%                    |
+| **$N = 10$**  | 34.9%                    | 59.9%                    | 81.7%                    | 90.4%                    |
+| **$N = 25$**  | 7.2%                     | 27.7%                    | 60.3%                    | 77.8%                    |
+| **$N = 50$**  | 0.5%                     | 7.7%                     | 36.4%                    | 60.5%                    |
+| **$N = 100$** | 0.003%                   | 0.59%                    | 13.3%                    | 36.6%                    |
+| **$N = 200$** | 0.00000007%              | 0.0035%                  | 1.76%                    | 13.4%                    |
 : **Compounding Trajectory Reliability Decay**: Theoretical probability of unverified trajectory completion $P_{\text{success}} = p^N$ across step horizons and single-step accuracies. {#tbl-compounding-decay}
 
 As demonstrated in @tbl-compounding-decay, an agent possessing a remarkable 98 percent single-step accuracy has less than a 37 percent chance of completing a 50-step task, and only a 13.3 percent chance of completing a 100-step task.
 
-### Non-Stationary Markovian Context Pollution
+### Non-stationary Markovian context pollution
 
 In production systems, the independent error assumption is an optimistic upper bound. In reality, agent trajectories are non-stationary Markov processes where the state transitions according to:
 
@@ -169,12 +168,11 @@ $$P_{\text{success}} \le \prod_{t=1}^{N} p_t \ll p^N$$
 
 This mathematical reality explains the empirical plateau observed on benchmarks like SWE-bench [@jimenez2024swebench] (see @sec-vol3-telemetry-evaluation). **Scaling pretraining parameters cannot overcome the exponent $N$.** Even if a multi-trillion parameter model achieves $p = 0.99$, a 200-step trajectory yields an 86.6 percent failure rate. The only mathematical path to high-horizon reliability is **intermediate verification**: resetting the compounding exponent by validating and checkpointing state at frequent intervals.
 
-
 ## The Verification Tax {#sec-vol3-recovery-the-verification-tax-c}
 
 If intermediate verification is the cure for exponential error decay, why not verify after every single token or micro-action? The answer lies in the economics of system execution: the **Verification Tax** ($C_{\text{ver}}$).
 
-### System Cost Formulation
+### System cost formulation
 
 Verification is not free. Executing an external verification suite consumes wall-clock latency, token inference budget, and host compute resources:
 
@@ -205,8 +203,37 @@ Total Cost
    +----------------------------------------------------> Verification Cadence (K)
 ```
 
-In high-error environments, verification must be aggressive. In highly reliable, deterministic sub-tasks, verification can be lazily deferred to logical milestone boundaries.
+Only three quantities fix where that minimum falls: the wall-clock cost of a step, the wall-clock cost of the verifier, and the per-step error rate.
 
+::: {#nbk-recovery-verification-cadence .callout-notebook title="Where the verification tax curve bottoms out"}
+
+**Problem**: An agent executes a 50-step trajectory behind a full test-suite gate. How many steps should run between verifications, and how much wall-clock time separates that cadence from the extremes of verifying every step and verifying only at the end?
+
+**Variables**: Trajectory length $N = 50$ steps, action step cost $T_{\text{step}} = 1\text{ s}$, verifier cost $T_{\text{ver}} = 10\text{ s}$ for a full suite run, and per-step semantic correctness $p = 0.95$ from @tbl-compounding-decay. A block of steps that fails its gate is rolled back and redone in full. The step and verifier costs are the over-verification example stated above, and all four quantities are scenario assumptions.
+
+**Math**: Verifying every $m$ steps partitions the trajectory into $N/m$ blocks. A block clears its gate only if all $m$ of its steps are correct, with probability $p^{m}$, so it takes $1/p^{m}$ attempts on average, and each attempt costs $m\,T_{\text{step}} + T_{\text{ver}}$ of wall clock:
+
+$$T(m) = \frac{N}{m} \cdot \frac{m\,T_{\text{step}} + T_{\text{ver}}}{p^{m}}$$
+
+Evaluating at five cadences, carrying $p^{m}$ to four figures:
+
+$$T(1) = 50 \times \frac{11}{0.9500} = 579\text{ s}, \qquad T(5) = 10 \times \frac{15}{0.7738} = 194\text{ s}$$
+
+$$T(10) = 5 \times \frac{20}{0.5987} = 167\text{ s}$$
+
+$$T(25) = 2 \times \frac{35}{0.2774} = 252\text{ s}, \qquad T(50) = 1 \times \frac{60}{0.07694} = 780\text{ s}$$
+
+Swapping the ten-second suite for the Stage 2 static gate at $T_{\text{ver}} = 0.05\text{ s}$ leaves $p$ and $N$ untouched but rescales the tax:
+
+$$T(1) = 50 \times \frac{1.05}{0.9500} = 55.3\text{ s}, \qquad T(10) = 5 \times \frac{10.05}{0.5987} = 83.9\text{ s}$$
+
+**Result**: Against the ten-second suite the minimum sits at $m = 10$, five gates across the trajectory, costing $167\text{ s}$ over a $50\text{ s}$ error-free floor. Verifying every step costs $579\text{ s}$, or $3.5\times$ the optimum, and verifying only at the end costs $780\text{ s}$, or $4.7\times$. The basin is broad, with every cadence from $5$ to $25$ landing within $1.5\times$ of the minimum. Against the static gate the minimum moves to $m = 1$.
+
+**Systems insight**: The optimal cadence is a property of the verifier rather than of the agent, and it shifts by an order of magnitude when the gate changes. A gate costing $5\%$ of a step is cheapest run on every action, because the rework it prevents always outweighs what it charges, while a gate costing ten steps has to be amortized across a block. This is the quantitative case for the cascading pipeline of @fig-verification-pipeline. Stages 1 and 2 belong on every candidate action, and only the dynamic test oracle of Stage 3 needs a cadence sized for it, which need only be correct to within a factor of two because the curve is flat near its minimum and steep only at the extremes.
+
+:::
+
+In high-error environments, verification must be aggressive. In highly reliable, deterministic sub-tasks, verification can be lazily deferred to logical milestone boundaries.
 
 ## Deterministic Test Oracles {#sec-vol3-recovery-deterministic-test-oracles-compilers}
 
@@ -216,11 +243,11 @@ To maintain execution efficiency while enforcing correctness, production archite
 ![](images/svg/verification_pipeline_gates.svg)
 :::
 
-### The Four Verification Gates
+### The four verification gates
 
 As shown in @fig-verification-pipeline, candidate actions are subjected to four non-negotiable verification gates:
 
-#### Stage 1: Syntax & Schema Gate ($T_{\text{ver}} < 2\text{ ms}$)
+#### Stage 1: Syntax & schema gate ($T_{\text{ver}} < 2\text{ ms}$)
 Before any code or command enters the operating system, the runtime validates structural integrity:
 
 * JSON-RPC schema compliance (Model Context Protocol parameters).
@@ -228,7 +255,7 @@ Before any code or command enters the operating system, the runtime validates st
 * Boundary delimiter integrity (verifying no unescaped quotes, mismatched brackets, or markdown leaks).
 * **Early Exit:** Syntactically malformed outputs are rejected in under 2 milliseconds without spawning child processes or consuming GPU high-bandwidth memory (HBM).
 
-#### Stage 2: Static Analysis & Type Gate ($T_{\text{ver}} \approx 10\text{--}50\text{ ms}$)
+#### Stage 2: Static analysis & type gate ($T_{\text{ver}} \approx 10\text{--}50\text{ ms}$)
 Syntactically valid code candidates undergo static verification without execution:
 
 * Language typecheckers (`tsc --noEmit`, `mypy --strict`, `cargo check`).
@@ -236,7 +263,7 @@ Syntactically valid code candidates undergo static verification without executio
 * Scope resolution (confirming all invoked functions, imports, and variables exist in the target AST).
 * Principles inherited from static software verification [@ball2002slam] guarantee that type violations and undefined references are eliminated before runtime.
 
-#### Stage 3: Dynamic Sandbox Test Oracle ($T_{\text{ver}} \approx 100\text{--}2000\text{ ms}$)
+#### Stage 3: Dynamic sandbox test oracle ($T_{\text{ver}} \approx 100\text{--}2000\text{ ms}$)
 Code that passes static analysis is executed inside an isolated, resource-bounded sandbox (e.g., an AWS Firecracker microVM or gVisor container; see @sec-vol3-sandboxing-isolation):
 
 * Target unit test execution (`pytest`, `cargo test`, `npm test`).
@@ -244,31 +271,30 @@ Code that passes static analysis is executed inside an isolated, resource-bounde
 * Exit code and return code validation (`exit_code == 0`).
 * Dynamic memory and resource leak detection.
 
-#### Stage 4: Semantic Invariant & Safety Gate ($T_{\text{ver}} \approx 5\text{--}20\text{ ms}$)
+#### Stage 4: Semantic invariant & safety gate ($T_{\text{ver}} \approx 5\text{--}20\text{ ms}$)
 The final gate evaluates system-level preconditions and postconditions:
 
 * Stategraph delta validation (verifying only authorized files were modified).
 * Token and financial budget adherence.
 * Policy invariant checks (ensuring no protected checkouts, credentials, or production network endpoints were touched).
 
-| Verification Property | Deterministic Software Oracles | LLM-as-a-Judge Critic |
-|:---|:---|:---|
-| **Determinism** | 100% bit-exact reproducibility | Non-deterministic, stochastic |
-| **Execution Latency** | 1 ms – 500 ms (native CPU) | 800 ms – 3000 ms (GPU inference) |
-| **Operational Cost** | Free (local CPU instructions) | Expensive (\$0.01--\$0.05 per pass) |
-| **False Positive Rate** | Zero (if test/compiler fails, code is broken) | Moderate (hallucinated objections) |
-| **False Negative Rate** | Bounded by test suite coverage | High (sycophancy, missed subtle bugs) |
-| **Feedback Mechanism** | Exact file, line number, compiler diff | Verbose, ambiguous conversational prose |
+| Verification Property   | Deterministic Software Oracles                | LLM-as-a-Judge Critic                   |
+|:------------------------|:----------------------------------------------|:----------------------------------------|
+| **Determinism**         | 100% bit-exact reproducibility                | Non-deterministic, stochastic           |
+| **Execution Latency**   | 1 ms – 500 ms (native CPU)                    | 800 ms – 3000 ms (GPU inference)        |
+| **Operational Cost**    | Free (local CPU instructions)                 | Expensive (\$0.01--\$0.05 per pass)     |
+| **False Positive Rate** | Zero (if test/compiler fails, code is broken) | Moderate (hallucinated objections)      |
+| **False Negative Rate** | Bounded by test suite coverage                | High (sycophancy, missed subtle bugs)   |
+| **Feedback Mechanism**  | Exact file, line number, compiler diff        | Verbose, ambiguous conversational prose |
 : **Deterministic Oracles vs. Secondary LLM Judges**: Comparative systems analysis of verification mechanisms. {#tbl-oracle-comparison}
 
 As summarized in @tbl-oracle-comparison, **deterministic software oracles strictly dominate neural LLM critics for code and systems verification**. An LLM critic often suffers from sycophancy—praising flawed code if framed authoritatively—or hallucinates non-existent syntax violations. A compiler or unit test suite provides an unforgeable, mathematical truth boundary.
-
 
 ## Test-Time Search Recovery {#sec-vol3-recovery-test-time-search-recovery-best-of-}
 
 When an action candidate fails verification at one of the gates, how does the agent runtime recover? Rather than collapsing into an interactive failure, modern systems employ **Test-Time Search Recovery** (see @sec-vol3-test-time-search) [@snell2024scaling].
 
-### Best-of-$N$ Rejection Sampling
+### Best-of-$N$ rejection sampling
 
 The simplest test-time recovery strategy is Best-of-$N$ parallel generation coupled with oracle filtering:
 
@@ -288,7 +314,7 @@ For a difficult refactoring turn where $p = 0.40$, sampling $N = 8$ candidates e
 
 $$P_{\text{recover}}(8) = 1 - (1 - 0.40)^8 = 1 - 0.0168 = 98.32\text{ percent}$$
 
-### Tree-of-Thoughts (ToT) and Speculative Rollbacks
+### Tree-of-thoughts (ToT) and speculative rollbacks
 
 For complex, multi-step sub-tasks, Best-of-$N$ is insufficient because errors span interdependent steps. Production runtimes implement **Tree-of-Thoughts (ToT)** [@yao2023tree] or Monte Carlo Tree Search (MCTS) over trajectory states.
 
@@ -315,7 +341,7 @@ When an agent embarks on a complex trajectory:
 3. **Speculative Rollback:** Because all mutations occurred in an ephemeral microVM UpperDir, rolling back $B_1$ is instantaneous: the UpperDir is purged in under 2 milliseconds, and the active context window rewinds to $S_0$.
 4. **Counterfactual Exploration:** The agent proceeds down alternative branch $B_2$, committing state mutations only when the terminal verifier passes.
 
-### Circuit Breakers and Runaway Execution Limits
+### Circuit breakers and runaway execution limits
 
 While test-time search algorithms like Best-of-$N$ and ToT provide powerful algorithmic mechanisms to navigate around failed verification gates, they introduce a critical system-level vulnerability: infinite retry loops. If an agent encounters an unsolvable constraint or structurally flawed test oracle, unconstrained search will aggressively consume GPU inference budgets without making forward progress.
 
@@ -325,7 +351,6 @@ Classical distributed architectures prevent cascading resource exhaustion via th
 2. **Consecutive Failure Breakers:** If an agent fails the identical verification gate $N$ consecutive times, the stategraph is locked and the task is escalated to a human supervisor.
 3. **Wall-Clock Timeouts:** A bounding deadline on task execution. Because agents may block on external APIs or hallucinate infinite loops in sandboxed bash sessions, the orchestrator must enforce preemptive OS-level thread and container timeouts.
 
-
 ## The Reversibility Boundary {#sec-vol3-recovery-the-reversibility-boundary-reversible}
 
 Speculative rollback is a powerful mechanism, but it relies upon an unstated assumption: **that actions can be undone**. In software engineering and real-world operations, this assumption is frequently false. This brings us to the **Reversibility Boundary** (@fig-reversibility-boundary).
@@ -334,11 +359,25 @@ Speculative rollback is a powerful mechanism, but it relies upon an unstated ass
 ![](images/svg/reversibility_boundary.svg)
 :::
 
-### The Bifurcation of Systems State
+::: {#ws-recovery-knight-capital-2012 .callout-war-story title="Knight Capital and the forty-five minute loop (2012)"}
+
+**Context**: On 1 August 2012 Knight Capital Americas deployed new order-routing code to its production servers ahead of a change in NYSE retail liquidity handling. The deployment reached seven of eight servers. On the eighth, dormant code from an earlier system remained in place, and the release repurposed a configuration flag that the dormant code still read [@sec2013knight].
+
+**Mechanism**: When trading opened, the flag activated the old logic on the one stale server. It began emitting orders without the counter that had previously bounded it, so each parent order produced a stream of child orders that were never marked complete. The system was not confused about market conditions and was not malfunctioning in any way its own monitoring could name. It executed exactly what its state told it to execute, at machine speed.
+
+**Impact**: Over roughly forty-five minutes the firm sent millions of orders into 154 stocks, accumulating multi-billion-dollar positions it had never intended to hold. Knight lost approximately \$460 million, more than its market capitalization, and was acquired within months. The SEC found the firm had violated the Market Access Rule, which requires controls that operate before an order reaches the market.
+
+**Fix**: Pre-trade limits enforced outside the trading logic, a kill switch that any operator can pull without diagnosing the cause first, and deployment procedures that verify every target rather than assuming uniformity.
+
+**Systems lesson**: Every executed trade was a legally final transfer, so no rollback existed at any layer. Knight is what the Reversibility Boundary looks like when it is crossed without a gate: the loop was bounded only by the time it took humans to understand what was happening, and each of those forty-five minutes wrote permanent state into an external system. An agentic runtime placing orders, sending payments, or moving physical mass inherits this exactly. The engineering question is not whether the policy is confident, but whether anything outside the policy can stop it before the action becomes a fact.
+
+:::
+
+### The bifurcation of systems state
 
 As mapped in @fig-reversibility-boundary, agent actions exist on two sides of a fundamental physical divide:
 
-#### 1. Reversible Internal State Domain (Invertible)
+#### 1. Reversible internal state domain (invertible)
 
 * **Latency:** $T_{\text{lat}} \approx 1\text{--}10\text{ ms}$.
 * **Cost:** Free; contained within local RAM, disk caches, and microVMs.
@@ -350,7 +389,7 @@ As mapped in @fig-reversibility-boundary, agent actions exist on two sides of a 
   - OverlayFS UpperDir layers
 * **System Property:** **100 percent Invertible.** If an action fails or exhibits hallucination, executing `git clean -fd` or purging an in-memory directory completely erases the side-effect. Speculative search, backtracking, and Best-of-$N$ sampling can operate freely with zero external liability.
 
-#### 2. Irreversible External Actuation Domain (Non-Invertible)
+#### 2. Irreversible external actuation domain (non-invertible)
 
 * **Latency:** $T_{\text{lat}} \approx 10^2\text{--}10^6\text{ ms}$.
 * **Cost:** High financial, legal, or operational liability.
@@ -361,7 +400,7 @@ As mapped in @fig-reversibility-boundary, agent actions exist on two sides of a 
   - Financial transactions (Stripe API, wire settlements, crypto transactions)
 * **System Property:** **Non-Invertible.** Once a TCP packet carrying an email leaves the network card, or once an uncommitted database row is modified without distributed locking, the action cannot be recalled. There is no `undo` system call in the physical universe.
 
-### The Breakdown of Distributed 2-Phase Commit (2PC)
+### The breakdown of distributed 2-phase commit (2PC)
 
 In classical database theory [@gray1992], atomicity across distributed systems is achieved via the **Two-Phase Commit (2PC)** protocol:
 
@@ -371,7 +410,7 @@ In classical database theory [@gray1992], atomicity across distributed systems i
 **Two-phase commit is impossible in autonomous agent architectures.**
 External SaaS APIs (Stripe, Twilio, GitHub, AWS) do not expose prepare/vote interfaces. They execute requests immediately upon receiving an authenticated HTTP POST. Furthermore, agent decision cycles take seconds or minutes, vastly exceeding distributed lock timeouts. Holding database row locks open while waiting for an LLM to generate its next inference turn would freeze enterprise databases and cause catastrophic connection starvation.
 
-### Idempotency Keys and the Two Generals' Problem
+### Idempotency keys and the Two Generals' problem
 
 When crossing the Reversibility Boundary, agentic systems inevitably collide with the classic Two Generals' Problem: a network timeout does not imply transaction failure. If an agent dispatches an HTTP POST to trigger a cloud deployment and the connection drops, the deployment may have actually succeeded.
 
@@ -381,7 +420,7 @@ $$ \text{Idempotency-Key} = \text{Hash}(\text{Trajectory\_ID} \parallel \text{St
 
 By injecting cryptographic idempotency tokens into external API headers, the runtime ensures that even if an agent hallucinates a retry loop or the network partitions, the downstream service will safely deduplicate the request, ensuring exactly-once execution semantics.
 
-### The $10^6\times$ Human Oversight Latency Tax
+### The $10^6\times$ human oversight latency tax
 
 When an agent must cross the Reversibility Boundary to execute a high-consequence, non-invertible action, production systems enforce an **Oversight Gate** (Human-in-the-Loop approval).
 
@@ -394,14 +433,13 @@ This represents a **$10^6\times$ latency disparity**.
 
 Synchronously blocking the agent execution thread while awaiting human confirmation is a catastrophic architectural antipattern: scarce GPU HBM remains allocated to hold the active KV cache, starving inference servers. The runtime must implement **asynchronous state suspension**: serializing the stategraph and Agent Control Block to persistent storage, tearing down the microVM, and releasing all compute resources until the human approval signal arrives.
 
-
 ## Distributed Sagas for Agent Workflows {#sec-vol3-recovery-distributed-sagas-for-agent}
 
 Because 2-phase commit is physically impossible across heterogeneous external services, autonomous agent workflows that execute multi-step external actions must adopt the **Saga Pattern**, originally formulated by @garciamolina1987sagas and modernized in microservices architectures [@richardson2018microservices].
 
-### Mathematical Formulation of an Agent Saga
+### Mathematical formulation of an agent saga
 
-::: {.callout-definition}
+::: {.callout-definition title="Agent saga"}
 An **Agent Saga** $\mathcal{S}$ is an ordered collection of $n$ forward tool transactions:
 
 $$\mathcal{S} = \{T_1, T_2, \dots, T_n\}$$
@@ -424,7 +462,7 @@ Forward Execution:   T_1 -----> T_2 -----> T_3 -----> T_4 (FAILS!)
 Backward Rollback:   C_1 <----- C_2 <----- C_3 <--------+
 ```
 
-### Execution Dynamics
+### Execution dynamics
 
 As illustrated in @fig-agent-saga, execution proceeds under strict state machine rules:
 
@@ -442,7 +480,7 @@ As illustrated in @fig-agent-saga, execution proceeds under strict state machine
   - Financial holds are released ($C_3$).
   - Scratch branches are purged ($C_1$).
 
-### The Golden Invariant: Compensations Must Be Deterministic Code
+### The golden invariant: Compensations must be deterministic code
 
 A critical error committed in early agent implementations is asking the language model to perform the rollback:
 
@@ -461,12 +499,11 @@ Compensating actions $C_i$ must be:
 2. **Idempotent:** Executing $C_i$ multiple times must yield the exact same environmental state ($C_i(C_i(s)) = C_i(s)$).
 3. **Registered at Dispatch:** When forward transaction $T_i$ is emitted by the LLM, the runtime parameterizes $C_i$ immediately using the response metadata (e.g., instance IDs, transaction hashes) before executing $T_{i+1}$.
 
-
 ## Trajectory Checkpointing {#sec-vol3-recovery-trajectory-checkpointing-persistent-stategraphs}
 
-To survive infrastructure crashes, host reboots, network partitioning, and multi-hour human approval pauses, autonomous agent runtimes must implement **Durable Execution** (see @sec-vol3-recovery-trajectory-checkpointing-persistent-stategraphs; as embodied in workflow systems like Temporal and LangGraph).
+To survive infrastructure crashes, host reboots, network partitioning, and multi-hour human approval pauses, autonomous agent runtimes must implement **Durable Execution**, as embodied in workflow systems like Temporal and LangGraph.
 
-### Event Sourcing and Write-Ahead Logging (WAL)
+### Event sourcing and write-ahead logging (WAL)
 
 A durable agent runtime never stores state purely as transient in-memory Python objects. Instead, the runtime is structured as an append-only event-sourced stategraph. Every state transition is recorded to an immutable Write-Ahead Log (WAL) backed by persistent storage (PostgreSQL, SQLite, or distributed object storage):
 
@@ -491,11 +528,11 @@ Each event payload contains:
 * `state_delta`: Serialized state mutations (variables modified, files edited).
 * `compensation_descriptor`: Typed parameters for $C_i$.
 
-### Distributed Snapshotting (Chandy-Lamport)
+### Distributed snapshotting (chandy-lamport)
 
 When persisting complex concurrent tool states, runtimes apply the classical Chandy-Lamport distributed snapshotting algorithm [@chandy1985distributed]. The coordinator injects marker tokens into internal message channels. When an agent receives a marker, it immediately flushes its local working set, records in-flight channel messages, and registers a consistent global snapshot without freezing concurrent read operations.
 
-### Instant Hydration and Crash Recovery
+### Instant hydration and crash recovery
 
 If the host machine experiences a physical power failure or kernel panic at Turn 4:
 
@@ -503,7 +540,6 @@ If the host machine experiences a physical power failure or kernel panic at Turn
 2. The worker replays the immutable event log from Turn 0 through Turn 4.
 3. Because all external tool interactions are recorded in the WAL, previous tool calls are **not re-executed**; their recorded outputs are injected directly into the runtime context.
 4. The agent hydrates its memory state in under 50 milliseconds, resuming execution from the exact point of interruption without losing progress or wasting GPU tokens.
-
 
 ## Fork-on-Error Branching {#sec-vol3-recovery-fork-on-error-and-counterfactual-branching}
 
@@ -517,7 +553,7 @@ Consider an autonomous database migration agent:
 
 Because the column has been physically dropped, there is no mathematical inverse $A^{-1}$. A simple backward rollback cannot restore the erased data.
 
-### The Fork-on-Error Pattern
+### The fork-on-error pattern
 
 When non-invertible failures occur, production systems transition from backward rollback to **Forward Counterfactual Remediation** [@decandia2007dynamo]:
 
@@ -545,7 +581,6 @@ When non-invertible failures occur, production systems transition from backward 
    * A restricted tool catalog containing only safe remediation utilities.
 5. The subagent derives a forward repair plan, extracts the missing data from backup logs, applies the repair, and transfers control back to the primary supervisor.
 
-
 ## Non-Deterministic Replay Engines {#sec-vol3-recovery-non-deterministic-replay-engines-mocking}
 
 A persistent nightmare in debugging autonomous systems is the **Heisenbug**: an agent fails catastrophically on a customer workflow, but when the systems engineer attempts to reproduce the bug locally, the agent executes flawlessly.
@@ -556,7 +591,7 @@ Stochastic LLMs and external environments exhibit non-determinism across three o
 2. **Environmental Non-Determinism:** Third-party REST API responses, network latency jitters, web page content changes, and dynamic git repositories.
 3. **Temporal Non-Determinism:** Operating system clocks, timestamp queries (`time.now()`), and process scheduling interleavings.
 
-### Architecture of a Deterministic Replay Engine
+### Architecture of a deterministic replay engine
 
 Drawing on principles from distributed replay systems (Friday [@geels2007friday]) and virtual machine time-travel debugging [@king2005debugging], production agent platforms incorporate an **Immutable Replay Engine** (see @sec-vol3-telemetry-evaluation).
 
@@ -594,12 +629,11 @@ The engineer executes the agent with the production trace file. The runtime ente
 
 The engineer can step backward and forward through multi-turn trajectories, attach debuggers, inspect intermediate attention KV activations, and pinpoint the exact token transition that triggered the semantic defect with **100 percent bit-exact determinism**.
 
-
 ## Self-Healing Pipeline Case Study {#sec-vol3-recovery-production-case-study-building}
 
 To observe these theoretical recovery mechanisms operating in production, consider the architecture of an enterprise automated refactoring pipeline deployed at scale on repositories with millions of lines of code [@jimenez2024swebench].
 
-### Pipeline Architecture
+### Pipeline architecture
 
 ```
                  +---------------------------------------------+
@@ -636,9 +670,9 @@ To observe these theoretical recovery mechanisms operating in production, consid
         Teardown MicroVM                              Fork Counterfactual Turn
 ```
 
-### Forensic Execution Trace: Surviving 8 Consecutive Semantic Failures
+### Forensic execution trace: Surviving 8 consecutive semantic failures
 
-In this real-world production incident, an autonomous agent was tasked with migrating an internal payment reconciliation service from synchronous HTTP to asynchronous Celery workers.
+The trace below is constructed rather than observed, and its timings are illustrative. An autonomous agent is tasked with migrating an internal payment reconciliation service from synchronous HTTP to asynchronous Celery workers, and the point of following it step by step is to watch which recovery mechanism catches each of the eight failures.
 
 ```
 T + 00:00  [INIT] Task received: "Refactor reconciliation loop to Celery tasks."
@@ -666,7 +700,7 @@ T + 00:32  [ITER 8] Agent adopts standard celery shared_task pattern with explic
 T + 00:35  [COMMIT] Pull Request opened with verified test artifacts; microVM purged.
 ```
 
-### Systems Postmortem
+### Systems postmortem
 
 Without deterministic multi-stage gates, this pipeline would have created a catastrophic pull request at Iteration 1 (which would have broken production typing) or Iteration 2 (which would have caused database connection exhaustion in worker nodes).
 
@@ -721,7 +755,6 @@ Piping multi-thousand-line raw terminal tracebacks and compiler logs directly in
 A common violation of the **Principle of Least Privilege** is equipping an agent with coarse-grained administrative credentials (e.g., AWS `AdministratorAccess` or unfiltered shell capabilities) under the assumption that the LLM will only invoke the specific subset of tools required. When an agent experiences semantic hallucination or encounters adversarial prompt injections, it will aggressively exploit all available permissions. Runtimes must restrict tool catalogs dynamically per-task and employ strictly bounded IAM roles before executing external actuations.
 
 :::
-
 
 ## Chapter Summary {#sec-vol3-recovery-summary}
 
