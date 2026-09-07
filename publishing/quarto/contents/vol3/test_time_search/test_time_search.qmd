@@ -20,11 +20,12 @@ For years, the trajectory of artificial intelligence was governed by pre-trainin
 
 Frontier machine learning systems have consequently crossed into a new scaling regime: scaling test-time compute. Rather than treating inference as a passive, single-pass oracle, an agent runtime can allocate variable inference compute dynamically to explore alternative action branches, verify intermediate candidate states, and backtrack when dead-ends are encountered.
 
-This chapter formalizes test-time search topologies over agent tool action spaces, including:
-- Best-of-$N$
-- Beam Search
-- Monte Carlo Tree Search (MCTS)
-- Graph of Thoughts (GoT)
+This chapter formalizes test-time search topologies over agent tool action spaces. We progress from zero-search linear baselines to full stochastic trees:
+- **Chain of Thought (CoT) and ReAct:** Linear, zero-search baselines where reasoning and acting are interleaved in a single continuous trajectory.
+- **Best-of-$N$ Sampling:** Embarrassingly parallel candidate re-ranking.
+- **Beam Search and Tree of Thoughts (ToT):** Step-level pruning and heuristic-guided tree expansion.
+- **Monte Carlo Tree Search (MCTS):** Asymmetric, simulation-backed exploration.
+- **Graph of Thoughts (GoT):** Directed acyclic graphs enabling branch merging and synthesis.
 
 We also:
 - Derive the Verification Tax ($C_{\text{ver}}$), proving that the optimal test-time policy balances generation compute against verification compute.
@@ -79,6 +80,14 @@ As illustrated in @fig-test-time-compute-scaling, scaling test-time compute shif
 The reasoning fidelity of an autoregressive model on compositional tasks is fundamentally bounded by its search horizon. When intermediate verification is tractable, scaling test-time search compute yields exponential error reductions that cannot be achieved through greedy decoding on any finite parameter architecture.
 :::
 
+## The Linear Baselines: CoT and ReAct {#sec-vol3-search-linear-baselines-cot-and-react}
+
+Before introducing combinatorial search topologies, we must establish the zero-search baselines that define a single trajectory $\tau$.
+
+The simplest execution pattern is direct generation. However, because transformer attention cannot perform multi-step derivation within a single token generation step, models must emit intermediate computation onto a scratchpad. This was formalized as **Chain of Thought (CoT)** [@wei2022cot], where the model emits a linear sequence of reasoning tokens prior to outputting a final answer.
+
+When external environment interactions are required, CoT is extended into the **ReAct (Reason + Act)** topology [@yao2023react]. In ReAct, the model interleaves thought, action, and environment observation. While ReAct forms the fundamental building block of all modern agents, it is strictly a linear, zero-search topology. The agent commits irrevocably to an action and moves forward. If an observation $o_t$ reveals a catastrophic hallucination in thought $x_t$, the model's next thought $x_{t+1}$ frequently attempts to rationalize the error (cognitive drift) rather than recovering. Escaping this linear trap requires allocating test-time compute to combinatorial search.
+
 ## Best-of-$N$ Sampling and Re-Ranking {#sec-vol3-search-best-of--n-sampling-and}
 
 The simplest architectural topology for test-time compute scaling is **Best-of-$N$ Sampling** (also known as rejection sampling or candidate re-ranking).
@@ -113,16 +122,18 @@ While Best-of-$N$ is embarrassingly parallel—saturating GPU tensor cores by ba
 
 - **Reward Model Overoptimization (Goodhart's Law):** As $N$ scales to thousands of candidates, learned neural reward models suffer from extreme value overestimation [@gao2023scaling; @goodhart1984]. The policy exploits subtle blind spots in the reward network, selecting adversarial outputs that receive high scores from the verifier despite being functionally incorrect.
 
-## Beam Search over Thought Spaces {#sec-vol3-search-beam-search-over-thought}
+## Beam Search and Tree of Thoughts (ToT) {#sec-vol3-search-beam-search-and-tot}
 
-To mitigate the all-or-nothing token waste of Best-of-$N$, **Beam Search** introduces step-level pruning [@freitag2017beam; @meister2020]. Originally formulated in speech recognition [@lowerre1976] and neural machine translation, beam search maintains a fixed-width pool of the $B$ most promising partial hypotheses at each discrete horizon step.
+To mitigate the all-or-nothing token waste of Best-of-$N$, runtime systems introduce step-level pruning and heuristic-guided tree expansion. Originally formulated in speech recognition as **Beam Search** [@freitag2017beam; @meister2020], this concept was adapted for agentic reasoning as the **Tree of Thoughts (ToT)** architecture [@yao2024tree].
 
 In agentic systems, a "step" does not correspond to an individual sub-word token, but rather to a complete semantic thought block or tool invocation turn:
 $$
 s_t = (x, a_0, o_0, a_1, o_1, \dots, a_t, o_t)
 $$
 
-### Beam Search Execution Loop
+By treating the context as a tree rather than a linear ReAct chain, the agent can deliberately explore multiple candidate thoughts at each node, evaluate their promise using a heuristic or a Process Reward Model (PRM), and prune doomed branches early.
+
+### ToT / Beam Search Execution Loop
 
 At horizon step $t$, the system holds $B$ partial trajectories $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. The algorithm proceeds in three phases:
 
