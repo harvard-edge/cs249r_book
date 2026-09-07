@@ -2275,30 +2275,12 @@ For a model with 100M parameters:
 - Quantized memory usage: _____ GB
 - Memory bandwidth reduction when loading from disk: _____ ×
 
-### BEGIN SOLUTION
-**Answer 1: Memory Architecture Impact**
-- Original memory usage: **0.4 GB** (100M parameters × 4 bytes = 400MB = 0.4 GB)
-- Quantized memory usage: **0.1 GB** (100M parameters × 1 byte = 100MB = 0.1 GB)
-- Memory bandwidth reduction: **4×** (loading 100MB instead of 400MB from disk)
-
-**Key Insight**: Quantization reduces not just RAM usage, but also disk I/O, network transfer time, and memory bandwidth pressure. A 4× reduction in bandwidth means 4× faster model loading and 4× less network traffic when deploying models.
-### END SOLUTION
-
 ### Question 2: Quantization Error Analysis
 Your quantization maps a continuous range to 256 discrete values (INT8).
 For weights uniformly distributed in [-0.1, 0.1]:
 - Quantization scale: _____
 - Maximum quantization error: _____
 - Signal-to-noise ratio approximately: _____ dB
-
-### BEGIN SOLUTION
-**Answer 2: Quantization Error Analysis**
-- Quantization scale: **0.0007843** (range 0.2 / 255 steps = 0.0007843)
-- Maximum quantization error: **±0.000392** (scale / 2 = ±0.0003922)
-- Signal-to-noise ratio: **~48 dB** (20 × log10(signal_range / quantization_step) ≈ 20 × log10(255) ≈ 48 dB)
-
-**Key Insight**: For 8-bit quantization, theoretical SNR is approximately 6 dB per bit × 8 bits = 48 dB. This is sufficient for neural networks because weights typically have bounded ranges and networks are robust to small perturbations.
-### END SOLUTION
 
 ### Question 3: Hardware Efficiency
 Modern processors have specialized INT8 instructions (like AVX-512 VNNI).
@@ -2307,46 +2289,17 @@ Compared to FP32 operations:
 - Why might actual speedup be less than this theoretical maximum? _____
 - What determines whether quantization improves or hurts performance? _____
 
-### BEGIN SOLUTION
-**Answer 3: Hardware Efficiency**
-- INT8 operations per SIMD: **4× more** (512-bit register can hold 64 INT8 values vs 16 FP32 values)
-- Why actual speedup is less: **Dequantization overhead, memory bandwidth bottlenecks, and non-compute operations** (data movement, activation functions, etc. remain in FP32)
-- Performance determinant: **Hardware INT8 support availability** (modern CPUs with VNNI, GPUs with Tensor Cores, mobile chips with Neural Engine) and **compute vs memory-bound workload** (compute-bound benefits more from INT8 ops, memory-bound benefits from reduced bandwidth)
-
-**Key Insight**: Theoretical 4× speedup requires: (1) Hardware with native INT8 instructions, (2) Large matrix multiplications where compute dominates, (3) Minimal dequantization overhead. Real-world speedups are typically 2-3× due to mixed precision operations and data movement costs.
-### END SOLUTION
-
 ### Question 4: Calibration Strategy Trade-offs
 Your calibration process finds optimal scales using sample data.
 - Too little calibration data: Risk of _____
 - Too much calibration data: Cost of _____
 - Per-channel vs per-tensor quantization trades _____ for _____
 
-### BEGIN SOLUTION
-**Answer 4: Calibration Strategy Trade-offs**
-- Too little calibration data: Risk of **suboptimal quantization parameters that don't represent the true activation distribution**, leading to **clipping of outliers and accuracy degradation**
-- Too much calibration data: Cost of **increased calibration time** and **diminishing returns** (accuracy stops improving after ~100-1000 samples typically)
-- Per-channel vs per-tensor trades: **Complexity and overhead** (more scales to store/compute) for **better precision** (each channel optimized independently, preserving more information)
-
-**Key Insight**: Calibration is about finding representative data statistics. The rule of thumb: 100-1000 diverse samples usually suffice. Per-channel quantization is worth the complexity for sensitive layers (first/last layers, attention) but overkill for bulk middle layers.
-### END SOLUTION
-
 ### Question 5: Production Deployment
 In mobile/edge deployment scenarios:
 - When is 4× memory reduction worth <1% accuracy loss? _____
 - Why might you keep certain layers in FP32? _____
 - How does quantization affect battery life? _____
-
-### BEGIN SOLUTION
-**Answer 5: Production Deployment**
-- When 4× reduction worth <1% loss: **Always in memory-constrained environments** (mobile devices with <4GB RAM, edge devices with <512MB, embedded systems). Also when **serving cost matters** (4× smaller = 4× more users per server) or **latency critical** (4× faster loading from disk/network).
-
-- Keep layers in FP32: **First layer** (input quantization loses information), **last layer** (output precision matters for final predictions), **attention layers** (sensitive to precision for softmax stability), and **layers with extreme activation ranges** (quantization error amplifies).
-
-- Battery life impact: **2-4× improvement** due to (1) **less memory access** = lower DRAM power, (2) **INT8 operations use less energy** than FP32 ALUs, (3) **faster inference** = shorter active time. Typical mobile inference: 60% energy from memory, 30% from compute, 10% other.
-
-**Key Insight**: Quantization is essential for edge AI. The 1% accuracy loss is usually imperceptible to users, but 4× memory savings and 2-3× speedup enable entirely new applications (real-time on-device AI, offline functionality, privacy-preserving local inference).
-### END SOLUTION
 """
 
 # %% [markdown]

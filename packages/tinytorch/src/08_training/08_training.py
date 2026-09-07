@@ -72,12 +72,12 @@ import os
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, AdamW
 
 # Enable autograd for gradient tracking (required for training)
-from tinytorch.core.autograd import enable_autograd
-enable_autograd()
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Constants for learning rate scheduling defaults
 DEFAULT_MAX_LR = 0.1  # Default maximum learning rate for cosine schedule
@@ -1556,13 +1556,13 @@ def demonstrate_complete_training_pipeline():
     class SimpleNN:
         def __init__(self):
             self.layer1 = Linear(3, 5)
+            self.relu = ReLU()
             self.layer2 = Linear(5, 2)
             self.training = True
 
         def forward(self, x):
             x = self.layer1.forward(x)
-            # Simple ReLU-like activation (max with 0)
-            x = Tensor(np.maximum(0, x.data))
+            x = self.relu.forward(x)   # through the operation object, so gradients reach layer1
             x = self.layer2.forward(x)
             return x
 

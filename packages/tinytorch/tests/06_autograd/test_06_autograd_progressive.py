@@ -271,7 +271,7 @@ class TestAutogradWithLayers:
         """
         ✅ TEST: Tanh propagates gradients (regression test for #1341)
 
-        Tanh was previously missing from enable_autograd()'s patch list,
+        Tanh was previously missing from the set of operations with a backward,
         so tanh(x).backward() silently failed to populate x.grad.
         """
         from tinytorch.core.tensor import Tensor

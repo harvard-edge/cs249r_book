@@ -22,10 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.autograd import enable_autograd
-
-enable_autograd()
-
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
