@@ -1382,6 +1382,83 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### The Compressor Class: Consolidated for Export
+
+Now that we've implemented all compression techniques, let's create a consolidated class
+for export to the tinytorch package. This allows milestones to use the complete compression system.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "compression_export", "solution": false}
+#| export
+class Compressor:
+    """
+    Complete compression system for milestone use.
+
+    Provides pruning, distillation, and low-rank approximation techniques.
+
+    This class delegates to the standalone functions (measure_sparsity, magnitude_prune, etc.)
+    that students implement, providing a clean OOP interface for milestones.
+
+    Note: Compressor methods return fractions (0-1) for consistency with benchmarking,
+    while standalone functions return percentages (0-100) for educational clarity.
+    """
+
+    @staticmethod
+    def measure_sparsity(model) -> float:
+        """Measure the sparsity of a model (returns fraction 0-1)."""
+        # Delegate to standalone function and convert percentage to fraction
+        return measure_sparsity(model) / 100.0
+
+    @staticmethod
+    def magnitude_prune(model, sparsity=0.5):
+        """Prune model weights by magnitude. Delegates to standalone function."""
+        return magnitude_prune(model, sparsity)
+
+    @staticmethod
+    def structured_prune(model, prune_ratio=0.5):
+        """Prune entire neurons/channels. Delegates to standalone function."""
+        return structured_prune(model, prune_ratio)
+
+    @staticmethod
+    def compress_model(model, compression_config: Dict[str, Any]):
+        """
+        Apply complete compression pipeline to a model.
+
+        Args:
+            model: Model to compress
+            compression_config: Dictionary with compression settings
+                - 'magnitude_sparsity': float (0-1)
+                - 'structured_prune_ratio': float (0-1)
+
+        Returns:
+            Compressed model with sparsity stats (fractions 0-1)
+        """
+        stats = {
+            'original_sparsity': Compressor.measure_sparsity(model)
+        }
+
+        # Apply magnitude pruning
+        if 'magnitude_sparsity' in compression_config:
+            model = Compressor.magnitude_prune(
+                model, compression_config['magnitude_sparsity']
+            )
+
+        # Apply structured pruning
+        if 'structured_prune_ratio' in compression_config:
+            model = Compressor.structured_prune(
+                model, compression_config['structured_prune_ratio']
+            )
+
+        stats['final_sparsity'] = Compressor.measure_sparsity(model)
+        stats['compression_ratio'] = 1.0 / (1.0 - stats['final_sparsity']) if stats['final_sparsity'] < 1.0 else float('inf')
+
+        return model, stats
+
+# Note: measure_sparsity, magnitude_prune, structured_prune are defined earlier in this module.
+# The Compressor class above delegates to those functions, providing an OOP interface for milestones.
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis: Compression Trade-offs
 
 Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
@@ -1391,7 +1468,7 @@ The fundamental challenge in model compression is balancing three competing obje
 
 # %% [markdown]
 """
-## 📊 Measuring Compression Impact with Profiler
+### Measuring Compression Impact with Profiler
 
 Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
 
@@ -1467,7 +1544,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Comparing Compression Techniques
+#### Comparing Compression Techniques
 
 Let's analyze compression ratios across different techniques systematically.
 """
@@ -1520,7 +1597,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Knowledge Distillation Analysis
+#### Knowledge Distillation Analysis
 
 Now let's analyze how knowledge distillation compares to other compression techniques for different compression ratios and accuracy preservation goals.
 """
@@ -1567,83 +1644,6 @@ def analyze_distillation_effectiveness():
 
 if __name__ == "__main__":
     analyze_distillation_effectiveness()
-
-# %% [markdown]
-"""
-## 🔧 Consolidated Compression Classes for Export
-
-Now that we've implemented all compression techniques, let's create a consolidated class
-for export to the tinytorch package. This allows milestones to use the complete compression system.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "compression_export", "solution": false}
-#| export
-class Compressor:
-    """
-    Complete compression system for milestone use.
-
-    Provides pruning, distillation, and low-rank approximation techniques.
-
-    This class delegates to the standalone functions (measure_sparsity, magnitude_prune, etc.)
-    that students implement, providing a clean OOP interface for milestones.
-
-    Note: Compressor methods return fractions (0-1) for consistency with benchmarking,
-    while standalone functions return percentages (0-100) for educational clarity.
-    """
-
-    @staticmethod
-    def measure_sparsity(model) -> float:
-        """Measure the sparsity of a model (returns fraction 0-1)."""
-        # Delegate to standalone function and convert percentage to fraction
-        return measure_sparsity(model) / 100.0
-
-    @staticmethod
-    def magnitude_prune(model, sparsity=0.5):
-        """Prune model weights by magnitude. Delegates to standalone function."""
-        return magnitude_prune(model, sparsity)
-
-    @staticmethod
-    def structured_prune(model, prune_ratio=0.5):
-        """Prune entire neurons/channels. Delegates to standalone function."""
-        return structured_prune(model, prune_ratio)
-
-    @staticmethod
-    def compress_model(model, compression_config: Dict[str, Any]):
-        """
-        Apply complete compression pipeline to a model.
-
-        Args:
-            model: Model to compress
-            compression_config: Dictionary with compression settings
-                - 'magnitude_sparsity': float (0-1)
-                - 'structured_prune_ratio': float (0-1)
-
-        Returns:
-            Compressed model with sparsity stats (fractions 0-1)
-        """
-        stats = {
-            'original_sparsity': Compressor.measure_sparsity(model)
-        }
-
-        # Apply magnitude pruning
-        if 'magnitude_sparsity' in compression_config:
-            model = Compressor.magnitude_prune(
-                model, compression_config['magnitude_sparsity']
-            )
-
-        # Apply structured pruning
-        if 'structured_prune_ratio' in compression_config:
-            model = Compressor.structured_prune(
-                model, compression_config['structured_prune_ratio']
-            )
-
-        stats['final_sparsity'] = Compressor.measure_sparsity(model)
-        stats['compression_ratio'] = 1.0 / (1.0 - stats['final_sparsity']) if stats['final_sparsity'] < 1.0 else float('inf')
-
-        return model, stats
-
-# Note: measure_sparsity, magnitude_prune, structured_prune are defined earlier in this module.
-# The Compressor class above delegates to those functions, providing an OOP interface for milestones.
 
 # %% [markdown]
 """

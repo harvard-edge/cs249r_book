@@ -240,7 +240,7 @@ This inefficiency makes production LLM serving economically impossible without o
 
 # %% [markdown]
 """
-## 📐 Foundations: The Key-Value Caching Insight
+### The Key-Value Caching Insight
 
 ### Mathematical Foundation
 

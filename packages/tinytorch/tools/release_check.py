@@ -150,8 +150,7 @@ def g_summary():
         seq = [(m.group(1) or m.group(2) or m.group(3))
                for m in re.finditer(r"^### (.+)$|^(Export with:)|^(\*\*Next\*\*:)", s, re.M)]
         core = [x for x in seq if x in ORDER]
-        want = ORDER[:-1] if num == 20 else ORDER
-        if core != want:
+        if core != ORDER:
             errs.append(f"{name}: got {core}")
     return errs
 

@@ -874,6 +874,103 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🔧 Integration: Measuring Acceleration Gains with Profiler
+
+Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
+
+This is how professional ML engineers work: profile → optimize → measure → repeat.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
+# Import Profiler from Module 14 (Module 17 comes after Module 14)
+from tinytorch.perf.profiling import Profiler
+
+def explore_acceleration_with_profiler():
+    """📊 Demonstrate acceleration gains using Profiler from Module 14."""
+
+    print("📊 Measuring Acceleration Gains with Profiler")
+    print("=" * 70)
+
+    profiler = Profiler()
+
+    # Create two simple models: one slow (loop-based), one fast (vectorized)
+    class SlowLinear:
+        """Linear layer using explicit loops (slow)."""
+        def __init__(self, in_features, out_features):
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
+
+        def forward(self, x):
+            # Explicit loop implementation (for demonstration)
+            batch_size = x.shape[0]
+            out_features = self.weight.shape[1]
+            result = np.zeros((batch_size, out_features), dtype=np.float32)
+
+            for i in range(batch_size):
+                for j in range(out_features):
+                    for k in range(x.shape[1]):
+                        result[i, j] += x.data[i, k] * self.weight.data[k, j]
+
+            return Tensor(result)
+
+    class FastLinear:
+        """Linear layer using vectorized matmul (fast)."""
+        def __init__(self, in_features, out_features):
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
+
+        def forward(self, x):
+            # Vectorized implementation
+            return vectorized_matmul(x, self.weight)
+
+    in_features, out_features = 128, 64
+    batch_size = 32
+
+    # Create models
+    slow_model = SlowLinear(in_features, out_features)
+    fast_model = FastLinear(in_features, out_features)
+
+    # Create input
+    input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
+
+    print("\n🐢 BEFORE: Loop-based implementation")
+    print("-" * 70)
+
+    # Measure slow model
+    slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
+    slow_flops = profiler.count_flops(slow_model, (batch_size, in_features))
+
+    print(f"   Latency: {slow_latency:.2f} ms")
+    print(f"   FLOPs: {slow_flops:,}")
+    print(f"   Throughput: {slow_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
+
+    print("\n🚀 AFTER: Vectorized implementation")
+    print("-" * 70)
+
+    # Measure fast model
+    fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
+    fast_flops = profiler.count_flops(fast_model, (batch_size, in_features))
+
+    print(f"   Latency: {fast_latency:.2f} ms")
+    print(f"   FLOPs: {fast_flops:,}")
+    print(f"   Throughput: {fast_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
+
+    print("\n📈 ACCELERATION GAINS")
+    print("=" * 70)
+    speedup = slow_latency / fast_latency
+    print(f"   Speedup: {speedup:.1f}x faster")
+    print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
+    print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
+
+    print("\n💡 Key Insight:")
+    print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
+    print(f"   that use SIMD instructions and cache-friendly memory access patterns.")
+    print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
+    print("\n✅ This is the power of acceleration: same math, different execution!")
+
+if __name__ == "__main__":
+    explore_acceleration_with_profiler()
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis: Performance Scaling Patterns
 
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
@@ -1084,7 +1181,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Optimization Insights: Production Acceleration Strategy
+### Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
@@ -1248,103 +1345,6 @@ def analyze_acceleration_decision_framework():
 
 if __name__ == "__main__":
     analyze_acceleration_decision_framework()
-
-# %% [markdown]
-"""
-## 🔧 Integration: Measuring Acceleration Gains with Profiler
-
-Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
-
-This is how professional ML engineers work: profile → optimize → measure → repeat.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
-# Import Profiler from Module 14 (Module 17 comes after Module 14)
-from tinytorch.perf.profiling import Profiler
-
-def explore_acceleration_with_profiler():
-    """📊 Demonstrate acceleration gains using Profiler from Module 14."""
-
-    print("📊 Measuring Acceleration Gains with Profiler")
-    print("=" * 70)
-
-    profiler = Profiler()
-
-    # Create two simple models: one slow (loop-based), one fast (vectorized)
-    class SlowLinear:
-        """Linear layer using explicit loops (slow)."""
-        def __init__(self, in_features, out_features):
-            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
-
-        def forward(self, x):
-            # Explicit loop implementation (for demonstration)
-            batch_size = x.shape[0]
-            out_features = self.weight.shape[1]
-            result = np.zeros((batch_size, out_features), dtype=np.float32)
-
-            for i in range(batch_size):
-                for j in range(out_features):
-                    for k in range(x.shape[1]):
-                        result[i, j] += x.data[i, k] * self.weight.data[k, j]
-
-            return Tensor(result)
-
-    class FastLinear:
-        """Linear layer using vectorized matmul (fast)."""
-        def __init__(self, in_features, out_features):
-            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
-
-        def forward(self, x):
-            # Vectorized implementation
-            return vectorized_matmul(x, self.weight)
-
-    in_features, out_features = 128, 64
-    batch_size = 32
-
-    # Create models
-    slow_model = SlowLinear(in_features, out_features)
-    fast_model = FastLinear(in_features, out_features)
-
-    # Create input
-    input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
-
-    print("\n🐢 BEFORE: Loop-based implementation")
-    print("-" * 70)
-
-    # Measure slow model
-    slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
-    slow_flops = profiler.count_flops(slow_model, (batch_size, in_features))
-
-    print(f"   Latency: {slow_latency:.2f} ms")
-    print(f"   FLOPs: {slow_flops:,}")
-    print(f"   Throughput: {slow_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
-
-    print("\n🚀 AFTER: Vectorized implementation")
-    print("-" * 70)
-
-    # Measure fast model
-    fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
-    fast_flops = profiler.count_flops(fast_model, (batch_size, in_features))
-
-    print(f"   Latency: {fast_latency:.2f} ms")
-    print(f"   FLOPs: {fast_flops:,}")
-    print(f"   Throughput: {fast_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
-
-    print("\n📈 ACCELERATION GAINS")
-    print("=" * 70)
-    speedup = slow_latency / fast_latency
-    print(f"   Speedup: {speedup:.1f}x faster")
-    print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
-    print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
-
-    print("\n💡 Key Insight:")
-    print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
-    print(f"   that use SIMD instructions and cache-friendly memory access patterns.")
-    print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
-    print("\n✅ This is the power of acceleration: same math, different execution!")
-
-if __name__ == "__main__":
-    explore_acceleration_with_profiler()
 
 # %% [markdown]
 """

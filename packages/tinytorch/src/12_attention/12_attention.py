@@ -1048,6 +1048,124 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🔧 Integration: Attention Patterns in Action
+
+Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
+
+### Understanding Attention Patterns
+
+Real transformer models learn interpretable attention patterns:
+
+```
+Example Attention Patterns in Language:
+
+1. Local Syntax Attention:
+   "The quick brown fox"
+   The → quick (determiner-adjective)
+         quick → brown (adjective-adjective)
+                 brown → fox (adjective-noun)
+
+2. Long-Range Coreference:
+   "John went to the store. He bought milk."
+   He → John (pronoun resolution across sentence boundary)
+
+3. Compositional Structure:
+   "The cat in the hat sat"
+   sat → cat (verb attending to subject, skipping prepositional phrase)
+
+4. Causal Dependencies:
+   "I think therefore I"
+   I → think (causal reasoning patterns)
+   I → I (self-reference at end)
+```
+
+Let's see these patterns emerge in our implementation.
+"""
+
+# %%
+def run_attention_scenarios():
+    """Test attention mechanisms in realistic scenarios."""
+    print("🧪 Testing Attention Scenarios...")
+
+    # Scenario 1: Small transformer block setup
+    print("\n1. Small Transformer Setup:")
+    embed_dim, num_heads, seq_len = 128, 8, 32
+
+    # Create embeddings (simulating token embeddings + positional)
+    embeddings = Tensor(rng.standard_normal((2, seq_len, embed_dim)))
+
+    # Multi-head attention
+    mha = MultiHeadAttention(embed_dim, num_heads)
+    attended = mha.forward(embeddings)
+
+    print(f"   Input shape: {embeddings.shape}")
+    print(f"   Output shape: {attended.shape}")
+    print(f"   Parameters: {len(mha.parameters())} tensors")
+
+    # Scenario 2: Causal language modeling
+    print("\n2. Causal Language Modeling:")
+
+    # Create causal mask (lower triangular)
+    causal_mask = np.tril(np.ones((seq_len, seq_len)))
+    mask = Tensor(np.broadcast_to(causal_mask, (2, seq_len, seq_len)))
+
+    # Apply causal attention
+    causal_output = mha.forward(embeddings, mask)
+
+    print(f"   Masked output shape: {causal_output.shape}")
+    print(f"   Causal mask applied: {mask.shape}")
+
+    # Scenario 3: Compare attention patterns
+    print("\n3. Attention Pattern Analysis:")
+
+    # Create simple test sequence
+    simple_embed = Tensor(rng.standard_normal((1, 4, 16)))
+    simple_mha = MultiHeadAttention(16, 4)
+
+    # Get attention weights by calling the base function
+    Q = simple_mha.q_proj.forward(simple_embed)
+    K = simple_mha.k_proj.forward(simple_embed)
+    V = simple_mha.v_proj.forward(simple_embed)
+
+    # Reshape for single head analysis
+    Q_head = Tensor(Q.data[:, :, :4])  # First head only
+    K_head = Tensor(K.data[:, :, :4])
+    V_head = Tensor(V.data[:, :, :4])
+
+    _, weights = scaled_dot_product_attention(Q_head, K_head, V_head)
+
+    print(f"   Attention weights shape: {weights.shape}")
+    print(f"   Attention weights (first batch, 4x4 matrix):")
+    weight_matrix = weights.data[0, :, :].round(3)
+
+    # Format the attention matrix nicely
+    print("     Pos→  0     1     2     3")
+    for i in range(4):
+        row_str = f"   {i}: " + " ".join(f"{weight_matrix[i,j]:5.3f}" for j in range(4))
+        print(row_str)
+
+    print(f"   Row sums: {weights.data[0].sum(axis=1).round(3)} (should be ~1.0)")
+
+    # Scenario 4: Attention with masking visualization
+    print("\n4. Causal Masking Effect:")
+
+    # Apply causal mask to the simple example
+    simple_mask = Tensor(np.tril(np.ones((1, 4, 4))))
+    _, masked_weights = scaled_dot_product_attention(Q_head, K_head, V_head, simple_mask)
+
+    print("   Causal attention matrix (lower triangular):")
+    masked_matrix = masked_weights.data[0, :, :].round(3)
+    print("     Pos→  0     1     2     3")
+    for i in range(4):
+        row_str = f"   {i}: " + " ".join(f"{masked_matrix[i,j]:5.3f}" for j in range(4))
+        print(row_str)
+
+    print("   Notice: Upper triangle is zero (can't attend to future)")
+
+    print("\n✅ All attention scenarios work correctly!")
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
@@ -1222,124 +1340,6 @@ This quadratic wall motivates active research into more efficient attention mech
 
 The quadratic wall is why long-context AI is an active research frontier, not a solved problem.
 """
-
-# %% [markdown]
-"""
-## 🔧 Integration: Attention Patterns in Action
-
-Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
-
-### Understanding Attention Patterns
-
-Real transformer models learn interpretable attention patterns:
-
-```
-Example Attention Patterns in Language:
-
-1. Local Syntax Attention:
-   "The quick brown fox"
-   The → quick (determiner-adjective)
-         quick → brown (adjective-adjective)
-                 brown → fox (adjective-noun)
-
-2. Long-Range Coreference:
-   "John went to the store. He bought milk."
-   He → John (pronoun resolution across sentence boundary)
-
-3. Compositional Structure:
-   "The cat in the hat sat"
-   sat → cat (verb attending to subject, skipping prepositional phrase)
-
-4. Causal Dependencies:
-   "I think therefore I"
-   I → think (causal reasoning patterns)
-   I → I (self-reference at end)
-```
-
-Let's see these patterns emerge in our implementation.
-"""
-
-# %%
-def run_attention_scenarios():
-    """Test attention mechanisms in realistic scenarios."""
-    print("🧪 Testing Attention Scenarios...")
-
-    # Scenario 1: Small transformer block setup
-    print("\n1. Small Transformer Setup:")
-    embed_dim, num_heads, seq_len = 128, 8, 32
-
-    # Create embeddings (simulating token embeddings + positional)
-    embeddings = Tensor(rng.standard_normal((2, seq_len, embed_dim)))
-
-    # Multi-head attention
-    mha = MultiHeadAttention(embed_dim, num_heads)
-    attended = mha.forward(embeddings)
-
-    print(f"   Input shape: {embeddings.shape}")
-    print(f"   Output shape: {attended.shape}")
-    print(f"   Parameters: {len(mha.parameters())} tensors")
-
-    # Scenario 2: Causal language modeling
-    print("\n2. Causal Language Modeling:")
-
-    # Create causal mask (lower triangular)
-    causal_mask = np.tril(np.ones((seq_len, seq_len)))
-    mask = Tensor(np.broadcast_to(causal_mask, (2, seq_len, seq_len)))
-
-    # Apply causal attention
-    causal_output = mha.forward(embeddings, mask)
-
-    print(f"   Masked output shape: {causal_output.shape}")
-    print(f"   Causal mask applied: {mask.shape}")
-
-    # Scenario 3: Compare attention patterns
-    print("\n3. Attention Pattern Analysis:")
-
-    # Create simple test sequence
-    simple_embed = Tensor(rng.standard_normal((1, 4, 16)))
-    simple_mha = MultiHeadAttention(16, 4)
-
-    # Get attention weights by calling the base function
-    Q = simple_mha.q_proj.forward(simple_embed)
-    K = simple_mha.k_proj.forward(simple_embed)
-    V = simple_mha.v_proj.forward(simple_embed)
-
-    # Reshape for single head analysis
-    Q_head = Tensor(Q.data[:, :, :4])  # First head only
-    K_head = Tensor(K.data[:, :, :4])
-    V_head = Tensor(V.data[:, :, :4])
-
-    _, weights = scaled_dot_product_attention(Q_head, K_head, V_head)
-
-    print(f"   Attention weights shape: {weights.shape}")
-    print(f"   Attention weights (first batch, 4x4 matrix):")
-    weight_matrix = weights.data[0, :, :].round(3)
-
-    # Format the attention matrix nicely
-    print("     Pos→  0     1     2     3")
-    for i in range(4):
-        row_str = f"   {i}: " + " ".join(f"{weight_matrix[i,j]:5.3f}" for j in range(4))
-        print(row_str)
-
-    print(f"   Row sums: {weights.data[0].sum(axis=1).round(3)} (should be ~1.0)")
-
-    # Scenario 4: Attention with masking visualization
-    print("\n4. Causal Masking Effect:")
-
-    # Apply causal mask to the simple example
-    simple_mask = Tensor(np.tril(np.ones((1, 4, 4))))
-    _, masked_weights = scaled_dot_product_attention(Q_head, K_head, V_head, simple_mask)
-
-    print("   Causal attention matrix (lower triangular):")
-    masked_matrix = masked_weights.data[0, :, :].round(3)
-    print("     Pos→  0     1     2     3")
-    for i in range(4):
-        row_str = f"   {i}: " + " ".join(f"{masked_matrix[i,j]:5.3f}" for j in range(4))
-        print(row_str)
-
-    print("   Notice: Upper triangle is zero (can't attend to future)")
-
-    print("\n✅ All attention scenarios work correctly!")
 
 # %% [markdown]
 """

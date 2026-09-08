@@ -2421,7 +2421,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Optimization Insights: Production Performance Patterns
+### Optimization Insights: Production Performance Patterns
 
 Understanding profiling results helps guide optimization decisions. Let's analyze different operation types and measurement overhead.
 
