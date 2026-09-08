@@ -567,7 +567,7 @@ class Trainer:
         """Run the model, passing the training flag to a forward() that accepts one.
 
         Module 03's Sequential takes training= so that Dropout knows which path
-        to run; a bare layer or a GPT (Module 13) takes only the inputs.
+        to run; a bare layer or a GPT (which Module 13 will build) takes only the inputs.
         """
         try:
             takes_flag = 'training' in inspect.signature(self.model.forward).parameters

@@ -268,7 +268,7 @@ class Sigmoid:
         return []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Apply Sigmoid through its operation, so Module 06 can record it for gradients."""
+        """Apply Sigmoid through its operation, so Module 06 will be able to record it for gradients."""
         return SigmoidFunction.apply(x)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -394,7 +394,7 @@ class ReLU:
         return []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Apply ReLU through its operation, so Module 06 can record it for gradients."""
+        """Apply ReLU through its operation, so Module 06 will be able to record it for gradients."""
         return ReLUFunction.apply(x)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -523,7 +523,7 @@ class Tanh:
         return []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Apply Tanh through its operation, so Module 06 can record it for gradients."""
+        """Apply Tanh through its operation, so Module 06 will be able to record it for gradients."""
         return TanhFunction.apply(x)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -668,7 +668,7 @@ class GELU:
         return []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Apply GELU through its operation, so Module 06 can record it for gradients."""
+        """Apply GELU through its operation, so Module 06 will be able to record it for gradients."""
         return GELUFunction.apply(x)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -815,7 +815,7 @@ class Softmax:
         return []
 
     def forward(self, x: Tensor, dim: int = -1) -> Tensor:
-        """Apply Softmax through its operation, so Module 06 can record it for gradients."""
+        """Apply Softmax through its operation, so Module 06 will be able to record it for gradients."""
         return SoftmaxFunction.apply(x, dim=dim)
 
     def __call__(self, x: Tensor, dim: int = -1) -> Tensor:
@@ -1171,7 +1171,7 @@ if __name__ == "__main__":
 a linear operation. ReLU's simple "zero out negatives" rule is what allows networks to learn
 complex patterns like recognizing faces or understanding language.
 
-Your activations are ready to be combined with Linear layers in Module 03!
+Module 03 will combine your activations with Linear layers!
 """
 
 # %%

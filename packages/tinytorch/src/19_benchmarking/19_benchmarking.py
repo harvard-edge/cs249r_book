@@ -260,6 +260,13 @@ Benchmark Architecture:
 **Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. This demonstrates proper systems architecture - build once, reuse everywhere!
 
 Each level adds capability while maintaining statistical rigor at the foundation.
+
+**Three harnesses, three jobs.** `Benchmark` measures: one model, one metric,
+one statistically summarized `BenchmarkResult`. `BenchmarkSuite` orchestrates:
+it runs every metric for every model through a `Benchmark`, derives energy, and
+writes the plots and the report. `MLPerf` standardizes the protocol around them:
+fixed inputs, run counts, and pass/fail thresholds, so that two submissions are
+comparable at all. Read them in that order; each one is built on the last.
 """
 
 # %% [markdown]

@@ -278,6 +278,10 @@ def g_forward_refs():
     errs = []
     for num, name, py in module_files():
         for i, line in enumerate(py.read_text().splitlines(), 1):
+            # A dependency-diagram label row such as "(Module 06)  (Module 07)" is not
+            # prose and needs no preview framing (2026-09-08).
+            if not re.sub(r"\([^)]*\)|\s", "", line):
+                continue
             for m in re.finditer(r"Module\s+(\d{1,2})\b", line):
                 if int(m.group(1)) > num and not any(p in line for p in PREVIEW):
                     errs.append(f"{name}:{i} {line.strip()[:74]}")
