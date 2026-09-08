@@ -250,7 +250,7 @@ Each operation inherits from Function and implements specific gradient rules.
 
 # %% [markdown]
 """
-### Function Base Class - The Foundation of Autograd
+### Function Base Class: The Foundation of Autograd
 
 The Function class is the foundation that makes autograd possible. Every differentiable operation (addition, multiplication, etc.) inherits from this class.
 
@@ -301,7 +301,7 @@ def method_of(cls):
 
 # %% [markdown]
 """
-### Operation Functions - Implementing Gradient Rules
+### Operation Functions: Implementing Gradient Rules
 
 Now we'll implement specific operations that compute gradients correctly. Each operation has mathematical rules for how gradients flow backward.
 
@@ -335,7 +335,7 @@ Each operation stores the inputs it needs for computing gradients.
 
 # %% [markdown]
 """
-### 🔍 Understanding Broadcasting in Gradients
+### Understanding Broadcasting in Gradients
 
 Before implementing gradient operations, we need to understand a critical challenge:
 **Broadcasting in Forward Pass vs. Gradient Reduction in Backward Pass**
@@ -467,7 +467,7 @@ def _reduce_broadcast_grad(grad, original_shape):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Broadcast Gradient Reduction
+### 🧪 Unit Test: Broadcast Gradient Reduction
 
 This test validates our gradient reduction helper handles all broadcasting scenarios.
 
@@ -478,8 +478,8 @@ This test validates our gradient reduction helper handles all broadcasting scena
 
 # %% nbgrader={"grade": true, "grade_id": "test-reduce-broadcast-grad", "locked": true, "points": 5}
 def test_unit_reduce_broadcast_grad():
-    """🔬 Test _reduce_broadcast_grad helper function."""
-    print("🔬 Unit Test: _reduce_broadcast_grad...")
+    """🧪 Test _reduce_broadcast_grad helper function."""
+    print("🧪 Unit Test: _reduce_broadcast_grad...")
     
     # Test 1: Remove leading dimension
     grad = np.ones((32, 128))
@@ -529,7 +529,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Add.backward - Gradient Rules for Addition
+### Add.backward: Gradient Rules for Addition
 
 Addition is the simplest gradient operation: gradients flow unchanged to both inputs.
 
@@ -631,7 +631,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Mul.backward - Gradient Rules for Element-wise Multiplication
+### Mul.backward: Gradient Rules for Element-wise Multiplication
 
 Element-wise multiplication follows the product rule of calculus.
 
@@ -729,7 +729,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Sub.backward - Gradient Rules for Subtraction
+### Sub.backward: Gradient Rules for Subtraction
 
 Subtraction is mathematically simple but important for operations like normalization.
 
@@ -803,7 +803,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Div.backward - Gradient Rules for Division
+### Div.backward: Gradient Rules for Division
 
 Division requires the quotient rule from calculus.
 
@@ -881,7 +881,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### MatMul.backward - Gradient Rules for Matrix Multiplication
+### MatMul.backward: Gradient Rules for Matrix Multiplication
 
 Matrix multiplication has more complex gradient rules based on matrix calculus.
 
@@ -1270,7 +1270,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Sum.backward - Gradient Rules for Reduction Operations
+### Sum.backward: Gradient Rules for Reduction Operations
 
 Sum operations reduce tensor dimensions, so gradients must be broadcast back.
 
@@ -1354,7 +1354,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Mean, Max, Copy, MaskedFill.backward - The Remaining Module 01 Operations
+### Mean, Max, Copy, MaskedFill.backward: The Remaining Module 01 Operations
 
 Every operation Module 01 gave a forward needs a backward, or the first `loss.mean()` you write will stop here. These four are short:
 
@@ -1471,7 +1471,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Function Classes
+### 🧪 Unit Test: Function Classes
 
 This test validates our Function classes compute gradients correctly.
 
@@ -1482,8 +1482,8 @@ This test validates our Function classes compute gradients correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-function-classes", "locked": true, "points": 15}
 def test_unit_function_classes():
-    """🔬 Test Function classes."""
-    print("🔬 Unit Test: Function Classes...")
+    """🧪 Test Function classes."""
+    print("🧪 Unit Test: Function Classes...")
 
     # Note: We call backward() on each operation directly, in isolation, before
     # Tensor.backward() exists. requires_grad is a constructor argument from Module 01.
@@ -1523,7 +1523,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Broadcasting in Gradients
+### 🧪 Unit Test: Broadcasting in Gradients
 This test validates that gradient reduction works correctly when operations
 involve broadcasting. This is crucial for real-world training where bias terms,
 normalization parameters, and other operations broadcast over batches.
@@ -1535,8 +1535,8 @@ normalization parameters, and other operations broadcast over batches.
 
 # %% nbgrader={"grade": true, "grade_id": "test-broadcast-gradients", "locked": true, "points": 10}
 def test_unit_broadcast_gradients():
-    """🔬 Test gradient broadcasting reduction."""
-    print("🔬 Unit Test: Broadcasting in Gradients...")
+    """🧪 Test gradient broadcasting reduction."""
+    print("🧪 Unit Test: Broadcasting in Gradients...")
 
     # Note: We call backward() on each operation directly, in isolation, before
     # Tensor.backward() exists.
@@ -2221,7 +2221,7 @@ def _stable_softmax(logits_data):
 
 # %% [markdown]
 """
-### Unit Test: Stable Softmax Helper
+### 🧪 Unit Test: Stable Softmax Helper
 
 **What we're testing**: Numerically stable softmax computation
 **Why it matters**: Unstable softmax causes NaN/Inf in cross-entropy gradients
@@ -2313,7 +2313,7 @@ def _one_hot_encode(targets, batch_size, num_classes):
 
 # %% [markdown]
 """
-### Unit Test: One-Hot Encoding Helper
+### 🧪 Unit Test: One-Hot Encoding Helper
 
 **What we're testing**: Conversion from class indices to one-hot vectors
 **Why it matters**: Incorrect one-hot encoding produces wrong cross-entropy gradients
@@ -2349,7 +2349,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### CrossEntropyFunction.backward - Gradient Rules for Cross-Entropy Loss
+### CrossEntropyFunction.backward: Gradient Rules for Cross-Entropy Loss
 
 The cross-entropy gradient combines three sub-computations:
 1. **Stable softmax**: Convert raw logits to probabilities
@@ -2433,7 +2433,7 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### LogSoftmax.backward - Gradient Rules for Log-Softmax
+### LogSoftmax.backward: Gradient Rules for Log-Softmax
 
 `log_softmax` from Module 04 is an operation too, and models that call it directly (rather than through `CrossEntropyLoss`) need its gradient.
 
@@ -2907,7 +2907,7 @@ never happened. Correctness > premature perf.
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Tensor Autograd Enhancement
+### 🧪 Unit Test: Tensor Autograd Enhancement
 
 This test validates our enhanced Tensor class computes gradients correctly.
 
@@ -2918,8 +2918,8 @@ This test validates our enhanced Tensor class computes gradients correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-tensor-autograd", "locked": true, "points": 20}
 def test_unit_tensor_autograd():
-    """🔬 Test Tensor autograd enhancement."""
-    print("🔬 Unit Test: Tensor Autograd Enhancement...")
+    """🧪 Test Tensor autograd enhancement."""
+    print("🧪 Unit Test: Tensor Autograd Enhancement...")
 
     # Test simple gradient computation
     x = Tensor([2.0], requires_grad=True)
@@ -2954,7 +2954,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Gradients Through a Reused Tensor
+### 🧪 Unit Test: Gradients Through a Reused Tensor
 
 This test validates the topological traversal: a tensor consumed by more than
 one operation must accumulate from every consumer before it propagates.
@@ -2967,8 +2967,8 @@ a traversal that visits a node once per edge silently halves the gradient
 
 # %% nbgrader={"grade": true, "grade_id": "test-reused-tensor-gradients", "locked": true, "points": 10}
 def test_unit_reused_tensor_gradients():
-    """🔬 Test gradient accumulation through a tensor with multiple consumers."""
-    print("🔬 Unit Test: Reused Tensor Gradients...")
+    """🧪 Test gradient accumulation through a tensor with multiple consumers."""
+    print("🧪 Unit Test: Reused Tensor Gradients...")
 
     # loss = (x @ W)^2  ->  dL/dW = 2(xW)x = 24,  dL/dx = 2(xW)W = 36
     x = Tensor(np.array([[2.0]]), requires_grad=True)
@@ -3060,7 +3060,6 @@ def analyze_computation_graph_memory():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_computation_graph_memory()
 
@@ -3098,7 +3097,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test 1: Multi-layer computation graph
-    print("🔬 Integration Test: Multi-layer Neural Network...")
+    print("🧪 Integration Test: Multi-layer Neural Network...")
 
     # Create a 3-layer computation: x -> Linear -> Linear -> Linear -> loss
     x = Tensor([[1.0, 2.0]], requires_grad=True)
@@ -3132,7 +3131,7 @@ def test_module():
     print("✅ Multi-layer neural network gradients work!")
 
     # Test 2: Gradient accumulation
-    print("🔬 Integration Test: Gradient Accumulation...")
+    print("🧪 Integration Test: Gradient Accumulation...")
 
     x = Tensor([2.0], requires_grad=True)
 
@@ -3149,7 +3148,7 @@ def test_module():
     print("✅ Gradient accumulation works!")
 
     # Test 3: Complex mathematical operations
-    print("🔬 Integration Test: Complex Operations...")
+    print("🧪 Integration Test: Complex Operations...")
 
     a = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
     b = Tensor([[2.0, 1.0], [1.0, 2.0]], requires_grad=True)
@@ -3180,7 +3179,6 @@ def test_module():
     print("Run: tito module complete 06")
 
 # %%
-# Run comprehensive module test
 if __name__ == "__main__":
     test_module()
 
@@ -3276,8 +3274,6 @@ for batch in dataloader:
 - What's the memory multiplier for gradient tracking?
 
 ---
-
-### Reflection Prompts
 
 After answering these questions, consider:
 1. **Which surprised you most?** What behavior was counterintuitive?

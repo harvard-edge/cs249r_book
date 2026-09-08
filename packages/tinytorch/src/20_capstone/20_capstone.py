@@ -474,7 +474,7 @@ This small model is perfect for demonstrating optimization impact without long b
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Benchmark Report Class
+## 🏗️ Benchmark Report Class
 
 The BenchmarkReport class encapsulates all benchmark results and provides methods for comprehensive measurement and professional reporting.
 
@@ -695,7 +695,7 @@ This design decision makes our submissions JSON-compatible without custom encode
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Submission Generation
+## 🏗️ Submission Generation
 
 The core function that generates a standardized JSON submission from benchmark results.
 
@@ -988,7 +988,6 @@ def run_example_benchmark():
     return submission
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     run_example_benchmark()
 
@@ -1152,7 +1151,6 @@ def run_optimization_workflow_example():
     return submission
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     run_optimization_workflow_example()
 
@@ -1245,7 +1243,6 @@ def test_unit_simple_mlp():
 
     print("✅ SimpleMLP works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_simple_mlp()
 
@@ -1303,7 +1300,6 @@ def test_unit_benchmark_report():
 
     print("✅ BenchmarkReport works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_benchmark_report()
 
@@ -1356,7 +1352,6 @@ def test_unit_submission_generation():
 
     print("✅ Submission generation works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_submission_generation()
 
@@ -1457,7 +1452,6 @@ def test_unit_submission_schema():
 
     print("✅ Submission schema validation works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_submission_schema()
 
@@ -1522,7 +1516,6 @@ def test_unit_submission_with_optimization():
 
     print("✅ Submission with optimization works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_submission_with_optimization()
 
@@ -1585,7 +1578,6 @@ def test_unit_improvements_calculation():
 
     print("✅ Improvements calculation is correct!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_improvements_calculation()
 
@@ -1646,7 +1638,6 @@ def test_unit_json_serialization():
 
     print("✅ JSON serialization works correctly!")
 
-# Run test immediately when developing
 if __name__ == "__main__":
     test_unit_json_serialization()
 
@@ -1702,21 +1693,15 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 20")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of benchmarking, reproducibility, and ML systems integration:
 
-### Reflecting on the Complete ML Systems Journey
-
 You've built an entire ML framework across 20 modules. This capstone asks you to step back and reflect on the complete systems journey—from tensors to production-ready benchmarking.
 
-### End-to-End System Integration
+### Question 1: End-to-End System Integration
 
 Modern ML systems aren't just individual components working in isolation—they're carefully orchestrated pipelines where each piece connects to form a cohesive whole.
 
@@ -1750,7 +1735,7 @@ Data → Tensor (M01) → Layers (M03) → Model → Training (M08)
 
 **Reflection Question:** When you imported `from tinytorch.core.tensor import Tensor` in Module 15 (Quantization), the Tensor already had gradient tracking from Module 06. How does this "single source of truth" design simplify system integration compared to having separate BasicTensor and GradTensor classes?
 
-### Benchmarking Methodology: Science Meets Engineering
+### Question 2: Benchmarking Methodology: Science Meets Engineering
 
 Effective benchmarking requires rigorous methodology that bridges scientific measurement with engineering pragmatism.
 
@@ -1816,7 +1801,7 @@ Single measurement: 12.3ms
 
 **Reflection Question:** Your benchmark runs inference 100 times and reports mean latency. A production API serves 1 million requests/day. Which percentile (p50, p90, p99) matters more for user experience, and why isn't mean sufficient?
 
-### Performance Measurement Traps and How to Avoid Them
+### Question 3: Performance Measurement Traps and How to Avoid Them
 
 Real-world benchmarking is full of subtle traps that can invalidate your measurements.
 
@@ -1898,7 +1883,7 @@ def good_benchmark():
 
 **Reflection Question:** You benchmark a model at batch_size=32 and report 50ms latency (1.56ms per sample). A production API serves requests one at a time. Will real users experience 1.56ms latency? Why or why not?
 
-### Schema Validation: Making Results Machine-Readable
+### Question 4: Schema Validation: Making Results Machine-Readable
 
 Your submission format uses JSON Schema validation—a powerful pattern for ensuring data quality and enabling automation.
 
@@ -1955,7 +1940,7 @@ plot_accuracy_vs_speedup(all_submissions)
 
 **Reflection Question:** Your submission schema requires `model_size_mb` as a float. Why is this better than allowing users to write "4MB" or "4.0 megabytes" as strings? Think about aggregation and comparison.
 
-### The Complete ML Systems Lifecycle
+### Question 5: The Complete ML Systems Lifecycle
 
 This capstone represents the final stage of the ML systems lifecycle—but it's also the beginning of the next iteration.
 
@@ -2009,7 +1994,7 @@ This capstone represents the final stage of the ML systems lifecycle—but it's 
 
 **Reflection Question:** You deploy a model with 92% accuracy and 10ms latency. Three months later, users complain it's slow. Monitoring shows 30ms latency now (same model, same code). You didn't save system_info in your original benchmark. What went wrong, and how does proper benchmarking prevent this?
 
-### Your Path Forward: From Learning to Production
+### Question 6: Your Path Forward: From Learning to Production
 
 You've completed an educational framework, but the patterns you learned apply directly to production systems.
 
@@ -2090,7 +2075,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🚀 MODULE SUMMARY: Capstone: Benchmarking & Submission
+## 🚀 MODULE SUMMARY: Capstone
 
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
 
@@ -2107,7 +2092,7 @@ Congratulations! You've completed the TinyTorch capstone by building a professio
 - **Reproducibility requirements**: System context, schema validation, and standardized reporting
 - **Production patterns**: How real ML systems measure and compare model performance
 
-### The Complete TinyTorch Journey
+The complete journey:
 
 ```
 Module 01: Tensor          -> Built foundation
@@ -2128,6 +2113,8 @@ You started Module 01 with a simple Tensor class. Now you have:
 **You didn't just learn ML systems - you BUILT one from scratch.**
 
 Export with: `tito module complete 20`
+
+**Next**: The TorchPerf Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's!
 
 **Congratulations on completing TinyTorch!**
 """

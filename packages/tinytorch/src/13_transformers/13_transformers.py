@@ -607,7 +607,6 @@ def test_unit_layer_norm():
 
     print("✅ LayerNorm works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_layer_norm()
 
@@ -815,7 +814,6 @@ def test_unit_mlp():
 
     print("✅ MLP works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_mlp()
 
@@ -1083,7 +1081,6 @@ def test_unit_transformer_block():
 
     print("✅ TransformerBlock works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_transformer_block()
 
@@ -1446,6 +1443,9 @@ class GPT:
 
         return params
 
+# Alias kept for tests written before the rename
+TinyGPT = GPT
+
 # %% [markdown]
 """
 ### 🧪 Unit Test: GPT Model
@@ -1498,7 +1498,6 @@ def test_unit_gpt():
 
     print("✅ GPT model works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_gpt()
 
@@ -1565,7 +1564,6 @@ def test_unit_sample_next_token():
 
     print("✅ Token sampling works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_sample_next_token()
 
@@ -2004,11 +2002,6 @@ if __name__ == "__main__":
     demonstrate_transformer_integration()
     print("\n")
     demo_transformers()
-
-# %%
-#| export
-# Alias for backward compatibility with tests
-TinyGPT = GPT
 
 # %% [markdown]
 """

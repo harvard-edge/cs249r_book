@@ -418,7 +418,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Magnitude-Based Pruning
+## 🏗️ Magnitude-Based Pruning
 
 Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
 
@@ -587,7 +587,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Structured Pruning
+## 🏗️ Structured Pruning
 
 While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
 
@@ -776,7 +776,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Low-Rank Approximation
+## 🏗️ Low-Rank Approximation
 
 Low-rank approximation discovers that large weight matrices often contain redundant information that can be captured with much smaller matrices through mathematical decomposition.
 
@@ -937,7 +937,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Knowledge Distillation
+## 🏗️ Knowledge Distillation
 
 Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
 
@@ -1268,6 +1268,7 @@ CLOUD SERVICE (Minimal compression):
 """
 
 # %% nbgrader={"grade": false, "grade_id": "compress-model-comprehensive", "solution": true}
+#| export
 def compress_model(model, compression_config):
     """
     Apply comprehensive model compression based on configuration.
@@ -1760,7 +1761,7 @@ def test_module():
 
 Answer these to deepen your understanding of compression techniques and their systems implications:
 
-### 1. Compression Trade-offs
+### Question 1: Compression Trade-offs
 **Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
 
 **Consider**:
@@ -1772,7 +1773,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 2. Structured vs Unstructured Sparsity
+### Question 2: Structured vs Unstructured Sparsity
 **Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
 
 **Consider**:
@@ -1784,7 +1785,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 3. Knowledge Distillation Efficiency
+### Question 3: Knowledge Distillation Efficiency
 **Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
 
 **Calculate**:
@@ -1796,7 +1797,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 4. Low-Rank Decomposition
+### Question 4: Low-Rank Decomposition
 **Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
 
 **Calculate**:
@@ -1809,7 +1810,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 5. Pruning Strategy Selection
+### Question 5: Pruning Strategy Selection
 **Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
 
 **Consider**:

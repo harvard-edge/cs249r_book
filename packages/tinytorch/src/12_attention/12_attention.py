@@ -613,7 +613,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Multi-Head Attention
+## 🏗️ Multi-Head Attention
 
 Multi-head attention runs multiple attention "heads" in parallel, each learning to focus on different types of relationships. Think of it as having multiple specialists: one for syntax, one for semantics, one for long-range dependencies, etc.
 
@@ -1111,7 +1111,6 @@ def analyze_attention_complexity():
     print(f"\n💡 KEY INSIGHT: Attention memory scales as O(n^2) with sequence length")
     print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1024/1024:.1f} MB")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_attention_complexity()
 
@@ -1153,7 +1152,6 @@ def analyze_attention_timing():
     print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
     print(f"🚀 This is why attention efficiency techniques are an active area of research")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_attention_timing()
 
@@ -1185,7 +1183,6 @@ def analyze_attention_memory_overhead():
     print("   Optimizer state (Adam's two moments) scales with parameters, not sequence length.")
     print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16MB per head becomes ~144GB of saved weights per sequence!")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_attention_memory_overhead()
 
@@ -1393,7 +1390,7 @@ def test_module():
 
 Answer these to deepen your understanding of attention operations and their systems implications:
 
-### 1. Quadratic Complexity and Memory
+### Question 1: Quadratic Complexity and Memory
 **Question**: For sequence length 1024, how much memory does attention's O(n^2) use? What about length 2048?
 
 **Consider**:
@@ -1407,7 +1404,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 2. Attention vs FFN Bottleneck
+### Question 2: Attention vs FFN Bottleneck
 **Question**: In production transformers, attention is often the memory bottleneck, not the FFN (feed-forward network). Why?
 
 **Consider**:
@@ -1424,7 +1421,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 3. Multi-Head Trade-offs
+### Question 3: Multi-Head Trade-offs
 **Question**: 8 attention heads vs 1 head with 8x dimensions - same parameters, different performance. What's the systems difference?
 
 **Consider**:
@@ -1441,7 +1438,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 4. Masking Costs
+### Question 4: Masking Costs
 **Question**: Causal masking (for autoregressive models) zeros out half the attention matrix. Do we save computation or just correctness?
 
 **Consider**:
@@ -1457,7 +1454,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 5. The Quadratic Memory Challenge
+### Question 5: The Quadratic Memory Challenge
 **Question**: Your implementation computes the full (seq_len x seq_len) attention matrix. Why is this the primary memory bottleneck?
 
 **Calculate**:
@@ -1472,7 +1469,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### Bonus: Training Memory Overhead
+### Bonus Question: Training Memory Overhead
 **Question**: Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
 
 **Calculate**:

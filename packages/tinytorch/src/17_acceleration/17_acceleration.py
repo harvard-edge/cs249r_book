@@ -29,8 +29,6 @@ Layers (03) → Training (08) → CNNs (09) → Acceleration (17)
 (building blocks) (learning)   (spatial)  (speed up)
 ```
 
-**Prerequisites**: Module 01 (Tensor) and Module 14 (Profiling, for the measurement habits)
-
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement vectorized operations for maximum throughput
@@ -134,7 +132,7 @@ When: Element-wise operations, small tensors
 Solution: Kernel fusion, memory layout optimization
 ```
 
-### The Roofline Model - Your Performance Compass
+### The Roofline Model: Your Performance Compass
 
 Every processor has fundamental limits:
 
@@ -167,7 +165,7 @@ Real-world performance wins:
 
 # %% [markdown]
 """
-## 📐 Foundations: Vectorization: From Loops to Lightning
+## 📐 Foundations: Vectorization, From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -359,7 +357,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Kernel Fusion: Eliminating Memory Bottlenecks
+## 🏗️ Implementation: Kernel Fusion
 
 ### The Memory Bandwidth Crisis
 
@@ -547,6 +545,10 @@ if __name__ == "__main__":
 ### 🧪 Unit Test: Fusion Performance
 
 Let's quantify the impact of kernel fusion by comparing fused vs unfused implementations.
+
+**What we're testing**: The unfused GELU matches the fused one numerically and costs more time
+**Why it matters**: Fusion only earns its keep if the temporaries it removes show up as wall-clock
+**Expected**: Identical outputs, and the fused version at least as fast
 """
 
 # %% nbgrader={"grade": false, "grade_id": "unfused-gelu", "solution": true}
@@ -686,7 +688,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Cache-Aware Matrix Multiplication
+## 🏗️ Cache-Aware Matrix Multiplication
 
 For large matrices that don't fit in cache, we need **tiling** (also called blocking).
 This breaks the computation into cache-sized chunks for better performance.
@@ -1023,7 +1025,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 📊 Memory Efficiency Analysis
+### Memory Efficiency Analysis
 
 Understanding memory allocation patterns is crucial for perf.
 Let's measure how different implementations use memory.
@@ -1481,17 +1483,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 17")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of acceleration techniques and their systems implications:
 
-### 1. Arithmetic Intensity Analysis
+### Question 1: Arithmetic Intensity Analysis
 You implemented vectorized matrix multiplication and fused GELU.
 - Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
 - Arithmetic intensity: _____ FLOPs/byte
@@ -1500,7 +1498,7 @@ You implemented vectorized matrix multiplication and fused GELU.
 
 ---
 
-### 2. Kernel Fusion Memory Benefits
+### Question 2: Kernel Fusion Memory Benefits
 Your fused_gelu combines 7 operations into a single expression.
 - Unfused version memory accesses: 7 reads + 7 writes = _____ per element
 - Fused version memory accesses: 1 read + 1 write = _____ per element
@@ -1509,7 +1507,7 @@ Your fused_gelu combines 7 operations into a single expression.
 
 ---
 
-### 3. Production Optimization Strategy
+### Question 3: Production Optimization Strategy
 Based on your decision framework analysis:
 For edge deployment (memory critical, stability required, hardware diverse):
 - Priority 1 technique: _____ (low risk, universal)
@@ -1588,8 +1586,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - **Kernel Fusion**: Critical for memory-bound workloads, reduces intermediate storage by 4-5×
 - **Optimization Strategy**: Start simple (vectorization), add complexity as needed
 
-### Production Impact
-Your acceleration techniques enable:
+In production, these techniques enable:
 - **Training larger models** within memory constraints
 - **Faster iteration cycles** during research and development
 - **Better hardware utilization** across different deployment targets
