@@ -79,10 +79,6 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
   Foundation          Nonlinearity              Architecture
 ```
 
-**Import Strategy**:
-This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
-**Assumption**: Module 01 (Tensor) has been completed and exported to the package.
-If you see import errors, ensure you've run `tito module complete 01`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
@@ -98,10 +94,6 @@ from tinytorch.core.tensor import Tensor, Function
 
 # Constants for numerical comparisons
 TOLERANCE = 1e-10  # Small tolerance for floating-point comparisons in tests
-
-# Export only activation classes
-__all__ = ['Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax',
-           'SigmoidFunction', 'ReLUFunction', 'TanhFunction', 'GELUFunction', 'SoftmaxFunction']
 
 # %% [markdown]
 """
@@ -143,7 +135,7 @@ This is how nonlinearity turns simple math into powerful function approximation.
 
 # %% [markdown]
 """
-## 📐 Foundations
+## 📐 Foundations: Five Activation Functions
 
 Each activation function serves a different purpose in computation:
 
@@ -179,7 +171,7 @@ class ActivationName:
 
 # %% [markdown]
 """
-### Sigmoid - The Probability Gatekeeper
+### Sigmoid: The Probability Gatekeeper
 
 Sigmoid maps any real number to the range (0, 1), making it perfect for probabilities and binary decisions.
 
@@ -316,7 +308,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### ReLU - The Sparsity Creator
+### ReLU: The Sparsity Creator
 
 ReLU (Rectified Linear Unit) is the most popular activation function. It simply removes negative values, creating sparsity that makes neural networks more efficient.
 
@@ -448,7 +440,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Tanh - The Zero-Centered Alternative
+### Tanh: The Zero-Centered Alternative
 
 Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering is a desirable mathematical property.
 
@@ -578,7 +570,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### GELU - The Smooth Modern Choice
+### GELU: The Smooth Modern Choice
 
 GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
 
@@ -723,7 +715,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Softmax - The Probability Distributor
+### Softmax: The Probability Distributor
 
 Softmax converts any vector into a valid probability distribution. All outputs are positive and sum to exactly 1.0, making it essential for multi-class classification.
 
@@ -903,6 +895,89 @@ These different behaviors make each activation suitable for different computatio
 
 # %% [markdown]
 """
+## 📊 Systems Analysis: Activation Computation Costs
+
+Let's understand ONE key systems concept: **computational cost differences between activations**.
+
+This analysis reveals why ReLU dominates hidden layers while more expensive activations are reserved for specific use cases.
+"""
+
+# %%
+def analyze_activation_performance():
+    """Demonstrate computational cost differences between activation functions."""
+    print("Analyzing Activation Computation Costs...")
+    print("=" * 60)
+
+    import time
+
+    # Create test data (realistic hidden layer size)
+    size = 1000000  # 1 million elements (like a large hidden layer)
+    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
+
+    print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
+    print("-" * 60)
+
+    # Initialize activations
+    relu = ReLU()
+    sigmoid = Sigmoid()
+    tanh = Tanh()
+    gelu = GELU()
+
+    # Warm up
+    _ = relu(test_data)
+    _ = sigmoid(test_data)
+
+    # Time each activation (multiple runs for accuracy)
+    n_runs = 10
+
+    # ReLU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = relu(test_data)
+    relu_time = (time.time() - start) / n_runs * 1000
+
+    # Sigmoid timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = sigmoid(test_data)
+    sigmoid_time = (time.time() - start) / n_runs * 1000
+
+    # Tanh timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = tanh(test_data)
+    tanh_time = (time.time() - start) / n_runs * 1000
+
+    # GELU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = gelu(test_data)
+    gelu_time = (time.time() - start) / n_runs * 1000
+
+    print("\n🧪 Activation Performance Results:")
+    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
+    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
+    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
+    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
+
+    print("\n" + "=" * 60)
+    print("KEY INSIGHTS:")
+    print("   1. ReLU is fastest: Just max(0, x) - no exponentials")
+    print("   2. Sigmoid/Tanh require exp() - expensive operation")
+    print("   3. GELU uses sigmoid internally - inherits its cost")
+    print("   4. For hidden layers: ReLU's speed advantage adds up!")
+
+    print("\nREAL-WORLD IMPLICATIONS:")
+    print("   - ResNet uses ReLU: billions of activations per forward pass")
+    print("   - GPT uses GELU: worth the cost for better gradients")
+    print("   - Sigmoid/Tanh: reserved for output layers or gates")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    analyze_activation_performance()
+
+# %% [markdown]
+"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -984,10 +1059,6 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 02")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 
 # %% [markdown]
 """
@@ -995,7 +1066,7 @@ if __name__ == "__main__":
 
 Answer these to deepen your understanding of activation functions and their systems implications:
 
-### 1. Computational Cost Comparison
+### Question 1: Computational Cost Comparison
 **Question**: ReLU is the most popular activation function in hidden layers. Given what you implemented, why is ReLU computationally cheaper than Sigmoid or GELU?
 
 **Consider**:
@@ -1007,7 +1078,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### 2. Numerical Stability
+### Question 2: Numerical Stability
 **Question**: Look at your Softmax implementation. Why did we subtract the maximum value before computing exponentials?
 
 **Consider**:
@@ -1019,7 +1090,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### 3. Sparsity and Efficiency
+### Question 3: Sparsity and Efficiency
 **Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for computation?
 
 **Consider**:
@@ -1034,7 +1105,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### 4. Activation Selection for Different Stages
+### Question 4: Activation Selection for Different Stages
 **Question**: Why do we typically use different activations for hidden stages vs. output stages of a computation?
 
 **Consider the requirements**:
@@ -1049,7 +1120,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### 5. The "Dying ReLU" Problem
+### Question 5: The "Dying ReLU" Problem
 **Question**: If ReLU outputs 0 for some inputs, those inputs get no signal passed through -- they effectively "die." What situations might cause this, and why is it a problem?
 
 **Consider**:
@@ -1064,7 +1135,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### Bonus Challenge: Memory Analysis
+### Bonus Question: Memory Analysis
 
 **Scenario**: You're running inference on a model with a hidden layer of size (batch=32, features=4096) using different activations.
 
@@ -1076,90 +1147,6 @@ Answer these to deepen your understanding of activation functions and their syst
 **Key insight**: Activation functions are memory-light (output same size as input), but the choice affects computational speed and numerical precision significantly.
 """
 
-
-# %% [markdown]
-"""
-## 📊 Systems Analysis: Activation Computation Costs
-
-Let's understand ONE key systems concept: **computational cost differences between activations**.
-
-This analysis reveals why ReLU dominates hidden layers while more expensive activations are reserved for specific use cases.
-"""
-
-# %%
-def analyze_activation_performance():
-    """Demonstrate computational cost differences between activation functions."""
-    print("Analyzing Activation Computation Costs...")
-    print("=" * 60)
-
-    import time
-
-    # Create test data (realistic hidden layer size)
-    size = 1000000  # 1 million elements (like a large hidden layer)
-    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
-
-    print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
-    print("-" * 60)
-
-    # Initialize activations
-    relu = ReLU()
-    sigmoid = Sigmoid()
-    tanh = Tanh()
-    gelu = GELU()
-
-    # Warm up
-    _ = relu(test_data)
-    _ = sigmoid(test_data)
-
-    # Time each activation (multiple runs for accuracy)
-    n_runs = 10
-
-    # ReLU timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = relu(test_data)
-    relu_time = (time.time() - start) / n_runs * 1000
-
-    # Sigmoid timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = sigmoid(test_data)
-    sigmoid_time = (time.time() - start) / n_runs * 1000
-
-    # Tanh timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = tanh(test_data)
-    tanh_time = (time.time() - start) / n_runs * 1000
-
-    # GELU timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = gelu(test_data)
-    gelu_time = (time.time() - start) / n_runs * 1000
-
-    print("\n🧪 Activation Performance Results:")
-    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
-    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
-    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
-    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
-
-    print("\n" + "=" * 60)
-    print("KEY INSIGHTS:")
-    print("   1. ReLU is fastest: Just max(0, x) - no exponentials")
-    print("   2. Sigmoid/Tanh require exp() - expensive operation")
-    print("   3. GELU uses sigmoid internally - inherits its cost")
-    print("   4. For hidden layers: ReLU's speed advantage adds up!")
-
-    print("\nREAL-WORLD IMPLICATIONS:")
-    print("   - ResNet uses ReLU: billions of activations per forward pass")
-    print("   - GPT uses GELU: worth the cost for better gradients")
-    print("   - Sigmoid/Tanh: reserved for output layers or gates")
-    print("=" * 60)
-
-# Run the analysis
-if __name__ == "__main__":
-    analyze_activation_performance()
 
 # %% [markdown]
 """

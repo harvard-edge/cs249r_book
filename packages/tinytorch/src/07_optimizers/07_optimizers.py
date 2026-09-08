@@ -342,7 +342,7 @@ class Optimizer:
 
 # %% [markdown]
 """
-### 🏗️ Gradient Extraction - Handling Tensor vs NumPy Gradients
+### Gradient Extraction: Handling Tensor vs NumPy Gradients
 
 When autograd computes gradients, they can arrive as either a `Tensor` object
 (wrapping a NumPy array in `.data`) or as a raw NumPy array. Every optimizer
@@ -910,7 +910,7 @@ class Adam(Optimizer):
 
 # %% [markdown]
 """
-### 🏗️ Moment Updates - EMA and Bias Correction
+### Moment Updates: EMA and Bias Correction
 
 Adam tracks two running statistics per parameter: a first moment (mean of
 gradients) and a second moment (mean of squared gradients). Both use
@@ -1038,7 +1038,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Adam Step - Composing Gradient Extraction, Moments, and Update
+### Adam Step: Composing Gradient Extraction, Moments, and Update
 
 The `step()` method now composes three focused operations:
 1. `_extract_gradient()` -- normalize Tensor/ndarray gradient to NumPy
@@ -1295,7 +1295,7 @@ class AdamW(Optimizer):
 
 # %% [markdown]
 """
-### 🏗️ AdamW Moment Updates - Same EMA, Different Context
+### AdamW Moment Updates: Same EMA, Different Context
 
 AdamW uses identical moment update math as Adam (EMA + bias correction), and
 the module keeps the two classes separate on purpose: a student building either
@@ -1422,7 +1422,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ AdamW Step - Decoupled Weight Decay Composition
+### AdamW Step: Decoupled Weight Decay Composition
 
 AdamW's `step()` composes the same helpers as Adam, but with one critical
 difference: weight decay is applied **after** the gradient update, directly
@@ -1742,7 +1742,6 @@ def analyze_optimizer_memory_usage():
     print("- Trade-off: More memory for better convergence")
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_optimizer_memory_usage()
 
@@ -1813,7 +1812,6 @@ def analyze_optimizer_convergence_behavior():
     print("- AdamW: Similar to Adam with regularization effects")
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_optimizer_convergence_behavior()
 
@@ -1938,7 +1936,7 @@ def test_module():
 
 Answer these to deepen your understanding of optimizer operations and their systems implications:
 
-### 1. Memory vs Performance
+### Question 1: Memory vs Performance
 **Question**: You've implemented SGD (2x memory) and Adam (3x memory). For a model with 10 billion parameters at float32 (4 bytes each):
 
 **Consider**:
@@ -1954,7 +1952,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### 2. Learning Rate Sensitivity
+### Question 2: Learning Rate Sensitivity
 **Question**: SGD uses a fixed learning rate for all parameters, while Adam adapts per-parameter.
 
 **Consider**:
@@ -1966,7 +1964,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### 3. Optimizer State Management
+### Question 3: Optimizer State Management
 **Question**: Adam and AdamW maintain momentum buffers (m, v) that persist across training steps.
 
 **Consider**:
@@ -1981,7 +1979,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### 4. Weight Decay Trade-offs
+### Question 4: Weight Decay Trade-offs
 **Question**: AdamW decouples weight decay from gradient updates.
 
 **Consider**:
@@ -1993,7 +1991,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### 5. Production Scale: Memory Requirements
+### Question 5: Production Scale: Memory Requirements
 **Question**: For training a GPT-scale model with 1 billion parameters, calculate the memory requirements:
 
 **Calculate**:
@@ -2011,7 +2009,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### Bonus Challenge: Optimization Analysis
+### Bonus Question: Optimization Analysis
 
 **Scenario**: You're training a deep neural network and observing the following:
 - Loss decreases rapidly for first 1000 steps

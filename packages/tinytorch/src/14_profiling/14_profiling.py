@@ -278,7 +278,7 @@ Profiler Class Structure:
 
 # %% [markdown]
 """
-### Layer Parameters - The Atom of Model Size
+### Layer Parameters: The Atom of Model Size
 
 Parameter count is the first number anyone quotes about a model, and it is the
 one every memory estimate starts from. A layer's parameters are whatever arrays
@@ -337,7 +337,7 @@ def _count_layer_parameters(layer) -> int:
 
 # %% [markdown]
 """
-### Convolution FLOPs - Where Parameters and Compute Diverge
+### Convolution FLOPs: Where Parameters and Compute Diverge
 
 A convolution costs far more than its parameter count suggests, and the gap is
 the whole point. A Linear layer uses each weight once. A convolution slides the
@@ -409,7 +409,7 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
 
 # %% [markdown]
 """
-### Linear FLOPs - The Cost of One Matrix Multiply
+### Linear FLOPs: The Cost of One Matrix Multiply
 
 A Linear layer is a single matrix multiply, so its arithmetic cost is fixed by
 two numbers: how wide the input is and how wide the output is. Producing one
@@ -468,7 +468,7 @@ def _count_linear_flops(model, input_shape: Tuple[int, ...]) -> int:
 
 # %% [markdown]
 """
-### Bottleneck Classification - Compute-Bound or Memory-Bound
+### Bottleneck Classification: Compute-Bound or Memory-Bound
 
 Every optimization decision starts with one question: is this workload waiting on
 arithmetic, or waiting on data? The two answers point in opposite directions. A
@@ -532,7 +532,7 @@ def _analyze_bottleneck(gflops_per_second: float,
 
 # %% [markdown]
 """
-### Memory Efficiency - Useful Bytes vs. Peak Bytes
+### Memory Efficiency: Useful Bytes vs. Peak Bytes
 
 Peak memory is almost never the memory you asked for. Allocators round up,
 intermediate buffers outlive their use, fragmentation strands free blocks that
@@ -582,7 +582,7 @@ def _calculate_memory_efficiency(useful_memory_mb: float, peak_memory_mb: float)
 
 # %% [markdown]
 """
-### Derived Metrics - Turning Counts into Rates
+### Derived Metrics: Turning Counts into Rates
 
 Raw measurements are not yet insight. A FLOP count and a latency are two
 unrelated numbers until you divide them, at which point they become throughput
@@ -651,7 +651,7 @@ def _compute_derived_metrics(flops: int, latency_ms: float,
 
 # %% [markdown]
 """
-### Backward Pass Cost - Why Training Is 3x Inference
+### Backward Pass Cost: Why Training Is 3x Inference
 
 Training costs roughly three times what inference costs, and the split is worth
 knowing precisely: one unit forward, two units backward. The backward pass is
@@ -708,7 +708,7 @@ def _estimate_backward_costs(forward_flops: int,
 
 # %% [markdown]
 """
-### Optimizer Memory - The Hidden Cost of Adam
+### Optimizer Memory: The Hidden Cost of Adam
 
 Optimizer state is the memory cost people forget. SGD keeps nothing between
 steps, so it adds nothing. Adam keeps two running averages per parameter, the
@@ -2415,14 +2415,13 @@ def analyze_batch_size_effects():
     print("\n💡 Batch Size Insights:")
     print("Larger batches typically improve throughput but increase memory usage")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_model_scaling()
     analyze_batch_size_effects()
 
 # %% [markdown]
 """
-## 📊 Optimization Insights: Production Performance Patterns
+### Optimization Insights: Production Performance Patterns
 
 Understanding profiling results helps guide optimization decisions. Let's analyze different operation types and measurement overhead.
 
@@ -2583,7 +2582,6 @@ def analyze_profiling_overhead():
     else:
         print("High overhead - use sparingly in production")
 
-# Run optimization analysis
 if __name__ == "__main__":
     benchmark_operation_efficiency()
     analyze_profiling_overhead()
@@ -2610,7 +2608,7 @@ def test_module():
     print("=" * 50)
 
     # Run all unit tests (helpers first, then composition functions)
-    print("Running helper unit tests...")
+    print("Running unit tests (helpers first, then compositions)...")
     test_unit_count_layer_parameters()
     test_unit_count_linear_flops()
     test_unit_count_conv_flops()
@@ -2704,17 +2702,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 14")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of profiling operations and their systems implications:
 
-### 1. FLOP Analysis
+### Question 1: FLOP Analysis
 **Question**: You implemented a profiler that counts FLOPs for different operations. For a Linear layer with 1000 input features and 500 output features:
 
 **Consider**:
@@ -2724,7 +2718,7 @@ Answer these to deepen your understanding of profiling operations and their syst
 
 ---
 
-### 2. Memory Scaling
+### Question 2: Memory Scaling
 **Question**: Your profiler measures memory usage for models and activations. A transformer model has 125M parameters (500MB at FP32). During training with batch size 16:
 
 **Calculate**:
@@ -2734,7 +2728,7 @@ Answer these to deepen your understanding of profiling operations and their syst
 
 ---
 
-### 3. Performance Bottlenecks
+### Question 3: Performance Bottlenecks
 **Question**: You built tools to identify compute vs memory bottlenecks. A model achieves 10 GFLOP/s on hardware with 100 GFLOP/s peak.
 
 **Think about**:
@@ -2744,7 +2738,7 @@ Answer these to deepen your understanding of profiling operations and their syst
 
 ---
 
-### 4. Profiling Trade-offs
+### Question 4: Profiling Trade-offs
 **Question**: Your profiler adds measurement overhead to understand performance. If profiling adds 5x overhead but reveals a 50% speedup opportunity:
 
 **Consider**:
@@ -2816,9 +2810,9 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 
 ### Ready for Next Steps
 Your profiling implementation provides the measurement foundation for all optimization work.
+You can't optimize what you can't measure, and now you can measure everything.
+
 Export with: `tito module complete 14`
 
 **Next**: Module 15 will add quantization, the first optimization your profiler will let you measure honestly!
-
-You can't optimize what you can't measure — and now you can measure everything.
 """

@@ -97,7 +97,7 @@ DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 - `tinytorch.core.tensor.Tensor` (Module 01)
 - `tinytorch.core.activations.ReLU, Sigmoid` (Module 02)
 
-**Important**: This module depends on Tensor and Activations.
+This module depends on Tensor and Activations.
 Ensure previous modules are completed and exported.
 
 **Dependency Flow**:
@@ -185,7 +185,7 @@ Let's build our layer system step by step. We'll implement two essential layer t
 
 # %% [markdown]
 """
-### 🏗️ Layer Base Class - Foundation for All Layers
+### Layer Base Class: Foundation for All Layers
 
 All neural network layers share common functionality: forward pass, parameter management, and callable interface. The base Layer class provides this consistent interface.
 """
@@ -242,7 +242,7 @@ class Layer:
 
 # %% [markdown]
 """
-### 🏗️ Linear Layer - The Foundation of Neural Networks
+### Linear Layer: The Foundation of Neural Networks
 
 Linear layers (also called Dense or Fully Connected layers) are the fundamental building blocks of neural networks. They implement the mathematical operation:
 
@@ -460,7 +460,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Edge Case Tests: Linear Layer
+### 🧪 Unit Test: Linear Edge Cases
 
 Additional tests for edge cases and error handling.
 
@@ -474,7 +474,7 @@ working, usually the first time a real dataset has a ragged final batch
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
 def test_unit_edge_cases_linear():
     """🧪 Test Linear layer edge cases."""
-    print("🧪 Edge Case Tests: Linear Layer...")
+    print("🧪 Unit Test: Linear Edge Cases...")
 
     layer = Linear(10, 5)
 
@@ -509,7 +509,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Parameter Collection Tests: Linear Layer
+### 🧪 Unit Test: Linear Parameter Collection
 
 Tests to ensure Linear layer parameters can be collected for optimization.
 
@@ -523,7 +523,7 @@ parameter left out of that list is a parameter that silently never learns
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
 def test_unit_parameter_collection_linear():
     """🧪 Test Linear layer parameter collection."""
-    print("🧪 Parameter Collection Test: Linear Layer...")
+    print("🧪 Unit Test: Linear Parameter Collection...")
 
     layer = Linear(10, 5)
 
@@ -546,7 +546,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🎲 Dropout Layer - Preventing Overfitting
+### Dropout Layer: Preventing Overfitting
 
 Dropout is a regularization technique that randomly "turns off" neurons during training. This forces the network to not rely too heavily on any single neuron, making it more robust and generalizable.
 
@@ -1181,7 +1181,6 @@ def analyze_layer_memory():
 
         print(f"Hidden={hidden_size:4d}: {total_params:7,} params = {memory_mb:5.1f} MB")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_layer_memory()
 
@@ -1238,7 +1237,6 @@ def analyze_layer_performance():
     print("🚀 Dropout adds minimal computational overhead (element-wise operations)")
     print("🚀 Larger batches amortize overhead, improving throughput efficiency")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_layer_performance()
 
@@ -1327,7 +1325,7 @@ def test_module():
 
 Answer these to deepen your understanding of layer operations and their systems implications:
 
-### 1. Parameter Scaling and Memory
+### Question 1: Parameter Scaling and Memory
 **Question**: Consider three different network architectures for MNIST (28x28 = 784 input features, 10 output classes):
 - Architecture A: 784 -> 128 -> 10
 - Architecture B: 784 -> 256 -> 10
@@ -1342,7 +1340,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 2. Dropout Training vs Inference
+### Question 2: Dropout Training vs Inference
 **Question**: You have a Dropout layer with p=0.5 in your network. During training, we scale surviving values by 1/(1-p) = 2.0.
 
 **Consider**:
@@ -1357,7 +1355,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 3. Weight Initialization Trade-offs
+### Question 3: Weight Initialization Trade-offs
 **Question**: We initialize weights with scale = sqrt(1/in_features) (LeCun-style). For Linear(1000, 10), how does this compare to Linear(10, 1000)?
 
 **Calculate**:
@@ -1371,7 +1369,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 4. Layer Ordering Effects
+### Question 4: Layer Ordering Effects
 **Question**: In a typical layer block, we compose: Linear -> Activation -> Dropout. What happens if you change the order to: Linear -> Dropout -> Activation?
 
 **Consider**:
@@ -1385,7 +1383,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 5. Production Deployment Memory
+### Question 5: Production Deployment Memory
 **Question**: You're deploying a 3-layer network (784->256->128->10) to a mobile device with 10MB free memory.
 
 **Calculate**:
@@ -1400,7 +1398,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### Bonus Challenge: Manual Composition Analysis
+### Bonus Question: Manual Composition Analysis
 
 **Question**: We deliberately built individual layers and composed them manually rather than using a Sequential container. What did you see explicitly that a Sequential would hide?
 

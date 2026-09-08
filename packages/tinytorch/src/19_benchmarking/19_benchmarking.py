@@ -212,7 +212,7 @@ Every measurement has uncertainty. When combining metrics (like accuracy per jou
 Professional benchmarking quantifies and minimizes these uncertainties.
 """
 
-# %%
+# %% nbgrader={"grade": false, "grade_id": "olympic-event", "solution": false}
 #| export
 from enum import Enum
 
@@ -271,7 +271,7 @@ comparable at all. Read them in that order; each one is built on the last.
 
 # %% [markdown]
 """
-### BenchmarkResult - Statistical Analysis Container
+### BenchmarkResult: Statistical Analysis Container
 
 Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
 
@@ -552,7 +552,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark Class - Core Measurement Engine
+### Benchmark Class: Core Measurement Engine
 
 The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
 
@@ -613,7 +613,7 @@ Different metrics require different measurement strategies:
 
 # %% [markdown]
 """
-### Benchmark.__init__ - Setting Up the Measurement Engine
+### Benchmark.__init__: Setting Up the Measurement Engine
 
 The Benchmark constructor configures the measurement infrastructure: models to test,
 datasets for evaluation, and system metadata for reproducibility. It reuses the
@@ -731,7 +731,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_latency_benchmark - Measuring Inference Speed
+### Benchmark.run_latency_benchmark: Measuring Inference Speed
 
 Latency benchmarking measures how long each model takes to process input. We use
 the Profiler for warmup, then collect multiple individual measurements for
@@ -828,7 +828,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Simulated Accuracy - The Honest Stand-In
+### Simulated Accuracy: The Honest Stand-In
 
 Some models handed to a benchmark harness have no `evaluate` method and no
 labeled data behind them. The tempting move is to make up a plausible score.
@@ -959,7 +959,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_accuracy_benchmark - Measuring Prediction Quality
+### Benchmark.run_accuracy_benchmark: Measuring Prediction Quality
 
 Accuracy benchmarking evaluates model correctness across datasets. A model that
 exposes an `evaluate(dataset)` method is **measured**: whatever score it returns
@@ -1079,7 +1079,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_memory_benchmark - Measuring Resource Consumption
+### Benchmark.run_memory_benchmark: Measuring Resource Consumption
 
 Memory benchmarking tracks how much RAM each model consumes during inference.
 We use the Profiler's memory measurement, falling back to parameter-count
@@ -1180,7 +1180,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.compare_models - Cross-Model Comparison
+### Benchmark.compare_models: Cross-Model Comparison
 
 The compare_models method dispatches to the appropriate benchmark type and
 formats results into a structured list of dictionaries for easy comparison.
@@ -1300,7 +1300,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite - Comprehensive Multi-Metric Evaluation
+### BenchmarkSuite: Comprehensive Multi-Metric Evaluation
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
 
@@ -1357,7 +1357,7 @@ Since direct energy measurement requires specialized hardware, we estimate energ
 
 # %% [markdown]
 """
-### BenchmarkSuite.__init__ - Setting Up Multi-Metric Evaluation
+### BenchmarkSuite.__init__: Setting Up Multi-Metric Evaluation
 
 The BenchmarkSuite constructor creates the evaluation infrastructure, including
 a Benchmark instance for measurements and an output directory for reports and plots.
@@ -1444,7 +1444,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.run_full_benchmark - Orchestrating All Measurements
+### BenchmarkSuite.run_full_benchmark: Orchestrating All Measurements
 
 The run_full_benchmark method runs all four benchmark categories (latency, accuracy,
 memory, energy) in sequence, collecting comprehensive results for each model.
@@ -1542,7 +1542,7 @@ def test_unit_benchsuite_run():
 
 # %% [markdown]
 """
-### BenchmarkSuite._estimate_energy_efficiency - Energy Modeling
+### BenchmarkSuite._estimate_energy_efficiency: Energy Modeling
 
 Since direct energy measurement requires specialized hardware (power meters, RAPL),
 we estimate energy from latency and memory usage. This simplified model captures the
@@ -1652,7 +1652,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.plot_results - Visualization
+### BenchmarkSuite.plot_results: Visualization
 
 The plot_results method generates a 2x2 grid of bar charts comparing models
 across all four metrics. The best performer in each category is highlighted green.
@@ -1836,7 +1836,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.generate_report - Actionable Insights
+### BenchmarkSuite.generate_report: Actionable Insights
 
 The generate_report method compiles all benchmark results into a structured
 markdown report with system information, per-metric summaries, best performers,
@@ -2186,7 +2186,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf - Standardized Industry Benchmarking
+### MLPerf: Standardized Industry Benchmarking
 
 MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
 benchmarks that enable fair comparison across different systems, similar to how the
@@ -2264,7 +2264,7 @@ All MLPerf benchmarks use:
 
 # %% [markdown]
 """
-### MLPerf.__init__ - Configuring Standard Benchmarks
+### MLPerf.__init__: Configuring Standard Benchmarks
 
 The MLPerf constructor sets up four standardized benchmark tasks, each with
 fixed input shapes, target accuracy, and maximum latency thresholds. Using a
@@ -2391,7 +2391,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf._run_latency_test - Measuring Inference Latency
+### MLPerf._run_latency_test: Measuring Inference Latency
 
 This helper runs the latency measurement phase: warmup, then timed inference
 for each test input. Returns lists of latencies (ms) and model predictions.
@@ -2501,7 +2501,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf._run_accuracy_test - Evaluating Prediction Quality
+### MLPerf._run_accuracy_test: Evaluating Prediction Quality
 
 This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
@@ -2698,7 +2698,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf.run_standard_benchmark - Complete Benchmark Execution
+### MLPerf.run_standard_benchmark: Complete Benchmark Execution
 
 This method orchestrates a complete standardized benchmark: input generation,
 latency testing, accuracy evaluation, and compliance determination. It composes
@@ -2886,7 +2886,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf.generate_compliance_report - Scorecard Generation
+### MLPerf.generate_compliance_report: Scorecard Generation
 
 The compliance report compiles results from multiple benchmarks into both
 machine-readable JSON and human-readable markdown formats, with overall
@@ -3314,7 +3314,7 @@ This principled approach ensures recommendations match real deployment needs.
 
 # %% [markdown]
 """
-### _collect_base_metrics - Extracting Baseline Performance
+### _collect_base_metrics: Extracting Baseline Performance
 
 This helper extracts the base model's mean performance across all metrics from
 the benchmark results. It establishes the reference point for improvement calculations.
@@ -3379,7 +3379,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _calculate_improvements - Computing Speedup and Retention Ratios
+### _calculate_improvements: Computing Speedup and Retention Ratios
 
 This helper computes improvement ratios for each optimized model relative to
 the baseline. For latency/memory/energy (lower is better), it calculates
@@ -3466,7 +3466,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _generate_recommendations - Deployment-Specific Guidance
+### _generate_recommendations: Deployment-Specific Guidance
 
 This helper analyzes improvement ratios across all optimized models to generate
 recommendations for four deployment scenarios: latency-critical, memory-constrained,
@@ -3599,7 +3599,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### analyze_optimization_techniques - Composition Function
+### analyze_optimization_techniques: Composition Function
 
 This is the main entry point that composes `_collect_base_metrics`,
 `_calculate_improvements`, and `_generate_recommendations` into a complete
@@ -3872,7 +3872,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 MLPerf Principles: Industry-Standard Benchmarking
+### MLPerf Principles: Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
 
@@ -3898,7 +3898,7 @@ The capstone project follows MLPerf-style principles!
 
 # %% [markdown]
 """
-## 📊 Combination Strategies
+### Combination Strategies
 
 Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
@@ -4108,19 +4108,19 @@ def test_module():
 
 Answer these to deepen your understanding of benchmarking and performance engineering:
 
-### 1. Statistical Confidence in Measurements
+### Question 1: Statistical Confidence in Measurements
 You implemented BenchmarkResult with confidence intervals for measurements.
 If you run 20 trials and get mean latency 5.2ms with std dev 0.8ms:
 - What's the 95% confidence interval for the true mean? [_____ ms, _____ ms]
 - How many more trials would you need to halve the confidence interval width? _____ total trials
 
-### 2. Measurement Overhead Analysis
+### Question 2: Measurement Overhead Analysis
 Your precise_timer context manager has microsecond precision, but models run for milliseconds.
 For a model that takes 1ms to execute:
 - If timer overhead is 10μs, what's the relative error? _____%
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
-### 3. Benchmark Configuration Trade-offs
+### Question 3: Benchmark Configuration Trade-offs
 The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
 (with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=10 as defaults).
 For a CI/CD pipeline that runs 100 benchmarks per day:
@@ -4128,14 +4128,14 @@ For a CI/CD pipeline that runs 100 benchmarks per day:
 - Accurate config (15s each): _____ minutes total daily
 - What's the key trade-off you're making? [accuracy/precision/development velocity]
 
-### 4. MLPerf Compliance Metrics
+### Question 4: MLPerf Compliance Metrics
 You implemented MLPerf-style standardized benchmarks with target thresholds.
 If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
 - Is it compliant? [Yes/No] _____
 - Which constraint is more critical for edge deployment? [accuracy/latency]
 - How would you prioritize optimization? [accuracy first/latency first/balanced]
 
-### 5. Optimization Comparison Analysis
+### Question 5: Optimization Comparison Analysis
 Your analyze_optimization_techniques() generates recommendations for different use cases.
 Given three optimized models:
 - Quantized: 0.8× memory, 2× speed, 0.95× accuracy
