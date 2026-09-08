@@ -2789,7 +2789,7 @@ def zero_grad(self):
 
 # %% [markdown]
 """
-## ⚠️ DANGER: In-Place Operations Break Autograd
+### In-Place Operations Break Autograd
 
 **THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
 
@@ -2907,7 +2907,7 @@ never happened. Correctness > premature perf.
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Tensor Autograd Enhancement
+#### 🧪 Unit Test: Tensor Autograd Enhancement
 
 This test validates our enhanced Tensor class computes gradients correctly.
 
@@ -2954,7 +2954,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Gradients Through a Reused Tensor
+#### 🧪 Unit Test: Gradients Through a Reused Tensor
 
 This test validates the topological traversal: a tensor consumed by more than
 one operation must accumulate from every consumer before it propagates.

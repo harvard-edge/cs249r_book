@@ -3872,7 +3872,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 MLPerf Principles: Industry-Standard Benchmarking
+### MLPerf Principles: Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
 
@@ -3898,7 +3898,7 @@ The capstone project follows MLPerf-style principles!
 
 # %% [markdown]
 """
-## 📊 Combination Strategies
+### Combination Strategies
 
 Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 

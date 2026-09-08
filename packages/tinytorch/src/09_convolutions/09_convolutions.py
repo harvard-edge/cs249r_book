@@ -2672,117 +2672,6 @@ if __name__ == "__main__":
     test_unit_pooling()
 
 # %% [markdown]
-"""
-## 📊 Systems Analysis: Spatial Operation Performance
-
-Let's understand ONE key systems concept: **computational complexity and memory trade-offs in spatial operations**.
-
-This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
-def analyze_convolution_complexity():
-    """📊 Analyze convolution computational complexity across different configurations."""
-    print("📊 Analyzing Convolution Complexity...")
-
-    # Test configurations optimized for educational demonstration (smaller sizes)
-    configs = [
-        {"input": (1, 3, 16, 16), "conv": (8, 3, 3), "name": "Small (16×16)"},
-        {"input": (1, 3, 24, 24), "conv": (12, 3, 3), "name": "Medium (24×24)"},
-        {"input": (1, 3, 32, 32), "conv": (16, 3, 3), "name": "Large (32×32)"},
-        {"input": (1, 3, 16, 16), "conv": (8, 3, 5), "name": "Large Kernel (5×5)"},
-    ]
-
-    print(f"{'Configuration':<20} {'FLOPs':<15} {'Memory (MB)':<12} {'Time (ms)':<10}")
-    print("-" * 70)
-
-    for config in configs:
-        # Create convolution layer
-        in_ch = config["input"][1]
-        out_ch, k_size = config["conv"][0], config["conv"][2]
-        conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
-
-        # Create input tensor
-        x = Tensor(rng.standard_normal(config["input"]))
-
-        # Calculate theoretical FLOPs
-        batch, in_channels, h, w = config["input"]
-        out_channels, kernel_size = config["conv"][0], config["conv"][2]
-
-        # Each output element requires in_channels * kernel_size² multiply-adds
-        flops_per_output = in_channels * kernel_size * kernel_size * 2  # 2 for MAC
-        total_outputs = batch * out_channels * h * w  # Assuming same size with padding
-        total_flops = flops_per_output * total_outputs
-
-        # Measure memory usage
-        input_memory = np.prod(config["input"]) * 4  # float32 = 4 bytes
-        weight_memory = out_channels * in_channels * kernel_size * kernel_size * 4
-        output_memory = batch * out_channels * h * w * 4
-        total_memory = (input_memory + weight_memory + output_memory) / (1024 * 1024)  # MB
-
-        # Measure execution time
-        start_time = time.time()
-        _ = conv(x)
-        end_time = time.time()
-        exec_time = (end_time - start_time) * 1000  # ms
-
-        print(f"{config['name']:<20} {total_flops:<15,} {total_memory:<12.2f} {exec_time:<10.2f}")
-
-    print("\n💡 Key Insights:")
-    print("🔸 FLOPs scale as O(H×W×C_in×C_out×K²) - quadratic in spatial and kernel size")
-    print("🔸 Memory scales linearly with spatial dimensions and channels")
-    print("🔸 Large kernels dramatically increase computational cost")
-    print("🚀 This motivates more efficient convolution variants that reduce computational cost")
-
-if __name__ == "__main__":
-    analyze_convolution_complexity()
-
-# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
-def analyze_pooling_effects():
-    """📊 Analyze pooling's impact on spatial dimensions and features."""
-    print("\n📊 Analyzing Pooling Effects...")
-
-    # Create sample input with spatial structure
-    # Simple edge pattern that pooling should preserve differently
-    pattern = np.zeros((1, 1, 8, 8))
-    pattern[0, 0, :, 3:5] = 1.0  # Vertical edge
-    pattern[0, 0, 3:5, :] = 1.0  # Horizontal edge
-    x = Tensor(pattern)
-
-    print("Original 8×8 pattern:")
-    print(x.data[0, 0])
-
-    # Test different pooling strategies
-    pools = [
-        (MaxPool2d(2, stride=2), "MaxPool 2×2"),
-        (AvgPool2d(2, stride=2), "AvgPool 2×2"),
-        (MaxPool2d(4, stride=4), "MaxPool 4×4"),
-        (AvgPool2d(4, stride=4), "AvgPool 4×4"),
-    ]
-
-    print(f"\n{'Operation':<15} {'Output Shape':<15} {'Feature Preservation'}")
-    print("-" * 60)
-
-    for pool_op, name in pools:
-        result = pool_op(x)
-        # Measure how much of the original pattern is preserved
-        preservation = np.sum(result.data > 0.1) / np.prod(result.shape)
-        print(f"{name:<15} {str(result.shape):<15} {preservation:<.2%}")
-
-        print(f"  Output:")
-        print(f"  {result.data[0, 0]}")
-        print()
-
-    print("💡 Key Insights:")
-    print("🔸 MaxPool preserves sharp features better (edge detection)")
-    print("🔸 AvgPool smooths features (noise reduction)")
-    print("🔸 Larger pooling windows lose more spatial detail")
-    print("🚀 Choice depends on task: classification vs detection vs segmentation")
-
-if __name__ == "__main__":
-    analyze_pooling_effects()
-
-# %% [markdown]
 r"""
 ## 🔧 Integration: Building a Complete CNN
 
@@ -3098,6 +2987,117 @@ def test_unit_simple_cnn():
 
 if __name__ == "__main__":
     test_unit_simple_cnn()
+
+# %% [markdown]
+"""
+## 📊 Systems Analysis: Spatial Operation Performance
+
+Let's understand ONE key systems concept: **computational complexity and memory trade-offs in spatial operations**.
+
+This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
+def analyze_convolution_complexity():
+    """📊 Analyze convolution computational complexity across different configurations."""
+    print("📊 Analyzing Convolution Complexity...")
+
+    # Test configurations optimized for educational demonstration (smaller sizes)
+    configs = [
+        {"input": (1, 3, 16, 16), "conv": (8, 3, 3), "name": "Small (16×16)"},
+        {"input": (1, 3, 24, 24), "conv": (12, 3, 3), "name": "Medium (24×24)"},
+        {"input": (1, 3, 32, 32), "conv": (16, 3, 3), "name": "Large (32×32)"},
+        {"input": (1, 3, 16, 16), "conv": (8, 3, 5), "name": "Large Kernel (5×5)"},
+    ]
+
+    print(f"{'Configuration':<20} {'FLOPs':<15} {'Memory (MB)':<12} {'Time (ms)':<10}")
+    print("-" * 70)
+
+    for config in configs:
+        # Create convolution layer
+        in_ch = config["input"][1]
+        out_ch, k_size = config["conv"][0], config["conv"][2]
+        conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
+
+        # Create input tensor
+        x = Tensor(rng.standard_normal(config["input"]))
+
+        # Calculate theoretical FLOPs
+        batch, in_channels, h, w = config["input"]
+        out_channels, kernel_size = config["conv"][0], config["conv"][2]
+
+        # Each output element requires in_channels * kernel_size² multiply-adds
+        flops_per_output = in_channels * kernel_size * kernel_size * 2  # 2 for MAC
+        total_outputs = batch * out_channels * h * w  # Assuming same size with padding
+        total_flops = flops_per_output * total_outputs
+
+        # Measure memory usage
+        input_memory = np.prod(config["input"]) * 4  # float32 = 4 bytes
+        weight_memory = out_channels * in_channels * kernel_size * kernel_size * 4
+        output_memory = batch * out_channels * h * w * 4
+        total_memory = (input_memory + weight_memory + output_memory) / (1024 * 1024)  # MB
+
+        # Measure execution time
+        start_time = time.time()
+        _ = conv(x)
+        end_time = time.time()
+        exec_time = (end_time - start_time) * 1000  # ms
+
+        print(f"{config['name']:<20} {total_flops:<15,} {total_memory:<12.2f} {exec_time:<10.2f}")
+
+    print("\n💡 Key Insights:")
+    print("🔸 FLOPs scale as O(H×W×C_in×C_out×K²) - quadratic in spatial and kernel size")
+    print("🔸 Memory scales linearly with spatial dimensions and channels")
+    print("🔸 Large kernels dramatically increase computational cost")
+    print("🚀 This motivates more efficient convolution variants that reduce computational cost")
+
+if __name__ == "__main__":
+    analyze_convolution_complexity()
+
+# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
+def analyze_pooling_effects():
+    """📊 Analyze pooling's impact on spatial dimensions and features."""
+    print("\n📊 Analyzing Pooling Effects...")
+
+    # Create sample input with spatial structure
+    # Simple edge pattern that pooling should preserve differently
+    pattern = np.zeros((1, 1, 8, 8))
+    pattern[0, 0, :, 3:5] = 1.0  # Vertical edge
+    pattern[0, 0, 3:5, :] = 1.0  # Horizontal edge
+    x = Tensor(pattern)
+
+    print("Original 8×8 pattern:")
+    print(x.data[0, 0])
+
+    # Test different pooling strategies
+    pools = [
+        (MaxPool2d(2, stride=2), "MaxPool 2×2"),
+        (AvgPool2d(2, stride=2), "AvgPool 2×2"),
+        (MaxPool2d(4, stride=4), "MaxPool 4×4"),
+        (AvgPool2d(4, stride=4), "AvgPool 4×4"),
+    ]
+
+    print(f"\n{'Operation':<15} {'Output Shape':<15} {'Feature Preservation'}")
+    print("-" * 60)
+
+    for pool_op, name in pools:
+        result = pool_op(x)
+        # Measure how much of the original pattern is preserved
+        preservation = np.sum(result.data > 0.1) / np.prod(result.shape)
+        print(f"{name:<15} {str(result.shape):<15} {preservation:<.2%}")
+
+        print(f"  Output:")
+        print(f"  {result.data[0, 0]}")
+        print()
+
+    print("💡 Key Insights:")
+    print("🔸 MaxPool preserves sharp features better (edge detection)")
+    print("🔸 AvgPool smooths features (noise reduction)")
+    print("🔸 Larger pooling windows lose more spatial detail")
+    print("🚀 Choice depends on task: classification vs detection vs segmentation")
+
+if __name__ == "__main__":
+    analyze_pooling_effects()
 
 # %% [markdown]
 """

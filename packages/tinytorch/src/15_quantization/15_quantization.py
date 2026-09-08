@@ -1081,7 +1081,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration: Scaling to Full Neural Networks
+## 🏗️ Model Quantization: Scaling to Full Networks
 
 ### The Model Quantization Challenge
 
@@ -1104,7 +1104,7 @@ Now let's implement the functions that make this transformation possible!
 
 # %% [markdown]
 """
-## 🏗️ Model Quantization: Scaling to Full Networks
+### From One Layer to a Whole Model
 
 Quantizing individual layers is useful, but real applications need to quantize entire neural
 networks. We'll build this capability in two steps:
@@ -1771,7 +1771,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Consolidated Quantization Classes for Export
+## 🔧 Integration: The Quantizer Class
 
 Now that we've implemented all quantization components, let's create consolidated classes
 for export to the tinytorch package. This allows milestones to use the complete quantization system.
@@ -1926,7 +1926,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Advanced Quantization Strategies: Production Techniques
+### Advanced Quantization Strategies: Production Techniques
 
 This analysis compares different quantization approaches used in production systems, revealing the trade-offs between accuracy, complexity, and performance.
 
@@ -1999,7 +1999,7 @@ measured above is exactly the input a mixed-precision decision needs.
 
 # %% [markdown]
 """
-## 📊 Measuring Quantization Savings with Profiler
+### Measuring Quantization Savings with Profiler
 
 Now let's use the Profiler tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) -> apply quantization (M15) -> measure savings (M14+M15).
 

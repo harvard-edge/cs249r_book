@@ -895,6 +895,89 @@ These different behaviors make each activation suitable for different computatio
 
 # %% [markdown]
 """
+## 📊 Systems Analysis: Activation Computation Costs
+
+Let's understand ONE key systems concept: **computational cost differences between activations**.
+
+This analysis reveals why ReLU dominates hidden layers while more expensive activations are reserved for specific use cases.
+"""
+
+# %%
+def analyze_activation_performance():
+    """Demonstrate computational cost differences between activation functions."""
+    print("Analyzing Activation Computation Costs...")
+    print("=" * 60)
+
+    import time
+
+    # Create test data (realistic hidden layer size)
+    size = 1000000  # 1 million elements (like a large hidden layer)
+    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
+
+    print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
+    print("-" * 60)
+
+    # Initialize activations
+    relu = ReLU()
+    sigmoid = Sigmoid()
+    tanh = Tanh()
+    gelu = GELU()
+
+    # Warm up
+    _ = relu(test_data)
+    _ = sigmoid(test_data)
+
+    # Time each activation (multiple runs for accuracy)
+    n_runs = 10
+
+    # ReLU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = relu(test_data)
+    relu_time = (time.time() - start) / n_runs * 1000
+
+    # Sigmoid timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = sigmoid(test_data)
+    sigmoid_time = (time.time() - start) / n_runs * 1000
+
+    # Tanh timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = tanh(test_data)
+    tanh_time = (time.time() - start) / n_runs * 1000
+
+    # GELU timing
+    start = time.time()
+    for _ in range(n_runs):
+        _ = gelu(test_data)
+    gelu_time = (time.time() - start) / n_runs * 1000
+
+    print("\n🧪 Activation Performance Results:")
+    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
+    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
+    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
+    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
+
+    print("\n" + "=" * 60)
+    print("KEY INSIGHTS:")
+    print("   1. ReLU is fastest: Just max(0, x) - no exponentials")
+    print("   2. Sigmoid/Tanh require exp() - expensive operation")
+    print("   3. GELU uses sigmoid internally - inherits its cost")
+    print("   4. For hidden layers: ReLU's speed advantage adds up!")
+
+    print("\nREAL-WORLD IMPLICATIONS:")
+    print("   - ResNet uses ReLU: billions of activations per forward pass")
+    print("   - GPT uses GELU: worth the cost for better gradients")
+    print("   - Sigmoid/Tanh: reserved for output layers or gates")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    analyze_activation_performance()
+
+# %% [markdown]
+"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -1064,89 +1147,6 @@ Answer these to deepen your understanding of activation functions and their syst
 **Key insight**: Activation functions are memory-light (output same size as input), but the choice affects computational speed and numerical precision significantly.
 """
 
-
-# %% [markdown]
-"""
-## 📊 Systems Analysis: Activation Computation Costs
-
-Let's understand ONE key systems concept: **computational cost differences between activations**.
-
-This analysis reveals why ReLU dominates hidden layers while more expensive activations are reserved for specific use cases.
-"""
-
-# %%
-def analyze_activation_performance():
-    """Demonstrate computational cost differences between activation functions."""
-    print("Analyzing Activation Computation Costs...")
-    print("=" * 60)
-
-    import time
-
-    # Create test data (realistic hidden layer size)
-    size = 1000000  # 1 million elements (like a large hidden layer)
-    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
-
-    print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
-    print("-" * 60)
-
-    # Initialize activations
-    relu = ReLU()
-    sigmoid = Sigmoid()
-    tanh = Tanh()
-    gelu = GELU()
-
-    # Warm up
-    _ = relu(test_data)
-    _ = sigmoid(test_data)
-
-    # Time each activation (multiple runs for accuracy)
-    n_runs = 10
-
-    # ReLU timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = relu(test_data)
-    relu_time = (time.time() - start) / n_runs * 1000
-
-    # Sigmoid timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = sigmoid(test_data)
-    sigmoid_time = (time.time() - start) / n_runs * 1000
-
-    # Tanh timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = tanh(test_data)
-    tanh_time = (time.time() - start) / n_runs * 1000
-
-    # GELU timing
-    start = time.time()
-    for _ in range(n_runs):
-        _ = gelu(test_data)
-    gelu_time = (time.time() - start) / n_runs * 1000
-
-    print("\n🧪 Activation Performance Results:")
-    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
-    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
-    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
-    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
-
-    print("\n" + "=" * 60)
-    print("KEY INSIGHTS:")
-    print("   1. ReLU is fastest: Just max(0, x) - no exponentials")
-    print("   2. Sigmoid/Tanh require exp() - expensive operation")
-    print("   3. GELU uses sigmoid internally - inherits its cost")
-    print("   4. For hidden layers: ReLU's speed advantage adds up!")
-
-    print("\nREAL-WORLD IMPLICATIONS:")
-    print("   - ResNet uses ReLU: billions of activations per forward pass")
-    print("   - GPT uses GELU: worth the cost for better gradients")
-    print("   - Sigmoid/Tanh: reserved for output layers or gates")
-    print("=" * 60)
-
-if __name__ == "__main__":
-    analyze_activation_performance()
 
 # %% [markdown]
 """
