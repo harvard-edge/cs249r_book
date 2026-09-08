@@ -78,7 +78,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 **TinyTorch Dependencies**: NONE
 
-**Important**: This module has NO TinyTorch dependencies.
+This module has NO TinyTorch dependencies.
 Other modules will import FROM this module.
 
 **Dependency Flow**:
@@ -1755,6 +1755,62 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🔧 Integration: Bringing It Together
+
+Let's test how our Tensor operations work together in realistic scenarios. This integration demonstrates that our individual operations combine correctly for complex workflows.
+
+### Linear Transformation Simulation
+
+A common pattern in scientific computing is the affine transformation: **y = xW + b**
+
+```
+Affine Transformation: y = xW + b
+
+Input Data    → Weight Matrix → Matrix Multiply → Add Offset  → Output Data
+  (batch, in)   (in, out)        (batch, out)     (batch, out)   (batch, out)
+
+Step-by-Step Breakdown:
+1. Input:   X shape (batch_size, input_features)
+2. Weight:  W shape (input_features, output_features)
+3. Matmul:  XW shape (batch_size, output_features)
+4. Bias:    b shape (output_features,)
+5. Result:  XW + b shape (batch_size, output_features)
+
+Example Flow:
+Input: [[1, 2, 3],    Weight: [[0.1, 0.2],    Bias: [0.1, 0.2]
+        [4, 5, 6]]            [0.3, 0.4],
+       (2, 3)                 [0.5, 0.6]]
+                             (3, 2)
+
+Step 1: Matrix Multiply
+[[1, 2, 3]] @ [[0.1, 0.2]] = [[1×0.1+2×0.3+3×0.5, 1×0.2+2×0.4+3×0.6]]
+[[4, 5, 6]]   [[0.3, 0.4]]   [[4×0.1+5×0.3+6×0.5, 4×0.2+5×0.4+6×0.6]]
+              [[0.5, 0.6]]
+                           = [[2.2, 2.8],
+                              [4.9, 6.4]]
+
+Step 2: Add Bias (Broadcasting)
+[[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
+ [4.9, 6.4]]                 [5.0, 6.6]]
+
+This affine transformation pattern is the building block of many computational systems!
+```
+
+### Why This Integration Matters
+
+This simulation shows how our basic operations combine to create powerful computational building blocks:
+
+- **Matrix Multiplication**: Transforms input features into a new feature space
+- **Broadcasting Addition**: Applies offsets efficiently across batches of data
+- **Shape Handling**: Ensures data flows correctly through transformation stages
+- **Memory Management**: Creates new tensors without corrupting inputs
+
+You'll see this affine transformation pattern used extensively as we build more complex systems in later modules.
+"""
+
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **memory layout and cache behavior**.
@@ -1823,65 +1879,8 @@ def analyze_memory_layout():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_memory_layout()
-
-
-# %% [markdown]
-"""
-## 🔧 Integration: Bringing It Together
-
-Let's test how our Tensor operations work together in realistic scenarios. This integration demonstrates that our individual operations combine correctly for complex workflows.
-
-### Linear Transformation Simulation
-
-A common pattern in scientific computing is the affine transformation: **y = xW + b**
-
-```
-Affine Transformation: y = xW + b
-
-Input Data    → Weight Matrix → Matrix Multiply → Add Offset  → Output Data
-  (batch, in)   (in, out)        (batch, out)     (batch, out)   (batch, out)
-
-Step-by-Step Breakdown:
-1. Input:   X shape (batch_size, input_features)
-2. Weight:  W shape (input_features, output_features)
-3. Matmul:  XW shape (batch_size, output_features)
-4. Bias:    b shape (output_features,)
-5. Result:  XW + b shape (batch_size, output_features)
-
-Example Flow:
-Input: [[1, 2, 3],    Weight: [[0.1, 0.2],    Bias: [0.1, 0.2]
-        [4, 5, 6]]            [0.3, 0.4],
-       (2, 3)                 [0.5, 0.6]]
-                             (3, 2)
-
-Step 1: Matrix Multiply
-[[1, 2, 3]] @ [[0.1, 0.2]] = [[1×0.1+2×0.3+3×0.5, 1×0.2+2×0.4+3×0.6]]
-[[4, 5, 6]]   [[0.3, 0.4]]   [[4×0.1+5×0.3+6×0.5, 4×0.2+5×0.4+6×0.6]]
-              [[0.5, 0.6]]
-                           = [[2.2, 2.8],
-                              [4.9, 6.4]]
-
-Step 2: Add Bias (Broadcasting)
-[[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
- [4.9, 6.4]]                 [5.0, 6.6]]
-
-This affine transformation pattern is the building block of many computational systems!
-```
-
-### Why This Integration Matters
-
-This simulation shows how our basic operations combine to create powerful computational building blocks:
-
-- **Matrix Multiplication**: Transforms input features into a new feature space
-- **Broadcasting Addition**: Applies offsets efficiently across batches of data
-- **Shape Handling**: Ensures data flows correctly through transformation stages
-- **Memory Management**: Creates new tensors without corrupting inputs
-
-You'll see this affine transformation pattern used extensively as we build more complex systems in later modules.
-"""
 
 
 # %% [markdown]
@@ -1990,10 +1989,6 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 01")
-
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
 
 
 # %% [markdown]

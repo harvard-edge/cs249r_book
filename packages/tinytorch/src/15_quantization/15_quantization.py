@@ -542,7 +542,7 @@ This test validates our INT8 quantization function works correctly with various 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-int8", "locked": true, "points": 5}
 def test_unit_quantize_int8():
     """Test INT8 quantization implementation."""
-    print("Unit Test: INT8 Quantization...")
+    print("🧪 Unit Test: INT8 Quantization...")
 
     # Test basic quantization
     tensor = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
@@ -598,7 +598,7 @@ def test_unit_quantize_int8():
         "zero_point must not be clamped for |c| > 127."
     )
 
-    print("INT8 quantization works correctly!")
+    print("✅ INT8 quantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_int8()
@@ -700,7 +700,7 @@ This test validates our dequantization function correctly restores FP32 values f
 # %% nbgrader={"grade": true, "grade_id": "test-dequantize-int8", "locked": true, "points": 5}
 def test_unit_dequantize_int8():
     """Test INT8 dequantization implementation."""
-    print("Unit Test: INT8 Dequantization...")
+    print("🧪 Unit Test: INT8 Dequantization...")
 
     # Test round-trip: quantize → dequantize
     original = Tensor([[-1.5, 0.0, 3.2], [1.1, -0.8, 2.7]])
@@ -714,7 +714,7 @@ def test_unit_dequantize_int8():
     # Verify output is float32
     assert restored.data.dtype == np.float32
 
-    print("INT8 dequantization works correctly!")
+    print("✅ INT8 dequantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_dequantize_int8()
@@ -769,7 +769,7 @@ Memory Saved: 4× for weights storage!
 Speed: Depends on dequantization overhead vs INT8 GEMM support
 ```
 
-### Calibration - Finding Optimal Input Quantization
+### Calibration: Finding Optimal Input Quantization
 
 ```
 Calibration Process:
@@ -1041,7 +1041,7 @@ This test validates our QuantizedLinear layer works correctly and achieves memor
 # %% nbgrader={"grade": true, "grade_id": "test-quantized-linear", "locked": true, "points": 5}
 def test_unit_quantized_linear():
     """Test QuantizedLinear implementation."""
-    print("Unit Test: QuantizedLinear...")
+    print("🧪 Unit Test: QuantizedLinear...")
 
     # Create original linear layer
     original = Linear(4, 3)
@@ -1074,14 +1074,14 @@ def test_unit_quantized_linear():
     assert memory_info['compression_ratio'] > 2.5, f"Should achieve ~4× compression, got {memory_info['compression_ratio']:.2f}×"
 
     print(f"  Memory reduction: {memory_info['compression_ratio']:.1f}x")
-    print("QuantizedLinear works correctly!")
+    print("✅ QuantizedLinear works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantized_linear()
 
 # %% [markdown]
 """
-## 🔧 Integration: Scaling to Full Neural Networks
+## 🏗️ Model Quantization: Scaling to Full Networks
 
 ### The Model Quantization Challenge
 
@@ -1104,7 +1104,7 @@ Now let's implement the functions that make this transformation possible!
 
 # %% [markdown]
 """
-## 🏗️ Model Quantization: Scaling to Full Networks
+### From One Layer to a Whole Model
 
 Quantizing individual layers is useful, but real applications need to quantize entire neural
 networks. We'll build this capability in two steps:
@@ -1208,7 +1208,7 @@ This test validates that we correctly forward calibration data through preceding
 # %% nbgrader={"grade": true, "grade_id": "test-collect-layer-inputs", "locked": true, "points": 3}
 def test_unit_collect_layer_inputs():
     """Test collecting intermediate activations for calibration."""
-    print("Unit Test: Collect Layer Inputs...")
+    print("🧪 Unit Test: Collect Layer Inputs...")
 
     # Create a simple model
     layer1 = Linear(4, 8)
@@ -1236,7 +1236,7 @@ def test_unit_collect_layer_inputs():
     inputs_limited = _collect_layer_inputs(model, 2, samples, max_samples=2)
     assert len(inputs_limited) == 2, "Should respect max_samples"
 
-    print("Collect layer inputs works correctly!")
+    print("✅ Collect layer inputs works correctly!")
 
 if __name__ == "__main__":
     test_unit_collect_layer_inputs()
@@ -1319,7 +1319,7 @@ This test validates that we correctly quantize one Linear layer with optional ca
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-single-layer", "locked": true, "points": 3}
 def test_unit_quantize_single_layer():
     """Test single layer quantization with and without calibration."""
-    print("Unit Test: Quantize Single Layer...")
+    print("🧪 Unit Test: Quantize Single Layer...")
 
     # Create a linear layer
     layer = Linear(4, 3)
@@ -1343,7 +1343,7 @@ def test_unit_quantize_single_layer():
     output = q_layer.forward(x)
     assert output.shape == (2, 3), f"Output shape should be (2, 3), got {output.shape}"
 
-    print("Quantize single layer works correctly!")
+    print("✅ Quantize single layer works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_single_layer()
@@ -1445,7 +1445,7 @@ This test validates our model quantization function correctly replaces Linear la
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-model", "locked": true, "points": 5}
 def test_unit_quantize_model():
     """Test model quantization implementation."""
-    print("Unit Test: Model Quantization...")
+    print("🧪 Unit Test: Model Quantization...")
 
     # Create test model using explicit layer composition (TinyTorch pattern)
     layer1 = Linear(4, 8)
@@ -1488,7 +1488,7 @@ def test_unit_quantize_model():
     print(f"  Model quantization error: {error:.4f}")
     assert error < 0.2, f"Model quantization error too high: {error}"
 
-    print("Model quantization works correctly!")
+    print("✅ Model quantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_model()
@@ -1538,6 +1538,7 @@ Byte Accounting per Layer Type:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "measure_layer_bytes", "solution": true}
+#| export
 def _measure_layer_bytes(layer, is_quantized: bool = False) -> Tuple[int, int]:
     """
     Measure parameter count and byte usage for a single layer.
@@ -1595,7 +1596,7 @@ This test validates that we correctly measure bytes for both FP32 and quantized 
 # %% nbgrader={"grade": true, "grade_id": "test-measure-layer-bytes", "locked": true, "points": 3}
 def test_unit_measure_layer_bytes():
     """Test per-layer byte measurement for FP32 and quantized layers."""
-    print("Unit Test: Measure Layer Bytes...")
+    print("🧪 Unit Test: Measure Layer Bytes...")
 
     # Test FP32 Linear layer
     linear = Linear(10, 5)
@@ -1620,7 +1621,7 @@ def test_unit_measure_layer_bytes():
     print(f"  FP32: {params} params, {bytes_} bytes")
     print(f"  INT8: {params_q} params, {bytes_q} bytes")
     print(f"  Ratio: {bytes_ / bytes_q:.1f}x")
-    print("Measure layer bytes works correctly!")
+    print("✅ Measure layer bytes works correctly!")
 
 if __name__ == "__main__":
     test_unit_measure_layer_bytes()
@@ -1652,6 +1653,7 @@ Aggregation Flow:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze_model_sizes", "solution": true}
+#| export
 
 def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     """
@@ -1729,7 +1731,7 @@ This test validates our model size analysis function correctly measures compress
 # %% nbgrader={"grade": true, "grade_id": "test-compare-sizes", "locked": true, "points": 5}
 def test_unit_analyze_model_sizes():
     """Test model size analysis."""
-    print("Unit Test: Model Size Analysis...")
+    print("🧪 Unit Test: Model Size Analysis...")
 
     # Create and quantize a model for testing (using Sequential from tinytorch.core.layers)
     layer1_orig = Linear(100, 50)
@@ -1762,14 +1764,14 @@ def test_unit_analyze_model_sizes():
 
     print(f"  Compression ratio: {comparison['compression_ratio']:.1f}x")
     print(f"  Memory saved: {comparison['memory_saved_percent']:.1f}%")
-    print("Model size analysis works correctly!")
+    print("✅ Model size analysis works correctly!")
 
 if __name__ == "__main__":
     test_unit_analyze_model_sizes()
 
 # %% [markdown]
 """
-## 🔧 Consolidated Quantization Classes for Export
+## 🔧 Integration: The Quantizer Class
 
 Now that we've implemented all quantization components, let's create consolidated classes
 for export to the tinytorch package. This allows milestones to use the complete quantization system.
@@ -1924,7 +1926,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Advanced Quantization Strategies: Production Techniques
+### Advanced Quantization Strategies: Production Techniques
 
 This analysis compares different quantization approaches used in production systems, revealing the trade-offs between accuracy, complexity, and performance.
 
@@ -1997,7 +1999,7 @@ measured above is exactly the input a mixed-precision decision needs.
 
 # %% [markdown]
 """
-## 📊 Measuring Quantization Savings with Profiler
+### Measuring Quantization Savings with Profiler
 
 Now let's use the Profiler tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) -> apply quantization (M15) -> measure savings (M14+M15).
 
@@ -2301,11 +2303,11 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 ### Ready for Next Steps
 Your quantization pipeline shrinks a trained model without retraining it. That
 makes it the first optimization you would reach for when a model has to fit on
-hardware it was not trained on.
+hardware it was not trained on. Reducing precision to INT8 delivers 4x memory
+savings with minimal accuracy loss, which makes quantization one of the most
+impactful optimizations you will learn.
 
 Export with: `tito module complete 15`
 
 **Next**: Module 16 will add compression: pruning, distillation, and low-rank approximation to shrink models further!
-
-Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
 """

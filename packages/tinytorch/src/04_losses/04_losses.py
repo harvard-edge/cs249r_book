@@ -86,10 +86,6 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module
   Foundation          Nonlinearity              Architecture        Error Measurement
 ```
 
-**Import Strategy**:
-This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
-**Assumption**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) have been completed and exported to the package.
-If you see import errors, make sure you've run `tito module complete` for each previous module.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
@@ -1102,7 +1098,6 @@ def analyze_loss_sensitivity():
     print("   - BCE grows logarithmically, heavily penalizing wrong confident predictions")
     print("   - Both encourage correct predictions but with different curvatures")
 
-# Run integration analysis when developing
 if __name__ == "__main__":
     analyze_loss_behaviors()
     analyze_loss_sensitivity()
@@ -1258,7 +1253,6 @@ def analyze_loss_memory():
     print("   - Intermediate activations (softmax) double CE memory")
     print(f"   - For batch=1024, CE needs {ce_memory:.1f}MB just for loss computation")
 
-# Run systems analysis when developing
 if __name__ == "__main__":
     analyze_numerical_stability()
     analyze_loss_memory()
@@ -1362,7 +1356,6 @@ def analyze_production_patterns():
     print("   - Numerical stability becomes critical at scale (FP16 training)")
     print("   - Loss computation is often <5% of total training time")
 
-# Run production analysis when developing
 if __name__ == "__main__":
     analyze_production_patterns()
 
@@ -1443,7 +1436,6 @@ def test_module():
 
 
 # %%
-# Run comprehensive module test
 if __name__ == "__main__":
     test_module()
 
@@ -1454,7 +1446,7 @@ if __name__ == "__main__":
 
 Answer these to deepen your understanding of loss functions and their systems implications:
 
-### 1. Memory and Performance
+### Question 1: Memory and Performance
 
 **Question**: Loss Function Selection for Large Vocabulary
 
@@ -1480,7 +1472,7 @@ Strategies to reduce memory:
 
 ---
 
-### 2. Loss Function Performance Bottleneck
+### Question 2: Loss Function Performance Bottleneck
 **Question**: Performance Analysis
 
 You profile your training loop and find:
@@ -1508,7 +1500,7 @@ Your model has 1000 output classes. What's the bottleneck and how would you fix 
 
 ---
 
-### 3. Numerical Stability
+### Question 3: Numerical Stability
 **Question**: Debugging Exploding Loss
 
 During training, you see:
@@ -1548,7 +1540,7 @@ loss = -log_softmax[target]
 
 ---
 
-### 4. Production Considerations
+### Question 4: Production Considerations
 **Question**: Real-Time Inference Latency
 
 Your spam filter needs to classify emails in <10ms. Currently:
@@ -1590,7 +1582,7 @@ confidence = abs(prediction.data - 0.5) * 2  # Distance from decision boundary
 
 ---
 
-### 5. Class Imbalance in Medical Diagnosis
+### Question 5: Class Imbalance in Medical Diagnosis
 **Question**: Handling Class Imbalance
 
 You're building a cancer detection system:
@@ -1638,7 +1630,7 @@ Automatically downweights easy examples (majority class).
 
 ---
 
-### 6. Batch Size and Loss Computation
+### Question 6: Batch Size and Loss Computation
 **Question**: Systems Thinking
 
 You're training on a GPU with 24GB memory. With batch size 32, memory usage is 8GB. You increase batch size to 128.
