@@ -3590,7 +3590,10 @@ class ValidateCommand:
     # pre-existing violations; new ones block the commit.
     # ------------------------------------------------------------------
 
-    _CAPTIONS_SKIP_PATH_PARTS = ("/frontmatter/", "/backmatter/")
+    # "/_shared/" holds front-matter partials included by more than one volume
+    # (the notation body, the AI-use statement). They are front matter wherever
+    # they are included from, so they inherit the same exemption.
+    _CAPTIONS_SKIP_PATH_PARTS = ("/frontmatter/", "/backmatter/", "/_shared/")
     _CAPTIONS_CALLOUT_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*\.callout-")
     _CAPTIONS_DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
     _CAPTIONS_DIV_CLOSE_RE = re.compile(r"^:::\s*$")
