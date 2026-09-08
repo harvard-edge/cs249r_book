@@ -1969,7 +1969,8 @@ Congratulations! You've built the optimization that makes production language mo
 - **Production Critical**: This single optimization makes ChatGPT-scale inference possible
 - **Non-Invasive Design**: Add capabilities forward without breaking existing modules
 
-### Real-World Impact
+**Real-World Impact**
+
 Without KV caching:
 - Every new token recomputes attention over the whole context, so per-token cost grows with n
 - Total attention work for n tokens: n(n+1)/2

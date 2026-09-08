@@ -845,7 +845,7 @@ Examples:
 # %% nbgrader={"grade": true, "grade_id": "conv2d-output-shape", "locked": true, "points": 5}
 def test_unit_conv2d_output_shape():
     """Test Conv2d._compute_output_shape for various configurations."""
-    print("Testing Conv2d output shape computation...")
+    print("🧪 Unit Test: Conv2d Output Shape...")
 
     # Same padding: output == input
     conv_same = Conv2d(3, 16, kernel_size=3, padding=1, stride=1)
@@ -872,7 +872,7 @@ def test_unit_conv2d_output_shape():
     oh, ow = conv_5x5._compute_output_shape(32, 32)
     assert (oh, ow) == (28, 28), f"5x5 kernel: expected (28, 28), got ({oh}, {ow})"
 
-    print("Conv2d output shape computation works correctly!")
+    print("✅ Conv2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_output_shape()
@@ -903,7 +903,7 @@ Before padding (1, 1, 3, 3):       After padding=1 (1, 1, 5, 5):
 # %% nbgrader={"grade": true, "grade_id": "conv2d-padding", "locked": true, "points": 5}
 def test_unit_conv2d_padding():
     """Test Conv2d._apply_padding for zero-padding behavior."""
-    print("Testing Conv2d padding...")
+    print("🧪 Unit Test: Conv2d Padding...")
 
     # No padding: input unchanged
     conv_no_pad = Conv2d(1, 1, kernel_size=3, padding=0)
@@ -934,7 +934,7 @@ def test_unit_conv2d_padding():
     assert result.shape[0] == 2, "Batch dim should be unchanged"
     assert result.shape[1] == 3, "Channel dim should be unchanged"
 
-    print("Conv2d padding works correctly!")
+    print("✅ Conv2d padding works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_padding()
@@ -969,7 +969,7 @@ Convolution = Sliding Window Dot Products:
 # %% nbgrader={"grade": true, "grade_id": "conv2d-convolve", "locked": true, "points": 15}
 def test_unit_conv2d_convolve_loops():
     """Test Conv2d._convolve_loops with known input/weight values."""
-    print("Testing Conv2d convolution loops...")
+    print("🧪 Unit Test: Conv2d Convolution Loops...")
 
     # Create a Conv2d with known weights (1 input channel, 1 output channel, 2x2 kernel)
     conv = Conv2d(in_channels=1, out_channels=1, kernel_size=2, bias=False)
@@ -1012,7 +1012,7 @@ def test_unit_conv2d_convolve_loops():
     assert np.allclose(output2[0, 0], expected_ch0), f"Channel 0 mismatch"
     assert np.allclose(output2[0, 1], expected_ch1), f"Channel 1 mismatch"
 
-    print("Conv2d convolution loops work correctly!")
+    print("✅ Conv2d convolution loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_convolve_loops()
@@ -1033,7 +1033,7 @@ and gradient tracking.
 # %% nbgrader={"grade": true, "grade_id": "conv2d-forward", "locked": true, "points": 15}
 def test_unit_conv2d():
     """Test Conv2d forward pass with multiple configurations."""
-    print("Testing Conv2d...")
+    print("🧪 Unit Test: Conv2d Forward...")
 
     # Test 1: Basic convolution without padding
     print("  Testing basic convolution...")
@@ -1493,7 +1493,7 @@ Common case: kernel=2, stride=2, padding=0
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_maxpool2d_output_shape():
     """Test MaxPool2d._compute_pool_output_shape."""
-    print("Testing MaxPool2d output shape computation...")
+    print("🧪 Unit Test: MaxPool2d Output Shape...")
 
     # Standard 2x2 pooling with stride 2: halves dimensions
     pool = MaxPool2d(kernel_size=2, stride=2)
@@ -1514,7 +1514,7 @@ def test_unit_maxpool2d_output_shape():
     oh, ow = pool_large._compute_pool_output_shape(16, 16)
     assert (oh, ow) == (4, 4), f"4x4 stride 4: expected (4, 4), got ({oh}, {ow})"
 
-    print("MaxPool2d output shape computation works correctly!")
+    print("✅ MaxPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_output_shape()
@@ -1545,7 +1545,7 @@ MaxPool2d sliding window (2x2, stride 2):
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-loops", "locked": true, "points": 7}
 def test_unit_maxpool2d_loops():
     """Test MaxPool2d._maxpool_loops with known values."""
-    print("Testing MaxPool2d loops...")
+    print("🧪 Unit Test: MaxPool2d Loops...")
 
     pool = MaxPool2d(kernel_size=2, stride=2)
 
@@ -1572,7 +1572,7 @@ def test_unit_maxpool2d_loops():
     output_neg = pool_small._maxpool_loops(padded_neg, 1, 1, 1, 1)
     assert output_neg[0, 0, 0, 0] == -1.0, f"Max of negatives: expected -1.0, got {output_neg[0,0,0,0]}"
 
-    print("MaxPool2d loops work correctly!")
+    print("✅ MaxPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_loops()
@@ -1881,7 +1881,7 @@ the spatial dimensions after average pooling.
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_avgpool2d_output_shape():
     """Test AvgPool2d._compute_pool_output_shape."""
-    print("Testing AvgPool2d output shape computation...")
+    print("🧪 Unit Test: AvgPool2d Output Shape...")
 
     # Standard 2x2 pooling: halves dimensions
     pool = AvgPool2d(kernel_size=2, stride=2)
@@ -1897,7 +1897,7 @@ def test_unit_avgpool2d_output_shape():
     oh, ow = pool_overlap._compute_pool_output_shape(5, 5)
     assert (oh, ow) == (3, 3), f"Overlapping: expected (3, 3), got ({oh}, {ow})"
 
-    print("AvgPool2d output shape computation works correctly!")
+    print("✅ AvgPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_output_shape()
@@ -1930,7 +1930,7 @@ Top-left: (1+2+5+6)/4 = 3.5
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-loops", "locked": true, "points": 7}
 def test_unit_avgpool2d_loops():
     """Test AvgPool2d._avgpool_loops with known values."""
-    print("Testing AvgPool2d loops...")
+    print("🧪 Unit Test: AvgPool2d Loops...")
 
     pool = AvgPool2d(kernel_size=2, stride=2)
 
@@ -1955,7 +1955,7 @@ def test_unit_avgpool2d_loops():
     max_output = pool_max._maxpool_loops(padded, 1, 1, 2, 2)
     assert np.all(output <= max_output), "Average should always be <= maximum"
 
-    print("AvgPool2d loops work correctly!")
+    print("✅ AvgPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_loops()

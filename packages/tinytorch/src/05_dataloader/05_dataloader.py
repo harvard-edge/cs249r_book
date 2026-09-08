@@ -807,7 +807,6 @@ Why? During evaluation, we want consistent, reproducible predictions. Augmentati
 """
 
 # %% nbgrader={"grade": false, "grade_id": "augmentation-transforms", "solution": true}
-
 #| export
 
 class RandomHorizontalFlip:
@@ -1700,9 +1699,7 @@ Let's test how our DataLoader integrates with a complete training workflow, simu
 
 # %% [markdown]
 """
-#### 🧪 Integration Test: Training Workflow
-
-Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
+### 🧪 Unit Test: Training Workflow
 
 **What we're testing**: Complete training loop with train/val split
 **Why it matters**: DataLoader must work seamlessly in real training pipelines
@@ -1712,7 +1709,7 @@ Let's test how our DataLoader integrates with a complete training workflow, simu
 # %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": false}
 def test_unit_training_integration():
     """🧪 Test DataLoader integration with training workflow."""
-    print("🧪 Integration Test: Training Workflow...")
+    print("🧪 Unit Test: Training Workflow...")
 
     # Create a realistic dataset
     num_samples = 1000
@@ -2364,14 +2361,13 @@ The same patterns appear in:
 
 ### Ready for Next Steps
 Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
-Export with: `tito module complete 05`
+Your data pipeline is the input side of every training loop you will write.
 
-**Next**: Module 06 will add autograd, so the batches you just built can actually drive learning!
-
-**Apply your knowledge:**
+Apply your knowledge:
 - Milestone 03: Train MLP on TinyDigits
 - Milestone 04: Train CNN on CIFAR-10 images
 
-Your data pipeline is the input side of every training loop you will write.
+Export with: `tito module complete 05`
 
+**Next**: Module 06 will add autograd, so the batches you just built can actually drive learning!
 """
