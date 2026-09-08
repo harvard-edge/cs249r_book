@@ -2004,7 +2004,7 @@ open the gate is. Both effects carry gradient.
 ```
 
 **The systems consequence**: GELU costs an exponential and several multiplies per
-element where ReLU costs one comparison. Module 17 fuses the whole expression
+element where ReLU costs one comparison. Module 17 will fuse the whole expression
 into a single pass over memory for exactly that reason.
 """
 
@@ -2071,7 +2071,7 @@ prediction exact     -> gradient 0          -> no update
 
 **The systems consequence**: the gradient is proportional to the error, so a
 single wildly wrong prediction produces a wildly large gradient. That is why MSE
-is sensitive to outliers, and why the training loop in Module 08 needs gradient
+is sensitive to outliers, and why the training loop in Module 08 will need gradient
 clipping.
 """
 
@@ -2204,60 +2204,20 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### Numerically Stable Softmax
+### Softmax Probabilities, Reused from Module 02
 
-Computing softmax naively as `exp(x) / sum(exp(x))` overflows for large values.
-The fix is to subtract the maximum value first, which is mathematically equivalent
-but numerically stable.
-
-```
-Naive (overflows):     softmax(x) = exp(x) / sum(exp(x))
-Stable (safe):         softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
-
-Why it works:
-  exp(x - max(x)) / sum(exp(x - max(x)))
-= exp(x) * exp(-max(x)) / (sum(exp(x)) * exp(-max(x)))
-= exp(x) / sum(exp(x))
-```
-
-This helper is used by CrossEntropyFunction.backward to convert logits to probabilities.
+CrossEntropyFunction.backward needs the softmax probabilities of the logits as a
+plain array. Module 02 already solved the hard part, subtracting the row maximum
+before exponentiating so large logits cannot overflow, and its `SoftmaxFunction`
+does its arithmetic on NumPy arrays. So this helper is one line: call that
+operation's `forward` on the array rather than deriving the trick a second time.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": false}
 #| export
 def _stable_softmax(logits_data):
-    """
-    Compute softmax probabilities with numerical stability.
-
-    Subtracts the max value per row before exponentiating to prevent overflow.
-
-    Args:
-        logits_data: numpy array of shape (batch_size, num_classes)
-
-    Returns:
-        numpy array of softmax probabilities, same shape as input
-
-    TODO: Implement numerically stable softmax computation.
-
-    APPROACH:
-    1. Find the maximum value per row: np.max(logits_data, axis=1, keepdims=True)
-    2. Subtract max from logits: logits_data - max_logits
-    3. Exponentiate: np.exp(shifted_logits)
-    4. Normalize by row sum: exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
-
-    EXAMPLE:
-    >>> logits = np.array([[2.0, 1.0, 0.1]])
-    >>> probs = _stable_softmax(logits)
-    >>> # probs ≈ [[0.659, 0.242, 0.099]]
-    >>> # Each row sums to 1.0
-
-    HINT: keepdims=True is essential for correct broadcasting.
-    """
-    ### BEGIN SOLUTION
-    max_logits = np.max(logits_data, axis=1, keepdims=True)
-    exp_logits = np.exp(logits_data - max_logits)
-    return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
-    ### END SOLUTION
+    """Softmax over the last axis of a (batch, classes) array, via Module 02's numerically stable operation."""
+    return SoftmaxFunction().forward(logits_data)
 
 # %% [markdown]
 """
@@ -2900,7 +2860,7 @@ W = Tensor([[0.5, 0.3]], requires_grad=True)
 y = x.matmul(W.transpose())
 loss = compute_loss(y, target)
 loss.backward()
-W.data -= 0.01 * W.grad  # ✅ exactly what Module 07's optimizers do
+W.data -= 0.01 * W.grad  # ✅ exactly what Module 07's optimizers will do
 ```
 
 ### How to Debug In-Place Corruption
@@ -2924,7 +2884,7 @@ with no_grad():
     logits = model(x)   # forward only: no graph, no saved tensors
 ```
 
-Module 07's optimizers do not need it: they write `param.data` after `backward()`
+Module 07's optimizers will not need it: they write `param.data` after `backward()`
 has released the graph, so nothing is recording. Reach for `no_grad()` in
 evaluation loops, where the saved forward tensors would only cost memory.
 

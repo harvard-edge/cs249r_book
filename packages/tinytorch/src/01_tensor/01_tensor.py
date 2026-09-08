@@ -234,7 +234,7 @@ This clean design focuses on what tensors fundamentally do: store numerical data
 
 Every Tensor method below hands its work to an operation class instead of computing the result itself. `a + b` calls `Tensor.__add__`, which calls `Add.apply(a, b)`. `apply` unwraps the Tensors to NumPy arrays, runs the operation's `forward`, and wraps the result in a new Tensor.
 
-This is how PyTorch is built (`torch.autograd.Function`), and the reason is Module 06. When we add automatic differentiation, `apply` is the one place that has to remember which operation produced which Tensor. Nothing in the Tensor class changes. In this module you write the `forward` half of every operation, in the cells that follow each section's explanation; `backward` raises until Module 06, where you write the other half of the same classes. The Tensor class refers to these operations by name, so run this cell before running any test below.
+This is how PyTorch is built (`torch.autograd.Function`), and the reason is Module 06, which will add automatic differentiation: `apply` is the one place that has to remember which operation produced which Tensor. Nothing in the Tensor class changes. In this module you write the `forward` half of every operation, in the cells that follow each section's explanation; `backward` raises until Module 06, where you write the other half of the same classes. The Tensor class refers to these operations by name, so run this cell before running any test below.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "function-base", "solution": false}
@@ -276,7 +276,7 @@ class Function:
 
     def backward(self, grad_output):
         """Return one gradient array per input. Module 06 implements this."""
-        raise NotImplementedError(f"{type(self).__name__}.backward is implemented in Module 06")
+        raise NotImplementedError(f"Module 06 implements {type(self).__name__}.backward")
 
     @classmethod
     def apply(cls, *inputs, **params):
@@ -363,10 +363,10 @@ class Tensor:
         self.size = self.data.size
         self.dtype = self.data.dtype
         ### END SOLUTION
-        self.requires_grad = requires_grad   # used from Module 06 (autograd)
-        self.grad = None                     # used from Module 06 (autograd)
-        self._grad_fn = None                 # used from Module 06 (autograd)
-        self._graph_released = False         # used from Module 06 (autograd)
+        self.requires_grad = requires_grad   # Module 06 (autograd) will use this
+        self.grad = None                     # Module 06 (autograd) will use this
+        self._grad_fn = None                 # Module 06 (autograd) will use this
+        self._graph_released = False         # Module 06 (autograd) will use this
 
     def __repr__(self):
         """String representation of tensor for debugging."""
@@ -649,11 +649,11 @@ class Tensor:
 
     def backward(self, gradient=None, retain_graph=False):
         """Propagate gradients to every tensor this one was computed from. Module 06 implements this."""
-        raise NotImplementedError("Tensor.backward is implemented in Module 06 (autograd)")
+        raise NotImplementedError("Module 06 (autograd) implements Tensor.backward")
 
     def zero_grad(self):
         """Forget the accumulated gradient. Module 06 implements this."""
-        raise NotImplementedError("Tensor.zero_grad is implemented in Module 06 (autograd)")
+        raise NotImplementedError("Module 06 (autograd) implements Tensor.zero_grad")
 
 # %% [markdown]
 """

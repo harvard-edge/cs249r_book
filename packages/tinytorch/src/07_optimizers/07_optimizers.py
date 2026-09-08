@@ -104,7 +104,7 @@ Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers) → Modul
    parameters           gradients            update rule            the training loop
 ```
 
-Optimizers are the step that turns gradients into learning. Module 08 wires
+Optimizers are the step that turns gradients into learning. Module 08 will wire
 them into a full training loop.
 """
 
@@ -612,7 +612,7 @@ class SGD(Optimizer):
         Check if this optimizer uses momentum.
 
         This explicit API method replaces the need for hasattr() checks
-        in checkpointing code (Module 08).
+        in checkpointing code (Module 08 will call it).
 
         Returns:
             bool: True if momentum is enabled (momentum > 0), False otherwise
@@ -1297,7 +1297,9 @@ class AdamW(Optimizer):
 """
 ### 🏗️ AdamW Moment Updates - Same EMA, Different Context
 
-AdamW uses identical moment update math as Adam (EMA + bias correction).
+AdamW uses identical moment update math as Adam (EMA + bias correction), and
+the module keeps the two classes separate on purpose: a student building either
+one sees the whole rule in one place.
 The critical difference is that AdamW passes **pure gradients** to moment
 updates -- weight decay is applied separately to parameters, not mixed
 into the gradient signal.
@@ -1564,7 +1566,7 @@ if __name__ == "__main__":
 """
 ### Checkpointing Adam's Moments
 
-Module 08's Trainer saves optimizer state through three small methods that SGD
+Module 08's Trainer will save optimizer state through three small methods that SGD
 already has: `has_momentum()`, `get_momentum_state()`, and `set_momentum_state()`.
 Adam and AdamW carry two buffers per parameter instead of one, so they answer the
 same three questions with (m, v) pairs. Without this, a restored Adam run would
@@ -1606,7 +1608,7 @@ for _cls in (Adam, AdamW):
 ### 🧪 Unit Test: Adam Checkpoint State
 
 **What we're testing**: get_momentum_state / set_momentum_state round trip for Adam and AdamW
-**Why it matters**: Module 08's Trainer restores optimizer state from checkpoints
+**Why it matters**: Module 08's Trainer will restore optimizer state from checkpoints
 **Expected**: Restored buffers equal the saved ones
 """
 
