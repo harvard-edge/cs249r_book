@@ -2810,9 +2810,9 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 
 ### Ready for Next Steps
 Your profiling implementation provides the measurement foundation for all optimization work.
+You can't optimize what you can't measure, and now you can measure everything.
+
 Export with: `tito module complete 14`
 
 **Next**: Module 15 will add quantization, the first optimization your profiler will let you measure honestly!
-
-You can't optimize what you can't measure — and now you can measure everything.
 """

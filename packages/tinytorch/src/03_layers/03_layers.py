@@ -460,7 +460,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Edge Case Tests: Linear Layer
+### 🧪 Unit Test: Linear Edge Cases
 
 Additional tests for edge cases and error handling.
 
@@ -474,7 +474,7 @@ working, usually the first time a real dataset has a ragged final batch
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
 def test_unit_edge_cases_linear():
     """🧪 Test Linear layer edge cases."""
-    print("🧪 Edge Case Tests: Linear Layer...")
+    print("🧪 Unit Test: Linear Edge Cases...")
 
     layer = Linear(10, 5)
 
@@ -509,7 +509,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Parameter Collection Tests: Linear Layer
+### 🧪 Unit Test: Linear Parameter Collection
 
 Tests to ensure Linear layer parameters can be collected for optimization.
 
@@ -523,7 +523,7 @@ parameter left out of that list is a parameter that silently never learns
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
 def test_unit_parameter_collection_linear():
     """🧪 Test Linear layer parameter collection."""
-    print("🧪 Parameter Collection Test: Linear Layer...")
+    print("🧪 Unit Test: Linear Parameter Collection...")
 
     layer = Linear(10, 5)
 

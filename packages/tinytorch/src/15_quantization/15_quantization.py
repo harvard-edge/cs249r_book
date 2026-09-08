@@ -2303,11 +2303,11 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 ### Ready for Next Steps
 Your quantization pipeline shrinks a trained model without retraining it. That
 makes it the first optimization you would reach for when a model has to fit on
-hardware it was not trained on.
+hardware it was not trained on. Reducing precision to INT8 delivers 4x memory
+savings with minimal accuracy loss, which makes quantization one of the most
+impactful optimizations you will learn.
 
 Export with: `tito module complete 15`
 
 **Next**: Module 16 will add compression: pruning, distillation, and low-rank approximation to shrink models further!
-
-Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
 """

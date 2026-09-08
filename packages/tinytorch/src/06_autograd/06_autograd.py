@@ -2231,7 +2231,7 @@ def _stable_softmax(logits_data):
 # %% nbgrader={"grade": true, "grade_id": "test-stable-softmax-helper", "locked": true, "points": 3}
 def test_unit_stable_softmax():
     """Test stable softmax helper."""
-    print("Testing stable softmax helper...")
+    print("🧪 Unit Test: Stable Softmax Helper...")
 
     # Basic correctness
     logits = np.array([[1.0, 2.0, 3.0]])
@@ -2255,7 +2255,7 @@ def test_unit_stable_softmax():
     assert batch_probs.shape == (3, 2), f"Expected (3, 2), got {batch_probs.shape}"
     assert np.allclose(batch_probs.sum(axis=1), np.ones(3)), "Each row should sum to 1"
 
-    print("  Stable softmax helper works correctly!")
+    print("✅ Stable softmax helper works correctly!")
 
 if __name__ == "__main__":
     test_unit_stable_softmax()
@@ -2323,7 +2323,7 @@ def _one_hot_encode(targets, batch_size, num_classes):
 # %% nbgrader={"grade": true, "grade_id": "test-one-hot-helper", "locked": true, "points": 3}
 def test_unit_one_hot_encode():
     """Test one-hot encoding helper."""
-    print("Testing one-hot encoding helper...")
+    print("🧪 Unit Test: One-Hot Encoding Helper...")
 
     # Basic test
     targets = np.array([0, 2, 1])
@@ -2342,7 +2342,7 @@ def test_unit_one_hot_encode():
     result_batch = _one_hot_encode(targets_batch, batch_size=5, num_classes=5)
     assert np.allclose(result_batch.sum(axis=1), np.ones(5)), "Each row should sum to 1"
 
-    print("  One-hot encoding helper works correctly!")
+    print("✅ One-hot encoding helper works correctly!")
 
 if __name__ == "__main__":
     test_unit_one_hot_encode()
@@ -2789,125 +2789,7 @@ def zero_grad(self):
 
 # %% [markdown]
 """
-### In-Place Operations Break Autograd
-
-**THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
-
-### Critical Rule: Never Modify Tensors In-Place When requires_grad=True
-
-**WRONG ❌ - This Corrupts the Gradient Graph:**
-```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * x
-x.data[0] = 999  # ❌ Mul.backward will read the corrupted x
-y.backward()     # ❌ x.grad[0] comes out as 1998, not 2
-```
-
-**RIGHT ✅ - Create New Tensors Instead:**
-```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * 2
-x = Tensor([999, 2, 3], requires_grad=True)  # ✅ New tensor, safe
-y.backward()  # ✅ Correct gradients
-```
-
-### Why This Breaks Everything
-
-Autograd records operations on the **original tensor values**. When you modify `.data` directly:
-
-1. **Forward pass** records: "y = x * 2" where x = [1, 2, 3]
-2. **You corrupt**: x.data[0] = 999, so x = [999, 2, 3]
-3. **Backward pass** uses: corrupted x values, causing wrong gradients or crashes
-
-**The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
-
-### Common In-Place Operations to AVOID
-
-```python
-# ❌ FORBIDDEN - Direct index assignment
-x.data[0] = value
-x.data[:, 0] = values
-x.data[mask] = values
-
-# ❌ FORBIDDEN - In-place arithmetic
-x.data += other
-x.data *= scalar
-x.data -= value
-
-# ❌ FORBIDDEN - NumPy in-place operations
-np.fill(x.data, value)
-np.add(x.data, other, out=x.data)
-x.data.fill(value)
-
-# ✅ CORRECT - Create new tensors
-x = x + other              # Creates new tensor
-x = Tensor(x.data + other) # Explicit new tensor
-x = Tensor([new_values])   # Complete replacement
-```
-
-### Real-World Example: Parameter Update Gone Wrong
-
-```python
-# ❌ WRONG - touching a parameter BETWEEN forward and backward
-W = Tensor([[0.5, 0.3]], requires_grad=True)
-y = x.matmul(W.transpose())
-loss = compute_loss(y, target)
-W.data *= 0.9            # ❌ the recorded graph still points at W
-loss.backward()          # ❌ MatMul.backward now reads the modified W
-
-# ✅ CORRECT - update AFTER backward, once the graph has been released
-W = Tensor([[0.5, 0.3]], requires_grad=True)
-y = x.matmul(W.transpose())
-loss = compute_loss(y, target)
-loss.backward()
-W.data -= 0.01 * W.grad  # ✅ exactly what Module 07's optimizers will do
-```
-
-### How to Debug In-Place Corruption
-
-If your gradients look wrong or you get mysterious errors:
-
-1. **Search your code** for `.data[` assignments
-2. **Search for** in-place operators: `+=`, `-=`, `*=`, `/=` on `.data`
-3. **Check custom functions** that modify tensors
-4. **Verify** parameter updates run after backward(), never between forward and backward
-
-### Why PyTorch Has torch.no_grad()
-
-PyTorch switches gradient tracking off wherever a computation must not be recorded:
-parameter updates, and evaluation passes that would otherwise save every forward
-tensor. TinyTorch has the same switch:
-
-```python
-from tinytorch.core.autograd import no_grad
-with no_grad():
-    logits = model(x)   # forward only: no graph, no saved tensors
-```
-
-Module 07's optimizers will not need it: they write `param.data` after `backward()`
-has released the graph, so nothing is recording. Reach for `no_grad()` in
-evaluation loops, where the saved forward tensors would only cost memory.
-
-**How it works**: `no_grad()` sets a global flag that all tracked operations check.
-When the flag is off, operations skip graph construction entirely -- the result tensor
-will have `requires_grad=False` regardless of its inputs.
-
-### Memory Impact
-
-**Question**: "Why not update `.data` between forward and backward and save a pass?"
-
-**Answer**: The recorded graph holds references to the tensors it saw during the
-forward pass. Change one of them and backward() differentiates a computation that
-never happened. Correctness > premature perf.
-
-**Bottom Line**: If a tensor has `requires_grad=True`, treat it as **immutable**. Always create new tensors instead of modifying in-place.
-
----
-"""
-
-# %% [markdown]
-"""
-#### 🧪 Unit Test: Tensor Autograd Enhancement
+### 🧪 Unit Test: Tensor Autograd Enhancement
 
 This test validates our enhanced Tensor class computes gradients correctly.
 
@@ -2954,7 +2836,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-#### 🧪 Unit Test: Gradients Through a Reused Tensor
+### 🧪 Unit Test: Gradients Through a Reused Tensor
 
 This test validates the topological traversal: a tensor consumed by more than
 one operation must accumulate from every consumer before it propagates.
@@ -3001,6 +2883,124 @@ def test_unit_reused_tensor_gradients():
 
 if __name__ == "__main__":
     test_unit_reused_tensor_gradients()
+
+# %% [markdown]
+"""
+### In-Place Operations Break Autograd
+
+**THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
+
+#### Critical Rule: Never Modify Tensors In-Place When requires_grad=True
+
+**WRONG ❌ - This Corrupts the Gradient Graph:**
+```python
+x = Tensor([1, 2, 3], requires_grad=True)
+y = x * x
+x.data[0] = 999  # ❌ Mul.backward will read the corrupted x
+y.backward()     # ❌ x.grad[0] comes out as 1998, not 2
+```
+
+**RIGHT ✅ - Create New Tensors Instead:**
+```python
+x = Tensor([1, 2, 3], requires_grad=True)
+y = x * 2
+x = Tensor([999, 2, 3], requires_grad=True)  # ✅ New tensor, safe
+y.backward()  # ✅ Correct gradients
+```
+
+#### Why This Breaks Everything
+
+Autograd records operations on the **original tensor values**. When you modify `.data` directly:
+
+1. **Forward pass** records: "y = x * 2" where x = [1, 2, 3]
+2. **You corrupt**: x.data[0] = 999, so x = [999, 2, 3]
+3. **Backward pass** uses: corrupted x values, causing wrong gradients or crashes
+
+**The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
+
+#### Common In-Place Operations to AVOID
+
+```python
+# ❌ FORBIDDEN - Direct index assignment
+x.data[0] = value
+x.data[:, 0] = values
+x.data[mask] = values
+
+# ❌ FORBIDDEN - In-place arithmetic
+x.data += other
+x.data *= scalar
+x.data -= value
+
+# ❌ FORBIDDEN - NumPy in-place operations
+np.fill(x.data, value)
+np.add(x.data, other, out=x.data)
+x.data.fill(value)
+
+# ✅ CORRECT - Create new tensors
+x = x + other              # Creates new tensor
+x = Tensor(x.data + other) # Explicit new tensor
+x = Tensor([new_values])   # Complete replacement
+```
+
+#### Real-World Example: Parameter Update Gone Wrong
+
+```python
+# ❌ WRONG - touching a parameter BETWEEN forward and backward
+W = Tensor([[0.5, 0.3]], requires_grad=True)
+y = x.matmul(W.transpose())
+loss = compute_loss(y, target)
+W.data *= 0.9            # ❌ the recorded graph still points at W
+loss.backward()          # ❌ MatMul.backward now reads the modified W
+
+# ✅ CORRECT - update AFTER backward, once the graph has been released
+W = Tensor([[0.5, 0.3]], requires_grad=True)
+y = x.matmul(W.transpose())
+loss = compute_loss(y, target)
+loss.backward()
+W.data -= 0.01 * W.grad  # ✅ exactly what Module 07's optimizers will do
+```
+
+#### How to Debug In-Place Corruption
+
+If your gradients look wrong or you get mysterious errors:
+
+1. **Search your code** for `.data[` assignments
+2. **Search for** in-place operators: `+=`, `-=`, `*=`, `/=` on `.data`
+3. **Check custom functions** that modify tensors
+4. **Verify** parameter updates run after backward(), never between forward and backward
+
+#### Why PyTorch Has torch.no_grad()
+
+PyTorch switches gradient tracking off wherever a computation must not be recorded:
+parameter updates, and evaluation passes that would otherwise save every forward
+tensor. TinyTorch has the same switch:
+
+```python
+from tinytorch.core.autograd import no_grad
+with no_grad():
+    logits = model(x)   # forward only: no graph, no saved tensors
+```
+
+Module 07's optimizers will not need it: they write `param.data` after `backward()`
+has released the graph, so nothing is recording. Reach for `no_grad()` in
+evaluation loops, where the saved forward tensors would only cost memory.
+
+**How it works**: `no_grad()` sets a global flag that all tracked operations check.
+When the flag is off, operations skip graph construction entirely -- the result tensor
+will have `requires_grad=False` regardless of its inputs.
+
+#### Memory Impact
+
+**Question**: "Why not update `.data` between forward and backward and save a pass?"
+
+**Answer**: The recorded graph holds references to the tensors it saw during the
+forward pass. Change one of them and backward() differentiates a computation that
+never happened. Correctness > premature perf.
+
+**Bottom Line**: If a tensor has `requires_grad=True`, treat it as **immutable**. Always create new tensors instead of modifying in-place.
+
+---
+"""
 
 # %% [markdown]
 """

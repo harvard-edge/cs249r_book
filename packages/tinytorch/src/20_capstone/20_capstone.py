@@ -2099,7 +2099,5 @@ You started Module 01 with a simple Tensor class. Now you have:
 
 Export with: `tito module complete 20`
 
-**Next**: The TorchPerf Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's!
-
-**Congratulations on completing TinyTorch!**
+**Next**: The TorchPerf Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's. Congratulations on completing TinyTorch!
 """
