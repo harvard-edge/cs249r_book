@@ -1306,7 +1306,7 @@ class GPT:
         Forward pass through GPT model.
 
         start_pos is the position of the first token (0 for a whole sequence).
-        Module 18's KV cache feeds one token at a time and passes the number of
+        Module 18's KV cache will feed one token at a time and pass the number of
         tokens already cached, so the embedding layer gives it the right position.
 
         TODO: Implement the complete GPT forward pass

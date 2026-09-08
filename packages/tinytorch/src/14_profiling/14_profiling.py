@@ -780,7 +780,7 @@ measure latency   ─┘
 
 Note what it does NOT do: it never estimates a number it could measure, and it
 never reports a measurement without the run count behind it. That distinction is
-the whole subject of Module 19.
+the whole subject of Module 19, which you'll build next.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "profiler_class", "solution": true}

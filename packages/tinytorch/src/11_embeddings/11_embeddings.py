@@ -656,7 +656,7 @@ class PositionalEncoding:
         Args:
             x: Input embeddings of shape (batch_size, seq_len, embed_dim)
             start_pos: Position of the first token in x. 0 for a whole sequence;
-                       Module 18's KV cache feeds one token at a time and passes
+                       Module 18's KV cache will feed one token at a time and pass
                        the number of tokens already cached.
 
         Returns:
@@ -1395,7 +1395,7 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     Forward pass through complete embedding system.
 
     start_pos is the position of the first token in `tokens`. It is 0 for a whole
-    sequence; Module 18's KV cache feeds one token at a time and passes how many
+    sequence; Module 18's KV cache will feed one token at a time and pass how many
     tokens are already cached, so each new token gets its true position.
 
     TODO: Compose token embed + optional scaling + positional encoding

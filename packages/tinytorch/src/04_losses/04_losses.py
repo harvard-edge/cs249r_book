@@ -471,7 +471,7 @@ class MSELoss:
         pass
 
     def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
         return MSEFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
@@ -680,7 +680,7 @@ class CrossEntropyLoss:
         pass
 
     def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
-        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
         return CrossEntropyFunction.apply(logits, targets)
 
     def __call__(self, logits: Tensor, targets: Tensor) -> Tensor:
@@ -896,7 +896,7 @@ class BinaryCrossEntropyLoss:
         pass
 
     def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
-        """Compute the loss through its operation, so Module 06 can record it for gradients."""
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
         return BinaryCrossEntropyFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
