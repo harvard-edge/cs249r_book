@@ -558,7 +558,6 @@ def test_unit_embedding():
 
     print("✅ Embedding layer works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_embedding()
 
@@ -824,7 +823,6 @@ def test_unit_positional_encoding():
 
     print("✅ Positional encoding works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_positional_encoding()
 
@@ -1114,7 +1112,6 @@ def test_unit_sinusoidal_embeddings():
 
     print("✅ Sinusoidal embeddings work correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_sinusoidal_embeddings()
 
@@ -1553,7 +1550,6 @@ def test_unit_complete_embedding_system():
 
     print("✅ Complete embedding system works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_complete_embedding_system()
 
@@ -1609,7 +1605,6 @@ def analyze_embedding_memory_scaling():
     print("• Learned PE adds memory but may improve task-specific performance")
     print("• Sinusoidal PE saves memory and allows longer sequences")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_embedding_memory_scaling()
 
@@ -1665,7 +1660,6 @@ def analyze_embedding_performance():
     print("• Memory bandwidth becomes bottleneck for large embedding dimensions")
     print("• Cache locality important for repeated token patterns")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_embedding_performance()
 
@@ -1740,7 +1734,6 @@ def analyze_positional_encoding_strategies():
     print(f"  - Cannot adapt to task-specific position patterns")
     print(f"  - May be suboptimal for highly position-dependent tasks")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_positional_encoding_strategies()
 
@@ -1882,7 +1875,7 @@ def test_module():
 
 Answer these to deepen your understanding of embedding systems and their implications:
 
-### 1. Memory Scaling
+### Question 1: Memory Scaling
 You implemented an embedding layer with vocab_size=50,000 and embed_dim=512.
 - How many parameters does this embedding table contain? _____ million
 - If using FP32 (4 bytes per parameter), how much memory does this use? _____ MB
@@ -1890,7 +1883,7 @@ You implemented an embedding layer with vocab_size=50,000 and embed_dim=512.
 
 ---
 
-### 2. Lookup Complexity
+### Question 2: Lookup Complexity
 Your embedding layer performs table lookups for token indices.
 - What is the time complexity of looking up a single token? O(_____)
 - For a batch of 32 sequences, each of length 128, how many lookup operations? _____
@@ -1898,7 +1891,7 @@ Your embedding layer performs table lookups for token indices.
 
 ---
 
-### 3. Positional Encoding Trade-offs
+### Question 3: Positional Encoding Trade-offs
 You implemented both learned and sinusoidal positional encodings.
 - Learned PE for max_seq_len=2048, embed_dim=512 adds how many parameters? _____
 - What happens if you try to process a sequence longer than max_seq_len with learned PE? _____
@@ -1906,7 +1899,7 @@ You implemented both learned and sinusoidal positional encodings.
 
 ---
 
-### 4. Production Implications
+### Question 4: Production Implications
 Your complete EmbeddingLayer combines token and positional embeddings.
 - In GPT-3 (vocab_size≈50K, embed_dim≈12K), approximately what percentage of total parameters are in the embedding table? _____%
 - If you wanted to reduce memory usage by 50%, which would be more effective: halving vocab_size or halving embed_dim? _____

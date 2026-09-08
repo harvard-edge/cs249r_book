@@ -83,7 +83,7 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 **TinyTorch Dependencies**:
 - Module 01 (Tensor): Optional - only needed if converting tokens to Tensor format
 
-**Important**: This module focuses on text processing fundamentals that work independently.
+This module focuses on text processing fundamentals that work independently.
 The tokenization algorithms use only standard Python and NumPy.
 
 **Dependency Flow**:
@@ -1592,7 +1592,6 @@ def analyze_tokenization_strategies():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_tokenization_strategies()
 
@@ -1778,7 +1777,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 📊 Performance Analysis: Vocabulary Size vs Sequence Length
+### Performance Analysis: Vocabulary Size vs Sequence Length
 
 The fundamental trade-off in tokenization creates a classic systems engineering challenge:
 
@@ -1908,17 +1907,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 10")
 
-# Call the comprehensive test only when running directly
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of tokenization and its systems implications:
 
-### 1. Vocabulary Size and Storage
+### Question 1: Vocabulary Size and Storage
 **Question**: You implemented tokenizers with different vocabulary sizes.
 
 **Calculate**:
@@ -1933,7 +1928,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 2. Sequence Length Trade-offs
+### Question 2: Sequence Length Trade-offs
 **Question**: Your character tokenizer produces longer sequences than BPE. For the text "machine learning" (16 characters):
 
 **Compare**:
@@ -1950,7 +1945,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 3. Tokenization Coverage and Robustness
+### Question 3: Tokenization Coverage and Robustness
 **Question**: Your BPE tokenizer handles unknown words by decomposing into subwords.
 
 **Consider**:
@@ -1963,7 +1958,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 4. Production Scale Considerations
+### Question 4: Production Scale Considerations
 **Question**: A production language model serves 1 million requests per day, each with average 500 tokens.
 
 **Calculate**:

@@ -1837,17 +1837,14 @@ def analyze_collation_overhead():
 
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_dataloader_performance()
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_memory_usage()
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_collation_overhead()
 
@@ -1857,7 +1854,7 @@ if __name__ == "__main__":
 
 Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
 
-### ⚠️ Common Mistakes to Avoid
+### Common Mistakes to Avoid
 
 **1. Forgetting to Shuffle Training Data**
 ```python
@@ -1908,7 +1905,7 @@ def forward(self, x):
     # Don't hardcode: batch_size = 128  # ❌ Breaks on last batch
 ```
 
-### 🚀 Best Practices for Production
+### Best Practices for Production
 
 **1. Batch Size Selection Strategy**
 ```
@@ -2105,7 +2102,7 @@ def test_module():
 
 Answer these to deepen your understanding of data loading and its systems implications:
 
-### 1. The Batch Memory Budget
+### Question 1: The Batch Memory Budget
 **Question**: You're loading a large image dataset. Each image is a tensor of shape (3, 224, 224) stored as float32 (4 bytes per value). Your batch size is 256.
 
 - How much memory does one image require? _____
@@ -2122,7 +2119,7 @@ Answer these to deepen your understanding of data loading and its systems implic
 
 ---
 
-### 2. To Shuffle or Not to Shuffle?
+### Question 2: To Shuffle or Not to Shuffle?
 **Question**: You're training on a medical dataset where samples are ordered by patient (first 1000 samples = Patient A, next 1000 = Patient B, etc.). Consider these scenarios:
 
 **Scenario 1: Training with shuffle=True**
@@ -2149,7 +2146,7 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 
 ---
 
-### 3. Data Loading Bottlenecks
+### Question 3: Data Loading Bottlenecks
 **Question**: Your program reports these timings per batch:
 
 ```
@@ -2192,7 +2189,7 @@ Result: Eliminate repeated decode overhead
 
 ---
 
-### 4. Memory Explosion with Large Datasets
+### Question 4: Memory Explosion with Large Datasets
 **Question**: You're training on 100GB of high-resolution medical scans. Your DataLoader code:
 
 ```python
@@ -2234,7 +2231,7 @@ loader = DataLoader(dataset, batch_size=32)
 
 ---
 
-### 5. The Shuffle Memory Trap
+### Question 5: The Shuffle Memory Trap
 **Question**: You implement shuffling like this:
 
 ```python
@@ -2272,7 +2269,7 @@ def __iter__(self):
 
 ---
 
-### Bonus Challenge: Data Pipeline Design Patterns
+### Bonus Question: Data Pipeline Design Patterns
 
 Your DataLoader implements three fundamental patterns:
 
@@ -2359,14 +2356,11 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 - **Data loading can become a bottleneck without proper optimization**
 - **Memory usage scales linearly with batch size and feature dimensions**
 
-### Real-World Connection
-You've implemented the same patterns used in:
+The same patterns appear in:
 - **PyTorch's DataLoader**: Same interface design for batching and shuffling
 - **TensorFlow's Dataset API**: Similar abstraction for data pipeline optimization
 - **Production ML**: Essential for handling large-scale training efficiently
 - **Research**: Standard foundation for all deep learning experiments
-
-Your data loading pipeline is now ready to power neural network training!
 
 ### Ready for Next Steps
 Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.

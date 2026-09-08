@@ -92,7 +92,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.autograd` (gradient tracking from Module 06)
 
-**Important**: This module builds on the complete training pipeline.
+This module builds on the complete training pipeline.
 Spatial operations will integrate with your existing layers and training system.
 
 **Dependency Flow**:
@@ -158,7 +158,7 @@ Convolution achieves dramatic parameter reduction (more than 1000×!) while pres
 
 # %% [markdown]
 """
-## 📐 Foundations
+## 📐 Foundations: Convolution, Step by Step
 
 ### Understanding Convolution Step by Step
 
@@ -353,7 +353,7 @@ def validate_4d_input(x, layer_name):
 
 # %% [markdown]
 """
-### Conv2d Implementation - Building the Core of Computer Vision
+### Conv2d Implementation: Building the Core of Computer Vision
 
 Conv2d is the workhorse of computer vision. It slides learned filters across images to detect patterns like edges, textures, and eventually complex objects.
 
@@ -1176,7 +1176,7 @@ The key difference: MaxPool takes max(window), AvgPool takes mean(window).
 
 # %% [markdown]
 """
-### MaxPool2d Implementation - Preserving Strong Features
+### MaxPool2d Implementation: Preserving Strong Features
 
 MaxPool2d finds the strongest activation in each spatial window, creating a compressed representation that keeps the most important information.
 
@@ -1472,7 +1472,7 @@ class MaxPool2d:
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Output Shape
+### 🧪 Unit Test: MaxPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after max pooling.
@@ -1521,7 +1521,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Loops
+### 🧪 Unit Test: MaxPool2d Loops
 
 This test validates that `_maxpool_loops` correctly finds the maximum
 value in each pooling window.
@@ -1579,7 +1579,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### AvgPool2d Implementation - Smoothing and Generalizing Features
+### AvgPool2d Implementation: Smoothing and Generalizing Features
 
 AvgPool2d computes the average of each spatial window, creating smoother features that are less sensitive to noise and exact pixel positions.
 
@@ -1868,7 +1868,7 @@ class AvgPool2d:
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Output Shape
+### 🧪 Unit Test: AvgPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after average pooling.
@@ -1904,7 +1904,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Loops
+### 🧪 Unit Test: AvgPool2d Loops
 
 This test validates that `_avgpool_loops` correctly computes the mean of
 each pooling window.
@@ -2734,7 +2734,6 @@ def analyze_convolution_complexity():
     print("🔸 Large kernels dramatically increase computational cost")
     print("🚀 This motivates more efficient convolution variants that reduce computational cost")
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_convolution_complexity()
 
@@ -2780,7 +2779,6 @@ def analyze_pooling_effects():
     print("🔸 Larger pooling windows lose more spatial detail")
     print("🚀 Choice depends on task: classification vs detection vs segmentation")
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_pooling_effects()
 
@@ -2862,7 +2860,7 @@ This hierarchical approach mirrors human vision: we first detect edges, then sha
 
 # %% [markdown]
 """
-### SimpleCNN Implementation - Putting It All Together
+### SimpleCNN Implementation: Putting It All Together
 
 Now we'll build a complete CNN that demonstrates how convolution and pooling work together. This is your first step from processing individual tensors to understanding complete images!
 
@@ -3238,17 +3236,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 09")
 
-# Run module test when this cell is executed
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of spatial operations and their systems implications:
 
-### 1. Conv2d Memory Footprint
+### Question 1: Conv2d Memory Footprint
 A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 - Calculate the memory footprint during the forward pass
 - Consider: input activations, output activations, filter weights, and biases
@@ -3258,7 +3252,7 @@ A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 
 ---
 
-### 2. Spatial Locality and CPU Performance
+### Question 2: Spatial Locality and CPU Performance
 Why are CNNs faster on CPUs than fully-connected networks of similar parameter count?
 
 **Consider**:
@@ -3270,7 +3264,7 @@ Why are CNNs faster on CPUs than fully-connected networks of similar parameter c
 
 ---
 
-### 3. Im2col Trade-off
+### Question 3: Im2col Trade-off
 The im2col algorithm transforms convolution into matrix multiplication, using more memory but speeding up computation.
 
 **When is this trade-off worthwhile?**
@@ -3283,7 +3277,7 @@ The im2col algorithm transforms convolution into matrix multiplication, using mo
 
 ---
 
-### 4. Pooling's Systems Benefits
+### Question 4: Pooling's Systems Benefits
 MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 **What's the systems benefit beyond reducing parameters?**
@@ -3296,7 +3290,7 @@ MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 ---
 
-### 5. Mobile ML Deployment
+### Question 5: Mobile ML Deployment
 Why do mobile ML models prefer depthwise-separable convolutions over standard Conv2d?
 
 **Analyze the FLOPs**:

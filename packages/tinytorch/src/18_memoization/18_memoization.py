@@ -149,7 +149,7 @@ def profile_naive_generation():
     step = NaiveAttentionStep()
 
     # Profile at increasing sequence lengths
-    print("🔬 Profiling Transformer Generation (Without Caching):\n")
+    print("🧪 Profiling Transformer Generation (Without Caching):\n")
     print("   Seq Len  |  Latency (ms)  |  Growth")
     print("   ---------|----------------|----------")
 
@@ -228,8 +228,6 @@ Total: 1 + 2 + 3 + ... + n = n(n+1)/2 = O(n²) complexity!
 
 For a 100-token sequence, this means **5,050 total K,V computations** — but only 100 are
 actually necessary (one per token). That's **4,950 redundant computations**!
-
-### Real-World Impact
 
 This inefficiency makes production LLM serving economically impossible without optimization:
 - **ChatGPT/GPT-4**: Would be too slow for real-time chat without caching
@@ -670,7 +668,7 @@ class KVCache:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: KVCache Implementation
+### 🧪 Unit Test: KVCache Implementation
 
 This test validates that our cache correctly stores and retrieves key-value pairs across multiple layers and sequence positions.
 
@@ -681,8 +679,8 @@ This test validates that our cache correctly stores and retrieves key-value pair
 
 # %% nbgrader={"grade": true, "grade_id": "test-kvcache", "locked": true, "points": 10}
 def test_unit_kvcache():
-    """🔬 Unit Test: KVCache Implementation"""
-    print("🔬 Unit Test: KVCache Implementation...")
+    """🧪 Unit Test: KVCache Implementation"""
+    print("🧪 Unit Test: KVCache Implementation...")
 
     # Test parameters (small transformer for testing)
     batch_size, max_seq_len = 2, 8
@@ -750,13 +748,12 @@ def test_unit_kvcache():
 
     print("✅ KVCache implementation works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_kvcache()
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Cache-Aware Generation
+## 🏗️ Cache-Aware Generation
 
 ### Integration Strategy
 
@@ -1499,6 +1496,7 @@ def enable_kv_cache(model):
     ### END SOLUTION
 
 
+# %% nbgrader={"grade": false, "grade_id": "kv-disable-cache", "solution": false}
 #| export
 def disable_kv_cache(model):
     """
@@ -1594,7 +1592,6 @@ def test_unit_noninvasive_integration():
 
     print("✅ Non-invasive cache integration works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_noninvasive_integration()
 
@@ -1739,7 +1736,6 @@ def analyze_kvcache_speedup():
     print("   • Every production LLM server caches K/V; without it, per-token cost")
     print("     grows with the conversation and long chats become unaffordable")
 
-# Run analysis when developing this module
 if __name__ == "__main__":
     analyze_kvcache_memory()
     analyze_kvcache_speedup()
@@ -1784,7 +1780,7 @@ def test_module():
     print()
 
     # Integration Test: Complete KV Cache Workflow
-    print("🔬 Integration Test: Complete KV Cache Workflow...")
+    print("🧪 Integration Test: Complete KV Cache Workflow...")
     batch_size, max_seq_len = 1, 128
     num_layers, num_heads, head_dim = 4, 8, 64
 
@@ -1816,7 +1812,7 @@ def test_module():
     print()
 
     # Integration Test: Memory Tracking
-    print("🔬 Integration Test: Memory Tracking...")
+    print("🧪 Integration Test: Memory Tracking...")
     mem_info = cache.get_memory_usage()
     assert mem_info['total_mb'] > 0
     assert mem_info['cache_tensors'] == num_layers * 2
@@ -1826,10 +1822,6 @@ def test_module():
     print("=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 18")
-
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
 
 
 # %% [markdown]
@@ -1891,7 +1883,7 @@ Your `KVCache` has `max_seq_len=2048`. A chatbot conversation reaches 2048 token
 - Why do production systems (ChatGPT) limit conversation length (e.g., 4096 or 8192 tokens)?
 - Which eviction strategy would you choose for a medical chatbot that needs full conversation history?
 
-### Question 5: Production Reality - Multi-User Serving
+### Question 5: Production Reality: Multi-User Serving
 ChatGPT serves millions of users. Each user's conversation needs its own KV cache.
 
 **Memory calculation for 10,000 concurrent conversations**:
@@ -1990,7 +1982,7 @@ With KV caching:
 
 This optimization is THE technique that transformed language models from research demonstrations into products serving millions of users daily.
 
-### Production Skills Developed
+Skills you practiced:
 - **Systems Optimization**: Identify and eliminate computational bottlenecks
 - **Memory-Compute Trade-offs**: Accept memory cost for speed gains
 - **Non-Breaking Enhancement**: Add features without modifying existing code

@@ -78,7 +78,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 **TinyTorch Dependencies**: NONE
 
-**Important**: This module has NO TinyTorch dependencies.
+This module has NO TinyTorch dependencies.
 Other modules will import FROM this module.
 
 **Dependency Flow**:
@@ -1823,7 +1823,6 @@ def analyze_memory_layout():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_memory_layout()
 
@@ -1990,10 +1989,6 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 01")
-
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
 
 
 # %% [markdown]
