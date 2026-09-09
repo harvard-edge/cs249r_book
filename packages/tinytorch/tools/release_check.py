@@ -590,6 +590,62 @@ def g_bare_except():
     return errs
 
 
+@gate("tests: no graded cell swallows its own failure")
+def g_graded_except():
+    """A handler that only passes (or only prints) inside a locked graded cell
+    makes the points unreachable: the assertion it guards can fail and the cell
+    still reports success. Added 2026-09-09, after module 19's 10-point
+    plotting test was found to catch every exception and pass regardless.
+
+    The expected-raise idiom is not a violation, so a try body containing an
+    assert is skipped:  try: f(); assert False, "should raise"; except E: pass
+    """
+    errs = []
+    for _, name, path in module_files():
+        lines = path.read_text().splitlines()
+        graded = False
+        for i, line in enumerate(lines):
+            if line.startswith("# %%"):
+                graded = '"grade": true' in line
+                continue
+            if not graded:
+                continue
+            m = re.match(r"(\s*)except\b.*:\s*$", line)
+            if not m:
+                continue
+            indent = len(m.group(1))
+
+            # Walk back to the matching `try:` at the same indent.
+            start = None
+            for j in range(i - 1, -1, -1):
+                cand = lines[j]
+                if not cand.strip():
+                    continue
+                ci = len(cand) - len(cand.lstrip())
+                if ci < indent:
+                    break
+                if ci == indent and cand.strip() == "try:":
+                    start = j
+                    break
+            if start is not None and "assert" in "\n".join(lines[start + 1:i]):
+                continue
+
+            handler = []
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                if len(nxt) - len(nxt.lstrip()) <= indent:
+                    break
+                handler.append(nxt.strip())
+            if not handler:
+                continue
+            # Strip trailing comments: `pass  # optional` is still a swallow.
+            stmts = [c for c in (h.split("#")[0].strip() for h in handler) if c]
+            if all(st == "pass" or st.startswith("print(") for st in stmts):
+                errs.append(f"{name}:{i + 1}: graded handler body is only {handler[0]!r}")
+    return errs
+
+
 @gate("tests: every test file imports and collects")
 def g_collect():
     p = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",

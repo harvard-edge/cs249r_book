@@ -1812,9 +1812,9 @@ BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto_frontier
 """
 ### 🧪 Unit Test: BenchmarkSuite.plot_results
 
-**What we're testing**: Visualization generation (graceful handling when matplotlib unavailable)
-**Why it matters**: Visual comparisons make benchmark results actionable
-**Expected**: No errors when plotting (or graceful fallback message)
+**What we're testing**: That plot_results actually writes a comparison chart, and stays quiet when there is nothing to plot
+**Why it matters**: A visualization step that silently produces no file is worse than none at all, because the report still claims a chart exists
+**Expected**: benchmark_comparison.png exists and is non-empty after a run; an empty suite prints a message instead of raising
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchsuite-plot", "locked": true, "points": 10}
@@ -1830,24 +1830,42 @@ def test_unit_benchsuite_plot():
             return x
 
     import tempfile
+    from pathlib import Path
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         models = [MockModel("m1"), MockModel("m2")]
         suite = BenchmarkSuite(models, [{"d": "1"}], output_dir=tmp_dir)
         suite.run_full_benchmark()
 
-        # Should not raise even without matplotlib display
-        try:
-            import matplotlib
-            matplotlib.use('Agg')  # Non-interactive backend
+        if MATPLOTLIB_AVAILABLE:
+            # Agg is the headless backend: it writes files and never opens a
+            # window, so plt.show() inside plot_results becomes a no-op here.
+            plt.switch_backend("Agg")
             suite.plot_results(save_plots=True)
-        except Exception:
-            pass  # Plotting is optional
 
-    # Test with no results
-    import tempfile
+            # Deliberately no try/except around the call above. The whole point
+            # of this test is that the chart is produced, and swallowing the
+            # exception would let a plot_results that draws nothing pass.
+            plot_path = Path(tmp_dir) / "benchmark_comparison.png"
+            assert plot_path.exists(), (
+                f"plot_results(save_plots=True) wrote no {plot_path.name}. "
+                f"Output directory holds: "
+                f"{sorted(f.name for f in Path(tmp_dir).iterdir())}"
+            )
+            assert plot_path.stat().st_size > 0, (
+                f"{plot_path.name} was created but is empty"
+            )
+        else:
+            # Without matplotlib the method must degrade, not raise.
+            suite.plot_results(save_plots=True)
+
+    # An empty suite reports that there is nothing to plot, and writes no file.
     with tempfile.TemporaryDirectory() as tmp_dir:
         suite2 = BenchmarkSuite([MockModel("m1")], [{"d": "1"}], output_dir=tmp_dir)
-        suite2.plot_results()  # Should print "No results" without error
+        suite2.plot_results()
+        assert not (Path(tmp_dir) / "benchmark_comparison.png").exists(), (
+            "plot_results wrote a chart even though the suite held no results"
+        )
 
     print("✅ BenchmarkSuite.plot_results works correctly!")
 
@@ -2329,19 +2347,20 @@ class MLPerf:
         TODO: Set up standard benchmark configurations with fixed seeds
 
         APPROACH:
-        1. Store random_seed and build the RNG that every phase of this run uses
+        1. Store random_seed; every phase rebuilds its generator from it
         2. Define benchmark configs with input_shape, target_accuracy, max_latency_ms
 
         HINTS:
         - Each benchmark is a dict with 'input_shape', 'target_accuracy', 'max_latency_ms', 'description'
         - keyword_spotting uses (1, 16000) for 1 second of 16kHz audio
-        - Bind the RNG to self. A generator built from a hardcoded seed and
-          dropped on the floor makes random_seed a lie, and a benchmark whose
-          seed does nothing is not reproducible no matter what it prints
+        - Store the seed itself, not a generator. Each phase calls
+          np.random.default_rng(self.random_seed), so running the same
+          benchmark twice draws the same inputs and the same synthetic labels.
+          A seed that no phase reads makes random_seed a lie, and a benchmark
+          whose seed does nothing is not reproducible no matter what it prints
         """
         ### BEGIN SOLUTION
         self.random_seed = random_seed
-        self.rng = np.random.default_rng(random_seed)
 
         # Standard MLPerf benchmark configurations
         self.benchmarks = {
@@ -2759,7 +2778,7 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
        at the 99th percentile, as MLPerf's server scenario bounds the tail, not the mean
 
     HINTS:
-    - Seed one generator, np.random.default_rng(7), and draw every input from it
+    - Seed one generator from self.random_seed, and draw every input from it
     - Audio data: rng.standard_normal, Image data: rng.integers(0,256)/255
     - compliant = accuracy_met AND latency_met
     """
@@ -2785,8 +2804,11 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         test_inputs = list(test_inputs)
         num_runs = len(test_inputs)
     else:
-        # One generator seeded once: the same inputs every run, but not the same input every time
-        input_rng = np.random.default_rng(7)
+        # Seeded from self.random_seed, not a hardcoded constant: the same
+        # inputs on every run of this benchmark, and a different set only when
+        # the caller asks for a different seed. A hardcoded seed here would make
+        # the constructor's random_seed argument decorative.
+        input_rng = np.random.default_rng(self.random_seed)
         test_inputs = []
         for _ in range(num_runs):
             if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
@@ -2860,9 +2882,9 @@ MLPerf.run_all_benchmarks = mlperf_run_all_benchmarks
 """
 ### 🧪 Unit Test: MLPerf.run_standard_benchmark
 
-**What we're testing**: Complete benchmark execution with compliance determination
-**Why it matters**: The full pipeline must produce valid, reproducible results
-**Expected**: Results dict with all required metrics and compliance flags
+**What we're testing**: Complete benchmark execution, and that random_seed actually controls the data
+**Why it matters**: A benchmark that prints a seed it never uses reports a number nobody can reproduce
+**Expected**: Results dict with all required metrics and compliance flags; equal seeds give identical inputs, different seeds give different ones
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-run", "locked": true, "points": 15}
@@ -2898,6 +2920,32 @@ def test_unit_mlperf_run():
         assert False, "Should have raised ValueError"
     except ValueError:
         pass
+
+    # random_seed must control the generated inputs, not merely appear in the
+    # report. This model records what it was actually fed, which is the only way
+    # to see the difference: a benchmark that hardcodes its own seed still
+    # returns a plausible-looking results dict.
+    class RecordingModel:
+        def __init__(self):
+            self.seen = []
+        def forward(self, x):
+            self.seen.append(np.asarray(x.data).copy())
+            return Tensor(np.zeros(2, dtype=np.float32))
+
+    same_a, same_b, different = RecordingModel(), RecordingModel(), RecordingModel()
+    MLPerf(random_seed=42).run_standard_benchmark(same_a, 'keyword_spotting', num_runs=3)
+    MLPerf(random_seed=42).run_standard_benchmark(same_b, 'keyword_spotting', num_runs=3)
+    MLPerf(random_seed=1234).run_standard_benchmark(different, 'keyword_spotting', num_runs=3)
+
+    assert np.array_equal(same_a.seen[0], same_b.seen[0]), (
+        "Two runs at random_seed=42 were fed different inputs, so the benchmark "
+        "does not repeat"
+    )
+    assert not np.array_equal(same_a.seen[0], different.seen[0]), (
+        "Changing random_seed from 42 to 1234 did not change the benchmark "
+        "inputs. The seed is decorative and the reported number is not "
+        "reproducible by anyone who passes a different one"
+    )
 
     print("✅ MLPerf.run_standard_benchmark works correctly!")
 
