@@ -25,6 +25,7 @@ from .memory import (
     calc_activation_memory,
     calc_checkpoint_size,
     calc_kv_cache_size,
+    calc_mla_cache_size,
     calc_paged_kv_cache_size,
 )
 from .communication import (
@@ -102,6 +103,7 @@ __all__ = [
     "calc_activation_memory",
     "calc_checkpoint_size",
     "calc_kv_cache_size",
+    "calc_mla_cache_size",
     "calc_paged_kv_cache_size",
     "calc_ring_allreduce_time",
     "calc_point_to_point_time",
