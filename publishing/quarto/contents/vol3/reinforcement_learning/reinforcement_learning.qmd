@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Reinforcement Learning {#sec-vol3-reinforcement-learning}
@@ -155,17 +155,92 @@ Eliminating the Critic network fundamentally transforms the systems profile of l
 
 Whether that reclaimed capacity amounts to the clean halving quoted above is a question of counting bytes per parameter across every model that stays resident during a training step.
 
+```{python}
+#| label: vol3-rl-critic-elimination
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | WHAT CRITIC ELIMINATION RECLAIMS
+# +-----------------------------------------------------------------------------
+# | Context: Notebook \ref{nbk-rl-critic-elimination-hbm}.
+# |
+# | Goal:    Count the persistent training state a PPO stack holds against a
+#| |          GRPO stack, and test the 50 percent headline against it.
+# | Show:    Per-model footprints, the reclaimed fraction, and the accelerator
+# |          and node counts on each side.
+# | How:     Mixed-precision Adam costs BF16 weights plus BF16 gradients plus
+# |          FP32 master weights plus the Adam moment pair, all from the units
+# |          module. Model size and node width come from MLSysIM.
+# +-----------------------------------------------------------------------------
+import math
+
+from mlsysim import *
+from mlsysim.fmt import fmt_memory_capacity
+
+class CriticElimination:
+    # +-- 1. LOAD (Constants) --------------------
+    model = Models.Language.Llama3_70B
+    node = Systems.Nodes.DGX_H100
+    gpu = node.accelerator
+    headline = 0.5  # scenario: the halving GRPO is popularly credited with
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    # A trainable model under mixed-precision Adam: BF16 weights, BF16
+    # gradients, an FP32 master copy, and the FP32 moment pair.
+    bytes_trainable = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    actor = memory_from_params(model.parameters, bytes_trainable)
+    critic = actor  # scenario: critic matches actor capacity
+    reference = memory_from_params(model.parameters, BYTES_FP16)
+    ppo_total = actor + critic + reference
+    grpo_total = actor + reference
+    reclaimed = ppo_total - grpo_total
+    reclaimed_fraction = (reclaimed / ppo_total).to("").magnitude
+    shortfall = headline - reclaimed_fraction
+
+    capacity = gpu.memory.capacity
+    gpus_per_node = node.accelerators_per_node
+    ppo_gpus = math.ceil((ppo_total / capacity).to("").magnitude)
+    grpo_gpus = math.ceil((grpo_total / capacity).to("").magnitude)
+    ppo_nodes = math.ceil(ppo_gpus / gpus_per_node)
+    grpo_nodes = math.ceil(grpo_gpus / gpus_per_node)
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(bytes_trainable.to(byte).magnitude == 16, f"Mixed-precision Adam should cost 16 bytes per parameter, got {bytes_trainable}")
+    check(reclaimed_fraction < headline, "Critic elimination must fall short of a clean halving, which is the notebook's point")
+    check(0.02 < shortfall < 0.04, f"The shortfall should be about three points, got {shortfall}")
+    check(ppo_nodes == 2 * grpo_nodes, f"The node count should halve, got {ppo_nodes} to {grpo_nodes}")
+    check(reclaimed == critic, "Everything reclaimed is the critic and nothing else")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    bytes_trainable_str = fmt_int(bytes_trainable.to(byte).magnitude)
+    params_str = fmt_params(model.parameters)
+    actor_str = fmt_memory(actor, unit=GB, precision=1)
+    reference_str = fmt_memory(reference, unit=GB, precision=1)
+    ppo_total_str = fmt_memory(ppo_total, unit=GB, precision=1)
+    grpo_total_str = fmt_memory(grpo_total, unit=GB, precision=1)
+    reclaimed_str = fmt_memory(reclaimed, unit=GB, precision=1)
+    reclaimed_fraction_str = fmt_percent(reclaimed_fraction, precision=1, style="prose")
+    shortfall_str = fmt_pp(shortfall * 100, precision=1)
+    headline_str = fmt_percent(headline, precision=0, style="prose")
+    capacity_label_str = fmt_memory_capacity(capacity, unit=GiB, precision=0)
+    capacity_decimal_str = fmt_memory(capacity, unit=GB, precision=1)
+    gpus_per_node_str = fmt_int(gpus_per_node)
+    ppo_gpus_str = fmt_int(ppo_gpus)
+    grpo_gpus_str = fmt_int(grpo_gpus)
+    ppo_nodes_str = fmt_int(ppo_nodes)
+    grpo_nodes_str = fmt_int(grpo_nodes)
+```
+
 ::: {#nbk-rl-critic-elimination-hbm .callout-notebook title="What critic elimination actually reclaims"}
 
-**Problem**: In a 70B parameter agent training cluster, how much high-bandwidth memory does eliminating the Critic network reclaim, and does the saving reach the 50 percent figure quoted for GRPO?
+**Problem**: In a 70B parameter agent training cluster, how much high-bandwidth memory does eliminating the Critic network reclaim, and does the saving reach the `{python} CriticElimination.headline_str` figure quoted for GRPO?
 
-**Variables**: $P = 70 \times 10^9$ parameters, with $1\text{ GB} = 10^9$ bytes. Mixed-precision Adaptive Moment Estimation (Adam) holds, per trainable parameter, $2\text{ bytes}$ of BF16 weights, $2\text{ bytes}$ of BF16 gradients, $4\text{ bytes}$ of FP32 master weights, and $4\text{ bytes} + 4\text{ bytes}$ of FP32 momentum and variance. The frozen reference model holds BF16 weights only, at $2\text{ bytes}$ per parameter. Accelerators carry $80\text{ GB}$ of HBM each, eight to a node. Two values are scenario assumptions: the Critic matches the Actor in parameter capacity, and the byte budget counts persistent state only, excluding activations and KV cache, so every total below is a floor.
+**Variables**: A parameter count $P$ of `{python} CriticElimination.params_str`, with $1\text{ GB} = 10^9$ bytes. Mixed-precision Adaptive Moment Estimation (Adam) holds, per trainable parameter, $2\text{ bytes}$ of BF16 weights, $2\text{ bytes}$ of BF16 gradients, $4\text{ bytes}$ of FP32 master weights, and $4\text{ bytes} + 4\text{ bytes}$ of FP32 momentum and variance. The frozen reference model holds BF16 weights only, at $2\text{ bytes}$ per parameter. Accelerators carry the branded `{python} CriticElimination.capacity_label_str` of HBM each, which is `{python} CriticElimination.capacity_decimal_str` in the decimal currency used throughout this count, `{python} CriticElimination.gpus_per_node_str` to a node. Two values are scenario assumptions: the Critic matches the Actor in parameter capacity, and the byte budget counts persistent state only, excluding activations and KV cache, so every total below is a floor.
 
-**Math**: A trainable model costs $2 + 2 + 4 + 4 + 4 = 16\text{ bytes}$ per parameter, so the Actor occupies $70 \times 10^9 \times 16 = 1120\text{ GB}$ and a Critic of equal capacity occupies another $1120\text{ GB}$. The frozen reference model, carrying no gradients and no optimizer states, costs $70 \times 10^9 \times 2 = 140\text{ GB}$. PPO therefore holds $1120 + 1120 + 140 = 2380\text{ GB}$ of persistent state against GRPO's $1120 + 140 = 1260\text{ GB}$, and the fraction reclaimed is $1120 / 2380 = 0.471$. Converting to hardware, $2380 / 80 = 29.75$ rounds up to $30$ accelerators, while $1260 / 80 = 15.75$ rounds up to $16$.
+**Math**: A trainable model costs $2 + 2 + 4 + 4 + 4 = $ `{python} CriticElimination.bytes_trainable_str` bytes per parameter, so the Actor occupies `{python} CriticElimination.actor_str` and a Critic of equal capacity occupies another `{python} CriticElimination.actor_str`. The frozen reference model, carrying no gradients and no optimizer states, costs `{python} CriticElimination.reference_str`. PPO therefore holds `{python} CriticElimination.ppo_total_str` of persistent state against GRPO's `{python} CriticElimination.grpo_total_str`, and the fraction reclaimed is `{python} CriticElimination.reclaimed_fraction_str`. Converting to hardware, the PPO state needs `{python} CriticElimination.ppo_gpus_str` accelerators and the GRPO state `{python} CriticElimination.grpo_gpus_str`.
 
-**Result**: Critic elimination reclaims $1120\text{ GB}$, a reduction of **47 percent**, and takes the resident training state from **four eight-GPU nodes down to two**.
+**Result**: Critic elimination reclaims `{python} CriticElimination.reclaimed_str`, a reduction of **`{python} CriticElimination.reclaimed_fraction_str`**, and takes the resident training state from **`{python} CriticElimination.ppo_nodes_str` nodes down to `{python} CriticElimination.grpo_nodes_str`**.
 
-**Systems insight**: The 50 percent headline is the ceiling of critic elimination rather than its value in a working cluster, and the missing three points are the frozen reference model that the KL penalty keeps resident. That residual is also the only resident model carrying no gradients and no optimizer states, which is why production GRPO stacks push it to CPU RAM, 8-bit weights, or a cheaper inference tier. Doing so moves the last $140\text{ GB}$ off premium HBM and lets nearly the entire $1120\text{ GB}$ saving land on the training tier, where it funds a larger rollout group $G$ or a longer context window without adding nodes.
+**Systems insight**: The `{python} CriticElimination.headline_str` headline is the ceiling of critic elimination rather than its value in a working cluster, and the missing `{python} CriticElimination.shortfall_str` are the frozen reference model that the KL penalty keeps resident. That residual is also the only resident model carrying no gradients and no optimizer states, which is why production GRPO stacks push it to CPU RAM, 8-bit weights, or a cheaper inference tier. Doing so moves the last `{python} CriticElimination.reference_str` off premium HBM and lets nearly the entire `{python} CriticElimination.reclaimed_str` saving land on the training tier, where it funds a larger rollout group $G$ or a longer context window without adding nodes.
 
 :::
 
