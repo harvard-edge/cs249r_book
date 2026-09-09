@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Trajectory Fine-Tuning {#sec-vol3-trajectory-fine-tuning}
@@ -57,7 +57,66 @@ In early agent prototypes, engineers relied entirely on prompting: the system pr
 
    $$\text{Memory}_{\text{KV}} = 2 \times n_{\text{layers}} \times n_{\text{kv}} \times d_{\text{head}} \times T \times b_{\text{bytes}}$$
 
-   In an agent executing a 30-turn interaction where each turn appends tool definitions, execution logs, and intermediate reasoning, $T$ readily surpasses 32,000 tokens. In a 70-billion-parameter model using 16-bit precision and grouped-query attention with eight key-value heads, serving a single agent session requires roughly 10 GB of high-bandwidth memory (HBM) exclusively for KV tensors. Multi-head attention over the full model width would cost eight times that. When thousands of concurrent agents run in parallel, memory bandwidth and capacity become the primary throughput bottleneck [@kaplan2020scaling].
+```{python}
+#| label: vol3-tuning-memory-anchors
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | KV, QUANTIZED WEIGHT, AND ADAPTER FOOTPRINTS FOR A 70B AGENT
+# +-----------------------------------------------------------------------------
+# | Context: The KV-cache bullet below, the QLoRA paragraph, and the adapter
+# |          multi-tenancy paragraph in this chapter.
+# |
+# | Goal:    Hold the three memory anchors this chapter quotes for a 70B agent,
+# |          so the KV figure, the quantization figure, and the adapter figure
+# |          all follow from the same model shape.
+# | Show:    KV cache at agent context length under grouped-query and multi-head
+# |          attention, base weights at 16-bit and 4-bit, and LoRA adapter size.
+# | How:     Model shape and per-element widths from MLSysIM. The adapter count
+# |          is 2 * r * d_model per projection, over the query and value
+# |          projections of every layer.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+class TuningMemory:
+    # +-- 1. LOAD (Constants) --------------------
+    large = Models.Language.Llama3_70B
+    small = Models.Language.Llama3_8B
+    session_tokens = 32_000  # scenario assumption: context a 30-turn agent session reaches
+    lora_rank = 16  # scenario assumption: rank used by the serving runtimes cited
+    lora_projections = 2  # scenario assumption: adapters on the query and value projections
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    kv_gqa = large.get_kv_cache_size(seq_len=session_tokens, batch_size=1, precision=BYTES_FP16)
+    group_ratio = large.heads // large.kv_heads
+    kv_mha = kv_gqa * group_ratio
+    weights_fp16 = memory_from_params(large.parameters, BYTES_FP16)
+    weights_nf4 = memory_from_params(large.parameters, BYTES_INT4)
+    quantization_ratio = (weights_fp16 / weights_nf4).to("").magnitude
+
+    # A rank-r adapter on one projection holds two matrices of r by d_model.
+    large_adapter = 2 * lora_rank * large.hidden_dim * large.layers * lora_projections * BYTES_FP16
+    small_adapter = 2 * lora_rank * small.hidden_dim * small.layers * lora_projections * BYTES_FP16
+    adapter_fraction = (large_adapter / weights_fp16).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(group_ratio == 8, f"Llama-3-70B groups eight query heads per key-value head, got {group_ratio}")
+    check(abs(quantization_ratio - 4) < 0.01, f"NF4 should quarter the 16-bit footprint, got {quantization_ratio}")
+    check(adapter_fraction < 0.001, f"A rank-{lora_rank} adapter must be a tiny fraction of the base model, got {adapter_fraction}")
+    check(large_adapter > small_adapter, "The adapter for the larger model must be the larger of the two")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    session_tokens_str = fmt_int(session_tokens)
+    kv_gqa_str = fmt_memory(kv_gqa, unit=GB, precision=1)
+    group_ratio_mult_str = fmt_multiple(group_ratio, precision=0)
+    kv_heads_str = fmt_int(large.kv_heads)
+    weights_fp16_str = fmt_memory(weights_fp16, unit=GB, precision=1)
+    weights_nf4_str = fmt_memory(weights_nf4, unit=GB, precision=1)
+    lora_rank_str = fmt_int(lora_rank)
+    large_adapter_str = fmt_memory(large_adapter, unit=MB, precision=1)
+    small_adapter_str = fmt_memory(small_adapter, unit=MB, precision=1)
+```
+
+   In an agent executing a 30-turn interaction where each turn appends tool definitions, execution logs, and intermediate reasoning, $T$ readily surpasses `{python} TuningMemory.session_tokens_str` tokens. In a 70-billion-parameter model using 16-bit precision and grouped-query attention with `{python} TuningMemory.kv_heads_str` key-value heads, serving a single agent session requires `{python} TuningMemory.kv_gqa_str` of high-bandwidth memory (HBM) exclusively for KV tensors. Multi-head attention over the full model width would cost `{python} TuningMemory.group_ratio_mult_str` that. When thousands of concurrent agents run in parallel, memory bandwidth and capacity become the primary throughput bottleneck [@kaplan2020scaling].
 
 2. **Attention Degradation and the "Lost in the Middle" Phenomenon:**
    Transformer attention distributions do not remain uniformly sharp over extensive sequence contexts. As established by @liu2024lost, language models exhibit pronounced U-shaped performance curves: retrieval accuracy is highest for tokens placed at the extreme beginning or end of the prompt context, while information located in the middle suffers severe degradation. When an agent relies on in-context exemplars embedded amidst lengthy API documentation, tool parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
@@ -345,11 +404,11 @@ Full-parameter fine-tuning (modifying all 70 billion parameters of a frontier mo
 
 As detailed in @fig-vol3-lora-adapters, rather than updating the massive base weight matrices during training, LoRA approximates the necessary weight updates using a pair of much smaller, low-rank matrices. (The formal algebraic derivation of this matrix decomposition, initialization distributions, and forward-pass scaling is detailed in @sec-vol3-appendix-math-lora).
 
-Because these low-rank matrices represent only a tiny fraction of the original parameter count, they can be trained quickly and stored efficiently. In QLoRA [@dettmers2023qlora], the base weights are further quantized to 4-bit NormalFloat (NF4) with double dequantization, reducing the memory footprint of a 70B parameter model from 140 GB to approximately 35 GB, allowing fine-tuning to execute on commodity server hardware.
+Because these low-rank matrices represent only a tiny fraction of the original parameter count, they can be trained quickly and stored efficiently. In QLoRA [@dettmers2023qlora], the base weights are further quantized to 4-bit NormalFloat (NF4) with double dequantization, reducing the memory footprint of a 70B parameter model from `{python} TuningMemory.weights_fp16_str` to `{python} TuningMemory.weights_nf4_str`, allowing fine-tuning to execute on commodity server hardware.
 
 ### Dynamic multi-tenant adapter swapping
 
-For agent serving systems, the true power of LoRA lies in runtime multi-tenancy. Modern serving runtimes (such as S-LoRA and Punica) exploit the property that a LoRA adapter is small next to the base model it steers: at rank $r=16$ over the query and value projections, roughly 80 megabytes for a 70-billion-parameter model and under 20 megabytes for a 7-billion-parameter one.
+For agent serving systems, the true power of LoRA lies in runtime multi-tenancy. Modern serving runtimes (such as S-LoRA and Punica) exploit the property that a LoRA adapter is small next to the base model it steers: at rank $r$ of `{python} TuningMemory.lora_rank_str` over the query and value projections, `{python} TuningMemory.large_adapter_str` for a 70-billion-parameter model and `{python} TuningMemory.small_adapter_str` for an 8-billion-parameter one.
 
 Instead of deploying separate model replicas:
 
