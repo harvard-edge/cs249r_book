@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Conclusion {#sec-vol3-conclusion}
@@ -103,13 +103,73 @@ If execution proceeds open-loop without intermediate external verification, the 
 
 $$P(\tau_{\text{success}}) = \prod_{t=1}^H p_t = (1 - \epsilon)^H \approx \exp(-\epsilon H)$$ {#eq-vol3-sovereign-law-horizon}
 
-As established in @eq-vol3-sovereign-law-horizon, the mathematical ceiling of unverified autonomy becomes apparent. If an engineering team deploys a frontier model with an impressive 98 percent per-step accuracy ($p = 0.98, \epsilon = 0.02$):
+```{python}
+#| label: vol3-conclusion-horizon-ceiling
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | THE HORIZON CEILING AND WHAT SCALING WOULD HAVE TO BUY
+# +-----------------------------------------------------------------------------
+# | Context: The horizon bullets below and the Amdahl bullet later in the
+# |          chapter.
+# |
+# | Goal:    Close the volume on the same compounding bound it opened with, and
+# |          state what per-step accuracy a viable trajectory would demand.
+# | Show:    Survival at three horizons, the accuracy required for a viable
+# |          hundred-step trajectory, and the ceiling a fixed I/O wait imposes.
+# | How:     calc_trajectory_reliability for the bound; its inverse, the H-th
+# |          root of the target, for the accuracy scaling would have to reach;
+# |          calc_amdahls_speedup for the wait-bound ceiling.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-- Over a short horizon of $H = 5$ steps: $P(\text{success}) = 0.98^5 \approx 0.904$ (90.4 percent).
-- Over a moderate horizon of $H = 30$ steps: $P(\text{success}) = 0.98^{30} \approx 0.545$ (54.5 percent).
-- Over an enterprise horizon of $H = 100$ steps: $P(\text{success}) = 0.98^{100} \approx 0.133$ (13.3 percent).
+class HorizonCeiling:
+    # +-- 1. LOAD (Constants) --------------------
+    accuracy = 0.98  # scenario assumption: frontier per-step accuracy
+    horizons = (5, 30, 100)  # scenario assumption: short, moderate, enterprise
+    viable = 0.95  # scenario assumption: a commercially viable success rate
+    io_wait = 0.60  # scenario assumption: wall clock blocked on external tools
 
-To achieve a commercially viable 95 percent trajectory success rate over $H = 100$ steps through raw model scaling alone would require an absurd per-step accuracy of $p \ge 0.95^{1/100} \approx 0.99948$ (an error rate of less than 1 in 2,000 steps). Because foundation models are probabilistic estimators trained on human web data, achieving such ultra-low error rates across out-of-distribution environments is mathematically intractable.
+    # +-- 2. EXECUTE (The Compute) ---------------
+    survivals = []
+    for h in horizons:
+        survivals.append(calc_trajectory_reliability(accuracy, h))
+    long_horizon = horizons[-1]
+    required_accuracy = viable ** (1 / long_horizon)
+    required_error = 1 - required_accuracy
+    error_one_in = 1 / required_error
+    wait_bound_speedup = calc_amdahls_speedup(1 - io_wait, 10**9)
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(survivals[0] > survivals[1] > survivals[2], "Survival must fall as the horizon grows")
+    check(required_accuracy > accuracy, "A viable hundred-step trajectory must demand more than frontier accuracy")
+    check(
+        abs(calc_trajectory_reliability(required_accuracy, long_horizon) - viable) < 1e-6,
+        "The required accuracy must reproduce the viability target when compounded",
+    )
+    check(
+        abs(wait_bound_speedup - 1 / io_wait) < 0.01,
+        f"An infinitely fast accelerator is bounded by the reciprocal of the wait, got {wait_bound_speedup}",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    accuracy_str = fmt_percent(accuracy, precision=0, style="prose")
+    h_short_str, h_mid_str, h_long_str = [fmt_int(h) for h in horizons]
+    s_short_str, s_mid_str, s_long_str = [fmt_percent(s, precision=1, style="prose") for s in survivals]
+    s_short_num_str, s_mid_num_str, s_long_num_str = [fmt(s, precision=3, commas=False) for s in survivals]
+    viable_str = fmt_percent(viable, precision=0, style="prose")
+    required_accuracy_str = fmt(required_accuracy, precision=5, commas=False)
+    error_one_in_str = fmt_int(int(round(error_one_in, -2)))
+    io_wait_str = fmt_percent(io_wait, precision=0, style="prose")
+    wait_bound_mult_str = fmt_multiple(wait_bound_speedup, precision=1)
+```
+
+As established in @eq-vol3-sovereign-law-horizon, the mathematical ceiling of unverified autonomy becomes apparent. If an engineering team deploys a frontier model with an impressive `{python} HorizonCeiling.accuracy_str` per-step accuracy:
+
+- Over a short horizon of $H = $ `{python} HorizonCeiling.h_short_str` steps, $P(\text{success})$ is `{python} HorizonCeiling.s_short_num_str`, or `{python} HorizonCeiling.s_short_str`.
+- Over a moderate horizon of $H = $ `{python} HorizonCeiling.h_mid_str` steps, `{python} HorizonCeiling.s_mid_num_str`, or `{python} HorizonCeiling.s_mid_str`.
+- Over an enterprise horizon of $H = $ `{python} HorizonCeiling.h_long_str` steps, `{python} HorizonCeiling.s_long_num_str`, or `{python} HorizonCeiling.s_long_str`.
+
+To achieve a commercially viable `{python} HorizonCeiling.viable_str` trajectory success rate over `{python} HorizonCeiling.h_long_str` steps through raw model scaling alone would require an absurd per-step accuracy of `{python} HorizonCeiling.required_accuracy_str`, an error rate of about one step in `{python} HorizonCeiling.error_one_in_str`. Because foundation models are probabilistic estimators trained on human web data, achieving such ultra-low error rates across out-of-distribution environments is mathematically intractable.
 
 ### Verification as a mandatory physical tax
 
@@ -192,7 +252,7 @@ In 1967, Gene Amdahl formulated **Amdahl's Law**, which states that the theoreti
 
 In agentic machine learning systems, these two principles govern the performance limits of complex workflows:
 
-1. **Amdahl's Bottleneck in Agent Execution:** While GPU inference speeds (tokens per second) scale with newer hardware accelerators, agentic workflows are intrinsically bottlenecked by sequential environmental interactions. If an agent spends 60 percent of its wall-clock time waiting for an external Python interpreter to execute a script or a search index to return results, an infinitely fast GPU can only ever yield a $1.6\times$ overall task speedup. System acceleration requires asynchronous tool dispatch, overlapping speculative decoding with I/O waits, and preemptive background retrieval.
+1. **Amdahl's Bottleneck in Agent Execution:** While GPU inference speeds (tokens per second) scale with newer hardware accelerators, agentic workflows are intrinsically bottlenecked by sequential environmental interactions. If an agent spends `{python} HorizonCeiling.io_wait_str` of its wall-clock time waiting for an external Python interpreter to execute a script or a search index to return results, an infinitely fast GPU can only ever yield a `{python} HorizonCeiling.wait_bound_mult_str` overall task speedup. System acceleration requires asynchronous tool dispatch, overlapping speculative decoding with I/O waits, and preemptive background retrieval.
 2. **The Agentic Tail at Scale:** When an orchestrator agent delegates sub-tasks to 50 parallel worker agents (for example, to evaluate multiple search branches or map over a large document), the orchestrator cannot proceed until the slowest worker returns. Due to the stochastic nature of autoregressive generation lengths (where one worker might require 5 tokens and another 500) and variable KV-cache eviction delays, variance across parallel agent requests is exceptionally high. Runtimes must employ classic tail-tolerance techniques: hedged requests (sending duplicate sub-tasks and taking the first result), proactive straggler mitigation, and speculative execution timeouts.
 
 Optimizing an agentic system requires looking beyond peak token throughput to address the sequential I/O bottlenecks and the compounding variance of distributed stochastic actors.
