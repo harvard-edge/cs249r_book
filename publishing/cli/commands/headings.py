@@ -44,8 +44,8 @@ console = Console()
 
 # ─── Rule data ───────────────────────────────────────────────────────────────
 
-def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], set[str]]:
-    """Load heading case rules from data/heading_rules.yaml with static fallback."""
+def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], set[str], set[str], set[str]]:
+    """Load heading and callout title case rules from data/heading_rules.yaml with static fallback."""
     yaml_path = Path(__file__).resolve().parent.parent / "data" / "heading_rules.yaml"
     if yaml_path.exists():
         try:
@@ -57,8 +57,18 @@ def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], s
             dam_axes = set(data.get("dam_axes", []))
             concept_terms_lower = set(data.get("concept_terms_lower", []))
             skip_headings = set(data.get("skip_headings", []))
+            skip_callout_titles = set(data.get("skip_callout_titles", []))
+            skip_titles = set(data.get("skip_titles", []))
             if acronyms:
-                return acronyms, compound_names, dam_axes, concept_terms_lower, skip_headings
+                return (
+                    acronyms,
+                    compound_names,
+                    dam_axes,
+                    concept_terms_lower,
+                    skip_headings,
+                    skip_callout_titles,
+                    skip_titles,
+                )
         except Exception:
             pass
 
@@ -114,9 +124,27 @@ def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], s
         "1-bit Adam: Compression-aware optimization",
         "Empirical validation: 50-layer comparison",
     }
-    return fallback_acronyms, fallback_compounds, fallback_dam, fallback_concept, fallback_skip
+    fallback_callout: set[str] = set()
+    fallback_titles: set[str] = set()
+    return (
+        fallback_acronyms,
+        fallback_compounds,
+        fallback_dam,
+        fallback_concept,
+        fallback_skip,
+        fallback_callout,
+        fallback_titles,
+    )
 
-ACRONYMS, COMPOUND_NAMES, DAM_AXES, CONCEPT_TERMS_LOWER, SKIP_HEADINGS = _load_rules()
+(
+    ACRONYMS,
+    COMPOUND_NAMES,
+    DAM_AXES,
+    CONCEPT_TERMS_LOWER,
+    SKIP_HEADINGS,
+    SKIP_CALLOUT_TITLES,
+    SKIP_TITLES,
+) = _load_rules()
 
 
 # ─── Regexes ─────────────────────────────────────────────────────────────────
@@ -378,6 +406,38 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
         result = result.replace(f"\x00MATHSPAN{i}\x00", span)
     return result
 
+
+def is_exempt_heading(text: str) -> bool:
+    """Check if a section heading is exempt from case enforcement."""
+    return text == "Purpose" or text in SKIP_HEADINGS or text in SKIP_TITLES
+
+
+def is_exempt_callout_title(text: str) -> bool:
+    """Check if a callout title is exempt from case enforcement."""
+    return text in SKIP_CALLOUT_TITLES or text in SKIP_TITLES or text in SKIP_HEADINGS
+
+
+def transform_sentence_case(text: str, is_callout: bool = False) -> str:
+    """Transform heading or callout title text into sentence-case form.
+
+    Handles math spans ($...$, $^2$, $^3$), Greek tokens, parenthetical axes,
+    acronyms, compound names, and exemptions. If text is exempt, returns original text.
+    """
+    if is_callout:
+        if is_exempt_callout_title(text):
+            return text
+        axis = _parenthetical_axis(text)
+        return _fix_sentence_case(text, axis)
+
+    if is_exempt_heading(text):
+        return text
+
+    axis = _parenthetical_axis(text)
+    pre_text = _preprocess_math(text)
+    new_text_raw = _fix_sentence_case(pre_text, axis)
+    return _postprocess_math(new_text_raw)
+
+
 def _strip_ignore(src: str) -> set:
     """Return line numbers (1-indexed) to skip: code fences, HTML comments, YAML front matter."""
     src_no_html = re.sub(
@@ -401,6 +461,7 @@ def _strip_ignore(src: str) -> set:
             skip.add(i)
     return skip
 
+
 def _process_file(path: str, dry_run: bool = True) -> List[Tuple[int, str, str]]:
     """Process a single .qmd file. Returns (line, old_line, new_line) tuples for H3+ violations."""
     with open(path) as fh:
@@ -418,14 +479,9 @@ def _process_file(path: str, dry_run: bool = True) -> List[Tuple[int, str, str]]
         level = len(hashes)
         if level <= 2:
             continue
-        if text == "Purpose":
+        if is_exempt_heading(text):
             continue
-        if text in SKIP_HEADINGS:
-            continue
-        axis = _parenthetical_axis(text)
-        pre_text = _preprocess_math(text)
-        new_text_raw = _fix_sentence_case(pre_text, axis)
-        new_text = _postprocess_math(new_text_raw)
+        new_text = transform_sentence_case(text, is_callout=False)
         if new_text != text:
             new_line = f"{hashes} {new_text}{attrs}"
             changes.append((i, line.rstrip(), new_line))
