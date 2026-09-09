@@ -2894,27 +2894,35 @@ if __name__ == "__main__":
 
 **WRONG ❌ - This Corrupts the Gradient Graph:**
 ```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * x
-x.data[0] = 999  # ❌ Mul.backward will read the corrupted x
-y.backward()     # ❌ x.grad[0] comes out as 1998, not 2
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()      # .sum() because backward() starts from a scalar
+x.data[0] = 999        # ❌ Mul saved x, and backward will read the new value
+y.backward()
+x.grad                 # ❌ [1998., 4., 6.] -- the first entry should be 2.
 ```
 
-**RIGHT ✅ - Create New Tensors Instead:**
+**RIGHT ✅ - Leave the Recorded Values Alone:**
 ```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * 2
-x = Tensor([999, 2, 3], requires_grad=True)  # ✅ New tensor, safe
-y.backward()  # ✅ Correct gradients
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()
+y.backward()
+x.grad                 # ✅ [2., 4., 6.]
+
+# Need different values? Start a new tensor and a new forward pass.
+x = Tensor([999.0, 2.0, 3.0], requires_grad=True)
 ```
+
+Both blocks run as written. The only difference is the assignment to `x.data`
+between the forward and backward passes, and it changes the first gradient from
+2 to 1998.
 
 #### Why This Breaks Everything
 
 Autograd records operations on the **original tensor values**. When you modify `.data` directly:
 
-1. **Forward pass** records: "y = x * 2" where x = [1, 2, 3]
-2. **You corrupt**: x.data[0] = 999, so x = [999, 2, 3]
-3. **Backward pass** uses: corrupted x values, causing wrong gradients or crashes
+1. **Forward pass** records: "y = sum(x * x)" and saves x = [1, 2, 3]
+2. **You corrupt**: x.data[0] = 999, so the saved array now reads [999, 2, 3]
+3. **Backward pass** computes 2x from the corrupted array: 2 x 999 = 1998, not 2
 
 **The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
 
@@ -2932,7 +2940,7 @@ x.data *= scalar
 x.data -= value
 
 # ❌ FORBIDDEN - NumPy in-place operations
-np.fill(x.data, value)
+np.copyto(x.data, value)
 np.add(x.data, other, out=x.data)
 x.data.fill(value)
 
