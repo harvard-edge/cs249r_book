@@ -8045,7 +8045,7 @@ class ValidateCommand:
 
     def _run_callout_title_case(self, root: Path) -> ValidationRunResult:
         """Enforce sentence-case on callout title attributes."""
-        from cli.commands.headings import _fix_sentence_case
+        from cli.commands.headings import is_exempt_callout_title, transform_sentence_case
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -8065,7 +8065,9 @@ class ValidateCommand:
                 title = tm.group(1).strip()
                 if not title:
                     continue
-                expected = _fix_sentence_case(title)
+                if is_exempt_callout_title(title):
+                    continue
+                expected = transform_sentence_case(title, is_callout=True)
                 if title != expected:
                     issues.append(
                         ValidationIssue(
