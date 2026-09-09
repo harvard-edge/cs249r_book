@@ -1105,16 +1105,16 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Schema Validation
+### The Submission Schema
 
-This test validates submissions conform to the required schema.
-
-**What we're testing**: Required fields, type safety, value constraints
-**Why it matters**: Schema validation enables automated aggregation and comparison
-**Expected**: Valid submissions pass, invalid submissions fail with clear errors
+Before a submission is worth comparing against anyone else's, it has to be
+readable by the tooling that aggregates it. The validator below is the contract:
+it names the required fields and the ranges their values must fall in. It ships
+with the package so the graders and your own scripts can apply the same rules.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
+# %% nbgrader={"grade": false, "grade_id": "validate-submission-schema", "solution": false}
+#| export
 def validate_submission_schema(submission: Dict[str, Any]) -> bool:
     """
     Validate submission JSON conforms to required schema.
@@ -1164,6 +1164,19 @@ def validate_submission_schema(submission: Dict[str, Any]) -> bool:
 
     return True
 
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Schema Validation
+
+This test validates submissions conform to the required schema.
+
+**What we're testing**: Required fields, type safety, value constraints
+**Why it matters**: Schema validation enables automated aggregation and comparison
+**Expected**: Valid submissions pass, invalid submissions fail with clear errors
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
 def test_unit_submission_schema():
     """🧪 Test submission schema validation."""
     print("🧪 Unit Test: Submission Schema...")

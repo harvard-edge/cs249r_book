@@ -79,25 +79,40 @@ def test_adam_with_multi_layer_network():
     # Create Adam optimizer
     adam = Adam(params, lr=0.01)
 
-    # Training loop simulation
+    # Snapshot every parameter so we can prove the step actually moved them.
+    before = [p.data.copy() for p in params]
+
+    # Fixed input: with the input held constant the loss must fall monotonically
+    # on this problem, which a no-op or wrongly-signed update would not do.
+    x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
+    target = Tensor(np.ones((2, 2)))
+
+    losses = []
     for step in range(3):
-        # Forward pass
-        x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
         h1 = relu1(layer1(x))
         h2 = relu2(layer2(h1))
         output = layer3(h2)
 
-        # Simple loss - MSE
-        target = Tensor(np.ones((2, 2)))
         diff = output - target
         loss = (diff * diff).sum()
+        losses.append(float(loss.data))
 
-        # Backward pass
         adam.zero_grad()
         loss.backward()
-
-        # Update
         adam.step()
+
+    # Every parameter that received a gradient must have moved.
+    moved = [not np.allclose(b, p.data) for b, p in zip(before, params)]
+    assert any(moved), "Adam.step() left every parameter unchanged"
+    assert all(moved), (
+        "Adam.step() skipped some parameters: "
+        f"{[i for i, m in enumerate(moved) if not m]} of {len(params)} did not move"
+    )
+
+    # And the updates must be in a descent direction on a fixed input.
+    assert losses[-1] < losses[0], (
+        f"Loss did not decrease over 3 Adam steps: {losses}"
+    )
 
     print("✅ Adam works with multi-layer networks!")
 
@@ -116,10 +131,28 @@ def test_optimizer_with_mse_loss():
     output = layer(x)
     loss = loss_fn(output, target)
 
+    loss_before = float(loss.data)
+    weight_before = layer.weight.data.copy()
+
     # Backward and update
     optimizer.zero_grad()
     loss.backward()
+
+    # The loss must actually reach the layer's parameters.
+    assert layer.weight.grad is not None, "MSELoss did not propagate a gradient to layer.weight"
+    assert not np.allclose(layer.weight.grad, 0.0), "Gradient through MSELoss is all zeros"
+
     optimizer.step()
+
+    assert not np.allclose(weight_before, layer.weight.data), (
+        "SGD.step() did not change the weight after a nonzero gradient"
+    )
+
+    # Re-evaluating on the same input must give a lower loss after one step.
+    loss_after = float(loss_fn(layer(x), target).data)
+    assert loss_after < loss_before, (
+        f"Loss rose after an SGD step: {loss_before} -> {loss_after}"
+    )
 
     print("✅ Optimizer integrates with MSE loss!")
 
