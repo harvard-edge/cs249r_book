@@ -61,6 +61,8 @@ Current counts: **147 exercises, 185 graded tests, 67 given cells.**
 | Every unit test has a What/Why/Expected header | 19 of 20 modules did this; module 17 had none |
 | Exercise docstrings carry TODO and APPROACH | The scaffold students follow |
 | Reflection Questions render as markdown | Module 15's was a code cell showing a raw Python string |
+| Unit-test docstrings open with 🧪 | 19 across four modules opened with a bare `Test`, and one still carried the retired 🔬 |
+| An exercise is followed by its test, not by more exercises | A student should not write several components before any is checked. Module 14 asked for nine profiling helpers in a row and tested them 1,100 lines later; module 06 ran to ten. Limit is five, since a family of small classes may legitimately share one test |
 
 ### Progressive disclosure — nothing arrives early
 
@@ -83,6 +85,7 @@ Current counts: **147 exercises, 185 graded tests, 67 given cells.**
 |---|---|
 | No test signals failure with a bare `return` | pytest discards the value. **Thirteen tests could not fail; six were actually failing** |
 | No bare `except:` | Six swallowed real failures. The worst skipped the gradient update entirely, turning "the network never trained" into a pass |
+| No graded cell swallows its own failure | A handler whose body is only a `pass` or a `print` makes the points unreachable. Module 19's ten-point plotting test caught every exception and passed, so the method could draw nothing and still score full marks. The expected-raise idiom is exempt |
 | Every test file imports and collects | Catches a stale import before the suite runs |
 
 ### Slow gates
@@ -93,6 +96,22 @@ Current counts: **147 exercises, 185 graded tests, 67 given cells.**
 | pytest | The full suite, green |
 
 ---
+
+## What the suite itself must not contain
+
+The gates above police the module sources. The suite under `tests/` is held to
+the same standard by review, because a test that cannot fail is worse than no
+test: it occupies the space where a real check would go.
+
+Removed in the 2026-09 cleanup: a 91-line file with no test functions that
+pytest executed as a script on every collection; three files skipped in full
+because they tested APIs the framework no longer has; five environment checks
+whose only reaction to a bad condition was to print a warning; and one CLI check
+whose own comment said it was informational and would not fail.
+
+Fixed at the same time: `--tinytorch`, the educational mode the test README
+recommends to students, printed `ALL PASSED | 0 passed, 0 total` on a run with
+failures, because its reporter was never wired to pytest's results.
 
 ## Determinism
 

@@ -409,16 +409,28 @@ class TinyTorchTestReporter:
                 self.console.print(Panel(content, title="[red]Test Failed[/red]",
                                         border_style="red", padding=(0, 1)))
 
-    def print_summary(self):
-        """Print final summary."""
+    def print_summary(self, passed=None, failed=None, skipped=None):
+        """Print final summary.
+
+        Counts come from pytest's own stats when given. They used to come from
+        this object's tallies, which nothing incremented, so the summary read
+        "ALL PASSED | 0 passed, 0 total" on a run with failures. A student was
+        told everything passed while the run was red.
+        """
         if not self.use_rich:
             return
 
-        total = self.passed + self.failed + self.skipped
+        passed = self.passed if passed is None else passed
+        failed = self.failed if failed is None else failed
+        skipped = self.skipped if skipped is None else skipped
+        total = passed + failed + skipped
 
         self.console.print("\n" + "━" * 50)
-        status = "[green]ALL PASSED[/green]" if self.failed == 0 else f"[red]{self.failed} FAILED[/red]"
-        self.console.print(f"[bold]{status}[/bold] | {self.passed} passed, {self.skipped} skipped, {total} total")
+        if total == 0:
+            self.console.print("[yellow]NO TESTS RAN[/yellow]")
+            return
+        status = "[green]ALL PASSED[/green]" if failed == 0 else f"[red]{failed} FAILED[/red]"
+        self.console.print(f"[bold]{status}[/bold] | {passed} passed, {skipped} skipped, {total} total")
 
 
 # Global reporter instance
@@ -449,16 +461,26 @@ def pytest_runtest_makereport(item, call):
     if report.when == "call":
         # Get docstring from test function
         docstring = item.function.__doc__ if hasattr(item, 'function') else None
-
-        # Store for later use if needed
         report._tinytorch_docstring = docstring
+
+        # Actually hand the result to the educational reporter. Without this the
+        # reporter was inert: no per-test line, and no WHAT/WHY panel on failure,
+        # which is the whole point of --tinytorch.
+        if item.config.getoption("--tinytorch", default=False):
+            _reporter.print_test_result(report.nodeid, report.outcome,
+                                        docstring, report.longrepr)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Add educational summary at the end of test run."""
     # Check if we should show educational summary
     if config.getoption("--tinytorch", default=False):
-        _reporter.print_summary()
+        stats = terminalreporter.stats
+        _reporter.print_summary(
+            passed=len(stats.get("passed", [])),
+            failed=len(stats.get("failed", [])) + len(stats.get("error", [])),
+            skipped=len(stats.get("skipped", [])),
+        )
 
 
 # =============================================================================

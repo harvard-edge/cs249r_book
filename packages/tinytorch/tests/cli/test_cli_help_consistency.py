@@ -79,47 +79,6 @@ class TestHelpConsistency:
         # Help should have usage
         assert 'usage:' in help_output.lower(), "tito -h should show usage"
 
-    def test_no_references_to_removed_commands(self):
-        """Verify help doesn't reference commands that don't exist."""
-        cli = TinyTorchCLI()
-        registered_commands = set(cli.commands.keys())
-
-        # Get main help
-        help_text = self.get_command_help()
-
-        # Common command-like words that might be false positives
-        ignore_words = {
-            'command', 'commands', 'option', 'options', 'argument',
-            'arguments', 'help', 'version', 'verbose', 'color',
-            'git', 'python', 'pip', 'jupyter', 'pytest', 'run',
-            'build', 'install', 'create', 'delete', 'update',
-            'show', 'list', 'view', 'open', 'close', 'start',
-            'stop', 'export', 'import', 'output', 'input'
-        }
-
-        # Extract words that look like commands (lowercase alphanumeric)
-        import re
-        potential_commands = set(re.findall(r'\b[a-z][a-z_-]*[a-z]\b', help_text.lower()))
-
-        # Filter to reasonable command-like words
-        suspicious = potential_commands - registered_commands - ignore_words
-
-        # These are expected in help text but not commands
-        expected_non_commands = {
-            'system', 'module', 'first', 'time', 'complete', 'resume',
-            'status', 'progress', 'journey', 'profile', 'timeline',
-            'tinytorch', 'tiny', 'torch', 'cli', 'developer', 'student',
-            'workflow', 'tracking', 'capabilities', 'achievements'
-        }
-
-        truly_suspicious = suspicious - expected_non_commands
-
-        # Just warn if we find something, don't fail
-        # (This test is informational)
-        if truly_suspicious:
-            print(f"\nInfo: Found potential command references: {sorted(truly_suspicious)[:10]}")
-
-
 class TestWelcomeScreen:
     """Test the welcome screen shown by bare 'tito' command."""
 
