@@ -571,7 +571,7 @@ This test validates our INT8 quantization function works correctly with various 
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-int8", "locked": true, "points": 5}
 def test_unit_quantize_int8():
-    """Test INT8 quantization implementation."""
+    """🧪 Test INT8 quantization implementation."""
     print("🧪 Unit Test: INT8 Quantization...")
 
     # Test basic quantization
@@ -728,7 +728,7 @@ This test validates our dequantization function correctly restores FP32 values f
 
 # %% nbgrader={"grade": true, "grade_id": "test-dequantize-int8", "locked": true, "points": 5}
 def test_unit_dequantize_int8():
-    """Test INT8 dequantization implementation."""
+    """🧪 Test INT8 dequantization implementation."""
     print("🧪 Unit Test: INT8 Dequantization...")
 
     # Test round-trip: quantize → dequantize
@@ -1069,7 +1069,7 @@ This test validates our QuantizedLinear layer works correctly and achieves memor
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantized-linear", "locked": true, "points": 5}
 def test_unit_quantized_linear():
-    """Test QuantizedLinear implementation."""
+    """🧪 Test QuantizedLinear implementation."""
     print("🧪 Unit Test: QuantizedLinear...")
 
     # Create original linear layer
@@ -1236,7 +1236,7 @@ This test validates that we correctly forward calibration data through preceding
 
 # %% nbgrader={"grade": true, "grade_id": "test-collect-layer-inputs", "locked": true, "points": 3}
 def test_unit_collect_layer_inputs():
-    """Test collecting intermediate activations for calibration."""
+    """🧪 Test collecting intermediate activations for calibration."""
     print("🧪 Unit Test: Collect Layer Inputs...")
 
     # Create a simple model
@@ -1347,7 +1347,7 @@ This test validates that we correctly quantize one Linear layer with optional ca
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-single-layer", "locked": true, "points": 3}
 def test_unit_quantize_single_layer():
-    """Test single layer quantization with and without calibration."""
+    """🧪 Test single layer quantization with and without calibration."""
     print("🧪 Unit Test: Quantize Single Layer...")
 
     # Create a linear layer
@@ -1473,7 +1473,7 @@ This test validates our model quantization function correctly replaces Linear la
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-model", "locked": true, "points": 5}
 def test_unit_quantize_model():
-    """Test model quantization implementation."""
+    """🧪 Test model quantization implementation."""
     print("🧪 Unit Test: Model Quantization...")
 
     # Create test model using explicit layer composition (TinyTorch pattern)
@@ -1624,7 +1624,7 @@ This test validates that we correctly measure bytes for both FP32 and quantized 
 
 # %% nbgrader={"grade": true, "grade_id": "test-measure-layer-bytes", "locked": true, "points": 3}
 def test_unit_measure_layer_bytes():
-    """Test per-layer byte measurement for FP32 and quantized layers."""
+    """🧪 Test per-layer byte measurement for FP32 and quantized layers."""
     print("🧪 Unit Test: Measure Layer Bytes...")
 
     # Test FP32 Linear layer
@@ -1759,7 +1759,7 @@ This test validates our model size analysis function correctly measures compress
 
 # %% nbgrader={"grade": true, "grade_id": "test-compare-sizes", "locked": true, "points": 5}
 def test_unit_analyze_model_sizes():
-    """Test model size analysis."""
+    """🧪 Test model size analysis."""
     print("🧪 Unit Test: Model Size Analysis...")
 
     # Create and quantize a model for testing (using Sequential from tinytorch.core.layers)

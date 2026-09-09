@@ -844,7 +844,7 @@ Examples:
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-output-shape", "locked": true, "points": 5}
 def test_unit_conv2d_output_shape():
-    """Test Conv2d._compute_output_shape for various configurations."""
+    """🧪 Test Conv2d._compute_output_shape for various configurations."""
     print("🧪 Unit Test: Conv2d Output Shape...")
 
     # Same padding: output == input
@@ -902,7 +902,7 @@ Before padding (1, 1, 3, 3):       After padding=1 (1, 1, 5, 5):
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-padding", "locked": true, "points": 5}
 def test_unit_conv2d_padding():
-    """Test Conv2d._apply_padding for zero-padding behavior."""
+    """🧪 Test Conv2d._apply_padding for zero-padding behavior."""
     print("🧪 Unit Test: Conv2d Padding...")
 
     # No padding: input unchanged
@@ -968,7 +968,7 @@ Convolution = Sliding Window Dot Products:
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-convolve", "locked": true, "points": 15}
 def test_unit_conv2d_convolve_loops():
-    """Test Conv2d._convolve_loops with known input/weight values."""
+    """🧪 Test Conv2d._convolve_loops with known input/weight values."""
     print("🧪 Unit Test: Conv2d Convolution Loops...")
 
     # Create a Conv2d with known weights (1 input channel, 1 output channel, 2x2 kernel)
@@ -1032,7 +1032,7 @@ and gradient tracking.
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-forward", "locked": true, "points": 15}
 def test_unit_conv2d():
-    """Test Conv2d forward pass with multiple configurations."""
+    """🧪 Test Conv2d forward pass with multiple configurations."""
     print("🧪 Unit Test: Conv2d Forward...")
 
     # Test 1: Basic convolution without padding
@@ -1492,7 +1492,7 @@ Common case: kernel=2, stride=2, padding=0
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_maxpool2d_output_shape():
-    """Test MaxPool2d._compute_pool_output_shape."""
+    """🧪 Test MaxPool2d._compute_pool_output_shape."""
     print("🧪 Unit Test: MaxPool2d Output Shape...")
 
     # Standard 2x2 pooling with stride 2: halves dimensions
@@ -1544,7 +1544,7 @@ MaxPool2d sliding window (2x2, stride 2):
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-loops", "locked": true, "points": 7}
 def test_unit_maxpool2d_loops():
-    """Test MaxPool2d._maxpool_loops with known values."""
+    """🧪 Test MaxPool2d._maxpool_loops with known values."""
     print("🧪 Unit Test: MaxPool2d Loops...")
 
     pool = MaxPool2d(kernel_size=2, stride=2)
@@ -1880,7 +1880,7 @@ the spatial dimensions after average pooling.
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_avgpool2d_output_shape():
-    """Test AvgPool2d._compute_pool_output_shape."""
+    """🧪 Test AvgPool2d._compute_pool_output_shape."""
     print("🧪 Unit Test: AvgPool2d Output Shape...")
 
     # Standard 2x2 pooling: halves dimensions
@@ -1929,7 +1929,7 @@ Top-left: (1+2+5+6)/4 = 3.5
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-loops", "locked": true, "points": 7}
 def test_unit_avgpool2d_loops():
-    """Test AvgPool2d._avgpool_loops with known values."""
+    """🧪 Test AvgPool2d._avgpool_loops with known values."""
     print("🧪 Unit Test: AvgPool2d Loops...")
 
     pool = AvgPool2d(kernel_size=2, stride=2)

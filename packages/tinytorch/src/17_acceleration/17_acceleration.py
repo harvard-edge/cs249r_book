@@ -499,7 +499,7 @@ fused version must stay numerically faithful to the unfused definition
 
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
-    """🔬 Test fused GELU activation implementation."""
+    """🧪 Test 🔬 Test fused GELU activation implementation."""
     print("🧪 Unit Test: Fused GELU...")
 
     # Test basic properties
