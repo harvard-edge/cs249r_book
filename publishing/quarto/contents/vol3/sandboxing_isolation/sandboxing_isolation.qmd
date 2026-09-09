@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Sandboxing and Isolation {#sec-vol3-sandboxing-isolation}
@@ -224,14 +224,137 @@ Linux containers are not virtualization boundaries; they are constrained process
 * **Control Groups (`cgroups v2`):** Impose accounting limits on CPU, memory, and block I/O.
 * **Seccomp Filters:** Restrict available system calls.
 
-While containers boot relatively quickly (~200–500 ms), they represent an **unacceptable risk for untrusted agent code execution** because they violate the principle of **Least Common Mechanism** [@saltzer1975]. By sharing the monolithic host Linux kernel across all tenants, containers introduce a massive shared attack surface. Over 450 system calls are exposed to the containerized process. Any local privilege escalation vulnerability in the host Linux kernel (such as Dirty COW [CVE-2016-5195] or Dirty Pipe [CVE-2022-0847]) grants root access to the physical host. Furthermore, misconfigured `/proc` and `/sys` mounts frequently leak host metadata, while shared loop devices can corrupt host block storage.
+```{python}
+#| label: vol3-sandboxing-boot-budget
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | ISOLATION PROFILES AND THE PER-CALL BOOT BUDGET
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-isolation-comparison, notebook
+# |          \ref{nbk-sandboxing-boot-budget}, and the container, gVisor, and
+# |          Firecracker paragraphs above the table.
+# |
+# | Goal:    Hold one set of isolation profiles for the whole section, then
+# |          charge each of them against the wall clock of one trajectory.
+# | Show:    Cold-boot and memory ranges per isolation primitive, the per-call
+# |          boot budget an interactive agent can afford, and what each
+# |          technology actually costs against it.
+# | How:     Isolation's share of wall clock is T/(t_productive + T), so the
+# |          budget solves to T = share * t_productive / (1 - share). The call
+# |          count cancels, which is the result the notebook turns on.
+# |
+# | Note:    The profile ranges are the chapter's operating figures. Firecracker
+# |          traces to @agache2020firecracker; the other four are engineering
+# |          estimates and are declared here rather than given false registry
+# |          provenance. They are a registry candidate once measured.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+def _p(value):
+    """Drop a decimal place when the value lands on a whole number."""
+    return 0 if abs(value - round(value)) < 1e-9 else 1
+
+class SandboxBudget:
+    # +-- 1. LOAD (Constants) --------------------
+    tool_calls = 40  # scenario assumption: tool calls in one trajectory
+    think_time = 2.0 * second  # scenario assumption: model inference per turn
+    tool_time = 1.5 * second  # scenario assumption: tool execution per turn
+    budget_share = 0.05  # scenario assumption: wall clock isolation may consume
+    qemu_boot = 30 * second  # scenario assumption: mid-range full-emulation boot
+
+    names = (
+        "Linux Containers (Docker)",
+        "gVisor (Sentry)",
+        "WebAssembly (WASI)",
+        "MicroVM (Firecracker)",
+        "Legacy VM (QEMU)",
+    )
+    boot_min = (150 * millisecond, 120 * millisecond, 1 * millisecond, 5 * millisecond, 15 * second)
+    boot_max = (400 * millisecond, 250 * millisecond, 5 * millisecond, 45 * millisecond, 45 * second)
+    mem_min = (15 * MB, 25 * MB, 1 * MB, 5 * MB, 512 * MB)
+    mem_max = (35 * MB, 45 * MB, 4 * MB, 5 * MB, 2_000 * MB)
+    io_penalty_min = (0.0, 0.15, 0.0, 0.0, 0.0)
+    io_penalty_max = (0.0, 0.35, 0.0, 0.0, 0.0)
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    productive_per_call = think_time + tool_time
+    trajectory_productive = tool_calls * productive_per_call
+    boot_budget = (budget_share * productive_per_call / (1 - budget_share)).to(second)
+    crossover = productive_per_call
+
+    per_call, charges, shares, overruns = [], [], [], []
+    for i in range(len(names)):
+        boot = qemu_boot if i == 4 else boot_max[i]
+        call_charge = boot + tool_time * io_penalty_max[i]
+        wall = trajectory_productive + tool_calls * call_charge
+        per_call.append(call_charge)
+        charges.append((tool_calls * call_charge).to(second))
+        shares.append(((tool_calls * call_charge) / wall).to("").magnitude)
+        overruns.append((call_charge / boot_budget).to("").magnitude)
+    gvisor_boot_charge = (tool_calls * boot_max[1]).to(second)
+    gvisor_io_charge = (tool_calls * tool_time * io_penalty_max[1]).to(second)
+    qemu_vs_productive = (charges[4] / trajectory_productive).to("").magnitude
+    fc_margin = (boot_budget / boot_max[3]).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(abs(boot_budget.to(millisecond).magnitude - 184) < 1, f"The per-call budget should land near 184 ms, got {boot_budget.to(millisecond)}")
+    check(overruns[3] < 1 < overruns[0] < overruns[1] < overruns[4], "Only the microVM should fit the budget, and QEMU should overrun it worst")
+    check(gvisor_io_charge > gvisor_boot_charge, "gVisor's steady-state I/O tax should exceed its cold-start cost, which is the notebook's point")
+    check(shares[4] > 0.85, f"Full emulation should consume most of the wall clock, got {shares[4]}")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    boot_cells, mem_cells = [], []
+    for i in range(len(names)):
+        boot_cells.append(fmt_time_range(boot_min[i], boot_max[i], second if i == 4 else millisecond, precision=0))
+        if mem_min[i] == mem_max[i]:
+            mem_cells.append(fmt_qty(mem_max[i], MB, precision=0))
+        else:
+            mem_cells.append(fmt_qty_range(mem_min[i], mem_max[i], MB, precision=0))
+    docker_boot_str, gvisor_boot_str, wasi_boot_str, fc_boot_str, qemu_boot_range_str = boot_cells
+    docker_mem_str, gvisor_mem_str, wasi_mem_str, fc_mem_str, qemu_mem_str = mem_cells
+
+    # The notebook charges the four POSIX-capable options; WASI is out of scope
+    # there because it does not run the agent's bash toolchain.
+    charge_cells, share_cells, overrun_cells = [], [], []
+    for i in (0, 1, 3, 4):
+        charge_cells.append(fmt_time(charges[i], second, precision=_p(charges[i].to(second).magnitude)))
+        share_cells.append(fmt_percent(shares[i], precision=_p(shares[i] * 100), style="prose"))
+        overrun_cells.append(fmt_multiple(overruns[i], precision=_p(overruns[i])))
+    # gVisor's total is split into boot and I/O in the notebook, so only the
+    # other three totals are exported.
+    docker_charge_str, _gvisor_charge, fc_charge_str, qemu_charge_str = charge_cells
+    docker_share_str, gvisor_share_str, fc_share_str, qemu_share_str = share_cells
+    # Firecracker is reported as margin inside the budget rather than overrun.
+    docker_overrun_mult_str, gvisor_overrun_mult_str, _fc_overrun, qemu_overrun_mult_str = overrun_cells
+
+    tool_calls_str = fmt_int(tool_calls)
+    think_time_str = fmt_time(think_time, second, precision=_p(think_time.to(second).magnitude))
+    tool_time_str = fmt_time(tool_time, second, precision=_p(tool_time.to(second).magnitude))
+    budget_share_str = fmt_percent(budget_share, precision=0, style="prose")
+    productive_per_call_str = fmt_time(productive_per_call, second, precision=_p(productive_per_call.to(second).magnitude))
+    trajectory_productive_str = fmt_time(trajectory_productive, second, precision=_p(trajectory_productive.to(second).magnitude))
+    boot_budget_str = fmt_time(int(round(boot_budget.to(millisecond).magnitude)) * millisecond, millisecond, precision=0)
+    crossover_str = fmt_time(crossover, second, precision=_p(crossover.to(second).magnitude))
+    qemu_boot_str = fmt_time(qemu_boot, second, precision=0)
+    fc_boot_max_str = fmt_time(boot_max[3], millisecond, precision=0)
+    fc_mem_base_str = fmt_qty(mem_max[3], MB, precision=0)
+    gvisor_boot_max_str = fmt_time(boot_max[1], millisecond, precision=0)
+    gvisor_io_range_str = fmt_percent_range(io_penalty_min[1], io_penalty_max[1], precision=0, style="prose")
+    gvisor_io_max_str = fmt_percent(io_penalty_max[1], precision=0, style="prose")
+    gvisor_boot_charge_str = fmt_time(gvisor_boot_charge, second, precision=0)
+    gvisor_io_charge_str = fmt_time(gvisor_io_charge, second, precision=0)
+    qemu_vs_productive_mult_str = fmt_multiple(qemu_vs_productive, precision=_p(qemu_vs_productive))
+    fc_margin_mult_str = fmt_multiple(fc_margin, precision=_p(fc_margin))
+```
+
+While containers boot relatively quickly (`{python} SandboxBudget.docker_boot_str`), they represent an **unacceptable risk for untrusted agent code execution** because they violate the principle of **Least Common Mechanism** [@saltzer1975]. By sharing the monolithic host Linux kernel across all tenants, containers introduce a massive shared attack surface. Over 450 system calls are exposed to the containerized process. Any local privilege escalation vulnerability in the host Linux kernel (such as Dirty COW [CVE-2016-5195] or Dirty Pipe [CVE-2022-0847]) grants root access to the physical host. Furthermore, misconfigured `/proc` and `/sys` mounts frequently leak host metadata, while shared loop devices can corrupt host block storage.
 
 ### Userspace syscall emulation (gvisor)
 
 Google's gVisor addresses container vulnerabilities by inserting a userspace kernel, termed the **Sentry**, between the application and the host operating system. The Sentry intercepts all application system calls (via `ptrace` or KVM virtualization hooks) and implements Linux kernel semantics entirely in memory-safe Go.
 
 * **Advantages:** The host Linux kernel is shielded from direct application system calls. The attack surface of the host is reduced to the minimal set of syscalls required by the Go runtime (~50 syscalls).
-* **Trade-offs:** Emulating complex Linux subsystems introduces significant I/O and context-switch overhead. File system operations, heavy git branch switches, and compilation workloads suffer a 15 percent to 35 percent performance degradation. Startup latency ranges between 120 ms and 300 ms.
+* **Trade-offs:** Emulating complex Linux subsystems introduces significant I/O and context-switch overhead. File system operations, heavy git branch switches, and compilation workloads suffer a `{python} SandboxBudget.gvisor_io_range_str` performance degradation, and startup latency runs to `{python} SandboxBudget.gvisor_boot_max_str`.
 
 ### WebAssembly (wasm / WASI)
 
@@ -242,15 +365,15 @@ WebAssembly [@haas2017bringing] provides deterministic, bytecode-level sandboxin
 
 ### Ephemeral MicroVMs (AWS Firecracker)
 
-MicroVMs combine the isolation strength of hardware-assisted virtualization with the agility of lightweight containers. By pruning all legacy PC hardware emulation, AWS Firecracker [@agache2020firecracker] achieves sub-50 ms boot times and a ~5 MB baseline memory footprint while running an independent, fully functional guest Linux kernel atop the Linux Kernel-based Virtual Machine (KVM) subsystem.
+MicroVMs combine the isolation strength of hardware-assisted virtualization with the agility of lightweight containers. By pruning all legacy PC hardware emulation, AWS Firecracker [@agache2020firecracker] achieves boot times of `{python} SandboxBudget.fc_boot_str` and a `{python} SandboxBudget.fc_mem_base_str` baseline memory footprint while running an independent, fully functional guest Linux kernel atop the Linux Kernel-based Virtual Machine (KVM) subsystem.
 
-| Isolation Primitive           | Boundary Mechanism       | Cold Boot ($T_{\text{boot}}$) | Memory Base   | Host Kernel Surface       | Untrusted Bash Safe?        |
-|:------------------------------|:-------------------------|:------------------------------|:--------------|:--------------------------|:----------------------------|
-| **Linux Containers (Docker)** | Namespaces & cgroups     | 150 – 400 ms                  | 15 – 35 MB    | Shared (450+ syscalls)    | [Unsafe] Escape prone       |
-| **gVisor (Sentry)**           | Userspace Syscall Filter | 120 – 250 ms                  | 25 – 45 MB    | Intercepted in Go         | [Moderate] I/O penalty      |
-| **WebAssembly (WASI)**        | Linear Memory Bounds     | < 1 – 5 ms                    | 1 – 4 MB      | Zero (Capability imports) | [Safe] Bytecode only        |
-| **MicroVM (Firecracker)**     | Hardware KVM (VT-x)      | 5 – 45 ms                     | ~5 MB         | Hardware VMCS barrier     | [Safe] Golden standard      |
-| **Legacy VM (QEMU)**          | Full PC Emulation        | 15 – 45 s                     | 512 MB – 2 GB | Full Hardware Hypervisor  | [Safe] Impractical at scale |
+| Isolation Primitive           | Boundary Mechanism       | Cold Boot ($T_{\text{boot}}$)                | Memory Base                             | Host Kernel Surface       | Untrusted Bash Safe?        |
+|:------------------------------|:-------------------------|:---------------------------------------------|:----------------------------------------|:--------------------------|:----------------------------|
+| **Linux Containers (Docker)** | Namespaces & cgroups     | `{python} SandboxBudget.docker_boot_str`     | `{python} SandboxBudget.docker_mem_str` | Shared (450+ syscalls)    | [Unsafe] Escape prone       |
+| **gVisor (Sentry)**           | Userspace Syscall Filter | `{python} SandboxBudget.gvisor_boot_str`     | `{python} SandboxBudget.gvisor_mem_str` | Intercepted in Go         | [Moderate] I/O penalty      |
+| **WebAssembly (WASI)**        | Linear Memory Bounds     | `{python} SandboxBudget.wasi_boot_str`       | `{python} SandboxBudget.wasi_mem_str`   | Zero (Capability imports) | [Safe] Bytecode only        |
+| **MicroVM (Firecracker)**     | Hardware KVM (VT-x)      | `{python} SandboxBudget.fc_boot_str`         | `{python} SandboxBudget.fc_mem_str`     | Hardware VMCS barrier     | [Safe] Golden standard      |
+| **Legacy VM (QEMU)**          | Full PC Emulation        | `{python} SandboxBudget.qemu_boot_range_str` | `{python} SandboxBudget.qemu_mem_str`   | Full Hardware Hypervisor  | [Safe] Impractical at scale |
 : **Isolation Technologies Comparison**: Quantitative comparison of isolation mechanisms for autonomous agent execution runtimes. {#tbl-isolation-comparison}
 
 As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection. The sub-$100\text{ ms}$ startup bar stated at the opening of this section, and the "impractical at scale" verdict in the table's last row, both follow from a single accounting question: how often is a sandbox torn down and rebuilt inside one agent trajectory, and what does each rebuild cost against the work it contains.
@@ -259,20 +382,20 @@ As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden arch
 
 **Problem**: An agent runtime provisions a fresh sandbox for every tool call and discards it afterward. What cold-boot latency keeps isolation a rounding error on trajectory wall-clock time rather than the dominant cost?
 
-**Variables**: A trajectory of $40$ tool calls, each turn spending $2.0\text{ s}$ on model inference and $1.5\text{ s}$ on tool execution, and an engineering budget that allows isolation to consume at most $5$ percent of wall clock. Those four are scenario assumptions. The boot latencies are the slow end of each range in @tbl-isolation-comparison: Firecracker $45\text{ ms}$, gVisor $250\text{ ms}$ plus its $35$ percent I/O degradation, Docker $400\text{ ms}$, and QEMU $30\text{ s}$.
+**Variables**: A trajectory of `{python} SandboxBudget.tool_calls_str` tool calls, each turn spending `{python} SandboxBudget.think_time_str` on model inference and `{python} SandboxBudget.tool_time_str` on tool execution, and an engineering budget that allows isolation to consume at most `{python} SandboxBudget.budget_share_str` of wall clock. Those four are scenario assumptions. The boot latencies are the slow end of each range in @tbl-isolation-comparison, with gVisor also charged its `{python} SandboxBudget.gvisor_io_max_str` I/O degradation, and full emulation charged `{python} SandboxBudget.qemu_boot_str`.
 
-**Math**: Productive work per call is $2.0 + 1.5 = 3.5\text{ s}$, so one trajectory contains $40 \times 3.5 = 140\text{ s}$ of it. Writing $T$ for boot latency per call, isolation's share of wall clock is $T/(3.5 + T)$. Setting that equal to $0.05$ and solving:
+**Math**: Productive work per call is `{python} SandboxBudget.productive_per_call_str`, so one trajectory contains `{python} SandboxBudget.trajectory_productive_str` of it. Writing $T$ for the isolation charge per call, isolation's share of wall clock is $T/(t_{\text{prod}} + T)$. Setting that equal to the budget share and solving:
 
-$$T = \frac{0.05 \times 3.5}{0.95} = 0.184\text{ s}$$
+$$T = \frac{s \cdot t_{\text{prod}}}{1 - s}$$
 
-The call count cancels, so the budget does not move with trajectory length. Charging each row of the table against a $140\text{ s}$ trajectory:
+That gives `{python} SandboxBudget.boot_budget_str`. The call count cancels, so the budget does not move with trajectory length. Charging each row of the table against the same trajectory:
 
-- Firecracker: $40 \times 0.045 = 1.8\text{ s}$ of boot, so $1.8/141.8 = 1.3$ percent of wall clock.
-- gVisor: $40 \times 0.250 = 10\text{ s}$ of boot plus $40 \times 1.5 \times 0.35 = 21\text{ s}$ of I/O tax, so $31/171 = 18.1$ percent.
-- Docker: $40 \times 0.400 = 16\text{ s}$ of boot, so $16/156 = 10.3$ percent.
-- QEMU: $40 \times 30 = 1200\text{ s}$ of boot, so $1200/1340 = 89.6$ percent, which is $1200/140 = 8.6$ times the productive work it wraps.
+- Firecracker: `{python} SandboxBudget.fc_charge_str` of boot, so `{python} SandboxBudget.fc_share_str` of wall clock.
+- gVisor: `{python} SandboxBudget.gvisor_boot_charge_str` of boot plus `{python} SandboxBudget.gvisor_io_charge_str` of I/O tax, so `{python} SandboxBudget.gvisor_share_str`.
+- Docker: `{python} SandboxBudget.docker_charge_str` of boot, so `{python} SandboxBudget.docker_share_str`.
+- QEMU: `{python} SandboxBudget.qemu_charge_str` of boot, so `{python} SandboxBudget.qemu_share_str`, which is `{python} SandboxBudget.qemu_vs_productive_mult_str` the productive work it wraps.
 
-**Result**: The budget is $184\text{ ms}$ per sandbox. Firecracker at $45\text{ ms}$ sits $4.1\times$ inside it, Docker overruns it by $2.2\times$, gVisor by $4.2\times$ once its I/O tax is charged, and QEMU by $163\times$. Isolation reaches half of wall clock at $T = 3.5\text{ s}$, the crossover where building a sandbox costs as much as using it, and QEMU sits an order of magnitude past that line. This is what "impractical at scale" means arithmetically.
+**Result**: The budget is `{python} SandboxBudget.boot_budget_str` per sandbox. Firecracker at `{python} SandboxBudget.fc_boot_max_str` sits `{python} SandboxBudget.fc_margin_mult_str` inside it, Docker overruns it by `{python} SandboxBudget.docker_overrun_mult_str`, gVisor by `{python} SandboxBudget.gvisor_overrun_mult_str` once its I/O tax is charged, and QEMU by `{python} SandboxBudget.qemu_overrun_mult_str`. Isolation reaches half of wall clock at `{python} SandboxBudget.crossover_str`, the crossover where building a sandbox costs as much as using it, and QEMU sits an order of magnitude past that line. This is what "impractical at scale" means arithmetically.
 
 **Systems insight**: The threshold is fixed by the productive time of one tool call, not by how long the trajectory runs, so an ephemeral-per-call design has exactly one tunable term and it is the per-call cost of the isolation boundary. That term is not the boot column alone, as gVisor shows: its steady-state I/O degradation costs roughly twice what its cold start does, so a technology has to be scored on the full per-call charge, and a runtime that cannot meet the budget is pushed toward reusing sandboxes across calls, which trades the boot cost back for cross-turn contamination risk.
 
