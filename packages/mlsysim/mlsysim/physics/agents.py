@@ -73,6 +73,136 @@ def calc_trajectory_reliability(step_success_rate: float, num_steps: int, verifi
     return float(effective_step_success ** num_steps)
 
 
+def calc_pareto_scale(mean_length: float, alpha: float) -> float:
+    """
+    Recover the Pareto scale parameter from a measured mean trajectory length.
+
+    Agent trajectory lengths are heavy tailed: most tasks finish in a handful of
+    steps while a small fraction run for hundreds. A Pareto tail with index
+    ``alpha`` has mean ``alpha * x_min / (alpha - 1)``, so a measured mean pins
+    the scale:
+
+        x_min = mean * (alpha - 1) / alpha
+
+    The mean exists only for ``alpha > 1``; below that the distribution has no
+    finite mean and a scheduler cannot be sized from an average at all.
+
+    Parameters
+    ----------
+    mean_length : float
+        Measured mean trajectory length, in steps.
+    alpha : float
+        Pareto tail index, strictly greater than 1.
+
+    Returns
+    -------
+    float
+        Scale parameter x_min, in steps.
+    """
+    validate_positive(mean_length, "mean_length")
+    if alpha <= 1.0:
+        raise ValueError(
+            "alpha must exceed 1 for the Pareto mean to exist; got %r. Below "
+            "that the distribution has no finite mean." % (alpha,)
+        )
+    return float(mean_length * (alpha - 1.0) / alpha)
+
+
+def calc_pareto_survival(length: float, scale: float, alpha: float) -> float:
+    """
+    Probability that a Pareto-distributed trajectory exceeds ``length`` steps.
+
+    Model:
+        P(N > x) = (x_min / x) ** alpha    for x >= x_min
+
+    Parameters
+    ----------
+    length : float
+        Step count to exceed.
+    scale : float
+        Pareto scale parameter x_min, as returned by ``calc_pareto_scale``.
+    alpha : float
+        Pareto tail index.
+
+    Returns
+    -------
+    float
+        Survival probability in [0, 1].
+    """
+    validate_positive(length, "length")
+    validate_positive(scale, "scale")
+    validate_positive(alpha, "alpha")
+    if length <= scale:
+        return 1.0
+    return float((scale / length) ** alpha)
+
+
+def calc_pareto_conditional_survival(attained: float, target: float, alpha: float) -> float:
+    """
+    Probability of reaching ``target`` steps given ``attained`` steps already run.
+
+    The scale parameter cancels in the ratio of survival functions, so this
+    depends only on the two step counts and the tail index:
+
+        P(N > target | N > attained) = (attained / target) ** alpha
+
+    This is the decreasing-hazard property that inverts operator intuition: a
+    trajectory that has already run a long time is *more* likely to keep running,
+    which is why attained service is the best remaining-work estimator a
+    non-clairvoyant scheduler has.
+
+    Parameters
+    ----------
+    attained : float
+        Steps the trajectory has already completed.
+    target : float
+        Step count to survive to, at least ``attained``.
+    alpha : float
+        Pareto tail index.
+
+    Returns
+    -------
+    float
+        Conditional survival probability in [0, 1].
+    """
+    validate_positive(attained, "attained")
+    validate_positive(alpha, "alpha")
+    validate_at_least(target, attained, "target")
+    return float((attained / target) ** alpha)
+
+
+def calc_pareto_mean_residual_life(attained: float, alpha: float) -> float:
+    """
+    Expected remaining steps for a trajectory that has already run ``attained``.
+
+    Model:
+        E[N - x | N > x] = x / (alpha - 1)
+
+    Remaining work grows with attained service rather than shrinking, which is
+    the formal statement of why the session closest to finishing is the one that
+    has barely started.
+
+    Parameters
+    ----------
+    attained : float
+        Steps the trajectory has already completed.
+    alpha : float
+        Pareto tail index, strictly greater than 1.
+
+    Returns
+    -------
+    float
+        Expected additional steps.
+    """
+    validate_positive(attained, "attained")
+    if alpha <= 1.0:
+        raise ValueError(
+            "alpha must exceed 1 for mean residual life to be finite; got %r."
+            % (alpha,)
+        )
+    return float(attained / (alpha - 1.0))
+
+
 def calc_radix_cache_effective_latency(
     prompt_tokens: int,
     shared_prefix_tokens: int,

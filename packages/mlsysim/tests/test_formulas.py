@@ -41,6 +41,10 @@ from mlsysim.physics import (
     calc_pipeline_bubble,
     calc_kv_cache_size,
     calc_mla_cache_size,
+    calc_pareto_scale,
+    calc_pareto_survival,
+    calc_pareto_conditional_survival,
+    calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
     calc_queue_latency_mmc,
     calc_failure_probability,
@@ -566,6 +570,55 @@ class TestPipelineBubble:
         bubble_8 = calc_pipeline_bubble(4, 8)
         bubble_64 = calc_pipeline_bubble(4, 64)
         assert bubble_64 < bubble_8
+
+# ======================================================================
+# Pareto trajectory-length helpers
+# ======================================================================
+
+class TestParetoTrajectory:
+    """Heavy-tailed agent trajectory lengths and the decreasing hazard rate."""
+
+    ALPHA = 1.1
+    MEAN = 24.8
+
+    def test_scale_from_measured_mean(self):
+        # x_min = mean * (alpha - 1) / alpha
+        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
+        assert scale == pytest.approx(2.2545, abs=1e-3)
+
+    def test_fit_reproduces_the_measured_tail(self):
+        # The same two parameters must place ~1 percent beyond a P99 of 142.
+        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
+        assert calc_pareto_survival(142, scale, self.ALPHA) == pytest.approx(0.010, abs=2e-3)
+
+    def test_scale_cancels_in_conditional_survival(self):
+        # P(N > 100 | N > 50) depends only on the ratio and the tail index.
+        for scale in (1.0, 2.2545, 5.0):
+            assert calc_pareto_conditional_survival(50, 100, self.ALPHA) == pytest.approx(
+                calc_pareto_survival(100, scale, self.ALPHA)
+                / calc_pareto_survival(50, scale, self.ALPHA)
+            )
+
+    def test_hazard_rate_decreases(self):
+        """A longer-running trajectory is likelier to keep running, not less."""
+        young = calc_pareto_conditional_survival(10, 20, self.ALPHA)
+        old = calc_pareto_conditional_survival(500, 1000, self.ALPHA)
+        assert young == pytest.approx(old)  # scale-free: doubling is doubling
+        assert calc_pareto_conditional_survival(50, 100, self.ALPHA) > math.exp(-50 / self.MEAN)
+
+    def test_mean_residual_life_grows_with_attained_service(self):
+        assert calc_pareto_mean_residual_life(50, self.ALPHA) == pytest.approx(500.0)
+        assert calc_pareto_mean_residual_life(100, self.ALPHA) > calc_pareto_mean_residual_life(50, self.ALPHA)
+
+    def test_no_finite_mean_below_alpha_one(self):
+        with pytest.raises(ValueError):
+            calc_pareto_scale(self.MEAN, 0.9)
+        with pytest.raises(ValueError):
+            calc_pareto_mean_residual_life(50, 1.0)
+
+    def test_survival_is_one_below_the_scale(self):
+        assert calc_pareto_survival(1.0, 2.2545, self.ALPHA) == 1.0
+
 
 # ======================================================================
 # calc_mla_cache_size
