@@ -116,3 +116,45 @@ class TestLatencyMeasurement:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_throughput_scales_with_batch_size():
+    """Reported GFLOP/s must account for the batch the latency was measured over.
+
+    count_flops() is per sample by design, while measure_latency() times the whole
+    batch. Dividing one by the other without multiplying by the batch size reports
+    a throughput that *falls* as the batch grows, and pins the bottleneck label to
+    'memory' for every model. This test pins the two conventions together.
+    """
+    import numpy as np
+
+    from tinytorch.core.layers import Linear
+    from tinytorch.core.tensor import Tensor
+    from tinytorch.perf.profiling import Profiler
+
+    rng = np.random.default_rng(0)
+    profiler = Profiler()
+    model = Linear(256, 128)
+
+    profiles = {}
+    for batch in (1, 64):
+        x = Tensor(rng.standard_normal((batch, 256)).astype(np.float32))
+        profiles[batch] = profiler.profile_forward_pass(model, x)
+
+    # The per-sample figure must not depend on the batch...
+    assert profiles[1]["flops"] == profiles[64]["flops"], (
+        "count_flops is documented as per-sample but changed with the batch size"
+    )
+    # ...while the figure throughput is computed from must scale with it.
+    assert profiles[64]["batch_flops"] == 64 * profiles[64]["flops"], (
+        f"batch_flops {profiles[64]['batch_flops']} is not 64x the per-sample "
+        f"{profiles[64]['flops']}"
+    )
+
+    # A 64x larger batch does 64x the arithmetic in well under 64x the time, so
+    # throughput must rise. Without the batch factor it would fall by ~64x.
+    assert profiles[64]["gflops_per_second"] > profiles[1]["gflops_per_second"], (
+        "Throughput did not improve with a 64x larger batch: "
+        f"{profiles[1]['gflops_per_second']:.4f} -> {profiles[64]['gflops_per_second']:.4f} "
+        "GFLOP/s. The batch factor is probably missing from the derived metrics."
+    )
