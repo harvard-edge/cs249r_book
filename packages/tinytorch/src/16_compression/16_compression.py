@@ -16,12 +16,12 @@
 """
 # Module 16: Compression - Pruning and Model Optimization
 
-Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller and more efficient while preserving their intelligence.
+Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller, and the measurements that say what each technique cost.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete optimization pipeline with profiling (14) and quantization (15)
 **You'll Build**: Pruning (magnitude & structured), knowledge distillation, and low-rank approximation
-**You'll Enable**: Compressed models that maintain accuracy while using dramatically less storage and memory
+**You'll Enable**: Pruned, factorized, and distilled models, plus the sparsity and output-drift measurements that show what each technique changed
 
 **Connection Map**:
 ```
@@ -46,7 +46,10 @@ Let's get started!
 
 ```python
 # Final package structure:
-from tinytorch.perf.compression import magnitude_prune, structured_prune, measure_sparsity
+from tinytorch.perf.compression import (
+    measure_sparsity, magnitude_prune, structured_prune,
+    low_rank_approximate, KnowledgeDistillation, compress_model, Compressor,
+)
 ```
 
 **Why this matters:**
@@ -63,8 +66,7 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 import numpy as np
 rng = np.random.default_rng(7)
 import copy
-from typing import List, Dict, Any, Tuple, Optional
-import time
+from typing import Dict, Any
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -79,7 +81,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 """
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-15 must be completed (especially 14 Profiling, 15 Quantization)
+**Prerequisites**: Modules 01-15 must be completed. This module uses Tensor (01), Linear and Sequential (03), ReLU (02), and the Profiler (14). Quantization (15) is not called here; Milestone 06 stacks the two.
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
@@ -89,7 +91,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `tinytorch.core.tensor` (Tensor class)
 - `tinytorch.core.layers` (Linear, Sequential)
 - `tinytorch.core.activations` (ReLU)
-- `tinytorch.perf.profiling` (Profiler, analyze_weight_distribution)
+- `tinytorch.perf.profiling` (Profiler)
 
 **Dependency Flow**:
 ```
@@ -106,14 +108,19 @@ that integrate with profiling and quantization for complete model optimization.
 """
 ## 💡 Introduction: Why Compression Matters
 
-Before we learn compression, let's profile a model to analyze its weight
-distribution. We'll discover that many weights are tiny and might not matter much!
+Before we learn compression, let's profile a layer's weights with the Module 14
+Profiler. The layer below is freshly initialized, so its weights follow the
+initializer's distribution, not anything learned. That is exactly the point of
+the exercise: a fresh layer already has a wide spread of magnitudes, and the
+question every pruning method asks is how much of the small end can go. The
+evidence that the answer is "most of it" comes from trained networks, which is
+why Milestone 06 measures accuracy before and after pruning on real digits.
 """
 
 # %%
 # Profile weight distribution to discover pruning opportunities
 # Module 14 (Profiling) must be completed before Module 16
-from tinytorch.perf.profiling import Profiler, analyze_weight_distribution
+from tinytorch.perf.profiling import Profiler
 
 def show_weight_distribution_motivation():
     """Display weight distribution analysis - motivates compression techniques."""
@@ -123,48 +130,48 @@ def show_weight_distribution_motivation():
     model = Linear(512, 512)
     param_count = profiler.count_parameters(model)
 
-    print("🧪 Profiling Parameter Distribution:\n")
+    print("🧪 Profiling Parameter Distribution (freshly initialized Linear(512, 512)):\n")
     print(f"   Total parameters: {param_count:,}")
     print(f"   Model memory: {param_count * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB (FP32)")
 
     # Analyze weight distribution
     weights = model.weight.data.flatten()
     abs_weights = np.abs(weights)
+    largest = np.max(abs_weights)
 
-    print("\n   Weight Statistics:")
+    print("\n   |Weight| Statistics:")
     print(f"   Mean: {np.mean(abs_weights):.4f}")
     print(f"   Std:  {np.std(abs_weights):.4f}")
     print(f"   Min:  {np.min(abs_weights):.4f}")
-    print(f"   Max:  {np.max(abs_weights):.4f}")
+    print(f"   Max:  {largest:.4f}")
 
-    # Check how many weights are small
-    thresholds = [0.001, 0.01, 0.1, 0.5]
-    print("\n   Weights Below Threshold:")
-    print("   Threshold  |  Percentage")
-    print("   -----------|--------------")
-    for threshold in thresholds:
-        percentage = np.sum(abs_weights < threshold) / len(weights) * 100
-        print(f"   < {threshold:<6}  |  {percentage:5.1f}%")
+    # Thresholds relative to the largest weight, so the table means the same
+    # thing whatever scale the initializer (or a trained network) uses
+    fractions = [0.01, 0.05, 0.10, 0.25]
+    below = {}
+    print("\n   Weights Below a Fraction of the Largest |Weight|:")
+    print("   Threshold        |  Percentage")
+    print("   -----------------|--------------")
+    for fraction in fractions:
+        below[fraction] = np.sum(abs_weights < fraction * largest) / len(weights) * 100
+        print(f"   < {fraction:4.0%} of max   |  {below[fraction]:5.1f}%")
 
-    print("\n💡 Key Observations:")
-    print("   • Many weights are very small (close to zero)")
-    print("   • Weight distribution typically: mean ≈ 0, concentrated near zero")
-    print("   • Small weights contribute little to final predictions")
-    print("   • Published pruning results remove 50-90% of a trained network's weights with little accuracy loss")
+    print("\n💡 Key Observations (computed from this layer):")
+    print(f"   • {below[0.10]:.0f}% of the weights are under a tenth of the largest one")
+    print(f"   • {below[0.25]:.0f}% are under a quarter of it; the spread is wide even before training")
+    print("   • A fresh layer proves only that magnitudes vary; trained networks are the evidence")
+    print("     that the small end can go (Han et al., 2015, removed 50-90% of the weights of")
+    print("     trained networks with little accuracy loss)")
 
     print("\n🎯 The Problem:")
-    print("   Why store and compute with weights that barely matter?")
-    print("   • They take memory")
-    print("   • They require computation")
-    print("   • They slow down inference")
-    print("   • But removing them has minimal accuracy impact!")
+    print("   Every weight, however small, costs the same to store and multiply.")
 
     print("\n✨ The Solution:")
     print("   Prune (remove) small weights:")
     print("   • Magnitude pruning: Set small weights to zero")
-    print("   • Structured pruning: Remove entire neurons/channels")
-    print("   • Typical: 80-90% sparsity with <1% accuracy loss")
-    print("   • Benefit: Smaller models, faster inference, less memory\n")
+    print("   • Structured pruning: Zero entire neurons/channels so they can later be deleted")
+    print("   • Then measure what it cost: this module measures output drift,")
+    print("     Milestone 06 measures accuracy\n")
 
 if __name__ == "__main__":
     show_weight_distribution_motivation()
@@ -175,7 +182,7 @@ if __name__ == "__main__":
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
-Model compression reduces the size and computational requirements of neural networks while preserving their intelligence. It's the bridge between powerful research models and practical deployment.
+Model compression reduces the size and computational requirements of neural networks at some cost in accuracy, and the engineering is in measuring that cost and keeping it small. It's the bridge between research models and practical deployment.
 
 ### Why Compression Matters in ML Systems
 
@@ -203,11 +210,11 @@ Neural Network Compression Techniques:
 │  ┌────────────────────────────────┐ │  ┌────────────────────────────┐ │
 │  │ Magnitude Pruning              │ │  │ Knowledge Distillation     │ │
 │  │ • Remove small weights         │ │  │ • Teacher → Student        │ │
-│  │ • 90% sparsity achievable      │ │  │ • 10x size reduction       │ │
+│  │ • Scattered zeros              │ │  │ • Smaller architecture     │ │
 │  │                                │ │  │                            │ │
 │  │ Structured Pruning             │ │  │ Neural Architecture        │ │
 │  │ • Remove entire channels       │ │  │ Search (NAS)               │ │
-│  │ • Hardware-friendly            │ │  │ • Automated design         │ │
+│  │ • Zeros that can be deleted    │ │  │ • Automated design         │ │
 │  │                                │ │  │                            │ │
 │  │ Low-Rank Approximation         │ │  │ Early Exit                 │ │
 │  │ • Matrix factorization         │ │  │ • Adaptive compute         │ │
@@ -243,9 +250,9 @@ Sparsity Calculation:
     Sparsity = (Zero weights / Total weights) × 100%
 ```
 
-### Structured Pruning: Hardware-Friendly Compression
+### Structured Pruning: Zeros in Deletable Shapes
 
-Unlike magnitude pruning which creates scattered zeros, structured pruning removes entire computational units (neurons, channels, attention heads).
+Unlike magnitude pruning which creates scattered zeros, structured pruning removes entire computational units (neurons, channels, attention heads). In this module "removes" means zeros the whole column; the shape change that actually deletes it is a separate step (see the Structured Pruning section).
 
 ```
 Channel Importance Metrics:
@@ -272,13 +279,17 @@ Distillation Loss Function:
     L_total = α × L_soft + (1-α) × L_hard
 
 Where:
-    L_soft = KL_divergence(σ(z_s/T), σ(z_t/T))  # Soft targets
+    L_soft = KL(σ(z_t/T) ‖ σ(z_s/T))             # Soft targets: teacher is the reference
     L_hard = CrossEntropy(σ(z_s), y_true)        # Hard targets
 
     σ(z/T) = Softmax with temperature T
     z_s = Student logits, z_t = Teacher logits
     α = Balance parameter (typically 0.7)
     T = Temperature parameter (typically 3-5)
+
+KL is not symmetric. KL(p ‖ q) = Σ p log(p/q) is zero when q matches p and
+grows fastest where p puts probability that q does not, so the teacher's
+distribution goes first: it is the target the student is pulled toward.
 
 Temperature Effect:
     T=1: Standard softmax (sharp probabilities)
@@ -295,9 +306,12 @@ SVD Decomposition:
 
 Parameter Reduction:
     Original: m × n parameters
-    Compressed (Σ folded into U): (m × k) + (k × n) = k(m + n) parameters
+    Compressed (Σ folded into U or V): (m × k) + (k × n) = k(m + n) parameters
 
     Compression achieved when: k < mn/(m+n)
+
+    This module counts low-rank parameters this way everywhere: the k singular
+    values fold into one factor, so storing them separately costs nothing.
 
 Reconstruction Error:
     ||W - W_approx||_F = √(Σᵢ₌ₖ₊₁ʳ σᵢ²)

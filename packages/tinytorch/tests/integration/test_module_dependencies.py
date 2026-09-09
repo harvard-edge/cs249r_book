@@ -325,28 +325,41 @@ def test_training_loop_integration():
 
 
 def test_loss_backward_integration():
-    """Test loss functions integrate with autograd.
+    """The gradient of MSELoss must reach the predictions with the right value.
 
-    NOTE: This test requires autograd to be enabled (Module 06+).
-    It will skip if requires_grad is not available.
+    Requires autograd (Module 06+). Skips explicitly if it is not built yet, so
+    an unbuilt package is reported as a skip rather than a silent pass.
     """
+    import numpy as np
+    import pytest
+
     from tinytorch.core.losses import MSELoss
     from tinytorch.core.tensor import Tensor
-    import numpy as np
 
     loss_fn = MSELoss()
 
-    # Check if autograd is enabled (requires_grad parameter available)
     try:
         predictions = Tensor(np.array([1.0, 2.0, 3.0]), requires_grad=True)
     except TypeError:
-        # requires_grad not available - autograd not enabled yet
-        return  # Skip test
+        pytest.skip("Autograd (Module 06) is not built; Tensor has no requires_grad")
 
     targets = Tensor(np.array([1.5, 2.5, 3.5]))
-
     loss = loss_fn(predictions, targets)
 
-    # Test backward pass
-    if hasattr(loss, 'backward'):
-        loss.backward()
+    # mean((p - t)^2) over three elements, each off by -0.5, is 0.25.
+    assert abs(float(loss.data) - 0.25) < 1e-6, (
+        f"MSELoss returned {float(loss.data)}, expected 0.25"
+    )
+
+    assert hasattr(loss, "backward"), "Loss tensor has no backward(); autograd did not attach"
+    loss.backward()
+
+    assert predictions.grad is not None, (
+        "MSELoss did not propagate a gradient back to its predictions"
+    )
+    # d/dp mean((p - t)^2) = 2 (p - t) / n
+    expected = 2.0 * (np.array([1.0, 2.0, 3.0]) - np.array([1.5, 2.5, 3.5])) / 3.0
+    np.testing.assert_allclose(
+        np.asarray(predictions.grad, dtype=np.float64), expected, rtol=1e-5, atol=1e-6,
+        err_msg="MSELoss gradient does not match 2(p - t)/n",
+    )

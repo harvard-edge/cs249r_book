@@ -16,7 +16,7 @@
 """
 # Module 02: Activations - Intelligence Through Nonlinearity
 
-Welcome to Module 02! Today you'll add the secret ingredient that makes neural networks intelligent: **nonlinearity**.
+Welcome to Module 02! Today you'll add the one ingredient a stack of linear layers cannot supply on its own: **nonlinearity**.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor with data manipulation and basic operations
@@ -86,8 +86,6 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
 #| export
 
 import numpy as np
-rng = np.random.default_rng(7)
-from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor, Function
@@ -114,23 +112,26 @@ Each ReLU zeroes a different subset of features, so the layers no longer
 collapse and the network can bend its decision boundary.
 ```
 
-The magic happens in those activation functions. They introduce **nonlinearity** - the ability to curve, bend, and create complex decision boundaries instead of just straight lines.
+The difference is entirely in those activation functions. They introduce **nonlinearity** - the ability to curve, bend, and create complex decision boundaries instead of just straight lines.
 
 ### Why Nonlinearity Matters
 
 Without activation functions, stacking multiple linear transformations is pointless:
 ```
-Linear(Linear(x)) = Linear(x)  # Same as a single transform!
+Linear2(Linear1(x)) = Linear3(x)  # Two linear maps compose into one linear map
 ```
 
-With activation functions between transformations, each stage can represent increasingly complex patterns:
+With activation functions between transformations, each stage can build on the
+one before it. The picture people usually draw (an intuition from vision
+networks, not a guarantee) looks like this:
 ```
 Stage 1: Simple edges and lines
 Stage 2: Curves and shapes
 Stage 3: Complex objects and concepts
 ```
 
-This is how nonlinearity turns simple math into powerful function approximation.
+This is how nonlinearity lets stacked layers represent functions no single
+linear layer can.
 """
 
 # %% [markdown]
@@ -156,7 +157,8 @@ Let's implement each one with clear explanations and immediate testing!
 
 ### Implementation Pattern
 
-Each activation follows this structure:
+Each activation is two classes. The `Function` does the math on NumPy arrays;
+the wrapper is what a network holds and calls:
 ```python
 class ActivationNameFunction(Function):
     def forward(self, x):          # x is a NumPy array
@@ -164,9 +166,22 @@ class ActivationNameFunction(Function):
         # Return the result array (Module 06 adds backward)
 
 class ActivationName:
+    def parameters(self):
+        return []                  # nothing to train
+
     def forward(self, x: Tensor) -> Tensor:
         return ActivationNameFunction.apply(x)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)     # so relu(x) works like relu.forward(x)
 ```
+
+Every module-like object in TinyTorch answers `parameters()`. Module 03 will use
+it to collect the weights a layer trains, and Module 07 will hand that list to
+an optimizer. An activation owns no weights, so it returns an empty list; the
+method exists so a stack of layers and activations can be walked with one
+uniform call. You write only the `forward()` of each `Function`; the wrappers
+are given.
 """
 
 # %% [markdown]
@@ -218,9 +233,13 @@ class SigmoidFunction(Function):
         TODO: Implement sigmoid function
 
         APPROACH:
-        1. Apply sigmoid formula: 1 / (1 + exp(-x))
-        2. Use np.exp for exponential
-        3. Return result as a NumPy array
+        1. For x >= 0 use 1 / (1 + exp(-x)); the exponent is <= 0, so it cannot overflow
+        2. For x < 0 use exp(x) / (1 + exp(x)); same value, exponent again <= 0
+        3. Pick the branch per element with np.where(x >= 0, branch_a, branch_b)
+        4. np.where computes both branches for every element, so wrap the whole
+           thing in np.errstate(over="ignore", invalid="ignore") to silence the
+           discarded branch
+        5. Return result as a NumPy array
 
         EXAMPLE:
         >>> sigmoid = Sigmoid()
@@ -229,14 +248,15 @@ class SigmoidFunction(Function):
         >>> print(result.data)
         [0.119, 0.5, 0.881]  # All values between 0 and 1
 
-        HINT: np.exp(-x) overflows for large negative x -- use np.where to pick the
-        branch whose exponent stays <= 0
+        HINT: The one-line formula 1 / (1 + np.exp(-x)) overflows at x = -1000
+        (exp(1000) is inf in float32). The unit test runs your code with NumPy
+        set to raise on overflow, so the naive form fails it
         """
         ### BEGIN SOLUTION
         # Numerically stable sigmoid. Each branch keeps its exponent <= 0, so the
         # selected value never overflows for large |x|. np.where still evaluates
-        # both branches, so errstate silences the harmless overflow in the
-        # discarded branch (whose result is thrown away).
+        # both branches, so errstate silences what happens in the discarded one:
+        # "over" for exp(1000) = inf, and "invalid" for inf / (1 + inf) = NaN.
         with np.errstate(over="ignore", invalid="ignore"):
             result = np.where(
                 x >= 0,
@@ -256,7 +276,7 @@ class Sigmoid:
     """
 
     def parameters(self):
-        """Return empty list (activations have no learnable parameters)."""
+        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -295,9 +315,18 @@ def test_unit_sigmoid():
     result = sigmoid.forward(x)
     assert np.all(result.data > 0) and np.all(result.data < 1), "All sigmoid outputs should be in (0, 1)"
 
-    # Test extreme values: the stable form must stay finite without overflow.
+    # Test extreme values. NumPy is told to raise on overflow and invalid results
+    # here, so the naive 1 / (1 + exp(-x)) (which computes exp(1000) = inf) fails
+    # loudly instead of limping through with a warning and a 0.0.
     x = Tensor([-1000, 1000])  # Extreme values
-    result = sigmoid.forward(x)
+    try:
+        with np.errstate(over="raise", invalid="raise"):
+            result = sigmoid.forward(x)
+    except FloatingPointError as err:
+        raise AssertionError(
+            f"sigmoid overflowed on extreme inputs ({err}). Keep every exponent <= 0 "
+            "and silence the discarded np.where branch with np.errstate"
+        ) from err
     assert np.allclose(result.data[0], 0, atol=TOLERANCE), "sigmoid(-∞) should approach 0"
     assert np.allclose(result.data[1], 1, atol=TOLERANCE), "sigmoid(+∞) should approach 1"
 
@@ -338,7 +367,7 @@ ReLU Function:
 -2  0  2
 ```
 
-**Why ReLU matters**: By zeroing negative values, ReLU creates sparsity (many zeros) which makes computation faster and helps prevent overfitting.
+**Why ReLU matters**: By zeroing negative values, ReLU creates sparsity (many zeros), and a max is far cheaper than an exponential. The Systems Analysis below measures that gap.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "relu-impl", "solution": true}
@@ -382,7 +411,7 @@ class ReLU:
     """
 
     def parameters(self):
-        """Return empty list (activations have no learnable parameters)."""
+        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -442,7 +471,7 @@ if __name__ == "__main__":
 """
 ### Tanh: The Zero-Centered Alternative
 
-Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering is a desirable mathematical property.
+Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1).
 
 ### Mathematical Definition
 ```
@@ -467,7 +496,7 @@ Tanh Curve:
      -3  0  3
 ```
 
-**Why Tanh matters**: Unlike sigmoid, tanh outputs are centered around zero, which is a desirable property for composing multiple transformations.
+**Why Tanh matters**: Sigmoid outputs are all positive, so every value it feeds to the next transformation pushes in the same direction. Tanh outputs are centered at zero, so the next stage sees inputs balanced around zero. Module 06 will show why that makes training easier; for now, treat it as the reason tanh is preferred inside a stack and sigmoid at the output.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tanh-impl", "solution": true}
@@ -511,7 +540,7 @@ class Tanh:
     """
 
     def parameters(self):
-        """Return empty list (activations have no learnable parameters)."""
+        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -529,8 +558,8 @@ class Tanh:
 This test validates tanh activation behavior.
 
 **What we're testing**: Tanh maps inputs to (-1, 1) range, zero-centered
-**Why it matters**: Zero-centered activations have desirable mathematical properties
-**Expected**: All outputs in (-1, 1), tanh(0) = 0, symmetric behavior
+**Why it matters**: Zero-centered outputs keep the next stage's inputs balanced around zero
+**Expected**: All outputs in [-1, 1] (saturating to exactly ±1 in float32 for |x| > 9), tanh(0) = 0, symmetric behavior
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tanh", "locked": true, "points": 10}
@@ -545,7 +574,7 @@ def test_unit_tanh():
     result = tanh.forward(x)
     assert np.allclose(result.data, [0.0]), f"tanh(0) should be 0, got {result.data}"
 
-    # Test range property - all outputs should be in (-1, 1)
+    # Test range property - all outputs in [-1, 1]; float32 tanh(10) rounds to exactly 1.0
     x = Tensor([-10, -1, 0, 1, 10])
     result = tanh.forward(x)
     assert np.all(result.data >= -1) and np.all(result.data <= 1), "All tanh outputs should be in [-1, 1]"
@@ -656,7 +685,7 @@ class GELU:
     """
 
     def parameters(self):
-        """Return empty list (activations have no learnable parameters)."""
+        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -803,7 +832,7 @@ class Softmax:
     """
 
     def parameters(self):
-        """Return empty list (activations have no learnable parameters)."""
+        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
         return []
 
     def forward(self, x: Tensor, dim: int = -1) -> Tensor:
@@ -909,6 +938,10 @@ def analyze_activation_performance():
     print("=" * 60)
 
     import time
+
+    # Seeded here rather than at module scope: this timing cell is the only user,
+    # and the package should not ship a fixed global seed.
+    rng = np.random.default_rng(7)
 
     # Create test data (realistic hidden layer size)
     size = 1000000  # 1 million elements (like a large hidden layer)

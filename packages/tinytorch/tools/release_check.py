@@ -335,6 +335,13 @@ def g_test_grammar():
                 errs.append(f"{name}: {gid} does not print '🧪 Unit Test: ...'")
             if "✅" not in b:
                 errs.append(f"{name}: {gid} has no ✅ success line")
+            # The docstring carries the marker too, so a reader scanning
+            # definitions sees the same grammar as the notebook output.
+            # Added 2026-09-09 after 19 tests across four modules were found
+            # opening with a bare 'Test ...' docstring.
+            for fn in re.finditer(r'^def (test_unit_\w+)\(.*\n\s+"""(.*?)"""', b, re.M):
+                if not fn.group(2).startswith("🧪"):
+                    errs.append(f"{name}: {fn.group(1)} docstring does not open with 🧪")
     return errs
 
 
@@ -587,6 +594,94 @@ def g_bare_except():
         for i, line in enumerate(f.read_text().splitlines(), 1):
             if re.match(r"\s*except:\s*$", line):
                 errs.append(f"{f.relative_to(ROOT)}:{i}")
+    return errs
+
+
+@gate("tests: no graded cell swallows its own failure")
+def g_graded_except():
+    """A handler that only passes (or only prints) inside a locked graded cell
+    makes the points unreachable: the assertion it guards can fail and the cell
+    still reports success. Added 2026-09-09, after module 19's 10-point
+    plotting test was found to catch every exception and pass regardless.
+
+    The expected-raise idiom is not a violation, so a try body containing an
+    assert is skipped:  try: f(); assert False, "should raise"; except E: pass
+    """
+    errs = []
+    for _, name, path in module_files():
+        lines = path.read_text().splitlines()
+        graded = False
+        for i, line in enumerate(lines):
+            if line.startswith("# %%"):
+                graded = '"grade": true' in line
+                continue
+            if not graded:
+                continue
+            m = re.match(r"(\s*)except\b.*:\s*$", line)
+            if not m:
+                continue
+            indent = len(m.group(1))
+
+            # Walk back to the matching `try:` at the same indent.
+            start = None
+            for j in range(i - 1, -1, -1):
+                cand = lines[j]
+                if not cand.strip():
+                    continue
+                ci = len(cand) - len(cand.lstrip())
+                if ci < indent:
+                    break
+                if ci == indent and cand.strip() == "try:":
+                    start = j
+                    break
+            if start is not None and "assert" in "\n".join(lines[start + 1:i]):
+                continue
+
+            handler = []
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                if len(nxt) - len(nxt.lstrip()) <= indent:
+                    break
+                handler.append(nxt.strip())
+            if not handler:
+                continue
+            # Strip trailing comments: `pass  # optional` is still a swallow.
+            stmts = [c for c in (h.split("#")[0].strip() for h in handler) if c]
+            if all(st == "pass" or st.startswith("print(") for st in stmts):
+                errs.append(f"{name}:{i + 1}: graded handler body is only {handler[0]!r}")
+    return errs
+
+
+@gate("pedagogy: an exercise is followed by its test, not by more exercises")
+def g_exercise_runs():
+    """The flow a student works through is implement, then test, then implement.
+    A long run of exercises with no graded cell between them means the student
+    writes several components before any of them is checked, and it is how
+    module 14 came to test its nine profiling helpers 1,100 lines after they
+    were written. Added 2026-09-09.
+
+    A family of small classes taught together may share one test, so the limit
+    is a run length rather than strict alternation. Modules 06 and 14 sat at 10
+    and 9 when this gate was written; the rest were at 3 or below.
+    """
+    LIMIT = 5
+    errs = []
+    sol = re.compile(r'^# %% nbgrader=\{"grade": false, "grade_id": "([^"]+)", "solution": true\}')
+    tst = re.compile(r'^# %% nbgrader=\{"grade": true, "grade_id": "[^"]+", "locked": true, "points": \d+\}')
+    for _, name, path in module_files():
+        run, first = 0, None
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            m = sol.match(line)
+            if m:
+                run += 1
+                if run == 1:
+                    first = (i, m.group(1))
+                if run == LIMIT + 1:
+                    errs.append(f"{name}:{first[0]} {first[1]}: "
+                                f"{run} exercises with no test between them")
+            elif tst.match(line):
+                run, first = 0, None
     return errs
 
 

@@ -114,5 +114,68 @@ class TestLatencyMeasurement:
         )
 
 
+def test_throughput_scales_with_batch_size():
+    """Reported GFLOP/s must account for the batch the latency was measured over.
+
+    count_flops() is per sample by design, while measure_latency() times the whole
+    batch. Dividing one by the other without multiplying by the batch size reports
+    a throughput that falls by a factor of the batch size, which pins the
+    bottleneck label to 'memory' for every model no matter what it does. This test
+    pins the two conventions together.
+
+    Deliberately not asserted here: that a larger batch is *faster* per sample.
+    TinyTorch's Linear is a single NumPy matmul whose cost is close to linear in
+    the batch on this scale, so the real margin is a few percent and a timing test
+    on it flakes under load. The assertions below are exact arithmetic instead.
+    """
+    import numpy as np
+
+    from tinytorch.core.layers import Linear
+    from tinytorch.core.tensor import Tensor
+    from tinytorch.perf.profiling import Profiler
+
+    rng = np.random.default_rng(0)
+    profiler = Profiler()
+    model = Linear(256, 128)
+
+    profiles = {}
+    for batch in (1, 64):
+        x = Tensor(rng.standard_normal((batch, 256)).astype(np.float32))
+        profiles[batch] = profiler.profile_forward_pass(model, x)
+
+    # The per-sample figure must not depend on the batch...
+    assert profiles[1]["flops"] == profiles[64]["flops"], (
+        "count_flops is documented as per-sample but changed with the batch size"
+    )
+    # ...while the figure throughput is computed from must scale with it.
+    assert profiles[64]["batch_flops"] == 64 * profiles[64]["flops"], (
+        f"batch_flops {profiles[64]['batch_flops']} is not 64x the per-sample "
+        f"{profiles[64]['flops']}"
+    )
+
+    # Throughput must be derived from the batch figure, not the per-sample one.
+    # This is an exact identity over numbers the profile already reported, so it
+    # holds regardless of how loaded the machine was when the latency was taken.
+    for batch, profile in profiles.items():
+        seconds = max(profile["latency_ms"] / 1000.0, 1e-6)
+        expected = (profile["batch_flops"] / 1e9) / seconds
+        assert profile["gflops_per_second"] == pytest.approx(expected, rel=1e-9), (
+            f"At batch {batch}, gflops_per_second {profile['gflops_per_second']:.6f} "
+            f"was not computed from batch_flops (expected {expected:.6f}). Dropping "
+            "the batch factor understates throughput by the batch size."
+        )
+
+    # And the reported throughput must not collapse as the batch grows. The
+    # margin is wide on purpose: the honest ratio is around 1.0, while dropping
+    # the batch factor would put it near 1/64.
+    ratio = profiles[64]["gflops_per_second"] / profiles[1]["gflops_per_second"]
+    assert ratio > 0.5, (
+        f"Throughput fell {1 / ratio:.1f}x when the batch grew 64x "
+        f"({profiles[1]['gflops_per_second']:.4f} -> "
+        f"{profiles[64]['gflops_per_second']:.4f} GFLOP/s). The batch factor is "
+        "probably missing from the derived metrics."
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

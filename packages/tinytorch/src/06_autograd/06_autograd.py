@@ -997,6 +997,81 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
+### 🧪 Unit Test: Arithmetic Backward Passes
+
+Four arithmetic rules and the matrix multiply, checked before you go on to the
+shape operations. Each is small enough to differentiate by hand, so this test
+states the expected gradient rather than probing for one.
+
+**What we're testing**: Add, Sub, Mul, Div and MatMul backward, against
+hand-computed gradients rather than shapes
+**Why it matters**: A gradient with the right shape and the wrong value trains a
+model that quietly learns the wrong thing. Shape checks pass for a transposed
+matmul gradient and for a subtraction that forgets its sign
+**Expected**: Add passes the gradient through, Sub negates the second operand,
+Mul swaps the operands, Div carries the squared denominator, and MatMul matches
+G@B^T and A^T@G
+"""
+
+
+# %% nbgrader={"grade": true, "grade_id": "test-arithmetic-backward", "locked": true, "points": 8}
+def test_unit_arithmetic_backward():
+    """🧪 Test the arithmetic and matmul backward passes."""
+    print("🧪 Unit Test: Arithmetic Backward Passes...")
+
+    # Note: We call backward() on each operation directly, in isolation, before
+    # Tensor.backward() exists. requires_grad is a constructor argument from Module 01.
+
+    # Test Add.backward
+    a = Tensor([1, 2, 3])
+    a.requires_grad = True
+    b = Tensor([4, 5, 6])
+    b.requires_grad = True
+    add_func = Add(a, b)
+    grad_output = np.array([1, 1, 1])
+    grad_a, grad_b = add_func.backward(grad_output)
+    assert np.allclose(grad_a, grad_output), f"Add.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, grad_output), f"Add.backward grad_b failed: {grad_b}"
+
+    # Test Mul.backward
+    mul_func = Mul(a, b)
+    grad_a, grad_b = mul_func.backward(grad_output)
+    assert np.allclose(grad_a, b.data), f"Mul.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, a.data), f"Mul.backward grad_b failed: {grad_b}"
+
+    # Test Sub.backward: the second operand's gradient carries the minus sign
+    sub_func = Sub(a, b)
+    grad_output = np.array([1, 1, 1])
+    grad_a, grad_b = sub_func.backward(grad_output)
+    assert np.allclose(grad_a, grad_output), f"Sub.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, -grad_output), f"Sub.backward grad_b failed: {grad_b}"
+
+    # Test Div.backward: d(a/b)/da = 1/b, d(a/b)/db = -a/b^2
+    div_func = Div(a, b)
+    grad_a, grad_b = div_func.backward(grad_output)
+    assert np.allclose(grad_a, 1.0 / b.data), f"Div.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, -a.data / b.data ** 2), f"Div.backward grad_b failed: {grad_b}"
+
+    # Test MatMul.backward. Shapes alone would pass for a transposed or
+    # swapped implementation, so pin the values: dA = G @ B^T, dB = A^T @ G.
+    a_mat = Tensor([[1, 2], [3, 4]])
+    a_mat.requires_grad = True
+    b_mat = Tensor([[5, 6], [7, 8]])
+    b_mat.requires_grad = True
+    matmul_func = MatMul(a_mat, b_mat)
+    grad_mat = np.ones((2, 2))
+    grad_a, grad_b = matmul_func.backward(grad_mat)
+    assert np.allclose(grad_a, grad_mat @ b_mat.data.T), f"MatMul.backward grad_a: {grad_a}"
+    assert np.allclose(grad_b, a_mat.data.T @ grad_mat), f"MatMul.backward grad_b: {grad_b}"
+
+    print("✅ Arithmetic backward passes work correctly!")
+
+if __name__ == "__main__":
+    test_unit_arithmetic_backward()
+
+
+# %% [markdown]
+"""
 ### Permute: Gradient Rules for Transpose and General Reordering
 
 Permute is transpose for more than two axes. The gradient is the same idea, with
@@ -1471,55 +1546,94 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Function Classes
+### 🧪 Unit Test: Shape and Reduction Backward Passes
 
-This test validates our Function classes compute gradients correctly.
+This test validates the backward pass of every Function class you just wrote,
+one family at a time: the arithmetic ops, the matrix multiply, the shape ops
+that move gradients around, and the reductions that spread one gradient back
+over many inputs.
 
-**What we're testing**: Forward and backward passes for each operation
-**Why it matters**: These are the building blocks of autograd
-**Expected**: Correct gradients that satisfy mathematical definitions
+**What we're testing**: Every backward in this section, against hand-computed
+gradients rather than shapes alone
+**Why it matters**: A backward with the right shape and the wrong values trains
+a model that quietly learns the wrong thing. Shape checks pass for a transposed
+matmul gradient, a slice that drops its scatter, and a max that rewards every
+element instead of the winner
+**Expected**: Sub negates the second gradient, Div carries the squared
+denominator, MatMul matches G@B^T and A^T@G, Permute inverts its axes, Slice
+scatters into the sliced positions and zeros elsewhere, MaskedFill gives masked
+positions nothing, and Sum, Mean and Max distribute as their definitions require
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-function-classes", "locked": true, "points": 15}
-def test_unit_function_classes():
-    """🧪 Test Function classes."""
-    print("🧪 Unit Test: Function Classes...")
+# %% nbgrader={"grade": true, "grade_id": "test-shape-reduction-backward", "locked": true, "points": 7}
+def test_unit_shape_reduction_backward():
+    """🧪 Test the shape and reduction backward passes."""
+    print("🧪 Unit Test: Shape and Reduction Backward Passes...")
 
-    # Note: We call backward() on each operation directly, in isolation, before
-    # Tensor.backward() exists. requires_grad is a constructor argument from Module 01.
+    x = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    x.requires_grad = True
 
-    # Test Add.backward
-    a = Tensor([1, 2, 3])
-    a.requires_grad = True
-    b = Tensor([4, 5, 6])
-    b.requires_grad = True
-    add_func = Add(a, b)
-    grad_output = np.array([1, 1, 1])
-    grad_a, grad_b = add_func.backward(grad_output)
-    assert np.allclose(grad_a, grad_output), f"Add.backward grad_a failed: {grad_a}"
-    assert np.allclose(grad_b, grad_output), f"Add.backward grad_b failed: {grad_b}"
+    # The shape operations move gradients around rather than scaling them, so
+    # each one is checked by where the gradient lands, not by its magnitude.
+    x = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    x.requires_grad = True
 
-    # Test Mul.backward
-    mul_func = Mul(a, b)
-    grad_a, grad_b = mul_func.backward(grad_output)
-    assert np.allclose(grad_a, b.data), f"Mul.backward grad_a failed: {grad_a}"
-    assert np.allclose(grad_b, a.data), f"Mul.backward grad_b failed: {grad_b}"
+    # Permute: the gradient comes back through the INVERSE permutation. This
+    # uses three axes on purpose. A 2D transpose is its own inverse, so a
+    # backward that permutes by axes instead of argsort(axes) would pass it.
+    cube = Tensor(np.arange(24, dtype=np.float32).reshape(2, 3, 4))
+    cube.requires_grad = True
+    perm_axes = (1, 2, 0)
+    perm_func = Permute(cube, axes=perm_axes)
+    g_perm = np.arange(24, dtype=np.float32).reshape(3, 4, 2)
+    grad_cube, = perm_func.backward(g_perm)
+    assert grad_cube.shape == cube.shape, f"Permute.backward shape: {grad_cube.shape}"
+    expected_perm = np.transpose(g_perm, np.argsort(perm_axes))
+    assert np.allclose(grad_cube, expected_perm), f"Permute.backward failed: {grad_cube}"
 
-    # Test MatMul.backward
-    a_mat = Tensor([[1, 2], [3, 4]])
-    a_mat.requires_grad = True
-    b_mat = Tensor([[5, 6], [7, 8]])
-    b_mat.requires_grad = True
-    matmul_func = MatMul(a_mat, b_mat)
-    grad_output = np.ones((2, 2))
-    grad_a, grad_b = matmul_func.backward(grad_output)
-    assert grad_a.shape == a_mat.shape, f"MatMul.backward grad_a shape: {grad_a.shape}"
-    assert grad_b.shape == b_mat.shape, f"MatMul.backward grad_b shape: {grad_b.shape}"
+    # Reshape: same elements, original shape restored
+    g_reshape = np.arange(6, dtype=np.float32).reshape(3, 2)
+    reshape_func = Reshape(x, shape=(3, 2))
+    grad_x, = reshape_func.backward(g_reshape)
+    assert np.allclose(grad_x, g_reshape.reshape(2, 3)), f"Reshape.backward failed: {grad_x}"
+
+    # Slice: gradient is scattered back into the sliced positions, zeros elsewhere
+    v = Tensor([1.0, 2.0, 3.0, 4.0])
+    v.requires_grad = True
+    slice_func = Slice(v, key=slice(1, 3))
+    grad_v, = slice_func.backward(np.array([10.0, 20.0]))
+    assert np.allclose(grad_v, [0.0, 10.0, 20.0, 0.0]), f"Slice.backward failed: {grad_v}"
+
+    # MaskedFill: masked positions consumed a constant, so they get no gradient
+    mask = np.array([[True, False, False], [False, False, True]])
+    fill_func = MaskedFill(x, mask=mask, value=-1e9)
+    g_ones = np.ones((2, 3))
+    grad_x, = fill_func.backward(g_ones)
+    assert np.allclose(grad_x, np.where(mask, 0.0, 1.0)), f"MaskedFill.backward failed: {grad_x}"
+
+    # The reductions spread one output gradient back over the inputs it summarized.
+    sum_func = Sum(x)
+    grad_x, = sum_func.backward(np.array(2.0))
+    assert np.allclose(grad_x, np.full((2, 3), 2.0)), f"Sum.backward failed: {grad_x}"
+
+    # Mean and Max read the forward result that apply() records on the node.
+    # This test runs before Tensor.backward() exists, so stand that value in.
+    mean_func = Mean(x)
+    mean_func.output = Tensor(np.mean(x.data))
+    grad_x, = mean_func.backward(np.array(6.0))
+    assert np.allclose(grad_x, np.full((2, 3), 1.0)), f"Mean.backward failed: {grad_x}"
+
+    max_func = Max(x)
+    max_func.output = Tensor(np.max(x.data))
+    grad_x, = max_func.backward(np.array(1.0))
+    expected_max = np.zeros((2, 3))
+    expected_max[1, 2] = 1.0          # only the winning element receives gradient
+    assert np.allclose(grad_x, expected_max), f"Max.backward failed: {grad_x}"
 
     print("✅ Function classes work correctly!")
 
 if __name__ == "__main__":
-    test_unit_function_classes()
+    test_unit_shape_reduction_backward()
 
 # %% [markdown]
 """
@@ -2052,6 +2166,77 @@ def backward(self, grad_output):
 
 # %% [markdown]
 """
+### 🧪 Unit Test: Activation Backward Passes
+
+Five activations, five derivatives, and no way to eyeball whether any of them is
+right. So this test does not hardcode the five formulas. It perturbs each input
+slightly, measures how the output actually moves, and checks the backward pass
+against that measurement. A derivative that is subtly wrong, a sign flipped or a
+term dropped, shows up as a mismatch no matter which activation it belongs to.
+
+**What we're testing**: Every activation backward, against central differences
+taken through its own forward
+**Why it matters**: A wrong activation gradient does not crash. The network
+trains, slowly and to a worse place, and the cause is invisible in the loss curve
+**Expected**: Analytic and numeric gradients agree to within 1e-3
+"""
+
+
+# %% nbgrader={"grade": true, "grade_id": "test-activation-backward", "locked": true, "points": 10}
+def test_unit_activation_backward():
+    """🧪 Test activation backward passes against finite differences."""
+    print("🧪 Unit Test: Activation Backward Passes...")
+
+    def numeric_check(cls, x_np, upstream, name):
+        """Compare cls.backward against central differences through cls.forward."""
+        t = Tensor(x_np.copy())
+        t.requires_grad = True
+        node = cls(t)
+        # apply() records the forward result on the node; some backwards read it.
+        node.output = Tensor(node.forward(x_np.copy()))
+        analytic, = node.backward(upstream)
+
+        eps = 1e-3
+        numeric = np.zeros_like(x_np, dtype=np.float64)
+        flat = x_np.astype(np.float64).ravel()
+        for i in range(flat.size):
+            hi, lo = flat.copy(), flat.copy()
+            hi[i] += eps
+            lo[i] -= eps
+            f_hi = cls(Tensor(hi.reshape(x_np.shape))).forward(hi.reshape(x_np.shape))
+            f_lo = cls(Tensor(lo.reshape(x_np.shape))).forward(lo.reshape(x_np.shape))
+            numeric.ravel()[i] = np.sum(upstream * (f_hi - f_lo)) / (2 * eps)
+
+        assert np.allclose(analytic, numeric, atol=1e-3), (
+            f"{name}.backward disagrees with finite differences.\n"
+            f"  analytic: {np.asarray(analytic).ravel()}\n"
+            f"  numeric:  {numeric.ravel()}"
+        )
+        print(f"✅ {name} gradient matches finite differences")
+
+    # Values chosen to sit on both sides of zero, so a sign error cannot hide.
+    x = np.array([-1.5, -0.25, 0.75, 2.0], dtype=np.float32)
+    ones = np.ones_like(x)
+
+    numeric_check(ReLUFunction, x, ones, "ReLU")
+    numeric_check(SigmoidFunction, x, ones, "Sigmoid")
+    numeric_check(TanhFunction, x, ones, "Tanh")
+    numeric_check(GELUFunction, x, ones, "GELU")
+
+    # Softmax needs a non-uniform upstream gradient. It is shift-invariant, so a
+    # uniform upstream produces an all-zero gradient and would pass against a
+    # backward that returns zeros unconditionally.
+    upstream = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    numeric_check(SoftmaxFunction, x, upstream, "Softmax")
+
+    print("✅ Activation backward passes work correctly!")
+
+if __name__ == "__main__":
+    test_unit_activation_backward()
+
+
+# %% [markdown]
+"""
 ### MSEFunction.backward: Gradient Rules for Mean Squared Error
 
 Loss functions are where the backward pass begins. MSE has the gentlest gradient
@@ -2230,7 +2415,7 @@ def _stable_softmax(logits_data):
 
 # %% nbgrader={"grade": true, "grade_id": "test-stable-softmax-helper", "locked": true, "points": 3}
 def test_unit_stable_softmax():
-    """Test stable softmax helper."""
+    """🧪 Test stable softmax helper."""
     print("🧪 Unit Test: Stable Softmax Helper...")
 
     # Basic correctness
@@ -2259,6 +2444,64 @@ def test_unit_stable_softmax():
 
 if __name__ == "__main__":
     test_unit_stable_softmax()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Loss Backward Passes
+
+A loss gradient is the first thing the whole backward pass consumes, so an error
+here scales every gradient behind it. These two are small enough to differentiate
+by hand, which is what this test does: it states the closed form and checks it.
+
+**What we're testing**: MSE and binary cross-entropy backward against their
+closed-form gradients
+**Why it matters**: A loss gradient off by a constant factor still trains, just
+at the wrong learning rate, and a missing 1/N makes that factor the batch size
+**Expected**: MSE gives 2(p - t)/N and BCE gives (p - t)/(p(1 - p)N)
+"""
+
+
+# %% nbgrader={"grade": true, "grade_id": "test-loss-backward", "locked": true, "points": 10}
+def test_unit_loss_backward():
+    """🧪 Test loss backward passes against closed-form gradients."""
+    print("🧪 Unit Test: Loss Backward Passes...")
+
+    preds = Tensor([0.5, 0.8, 0.2, 0.9])
+    preds.requires_grad = True
+    targets = Tensor([1.0, 1.0, 0.0, 0.0])
+    n = preds.data.size
+
+    # MSE: d/dp mean((p - t)^2) = 2(p - t)/N
+    mse = MSEFunction(preds, targets)
+    mse.output = Tensor(np.mean((preds.data - targets.data) ** 2))
+    grad_p, grad_t = mse.backward(np.array(1.0))
+    expected = 2 * (preds.data - targets.data) / n
+    assert np.allclose(grad_p, expected), f"MSE.backward failed: {grad_p} vs {expected}"
+    print("✅ MSE gradient is 2(p - t)/N")
+
+    # The factor of two and the division by N are the two things that go missing,
+    # and neither shows up as a crash, so pin them separately.
+    assert not np.allclose(grad_p, (preds.data - targets.data) / n), \
+        "MSE.backward is missing its factor of 2"
+    assert not np.allclose(grad_p, 2 * (preds.data - targets.data)), \
+        "MSE.backward is missing its division by N"
+
+    # BCE: d/dp mean(-[t log p + (1-t) log(1-p)]) = (p - t) / (p(1-p)N)
+    bce = BinaryCrossEntropyFunction(preds, targets)
+    p_c = np.clip(preds.data, 1e-7, 1 - 1e-7)
+    bce.output = Tensor(np.mean(-(targets.data * np.log(p_c)
+                                  + (1 - targets.data) * np.log(1 - p_c))))
+    grad_p, grad_t = bce.backward(np.array(1.0))
+    expected = (p_c - targets.data) / (p_c * (1 - p_c) * n)
+    assert np.allclose(grad_p, expected, atol=1e-5), \
+        f"BCE.backward failed: {grad_p} vs {expected}"
+    print("✅ BCE gradient is (p - t)/(p(1 - p)N)")
+
+    print("✅ Loss backward passes work correctly!")
+
+if __name__ == "__main__":
+    test_unit_loss_backward()
+
 
 # %% [markdown]
 """
@@ -2322,7 +2565,7 @@ def _one_hot_encode(targets, batch_size, num_classes):
 
 # %% nbgrader={"grade": true, "grade_id": "test-one-hot-helper", "locked": true, "points": 3}
 def test_unit_one_hot_encode():
-    """Test one-hot encoding helper."""
+    """🧪 Test one-hot encoding helper."""
     print("🧪 Unit Test: One-Hot Encoding Helper...")
 
     # Basic test
@@ -2894,27 +3137,35 @@ if __name__ == "__main__":
 
 **WRONG ❌ - This Corrupts the Gradient Graph:**
 ```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * x
-x.data[0] = 999  # ❌ Mul.backward will read the corrupted x
-y.backward()     # ❌ x.grad[0] comes out as 1998, not 2
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()      # .sum() because backward() starts from a scalar
+x.data[0] = 999        # ❌ Mul saved x, and backward will read the new value
+y.backward()
+x.grad                 # ❌ [1998., 4., 6.] -- the first entry should be 2.
 ```
 
-**RIGHT ✅ - Create New Tensors Instead:**
+**RIGHT ✅ - Leave the Recorded Values Alone:**
 ```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * 2
-x = Tensor([999, 2, 3], requires_grad=True)  # ✅ New tensor, safe
-y.backward()  # ✅ Correct gradients
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()
+y.backward()
+x.grad                 # ✅ [2., 4., 6.]
+
+# Need different values? Start a new tensor and a new forward pass.
+x = Tensor([999.0, 2.0, 3.0], requires_grad=True)
 ```
+
+Both blocks run as written. The only difference is the assignment to `x.data`
+between the forward and backward passes, and it changes the first gradient from
+2 to 1998.
 
 #### Why This Breaks Everything
 
 Autograd records operations on the **original tensor values**. When you modify `.data` directly:
 
-1. **Forward pass** records: "y = x * 2" where x = [1, 2, 3]
-2. **You corrupt**: x.data[0] = 999, so x = [999, 2, 3]
-3. **Backward pass** uses: corrupted x values, causing wrong gradients or crashes
+1. **Forward pass** records: "y = sum(x * x)" and saves x = [1, 2, 3]
+2. **You corrupt**: x.data[0] = 999, so the saved array now reads [999, 2, 3]
+3. **Backward pass** computes 2x from the corrupted array: 2 x 999 = 1998, not 2
 
 **The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
 
@@ -2932,7 +3183,7 @@ x.data *= scalar
 x.data -= value
 
 # ❌ FORBIDDEN - NumPy in-place operations
-np.fill(x.data, value)
+np.copyto(x.data, value)
 np.add(x.data, other, out=x.data)
 x.data.fill(value)
 
@@ -3089,8 +3340,11 @@ def test_module():
     test_unit_stable_softmax()
     test_unit_one_hot_encode()
     test_unit_reduce_broadcast_grad()
-    test_unit_function_classes()
+    test_unit_arithmetic_backward()
+    test_unit_shape_reduction_backward()
     test_unit_broadcast_gradients()
+    test_unit_activation_backward()
+    test_unit_loss_backward()
     test_unit_tensor_autograd()
     test_unit_reused_tensor_gradients()
 

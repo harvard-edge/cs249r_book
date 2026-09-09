@@ -16,7 +16,7 @@
 """
 # Module 12: Attention - Learning to Focus
 
-Welcome to Module 12! You're about to build the attention mechanism that revolutionized deep learning and powers GPT, BERT, and modern transformers.
+Welcome to Module 12! You're about to build the attention mechanism at the heart of GPT, BERT, and modern transformers.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor, activations, layers, losses, autograd, optimizers, training, dataloaders, spatial layers, tokenization, and embeddings
@@ -66,12 +66,10 @@ import math
 import time
 from typing import Optional, Tuple, List
 
-# Import dependencies from previous modules - following TinyTorch dependency chain
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import Softmax
 
-# Constants for attention computation
 MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
 
 # %% [markdown]
@@ -130,7 +128,7 @@ Before attention, RNNs processed sequences step-by-step, creating an information
 RNN Processing (Sequential):
 Token 1 → Hidden → Token 2 → Hidden → ... → Final Hidden
          ↓              ↓                      ↓
-    Limited Info   Compressed State    All Information Lost
+    Limited Info   Compressed State    Heavily Compressed
 ```
 
 Attention allows direct connections between any two positions:
@@ -249,7 +247,7 @@ Each row sums to 1.0 (probability distribution)
 """
 ## 🏗️ Implementation: Building Scaled Dot-Product Attention
 
-Now let's implement the core attention mechanism that powers all transformer models. We'll use explicit loops first to make the O(n²) complexity visible and educational.
+Now let's implement the core attention mechanism that powers all transformer models. We'll build it from three small vectorized helpers (scores, scaling, masking) and then compose them, so each step of the O(n²) computation stays visible.
 
 ### Understanding the Algorithm Visually
 
@@ -265,11 +263,13 @@ Step-by-Step Attention Computation:
 
 2. Scaling (÷ √d_k):
    scaled_scores = scores / √d_k
-   (d_k is the per-head dimension: embed_dim // num_heads in multi-head attention)
+   (d_k is the length of each key vector; later in this module, when we
+    split attention into heads, it becomes embed_dim // num_heads)
    (Prevents softmax saturation for large dimensions)
 
 3. Masking (optional):
    For causal attention: scores[i,j] = -∞ if j > i
+   (in code, a large negative number such as -1e9 stands in for -∞)
 
    Causal Mask (lower triangular):
    [  OK  -∞  -∞  -∞ ]
@@ -371,7 +371,7 @@ def _scale_scores(scores: Tensor, d_k: int) -> Tensor:
     attention that equals d_model; for multi-head attention it is the
     per-head dimension (embed_dim // num_heads).
 
-    TODO: Divide scores by the square root of the model dimension
+    TODO: Divide scores by the square root of d_k
 
     APPROACH:
     1. Compute scale factor: 1.0 / math.sqrt(d_k)
@@ -415,9 +415,9 @@ if __name__ == "__main__":
 ### Applying the Causal Mask
 
 In autoregressive models (like GPT), each token can only attend to tokens
-that came before it -- not future tokens. We enforce this by setting future
-positions to -infinity before softmax, which makes their attention weight
-exactly zero.
+that came before it -- not future tokens. We enforce this by adding a very
+large negative number (MASK_VALUE = -1e9, standing in for -infinity) to future
+positions before softmax, which drives their attention weight to zero.
 
 ```
 Causal Mask (4 tokens):       After masking:
@@ -433,13 +433,14 @@ Causal Mask (4 tokens):       After masking:
 # %% nbgrader={"grade": false, "grade_id": "attn-apply-mask", "solution": true}
 #| export
 def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
-    """Apply causal mask by setting masked positions to -infinity.
+    """Apply causal mask by pushing masked positions toward -infinity.
 
     TODO: Add large negative values to positions where mask is 0
 
     APPROACH:
     1. Compute additive mask: (1 - mask) * MASK_VALUE
-    2. Add to scores (masked positions become -inf, unmasked unchanged)
+    2. Add to scores (masked positions drop to ~MASK_VALUE = -1e9, which
+       softmax treats as -inf; unmasked positions are unchanged)
 
     EXAMPLE:
     >>> scores = Tensor(np.ones((1, 3, 3)))
@@ -499,18 +500,20 @@ loops. While easier to read, this is NOT the implementation because:
 Conceptually, this is what the vectorized helpers above are doing:
 
 ```
-batch_size, n_heads, seq_len, d_k = Q.shape
-scores = np.zeros((batch_size, n_heads, seq_len, seq_len))
+batch_size, seq_len, d_k = Q.shape
+scores = np.zeros((batch_size, seq_len, seq_len))
 
 for b in range(batch_size):
-    for h in range(n_heads):
-        for i in range(seq_len):          # Each query
-            for j in range(seq_len):      # Attends to each key
-                dot_product = 0.0
-                for k in range(d_k):
-                    dot_product += Q[b, h, i, k] * K[b, h, j, k]
-                scores[b, h, i, j] = dot_product / math.sqrt(d_k)
+    for i in range(seq_len):          # Each query
+        for j in range(seq_len):      # Attends to each key
+            dot_product = 0.0
+            for k in range(d_k):
+                dot_product += Q[b, i, k] * K[b, j, k]
+            scores[b, i, j] = dot_product / math.sqrt(d_k)
 ```
+
+Count the loops: i and j each run over seq_len, so the score computation
+alone is seq_len² dot products. That is the O(n²) you will measure later.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-scaled-dot-product", "solution": true}
@@ -529,18 +532,24 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
 
     SUB-PROBLEMS (you already implemented these):
     - _compute_attention_scores: Q @ K^T similarity matrix
-    - _scale_scores: divide by sqrt(d) for stable softmax
-    - _apply_mask: block future positions with -inf
+    - _scale_scores: divide by sqrt(d_k) for stable softmax
+    - _apply_mask: block future positions with MASK_VALUE (~ -inf)
 
     Args:
-        Q: Query tensor of shape (batch_size, seq_len, d_model)
-        K: Key tensor of shape (batch_size, seq_len, d_model)
-        V: Value tensor of shape (batch_size, seq_len, d_model)
-        mask: Optional causal mask, 1=allow, 0=mask (batch_size, seq_len, seq_len)
+        Q: Query tensor of shape (..., seq_len, d_k)
+        K: Key tensor of shape (..., seq_len, d_k)
+        V: Value tensor of shape (..., seq_len, d_k)
+        mask: Optional causal mask, 1=allow, 0=mask, shape (..., seq_len, seq_len)
+              or any shape that broadcasts against the scores
+
+        The leading "..." is any number of batch-like dimensions. Called
+        directly it is (batch_size,) and d_k = d_model; from
+        MultiHeadAttention it is (batch_size, num_heads) and d_k = head_dim.
+        The helpers only touch the last two axes, so the same code serves both.
 
     Returns:
-        output: Attended values (batch_size, seq_len, d_model)
-        attention_weights: Attention matrix (batch_size, seq_len, seq_len)
+        output: Attended values (..., seq_len, d_k)
+        attention_weights: Attention matrix (..., seq_len, seq_len)
 
     EXAMPLE:
     >>> Q = Tensor(rng.standard_normal((2, 4, 64)))
@@ -683,7 +692,7 @@ Step 4: Concatenate and Mix
 [output₁ ∥ output₂ ∥ ... ∥ output₈] (512) → Linear → Final(512)
 ```
 
-### Why Multiple Heads Are Powerful
+### Why Multiple Heads Help
 
 Each head can specialize in different patterns:
 - **Head 1**: Short-range syntax ("the cat" → subject-article relationship)
