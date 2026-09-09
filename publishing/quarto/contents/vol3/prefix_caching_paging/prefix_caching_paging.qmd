@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Prefix Caching and Paging {#sec-vol3-prefix-caching-paging}
@@ -131,17 +131,99 @@ The ratio of Query heads ($n_{\text{q\_heads}}$) to Key-Value heads ($n_{\text{k
 2. **Multi-Query Attention (MQA):** All Query heads share a single Key head and a single Value head per layer ($n_{\text{kv\_heads}} = 1$) [@shazeer2019fast]. MQA slashes the KV cache memory footprint by a factor equal to $n_{\text{q\_heads}}$, but can slightly degrade fine-grained recall on complex reasoning tasks.
 3. **Grouped-Query Attention (GQA):** Query heads are partitioned into $G$ equal groups, where all Query heads within a group share a single Key head and a single Value head ($n_{\text{kv\_heads}} = n_{\text{q\_heads}} / G$) [@ainslie2023]. GQA achieves the high task quality of MHA while delivering up to an $8\times$ reduction in KV cache memory consumption.
 
-| Model Architecture |   Parameters   | Attention Type | $n_{\text{layers}}$ | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ | $d_{\text{head}}$ | Bytes/Token (FP16) | 32k KV Cache Size | 64k KV Cache Size |
-|:-------------------|:--------------:|:--------------:|:-------------------:|:--------------------------------------------:|:-----------------:|:------------------:|:-----------------:|:-----------------:|
-| Llama-2-70B        |      70B       |      MHA       |          80         |                   64 / 64                    |        128        |      1.31 MB       |      41.9 GB      |      83.8 GB      |
-| Llama-3-8B         |       8B       |      GQA       |          32         |                    32 / 8                    |        128        |       131 kB       |      4.19 GB      |      8.38 GB      |
-| Llama-3-70B        |      70B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
-| Qwen-2.5-72B       |      72B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
-| DeepSeek-V3 (MLA)  | 671B (37B act) |      MLA       |          61         |               128 / 1 (latent)               |        576        |      70.2 kB       |      2.25 GB      |      4.49 GB      |
+```{python}
+#| label: vol3-caching-attention-footprint
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | KV FOOTPRINT BY ATTENTION SCHEME
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-vol3-caching-model-kv-footprint and the paragraph that reads it.
+# |
+# | Goal:    Price one cached token under multi-head, grouped-query, and latent
+# |          attention, using real models rather than a stylized shape.
+# | Show:    Layer depth, head ratio, head dimension, per-token bytes, and the
+# |          resident cache at two agent-scale contexts.
+# | How:     Every shape comes from the MLSysIM model registry; sizing goes
+# |          through get_kv_cache_size, which takes the latent path for a model
+# |          that declares an MLA rank and the standard path otherwise.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-: **KV-Cache Footprint by Attention Architecture**: Per-token KV bytes and total context buffer requirements for frontier model architectures at 16-bit precision. Grouped-query and latent attention cut the per-token cost by nearly an order of magnitude relative to multi-head attention, which is what makes long multi-turn agent contexts affordable at all. {#tbl-vol3-caching-model-kv-footprint}
+class AttentionFootprint:
+    # +-- 1. LOAD (Constants) --------------------
+    models = (
+        Models.Language.GPT3,
+        Models.Language.Llama3_8B,
+        Models.Language.Llama3_70B,
+        Models.Language.DeepSeek_V3,
+    )
+    short_ctx = 32_768  # scenario: a single agent turn carrying recent history
+    long_ctx = 65_536  # scenario: a long multi-turn trajectory
 
-As demonstrated in @tbl-vol3-caching-model-kv-footprint, while GQA substantially reduces per-token memory overhead compared to legacy MHA, maintaining multi-turn agent contexts ($32\text{k} \text{--} 64\text{k}$ tokens) still consumes $10.5\text{ to } 21\text{ GB}$ of accelerator memory per active trajectory on 70B-class models. When dozens of autonomous agents execute concurrently across a GPU cluster, memory capacity—rather than compute throughput—becomes the primary bottleneck.
+    # +-- 2. EXECUTE (The Compute) ---------------
+    per_token, short_kv, long_kv = [], [], []
+    schemes, head_specs, dims = [], [], []
+    for m in models:
+        per_token.append(m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16))
+        short_kv.append(m.get_kv_cache_size(seq_len=short_ctx, batch_size=1, precision=BYTES_FP16))
+        long_kv.append(m.get_kv_cache_size(seq_len=long_ctx, batch_size=1, precision=BYTES_FP16))
+        if m.kv_lora_rank is not None:
+            schemes.append("MLA")
+            head_specs.append("%d / latent" % m.heads)
+            dims.append("%d (latent)" % (m.kv_lora_rank + m.qk_rope_head_dim))
+        else:
+            kv = m.kv_heads or m.heads
+            schemes.append("MHA" if kv == m.heads else "GQA")
+            head_specs.append("%d / %d" % (m.heads, kv))
+            dims.append("%d" % (m.hidden_dim // m.heads))
+    mha_over_gqa = (per_token[0] / per_token[2]).to("").magnitude
+    gqa_over_mla = (per_token[2] / per_token[3]).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(schemes == ["MHA", "GQA", "GQA", "MLA"], f"The roster must span all three attention schemes, got {schemes}")
+    check(per_token[0] > per_token[1] and per_token[2] > per_token[3], "Per-token cost must fall as the scheme sheds cached heads")
+    check(10 < mha_over_gqa < 20, f"Multi-head should cost roughly an order of magnitude more per token, got {mha_over_gqa}")
+    check(
+        models[0].parameters > models[2].parameters and per_token[0] > per_token[2],
+        "The multi-head model is both larger and more expensive per token, which is the point to check",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    names, params_cells, scheme_cells, layers_cells, heads_cells, dim_cells = [], [], [], [], [], []
+    token_cells, short_cells, long_cells = [], [], []
+    for i in range(len(models)):
+        names.append(fmt_text(models[i].name))
+        params_cells.append(fmt_params(models[i].parameters))
+        scheme_cells.append(fmt_text(schemes[i]))
+        layers_cells.append(fmt_int(models[i].layers))
+        heads_cells.append(fmt_text(head_specs[i]))
+        dim_cells.append(fmt_text(dims[i]))
+        token_cells.append(fmt_memory(per_token[i]))
+        short_cells.append(fmt_memory(short_kv[i], unit=GB, precision=1))
+        long_cells.append(fmt_memory(long_kv[i], unit=GB, precision=1))
+    gpt3_name_str, l8b_name_str, l70b_name_str, dsv3_name_str = names
+    gpt3_params_str, l8b_params_str, l70b_params_str, dsv3_params_str = params_cells
+    gpt3_scheme_str, l8b_scheme_str, l70b_scheme_str, dsv3_scheme_str = scheme_cells
+    gpt3_layers_str, l8b_layers_str, l70b_layers_str, dsv3_layers_str = layers_cells
+    gpt3_heads_str, l8b_heads_str, l70b_heads_str, dsv3_heads_str = heads_cells
+    gpt3_dim_str, l8b_dim_str, l70b_dim_str, dsv3_dim_str = dim_cells
+    gpt3_token_str, l8b_token_str, l70b_token_str, dsv3_token_str = token_cells
+    gpt3_short_str, l8b_short_str, l70b_short_str, dsv3_short_str = short_cells
+    gpt3_long_str, l8b_long_str, l70b_long_str, dsv3_long_str = long_cells
+    mha_over_gqa_mult_str = fmt_multiple(mha_over_gqa, precision=1)
+    gqa_over_mla_mult_str = fmt_multiple(gqa_over_mla, precision=1)
+```
+
+| Model Architecture                          |                   Parameters                  |                 Attention Type                |              $n_{\text{layers}}$              | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ |             $d_{\text{head}}$              |              Bytes/Token (FP16)              |                 32k KV Cache                 |                 64k KV Cache                |
+|:--------------------------------------------|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:--------------------------------------------:|:------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|:-------------------------------------------:|
+| `{python} AttentionFootprint.gpt3_name_str` | `{python} AttentionFootprint.gpt3_params_str` | `{python} AttentionFootprint.gpt3_scheme_str` | `{python} AttentionFootprint.gpt3_layers_str` | `{python} AttentionFootprint.gpt3_heads_str` | `{python} AttentionFootprint.gpt3_dim_str` | `{python} AttentionFootprint.gpt3_token_str` | `{python} AttentionFootprint.gpt3_short_str` | `{python} AttentionFootprint.gpt3_long_str` |
+| `{python} AttentionFootprint.l8b_name_str`  |  `{python} AttentionFootprint.l8b_params_str` |  `{python} AttentionFootprint.l8b_scheme_str` |  `{python} AttentionFootprint.l8b_layers_str` | `{python} AttentionFootprint.l8b_heads_str`  | `{python} AttentionFootprint.l8b_dim_str`  | `{python} AttentionFootprint.l8b_token_str`  | `{python} AttentionFootprint.l8b_short_str`  |  `{python} AttentionFootprint.l8b_long_str` |
+| `{python} AttentionFootprint.l70b_name_str` | `{python} AttentionFootprint.l70b_params_str` | `{python} AttentionFootprint.l70b_scheme_str` | `{python} AttentionFootprint.l70b_layers_str` | `{python} AttentionFootprint.l70b_heads_str` | `{python} AttentionFootprint.l70b_dim_str` | `{python} AttentionFootprint.l70b_token_str` | `{python} AttentionFootprint.l70b_short_str` | `{python} AttentionFootprint.l70b_long_str` |
+| `{python} AttentionFootprint.dsv3_name_str` | `{python} AttentionFootprint.dsv3_params_str` | `{python} AttentionFootprint.dsv3_scheme_str` | `{python} AttentionFootprint.dsv3_layers_str` | `{python} AttentionFootprint.dsv3_heads_str` | `{python} AttentionFootprint.dsv3_dim_str` | `{python} AttentionFootprint.dsv3_token_str` | `{python} AttentionFootprint.dsv3_short_str` | `{python} AttentionFootprint.dsv3_long_str` |
+
+: **KV-Cache Footprint by Attention Architecture**: Per-token KV bytes and resident cache at two agent-scale contexts, at 16-bit precision. Per-token cost is set by layer depth, key-value head count, and head dimension, not by parameter count, which is why the largest model in the table is also the most expensive per token by a wide margin. {#tbl-vol3-caching-model-kv-footprint tbl-colwidths="[16,9,10,9,12,10,12,11,11]"}
+
+As demonstrated in @tbl-vol3-caching-model-kv-footprint, the cost of a cached token tracks the attention scheme rather than the parameter count: multi-head attention charges `{python} AttentionFootprint.mha_over_gqa_mult_str` what grouped-query attention charges on a model less than half its size, and latent attention takes another `{python} AttentionFootprint.gqa_over_mla_mult_str` off that. Even so, a grouped-query 70B model holding a multi-turn agent context still commits `{python} AttentionFootprint.l70b_short_str` to `{python} AttentionFootprint.l70b_long_str` of accelerator memory per active trajectory. When dozens of autonomous agents execute concurrently across a GPU cluster, memory capacity—rather than compute throughput—becomes the primary bottleneck.
 
 ### Physical tensor layouts and memory fragmentation
 
