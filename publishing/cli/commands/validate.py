@@ -516,6 +516,8 @@ class ValidateCommand:
                   note="hand-typed 'Author et al.' — use narrative @key"),
             Scope("underscore-italics", "_run_underscore_italics",
                   note="underscores are reserved for the Purpose hook"),
+            Scope("standalone-prose", "_run_standalone_prose",
+                  note="no series-dependent volume naming ('this volume', 'Volume I-IV')"),
             Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
             Scope("spelling-dict", "_run_mitpress_spelling_dict",
@@ -5823,6 +5825,21 @@ class ValidateCommand:
             lambda h: (f"`{h.match}` uses underscore italics. Body prose uses "
                        f"asterisks (*{h.detail}*); underscores are reserved "
                        f"for the Purpose hook question."))
+
+    def _run_standalone_prose(self, root: Path) -> ValidationRunResult:
+        """Flag series-dependent volume naming in prose.
+
+        Volumes in the curriculum must read as standalone books. Disallows
+        referencing "this volume", "companion volume", "Volume I/II/III/IV", etc.,
+        except when discussing physical/data volume (storage, sound, traffic)
+        or inside code spans.
+        """
+        from cli.checks.prose_integrity import find_standalone_prose
+        return self._run_prose_integrity(
+            root, find_standalone_prose, "standalone-prose", "standalone_prose",
+            lambda h: (f"Series-dependent volume reference '{h.match}'. "
+                       f"The book must be standalone; use 'this book' or describe "
+                       f"the topic directly instead of referencing volumes."))
 
     def _run_prose_integrity(self, root, finder, name, code, msg):
         """Shared driver for the prose-integrity detectors."""
