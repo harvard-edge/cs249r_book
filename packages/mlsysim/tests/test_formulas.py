@@ -40,6 +40,7 @@ from mlsysim.physics import (
     calc_mtbf_node,
     calc_pipeline_bubble,
     calc_kv_cache_size,
+    calc_mla_cache_size,
     calc_paged_kv_cache_size,
     calc_queue_latency_mmc,
     calc_failure_probability,
@@ -565,6 +566,43 @@ class TestPipelineBubble:
         bubble_8 = calc_pipeline_bubble(4, 8)
         bubble_64 = calc_pipeline_bubble(4, 64)
         assert bubble_64 < bubble_8
+
+# ======================================================================
+# calc_mla_cache_size
+# ======================================================================
+
+class TestMLACacheSize:
+    """MLA cache = L * (kv_lora_rank + qk_rope_head_dim) * S * B * bytes.
+
+    The absent factor of two is the point: Multi-Head Latent Attention keeps one
+    compressed latent per token per layer instead of a separate K and V tensor
+    per key-value head.
+    """
+
+    def test_known_answer_deepseek_v3(self):
+        # DeepSeek-V3: 61 layers, d_c = 512, decoupled rotary key = 64.
+        # 61 * (512 + 64) * 1 * 1 * 2 = 70,272 bytes per token.
+        result = calc_mla_cache_size(
+            n_layers=61, kv_lora_rank=512, qk_rope_head_dim=64,
+            seq_len=1, batch_size=1, bytes_per_elem=2,
+        )
+        assert result.to(ureg.byte).magnitude == pytest.approx(70272)
+
+    def test_scales_linearly_with_sequence(self):
+        one = calc_mla_cache_size(61, 512, 64, seq_len=1, batch_size=1)
+        many = calc_mla_cache_size(61, 512, 64, seq_len=32000, batch_size=1)
+        assert many.to(ureg.byte).magnitude == pytest.approx(
+            32000 * one.to(ureg.byte).magnitude
+        )
+
+    def test_far_smaller_than_grouped_query_of_same_depth(self):
+        mla = calc_mla_cache_size(61, 512, 64, seq_len=1, batch_size=1)
+        gqa = calc_kv_cache_size(
+            n_layers=61, n_heads=8, head_dim=128,
+            seq_len=1, batch_size=1, bytes_per_elem=2,
+        )
+        assert mla < gqa
+
 
 # ======================================================================
 # calc_kv_cache_size
