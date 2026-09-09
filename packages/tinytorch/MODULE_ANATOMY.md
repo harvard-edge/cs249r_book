@@ -172,6 +172,13 @@ never signals failure with a bare `return` or a swallowed exception.
 Where a component is a class with several methods, each method may get its own
 test (Module 09's Conv2d has four). The heading and print grammar do not change.
 
+A family of small classes may share one test, but the run has a limit: no more
+than five exercises may follow one another without a graded cell between them
+(gate: `pedagogy: an exercise is followed by its test, not by more exercises`).
+Module 14 once asked for nine profiling helpers in a row and tested them 1,100
+lines later; Module 06 ran to ten. A student should not write five components
+before learning whether the first one works.
+
 ## 5. The three nbgrader cell shapes
 
 Every code cell that nbgrader sees uses exactly one of three headers:
@@ -285,7 +292,7 @@ are not relitigated one module at a time.
 ## 10. Checking a module
 
 ```bash
-python tools/release_check.py --fast          # 27 gates, under a minute
+python tools/release_check.py --fast          # 29 gates, under a minute
 python tests/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
 python narrative_book/tools/listings.py --check
 python tools/release_check.py                 # adds the notebook run and full pytest
