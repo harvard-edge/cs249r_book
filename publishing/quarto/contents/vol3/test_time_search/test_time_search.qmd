@@ -298,7 +298,7 @@ When serving tree search algorithms in production, the primary hardware bottlene
 In naive large language model serving engines, each concurrent sequence maintains an independent linear Key-Value (KV) cache buffer. Consider serving an MCTS tree with branch factor $b=4$ over an 8,000-token prompt context:
 
 - Under naive independent allocation, 16 candidate leaf trajectories replicate the 8,000-token prompt prefix 16 times in HBM.
-- For a 70B model using 16-bit FP16 precision across 80 layers, a single 8,000-token prompt KV-cache consumes approximately 2.5 GB of HBM. Replicating this 16 times wastes **40 GB of HBM** on identical prefix data!
+- For a 70B model using 16-bit FP16 precision across 80 layers, a single 8,000-token prompt KV-cache consumes approximately 2.5 GB of HBM. Replicating this across 16 branches occupies **40 GB of HBM**, of which the 15 redundant copies, **37.5 GB**, carry no information the first copy does not already hold.
 - The GPU runs out of memory (OOM) after exploring only a few plies, crippling search width.
 
 ::: {#fig-tree-kv-cache-radix fig-env="figure" fig-pos="htb" fig-cap="**Tree-Structured KV-Cache Allocation and Radix Prefix Sharing**: Panel A illustrates naive independent branch serving, where identical system prompt and execution trace prefixes are duplicated across all candidate branches, causing rapid HBM exhaustion. Panel B demonstrates RadixAttention with Copy-on-Write page allocation, where shared prefixes are retained once in memory and child branches store only incremental delta tokens." fig-alt="Two-panel memory diagram. Panel A shows four branches laid out as parallel bars, each holding a 2,000-token system prompt, a 1,500-token step trace, and a 500-token divergent suffix; the prompt and trace segments of branches two through four are marked as duplicates, giving 16,000 tokens allocated of which 10,500 are redundant. Panel B shows the same branches as a radix tree with one shared prompt node and one shared trace node, each carrying a reference count of four, feeding four leaf nodes of 500 delta tokens each, for 5,500 tokens allocated."}
@@ -405,14 +405,20 @@ Allowing concurrent search branches to execute mutating tool calls (e.g., file w
 
 The Verification Tax is what keeps principle \ref{pri-vol3-test-time-scaling} from being a promise of free capability. Search buys accuracy with inference compute, and the bound on that trade is set by what it costs to check each candidate, which is why a domain with a cheap oracle scales and a domain without one does not.
 
-## Chapter Summary {#sec-vol3-search-summary}
+## Summary {#sec-vol3-search-summary}
 
-- **The Test-Time Paradigm Shift:** Test-time compute scaling decouples reasoning accuracy from static model parameter capacity, allowing runtimes to allocate variable inference FLOPs dynamically to match problem complexity.
-- **The Search Topology Spectrum:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search enforces linear memory bounds through synchronous per-ply pruning; MCTS provides asymptotically optimal lookahead balancing exploration and exploitation; Graph of Thoughts enables multi-path synthesis and aggregation.
-- **The Verification Tax:** Allocating compute to intermediate verification ($C_{\text{ver}}$) collapses the combinatorial branching explosion ($b^d \to b_{\text{eff}}^d$), drastically reducing total net compute while eliminating error propagation.
-- **Tree-Structured Memory Management:** Naive independent branch allocation causes catastrophic HBM exhaustion. RadixAttention and PagedAttention provide Copy-on-Write page sharing and reference counting, slashing search memory footprints by up to 85 percent.
-- **Environment State Forking:** Multi-branch search over tool actions requires isolating external state. Runtimes must employ CoW filesystems or microVM snapshots to prevent state corruption across diverging candidate trajectories.
-- **Macro-Economic Pareto Inversion:** On compositional reasoning tasks, scaling test-time search on compact foundation models systematically outperforms order-of-magnitude larger models running greedy decode, establishing a superior dollar-cost-per-resolved-task frontier.
+Test-time compute scaling shifts the capability frontier from static parameter pretraining to dynamic inference execution. By exploring candidate trajectories, evaluating intermediate states with verifier oracles, and pruning search trees, systems trade inference FLOPs for verifiable task resolution.
+
+::: {.callout-takeaways title="Test-Time Search and the Verification Tax"}
+* **The Test-Time Paradigm Shift:** Test-time compute scaling decouples reasoning accuracy from static model parameter capacity, allowing runtimes to allocate variable inference FLOPs dynamically to match problem complexity.
+* **The Search Topology Spectrum:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search enforces linear memory bounds through synchronous per-ply pruning; MCTS provides asymptotically optimal lookahead balancing exploration and exploitation; Graph of Thoughts enables multi-path synthesis and aggregation.
+* **The Verification Tax:** Allocating compute to intermediate verification ($C_{\text{ver}}$) collapses the combinatorial branching explosion ($b^d \to b_{\text{eff}}^d$), drastically reducing total net compute while eliminating error propagation.
+* **Tree-Structured Memory Management:** Naive independent branch allocation causes catastrophic HBM exhaustion. RadixAttention and PagedAttention provide Copy-on-Write page sharing and reference counting, slashing search memory footprints by up to 85 percent.
+* **Environment State Forking:** Multi-branch search over tool actions requires isolating external state. Runtimes must employ CoW filesystems or microVM snapshots to prevent state corruption across diverging candidate trajectories.
+* **Macro-Economic Pareto Inversion:** On compositional reasoning tasks, scaling test-time search on compact foundation models systematically outperforms order-of-magnitude larger models running greedy decode, establishing a superior dollar-cost-per-resolved-task frontier.
+:::
+
+Having explored policy adaptation and test-time search, **Part III: Serving Runtimes and Memory Systems** addresses the infrastructure required to host long-running trajectories: beginning in @sec-vol3-context-working-sets with the memory hierarchy of context working sets and dynamic prompt eviction.
 
 ```{=latex}
 \part{key:vol3_serving}

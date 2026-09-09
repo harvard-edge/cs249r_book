@@ -333,7 +333,7 @@ Production sandboxes resolve this bottleneck by combining immutable base images 
 
 An OverlayFS mount unites two distinct directories into a unified merged filesystem:
 
-1. **LowerDir (Immutable Base Layer):** Contains a pristine, read-only snapshot of the operating system root filesystem (e.g., Ubuntu 24.04), pre-installed developer toolchains (Python, Node.js, Rust, Git, LLVM), and a read-only mirror of the project repository. Because LowerDir is read-only, **a single 10 GB base image can be shared concurrently across 10,000 parallel microVMs**. The host Linux kernel caches these read-only pages in memory once, reducing host RAM pressure.
+1. **LowerDir (Immutable Base Layer):** Contains a pristine, read-only snapshot of the operating system root filesystem (e.g., Ubuntu 24.04), pre-installed developer toolchains (Python, Node.js, Rust, Git, LLVM), and a read-only mirror of the project repository. Because LowerDir is read-only, the host Linux kernel caches its pages once and every sandbox on that host reads the same physical copy. **A 10 GB base image therefore costs 10 GB of host RAM whether one sandbox is running or several hundred are.** Density is then set by the writable layer rather than the image: at a few hundred megabytes of working set per sandbox, a host with a terabyte of RAM carries sandboxes in the hundreds, and the base image has stopped being the constraint.
 2. **UpperDir (Ephemeral Read-Write Layer):** A small, writable directory allocated on an in-memory `tmpfs` or a thin-provisioned sparse block device.
 3. **WorkDir:** An auxiliary directory used by OverlayFS to prepare atomic directory moves and file whiteouts.
 
@@ -627,7 +627,7 @@ T + 00:04  Bot processes stdout; LLM executes attacker instruction:
 T + 00:05  Bot queries AWS Instance Metadata Service (IMDS); retrieves IAM admin role keys.
 T + 00:06  Bot executes shell command to exfiltrate IAM keys to attacker C2 via HTTPS.
 T + 00:45  Attacker uses stolen IAM credentials to provision 32 GPU instances for crypto-mining.
-T + 03:15  Cloud billing alarm triggers ($42,000 accrued); security team revokes IAM role.
+T + 03:15  Cloud billing alarm triggers ($8,000 accrued); security team revokes IAM role.
 ```
 
 ### Forensic root-cause analysis
@@ -686,12 +686,18 @@ Blocking outbound HTTP/HTTPS traffic while leaving DNS resolution (port 53) unre
 
 Principle \ref{pri-vol3-zero-trust-sandboxing} rests on an architectural fact this chapter makes concrete. A processor separates instructions from data with hardware; a language model has no such separation, so any text that reaches the context can act as instruction. Isolation is therefore placed around the side effects rather than around the reasoning.
 
-## Chapter Summary {#sec-vol3-sandboxing-summary}
+## Summary {#sec-vol3-sandboxing-summary}
 
-- **The $W \oplus X$ Architectural Failure:** Neural language models serialize instructions and untrusted data into an identical continuous self-attention tensor. The lack of an instruction/data split makes prompt injection an architectural inevitability rather than an implementation bug.
-- **The Confused Deputy Problem:** When an autonomous agent possessing ambient credentials executes tools directed by untrusted environment text, it acts as a confused deputy. Security requires least-privilege, capability-based access rather than ambient authorization.
-- **The Isolation Spectrum:** While Linux containers boot quickly, they expose 450+ host system calls and are unsafe for untrusted code. WebAssembly provides fast bytecode isolation but lacks full POSIX toolchain support. AWS Firecracker microVMs represent the production standard, combining sub-50 ms cold boots and 5 MB footprints with hardware-enforced KVM hypervisor isolation.
-- **Ephemeral Filesystems via Copy-on-Write:** Combining immutable, shared read-only base OS layers (LowerDir) with ephemeral in-memory diff layers (UpperDir) enables instant zero-copy workspace cloning and sub-2 ms residual cleanup upon task completion.
-- **Defense-in-Depth Network Egress:** Autonomous agents must never have unfettered internet access. Egress security requires eBPF packet interception, TLS SNI domain allowlists, automated token pattern scanning, and DNS covert tunneling mitigation.
-- **Information Flow Control (IFC):** By tagging untrusted environment data with dynamic taint bits, the agent runtime can automatically revoke high-privilege tool capabilities the moment external data enters the context window.
-- **Automated Red Teaming:** Multi-turn adversarial fuzzing harnesses (PyRIT, PromptFoo, AgentDojo) must continuously test agent trajectories against simulated injections and privilege escalations prior to production deployment.
+Because autoregressive foundation models lack hardware separation between executable instructions and untrusted data ($W \oplus X$), prompt injection is an architectural inevitability. Securing autonomous systems therefore requires enforcing strict isolation around the execution boundary—leveraging hardware-virtualized microVMs, Copy-on-Write filesystems, and Information Flow Control to contain untrusted reasoning.
+
+::: {.callout-takeaways title="MicroVM Sandboxing and Epistemic Taint Isolation"}
+* **The $W \oplus X$ Architectural Failure:** Neural language models serialize instructions and untrusted data into an identical continuous self-attention tensor. The lack of an instruction/data split makes prompt injection an architectural inevitability rather than an implementation bug.
+* **The Confused Deputy Problem:** When an autonomous agent possessing ambient credentials executes tools directed by untrusted environment text, it acts as a confused deputy. Security requires least-privilege, capability-based access rather than ambient authorization.
+* **The Isolation Spectrum:** While Linux containers boot quickly, they expose 450+ host system calls and are unsafe for untrusted code. WebAssembly provides fast bytecode isolation but lacks full POSIX toolchain support. AWS Firecracker microVMs represent the production standard, combining sub-50 ms cold boots and 5 MB footprints with hardware-enforced KVM hypervisor isolation.
+* **Ephemeral Filesystems via Copy-on-Write:** Combining immutable, shared read-only base OS layers (LowerDir) with ephemeral in-memory diff layers (UpperDir) enables instant zero-copy workspace cloning and sub-2 ms residual cleanup upon task completion.
+* **Defense-in-Depth Network Egress:** Autonomous agents must never have unfettered internet access. Egress security requires eBPF packet interception, TLS SNI domain allowlists, automated token pattern scanning, and DNS covert tunneling mitigation.
+* **Information Flow Control (IFC):** By tagging untrusted environment data with dynamic taint bits, the agent runtime can automatically revoke high-privilege tool capabilities the moment external data enters the context window.
+* **Automated Red Teaming:** Multi-turn adversarial fuzzing harnesses (PyRIT, PromptFoo, AgentDojo) must continuously test agent trajectories against simulated injections and privilege escalations prior to production deployment.
+:::
+
+Containing side effects within ephemeral sandboxes protects the host, but does not guarantee that the agent completes its delegated task correctly. In @sec-vol3-verification-recovery, we explore verification oracles, the reversibility boundary, and distributed compensating Sagas that enable autonomous error recovery.

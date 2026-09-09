@@ -320,7 +320,7 @@ In human-in-the-loop interactions and complex agent workflows, agent execution i
 
 In classical operating systems, a process's *working set* is the minimum amount of physical memory required to make forward progress without thrashing. For an active agent trajectory, the working set is strictly the entire uncompressed KV cache of its context history.
 
-If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), just 20 idle agent sessions can exhaust the entire cluster's memory, causing out-of-memory (OOM) crashes and stalling active generation.
+If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), the model's own FP16 weights claim $140\text{ GB}$ before a single request arrives, so roughly 20 idle agent sessions exhaust what remains, causing out-of-memory (OOM) crashes and stalling active generation.
 
 Conversely, if the serving runtime unilaterally discards the idle agent's KV cache to free memory, resuming the agent when the tool finishes forces a full $64\text{k}$-token prefill recomputation, incurring a 10-second latency penalty and wasting cluster compute.
 
@@ -462,7 +462,7 @@ If the serving system evaluates these $K^D$ trajectory rollouts independently, t
 
 $$\text{Tokens}_{\text{naive}} = \sum_{d=0}^{D} K^d \cdot \left( L_{\text{root}} + d \cdot \Delta L \right) = O\left( K^D \cdot L_{\text{root}} \right)$$
 
-For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving requires prefilling over **$12.2\text{ million}$ tokens**, requiring hours of GPU time and rendering test-time search economically impossible.
+For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving prefills **$12.3\text{ million}$ tokens at the leaf level alone**, and roughly $14\text{ million}$ across the whole tree. At a sustained $500\text{ TFLOP/s}$ that is about a GPU-hour of prefill to answer one query, which is what makes naive test-time search economically impossible.
 
 ### Copy-on-write prefix sharing in radix trees
 
@@ -563,7 +563,7 @@ By placing the millisecond-precision dynamic timestamp and random UUID at the ve
 The failure propagated through five distinct stages:
 
 1. **Zero-Hit Prefix Invalidation:** When requests arrived at the inference engine, the Radix tree traversal failed immediately at token position 12. The engine was unable to reuse any cached physical blocks for the subsequent $35\text{k}$ tokens of tool schemas, repository context, and conversation history.
-2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $14\times$.
+2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $11.6\times$, the reciprocal of the $8.6$ percent of prefill the cluster had still been paying for.
 3. **Radix Tree Eviction Thrashing:** To allocate physical blocks for the massive surge of incoming prefills, the PagedAttention memory manager entered aggressive LRU eviction mode. Because new prefixes diverged immediately at the root, the Radix tree allocator created thousands of short-lived, fragmented branches. High-utility cached prefixes from other active workflows were prematurely evicted.
 4. **Queueing Backpressure and Pinned Block Exhaustion:** Dictated by Little's Law ($L = \lambda W$), as prefill latency ($W$) exploded from $220\text{ ms}$ to over $11\text{ seconds}$ under constant arrival rate ($\lambda$), the number of concurrent requests actively trapped in the system ($L$) skyrocketed. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks completely exhausted the global free list.
 5. **Cascading Worker Death:** When an active decode step requested an additional physical block from an exhausted free pool with zero evictable zero-ref-count blocks, the allocation call failed. Rather than graceful throttling, worker processes crashed with CUDA out-of-memory exceptions, triggering cluster-wide leader election storms.
@@ -602,11 +602,17 @@ While Copy-on-Write PagedAttention eliminates prefix duplication, speculative tr
 
 This chapter gives principle \ref{pri-vol3-prefix-coherence} both halves of its claim. Prefix sharing is what makes multi-turn serving affordable, and coherence is what keeps the saving honest, because a cached prefix is valid only while the tokens and the model that produced it are unchanged.
 
-## Chapter Summary {#sec-vol3-caching-summary}
+## Summary {#sec-vol3-caching-summary}
 
-- **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85 to 95 percent prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
-- **PagedAttention Virtual Memory:** Adapting operating system virtual memory paging to transformer KV caches partitions tensors into fixed-size physical blocks (e.g., 16 or 32 tokens), eliminating external fragmentation, bounding internal fragmentation to $< 0.05\%$, and enabling Copy-on-Write sharing.
-- **Radix Tree Indexing:** Organizing physical KV blocks as a dynamic Radix tree allows serving runtimes (such as SGLang) to match incoming token sequences against cached GPU memory in sub-millisecond time, executing chunked prefills exclusively for new suffix tokens.
-- **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving swap breakevens under $100\text{ ms}$.
-- **Prefill-Decode Disaggregation:** Physically separating compute-bound prefill nodes from memory-bandwidth-bound decode nodes over 400–800 Gbps RDMA interconnects eliminates Head-of-Line blocking, isolates latency SLOs, and increases serving goodput by up to $4\times$.
-- **Static Prefix Discipline:** Prompt templates must place immutable tokens (system instructions, tool schemas) strictly ahead of mutable variables and observation deltas to prevent catastrophic Radix cache thrashing.
+Prefix caching and virtual memory paging establish the physical serving substrate for multi-turn agentic systems. By treating Key-Value activation tensors as demand-paged memory blocks organized in Radix prefix trees, runtimes reclaim GPU memory across branching reasoning trees and eliminate redundant prefill computation.
+
+::: {.callout-takeaways title="Radix Prefix Caching and Paged KV Memory"}
+* **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85 to 95 percent prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
+* **PagedAttention Virtual Memory:** Adapting operating system virtual memory paging to transformer KV caches partitions tensors into fixed-size physical blocks (e.g., 16 or 32 tokens), eliminating external fragmentation, bounding internal fragmentation to $< 0.05\%$, and enabling Copy-on-Write sharing.
+* **Radix Tree Indexing:** Organizing physical KV blocks as a dynamic Radix tree allows serving runtimes (such as SGLang) to match incoming token sequences against cached GPU memory in sub-millisecond time, executing chunked prefills exclusively for new suffix tokens.
+* **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving swap breakevens under $100\text{ ms}$.
+* **Prefill-Decode Disaggregation:** Physically separating compute-bound prefill nodes from memory-bandwidth-bound decode nodes over 400–800 Gbps RDMA interconnects eliminates Head-of-Line blocking, isolates latency SLOs, and increases serving goodput by up to $4\times$.
+* **Static Prefix Discipline:** Prompt templates must place immutable tokens (system instructions, tool schemas) strictly ahead of mutable variables and observation deltas to prevent catastrophic Radix cache thrashing.
+:::
+
+With memory-efficient prefix sharing and paging established at the single-node layer, @sec-vol3-trajectory-scheduling examines how clusters coordinate these stateful workloads: scheduling trajectories under unknown service times, heavy-tailed arrivals, and asynchronous tool stalls.
