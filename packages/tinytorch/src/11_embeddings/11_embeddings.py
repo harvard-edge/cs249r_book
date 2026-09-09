@@ -563,6 +563,60 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### 🧪 Unit Test: Embedding gradients
+
+The forward pass is a lookup, so it is hard to get wrong. The backward pass is
+where embeddings are actually interesting, and where the bug is invisible: if you
+write `grad_weight[indices] = grad` instead of `np.add.at`, a token that appears
+twice in a sequence keeps only one of its two gradients. The forward output is
+identical, the loss still falls, and the table simply learns more slowly than it
+should for exactly the tokens that matter most.
+
+**What we're testing**: Scatter-add accumulation for repeated indices, and that
+untouched rows receive no gradient at all
+**Why it matters**: Assignment instead of accumulation silently halves the signal
+for frequent tokens, which are the ones a language model sees most
+**Expected**: Row 0 (used twice) gets twice the gradient of row 2 (used once);
+row 1 (unused) stays exactly zero
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-embedding-backward", "locked": true, "points": 10}
+def test_unit_embedding_backward():
+    """🧪 Test Embedding gradient accumulation."""
+    print("🧪 Unit Test: Embedding gradients...")
+
+    embed = Embedding(vocab_size=4, embed_dim=2)
+
+    # Token 0 appears twice, token 2 once, tokens 1 and 3 not at all.
+    tokens = Tensor([0, 2, 0])
+    output = embed.forward(tokens)
+    output.sum().backward()
+
+    grad = embed.weight.grad
+    assert grad is not None, "No gradient reached embed.weight"
+
+    # Every position contributes a gradient of 1 to its row.
+    assert np.allclose(grad[0], [2.0, 2.0]), (
+        f"Row 0 is used twice so its gradient should be [2, 2], got {grad[0]}. "
+        "Indexed assignment overwrites instead of accumulating; use np.add.at."
+    )
+    assert np.allclose(grad[2], [1.0, 1.0]), (
+        f"Row 2 is used once so its gradient should be [1, 1], got {grad[2]}"
+    )
+    assert np.allclose(grad[1], [0.0, 0.0]), (
+        f"Row 1 is never looked up so its gradient must stay zero, got {grad[1]}"
+    )
+    assert np.allclose(grad[3], [0.0, 0.0]), (
+        f"Row 3 is never looked up so its gradient must stay zero, got {grad[3]}"
+    )
+
+    print("✅ Embedding gradients accumulate correctly!")
+
+if __name__ == "__main__":
+    test_unit_embedding_backward()
+
+# %% [markdown]
+"""
 ### Learned Positional Encoding
 
 Trainable position embeddings that can learn position-specific patterns. This approach treats each position as a learnable parameter, similar to token embeddings.
@@ -670,7 +724,11 @@ class PositionalEncoding:
         4. Add to input embeddings
 
         HINTS:
-        - pos_embeddings.data[np.newaxis, :, :] adds the batch dimension
+        - Use pos_embeddings.reshape(1, seq_len, embed_dim) to add the batch dimension.
+          Do NOT write Tensor(pos_embeddings.data[np.newaxis]): reading .data and
+          re-wrapping it builds a new leaf tensor, which cuts these positions out of
+          the graph. The forward output looks identical and the gradient silently
+          never reaches the parameter.
         - Use x + pos_embeddings_batched for element-wise addition
         """
         ### BEGIN SOLUTION
@@ -1762,6 +1820,7 @@ def test_module():
     print("Running unit tests...")
     test_unit_embedding_init()
     test_unit_embedding()
+    test_unit_embedding_backward()
     test_unit_positional_encoding_init()
     test_unit_positional_encoding()
     test_unit_sinusoidal_table()
