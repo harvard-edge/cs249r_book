@@ -422,7 +422,7 @@ $$ \text{Idempotency-Key} = \text{Hash}(\text{Trajectory\_ID} \parallel \text{St
 
 By injecting cryptographic idempotency tokens into external API headers, the runtime ensures that even if an agent hallucinates a retry loop or the network partitions, the downstream service will safely deduplicate the request, ensuring exactly-once execution semantics.
 
-### The $10^6\times$ human oversight latency tax
+### The human oversight latency tax
 
 When an agent must cross the Reversibility Boundary to execute a high-consequence, non-invertible action, production systems enforce an **Oversight Gate** (Human-in-the-Loop approval).
 
@@ -431,7 +431,7 @@ This introduces an astronomical latency mismatch:
 * Machine reasoning loop: $100\text{--}1000\text{ ms}$ ($10^{-1}\text{--}10^0\text{ s}$).
 * Human operator response: $5\text{ minutes to } 24\text{ hours}$ ($10^2\text{--}10^5\text{ s}$).
 
-This represents a **$10^6\times$ latency disparity**.
+Pairing the fastest machine loop with the slowest human gives a **$10^6\times$ disparity**, and pairing the slowest loop with the fastest human still gives $10^2\times$. The gate costs between two and six orders of magnitude depending on which pair the system actually sees, and a runtime that provisions for the optimistic end of that band will hold GPU memory for hours.
 
 Synchronously blocking the agent execution thread while awaiting human confirmation is a catastrophic architectural antipattern: scarce GPU HBM remains allocated to hold the active KV cache, starving inference servers. The runtime must implement **asynchronous state suspension**: serializing the stategraph and Agent Control Block to persistent storage, tearing down the microVM, and releasing all compute resources until the human approval signal arrives.
 
@@ -758,14 +758,24 @@ A common violation of the **Principle of Least Privilege** is equipping an agent
 
 :::
 
-## Chapter Summary {#sec-vol3-recovery-summary}
+## Summary {#sec-vol3-recovery-summary}
 
-- **The Fail-Plausible Fault Model:** Autonomous agents introduce a new failure class where models emit syntactically flawless, highly confident outputs that harbor destructive semantic defects. Checksums cannot detect semantic flaws; unverified retries compound error through confirmation bias.
-- **Exponential Error Compounding:** If single-step accuracy is $p$, an unverified trajectory's success probability decays exponentially as $P_{\text{success}} \le p^N$. A model with 98 percent accuracy has only a 13.3 percent chance of succeeding across 100 unverified steps. Scaling model parameters cannot overcome the horizon exponent $N$ without intermediate verification.
-- **The Verification Tax ($C_{\text{ver}}$):** Verification consumes latency and compute. The optimal checkpoint cadence $K^*$ balances verification tax against the cost of discarded forward progress, as under-verification wastes compute on failed rollbacks, while over-verification paralyzes execution speed.
-- **Circuit Breakers for Runaway Execution:** To prevent infinite algorithmic retry loops from exhausting GPU compute and token budgets, robust agent runtimes enforce token cost limiters, consecutive failure breakers, and preemptive wall-clock timeouts.
-- **Deterministic Test Oracles:** Software oracles (AST validators, compilers, linters, and unit test suites) strictly dominate stochastic "LLM-as-a-judge" critics. They provide unforgeable, bit-exact correctness boundaries at sub-second latency and zero token cost.
-- **The Reversibility Boundary:** Systems state bifurcates into the reversible internal domain (context working sets, git worktrees, OverlayFS UpperDir) where rollbacks are instantaneous and zero-cost, and the irreversible external actuation domain (databases, cloud APIs, emails, financial transactions) where true inverses do not exist.
-- **Distributed Agent Sagas and Idempotency:** Multi-step external workflows cannot use 2-phase commit. They must be orchestrated as Sagas: forward transactions paired with pre-compiled, deterministic compensating handlers ($A^{-1}$) executed in reverse order upon failure. Furthermore, all state-mutating forward actions must enforce cryptographic Idempotency Keys to survive network partitions without duplicating executions.
-- **State Checkpointing and Event Sourcing:** Resilient agents record transitions to append-only Write-Ahead Logs (WAL). In-flight execution can be snapshotted, dehydrated during multi-hour human approval gates, and hydrated onto replacement nodes within 50 milliseconds.
-- **Deterministic Replay Engines:** Debugging non-deterministic, rare stochastic agent failures requires capturing PRNG seeds, freezing system clocks, and recording external network I/O bytes to enable bit-exact offline reproduction.
+Long-horizon autonomous execution demands a rigorous engineering discipline for failure detection and state recovery. Because non-deterministic foundation models suffer from fail-plausible errors that compound exponentially over multi-step horizons, reliable runtimes must enforce deterministic test oracles, respect the reversibility boundary, and coordinate mutating side effects through compensating distributed Sagas.
+
+::: {.callout-takeaways title="The Reversibility Boundary and Compensating Sagas"}
+* **The Fail-Plausible Fault Model:** Autonomous agents introduce a new failure class where models emit syntactically flawless, highly confident outputs that harbor destructive semantic defects. Checksums cannot detect semantic flaws; unverified retries compound error through confirmation bias.
+* **Exponential Error Compounding:** If single-step accuracy is $p$, an unverified trajectory's success probability decays exponentially as $P_{\text{success}} \le p^N$. A model with 98 percent accuracy has only a 13.3 percent chance of succeeding across 100 unverified steps. Scaling model parameters cannot overcome the horizon exponent $N$ without intermediate verification.
+* **The Verification Tax ($C_{\text{ver}}$):** Verification consumes latency and compute. The optimal checkpoint cadence $K^*$ balances verification tax against the cost of discarded forward progress, as under-verification wastes compute on failed rollbacks, while over-verification paralyzes execution speed.
+* **Circuit Breakers for Runaway Execution:** To prevent infinite algorithmic retry loops from exhausting GPU compute and token budgets, robust agent runtimes enforce token cost limiters, consecutive failure breakers, and preemptive wall-clock timeouts.
+* **Deterministic Test Oracles:** Software oracles (AST validators, compilers, linters, and unit test suites) strictly dominate stochastic "LLM-as-a-judge" critics. They provide unforgeable, bit-exact correctness boundaries at sub-second latency and zero token cost.
+* **The Reversibility Boundary:** Systems state bifurcates into the reversible internal domain (context working sets, git worktrees, OverlayFS UpperDir) where rollbacks are instantaneous and zero-cost, and the irreversible external actuation domain (databases, cloud APIs, emails, financial transactions) where true inverses do not exist.
+* **Distributed Agent Sagas and Idempotency:** Multi-step external workflows cannot use 2-phase commit. They must be orchestrated as Sagas: forward transactions paired with pre-compiled, deterministic compensating handlers ($A^{-1}$) executed in reverse order upon failure. Furthermore, all state-mutating forward actions must enforce cryptographic Idempotency Keys to survive network partitions without duplicating executions.
+* **State Checkpointing and Event Sourcing:** Resilient agents record transitions to append-only Write-Ahead Logs (WAL). In-flight execution can be snapshotted, dehydrated during multi-hour human approval gates, and hydrated onto replacement nodes within 50 milliseconds.
+* **Deterministic Replay Engines:** Debugging non-deterministic, rare stochastic agent failures requires capturing PRNG seeds, freezing system clocks, and recording external network I/O bytes to enable bit-exact offline reproduction.
+:::
+
+With execution boundaries, sandboxing, and fault recovery established, **Part V: Scale, Evaluation, and Operations** addresses the macro-systems challenges of autonomous agency: beginning in @sec-vol3-multi-agent with multi-agent coordination, hierarchical delegation, and distributed IPC topologies.
+
+```{=latex}
+\part{key:vol3_scale}
+```
