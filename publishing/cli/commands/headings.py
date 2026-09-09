@@ -44,8 +44,8 @@ console = Console()
 
 # ─── Rule data ───────────────────────────────────────────────────────────────
 
-def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], set[str]]:
-    """Load heading case rules from data/heading_rules.yaml with static fallback."""
+def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], set[str], set[str], set[str]]:
+    """Load heading and callout title case rules from data/heading_rules.yaml with static fallback."""
     yaml_path = Path(__file__).resolve().parent.parent / "data" / "heading_rules.yaml"
     if yaml_path.exists():
         try:
@@ -57,8 +57,18 @@ def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], s
             dam_axes = set(data.get("dam_axes", []))
             concept_terms_lower = set(data.get("concept_terms_lower", []))
             skip_headings = set(data.get("skip_headings", []))
+            skip_callout_titles = set(data.get("skip_callout_titles", []))
+            skip_titles = set(data.get("skip_titles", []))
             if acronyms:
-                return acronyms, compound_names, dam_axes, concept_terms_lower, skip_headings
+                return (
+                    acronyms,
+                    compound_names,
+                    dam_axes,
+                    concept_terms_lower,
+                    skip_headings,
+                    skip_callout_titles,
+                    skip_titles,
+                )
         except Exception:
             pass
 
@@ -114,9 +124,27 @@ def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], s
         "1-bit Adam: Compression-aware optimization",
         "Empirical validation: 50-layer comparison",
     }
-    return fallback_acronyms, fallback_compounds, fallback_dam, fallback_concept, fallback_skip
+    fallback_callout: set[str] = set()
+    fallback_titles: set[str] = set()
+    return (
+        fallback_acronyms,
+        fallback_compounds,
+        fallback_dam,
+        fallback_concept,
+        fallback_skip,
+        fallback_callout,
+        fallback_titles,
+    )
 
-ACRONYMS, COMPOUND_NAMES, DAM_AXES, CONCEPT_TERMS_LOWER, SKIP_HEADINGS = _load_rules()
+(
+    ACRONYMS,
+    COMPOUND_NAMES,
+    DAM_AXES,
+    CONCEPT_TERMS_LOWER,
+    SKIP_HEADINGS,
+    SKIP_CALLOUT_TITLES,
+    SKIP_TITLES,
+) = _load_rules()
 
 
 # ─── Regexes ─────────────────────────────────────────────────────────────────
@@ -124,8 +152,8 @@ ACRONYMS, COMPOUND_NAMES, DAM_AXES, CONCEPT_TERMS_LOWER, SKIP_HEADINGS = _load_r
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)(\s*\{[^}]*\})?\s*$")
 TOKEN_RE = re.compile(
     r"""
-    (?:[A-Za-z][A-Za-z0-9'·³²]*
-       (?:[-/\.][A-Za-z0-9'·³²]+)*
+    (?:[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff'·³²]*
+       (?:[-/\.–][A-Za-z0-9\u0370-\u03ff'·³²]+)*
     )
     | \d+[A-Za-z]*
     | :
@@ -224,7 +252,7 @@ def _is_proper_generic(w: str) -> bool:
     return False
 
 def _is_wordlike(tok: str) -> bool:
-    return bool(re.match(r"[A-Za-z]", tok)) and tok != ":"
+    return bool(re.match(r"[A-Za-z\u0370-\u03ff]", tok)) and tok != ":"
 
 def _parenthetical_axis(text: str) -> Optional[str]:
     m = re.search(r"\(([A-Z][a-z]+)\)\s*$", text)
@@ -232,7 +260,8 @@ def _parenthetical_axis(text: str) -> Optional[str]:
 
 def _case_hyphenated(w: str, is_start: bool) -> Optional[str]:
     """Apply sentence-case to each part of a hyphenated compound per §10.8."""
-    parts = w.split("-")
+    sep = "–" if "–" in w else "-"
+    parts = w.split(sep)
     if len(parts) < 2:
         return None
     new_parts: List[str] = []
@@ -255,6 +284,9 @@ def _case_hyphenated(w: str, is_start: bool) -> Optional[str]:
             preserve = True
         elif len(p) == 1 and p.isupper() and p.isalpha():
             preserve = True
+        elif re.match(r"^[\u0370-\u03ff]+$", p):
+            # Greek letter: preserve original case
+            preserve = True
         if preserve:
             new_parts.append(p)
             continue
@@ -262,7 +294,7 @@ def _case_hyphenated(w: str, is_start: bool) -> Optional[str]:
             new_parts.append(p[0].upper() + p[1:] if len(p) > 1 else p.upper())
         else:
             new_parts.append(p.lower())
-    return "-".join(new_parts)
+    return sep.join(new_parts)
 
 def _is_legislation_act(words: List[str], idx: int) -> bool:
     if idx == 0:
@@ -284,6 +316,26 @@ def _postprocess_math(text: str) -> str:
     text = text.replace("³", "$^3$").replace("²", "$^2$")
     return text
 
+def _find_clause_start(toks: List[str], start_idx: int) -> Optional[int]:
+    """Find index of the first word to capitalize in a clause starting at start_idx."""
+    i = start_idx
+    while i < len(toks):
+        t = toks[i]
+        if not t.strip() or t in {'"', "'", "“", "”", "`", "‘", "’", "(", "["}:
+            i += 1
+            continue
+        if re.match(r"^\d+$", t):
+            j = i + 1
+            while j < len(toks) and not toks[j].strip():
+                j += 1
+            if j < len(toks) and toks[j] in {".", ")", ":"}:
+                i = j + 1
+                continue
+        if _is_wordlike(t):
+            return i
+        return None
+    return None
+
 def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
     """Transform a heading text into sentence-case form (H3+ rule)."""
     # Stash math spans so tokenizer doesn't touch chars inside $...$
@@ -294,16 +346,15 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
     text = re.sub(r"\$[^$]+\$", stash, text)
 
     toks = [t for t in TOKEN_RE.findall(text) if t != ""]
-    word_positions = [i for i, t in enumerate(toks) if _is_wordlike(t)]
     sentence_starts = set()
-    if word_positions:
-        sentence_starts.add(word_positions[0])
+    first_idx = _find_clause_start(toks, 0)
+    if first_idx is not None:
+        sentence_starts.add(first_idx)
     for i, t in enumerate(toks):
         if t == ":":
-            for j in range(i + 1, len(toks)):
-                if _is_wordlike(toks[j]):
-                    sentence_starts.add(j)
-                    break
+            colon_idx = _find_clause_start(toks, i + 1)
+            if colon_idx is not None:
+                sentence_starts.add(colon_idx)
     words_only = [(i, t) for i, t in enumerate(toks) if _is_wordlike(t)]
     word_idx_map = {tok_idx: word_i for word_i, (tok_idx, _) in enumerate(words_only)}
     words_only_list = [t for _, t in words_only]
@@ -318,8 +369,11 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
             # 1. Whole-word proper noun
             if _is_proper_whole(w):
                 out.append(w); prev_word = w; continue
-            # 2. Compound product/benchmark name
-            if prev_word and (prev_word, w) in COMPOUND_NAMES:
+            # 2. Compound product/benchmark name (lookahead or lookbehind)
+            next_word = words_only_list[wi + 1] if wi + 1 < len(words_only_list) else None
+            if next_word and w[0].isupper() and (w, next_word) in COMPOUND_NAMES:
+                out.append(w); prev_word = w; continue
+            if prev_word and w[0].isupper() and (prev_word, w) in COMPOUND_NAMES:
                 out.append(w); prev_word = w; continue
             # 3. Legislation Act/Law in proper-noun context
             if w in {"Act", "Law", "Rule", "Theorem", "Principle", "Axiom", "Directive", "Regulation"} and wi > 0:
@@ -328,7 +382,7 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
                 if _is_legislation_act(words_only_list, wi):
                     out.append(w); prev_word = w; continue
             # 4. Hyphenated compound §10.8
-            if "-" in w and "/" not in w and "." not in w:
+            if ("-" in w or "–" in w) and "/" not in w and "." not in w:
                 hres = _case_hyphenated(w, is_start)
                 if hres is not None:
                     out.append(hres); prev_word = w; continue
@@ -351,6 +405,38 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
     for i, span in enumerate(math_spans):
         result = result.replace(f"\x00MATHSPAN{i}\x00", span)
     return result
+
+
+def is_exempt_heading(text: str) -> bool:
+    """Check if a section heading is exempt from case enforcement."""
+    return text == "Purpose" or text in SKIP_HEADINGS or text in SKIP_TITLES
+
+
+def is_exempt_callout_title(text: str) -> bool:
+    """Check if a callout title is exempt from case enforcement."""
+    return text in SKIP_CALLOUT_TITLES or text in SKIP_TITLES or text in SKIP_HEADINGS
+
+
+def transform_sentence_case(text: str, is_callout: bool = False) -> str:
+    """Transform heading or callout title text into sentence-case form.
+
+    Handles math spans ($...$, $^2$, $^3$), Greek tokens, parenthetical axes,
+    acronyms, compound names, and exemptions. If text is exempt, returns original text.
+    """
+    if is_callout:
+        if is_exempt_callout_title(text):
+            return text
+        axis = _parenthetical_axis(text)
+        return _fix_sentence_case(text, axis)
+
+    if is_exempt_heading(text):
+        return text
+
+    axis = _parenthetical_axis(text)
+    pre_text = _preprocess_math(text)
+    new_text_raw = _fix_sentence_case(pre_text, axis)
+    return _postprocess_math(new_text_raw)
+
 
 def _strip_ignore(src: str) -> set:
     """Return line numbers (1-indexed) to skip: code fences, HTML comments, YAML front matter."""
@@ -375,6 +461,7 @@ def _strip_ignore(src: str) -> set:
             skip.add(i)
     return skip
 
+
 def _process_file(path: str, dry_run: bool = True) -> List[Tuple[int, str, str]]:
     """Process a single .qmd file. Returns (line, old_line, new_line) tuples for H3+ violations."""
     with open(path) as fh:
@@ -392,14 +479,9 @@ def _process_file(path: str, dry_run: bool = True) -> List[Tuple[int, str, str]]
         level = len(hashes)
         if level <= 2:
             continue
-        if text == "Purpose":
+        if is_exempt_heading(text):
             continue
-        if text in SKIP_HEADINGS:
-            continue
-        axis = _parenthetical_axis(text)
-        pre_text = _preprocess_math(text)
-        new_text_raw = _fix_sentence_case(pre_text, axis)
-        new_text = _postprocess_math(new_text_raw)
+        new_text = transform_sentence_case(text, is_callout=False)
         if new_text != text:
             new_line = f"{hashes} {new_text}{attrs}"
             changes.append((i, line.rstrip(), new_line))
