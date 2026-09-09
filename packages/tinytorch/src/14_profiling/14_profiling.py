@@ -337,6 +337,56 @@ def _count_layer_parameters(layer) -> int:
 
 # %% [markdown]
 """
+### 🧪 Unit Test: _count_layer_parameters
+
+This test validates the helper that counts parameters from a single layer's weight and bias.
+
+**What we're testing**: Single-layer parameter counting from weight/bias attributes
+**Why it matters**: This is the atomic unit of parameter counting that count_parameters delegates to
+**Expected**: Correct weight + bias element counts
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-count-layer-parameters", "locked": true, "points": 3}
+def test_unit_count_layer_parameters():
+    """🧪 Test _count_layer_parameters helper."""
+    print("🧪 Unit Test: _count_layer_parameters...")
+
+    # Test 1: Layer with weight and bias
+    class LayerWithBias:
+        def __init__(self):
+            self.weight = Tensor(rng.standard_normal((10, 5)))
+            self.bias = Tensor(rng.standard_normal(5))
+
+    layer = LayerWithBias()
+    count = _count_layer_parameters(layer)
+    assert count == 55, f"Expected 55 (10*5 + 5), got {count}"
+    print(f"✅ Layer with bias: {count} parameters")
+
+    # Test 2: Layer with weight only (no bias)
+    class LayerNoBias:
+        def __init__(self):
+            self.weight = Tensor(rng.standard_normal((8, 4)))
+
+    layer_no_bias = LayerNoBias()
+    count = _count_layer_parameters(layer_no_bias)
+    assert count == 32, f"Expected 32 (8*4), got {count}"
+    print(f"✅ Layer without bias: {count} parameters")
+
+    # Test 3: Object without weight attribute
+    class NoWeight:
+        pass
+
+    count = _count_layer_parameters(NoWeight())
+    assert count == 0, f"Expected 0, got {count}"
+    print("✅ No weight attribute: 0 parameters")
+
+    print("✅ _count_layer_parameters works correctly!")
+
+if __name__ == "__main__":
+    test_unit_count_layer_parameters()
+
+# %% [markdown]
+"""
 ### Convolution FLOPs: Where Parameters and Compute Diverge
 
 A convolution costs far more than its parameter count suggests, and the gap is
@@ -409,6 +459,69 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
 
 # %% [markdown]
 """
+### 🧪 Unit Test: _count_conv_flops
+
+This test validates the helper that computes FLOPs for a Conv2d layer.
+
+**What we're testing**: Conv2d FLOP formula: out_H x out_W x k^2 x in_C x out_C x 2
+**Why it matters**: Convolutions are the most compute-intensive operations in vision models
+**Expected**: Correct FLOPs accounting for kernel size and channel dimensions
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-count-conv-flops", "locked": true, "points": 3}
+def test_unit_count_conv_flops():
+    """🧪 Test _count_conv_flops helper."""
+    print("🧪 Unit Test: _count_conv_flops...")
+
+    # Create mock Conv2d layer
+    class MockConv:
+        def __init__(self, in_c, out_c, k, s=1, p=0):
+            self.in_channels = in_c
+            self.out_channels = out_c
+            self.kernel_size = k
+            self.stride = s
+            self.padding = p
+            self.__class__.__name__ = 'Conv2d'
+
+    # Test 1: Simple 3x3 conv, stride 1
+    conv = MockConv(3, 16, 3, 1)
+    flops = _count_conv_flops(conv, (1, 3, 32, 32))
+    expected = 30 * 30 * 3 * 3 * 3 * 16 * 2
+    assert flops == expected, f"Expected {expected}, got {flops}"
+    print(f"✅ Conv2d(3, 16, 3): {flops} FLOPs")
+
+    # Test 2: Stride 2 halves output spatial dims
+    conv_s2 = MockConv(3, 64, 7, 2)
+    flops_s2 = _count_conv_flops(conv_s2, (1, 3, 224, 224))
+    out_h = (224 + 2 * 0 - 7) // 2 + 1
+    out_w = (224 + 2 * 0 - 7) // 2 + 1
+    expected_s2 = out_h * out_w * 7 * 7 * 3 * 64 * 2
+    assert flops_s2 == expected_s2, f"Expected {expected_s2}, got {flops_s2}"
+    print(f"✅ Conv2d(3, 64, 7, stride=2): {flops_s2} FLOPs")
+
+    # Test 3: Padding size 3 for each side
+    conv_p3 = MockConv(3, 10, 3, 1, 3)
+    flops_p3 = _count_conv_flops(conv_p3, (1, 3, 28, 28))
+    out_h_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    out_w_p3 = (28 + 2 * 3 - 3) // 1 + 1
+    expected_p3 = out_h_p3 * out_w_p3 * 3 * 3 * 3 * 10 * 2
+    assert flops_p3 == expected_p3, f"Expected {expected_p3}, got {flops_p3}"
+    print(f"✅ Conv2d(3, 10, 3, stride=1, padding=3): {flops_p3} FLOPs")
+
+    # Test 4: Missing attributes returns 0
+    class Incomplete:
+        pass
+
+    assert _count_conv_flops(Incomplete(), (1, 3, 32, 32)) == 0
+    print("✅ Missing attributes returns 0")
+
+    print("✅ _count_conv_flops works correctly!")
+
+if __name__ == "__main__":
+    test_unit_count_conv_flops()
+
+# %% [markdown]
+"""
 ### Linear FLOPs: The Cost of One Matrix Multiply
 
 A Linear layer is a single matrix multiply, so its arithmetic cost is fixed by
@@ -465,6 +578,51 @@ def _count_linear_flops(model, input_shape: Tuple[int, ...]) -> int:
     out_features = model.weight.shape[1] if hasattr(model, 'weight') else 1
     return in_features * out_features * 2
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: count_linear_flops
+
+This test validates the helper that computes FLOPs for a single Linear layer.
+
+**What we're testing**: Linear layer FLOP formula: in_features x out_features x 2
+**Why it matters**: Linear layers dominate FLOP counts in most ML models
+**Expected**: Exact FLOP count matching the formula
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-count-linear-flops", "locked": true, "points": 3}
+def test_unit_count_linear_flops():
+    """🧪 Test count_linear_flops helper."""
+    print("🧪 Unit Test: count_linear_flops...")
+
+    # Create mock Linear layer
+    class MockLinear:
+        def __init__(self, in_f, out_f):
+            self.weight = Tensor(rng.standard_normal((in_f, out_f)))
+            self.__class__.__name__ = 'Linear'
+
+    # Test 1: Known dimensions
+    layer = MockLinear(128, 64)
+    flops = _count_linear_flops(layer, (1, 128))
+    assert flops == 128 * 64 * 2, f"Expected {128*64*2}, got {flops}"
+    print(f"✅ Linear(128, 64): {flops} FLOPs")
+
+    # Test 2: Square layer
+    layer_sq = MockLinear(256, 256)
+    flops_sq = _count_linear_flops(layer_sq, (1, 256))
+    assert flops_sq == 256 * 256 * 2, f"Expected {256*256*2}, got {flops_sq}"
+    print(f"✅ Linear(256, 256): {flops_sq} FLOPs")
+
+    # Test 3: Batch independence (uses last dim only)
+    flops_b1 = _count_linear_flops(layer, (1, 128))
+    flops_b32 = _count_linear_flops(layer, (32, 128))
+    assert flops_b1 == flops_b32, "FLOPs should be batch-independent"
+    print("✅ Batch-independent FLOPs confirmed")
+
+    print("✅ count_linear_flops works correctly!")
+
+if __name__ == "__main__":
+    test_unit_count_linear_flops()
 
 # %% [markdown]
 """
@@ -532,6 +690,45 @@ def _analyze_bottleneck(gflops_per_second: float,
 
 # %% [markdown]
 """
+### 🧪 Unit Test: analyze_bottleneck
+
+This test validates the helper that identifies memory-bound vs compute-bound workloads.
+
+**What we're testing**: Bottleneck classification based on bandwidth/compute ratio
+**Why it matters**: Knowing the bottleneck determines the right optimization strategy
+**Expected**: Correct classification of memory-bound and compute-bound workloads
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-analyze-bottleneck", "locked": true, "points": 3}
+def test_unit_analyze_bottleneck():
+    """🧪 Test analyze_bottleneck helper."""
+    print("🧪 Unit Test: analyze_bottleneck...")
+
+    # Test 1: Memory-bound (high bandwidth relative to compute)
+    result = _analyze_bottleneck(gflops_per_second=1.0, memory_bandwidth_mbs=10000.0)
+    assert result['is_memory_bound'] is True, "High bandwidth should be memory-bound"
+    assert result['bottleneck'] == 'memory'
+    print("✅ High bandwidth -> memory-bound")
+
+    # Test 2: Compute-bound (low bandwidth relative to compute)
+    result = _analyze_bottleneck(gflops_per_second=50.0, memory_bandwidth_mbs=100.0)
+    assert result['is_compute_bound'] is True, "Low bandwidth should be compute-bound"
+    assert result['bottleneck'] == 'compute'
+    print("✅ Low bandwidth -> compute-bound")
+
+    # Test 3: Mutually exclusive flags
+    result = _analyze_bottleneck(gflops_per_second=10.0, memory_bandwidth_mbs=500.0)
+    assert result['is_memory_bound'] != result['is_compute_bound'], \
+        "Memory-bound and compute-bound should be mutually exclusive"
+    print(f"✅ Mutually exclusive: bottleneck = {result['bottleneck']}")
+
+    print("✅ analyze_bottleneck works correctly!")
+
+if __name__ == "__main__":
+    test_unit_analyze_bottleneck()
+
+# %% [markdown]
+"""
 ### Memory Efficiency: Useful Bytes vs. Peak Bytes
 
 Peak memory is almost never the memory you asked for. Allocators round up,
@@ -579,6 +776,47 @@ def _calculate_memory_efficiency(useful_memory_mb: float, peak_memory_mb: float)
     ratio = useful_memory_mb / max(peak_memory_mb, 0.001)
     return min(ratio, 1.0)
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _calculate_memory_efficiency
+
+This test validates the helper that computes useful-to-total memory ratio.
+
+**What we're testing**: Efficiency = useful_memory / peak_memory, clamped to [0, 1]
+**Why it matters**: Low efficiency means memory fragmentation or allocator overhead
+**Expected**: Values between 0 and 1, with division-by-zero safety
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-calculate-memory-efficiency", "locked": true, "points": 3}
+def test_unit_calculate_memory_efficiency():
+    """🧪 Test _calculate_memory_efficiency helper."""
+    print("🧪 Unit Test: _calculate_memory_efficiency...")
+
+    # Test 1: Perfect efficiency
+    eff = _calculate_memory_efficiency(10.0, 10.0)
+    assert abs(eff - 1.0) < 0.01, f"Expected 1.0, got {eff}"
+    print(f"✅ Perfect efficiency: {eff}")
+
+    # Test 2: Half efficiency
+    eff_half = _calculate_memory_efficiency(5.0, 10.0)
+    assert abs(eff_half - 0.5) < 0.01, f"Expected 0.5, got {eff_half}"
+    print(f"✅ Half efficiency: {eff_half}")
+
+    # Test 3: Clamped at 1.0 (useful > peak shouldn't exceed 1.0)
+    eff_clamped = _calculate_memory_efficiency(20.0, 10.0)
+    assert eff_clamped <= 1.0, f"Efficiency should be clamped to 1.0, got {eff_clamped}"
+    print(f"✅ Clamped efficiency: {eff_clamped}")
+
+    # Test 4: Division by zero safety
+    eff_zero = _calculate_memory_efficiency(5.0, 0.0)
+    assert eff_zero <= 1.0, f"Should handle zero peak safely, got {eff_zero}"
+    print("✅ Zero-peak safety handled")
+
+    print("✅ _calculate_memory_efficiency works correctly!")
+
+if __name__ == "__main__":
+    test_unit_calculate_memory_efficiency()
 
 # %% [markdown]
 """
@@ -651,6 +889,47 @@ def _compute_derived_metrics(flops: int, latency_ms: float,
 
 # %% [markdown]
 """
+### 🧪 Unit Test: _compute_derived_metrics
+
+This test validates the helper that converts raw FLOPs and latency into throughput metrics.
+
+**What we're testing**: GFLOP/s, memory bandwidth, and computational efficiency calculations
+**Why it matters**: These derived metrics determine whether a workload is memory-bound or compute-bound
+**Expected**: Correct throughput calculations from known FLOP counts and latencies
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-compute-derived-metrics", "locked": true, "points": 3}
+def test_unit_compute_derived_metrics():
+    """🧪 Test _compute_derived_metrics helper."""
+    print("🧪 Unit Test: _compute_derived_metrics...")
+
+    # Test 1: Known values -> known throughput
+    # 1e9 FLOPs in 1000ms (1 second) = 1.0 GFLOP/s
+    metrics = _compute_derived_metrics(
+        flops=1_000_000_000, latency_ms=1000.0, peak_memory_mb=100.0
+    )
+    assert abs(metrics['gflops_per_second'] - 1.0) < 0.01, \
+        f"Expected 1.0 GFLOP/s, got {metrics['gflops_per_second']}"
+    print(f"✅ 1B FLOPs / 1s = {metrics['gflops_per_second']:.1f} GFLOP/s")
+
+    # Test 2: Memory bandwidth calculation
+    # 100 MB in 1 second = 100 MB/s
+    assert abs(metrics['memory_bandwidth_mbs'] - 100.0) < 0.1, \
+        f"Expected 100 MB/s, got {metrics['memory_bandwidth_mbs']}"
+    print(f"✅ Memory bandwidth: {metrics['memory_bandwidth_mbs']:.1f} MB/s")
+
+    # Test 3: Efficiency bounded by [0, 1]
+    assert 0 <= metrics['computational_efficiency'] <= 1.0, \
+        f"Efficiency out of bounds: {metrics['computational_efficiency']}"
+    print(f"✅ Efficiency: {metrics['computational_efficiency']:.3f}")
+
+    print("✅ _compute_derived_metrics works correctly!")
+
+if __name__ == "__main__":
+    test_unit_compute_derived_metrics()
+
+# %% [markdown]
+"""
 ### Backward Pass Cost: Why Training Is 3x Inference
 
 Training costs roughly three times what inference costs, and the split is worth
@@ -708,6 +987,39 @@ def _estimate_backward_costs(forward_flops: int,
 
 # %% [markdown]
 """
+### 🧪 Unit Test: _estimate_backward_costs
+
+This test validates the helper that estimates backward pass FLOPs and latency from forward measurements.
+
+**What we're testing**: Backward costs = 2x forward costs (standard ML heuristic)
+**Why it matters**: Training cost = forward + backward; backward is typically 2x forward
+**Expected**: Backward FLOPs and latency are exactly 2x the forward values
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-estimate-backward-costs", "locked": true, "points": 3}
+def test_unit_estimate_backward_costs():
+    """🧪 Test _estimate_backward_costs helper."""
+    print("🧪 Unit Test: _estimate_backward_costs...")
+
+    # Test 1: Known forward values -> 2x backward
+    costs = _estimate_backward_costs(forward_flops=1000, forward_latency_ms=5.0)
+    assert costs['backward_flops'] == 2000, f"Expected 2000, got {costs['backward_flops']}"
+    assert costs['backward_latency_ms'] == 10.0, f"Expected 10.0, got {costs['backward_latency_ms']}"
+    print(f"✅ 1000 forward FLOPs -> {costs['backward_flops']} backward FLOPs")
+
+    # Test 2: Zero forward -> zero backward
+    costs_zero = _estimate_backward_costs(forward_flops=0, forward_latency_ms=0.0)
+    assert costs_zero['backward_flops'] == 0
+    assert costs_zero['backward_latency_ms'] == 0.0
+    print("✅ Zero forward -> zero backward")
+
+    print("✅ _estimate_backward_costs works correctly!")
+
+if __name__ == "__main__":
+    test_unit_estimate_backward_costs()
+
+# %% [markdown]
+"""
 ### Optimizer Memory: The Hidden Cost of Adam
 
 Optimizer state is the memory cost people forget. SGD keeps nothing between
@@ -762,6 +1074,40 @@ def _estimate_optimizer_memory(gradient_memory_mb: float) -> Dict[str, float]:
         'adamw': gradient_memory_mb * 2,
     }
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _estimate_optimizer_memory
+
+This test validates the helper that estimates memory requirements for different optimizers.
+
+**What we're testing**: Per-optimizer memory multipliers (SGD: 0x, Adam: 2x gradient memory)
+**Why it matters**: Adam uses 2x extra memory vs SGD; this affects hardware requirements
+**Expected**: SGD = 0 extra, Adam = 2x gradient memory, AdamW = 2x gradient memory
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-estimate-optimizer-memory", "locked": true, "points": 3}
+def test_unit_estimate_optimizer_memory():
+    """🧪 Test _estimate_optimizer_memory helper."""
+    print("🧪 Unit Test: _estimate_optimizer_memory...")
+
+    # Test with 100 MB gradient memory
+    estimates = _estimate_optimizer_memory(gradient_memory_mb=100.0)
+
+    assert estimates['sgd'] == 0, f"SGD should need 0 extra, got {estimates['sgd']}"
+    assert estimates['adam'] == 200.0, f"Adam should need 200 MB, got {estimates['adam']}"
+    assert estimates['adamw'] == 200.0, f"AdamW should need 200 MB, got {estimates['adamw']}"
+    print(f"✅ SGD: {estimates['sgd']} MB, Adam: {estimates['adam']} MB, AdamW: {estimates['adamw']} MB")
+
+    # Test with zero gradients
+    estimates_zero = _estimate_optimizer_memory(gradient_memory_mb=0.0)
+    assert estimates_zero['adam'] == 0.0, "Zero gradients -> zero optimizer memory"
+    print("✅ Zero gradient memory handled correctly")
+
+    print("✅ _estimate_optimizer_memory works correctly!")
+
+if __name__ == "__main__":
+    test_unit_estimate_optimizer_memory()
 
 # %% [markdown]
 """
@@ -1153,12 +1499,22 @@ class Profiler:
         memory_stats = self.measure_memory(model, input_tensor.shape)
         latency_ms = self.measure_latency(model, input_tensor, warmup=5, iterations=20)
 
-        derived = _compute_derived_metrics(flops, latency_ms, memory_stats['peak_memory_mb'])
+        # count_flops is per sample; measure_latency times the whole batch. Dividing
+        # one by the other without this factor understates throughput by the batch
+        # size, which is why every GFLOP/s and bottleneck label used to look
+        # memory-bound no matter what the model did.
+        batch_size = input_tensor.shape[0] if len(input_tensor.shape) > 1 else 1
+        batch_flops = flops * batch_size
+
+        derived = _compute_derived_metrics(batch_flops, latency_ms, memory_stats['peak_memory_mb'])
         bottleneck = _analyze_bottleneck(derived['gflops_per_second'],
                                               derived['memory_bandwidth_mbs'])
 
         return {
-            'parameters': param_count, 'flops': flops, 'latency_ms': latency_ms,
+            # 'flops' stays per sample, matching count_flops. 'batch_flops' is the
+            # figure the throughput below was computed from.
+            'parameters': param_count, 'flops': flops, 'batch_flops': batch_flops,
+            'latency_ms': latency_ms,
             **memory_stats, **derived, **bottleneck
         }
         ### END SOLUTION
@@ -1403,58 +1759,6 @@ Parameter Growth Examples:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: _count_layer_parameters
-
-This test validates the helper that counts parameters from a single layer's weight and bias.
-
-**What we're testing**: Single-layer parameter counting from weight/bias attributes
-**Why it matters**: This is the atomic unit of parameter counting that count_parameters delegates to
-**Expected**: Correct weight + bias element counts
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-count-layer-parameters", "locked": true, "points": 3}
-def test_unit_count_layer_parameters():
-    """🧪 Test _count_layer_parameters helper."""
-    print("🧪 Unit Test: _count_layer_parameters...")
-
-    profiler = Profiler()
-
-    # Test 1: Layer with weight and bias
-    class LayerWithBias:
-        def __init__(self):
-            self.weight = Tensor(rng.standard_normal((10, 5)))
-            self.bias = Tensor(rng.standard_normal(5))
-
-    layer = LayerWithBias()
-    count = _count_layer_parameters(layer)
-    assert count == 55, f"Expected 55 (10*5 + 5), got {count}"
-    print(f"✅ Layer with bias: {count} parameters")
-
-    # Test 2: Layer with weight only (no bias)
-    class LayerNoBias:
-        def __init__(self):
-            self.weight = Tensor(rng.standard_normal((8, 4)))
-
-    layer_no_bias = LayerNoBias()
-    count = _count_layer_parameters(layer_no_bias)
-    assert count == 32, f"Expected 32 (8*4), got {count}"
-    print(f"✅ Layer without bias: {count} parameters")
-
-    # Test 3: Object without weight attribute
-    class NoWeight:
-        pass
-
-    count = _count_layer_parameters(NoWeight())
-    assert count == 0, f"Expected 0, got {count}"
-    print("✅ No weight attribute: 0 parameters")
-
-    print("✅ _count_layer_parameters works correctly!")
-
-if __name__ == "__main__":
-    test_unit_count_layer_parameters()
-
-# %% [markdown]
-"""
 ### 🧪 Unit Test: Parameter Counting
 
 This test validates our parameter counting works correctly for different model types.
@@ -1544,118 +1848,6 @@ Different operations require different FLOP calculations:
 - **Convolutions**: Output spatial x kernel spatial x channels
 - **Activations**: Usually 1 FLOP per element
 """
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: count_linear_flops
-
-This test validates the helper that computes FLOPs for a single Linear layer.
-
-**What we're testing**: Linear layer FLOP formula: in_features x out_features x 2
-**Why it matters**: Linear layers dominate FLOP counts in most ML models
-**Expected**: Exact FLOP count matching the formula
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-count-linear-flops", "locked": true, "points": 3}
-def test_unit_count_linear_flops():
-    """🧪 Test count_linear_flops helper."""
-    print("🧪 Unit Test: count_linear_flops...")
-
-    profiler = Profiler()
-
-    # Create mock Linear layer
-    class MockLinear:
-        def __init__(self, in_f, out_f):
-            self.weight = Tensor(rng.standard_normal((in_f, out_f)))
-            self.__class__.__name__ = 'Linear'
-
-    # Test 1: Known dimensions
-    layer = MockLinear(128, 64)
-    flops = _count_linear_flops(layer, (1, 128))
-    assert flops == 128 * 64 * 2, f"Expected {128*64*2}, got {flops}"
-    print(f"✅ Linear(128, 64): {flops} FLOPs")
-
-    # Test 2: Square layer
-    layer_sq = MockLinear(256, 256)
-    flops_sq = _count_linear_flops(layer_sq, (1, 256))
-    assert flops_sq == 256 * 256 * 2, f"Expected {256*256*2}, got {flops_sq}"
-    print(f"✅ Linear(256, 256): {flops_sq} FLOPs")
-
-    # Test 3: Batch independence (uses last dim only)
-    flops_b1 = _count_linear_flops(layer, (1, 128))
-    flops_b32 = _count_linear_flops(layer, (32, 128))
-    assert flops_b1 == flops_b32, "FLOPs should be batch-independent"
-    print("✅ Batch-independent FLOPs confirmed")
-
-    print("✅ count_linear_flops works correctly!")
-
-if __name__ == "__main__":
-    test_unit_count_linear_flops()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: _count_conv_flops
-
-This test validates the helper that computes FLOPs for a Conv2d layer.
-
-**What we're testing**: Conv2d FLOP formula: out_H x out_W x k^2 x in_C x out_C x 2
-**Why it matters**: Convolutions are the most compute-intensive operations in vision models
-**Expected**: Correct FLOPs accounting for kernel size and channel dimensions
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-count-conv-flops", "locked": true, "points": 3}
-def test_unit_count_conv_flops():
-    """🧪 Test _count_conv_flops helper."""
-    print("🧪 Unit Test: _count_conv_flops...")
-
-    profiler = Profiler()
-
-    # Create mock Conv2d layer
-    class MockConv:
-        def __init__(self, in_c, out_c, k, s=1, p=0):
-            self.in_channels = in_c
-            self.out_channels = out_c
-            self.kernel_size = k
-            self.stride = s
-            self.padding = p
-            self.__class__.__name__ = 'Conv2d'
-
-    # Test 1: Simple 3x3 conv, stride 1
-    conv = MockConv(3, 16, 3, 1)
-    flops = _count_conv_flops(conv, (1, 3, 32, 32))
-    expected = 30 * 30 * 3 * 3 * 3 * 16 * 2
-    assert flops == expected, f"Expected {expected}, got {flops}"
-    print(f"✅ Conv2d(3, 16, 3): {flops} FLOPs")
-
-    # Test 2: Stride 2 halves output spatial dims
-    conv_s2 = MockConv(3, 64, 7, 2)
-    flops_s2 = _count_conv_flops(conv_s2, (1, 3, 224, 224))
-    out_h = (224 + 2 * 0 - 7) // 2 + 1
-    out_w = (224 + 2 * 0 - 7) // 2 + 1
-    expected_s2 = out_h * out_w * 7 * 7 * 3 * 64 * 2
-    assert flops_s2 == expected_s2, f"Expected {expected_s2}, got {flops_s2}"
-    print(f"✅ Conv2d(3, 64, 7, stride=2): {flops_s2} FLOPs")
-
-    # Test 3: Padding size 3 for each side
-    conv_p3 = MockConv(3, 10, 3, 1, 3)
-    flops_p3 = _count_conv_flops(conv_p3, (1, 3, 28, 28))
-    out_h_p3 = (28 + 2 * 3 - 3) // 1 + 1
-    out_w_p3 = (28 + 2 * 3 - 3) // 1 + 1
-    expected_p3 = out_h_p3 * out_w_p3 * 3 * 3 * 3 * 10 * 2
-    assert flops_p3 == expected_p3, f"Expected {expected_p3}, got {flops_p3}"
-    print(f"✅ Conv2d(3, 10, 3, stride=1, padding=3): {flops_p3} FLOPs")
-
-    # Test 4: Missing attributes returns 0
-    class Incomplete:
-        pass
-
-    assert _count_conv_flops(Incomplete(), (1, 3, 32, 32)) == 0
-    print("✅ Missing attributes returns 0")
-
-    print("✅ _count_conv_flops works correctly!")
-
-if __name__ == "__main__":
-    test_unit_count_conv_flops()
 
 # %% [markdown]
 """
@@ -1827,49 +2019,6 @@ def test_unit_calculate_parameter_memory():
 
 if __name__ == "__main__":
     test_unit_calculate_parameter_memory()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: _calculate_memory_efficiency
-
-This test validates the helper that computes useful-to-total memory ratio.
-
-**What we're testing**: Efficiency = useful_memory / peak_memory, clamped to [0, 1]
-**Why it matters**: Low efficiency means memory fragmentation or allocator overhead
-**Expected**: Values between 0 and 1, with division-by-zero safety
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-calculate-memory-efficiency", "locked": true, "points": 3}
-def test_unit_calculate_memory_efficiency():
-    """🧪 Test _calculate_memory_efficiency helper."""
-    print("🧪 Unit Test: _calculate_memory_efficiency...")
-
-    profiler = Profiler()
-
-    # Test 1: Perfect efficiency
-    eff = _calculate_memory_efficiency(10.0, 10.0)
-    assert abs(eff - 1.0) < 0.01, f"Expected 1.0, got {eff}"
-    print(f"✅ Perfect efficiency: {eff}")
-
-    # Test 2: Half efficiency
-    eff_half = _calculate_memory_efficiency(5.0, 10.0)
-    assert abs(eff_half - 0.5) < 0.01, f"Expected 0.5, got {eff_half}"
-    print(f"✅ Half efficiency: {eff_half}")
-
-    # Test 3: Clamped at 1.0 (useful > peak shouldn't exceed 1.0)
-    eff_clamped = _calculate_memory_efficiency(20.0, 10.0)
-    assert eff_clamped <= 1.0, f"Efficiency should be clamped to 1.0, got {eff_clamped}"
-    print(f"✅ Clamped efficiency: {eff_clamped}")
-
-    # Test 4: Division by zero safety
-    eff_zero = _calculate_memory_efficiency(5.0, 0.0)
-    assert eff_zero <= 1.0, f"Should handle zero peak safely, got {eff_zero}"
-    print("✅ Zero-peak safety handled")
-
-    print("✅ _calculate_memory_efficiency works correctly!")
-
-if __name__ == "__main__":
-    test_unit_calculate_memory_efficiency()
 
 # %% [markdown]
 """
@@ -2071,161 +2220,6 @@ Model: 125M parameters (500MB)
 Total Training Memory: 4x parameter memory!
 ```
 """
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: _compute_derived_metrics
-
-This test validates the helper that converts raw FLOPs and latency into throughput metrics.
-
-**What we're testing**: GFLOP/s, memory bandwidth, and computational efficiency calculations
-**Why it matters**: These derived metrics determine whether a workload is memory-bound or compute-bound
-**Expected**: Correct throughput calculations from known FLOP counts and latencies
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-compute-derived-metrics", "locked": true, "points": 3}
-def test_unit_compute_derived_metrics():
-    """🧪 Test _compute_derived_metrics helper."""
-    print("🧪 Unit Test: _compute_derived_metrics...")
-
-    profiler = Profiler()
-
-    # Test 1: Known values -> known throughput
-    # 1e9 FLOPs in 1000ms (1 second) = 1.0 GFLOP/s
-    metrics = _compute_derived_metrics(
-        flops=1_000_000_000, latency_ms=1000.0, peak_memory_mb=100.0
-    )
-    assert abs(metrics['gflops_per_second'] - 1.0) < 0.01, \
-        f"Expected 1.0 GFLOP/s, got {metrics['gflops_per_second']}"
-    print(f"✅ 1B FLOPs / 1s = {metrics['gflops_per_second']:.1f} GFLOP/s")
-
-    # Test 2: Memory bandwidth calculation
-    # 100 MB in 1 second = 100 MB/s
-    assert abs(metrics['memory_bandwidth_mbs'] - 100.0) < 0.1, \
-        f"Expected 100 MB/s, got {metrics['memory_bandwidth_mbs']}"
-    print(f"✅ Memory bandwidth: {metrics['memory_bandwidth_mbs']:.1f} MB/s")
-
-    # Test 3: Efficiency bounded by [0, 1]
-    assert 0 <= metrics['computational_efficiency'] <= 1.0, \
-        f"Efficiency out of bounds: {metrics['computational_efficiency']}"
-    print(f"✅ Efficiency: {metrics['computational_efficiency']:.3f}")
-
-    print("✅ _compute_derived_metrics works correctly!")
-
-if __name__ == "__main__":
-    test_unit_compute_derived_metrics()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: analyze_bottleneck
-
-This test validates the helper that identifies memory-bound vs compute-bound workloads.
-
-**What we're testing**: Bottleneck classification based on bandwidth/compute ratio
-**Why it matters**: Knowing the bottleneck determines the right optimization strategy
-**Expected**: Correct classification of memory-bound and compute-bound workloads
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-analyze-bottleneck", "locked": true, "points": 3}
-def test_unit_analyze_bottleneck():
-    """🧪 Test analyze_bottleneck helper."""
-    print("🧪 Unit Test: analyze_bottleneck...")
-
-    profiler = Profiler()
-
-    # Test 1: Memory-bound (high bandwidth relative to compute)
-    result = _analyze_bottleneck(gflops_per_second=1.0, memory_bandwidth_mbs=10000.0)
-    assert result['is_memory_bound'] is True, "High bandwidth should be memory-bound"
-    assert result['bottleneck'] == 'memory'
-    print("✅ High bandwidth -> memory-bound")
-
-    # Test 2: Compute-bound (low bandwidth relative to compute)
-    result = _analyze_bottleneck(gflops_per_second=50.0, memory_bandwidth_mbs=100.0)
-    assert result['is_compute_bound'] is True, "Low bandwidth should be compute-bound"
-    assert result['bottleneck'] == 'compute'
-    print("✅ Low bandwidth -> compute-bound")
-
-    # Test 3: Mutually exclusive flags
-    result = _analyze_bottleneck(gflops_per_second=10.0, memory_bandwidth_mbs=500.0)
-    assert result['is_memory_bound'] != result['is_compute_bound'], \
-        "Memory-bound and compute-bound should be mutually exclusive"
-    print(f"✅ Mutually exclusive: bottleneck = {result['bottleneck']}")
-
-    print("✅ analyze_bottleneck works correctly!")
-
-if __name__ == "__main__":
-    test_unit_analyze_bottleneck()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: _estimate_backward_costs
-
-This test validates the helper that estimates backward pass FLOPs and latency from forward measurements.
-
-**What we're testing**: Backward costs = 2x forward costs (standard ML heuristic)
-**Why it matters**: Training cost = forward + backward; backward is typically 2x forward
-**Expected**: Backward FLOPs and latency are exactly 2x the forward values
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-estimate-backward-costs", "locked": true, "points": 3}
-def test_unit_estimate_backward_costs():
-    """🧪 Test _estimate_backward_costs helper."""
-    print("🧪 Unit Test: _estimate_backward_costs...")
-
-    profiler = Profiler()
-
-    # Test 1: Known forward values -> 2x backward
-    costs = _estimate_backward_costs(forward_flops=1000, forward_latency_ms=5.0)
-    assert costs['backward_flops'] == 2000, f"Expected 2000, got {costs['backward_flops']}"
-    assert costs['backward_latency_ms'] == 10.0, f"Expected 10.0, got {costs['backward_latency_ms']}"
-    print(f"✅ 1000 forward FLOPs -> {costs['backward_flops']} backward FLOPs")
-
-    # Test 2: Zero forward -> zero backward
-    costs_zero = _estimate_backward_costs(forward_flops=0, forward_latency_ms=0.0)
-    assert costs_zero['backward_flops'] == 0
-    assert costs_zero['backward_latency_ms'] == 0.0
-    print("✅ Zero forward -> zero backward")
-
-    print("✅ _estimate_backward_costs works correctly!")
-
-if __name__ == "__main__":
-    test_unit_estimate_backward_costs()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: _estimate_optimizer_memory
-
-This test validates the helper that estimates memory requirements for different optimizers.
-
-**What we're testing**: Per-optimizer memory multipliers (SGD: 0x, Adam: 2x gradient memory)
-**Why it matters**: Adam uses 2x extra memory vs SGD; this affects hardware requirements
-**Expected**: SGD = 0 extra, Adam = 2x gradient memory, AdamW = 2x gradient memory
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-estimate-optimizer-memory", "locked": true, "points": 3}
-def test_unit_estimate_optimizer_memory():
-    """🧪 Test _estimate_optimizer_memory helper."""
-    print("🧪 Unit Test: _estimate_optimizer_memory...")
-
-    profiler = Profiler()
-
-    # Test with 100 MB gradient memory
-    estimates = _estimate_optimizer_memory(gradient_memory_mb=100.0)
-
-    assert estimates['sgd'] == 0, f"SGD should need 0 extra, got {estimates['sgd']}"
-    assert estimates['adam'] == 200.0, f"Adam should need 200 MB, got {estimates['adam']}"
-    assert estimates['adamw'] == 200.0, f"AdamW should need 200 MB, got {estimates['adamw']}"
-    print(f"✅ SGD: {estimates['sgd']} MB, Adam: {estimates['adam']} MB, AdamW: {estimates['adamw']} MB")
-
-    # Test with zero gradients
-    estimates_zero = _estimate_optimizer_memory(gradient_memory_mb=0.0)
-    assert estimates_zero['adam'] == 0.0, "Zero gradients -> zero optimizer memory"
-    print("✅ Zero gradient memory handled correctly")
-
-    print("✅ _estimate_optimizer_memory works correctly!")
-
-if __name__ == "__main__":
-    test_unit_estimate_optimizer_memory()
 
 # %% [markdown]
 """
