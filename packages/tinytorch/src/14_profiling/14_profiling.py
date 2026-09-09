@@ -1153,12 +1153,22 @@ class Profiler:
         memory_stats = self.measure_memory(model, input_tensor.shape)
         latency_ms = self.measure_latency(model, input_tensor, warmup=5, iterations=20)
 
-        derived = _compute_derived_metrics(flops, latency_ms, memory_stats['peak_memory_mb'])
+        # count_flops is per sample; measure_latency times the whole batch. Dividing
+        # one by the other without this factor understates throughput by the batch
+        # size, which is why every GFLOP/s and bottleneck label used to look
+        # memory-bound no matter what the model did.
+        batch_size = input_tensor.shape[0] if len(input_tensor.shape) > 1 else 1
+        batch_flops = flops * batch_size
+
+        derived = _compute_derived_metrics(batch_flops, latency_ms, memory_stats['peak_memory_mb'])
         bottleneck = _analyze_bottleneck(derived['gflops_per_second'],
                                               derived['memory_bandwidth_mbs'])
 
         return {
-            'parameters': param_count, 'flops': flops, 'latency_ms': latency_ms,
+            # 'flops' stays per sample, matching count_flops. 'batch_flops' is the
+            # figure the throughput below was computed from.
+            'parameters': param_count, 'flops': flops, 'batch_flops': batch_flops,
+            'latency_ms': latency_ms,
             **memory_stats, **derived, **bottleneck
         }
         ### END SOLUTION
