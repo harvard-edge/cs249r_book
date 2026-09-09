@@ -942,6 +942,22 @@ class TestTwoProportionSampleSize:
         n = calc_two_proportion_sample_size(0.05, 0.001)
         assert n == pytest.approx(744_800, rel=1e-9)
 
+    def test_pooled_form_matches_the_textbook_equation(self):
+        """The pooled form carries both arms' variance, so it needs more tasks."""
+        simple = calc_two_proportion_sample_size(0.30, 0.05)
+        pooled = calc_two_proportion_sample_size(0.30, 0.05, pooled=True)
+        assert math.ceil(pooled) == 1375
+        assert pooled > simple
+
+    def test_pooled_default_is_off_so_existing_callers_do_not_move(self):
+        assert calc_two_proportion_sample_size(0.05, 0.001) == pytest.approx(
+            calc_two_proportion_sample_size(0.05, 0.001, pooled=False)
+        )
+
+    def test_pooled_rejects_a_rate_that_leaves_the_unit_interval(self):
+        with pytest.raises(ValueError):
+            calc_two_proportion_sample_size(0.9, 0.2, pooled=True)
+
     def test_quadruples_when_lift_halves(self):
         n1 = calc_two_proportion_sample_size(0.05, 0.002)
         n2 = calc_two_proportion_sample_size(0.05, 0.001)

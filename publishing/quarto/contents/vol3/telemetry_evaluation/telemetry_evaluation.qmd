@@ -245,14 +245,29 @@ The required sample size $N$ to detect an effect size $\Delta p$ with sufficient
 # |          state what a suite of the size teams actually run can resolve.
 # | Show:    Required tasks per configuration, and the smallest delta a 50-task
 # |          and a 100-task suite can detect.
-# | How:     calc_two_proportion_sample_size is the source of truth. Sample size
-# |          runs as the inverse square of the delta under that formula, so the
-# |          detectable delta at a fixed suite size is recovered by scaling from
-# |          the same call rather than by restating its constants here.
+# | How:     calc_two_proportion_sample_size in its pooled form is the source
+# |          of truth, matching the equation displayed in
+# |          @sec-vol3-appendix-math-bootstrap. The delta a fixed suite can
+# |          resolve is recovered by bisecting that same function.
 # +-----------------------------------------------------------------------------
 import math
 
 from mlsysim import *
+
+def _detectable(baseline, suite):
+    """Delta whose pooled sample size is exactly `suite`.
+
+    Bisects the registry formula rather than restating its constants, so the
+    inverse cannot drift from the forward direction.
+    """
+    low, high = 1e-4, 1.0 - baseline - 1e-6
+    for _ in range(200):
+        mid = (low + high) / 2
+        if calc_two_proportion_sample_size(baseline, mid, pooled=True) > suite:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2
 
 class EvaluationPower:
     # +-- 1. LOAD (Constants) --------------------
@@ -263,19 +278,15 @@ class EvaluationPower:
 
     # +-- 2. EXECUTE (The Compute) ---------------
     delta = improved - baseline
-    required = math.ceil(calc_two_proportion_sample_size(baseline, delta))
-
-    # n scales as 1 / delta**2 under this formula, so the delta a fixed suite
-    # can resolve follows from the same call.
-    reference = calc_two_proportion_sample_size(baseline, delta)
-    small_delta = delta * math.sqrt(reference / small_suite)
-    typical_delta = delta * math.sqrt(reference / typical_suite)
+    required = math.ceil(calc_two_proportion_sample_size(baseline, delta, pooled=True))
+    small_delta = _detectable(baseline, small_suite)
+    typical_delta = _detectable(baseline, typical_suite)
 
     # +-- 3. GUARD (Invariants) ------------------
     check(required > 1_000, f"Detecting a five-point delta should demand more than a thousand tasks, got {required}")
     check(typical_delta > delta and small_delta > typical_delta, "A smaller suite must resolve only a larger delta")
     check(
-        abs(calc_two_proportion_sample_size(baseline, typical_delta) - typical_suite) < 1e-6,
+        abs(calc_two_proportion_sample_size(baseline, typical_delta, pooled=True) - typical_suite) < 1e-3,
         "The recovered delta must round-trip through the sample-size formula",
     )
 
