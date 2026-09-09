@@ -495,6 +495,8 @@ class ValidateCommand:
                   note="supported callout types, titles, and attributes"),
             Scope("callout-title-hygiene", "_run_callout_title_hygiene",
                   note="callout title presence, generic titles, trailing periods, and @-ref leaks"),
+            Scope("callout-title-case", "_run_callout_title_case",
+                  note="callout title attribute sentence-case compliance"),
             Scope("unclosed-html-comments", "_run_unclosed_html_comments",
                   note="unclosed <!-- HTML comment tags that silently swallow prose"),
             # default=False until vol2 narrative callouts are normalized to the
@@ -7935,7 +7937,7 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        block_start_re = re.compile(r"^:::\s*\{?\.?([a-zA-Z0-9_-]+)(.*?)\}?\s*$")
+        block_start_re = re.compile(r"^:{3,}\s*\{?(.*?)\}?\s*$")
         title_attr_re = re.compile(r'title=["\'](.*?)["\']')
 
         for file in files:
@@ -7947,15 +7949,25 @@ class ValidateCommand:
                 if not m:
                     continue
 
-                block_type = m.group(1).lower()
-                attrs = m.group(2)
-
-                if not (
-                    block_type.startswith("callout")
-                    or block_type in ("dfn", "exmp", "nbk", "pri", "thm", "lem", "cor", "prop", "rem", "case", "lighthouse", "takeaway")
-                ):
+                attrs = m.group(1).strip()
+                classes = re.findall(r"\.([a-zA-Z0-9_-]+)", attrs)
+                if not classes:
+                    parts = attrs.split()
+                    if parts and not parts[0].startswith(("#", ".")):
+                        classes = [parts[0]]
+                if not classes:
                     continue
 
+                matching_type = None
+                for c in classes:
+                    cl = c.lower()
+                    if cl.startswith("callout") or cl in ("dfn", "exmp", "nbk", "pri", "thm", "lem", "cor", "prop", "rem", "case", "lighthouse", "takeaway"):
+                        matching_type = cl
+                        break
+                if not matching_type:
+                    continue
+
+                block_type = matching_type
                 if block_type in ("callout-learning-objectives", "callout-chapter-takeaways", "chapter-takeaways", "learning-objectives"):
                     continue
 
@@ -8026,6 +8038,49 @@ class ValidateCommand:
         return ValidationRunResult(
             name="callout-title-hygiene",
             description="Flag callout blocks with generic, missing, or improperly formatted titles",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_callout_title_case(self, root: Path) -> ValidationRunResult:
+        """Enforce sentence-case on callout title attributes."""
+        from cli.commands.headings import _fix_sentence_case
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        title_attr_re = re.compile(r'title=["\'](.*?)["\']')
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if not stripped.startswith(":::"):
+                    continue
+                tm = title_attr_re.search(stripped)
+                if not tm:
+                    continue
+                title = tm.group(1).strip()
+                if not title:
+                    continue
+                expected = _fix_sentence_case(title)
+                if title != expected:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="callout-title-case",
+                            message=f"expected '{expected}', got '{title}'",
+                            severity="error",
+                            context=stripped[:100],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="callout-title-case",
+            description="Callout title attribute sentence-case compliance",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
