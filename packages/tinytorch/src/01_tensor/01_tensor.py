@@ -1143,6 +1143,11 @@ Validation Decision Tree:
 Separating validation from computation keeps each function focused on a single
 concept: `_validate_matmul_shapes` teaches input checking, while
 `MatMul.forward` teaches the algorithm itself.
+"""
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Validate Matmul Shapes
 
 **What we're testing**: All three shape-mismatch categories are caught and named, for matrices and vectors alike
 **Why it matters**: A shape error caught at the boundary names the problem; one
