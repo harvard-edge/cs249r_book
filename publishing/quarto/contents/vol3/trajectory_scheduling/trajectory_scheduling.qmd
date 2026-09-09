@@ -88,15 +88,17 @@ When variance is unbounded, classical queueing models completely collapse. In st
 
 Under heavy-tailed Pareto workloads, this variance approaches infinity. In practical clusters, this mathematical reality manifests as catastrophic Head-of-Line (HoL) blocking: when a standard First-In-First-Out (FIFO) queue schedules a 200-step agent, it monopolizes accelerator resources for tens of minutes, causing queue backpressure that delays hundreds of quick 2-step tasks.
 
-| Workload Domain          |   Benchmark / Trace    | Mean Steps $\mathbb{E}[N]$ | P99 Steps | Step Variance $\sigma^2$ | Mean Tool Wait Fraction | Mean Context Growth / Step | Peak KV Memory (70B GQA) |
-|:-------------------------|:----------------------:|:--------------------------:|:---------:|:------------------------:|:-----------------------:|:--------------------------:|:------------------------:|
-| **Stateless Serving**    |  LMSYS Chatbot Arena   |            1.0             |    1.0    |           0.0            |           0.0%          |          0 tokens          |          0.8 GB          |
-| **Multi-Turn Chat**      |        MT-Bench        |            2.0             |    2.0    |           0.0            |           0.0%          |         450 tokens         |          1.4 GB          |
-| **Web Navigation**       |  WebArena / VisualWeb  |            7.4             |    35.0   |           48.2           |          72.4%          |        1,850 tokens        |         14.2 GB          |
-| **Software Engineering** |   SWE-bench Verified   |            24.8            |   142.0   |          812.6           |          84.1%          |         820 tokens         |         22.4 GB          |
-| **Deep Research**        | GAIA / Research Fleets |            38.2            |   260.0   |         1,440.0          |          88.6%          |        1,400 tokens        |         34.8 GB          |
+| Workload Domain          |   Benchmark / Trace    | Mean Steps $\mathbb{E}[N]$ | P99 Steps | Sample Step Variance $s^2$ | Mean Tool Wait Fraction | Mean Context Growth / Step | Peak KV Memory (70B GQA) |
+|:-------------------------|:----------------------:|:--------------------------:|:---------:|:--------------------------:|:-----------------------:|:--------------------------:|:------------------------:|
+| **Stateless Serving**    |  LMSYS Chatbot Arena   |            1.0             |    1.0    |            0.0             |           0.0%          |          0 tokens          |          0.8 GB          |
+| **Multi-Turn Chat**      |        MT-Bench        |            2.0             |    2.0    |            0.0             |           0.0%          |         450 tokens         |          1.4 GB          |
+| **Web Navigation**       |  WebArena / VisualWeb  |            7.4             |    35.0   |            48.2            |          72.4%          |        1,850 tokens        |         14.2 GB          |
+| **Software Engineering** |   SWE-bench Verified   |            24.8            |   142.0   |           812.6            |          84.1%          |         820 tokens         |         22.4 GB          |
+| **Deep Research**        | GAIA / Research Fleets |            38.2            |   260.0   |          1,440.0           |          88.6%          |        1,400 tokens        |         34.8 GB          |
 
 : **Empirical Workload Characteristics across Serving Regimes**: Mean and tail step counts, step variance, tool wait fraction, context growth, and peak KV memory across stateless text generation, multi-turn chat, and autonomous agent trajectories. {#tbl-vol3-scheduling-workload-comparison}
+
+The variance column is a sample statistic, and every trace produces a finite one: a measured set of trajectories has a largest element, so its variance is bounded by construction. That is the trap. Each row's sample standard deviation sits within about 15 percent of its own mean, which is the signature of a light-tailed distribution and not of the power law the traces are drawn from. The sample moment understates the population moment precisely because the trace is truncated, and it will jump on the next trace that happens to catch one more long trajectory. A scheduler sized from this column is sized from an artifact of the measurement window rather than from the workload.
 
 ### Bimodal temporal execution dynamics
 
@@ -106,7 +108,7 @@ Beyond step-count variance, the temporal profile of each individual step is inte
 2. **Tool I/O Wait Phase ($1\text{ s -- } 60\text{ s}$):** The agent halts token generation while an external sandbox executes bash commands, runs test suites, queries databases, or scrapes web pages.
 3. **Human Approval Wait Phase ($1\text{ minute -- } 24\text{ hours}$):** If the agent requires supervisory consent for a privileged action, execution pauses indefinitely in an external mailbox queue.
 
-As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend between 70 and 90 percent of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization plummets to single-digit percentages.
+As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend between 70 and 90 percent of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization falls to between 11 and 28 percent across these workloads, with the deep-research fleet the worst of them.
 
 ### Human-in-the-loop (HITL) suspend and resume
 
