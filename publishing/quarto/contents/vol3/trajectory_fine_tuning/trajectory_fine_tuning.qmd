@@ -55,9 +55,9 @@ In early agent prototypes, engineers relied entirely on prompting: the system pr
 1. **Computational Complexity and Key-Value Cache Saturation:**
    The computational cost of standard scaled dot-product attention scales quadratically with sequence length $T$ during prefill, and the memory consumption of the Key-Value (KV) cache scales linearly:
 
-   $$\text{Memory}_{\text{KV}} = 2 \times n_{\text{layers}} \times d_{\text{model}} \times T \times b_{\text{bytes}}$$
+   $$\text{Memory}_{\text{KV}} = 2 \times n_{\text{layers}} \times n_{\text{kv}} \times d_{\text{head}} \times T \times b_{\text{bytes}}$$
 
-   In an agent executing a 30-turn interaction where each turn appends tool definitions, execution logs, and intermediate reasoning, $T$ readily surpasses 32,000 tokens. In a 70-billion-parameter model using 16-bit precision, serving a single agent session requires over 8 GB of high-bandwidth memory (HBM) exclusively for KV tensors. When thousands of concurrent agents run in parallel, memory bandwidth and capacity become the primary throughput bottleneck [@kaplan2020scaling].
+   In an agent executing a 30-turn interaction where each turn appends tool definitions, execution logs, and intermediate reasoning, $T$ readily surpasses 32,000 tokens. In a 70-billion-parameter model using 16-bit precision and grouped-query attention with eight key-value heads, serving a single agent session requires roughly 10 GB of high-bandwidth memory (HBM) exclusively for KV tensors. Multi-head attention over the full model width would cost eight times that. When thousands of concurrent agents run in parallel, memory bandwidth and capacity become the primary throughput bottleneck [@kaplan2020scaling].
 
 2. **Attention Degradation and the "Lost in the Middle" Phenomenon:**
    Transformer attention distributions do not remain uniformly sharp over extensive sequence contexts. As established by @liu2024lost, language models exhibit pronounced U-shaped performance curves: retrieval accuracy is highest for tokens placed at the extreme beginning or end of the prompt context, while information located in the middle suffers severe degradation. When an agent relies on in-context exemplars embedded amidst lengthy API documentation, tool parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
@@ -349,7 +349,7 @@ Because these low-rank matrices represent only a tiny fraction of the original p
 
 ### Dynamic multi-tenant adapter swapping
 
-For agent serving systems, the true power of LoRA lies in runtime multi-tenancy. Modern serving runtimes (such as S-LoRA and Punica) exploit the property that a LoRA adapter for rank $r=16$ occupies less than 50 megabytes of memory.
+For agent serving systems, the true power of LoRA lies in runtime multi-tenancy. Modern serving runtimes (such as S-LoRA and Punica) exploit the property that a LoRA adapter is small next to the base model it steers: at rank $r=16$ over the query and value projections, roughly 80 megabytes for a 70-billion-parameter model and under 20 megabytes for a 7-billion-parameter one.
 
 Instead of deploying separate model replicas:
 

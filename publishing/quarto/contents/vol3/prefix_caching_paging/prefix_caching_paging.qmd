@@ -320,7 +320,7 @@ In human-in-the-loop interactions and complex agent workflows, agent execution i
 
 In classical operating systems, a process's *working set* is the minimum amount of physical memory required to make forward progress without thrashing. For an active agent trajectory, the working set is strictly the entire uncompressed KV cache of its context history.
 
-If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), just 20 idle agent sessions can exhaust the entire cluster's memory, causing out-of-memory (OOM) crashes and stalling active generation.
+If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), the model's own FP16 weights claim $140\text{ GB}$ before a single request arrives, so roughly 20 idle agent sessions exhaust what remains, causing out-of-memory (OOM) crashes and stalling active generation.
 
 Conversely, if the serving runtime unilaterally discards the idle agent's KV cache to free memory, resuming the agent when the tool finishes forces a full $64\text{k}$-token prefill recomputation, incurring a 10-second latency penalty and wasting cluster compute.
 
@@ -462,7 +462,7 @@ If the serving system evaluates these $K^D$ trajectory rollouts independently, t
 
 $$\text{Tokens}_{\text{naive}} = \sum_{d=0}^{D} K^d \cdot \left( L_{\text{root}} + d \cdot \Delta L \right) = O\left( K^D \cdot L_{\text{root}} \right)$$
 
-For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving requires prefilling over **$12.2\text{ million}$ tokens**, requiring hours of GPU time and rendering test-time search economically impossible.
+For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving prefills **$12.3\text{ million}$ tokens at the leaf level alone**, and roughly $14\text{ million}$ across the whole tree. At a sustained $500\text{ TFLOP/s}$ that is about a GPU-hour of prefill to answer one query, which is what makes naive test-time search economically impossible.
 
 ### Copy-on-write prefix sharing in radix trees
 
@@ -563,7 +563,7 @@ By placing the millisecond-precision dynamic timestamp and random UUID at the ve
 The failure propagated through five distinct stages:
 
 1. **Zero-Hit Prefix Invalidation:** When requests arrived at the inference engine, the Radix tree traversal failed immediately at token position 12. The engine was unable to reuse any cached physical blocks for the subsequent $35\text{k}$ tokens of tool schemas, repository context, and conversation history.
-2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $14\times$.
+2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $11.6\times$, the reciprocal of the $8.6$ percent of prefill the cluster had still been paying for.
 3. **Radix Tree Eviction Thrashing:** To allocate physical blocks for the massive surge of incoming prefills, the PagedAttention memory manager entered aggressive LRU eviction mode. Because new prefixes diverged immediately at the root, the Radix tree allocator created thousands of short-lived, fragmented branches. High-utility cached prefixes from other active workflows were prematurely evicted.
 4. **Queueing Backpressure and Pinned Block Exhaustion:** Dictated by Little's Law ($L = \lambda W$), as prefill latency ($W$) exploded from $220\text{ ms}$ to over $11\text{ seconds}$ under constant arrival rate ($\lambda$), the number of concurrent requests actively trapped in the system ($L$) skyrocketed. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks completely exhausted the global free list.
 5. **Cascading Worker Death:** When an active decode step requested an additional physical block from an exhausted free pool with zero evictable zero-ref-count blocks, the allocation call failed. Rather than graceful throttling, worker processes crashed with CUDA out-of-memory exceptions, triggering cluster-wide leader election storms.
