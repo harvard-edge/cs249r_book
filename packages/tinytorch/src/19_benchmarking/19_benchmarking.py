@@ -31,10 +31,10 @@ Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement professional benchmarking infrastructure with statistical rigor
-2. Learn to combine optimization techniques strategically (order matters!)
+1. Implement benchmarking infrastructure with statistical rigor
+2. Measure optimizations alone and in combination on one layer, and read what each step contributes
 3. Build the Benchmark class - a standardized performance evaluation framework
-4. Understand ablation studies and systematic performance evaluation
+4. Run an ablation and identify Pareto-optimal models from measured results
 
 Let's get started!
 
@@ -71,6 +71,7 @@ import statistics
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -90,7 +91,7 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 # Constants for benchmarking defaults
-DEFAULT_WARMUP_RUNS = 5  # Default warmup runs for JIT compilation and cache warming
+DEFAULT_WARMUP_RUNS = 5  # Default warmup runs: cache warming and CPU clock ramp (NumPy has no JIT)
 DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical significance
 
 # Illustrative energy model (no power meter here): a fixed cost per inference, an
@@ -173,7 +174,7 @@ Benchmarking is applied statistics. We measure noisy processes (model inference)
 
 ### Central Limit Theorem in Practice
 
-When you run a model many times, the distribution of measurements approaches normal (regardless of the underlying noise distribution). This lets us:
+When you run a model many times, the distribution of the *sample mean* approaches normal as the sample grows, whatever the shape of the individual measurements (the individual latencies stay skewed, with a long slow tail). This lets us:
 - Compute confidence intervals for the true mean
 - Detect statistically significant differences between models
 - Control for measurement variance
@@ -212,16 +213,29 @@ Every measurement has uncertainty. When combining metrics (like accuracy per jou
 Professional benchmarking quantifies and minimizes these uncertainties.
 """
 
+# %% [markdown]
+"""
+### OlympicEvent: Naming the Capstone's Events
+
+Module 20 scores submissions in five events, each optimizing a different
+objective. The event names need to be spelled the same way in every file that
+uses them, so they are declared once here as an `Enum`, a Python class whose
+members are a fixed set of named constants. `OlympicEvent.LATENCY_SPRINT` is
+one member; `.value` gives its string `"latency_sprint"`, and a typo such as
+`OlympicEvent.LATENCY_SPRNT` raises an `AttributeError` instead of silently
+scoring the wrong event. The thresholds in the comments are the capstone's
+rules, not anything this module enforces: Module 20 reads them when it scores.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "olympic-event", "solution": false}
 #| export
-from enum import Enum
-
 class OlympicEvent(Enum):
     """
-    Performance evaluation event categories for systematic optimization benchmarking.
+    Event categories for the Module 20 capstone.
 
-    Each event optimizes for different objectives with specific constraints,
-    enabling structured comparison of optimization strategies.
+    Each event optimizes for a different objective under its own constraint,
+    so submissions are compared within an event, never across events.
+    The thresholds are the capstone's rules; Module 20 applies them.
     """
     LATENCY_SPRINT = "latency_sprint"      # Minimize latency (accuracy >= 85%)
     MEMORY_CHALLENGE = "memory_challenge"   # Minimize memory (accuracy >= 85%)
@@ -239,34 +253,40 @@ We'll build a comprehensive benchmarking system that handles statistical analysi
 
 ```
 Benchmark Architecture:
-┌─────────────────────────────────────────┐
-│ Profiler (Module 14)                    │
-│ • Base measurement tools                │
-├─────────────────────────────────────────┤
-│ BenchmarkResult                         │
-│ • Statistical container for measurements│
-├─────────────────────────────────────────┤
-│ Benchmark                               │
-│ • Uses Profiler + multi-model comparison│
-├─────────────────────────────────────────┤
-│ BenchmarkSuite                          │
-│ • Multi-metric comprehensive evaluation │
-├─────────────────────────────────────────┤
-│ MLPerf                                  │
-│ • Standardized industry-style benchmarks│
-└─────────────────────────────────────────┘
+                    ┌──────────────────────────┐
+                    │ precise_timer            │
+                    │ • one timed block        │
+                    └────────┬─────────┬───────┘
+                             │         │
+┌──────────────────────┐     │         │     ┌──────────────────────────┐
+│ Profiler (Module 14) │     │         └────>│ MLPerf                   │
+│ • measure_latency    │     │               │ • fixed inputs, seeds,   │
+│ • measure_memory     │     │               │   run counts, thresholds │
+└──────────┬───────────┘     │               │ • pass/fail per task     │
+           v                 v               └──────────────────────────┘
+┌──────────────────────────────┐
+│ Benchmark                    │      ┌──────────────────────────┐
+│ • one model, one metric      │─────>│ BenchmarkResult          │
+│ • many models compared       │      │ • mean, std, CI, p99     │
+└──────────┬───────────────────┘      └──────────────────────────┘
+           v
+┌──────────────────────────────┐
+│ BenchmarkSuite               │
+│ • every metric, every model  │
+│ • energy, plots, report      │
+└──────────────────────────────┘
 ```
 
-**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. This demonstrates proper systems architecture - build once, reuse everywhere!
-
-Each level adds capability while maintaining statistical rigor at the foundation.
+**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. Build the measurement once, reuse it everywhere.
 
 **Three harnesses, three jobs.** `Benchmark` measures: one model, one metric,
-one statistically summarized `BenchmarkResult`. `BenchmarkSuite` orchestrates:
-it runs every metric for every model through a `Benchmark`, derives energy, and
-writes the plots and the report. `MLPerf` standardizes the protocol around them:
-fixed inputs, run counts, and pass/fail thresholds, so that two submissions are
-comparable at all. Read them in that order; each one is built on the last.
+one statistically summarized `BenchmarkResult`. `BenchmarkSuite` drives a
+`Benchmark`: it runs every metric for every model, derives energy, and writes
+the plots and the report. `MLPerf` stands beside them rather than on top of
+them. It shares only `precise_timer` and `BenchmarkResult`'s way of thinking;
+what it adds is a protocol, with fixed inputs, seeds, run counts, and pass/fail
+thresholds, so that two submissions are comparable at all. Read them in that
+order: the first two stack, the third is a separate harness for a separate job.
 """
 
 # %% [markdown]

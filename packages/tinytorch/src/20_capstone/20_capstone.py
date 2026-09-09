@@ -31,8 +31,8 @@ Modules 01-13 → Optimization Suite (14-18) → Benchmarking (19) → Submissio
 
 ## 🎯 Learning Objectives
 By the end of this capstone, you will:
-1. Use Module 19's benchmarking tools to measure model performance comprehensively
-2. Apply optimization techniques from Modules 14-18 to improve baseline models
+1. Use Module 19's `precise_timer` to measure latency and throughput as two separate measurements
+2. Apply optimization techniques from Modules 15 and 16 to improve a baseline model
 3. Generate standardized JSON submissions following industry best practices
 4. Validate submissions against a schema for reproducibility
 5. Compare baseline vs. optimized models with quantitative metrics
@@ -47,15 +47,16 @@ Let's get started!
 
 ```python
 # Final package structure:
-from tinytorch.olympics import generate_submission, BenchmarkReport
+from tinytorch.olympics import BenchmarkReport, generate_submission, save_submission, validate_submission_schema
 
 # Benchmark your model
-report = BenchmarkReport()
+report = BenchmarkReport(model_name="my_model")
 report.benchmark_model(my_model, X_test, y_test)
 
-# Generate submission
+# Generate, validate, and save the submission (a plain dict, written as JSON)
 submission = generate_submission(report)
-submission.save("my_submission.json")
+validate_submission_schema(submission)
+save_submission(submission, "my_submission.json")
 ```
 
 **Why this matters:**
@@ -73,7 +74,7 @@ submission.save("my_submission.json")
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
-- `time` (for latency measurements)
+- `time` (for the report timestamp)
 - `json` (for submission serialization)
 - `pathlib` (for file path handling)
 - `platform` (for system information)
@@ -82,7 +83,8 @@ submission.save("my_submission.json")
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.layers` (Linear layer from Module 03)
 - `tinytorch.core.activations` (ReLU from Module 02)
-- Optimization modules 14-18 (optional, for advanced workflows)
+- `tinytorch.perf.benchmarking` (`precise_timer` from Module 19, used for every timing)
+- `tinytorch.perf.profiling`, `tinytorch.perf.quantization`, `tinytorch.perf.compression` (Modules 14, 15, 16; imported only inside the optimization workflow example)
 
 **Dependency Flow**:
 ```
@@ -140,18 +142,17 @@ This module shows you how to:
 4. **Document optimizations** - Tracking what techniques were applied and their impact
 5. **Share professionally** - Generating submission files that work like research papers
 
-Let's build a benchmarking and submission system worthy of production ML!
+Let's build the benchmarking and submission system.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp olympics
 #| export
 import numpy as np
-rng = np.random.default_rng(7)
 import time
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 import platform
 import sys
 
@@ -159,6 +160,11 @@ import sys
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
+from tinytorch.perf.benchmarking import precise_timer  # Module 19's timing context manager
+
+# One generator for the two example workflows below. The unit tests seed their
+# own generators so a test's numbers never depend on which cells ran before it.
+rng = np.random.default_rng(7)
 
 # %% [markdown]
 """
@@ -269,6 +275,8 @@ Example:
 
 Trade-off: Batching increases throughput but adds latency!
 ```
+
+Because the two pull in opposite directions, `BenchmarkReport` measures them with two different calls: latency times `model.forward` on one sample, and throughput times `model.forward` on the whole test batch and divides the batch size by that time. Deriving one from the other (`1000 / latency_ms`) would erase exactly the trade-off this box describes.
 
 ### Why Variance Matters
 
@@ -425,7 +433,8 @@ class SimpleMLP:
         ### END SOLUTION
 
     def parameters(self):
-        """Return model parameters for perf."""
+        """Return every parameter (fc1 first, then fc2) so count_parameters,
+        Module 14's Profiler, and Module 16's magnitude_prune can walk them."""
         return self.fc1.parameters() + self.fc2.parameters()
 
     def count_parameters(self):
@@ -576,8 +585,9 @@ class BenchmarkReport:
         2. Model size (MB) - Deployment cost (assumes FP32)
         3. Accuracy - Task performance (classification accuracy)
         4. Latency (mean ± std, and the median) - Inference speed and consistency,
-           timed with perf_counter after a few untimed warmup runs (Module 19)
-        5. Throughput - Maximum samples/second capacity
+           timed with Module 19's precise_timer after a few untimed warmup runs
+        5. Throughput - Samples per second when the whole test batch goes through
+           one forward call, timed separately from latency (see Foundations)
         """
         # Count parameters and stored size (see measure_memory)
         param_count = model.count_parameters()
@@ -596,6 +606,21 @@ class BenchmarkReport:
         std_latency = np.std(latencies)
         median_latency = np.median(latencies)
 
+        # Throughput: time the WHOLE batch through one forward call, num_runs times,
+        # after its own untimed warmup. This is a separate measurement, not
+        # 1000 / latency: batching raises samples/second without making any one
+        # sample faster (Foundations, "Latency vs. Throughput")
+        batch_size = X_test.shape[0]
+        for _ in range(min(5, num_runs)):
+            _ = model.forward(X_test)
+        batch_seconds = []
+        for _ in range(num_runs):
+            with precise_timer() as timer:
+                _ = model.forward(X_test)
+            batch_seconds.append(timer.elapsed)
+        # Median batch time, floored so a batch that measures 0.0 s cannot divide by zero
+        throughput = batch_size / max(np.median(batch_seconds), 1e-9)
+
         # Store metrics (all as Python native types for JSON serialization)
         self.metrics = {
             'parameter_count': int(param_count),
@@ -604,9 +629,7 @@ class BenchmarkReport:
             'latency_ms_mean': float(avg_latency),
             'latency_ms_std': float(std_latency),
             'latency_ms_median': float(median_latency),
-            # Floor the denominator so an empty model that measures 0.0 ms
-            # cannot divide by zero
-            'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
+            'throughput_samples_per_sec': float(throughput)
         }
 
         print(f"\n📊 Benchmark Results for {self.model_name}:")
@@ -614,35 +637,45 @@ class BenchmarkReport:
         print(f"  Size: {model_size_mb:.2f} MB")
         print(f"  Accuracy: {accuracy*100:.1f}%")
         print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
+        print(f"  Throughput: {throughput:,.0f} samples/sec (batch of {batch_size})")
 
         return self.metrics
 
-    def measure_latency(self, model, X_sample, num_runs=100):
+    def measure_latency(self, model, X_batch, num_runs=100):
         """
-        Measure inference latency over multiple runs.
+        Measure single-sample inference latency over multiple runs.
+
+        Args:
+            model: Model with a .forward() method
+            X_batch: Test inputs (Tensor); only the first sample, X_batch[:1], is timed
+            num_runs: Number of timed runs (default: 100)
+
+        Returns:
+            List of per-run latencies in milliseconds
 
         TODO: Time single-sample inference over multiple runs
 
         APPROACH:
         1. Run a few untimed warmup calls first (Module 19)
         2. Run inference num_runs times
-        3. Measure each run with time.perf_counter()
-        4. Convert to milliseconds
-        5. Return list of latencies
+        3. Time each run with Module 19's precise_timer() context manager
+        4. Convert seconds to milliseconds
+        5. Return the list of latencies
 
         HINTS:
-        - Use time.perf_counter() before and after model.forward()
+        - `with precise_timer() as timer:` around model.forward(); timer.elapsed
+          holds the seconds once the block exits
         - Multiply by 1000 to convert seconds to milliseconds
-        - Use X_sample[:1] for single-sample timing
+        - Use X_batch[:1] so each call sees exactly one sample
         """
         ### BEGIN SOLUTION
         for _ in range(min(5, num_runs)):
-            _ = model.forward(X_sample[:1])
+            _ = model.forward(X_batch[:1])
         latencies = []
         for _ in range(num_runs):
-            start = time.perf_counter()
-            _ = model.forward(X_sample[:1])
-            latencies.append((time.perf_counter() - start) * 1000)
+            with precise_timer() as timer:
+                _ = model.forward(X_batch[:1])
+            latencies.append(timer.elapsed * 1000)
         return latencies
         ### END SOLUTION
 
@@ -690,13 +723,13 @@ Metric Decision Tree:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Design Choice: Why num_runs=100?
+### Design Choice: Warmup, Then num_runs=100
 
-We run inference 100 times by default to:
-- **Warm up** the system (first runs are often slower)
-- **Capture variance** (some runs hit cache, others miss)
-- **Average out noise** (OS interrupts, GC pauses)
-- **Get confidence intervals** (via std dev)
+`measure_latency` makes a few untimed calls first, then times 100 calls:
+- **Warmup is untimed**, so first-call costs (allocations, cold caches) stay out of the numbers
+- **100 timed runs** average out OS interrupts and GC pauses, and the std shows how consistent the model is
+- **The median is reported alongside mean ± std** because a few slow outliers drag the mean; the submission compares medians for that reason
+- **Std is a spread, not a confidence interval**: it says how wide the distribution is, not how sure you are of the mean
 
 ```
 Single Run (Unreliable):        Multiple Runs (Reliable):
@@ -704,12 +737,12 @@ Single Run (Unreliable):        Multiple Runs (Reliable):
 │ Run 1: 12.3ms           │     │ Run 1: 12.3ms           │
 │                         │     │ Run 2: 9.8ms            │
 │ Result: 12.3ms          │     │ Run 3: 10.1ms           │
-│ Confidence: Low         │     │ ...                     │
+│ Spread: unknown         │     │ ...                     │
 │ (Could be outlier!)     │     │ Run 100: 10.2ms         │
 │                         │     │                         │
 │                         │     │ Result: 10.0ms ± 0.5ms  │
-│                         │     │ Confidence: High        │
-│                         │     │ (Statistically sound)   │
+│                         │     │ Spread: visible         │
+│                         │     │ (median 10.1ms)         │
 └─────────────────────────┘     └─────────────────────────┘
 ```
 
@@ -873,9 +906,10 @@ def generate_submission(
         optimized_size = optimized_report.metrics['model_size_mb']
 
         submission['improvements'] = {
-            # Floor the denominator so an empty model that measures 0.0 ms cannot divide by zero
+            # Floor both denominators: an empty model measures 0.0 ms, and a model
+            # pruned to sparsity 1.0 stores 0 bytes
             'speedup': float(baseline_latency / max(optimized_latency, 1e-6)),
-            'compression_ratio': float(baseline_size / optimized_size),
+            'compression_ratio': float(baseline_size / max(optimized_size, 1e-9)),
             'accuracy_delta': float(
                 optimized_report.metrics['accuracy'] - baseline_report.metrics['accuracy']
             )

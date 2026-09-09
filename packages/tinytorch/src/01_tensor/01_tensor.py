@@ -44,8 +44,7 @@ Let's get started!
 **Building Side:** Code exports to tinytorch.core.tensor
 
 ```python
-# Final package structure:
-# Other modules will import and use this Tensor
+from tinytorch.core.tensor import Tensor   # every later module starts here
 ```
 
 **Why this matters:**
@@ -64,7 +63,6 @@ rng = np.random.default_rng(7)
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
@@ -144,14 +142,14 @@ Our Tensor class will support all fundamental operations that neural networks ne
 
 ```
 Operation Types:
-┌─────────────────┬─────────────────┬─────────────────┐
-│ Element-wise    │ Matrix Ops      │ Shape Ops       │
-├─────────────────┼─────────────────┼─────────────────┤
-│ + Addition      │ @ Matrix Mult   │ .reshape()      │
-│ - Subtraction   │ .transpose()    │ .sum()          │
-│ * Multiplication│                 │ .mean()         │
-│ / Division      │                 │ .max()          │
-└─────────────────┴─────────────────┴─────────────────┘
+┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
+│ Element-wise    │ Matrix Ops      │ Shape Ops       │ Reductions      │
+├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
+│ + Addition      │ @ Matrix Mult   │ .reshape()      │ .sum()          │
+│ - Subtraction   │ .transpose()    │ t[key] indexing │ .mean()         │
+│ * Multiplication│                 │ .masked_fill()  │ .max()          │
+│ / Division      │                 │                 │                 │
+└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
 ```
 
 ### Broadcasting: Making Tensors Work Together
@@ -178,14 +176,14 @@ Matrix:     Memory:
 [[1, 2, 3]  [1][2][3][4][5][6]
  [4, 5, 6]]  ↑  Row 1   ↑  Row 2
 
-Cache Behavior:
+Cache Behavior (once a row is longer than one cache line):
 Sequential Access: Fast (uses cache lines efficiently)
-  Row access: [1][2][3] → cache hit, hit, hit
-Random Access: Slow (cache misses)
-  Column access: [1][4] → cache hit, miss
+  Row access: [1][2][3] → one cache line, every byte in it is used
+Strided Access: Slow (cache misses)
+  Column access: [1][4] → a different cache line per element, one useful value each
 ```
 
-This memory layout affects performance in real ML workloads - algorithms that access data sequentially run faster than those that access randomly.
+The 2×3 example above is far too small to miss: all six float32 values fit in a single 64-byte cache line. The pattern matters once a row is longer than a cache line, which is the case for every matrix you will use for real work. Algorithms that access data sequentially run faster than those that stride through memory; the Systems Analysis section measures this on a 2000×2000 matrix.
 """
 
 # %% [markdown]
@@ -211,8 +209,11 @@ Tensor Class Structure:
 ├─────────────────────────────────┤
 │ Shape Operations:               │
 │ • reshape(), transpose()        │
-│ • sum(), mean(), max()          │
 │ • __getitem__ (indexing)        │
+│ • masked_fill()                 │
+├─────────────────────────────────┤
+│ Reductions:                     │
+│ • sum(), mean(), max()          │
 ├─────────────────────────────────┤
 │ Operations delegate to:         │
 │ • Function subclasses (Add, ...)│
@@ -312,8 +313,10 @@ Tensor wraps with: shape=(2,3), size=6, dtype=float32
 **Why This Approach?**
 - **Performance**: NumPy's C implementations are highly optimized
 - **Compatibility**: Easy integration with scientific Python ecosystem
-- **Memory Efficiency**: No unnecessary data copying
-- **Future-Proof**: Easy transition to GPU tensors in advanced modules
+- **Memory Discipline**: One copy per operation. `Function.apply` wraps every result in a fresh Tensor, so no two Tensors ever share a buffer and no operation can corrupt its inputs
+- **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers
+
+**Three of the methods below come before the sections that explain them.** The class is one cell, so you will write `reshape`, `transpose`, and `_validate_matmul_shapes` now, before the Matrix Multiplication section (which motivates the shape check) and the Shape Manipulation section (which explains reshape and transpose). Each APPROACH block is written to be enough on its own; if you want the why first, read those two sections and come back.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tensor-class", "solution": true}
@@ -411,11 +414,12 @@ class Tensor:
     def masked_fill(self, mask, value):
         """Fill positions where mask is True with value, matching PyTorch's masked_fill.
 
-        Used in transformer attention to set padding positions to -inf before softmax.
+        Nothing in this module needs it yet. Module 12 will use it to blank out
+        positions a model must not look at before normalizing scores.
 
         Args:
             mask:  A Tensor or numpy array of booleans, same shape as self (or broadcastable).
-            value: Scalar fill value (e.g. float('-inf') for attention masking).
+            value: Scalar fill value (Module 12 will pass float('-inf')).
 
         Returns:
             New Tensor with masked positions replaced by value.
@@ -461,14 +465,24 @@ class Tensor:
         This helper checks three conditions before any computation begins:
         1. The other operand must be a Tensor (not a plain number or array)
         2. Neither operand can be a 0D scalar (scalars use * instead)
-        3. For 2D+ tensors, the inner dimensions must align
+        3. The inner dimensions must align. Matrix multiplication contracts the
+           LAST axis of self against the ROWS axis of other. For a matrix that
+           rows axis is shape[-2]; a 1D vector has only one axis, so its rows
+           axis is shape[0]. Every case follows from that one rule:
+               (M, K) @ (K, N)  ->  (M, N)      matrix @ matrix
+               (M, K) @ (K,)    ->  (M,)        matrix @ vector
+               (K,)   @ (K, N)  ->  (N,)        vector @ matrix
+               (K,)   @ (K,)    ->  ()          vector @ vector (dot product)
+           and (2, 3) @ (2,) is a mismatch because 3 != 2.
 
         TODO: Implement the three validation checks for matrix multiplication.
 
         APPROACH:
         1. Check isinstance(other, Tensor) - raise TypeError if not
         2. Check both tensors are at least 1D - raise ValueError if 0D
-        3. For 2D+ tensors, check self.shape[-1] == other.shape[-2]
+        3. inner_self = self.shape[-1]
+           inner_other = other.shape[-2] if other has 2+ dims, else other.shape[0]
+           raise ValueError if they differ (put both numbers in the message)
 
         EXAMPLE:
         >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
@@ -477,6 +491,9 @@ class Tensor:
         >>> c = Tensor([[1, 2, 3]])        # 1x3
         >>> d = Tensor([[1], [2]])         # 2x1
         >>> c._validate_matmul_shapes(d)   # ValueError - 3 != 2
+        >>> m = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3
+        >>> m._validate_matmul_shapes(Tensor([1, 2, 3]))  # No error - 3 == 3
+        >>> m._validate_matmul_shapes(Tensor([1, 2]))     # ValueError - 3 != 2
 
         HINT: Use len(tensor.shape) to check dimensionality and tensor.shape[-1]
         to access the last dimension.
@@ -487,23 +504,28 @@ class Tensor:
                 f"Matrix multiplication requires Tensor, got {type(other).__name__}\n"
                 f"  ❌ Cannot perform: Tensor @ {type(other).__name__}\n"
                 f"  💡 Matrix multiplication (@) only works between two Tensors\n"
-                f"  🔧 Wrap your data: Tensor({other}) @ other_tensor"
+                f"  🔧 Wrap the {type(other).__name__} first: tensor @ Tensor(other)"
             )
         if len(self.shape) == 0 or len(other.shape) == 0:
             raise ValueError(
                 f"Matrix multiplication requires at least 1D tensors\n"
                 f"  ❌ Got shapes: {self.shape} @ {other.shape}\n"
                 f"  💡 Scalars (0D tensors) cannot be matrix-multiplied; use * for element-wise\n"
-                f"  🔧 Reshape scalar to 1D: tensor.reshape(1) or use tensor * scalar"
+                f"  🔧 Use tensor * scalar instead"
             )
-        if len(self.shape) >= 2 and len(other.shape) >= 2:
-            if self.shape[-1] != other.shape[-2]:
-                raise ValueError(
-                    f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
-                    f"  ❌ Inner dimensions don't match: {self.shape[-1]} vs {other.shape[-2]}\n"
-                    f"  💡 For A @ B, A's last dim must equal B's second-to-last dim\n"
-                    f"  🔧 Try: other.transpose() to get shape {other.shape[::-1]}, or reshape self"
-                )
+        inner_self = self.shape[-1]
+        inner_other = other.shape[-2] if len(other.shape) >= 2 else other.shape[0]
+        if inner_self != inner_other:
+            if len(other.shape) >= 2:
+                fix = f"other.transpose() to get shape {other.shape[::-1]}, or reshape self"
+            else:
+                fix = f"a vector of length {inner_self}, or transpose self"
+            raise ValueError(
+                f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
+                f"  ❌ Inner dimensions don't match: {inner_self} vs {inner_other}\n"
+                f"  💡 For A @ B, A's last dim must equal B's rows (shape[-2] for a matrix, shape[0] for a vector)\n"
+                f"  🔧 Try: {fix}"
+            )
         ### END SOLUTION
 
     def matmul(self, other):
@@ -526,13 +548,22 @@ class Tensor:
     def reshape(self, *shape):
         """Reshape tensor to new dimensions.
 
+        A reshape keeps every element and changes only how they are grouped, so
+        the new shape must hold exactly self.size elements. One dimension may
+        be given as -1, meaning "whatever is left": with 6 elements,
+        reshape(2, -1) is reshape(2, 3) and reshape(-1, 3) is reshape(2, 3).
+        Any other negative size, or a zero, has no meaning and is rejected.
+
         TODO: Reshape tensor while preserving total element count.
 
         APPROACH:
         1. Handle both reshape(2, 3) and reshape((2, 3)) calling styles
-        2. If -1 in shape, infer that dimension from total size
-        3. Validate total elements match: np.prod(new_shape) == self.size
-        4. Hand the validated shape to the operation: return Reshape.apply(self, shape=new_shape)
+        2. Reject any dimension that is 0 or below -1 (only -1 is special)
+        3. If -1 in shape, infer that dimension from total size:
+           known_size = product of the other dimensions;
+           the -1 becomes self.size // known_size (must divide evenly; only one -1 allowed)
+        4. Validate total elements match: np.prod(new_shape) == self.size
+        5. Hand the validated shape to the operation: return Reshape.apply(self, shape=new_shape)
 
         EXAMPLE:
         >>> t = Tensor([1, 2, 3, 4, 5, 6])
@@ -554,6 +585,14 @@ class Tensor:
             new_shape = tuple(shape[0])
         else:
             new_shape = shape
+        bad = [d for d in new_shape if d == 0 or d < -1]
+        if bad:
+            raise ValueError(
+                f"Cannot reshape {self.shape} to {new_shape}\n"
+                f"  ❌ Invalid dimension size {bad[0]}: sizes must be positive, or -1 to infer\n"
+                f"  💡 -1 is the only special value; it stands for 'whatever is left'\n"
+                f"  🔧 Replace {bad[0]} with a positive size or -1"
+            )
         if -1 in new_shape:
             if new_shape.count(-1) > 1:
                 raise ValueError(
@@ -591,6 +630,11 @@ class Tensor:
 
     def transpose(self, dim0=None, dim1=None):
         """Transpose tensor dimensions.
+
+        Transposing swaps two axes: a (2, 3) matrix becomes (3, 2), with
+        element [i, j] moving to [j, i]. The data does not move; only the order
+        in which the axes are read changes, and Permute does that reordering
+        from an axes list such as (1, 0). Your job here is to build that list.
 
         TODO: Swap tensor dimensions (default: swap last two dimensions).
 
@@ -704,6 +748,12 @@ def test_unit_tensor_creation():
     assert scalar.numel() == 1, "Scalar has 1 element"
     assert vector.numel() == 3, "Vector has 3 elements"
     assert matrix.numel() == 4, "2x2 matrix has 4 elements"
+
+    # A list of Tensors stacks along a new first axis (APPROACH step 1)
+    stacked = Tensor([vector, vector])
+    assert stacked.shape == (2, 3), f"Stacking two (3,) Tensors should give (2, 3), got {stacked.shape}"
+    assert np.array_equal(stacked.data[1], vector.data)
+    assert stacked.dtype == np.float32
 
     print("✅ Tensor creation works correctly!")
 
@@ -928,17 +978,17 @@ def test_unit_arithmetic_operations():
     expected = np.array([[11, 22], [13, 24]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
-    # ⚠️ Broadcasting pitfall: verify shapes match before element-wise ops
-    # In ML, predictions (batch, features) minus targets (features,) broadcasts
-    # silently — the same target row repeats for every sample. Always check!
-    predictions = Tensor(np.ones((4, 3)))   # 4 samples, 3 features
-    targets_good = Tensor(np.zeros((4, 3)))  # correct: same shape
-    targets_bad = Tensor(np.zeros((3,)))     # dangerous: missing batch dim
-    assert predictions.shape == targets_good.shape, "Matching shapes — safe"
-    assert predictions.shape != targets_bad.shape, (
-        f"Shape mismatch: {predictions.shape} vs {targets_bad.shape}. "
-        f"NumPy broadcasts silently — this is almost always a bug in ML code."
-    )
+    # ⚠️ Broadcasting pitfall: predictions (batch, features) minus a targets
+    # vector (features,) does NOT raise. It broadcasts, and the single target
+    # row is subtracted from every sample. Watch the silent broadcast happen:
+    predictions = Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])  # 4 samples, 3 features
+    targets_bad = Tensor([1, 2, 3])                                          # missing batch dim
+    diff = predictions - targets_bad
+    assert diff.shape == (4, 3), f"Broadcast should give (4, 3), got {diff.shape}"
+    assert np.array_equal(diff.data[0], np.zeros(3, dtype=np.float32))     # row 0 happens to match
+    assert np.array_equal(diff.data[3], np.array([9, 9, 9], dtype=np.float32))  # row 3 was never meant to see [1,2,3]
+    # No error, no warning, and rows 1 to 3 are compared against the wrong target.
+    # Check shapes yourself before a loss computation; NumPy will not.
 
     # Test subtraction (data centering)
     result = b - a
@@ -1077,7 +1127,10 @@ plain Python number or a raw NumPy array. The second check catches 0D scalars,
 which have no rows or columns and therefore cannot participate in a matrix
 product (students should use `*` for scalar multiplication instead). The third
 check is the classic inner-dimension rule: for `A @ B` where A has shape
-`(M, K)` and B has shape `(K, N)`, the two `K` values must agree.
+`(M, K)` and B has shape `(K, N)`, the two `K` values must agree. The same rule
+covers vectors once you know where their `K` lives: a 1D operand has a single
+axis, so for `(M, K) @ (K,)` the vector's length is its rows count, and
+`(2, 3) @ (2,)` is a mismatch just as `(2, 3) @ (2, 1)` is.
 
 ```
 Validation Decision Tree:
@@ -1088,10 +1141,10 @@ Validation Decision Tree:
 ```
 
 Separating validation from computation keeps each function focused on a single
-concept: `_validate_matmul_shapes` teaches input checking, while `matmul`
-teaches the algorithm itself.
+concept: `_validate_matmul_shapes` teaches input checking, while
+`MatMul.forward` teaches the algorithm itself.
 
-**What we're testing**: All three shape-mismatch categories are caught and named
+**What we're testing**: All three shape-mismatch categories are caught and named, for matrices and vectors alike
 **Why it matters**: A shape error caught at the boundary names the problem; one
 that slips through surfaces as a NumPy error deep inside a matmul, pages away
 from the line that caused it
@@ -1139,6 +1192,18 @@ def test_unit_validate_matmul_shapes():
         assert "Inner dimensions don't match" in str(e)
         assert "2 vs 3" in str(e)
 
+    # Check 3, vector case: a (2,3) matrix times a length-3 vector is fine,
+    # a length-2 vector is the same mismatch and must be caught HERE, not
+    # deep inside np.matmul
+    m = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3
+    m._validate_matmul_shapes(Tensor([1, 2, 3]))  # No exception (3 == 3)
+    try:
+        m._validate_matmul_shapes(Tensor([1, 2]))  # (2,3) @ (2,)
+        assert False, "Should have raised ValueError for matrix-vector mismatch"
+    except ValueError as e:
+        assert "Inner dimensions don't match" in str(e)
+        assert "3 vs 2" in str(e)
+
     print("✅ Matmul shape validation works correctly!")
 
 if __name__ == "__main__":
@@ -1161,15 +1226,16 @@ class MatMul(Function):
         Multiply two matrices.
 
         For 2D matrices, uses explicit nested loops so you can see exactly how
-        each output element is a dot product of a row and a column. For batched
-        (3D+) inputs, delegates to np.matmul.
+        each output element is a dot product of a row and a column. For anything
+        other than 2D @ 2D (a vector on either side, or batched 3D+ inputs),
+        delegates to np.matmul.
 
-        TODO: Compute the matrix product using explicit loops for 2D and
-        np.matmul for 3D+.
+        TODO: Compute the matrix product using explicit loops for 2D @ 2D and
+        np.matmul for every other case.
 
         APPROACH:
-        1. For 2D matrices: use explicit nested loops with np.dot per element
-        2. For batched (3D+): use np.matmul for correctness
+        1. For 2D @ 2D: use explicit nested loops with np.dot per element
+        2. For every other case (1D operands, batched 3D+): use np.matmul
         3. Return the result array
 
         EXAMPLE:
@@ -1190,7 +1256,7 @@ class MatMul(Function):
         # Handle 2D matrices with explicit loops (educational)
         if len(a.shape) == 2 and len(b.shape) == 2:
             M, K = a.shape
-            K2, N = b.shape
+            _, N = b.shape   # b's row count is K; Tensor.matmul already checked it
             result_data = np.zeros((M, N), dtype=a.dtype)
 
             # Explicit nested loops - students can see exactly what's happening!
@@ -1200,8 +1266,8 @@ class MatMul(Function):
                     # Dot product of row i from A with column j from B
                     result_data[i, j] = np.dot(a[i, :], b[:, j])
         else:
-            # For batched operations (3D+), use np.matmul for correctness
-            # Students will understand this once they grasp the 2D case
+            # Anything other than 2D @ 2D (a 1D operand, or batched 3D+ inputs)
+            # goes to np.matmul. The mechanism is the same dot product per element.
             result_data = np.matmul(a, b)
 
         return result_data
