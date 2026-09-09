@@ -934,24 +934,30 @@ def explore_acceleration_with_profiler():
     print("\n🐢 BEFORE: Loop-based implementation")
     print("-" * 70)
 
+    # Both models do exactly the same arithmetic: one multiply and one add per
+    # (batch, in, out) triple. We count it here rather than calling
+    # profiler.count_flops, because that dispatches on the class name and these
+    # local classes are neither 'Linear' nor 'Sequential'. It would silently fall
+    # through to prod(input_shape) and report 4,096 instead of 524,288.
+    total_flops = 2 * batch_size * in_features * out_features
+
     # Measure slow model
     slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
-    slow_flops = profiler.count_flops(slow_model, (batch_size, in_features))
 
     print(f"   Latency: {slow_latency:.2f} ms")
-    print(f"   FLOPs: {slow_flops:,}")
-    print(f"   Throughput: {slow_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
+    print(f"   FLOPs: {total_flops:,}")
+    print(f"   Throughput: {total_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
 
     print("\n🚀 AFTER: Vectorized implementation")
     print("-" * 70)
 
-    # Measure fast model
+    # Measure fast model. Same FLOP count: the arithmetic is identical, only the
+    # execution differs. That is the whole point of the comparison.
     fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
-    fast_flops = profiler.count_flops(fast_model, (batch_size, in_features))
 
     print(f"   Latency: {fast_latency:.2f} ms")
-    print(f"   FLOPs: {fast_flops:,}")
-    print(f"   Throughput: {fast_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
+    print(f"   FLOPs: {total_flops:,}")
+    print(f"   Throughput: {total_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
 
     print("\n📈 ACCELERATION GAINS")
     print("=" * 70)
