@@ -14,14 +14,14 @@
 
 # %% [markdown]
 """
-# Module 07: Optimizers - Sophisticated Learning Algorithms
+# Module 07: Optimizers - Turning Gradients into Updates
 
-Welcome to Module 07! You'll build optimizers that enable neural networks to learn from gradients using sophisticated algorithms.
+Welcome to Module 07! You'll build the optimizers that turn the gradients Module 06 computes into parameter updates.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor with gradients (Modules 01-06)
-**You'll Build**: SGD, Adam, and AdamW optimizers with sophisticated momentum and adaptive learning
-**You'll Enable**: Modern optimization algorithms that power state-of-the-art neural networks
+**You'll Build**: SGD, Adam, and AdamW optimizers with momentum, per-parameter step sizes, and decoupled weight decay
+**You'll Enable**: The update rules Module 08's training loop and every later milestone will call
 
 **Connection Map**:
 ```
@@ -52,7 +52,7 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 - **Learning:** Complete optimization system for modern neural network training
 - **Production:** Proper organization like PyTorch's torch.optim with all optimization algorithms together
 - **Consistency:** All optimization logic and parameter updating in core.optimizers
-- **Integration:** Works seamlessly with gradients from Module 06 for complete training capability
+- **Integration:** Reads the gradients Module 06 writes into `param.grad`
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -61,20 +61,17 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 
 import numpy as np
 rng = np.random.default_rng(7)
-from typing import List, Union, Optional, Dict, Any
+from typing import List, Optional, Dict
 
-# Import Tensor from Module 01 (now with gradient support from Module 06)
 from tinytorch.core.tensor import Tensor
-
-# Enable autograd to add gradient tracking to Tensor
-# This module depends on Module 06 (Autograd) being available
-import tinytorch.core.autograd  # completes every operation with its backward half
+# Importing Module 06 completes every Tensor operation with its backward half,
+# which is what puts a gradient into param.grad for an optimizer to read.
+import tinytorch.core.autograd
 from tinytorch.core.autograd import method_of  # attach a method to a class, as in Module 06
 
 # Constants for optimizer defaults
 DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
 DEFAULT_LEARNING_RATE_ADAM = 0.001  # Default learning rate for Adam/AdamW
-DEFAULT_MOMENTUM = 0.9  # Default momentum for SGD
 DEFAULT_BETA1 = 0.9  # First moment decay rate for Adam
 DEFAULT_BETA2 = 0.999  # Second moment decay rate for Adam
 DEFAULT_EPS = 1e-8  # Small epsilon for numerical stability in Adam
@@ -158,7 +155,7 @@ Where:
 - `α` = step size (learning rate)
 - `direction` = where to step (gradient-based)
 
-But sophisticated optimizers do much more than basic gradient descent!
+The three optimizers below differ in how they choose `direction` and how they scale it.
 """
 
 # %% [markdown]
@@ -269,10 +266,9 @@ class Optimizer:
 
         APPROACH:
         1. Store parameters as a list for iteration
-        2. Validate that all parameters require gradients
-        3. Mark every parameter requires_grad=True; give it a grad attribute
+        2. Mark every parameter requires_grad=True; give it a grad attribute
            (set to None) only if it has none yet
-        4. Initialize step counter for algorithms that need it
+        3. Initialize step counter for algorithms that need it
 
         EXAMPLE:
         >>> linear = Linear(784, 128)
@@ -314,7 +310,7 @@ class Optimizer:
 
         EXAMPLE:
         >>> optimizer.zero_grad()  # Clears all gradients
-        >>> assert param.grad is None for param in optimizer.params
+        >>> assert all(param.grad is None for param in optimizer.params)
 
         WHY: Gradients accumulate by default, so we need to clear them between batches
         """
@@ -344,9 +340,10 @@ class Optimizer:
 """
 ### Gradient Extraction: Handling Tensor vs NumPy Gradients
 
-When autograd computes gradients, they can arrive as either a `Tensor` object
-(wrapping a NumPy array in `.data`) or as a raw NumPy array. Every optimizer
-needs to normalize this before doing math on the gradient.
+Module 06's `backward()` writes a bare NumPy array into `param.grad`. A gradient
+can also be assigned by hand as a `Tensor`, which is what the unit tests in this
+module do to check an update rule without running a forward and backward pass.
+Every optimizer normalizes the two shapes before doing math on the gradient.
 
 ```
 param.grad
@@ -361,15 +358,15 @@ all share the same extraction logic.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "extract-gradient", "solution": true}
-#| export
+#| exporti
 @method_of(Optimizer)
 def _extract_gradient(self, param: Tensor) -> np.ndarray:
     """
     Extract gradient data as a NumPy array from a parameter.
 
-    Gradients can be stored as either a Tensor (with .data attribute)
-    or as a raw NumPy array (from autograd). This helper normalizes
-    both cases to a plain NumPy array for optimizer math.
+    Module 06's backward() stores a raw NumPy array in param.grad; a gradient
+    set by hand may be a Tensor (with a .data attribute). This helper
+    normalizes both cases to a plain NumPy array for optimizer math.
 
     TODO: Return the gradient's underlying NumPy array
 
@@ -493,7 +490,7 @@ if __name__ == "__main__":
 r"""
 ## 🏗️ SGD: Stochastic Gradient Descent
 
-SGD is the foundation of neural network training. It implements the simple but powerful idea: "move in the direction opposite to the gradient."
+SGD is the foundation of neural network training. It implements one idea: "move in the direction opposite to the gradient."
 
 ### Why SGD Works
 
@@ -611,8 +608,8 @@ class SGD(Optimizer):
         """
         Check if this optimizer uses momentum.
 
-        This explicit API method replaces the need for hasattr() checks
-        in checkpointing code (Module 08 will call it).
+        Module 08's Trainer calls this before saving a checkpoint, to know
+        whether there is optimizer state to store.
 
         Returns:
             bool: True if momentum is enabled (momentum > 0), False otherwise
@@ -628,8 +625,8 @@ class SGD(Optimizer):
         """
         Get momentum buffers for checkpointing.
 
-        This explicit API method provides safe access to momentum buffers
-        without using hasattr(), making the API contract clear.
+        Module 08's Trainer stores the returned list in the checkpoint file.
+        The buffers are copied, so later steps do not alter the saved state.
 
         Returns:
             Optional[List]: List of momentum buffers if momentum is enabled,
@@ -650,8 +647,8 @@ class SGD(Optimizer):
         """
         Restore momentum buffers from checkpointing.
 
-        This explicit API method provides safe restoration of momentum state
-        without using hasattr().
+        Module 08's Trainer calls this when it resumes from a checkpoint, so a
+        resumed run continues with the velocity it had, not from zero.
 
         Args:
             state: List of momentum buffers or None
@@ -858,7 +855,7 @@ Step 1: m = 0.9*0 + 0.1*g    Step 1: m̂ = m / (1-0.9¹) = m / 0.1
        = 0.1*g (too small!)           = g (correct!)
 
 Step 2: m = 0.9*0.1*g + 0.1*g Step 2: m̂ = m / (1-0.9²) = m / 0.19
-       = 0.19*g (still small)         ≈ g (better!)
+       = 0.19*g (still small)         = g (exact again)
 ```
 
 **Key Insight:** Adam is like having an automatic transmission that adjusts gear ratios for each parameter individually.

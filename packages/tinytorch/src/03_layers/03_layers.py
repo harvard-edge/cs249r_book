@@ -20,7 +20,7 @@ Welcome to Module 03! You're about to build the fundamental building blocks that
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor class (Module 01) with all operations and activations (Module 02)
-**You'll Build**: Linear layers and Dropout regularization
+**You'll Build**: A Layer base class, Linear layers, Dropout regularization, and a Sequential container
 **You'll Enable**: Multi-layer neural networks, trainable parameters, and forward passes
 
 **Connection Map**:
@@ -34,7 +34,8 @@ By the end of this module, you will:
 1. Implement Linear layers with proper weight initialization
 2. Add Dropout for regularization during training
 3. Understand parameter management and counting
-4. Test individual layer components
+4. Compose layers into a network, first by hand and then with a Sequential container
+5. Test individual layer components
 
 Let's get started!
 
@@ -45,7 +46,7 @@ Let's get started!
 
 ```python
 # Final package structure:
-from tinytorch.core.layers import Linear, Dropout  # This module
+from tinytorch.core.layers import Layer, Linear, Dropout, Sequential  # This module
 from tinytorch.core.tensor import Tensor  # Module 01 - foundation
 from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 ```
@@ -74,11 +75,11 @@ rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.activations import ReLU, Sigmoid
 
-# Constants for weight initialization
+# Constant for weight initialization
 # Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
-# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both achieve stable gradients.
+# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both keep the output
+# variance of a layer close to its input variance.
 INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
-HE_SCALE_FACTOR = 2.0  # He initialization uses sqrt(2/fan_in) for ReLU
 
 # Constants for dropout
 DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
@@ -171,16 +172,16 @@ Memory usage: 4 bytes/param × 203,530 = ~795 KB for weights alone
 """
 ## 🏗️ Implementation: Building Layer Foundation
 
-Let's build our layer system step by step. We'll implement two essential layer types:
+Let's build our layer system step by step. We'll implement two essential layer types on top of a shared base class, then add a container that chains them:
 
 1. **Linear Layer** - The workhorse of neural networks
 2. **Dropout Layer** - Prevents overfitting
+3. **Sequential** - Chains layers so a network is one callable object
 
 ### Key Design Principles:
-- All methods defined INSIDE classes (no monkey-patching)
-- Forward methods return new tensors, preserving immutability
-- parameters() method enables optimizer integration
-- Gradient tracking is handled separately from layer definitions
+- Forward methods never modify the input in place; they return a Tensor computed from it
+- parameters() lists exactly the tensors a layer learns. Module 07 will add optimizers that update whatever this list returns
+- Gradient tracking is not the layer's job. Module 06 will add it to Tensor without changing these classes
 """
 
 # %% [markdown]
@@ -200,7 +201,10 @@ class Layer:
     - forward(x): Compute layer output
     - parameters(): Return list of trainable parameters
 
-    The __call__ method is provided to make layers callable.
+    The __call__ method is provided to make layers callable, and it forwards
+    any extra arguments (such as Dropout's training flag) to forward().
+    The default parameters() returns an empty list, which is right for any
+    layer without learnable weights.
     """
 
     def forward(self, x):
