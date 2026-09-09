@@ -374,6 +374,74 @@ def g_test_module_tail():
     return errs
 
 
+@gate("structure: __main__ runners only call names defined in earlier cells")
+def g_runner_order():
+    # A notebook executes top to bottom, so a `if __name__ == "__main__":` block
+    # may only use names already defined. Added 2026-09-08 after a cell move put
+    # module 13's create_causal_mask() below the test that calls it; the slow
+    # notebook gate caught it, this catches it in under a second.
+    errs = []
+    for _, name, py in module_files():
+        code = [b for h, b in cells(py.read_text()) if not h.startswith("# %% [markdown]")]
+        trees = []
+        for b in code:
+            try:
+                trees.append(ast.parse(b))
+            except SyntaxError:
+                trees.append(None)
+        def defs(tree):
+            out = set()
+            for n in tree.body:
+                if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+                    out.add(n.name)
+                elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                    out.update((a.asname or a.name).split(".")[0] for a in n.names)
+                elif isinstance(n, ast.Assign):
+                    out.update(t.id for t in n.targets if isinstance(t, ast.Name))
+            return out
+        all_defs = set().union(*(defs(t) for t in trees if t))
+        seen, bodies = set(), {}
+        for i, tree in enumerate(trees):
+            if tree is None:
+                continue
+            seen |= defs(tree)
+            for n in tree.body:
+                if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+                    bodies[n.name] = n
+            for n in tree.body:
+                if not (isinstance(n, ast.If) and "__main__" in ast.dump(n.test)):
+                    continue
+                # Follow calls transitively through plain functions: the runner
+                # calls a test, the test calls a helper; the helper must already
+                # exist. Classes are treated as leaves and names bound inside a
+                # function (arguments, local imports, assignments) are ignored.
+                def local_names(fn):
+                    out = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+                    for s in ast.walk(fn):
+                        if isinstance(s, (ast.Import, ast.ImportFrom)):
+                            out.update((a.asname or a.name).split(".")[0] for a in s.names)
+                        elif isinstance(s, ast.Name) and isinstance(s.ctx, ast.Store):
+                            out.add(s.id)
+                    return out
+                todo = [(n, set())]; visited = set(); bad = set()
+                while todo:
+                    node, local = todo.pop()
+                    for s in ast.walk(node):
+                        if not (isinstance(s, ast.Call) and isinstance(s.func, ast.Name)):
+                            continue
+                        callee = s.func.id
+                        if callee in local or callee not in all_defs:
+                            continue
+                        if callee not in seen:
+                            bad.add(callee)
+                        elif isinstance(bodies.get(callee), ast.FunctionDef) and callee not in visited:
+                            visited.add(callee)
+                            todo.append((bodies[callee], local_names(bodies[callee])))
+                for u in sorted(bad):
+                    errs.append(f"{name}: cell {i} runner reaches {u}(), defined in a later cell")
+    return errs
+
+
 @gate("pedagogy: docstring scaffold present on exercises (TODO/APPROACH/HINTS)")
 def g_scaffold():
     errs = []

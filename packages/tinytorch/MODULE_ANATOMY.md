@@ -267,7 +267,9 @@ are not relitigated one module at a time.
 - **Tests sit beside their code.** Module 20 had gathered its seven unit tests
   into a trailing "Unit Tests" section. They now follow the component they test,
   as in the other nineteen. Module 13's causal-mask helper moved from the front
-  matter into Implementation, next to the GPT class that uses it.
+  matter into Implementation, just above the TransformerBlock test that
+  first calls it (a first placement below that test broke the top-to-bottom
+  notebook run, which is why the runner-order gate now exists).
 - **One test emoji.** 🧪 marks every test heading and print. 🔬 had crept into
   two modules and the review checklist; it is gone from both.
 - **`###` headings carry no emoji** beyond the unit-test marker, so the notebook
@@ -283,12 +285,14 @@ are not relitigated one module at a time.
 ## 10. Checking a module
 
 ```bash
-python tools/release_check.py --fast          # 26 gates, under a minute
+python tools/release_check.py --fast          # 27 gates, under a minute
 python tests/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
 python narrative_book/tools/listings.py --check
 python tools/release_check.py                 # adds the notebook run and full pytest
 ```
 
+The two slow gates (the top-to-bottom notebook run and the full pytest)
+are part of the release, not optional: run the full command before tagging.
 The gate names say what they check. A new convention gets a new gate in the
 same file, with a dated comment saying which defect it was added to catch; every
 gate there corresponds to a real one.
