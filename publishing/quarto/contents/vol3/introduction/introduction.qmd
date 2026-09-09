@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Introduction {#sec-vol3-introduction}
@@ -274,17 +274,87 @@ $$P_{\text{success}}(N) \le p^N$$
 
 In real-world systems, the independence assumption is strictly optimistic: in practice, an erroneous intermediate action shifts the environment into an unfamiliar, corrupted state, causing conditional success probabilities to decay monotonically over time ($P(E_t \mid \text{Error}_{t-1}) \ll p$). Consequently, $p^N$ represents a strict theoretical upper bound on trajectory reliability.
 
-| Step Accuracy ($p$) | $N = 1$ | $N = 5$ | $N = 10$ | $N = 20$ | $N = 50$ |
-|:--------------------|:-------:|:-------:|:--------:|:--------:|:--------:|
-| **$p = 0.80$**      |  80.0%  |  32.8%  |  10.7%   |   1.2%   |  0.001%  |
-| **$p = 0.90$**      |  90.0%  |  59.0%  |  34.9%   |  12.2%   |  0.51%   |
-| **$p = 0.95$**      |  95.0%  |  77.4%  |  59.9%   |  35.8%   |  7.69%   |
+```{python}
+#| label: vol3-intro-trajectory-reliability
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | COMPOUNDING ERROR ACROSS A TRAJECTORY
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-trajectory-survival and the paragraphs that read it.
+# |
+# | Goal:    Evaluate the reliability bound of this section for a sweep of
+# |          single-step accuracies and horizon depths.
+# | Show:    Trajectory survival probability across the sweep, plus the failure
+# |          probability of a frontier-accuracy agent over a long horizon.
+# | How:     calc_trajectory_reliability raises the per-step success rate to the
+# |          horizon, which is the independence bound stated above the table.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+def _pct(ratio):
+    """Percent string carrying three significant digits at any magnitude."""
+    value = ratio * 100
+    if abs(value - round(value)) < 1e-9:
+        precision = 0
+    elif value >= 10:
+        precision = 1
+    elif value >= 0.1:
+        precision = 2
+    else:
+        precision = 4
+    return fmt_percent(ratio, precision=precision, style="symbol")
+
+class TrajectoryReliability:
+    # +-- 1. LOAD (Constants) --------------------
+    accuracies = (0.80, 0.90, 0.95)  # scenario: the per-step accuracies practitioners quote
+    horizons = (1, 5, 10, 20, 50)  # scenario: trajectory depths from one call to a SWE-bench task
+    frontier_accuracy = 0.99  # scenario: the accuracy scaling is asked to deliver
+    frontier_horizon = 100  # scenario: a long autonomous trajectory
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    survival = {}
+    for p in accuracies:
+        for n in horizons:
+            survival[(p, n)] = calc_trajectory_reliability(p, n)
+    frontier_failure = 1 - calc_trajectory_reliability(frontier_accuracy, frontier_horizon)
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(
+        abs(survival[(0.95, 20)] - 0.3585) < 1e-3,
+        f"A 95 percent agent over 20 steps should survive about 35.8 percent of the time, got {survival[(0.95, 20)]}",
+    )
+    check(survival[(0.80, 50)] < 1e-4, f"An 80 percent agent over 50 steps should be vanishingly unlikely, got {survival[(0.80, 50)]}")
+    check(0.63 < frontier_failure < 0.64, f"A 99 percent agent over 100 steps should fail about 63 percent of the time, got {frontier_failure}")
+    check(survival[(0.95, 50)] < survival[(0.95, 20)] < survival[(0.95, 5)], "Survival must fall monotonically as the horizon grows")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    rows = {}
+    for p in accuracies:
+        cells = []
+        for n in horizons:
+            cells.append(_pct(survival[(p, n)]))
+        rows[p] = cells
+    p80_n1_str, p80_n5_str, p80_n10_str, p80_n20_str, p80_n50_str = rows[0.80]
+    p90_n1_str, p90_n5_str, p90_n10_str, p90_n20_str, p90_n50_str = rows[0.90]
+    p95_n1_str, p95_n5_str, p95_n10_str, p95_n20_str, p95_n50_str = rows[0.95]
+    p95_n20_prose_str = fmt_percent(survival[(0.95, 20)], precision=1, style="prose")
+    p95_n50_prose_str = fmt_percent(survival[(0.95, 50)], precision=2, style="prose")
+    frontier_failure_prose_str = fmt_percent(frontier_failure, precision=1, style="prose")
+    frontier_accuracy_prose_str = fmt_percent(frontier_accuracy, precision=0, style="prose")
+    frontier_horizon_str = fmt_int(frontier_horizon)
+```
+
+| Step Accuracy ($p$) |                   $N = 1$                   |                   $N = 5$                   |                   $N = 10$                   |                   $N = 20$                   |                   $N = 50$                   |
+|:--------------------|:-------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
+| **$p = 0.80$**      | `{python} TrajectoryReliability.p80_n1_str` | `{python} TrajectoryReliability.p80_n5_str` | `{python} TrajectoryReliability.p80_n10_str` | `{python} TrajectoryReliability.p80_n20_str` | `{python} TrajectoryReliability.p80_n50_str` |
+| **$p = 0.90$**      | `{python} TrajectoryReliability.p90_n1_str` | `{python} TrajectoryReliability.p90_n5_str` | `{python} TrajectoryReliability.p90_n10_str` | `{python} TrajectoryReliability.p90_n20_str` | `{python} TrajectoryReliability.p90_n50_str` |
+| **$p = 0.95$**      | `{python} TrajectoryReliability.p95_n1_str` | `{python} TrajectoryReliability.p95_n5_str` | `{python} TrajectoryReliability.p95_n10_str` | `{python} TrajectoryReliability.p95_n20_str` | `{python} TrajectoryReliability.p95_n50_str` |
 : **Trajectory Success Probability under Compounding Error**: Joint survival probability $P_{\text{success}} \le p^N$ across single-step accuracies and horizon depths. {#tbl-trajectory-survival}
 
-As demonstrated in @tbl-trajectory-survival, even a state-of-the-art model with an extraordinary $95\%$ single-step accuracy collapses to a mere $35.8\%$ completion rate across a modest 20-step trajectory. When the horizon reaches 50 steps—typical for complex software engineering tasks in SWE-bench [@jimenez2024swebench]—the trajectory success rate drops to a catastrophic $7.69\%$.
+As demonstrated in @tbl-trajectory-survival, even a state-of-the-art model with an extraordinary 95 percent single-step accuracy collapses to a mere `{python} TrajectoryReliability.p95_n20_prose_str` completion rate across a modest 20-step trajectory. When the horizon reaches 50 steps—typical for complex software engineering tasks in SWE-bench [@jimenez2024swebench]—the trajectory success rate drops to a catastrophic `{python} TrajectoryReliability.p95_n50_prose_str`.
 
 ### Why pretraining model scale cannot solve the reliability wall
-A widespread industry fallacy asserts that scaling foundation model parameters will eventually eliminate this problem. The empirical mathematics of scaling laws disprove this hypothesis. According to neural scaling laws [@kaplan2020scaling], model cross-entropy loss $\mathcal{L}$ scales as a power law with compute $C$: $\mathcal{L}(C) \propto C^{-\alpha}$ (where $\alpha \approx 0.05\text{--}0.08$). Improving single-step accuracy from $95\%$ to $99.9\%$ requires astronomical, economically prohibitive investments in pretraining compute. Yet even at $p = 0.99$, a 100-step trajectory still suffers a $63.4\%$ probability of total failure.
+A widespread industry fallacy asserts that scaling foundation model parameters will eventually eliminate this problem. The empirical mathematics of scaling laws disprove this hypothesis. According to neural scaling laws [@kaplan2020scaling], model cross-entropy loss $\mathcal{L}$ scales as a power law with compute $C$: $\mathcal{L}(C) \propto C^{-\alpha}$ (where $\alpha \approx 0.05\text{--}0.08$). Improving single-step accuracy from 95 percent to 99.9 percent requires astronomical, economically prohibitive investments in pretraining compute. Yet even at `{python} TrajectoryReliability.frontier_accuracy_prose_str` per-step accuracy, a `{python} TrajectoryReliability.frontier_horizon_str`-step trajectory still suffers a `{python} TrajectoryReliability.frontier_failure_prose_str` probability of total failure.
 
 The conclusion is inescapable: **The Reliability Wall cannot be breached by model pretraining scale alone.** Trajectory reliability must be engineered at runtime through systems architecture. The runtime must incorporate:
 
