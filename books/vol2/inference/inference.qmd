@@ -2108,14 +2108,7 @@ PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts 
 ![](images/svg/kv-cache-fragmentation.svg)
 :::
 
-PagedAttention provides four capacity benefits:
-
-- **Internal fragmentation**: It allocates only the pages needed for actual tokens.
-- **External fragmentation**: Any free page can be used by any sequence.
-- **Dynamic growth**: Sequences can grow without preallocation.
-- **Prefix sharing**: Common prefixes can share physical pages.
-
-Together, these properties turn KV cache capacity into a schedulable resource rather than a fixed per-request reservation.
+PagedAttention provides four direct capacity benefits. By allocating pages only as tokens materialize, it eliminates internal fragmentation. By allowing any free page to serve any active sequence, it abolishes external fragmentation. Sequences can grow dynamically without worst-case reservation, and requests sharing identical prefixes map directly to the same physical pages. Together, these properties turn KV cache capacity into a schedulable resource rather than a fixed per-request reservation.
 
 ::: {#exmp-inference-pagedattention-implementation-details .callout-example title="PagedAttention implementation details"}
 
@@ -3121,13 +3114,7 @@ Expert parallelism distributes experts across devices, with each device hosting 
 
 :::
 
-The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing). This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
-
-- **Auxiliary Loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
-- **Capacity Factor**\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-- **Expert Buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
-
-These mechanisms keep expert utilization balanced enough that routing remains a throughput advantage instead of a new straggler source.
+The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing). This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Systems counter this imbalance across both training and serving. An auxiliary loss\index{Auxiliary Loss} penalizes uneven expert assignment during training by rewarding uniform routing probabilities. At runtime, enforcing an expert capacity factor\index{Capacity Factor} caps the maximum tokens an individual expert accepts per batch (typically 1.25$\times$ its fair share), dropping or rerouting the excess. Finally, expert buffering\index{Expert Buffering} queues overflow tokens across subsequent iterations, smoothing out transient load spikes at the cost of modest latency variance. Together, these mechanisms keep expert utilization balanced enough that dynamic routing remains a throughput advantage rather than a straggler source.
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
@@ -3304,24 +3291,17 @@ class MetaEmbeddingScaleCheck:
     tp_parallelism_str = fmt_int(8, commas=False)
 ```
 
-For the Archetype B recommendation workload, Meta's infrastructure demonstrates embedding sharding at extreme scale:
+For the Archetype B recommendation workload, Meta's infrastructure demonstrates embedding sharding at extreme scale, encompassing over 100 TB of embedding tables across 10+ trillion unique entities (dimension 128–256) distributed over `{python} MetaEmbeddingScaleCheck.n_shards_str`+ server shards.
 
-**Scale**:
+These figures describe infrastructure-level totals, not one dense resident table in which every unique entity has a 128--256-dimensional vector. A dense INT8 table with `{python} MetaEmbeddingScaleCheck.entity_count_t_str` trillion entities and `{python} MetaEmbeddingScaleCheck.min_dimension_str` dimensions would require at least `{python} MetaEmbeddingScaleCheck.dense_int8_tb_str`, while `{python} MetaEmbeddingScaleCheck.storage_tb_str` across the same entity count averages only `{python} MetaEmbeddingScaleCheck.effective_bytes_per_entity_str` bytes per entity. The production system therefore relies on compression, tiering, cold storage, and uneven entity coverage rather than a single fully materialized dense matrix.
 
-- Embedding tables: 100+ TB total
-- Unique entities: 10+ trillion
-- Embedding dimension: 128–256
-- Shards: `{python} MetaEmbeddingScaleCheck.n_shards_str`+ servers
+To balance memory footprint against extreme access skews, the serving layer tiers embeddings by popularity:
 
-These scale bullets describe infrastructure-level totals, not one dense resident table in which every unique entity has a 128--256-dimensional vector. A dense INT8 table with `{python} MetaEmbeddingScaleCheck.entity_count_t_str` trillion entities and `{python} MetaEmbeddingScaleCheck.min_dimension_str` dimensions would require at least `{python} MetaEmbeddingScaleCheck.dense_int8_tb_str`, while `{python} MetaEmbeddingScaleCheck.storage_tb_str` across the same entity count averages only `{python} MetaEmbeddingScaleCheck.effective_bytes_per_entity_str` bytes per entity. The production system therefore relies on compression, tiering, cold storage, and uneven entity coverage rather than a single fully materialized dense matrix.
+- **Hot embeddings** (top 1 percent by access frequency): Replicated across memory on all shards to eliminate hot spots.
+- **Warm embeddings** (next `{python} MetaEmbeddingScaleCheck.warm_pct_str`): Column-sharded with `{python} MetaEmbeddingScaleCheck.tp_parallelism_str`-way parallelism across memory.
+- **Cold embeddings** (remaining `{python} MetaEmbeddingScaleCheck.cold_pct_str`): Row-sharded with consistent hashing across NVMe flash storage.
 
-**Sharding strategy**:
-
-- **Hot embeddings** (top 1 percent by access frequency): Replicated across all shards
-- **Warm embeddings** (next `{python} MetaEmbeddingScaleCheck.warm_pct_str`): Column-sharded with `{python} MetaEmbeddingScaleCheck.tp_parallelism_str`-way parallelism
-- **Cold embeddings** (remaining `{python} MetaEmbeddingScaleCheck.cold_pct_str`): Row-sharded with consistent hashing
-
-Each inference request requires approximately `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` embedding lookups. Without optimization, this would require `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` network round trips. Instead, the system applies several optimizations. Batch accumulation collects lookups for 1 ms. Lookup deduplication removes duplicate entities across requests. Shard-aware batching groups lookups by destination shard. Parallel dispatch sends batched requests to all shards simultaneously. Streaming assembly reconstructs embeddings as responses arrive.
+Each inference request requires approximately `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` embedding lookups. Executed naively, these would incur `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` sequential network round trips, saturating the network stack and violating latency budgets. Instead, the pipeline batches and coordinates lookups: the engine accumulates requests across a 1 ms window, deduplicates redundant entity lookups, groups keys by destination shard, and dispatches queries concurrently. As responses stream back, the assembly layer reconstructs feature vectors in parallel with downstream scoring.
 
 The order-of-magnitude effect of these optimizations on round-trip count, lookup latency, and bandwidth appears in @tbl-inference-meta-embedding-perf:
 
@@ -3570,14 +3550,7 @@ Archetype B (DLRM at Scale) relies on $P_{99} \le 100\text{ ms}$ performance bou
 
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
-Evaluation therefore needs four signals that cover both tail latency and load balance:
-
-- **Maximum queue length**: This determines worst-case latency.
-- **Load variance**: This measures how evenly work is distributed.
-- **Utilization spread**: This shows whether some replicas are idle while others are saturated.
-- **Decision overhead**: This captures the cost of making the routing choice.
-
-A policy that optimizes only one of these signals can look healthy in aggregate while sending unlucky requests into the tail.
+Evaluating any load-balancing policy therefore requires four complementary signals that balance tail latency against fleet utilization. Maximum queue length dictates worst-case latency, while load variance quantifies how evenly work distributes across replicas. In parallel, utilization spread exposes whether idle capacity coexists with saturated nodes, and decision overhead bounds the routing delay added by the load balancer itself. A policy that optimizes only one of these signals can appear healthy in aggregate while quietly pushing unlucky requests deep into the tail.
 
 ### Round-robin and random assignment {#sec-inference-scale-roundrobin-random-assignment-f374}
 
@@ -3906,13 +3879,7 @@ The **Circuit Breaker Pattern**\index{Circuit Breaker!circuit breaker pattern}[^
 
 Backpressure propagation complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
 
-A saturated LLM fleet under KV cache pressure has three relief valves that generic backpressure cannot provide:
-
-- **Context eviction**: Evict older conversational turns from the KV cache to reduce context window and free memory.
-- **Speculative decoding**: Disable speculative decoding to reclaim the GPU memory its draft model occupies.
-- **Fallback routing**: Route new requests to a smaller quantized fallback model until the primary queue drains.
-
-Each response trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct trade-off depends on the application, a real-time assistant tolerates context truncation better than silent quality degradation.
+When an LLM fleet reaches memory saturation under intense KV cache pressure, generic backpressure is often insufficient. In response, serving engines invoke three specialized relief valves before dropping traffic outright: evicting older conversational turns from the KV cache to shrink active context windows, disabling speculative decoding to reclaim the GPU memory occupied by draft models, or shedding load by rerouting incoming prompts to smaller, quantized fallback models until primary queues drain. Each degradation mechanism trades output quality or latency for continued availability, which users typically prefer over outright request rejection. The system designer must specify which degradation modes activate at each pressure tier; an interactive assistant, for instance, tolerates context truncation far better than silent quality degradation.
 
 ```{python}
 #| echo: false
@@ -4362,7 +4329,7 @@ The two paths in @fig-edge-cache-routing highlight the order-of-magnitude latenc
 
 : **Edge Cache Hit Rates by Workload**: Cache effectiveness depends almost entirely on request repeatability. Autocomplete and FAQ workloads have high prefix overlap and benefit dramatically; open-ended chat has near-unique inputs and barely benefits. The hit-rate range determines whether edge caching is worth the operational complexity for a given workload. {#tbl-edge-cache-hit-rates}
 
-Semantic caching[^fn-semantic-cache-tradeoff] (caching based on embedding similarity rather than exact match) can improve hit rates for open-ended workloads.
+For open-ended conversational workloads whose prompts lack exact lexical overlap, semantic caching[^fn-semantic-cache-tradeoff]—matching queries in embedding space rather than on exact syntax—can partially recover hit rates, though at the expense of dedicated vector lookups and potential false-positive retrievals.
 
 [^fn-semantic-cache-tradeoff]: [offset=-10mm] **Semantic Caching**\index{Semantic Caching!trade-off}: Returns cached responses for queries that are embedding-similar rather than string-identical, requiring a vector database lookup per request. The trade-off: higher hit rates (potentially 2--3$\times$ for open-ended workloads) at the cost of added lookup latency (1--5 ms) and the risk of incorrect cache hits when semantically similar queries require different answers. Setting the similarity threshold is a precision-recall trade-off with direct impact on response correctness.
 
@@ -4442,9 +4409,7 @@ def route_batch_request(request):
 
 :::
 
-Time-of-day routing can reduce costs by 20--40 percent for batch workloads while maintaining SLOs for interactive traffic.
-
-Scaling global infrastructure aggressively is highly effective, but it is also exceptionally expensive. To further bend the cost curve of large deployments, system designers alter the model's fundamental numerical representation to execute faster and consume less memory through quantization.
+Time-of-day routing can reduce costs by 20--40 percent for batch workloads while preserving tight SLOs for interactive traffic. Yet scaling and routing across global infrastructure remains capital-intensive: multi-region replication multiplies hardware footprints across every deployment zone. To bend the serving cost curve at its physical foundation, systems must alter the model's underlying numerical representation, compressing weights and activations so they execute faster and demand fewer accelerators through quantization.
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
