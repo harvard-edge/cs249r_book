@@ -103,6 +103,8 @@ For a sequence of context length $L$, the total KV cache memory consumed by a si
 
 $$M_{\text{KV}}(L) = L \times S_{\text{token}} = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot L$$ {#eq-vol3-vm-total-kv-footprint}
 
+To build physical intuition, consider how this footprint accumulates during an agent's execution. Every time the agent generates a single token, it must cache a Key vector and a Value vector across every single transformer layer. For a standard Multi-Head Attention model, this requires storing $2 \times b \times d_{\text{model}}$ bytes per layer. When multiplied across dozens of layers, caching just one token can consume over a megabyte of physical silicon. As the agent's context expands to tens of thousands of tokens, this volatile memory footprint rapidly eclipses the static model weights, making efficient allocation the absolute bottleneck for agent concurrency.
+
 ### Attention Geometries: MHA, MQA, GQA, and MLA
 
 As context windows expanded from $4\text{k}$ to $128\text{k}$ and $1\text{M}$ tokens to accommodate dense agent scratchpads and codebases, standard MHA became a severe memory bandwidth and capacity bottleneck. Modern models employ architectural variants that alter the KV tensor layout:
@@ -312,7 +314,7 @@ During the generation phase, the model emits one token at a time. The engine app
 PagedAttention fundamentally alters the memory efficiency equation:
 
 1. **Elimination of External Fragmentation:** Because all physical blocks share an identical fixed size $B$, any free block in HBM can satisfy any allocation request from any agent. Memory allocation is reduced to managing a simple free-list stack or bitmask. Memory compactions, defragmentation pauses, and contiguous allocation failures are mathematically impossible.
-2. **Bounding Internal Fragmentation:** Internal fragmentation is restricted strictly to the final block of an active sequence. For block size $B$, the expected internal waste per agent sequence is:
+2. **Bounding Internal Fragmentation:** Internal fragmentation is restricted strictly to the final block of an active sequence. Imagine an agent generates a trajectory of 35 tokens, and the system uses a block size of $B = 16$. The first 32 tokens perfectly fill two physical blocks (16 tokens each) with zero wasted space. The remaining 3 tokens spill into a third physical block. This third block reserves space for 16 tokens but only holds 3, resulting in 13 empty token slots of internal fragmentation. Because this waste only ever occurs in the single, final, partially-filled block of a sequence, it is mathematically bounded. For block size $B$, the expected internal waste per agent sequence is:
    $$\mathbb{E}[\text{Waste}_{\text{internal}}] = \frac{B - 1}{2} \times S_{\text{token}}$$
    For $B = 16$ on Llama-3-70B ($S_{\text{token}} = 160\text{ KB}$), the expected waste per agent is only:
    $$\mathbb{E}[\text{Waste}] = 7.5 \times 160\text{ KB} \approx 1.20\text{ MB}$$
@@ -399,7 +401,7 @@ When an agent submits a prompt $X = (x_0, x_1, \dots, x_{N-1})$ to the serving r
 1. **Prefix Matching (Lookup):** The scheduler traverses the Radix tree from the root node, comparing the prompt tokens $X$ against edge labels. Traversal continues until the first token mismatch or until prompt tokens are exhausted. Let the longest matched prefix have length $M \le N$.
    - If $M > 0$, the scheduler reuses all physical blocks associated with the matched path $(0 \dots M-1)$. No prefill computation is executed for these $M$ tokens.
 2. **Chunked Prefill:** The engine computes prefill activations *only* for the remaining suffix tokens $(x_M, \dots, x_{N-1})$. The prefill kernel processes this chunk in parallel, allocating fresh physical blocks from the free pool.
-3. **Tree Insertion and Edge Splitting:** If the matched path terminates in the middle of an edge label, the engine splits the edge: a new internal node is created at the divergence point, the existing edge is shortened, and a new child branch is inserted for the new suffix. The newly allocated physical blocks are attached to the new leaf node.
+3. **Tree Insertion and Edge Splitting:** If the matched path terminates in the middle of an existing edge, the Radix tree dynamically splits that edge to accommodate the divergence. The original node is split at the exact token where the new sequence diverges from the cached sequence. The shared prefix becomes a parent node, pointing to physical blocks that are now shared via reference counting. Two new child edges are then created: one preserving the remainder of the original sequence, and one for the newly generated suffix. The newly allocated physical blocks for the suffix are attached to the new leaf node. This edge-splitting mechanism ensures that any future agents sharing either the parent prefix or the divergent branches can match exactly the tokens they need, enabling zero-overhead prefix sharing across complex branching search trees without manual cache management.
 
 ### Reference Counting and LRU Eviction
 

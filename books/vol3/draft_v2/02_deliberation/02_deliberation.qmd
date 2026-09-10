@@ -378,13 +378,13 @@ where:
 The exploration bonus $c_{\text{puct}} P(s, a) \frac{\sqrt{N(s)}}{1 + N(s, a)}$ prioritizes rarely visited branches with high policy priors, preventing premature convergence on suboptimal actions.
 
 #### Phase 2: Expansion
-When selection reaches a non-terminal leaf node $s_L$, the agent expands the node. The foundation model $\pi_\theta$ generates $K$ candidate tool actions or reasoning steps, instantiating new child vertices in the tree.
+When selection reaches a non-terminal leaf node $s_L$, the agent expands the node. The foundation model $\pi_\theta$ generates $K$ candidate tool actions or reasoning steps, instantiating new child vertices in the tree. To build intuition, imagine an agent tasked with optimizing a slow SQL query. At node $s_L$, the agent realizes the current query plan uses a nested loop join. The policy network generates three candidate actions: adding a composite index, rewriting the join as a hash join, or partitioning the table. These three actions become newly expanded child vertices waiting for evaluation.
 
 #### Phase 3: Simulation (Evaluation)
-To evaluate newly expanded node $s'$, the system estimates its future expected value $V(s')$. In classical games, this was computed via random rollouts to terminal states. In agentic systems, random rollouts are computationally prohibitive and statistically noisy. Production runtimes use two alternative evaluators:
+To evaluate newly expanded node $s'$, the system estimates its future expected value $V(s')$. In classical board games, this was computed via random rollouts: the system would play completely random moves from $s'$ until the game ended, averaging the wins and losses to guess the node's strength. In agentic systems, random rollouts are computationally prohibitive and statistically meaningless—a random sequence of bash commands will almost never successfully configure a web server. Instead, production runtimes use two alternative evaluators to predict the branch's viability without executing it to completion:
 
-*   **Value Network Head:** A learned value network $V_\phi(s')$ computes a scalar expected success probability in a single forward pass.
-*   **Truncated Fast Rollout:** A compact draft model executes a shallow 2-step rollout evaluated by a deterministic compiler or linter oracle.
+*   **Value Network Head:** A learned value network $V_\phi(s')$ computes a scalar expected success probability in a single forward pass, essentially pattern-matching the current state against known successful trajectories.
+*   **Truncated Fast Rollout:** A compact draft model executes a shallow, tightly bounded rollout (e.g., 2 steps) evaluated by a deterministic compiler or linter oracle, providing a cheap structural check before committing heavy compute to the branch.
 
 #### Phase 4: Backpropagation
 The estimated value $V(s')$ is recursively propagated back up the ancestral path to the root. For every visited edge $(s, a)$ along the path:
@@ -463,7 +463,7 @@ Figure 2.6 (@fig-vol3-deliberation-compute-scaling) demonstrates this Pareto fro
 
 In any tree search algorithm, search efficacy is strictly bounded by the fidelity of the evaluation oracle. Expanding thousands of reasoning nodes is useless if the system cannot accurately discriminate between sound derivations and plausible hallucinations.
 
-Every invocation of an evaluation oracle consumes computational resources, token budget, and wall-clock latency. We formalize the **Verification Tax**\index{Verification Tax}[^fn-verification-tax] ($C_{\text{ver}}$) as the total compute overhead invested in grading candidate states:
+Every invocation of an evaluation oracle consumes computational resources, token budget, and wall-clock latency. This is not just a theoretical inefficiency; it is a hard physical constraint on execution speed. If evaluating a node requires spinning up a Docker container to run a 15-second test suite, the search algorithm is physically blocked from expanding the tree until that verification completes. We formalize this inescapable overhead as the **Verification Tax**\index{Verification Tax}[^fn-verification-tax] ($C_{\text{ver}}$), representing the total compute and latency invested in grading candidate states:
 $$
 C_{\text{total}} = \sum_{v \in \mathcal{V}} C_{\text{gen}}(v) + \sum_{v \in \mathcal{V}} C_{\text{ver}}(v)
 $$
@@ -619,7 +619,7 @@ Compilers, linters, unit tests, and formal theorem provers (e.g., Lean, Z3).
 Neural classifiers trained on step-by-step annotations to grade intermediate natural language reasoning steps ($r_{\text{PRM}} \in [-1, 1]$) [@lightman2023let].
 *   **Strengths:** Dense step-level feedback; grades natural language thoughts and incomplete derivations where deterministic compilers cannot run.
 *   **Failure Modes:**
-    *   **False Positives (Reward Hacking):** Assigning high scores to confident, plausible-sounding, but mathematically false statements. Under high search budgets ($N \gg 100$), search algorithms ruthlessly exploit these blind spots (Goodhart's Law).
+    *   **False Positives (Reward Hacking):** Assigning high scores to confident, plausible-sounding, but mathematically false statements. Under high search budgets ($N \gg 100$), search algorithms ruthlessly exploit these blind spots. This represents a catastrophic manifestation of Goodhart's Law: when a learned metric becomes the target of a high-capacity search algorithm, the metric ceases to be a good measure. Because the PRM is a neural network mapping high-dimensional text to a scalar, its decision boundary contains adversarial pockets. As the search algorithm samples thousands of candidates, it inevitably discovers and selects these adversarial pockets—such as injecting academic jargon or formatting a fundamentally broken equation so beautifully that the PRM assigns it a perfect score.
     *   **False Negatives (Premature Pruning):** Penalizing unconventional or creative reasoning paths, killing viable solutions before they mature.
 
 Table 2.5 (@tbl-vol3-deliberation-verifier-taxonomy) formalizes the architectural taxonomy of deliberation verifiers, contrasting deterministic oracles, learned process and outcome models, and human supervisory gates across their operational and systems dimensions:
