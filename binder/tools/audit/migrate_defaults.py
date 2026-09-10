@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         _REPO / "books",
         _REPO / "book/labs",
         _REPO / "labs",
-        _REPO / "mlsysim/tests",
+        _REPO / "packages/mlsysim/tests",
     ]
     changed = 0
     for root in roots:

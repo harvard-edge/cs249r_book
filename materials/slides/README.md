@@ -16,7 +16,7 @@ Beamer slide decks for the ML Systems textbook. One deck per chapter, ready to d
 ## Quick Start
 
 ```bash
-cd slides/vol1/01_introduction
+cd materials/slides/vol1/01_introduction
 xelatex 01_introduction.tex   # Compile (run twice for navigation)
 ```
 

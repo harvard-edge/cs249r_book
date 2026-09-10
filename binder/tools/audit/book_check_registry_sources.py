@@ -78,7 +78,7 @@ LEGACY_IMPORT_NAMES = frozenset(
     }
 )
 
-# Mirror mlsysim/tests/test_constants_allowlist.py — names belong in registries.
+# Mirror packages/mlsysim/tests/test_constants_allowlist.py — names belong in registries.
 FORBIDDEN_NAME_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^(H100|A100|V100|B200|H200|MI300X|T4|TPU|JETSON|ESP32|DGX)_"),
     re.compile(r"^NVLINK_"),

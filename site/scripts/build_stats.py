@@ -148,7 +148,7 @@ def tracked_files(*pathspecs: str) -> list[str]:
     """Files git tracks under the given paths.
 
     Counting tracked files rather than walking the filesystem is deliberate.
-    Several generated trees (tinytorch/modules/, every _build/) exist in a
+    Several generated trees (packages/tinytorch/modules/, every _build/) exist in a
     working checkout but are gitignored, so a filesystem walk gives one answer
     locally and a different one in CI's fresh clone. git ls-files is the only
     view both environments share.
@@ -166,23 +166,23 @@ def tracked_files(*pathspecs: str) -> list[str]:
 
 def count_slide_decks() -> int:
     """One Beamer .tex per chapter deck across both volumes."""
-    return sum(1 for f in tracked_files("slides/vol1", "slides/vol2")
+    return sum(1 for f in tracked_files("materials/slides/vol1", "materials/slides/vol2")
                if f.endswith(".tex"))
 
 
 def count_slide_svgs() -> int:
-    return sum(1 for f in tracked_files("slides/vol1", "slides/vol2")
+    return sum(1 for f in tracked_files("materials/slides/vol1", "materials/slides/vol2")
                if f.endswith(".svg"))
 
 
 def count_tinytorch_modules() -> int:
-    """Counted from tinytorch/quarto/modules/NN_*.qmd.
+    """Counted from packages/tinytorch/quarto/modules/NN_*.qmd.
 
-    Not from tinytorch/modules/, which .gitignore excludes because nbdev
+    Not from packages/tinytorch/modules/, which .gitignore excludes because nbdev
     regenerates it from src/. That directory is populated locally and empty in
     CI, which would silently publish "0 progressive modules".
     """
-    return sum(1 for f in tracked_files("tinytorch/quarto/modules")
+    return sum(1 for f in tracked_files("packages/tinytorch/quarto/modules")
                if re.search(r"/\d{2}_[^/]+\.qmd$", f))
 
 

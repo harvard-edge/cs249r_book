@@ -977,7 +977,7 @@ class BuildCommand:
         # globally installed editable checkout.
         env = os.environ.copy()
         root_dir = str(self.config_manager.root_dir.resolve())
-        mlsysim_dir = str((self.config_manager.root_dir / "mlsysim").resolve())
+        mlsysim_dir = str((self.config_manager.root_dir / "packages" / "mlsysim").resolve())
         current_pythonpath = env.get("PYTHONPATH", "")
         local_pythonpath = f"{root_dir}:{mlsysim_dir}"
         if current_pythonpath:

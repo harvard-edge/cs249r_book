@@ -128,7 +128,7 @@ automate the checklist; until then, apply this contract in review.
 - `./binder/binder check code --scope lego-prose-literals` — walkthrough prose must not hardcode computed operands
 - `./binder/binder check refs --scope inline-python` — chapter exec validation
 - `binder/tools/audit/book_check_registry_sources.py` — legacy alias / constant import gate
-- `mlsysim/tests/test_constants_allowlist.py` — CI lock on `constants.py` surface
+- `packages/mlsysim/tests/test_constants_allowlist.py` — CI lock on `constants.py` surface
 
 ## Audit runbook (last-minute cleanup)
 
@@ -137,7 +137,7 @@ Use this pass before chapter sign-off or pre-push `/precheck`.
 ### Phase 0 — Inventory
 
 ```bash
-export PYTHONPATH=mlsysim
+export PYTHONPATH=packages/mlsysim
 python3 binder/tools/audit/lego_focal_verify.py books/vol1 books/vol2
 python3 binder/tools/audit/fmt/audit_fmt_usage.py --root books
 python3 binder/tools/audit/fmt/fmt_prose_contract.py --root books
@@ -177,7 +177,7 @@ Every `*_str` output must match its formatter (see `.claude/rules/lego-units.md`
 ### Phase 3 — Prose preview (after each fix batch)
 
 ```bash
-PYTHONPATH=mlsysim python3 binder/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
+PYTHONPATH=packages/mlsysim python3 binder/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
 ```
 
 **Precision guard triage** (when exec fails with `Formatting Precision Error`):
@@ -199,7 +199,7 @@ precision 1. Agent copy: `.claude/rules/lego-verify.md`.
 ```bash
 python3 binder/tools/audit/chapter_html_verify.py --vol1 training   # build + full lane
 python3 binder/tools/audit/chapter_html_verify.py --report
-PYTHONPATH=mlsysim python3 binder/tools/audit/fmt/audit_lego_html.py
+PYTHONPATH=packages/mlsysim python3 binder/tools/audit/fmt/audit_lego_html.py
 ```
 
 Do not commit truncated `books/config/_quarto-html-vol*.yml` after binder

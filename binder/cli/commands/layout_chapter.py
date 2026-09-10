@@ -56,7 +56,7 @@ def _local_render_env(config_manager: Any) -> dict[str, str]:
     """Return an environment that imports Python sources from this worktree."""
     env = os.environ.copy()
     root_dir = Path(config_manager.root_dir).resolve()
-    local_paths = [str(root_dir), str((root_dir / "mlsysim").resolve())]
+    local_paths = [str(root_dir), str((root_dir / "packages" / "mlsysim").resolve())]
     current_pythonpath = env.get("PYTHONPATH")
     if current_pythonpath:
         local_paths.append(current_pythonpath)

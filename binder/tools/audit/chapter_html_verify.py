@@ -283,7 +283,7 @@ def _lego_focal(qmd: Path) -> tuple[bool, str]:
 
 
 def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
-    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "mlsysim"), "MPLBACKEND": "Agg"}
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "packages" / "mlsysim"), "MPLBACKEND": "Agg"}
     try:
         proc = subprocess.run(
             [sys.executable, "-W", "ignore::UserWarning",

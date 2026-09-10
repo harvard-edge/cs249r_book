@@ -1,5 +1,5 @@
 # =============================================================================
-# mlsysim/tutorial/Makefile — Build ISCA tutorial slides
+# packages/mlsysim/tutorial/Makefile — Build ISCA tutorial slides
 # =============================================================================
 # Usage:
 #   make              Build the full tutorial deck (PDF)
@@ -35,8 +35,8 @@ RELATED := $(SLIDES_DIR)/related_work.tex
 SVGS := $(wildcard $(SVG_DIR)/*.svg)
 PDFS := $(patsubst $(SVG_DIR)/%.svg,$(PDF_IMG_DIR)/%.pdf,$(SVGS))
 
-# LaTeX engine — pdflatex + helvet/courier, matching slides/Makefile
-# and mlsysim/paper. Was xelatex+fontspec, which had silent-fallback
+# LaTeX engine — pdflatex + helvet/courier, matching materials/slides/Makefile
+# and packages/mlsysim/paper. Was xelatex+fontspec, which had silent-fallback
 # rendering issues on Ubuntu CI (see 2026-05-12 publish drama).
 LATEX := pdflatex
 LATEX_FLAGS := -interaction=nonstopmode -halt-on-error -output-directory=$(BUILD_DIR)

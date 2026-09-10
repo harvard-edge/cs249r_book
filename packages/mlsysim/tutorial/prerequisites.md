@@ -177,7 +177,7 @@ This adds `plotly` and `matplotlib` for `plot_roofline()` and
 After setup, the exercise file is at:
 
 ```
-mlsysim/tutorial/exercises.md
+packages/mlsysim/tutorial/exercises.md
 ```
 
 Each exercise is self-contained. You can copy code blocks into a

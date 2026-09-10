@@ -17,6 +17,13 @@ The fallback in each workflow is hardcoded to match — if the var is
 deleted, builds keep working until someone changes the underlying
 default.
 
+> **Note:** TinyTorch, MLSys·im, and MLPerf EDU now live under `packages/`,
+> and the slides and instructor hub under `materials/`. The top-level
+> `tinytorch`, `mlsysim`, `mlperf-edu`, `slides`, and `instructors` paths no
+> longer exist. The project-root rows below show the new paths. A repository
+> variable that still holds an old path overrides the workflow fallback and
+> breaks that workflow, so update it or delete it.
+
 ### Project source roots
 
 These tell each project's workflows where its source lives.
@@ -26,15 +33,15 @@ These tell each project's workflows where its source lives.
 | `STAFFML_ROOT` | `staffml/app` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev |
 | `VAULT_DIR` | `staffml/vault` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev, staffml-validate-vault |
 | `VAULT_CLI_DIR` | `staffml/vault-cli` | same as above |
-| `TINYTORCH_ROOT` | `tinytorch` | (existing — pre-cutover) |
-| `TINYTORCH_SITE` | `tinytorch/quarto` | tinytorch-publish-live |
+| `TINYTORCH_ROOT` | `packages/tinytorch` | (existing — pre-cutover) |
+| `TINYTORCH_SITE` | `packages/tinytorch/quarto` | tinytorch-publish-live |
 | `BOOK_ROOT` | `book` | (existing — pre-cutover) |
 | `BOOK_QUARTO` | `books/` | (existing — pre-cutover) |
-| `MLSYSIM_ROOT` | `mlsysim` | mlsysim-publish-live, mlsysim-preview-dev |
-| `MLSYSIM_DOCS` | `mlsysim/docs` | same as above |
+| `MLSYSIM_ROOT` | `packages/mlsysim` | mlsysim-publish-live, mlsysim-preview-dev |
+| `MLSYSIM_DOCS` | `packages/mlsysim/docs` | same as above |
 | `KITS_ROOT` | `kits` | kits-publish-live |
 | `LABS_ROOT` | `labs` | labs-publish-live |
-| `INSTRUCTORS_ROOT` | `instructors` | instructors-publish-live (also hardcoded as `instructors` in some places) |
+| `INSTRUCTORS_ROOT` | `materials/instructors` | instructors-preview-dev (instructors-publish-live and instructors-validate-dev hardcode the path) |
 
 ### Deploy paths (gh-pages subpaths)
 
@@ -77,9 +84,9 @@ completeness.
 | `BOOK_TOOLS` | `binder/tools` |
 | `KITS_DOCS` | `kits` |
 | `LABS_DOCS` | `labs` |
-| `SLIDES_ROOT` | `slides` |
-| `TINYTORCH_SRC` | `tinytorch/src` |
-| `TINYTORCH_TESTS` | `tinytorch/tests` |
+| `SLIDES_ROOT` | `materials/slides` |
+| `TINYTORCH_SRC` | `packages/tinytorch/src` |
+| `TINYTORCH_TESTS` | `packages/tinytorch/tests` |
 | `DEV_REPO` | `harvard-edge/cs249r_book_dev` |
 | `DEV_REPO_URL` | `git@github.com:harvard-edge/cs249r_book_dev.git` |
 

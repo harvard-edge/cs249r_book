@@ -63,7 +63,7 @@ def _chapters_with_inline_python(vol: str) -> list[Path]:
 
 def run_prose_layer(vol: str) -> LayerResult:
     res = LayerResult(layer="audit_prose", ok=True)
-    env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
+    env = {**os.environ, "PYTHONPATH": str(REPO / "packages" / "mlsysim"), "MPLBACKEND": "Agg"}
     script = REPO / "binder/tools/audit/fmt/audit_prose.py"
     chapters = _chapters_with_inline_python(vol)
     res.total = len(chapters)
@@ -108,7 +108,7 @@ def run_static_html_layer(vol: str, html_dir: Path) -> LayerResult:
 
 def run_lego_html_layer(vol: str) -> LayerResult:
     res = LayerResult(layer="audit_lego_html", ok=True)
-    env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
+    env = {**os.environ, "PYTHONPATH": str(REPO / "packages" / "mlsysim"), "MPLBACKEND": "Agg"}
     report_path = ARTIFACTS / f"lego_html_{vol}.json"
     proc = subprocess.run(
         [sys.executable, str(REPO / "binder/tools/audit/fmt/audit_lego_html.py"), "--report", str(report_path)],
