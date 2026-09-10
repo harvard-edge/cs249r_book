@@ -1,0 +1,87 @@
+# Control Theory and Dynamics {#sec-appendix-control}
+
+This appendix provides a brief, first-principles overview of the core concepts in control theory and dynamics used throughout this volume. Our goal here is not to provide exhaustive mathematical proofs, but rather to distill the fundamental equations and intuition that systems engineers and computer scientists need to implement robust robotic and physical AI systems.
+
+## 1. Safety and Control Barrier Functions (CBFs)
+
+When deploying ML models on physical hardware, ensuring that the system does not violate safety constraints (such as avoiding collisions or preventing joint over-extension) is paramount. Control Barrier Functions (CBFs) offer a mathematically rigorous way to enforce these constraints as a "safety filter" on top of a nominal controller (like a neural network).
+
+Let the state of the system be $x$ and the control input be $u$. Suppose we have a set of safe states $\mathcal{S}$, defined by a continuously differentiable function $h(x)$ such that:
+- $h(x) > 0$ when the system is strictly safe.
+- $h(x) = 0$ at the boundary of the safe set.
+- $h(x) < 0$ when the system is unsafe.
+
+To guarantee that the system remains safe, we must ensure that the derivative of $h(x)$ along the system's trajectory is bounded. A common condition is to require:
+$$ \dot{h}(x) \ge -\gamma h(x) $$
+where $\gamma > 0$ is a tuning parameter. If $h(x)$ approaches zero, $\dot{h}(x)$ is forced to be non-negative, preventing the system from crossing the boundary.
+
+### Quadratic Programming (QP) Integration
+
+For a control-affine system with dynamics $\dot{x} = f(x) + g(x)u$, the derivative of $h$ is given by the Lie derivatives:
+$$ \dot{h}(x) = L_f h(x) + L_g h(x) u $$
+
+We can enforce safety by finding the control input $u$ that is as close as possible to our desired (but potentially unsafe) neural network action $u_{\text{nom}}$, subject to the CBF constraint. This is formulated as a Quadratic Program (QP):
+$$
+\begin{align*}
+u^* &= \text{arg} \min_{u} \frac{1}{2} \| u - u_{\text{nom}} \|^2 \\
+&\text{subject to:} \quad L_f h(x) + L_g h(x) u \ge -\gamma h(x)
+\end{align*}
+$$
+QPs can be solved highly efficiently in real-time (often in microseconds), making them ideal for high-frequency safety filters in physical systems.
+
+## 2. Smooth Trajectories and Bumpless Transfer
+
+Physical systems have inertia; commanding discontinuous velocities or accelerations can damage hardware or cause catastrophic instability. 
+
+### Quintic Splines
+When generating a path between two points in space or joint angles, systems engineers often use polynomials to ensure smooth transitions. A **quintic spline** is a 5th-degree polynomial of time $t$:
+$$ \theta(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5 $$
+Why a 5th-degree polynomial? Because it provides exactly 6 coefficients. This allows us to specify 6 boundary conditions for a trajectory segment starting at $t=0$ and ending at $t=T$:
+1. Initial position: $\theta(0)$
+2. Initial velocity: $\dot{\theta}(0)$
+3. Initial acceleration: $\ddot{\theta}(0)$
+4. Final position: $\theta(T)$
+5. Final velocity: $\dot{\theta}(T)$
+6. Final acceleration: $\ddot{\theta}(T)$
+By setting velocities and accelerations to zero at the start and end of a movement, we guarantee that the robot starts and stops smoothly without jerking.
+
+### Bumpless Transfer
+In hybrid systems, the control logic often switches between different modes (e.g., from an automated path-follower to manual teleoperation, or from position control to torque control). **Bumpless transfer** is the practice of ensuring that the control signal $u(t)$ does not experience a massive step change at the moment of switching. This is typically implemented by maintaining an internal offset or using blending filters (like quintic splines) over a short time horizon to smoothly interpolate the control signals between the outgoing and incoming controllers.
+
+## 3. Kinematic Reachability
+
+**Kinematics** refers to the geometry of motion, ignoring the forces that cause it. For a robot arm, the **Forward Kinematics** function $f(q)$ maps the joint angles $q = [q_1, \dots, q_n]^T$ to the position and orientation $x$ of the end-effector (the tool or hand):
+$$ x = f(q) $$
+
+The derivative of this mapping is the **Jacobian matrix** $J(q)$, which relates joint velocities $\dot{q}$ to end-effector velocities $\dot{x}$:
+$$ \dot{x} = J(q) \dot{q} $$
+
+**Kinematic reachability** describes the set of all poses $x$ the end-effector can achieve given the limits of its joint angles $q$. A critical concept here is **singularities**—configurations where the robot loses one or more degrees of freedom. Mathematically, a singularity occurs when the Jacobian matrix loses rank (i.e., its determinant is zero for a square Jacobian). Near singularities, attempting to move the end-effector in certain directions requires infinite joint velocities, which causes physical hardware to violently halt or error out. System designs must actively avoid or safely handle trajectories that pass near these singular configurations.
+
+## 4. Rigid Body Contact Mechanics
+
+Simulation and control of physical interaction (like walking or grasping) require modeling contacts. The fundamental mathematical challenge of contact is that it is discontinuous: forces only exist when objects are touching.
+
+Let $\phi(q)$ be the signed distance between two objects. 
+- $\phi(q) > 0$: Objects are separated.
+- $\phi(q) = 0$: Objects are touching.
+- $\phi(q) < 0$: Objects are penetrating (which is physically impossible for rigid bodies).
+
+Let $f_n$ be the normal contact force pushing the objects apart.
+- If $\phi(q) > 0$, there is no contact, so $f_n = 0$.
+- If objects are touching, they can only push, not pull, so $f_n \ge 0$.
+
+This relationship is encapsulated by a **Linear Complementarity Problem (LCP)**, governed by three conditions:
+1. Non-penetration: $\phi(q) \ge 0$
+2. Unilateral force: $f_n \ge 0$
+3. Complementarity: $\phi(q) f_n = 0$
+
+The third condition elegantly forces at least one of the variables to be zero. Either the distance is zero (objects are touching, force can be applied), or the force is zero (objects are separated). Simulating this correctly is what allows modern physics engines (like MuJoCo or Drake) to reliably train ML policies in simulation that transfer to the real world.
+
+## Further Reading
+
+For those looking to build a deeper theoretical foundation, the following texts are considered standard references in the field:
+
+* **Modern Robotics: Mechanics, Planning, and Control** by Kevin M. Lynch and Frank C. Park. (Provides an elegant, unified approach to kinematics and dynamics using screw theory and Lie groups).
+* **Robotics: Modelling, Planning and Control** by Bruno Siciliano, Lorenzo Sciavicco, Luigi Villani, and Giuseppe Oriolo. (A comprehensive standard reference for robot modeling and control).
+* **Feedback Systems: An Introduction for Scientists and Engineers** by Karl J. Åström and Richard M. Murray. (The quintessential text for classical and state-space control theory from first principles).
