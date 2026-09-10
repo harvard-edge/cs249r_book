@@ -41,7 +41,7 @@ Virtual context memory is the operating system abstraction layer that decouples 
 
 ## Introduction {#sec-vol3-vm-intro}
 
-In the classic Von Neumann computer architecture, the central processing unit interacts with a hierarchical memory subsystem: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage. Operating systems bridge these tiers through **virtual memory**\index{virtual memory}[^fn-virtual-memory] [@kilburn1962one; @denning1970virtual], presenting software with an illusion of vast, contiguous, isolated address spaces while dynamically mapping logical pages onto fragmented physical frames in silicon.
+Consider an autonomous agent that has just spent twenty minutes navigating a repository, issuing grep commands, and reading logs. When it invokes a tool to run tests, it receives a 5,000-line traceback. To decide on the next step, the agent must process this new information alongside its entire history. In the classic Von Neumann computer architecture, the central processing unit interacts with a hierarchical memory subsystem: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage. Operating systems bridge these tiers through **virtual memory**\index{virtual memory}[^fn-virtual-memory] [@kilburn1962one; @denning1970virtual], presenting software with an illusion of vast, contiguous, isolated address spaces while dynamically mapping logical pages onto fragmented physical frames in silicon.
 
 An autonomous LLM agent operates under a strikingly similar paradigm. The transformer foundation model [@vaswani2017attention] functions as the central reasoning engine. Its registers and primary working memory, however, do not consist of standard byte-addressable DRAM. Instead, the active working memory of an agent consists of token sequences materialized as high-dimensional **Key-Value (KV) activation tensors**\index{Key-Value (KV) activation tensors}[^fn-kv-activation-tensors] resident within accelerator High-Bandwidth Memory (HBM).
 
@@ -66,6 +66,8 @@ Resolving these pathologies requires virtualizing the agent's context memory. Ju
 
 :::
 
+These virtual memory architectures map directly to the high-dimensional tensors computed by the foundation model. Understanding how to manage this memory requires first dissecting the physical geometry and arithmetic footprint of the Key-Value cache itself.
+
 ::: {.callout-note title="Checkpoint"}
 
 Before dissecting physical tensor geometries, verify your understanding of why stateful agent loops necessitate neural virtual memory systems:
@@ -80,7 +82,7 @@ Before dissecting physical tensor geometries, verify your understanding of why s
 
 ## KV-Cache Tensor Layouts {#sec-vol3-vm-kv-cache-layouts}
 
-To engineer virtual memory management for neural agents, one must first dissect the physical geometry and arithmetic footprint of the Key-Value cache. During autoregressive decoding, each transformer layer attends to all previous tokens in the sequence. To avoid recomputing Key and Value vectors for historical tokens at every generation step, the engine caches these intermediate activations in accelerator HBM.
+When an agent generates a multi-file pull request within a 128,000-token context, the underlying transformer must attend to the entire history for every single generated token. To avoid catastrophic recomputation, the system caches intermediate activation vectors in accelerator memory. During autoregressive decoding, each transformer layer attends to all previous tokens in the sequence. To avoid recomputing Key and Value vectors for historical tokens at every generation step, the engine caches these intermediate activations in accelerator HBM.
 
 ### Mathematical Derivation of Footprint Per Token
 
@@ -134,6 +136,8 @@ Because memory is physically contiguous along the sequence dimension $L$, two fo
 
 Empirical measurements across production inference clusters indicate that static and unpaged allocators waste between **$60\%$ and $80\%$** of total accelerator memory [@kwon2023efficient]. This memory waste directly caps agent concurrency, stranding expensive GPU compute silicon.
 
+This fragmentation crisis is compounded by the way agents interact with their environments. Because agents iteratively append actions and observations to a shared context, their memory access patterns exhibit extreme prefix overlap. The consequence is a dual challenge: the runtime must manage fragmented physical memory while simultaneously exploiting this prefix overlap to prevent redundant computation.
+
 ::: {.callout-checkpoint title="KV-cache geometry and fragmentation"}
 
 Checking quantitative command of KV cache sizing, attention head scaling, and memory fragmentation.
@@ -149,7 +153,7 @@ Checking quantitative command of KV cache sizing, attention head scaling, and me
 
 ## Prefix Locality in Trajectories {#sec-vol3-vm-prefix-locality}
 
-Autonomous agent workloads exhibit fundamentally different memory access and lifespan characteristics than standard conversational chatbots. A chatbot interaction typically consists of short, independent queries with localized dialogue history. In contrast, an autonomous agent interacts through structured, long-horizon operational environments.
+When an agent executes a bash command and observes the terminal output, its next prompt to the model is nearly identical to the previous one—only the new action and observation are appended. Autonomous agent workloads exhibit fundamentally different memory access and lifespan characteristics than standard conversational chatbots. A chatbot interaction typically consists of short, independent queries with localized dialogue history. In contrast, an autonomous agent interacts through structured, long-horizon operational environments.
 
 ### Trajectory Prompt Anatomy
 
@@ -256,6 +260,8 @@ $$\text{Speedup}_{\text{cumulative}} = \frac{132.16\text{ s}}{8.74\text{ s}} \ap
 
 :::
 
+Recognizing the computational necessity of retaining the Key-Value cache reveals a new systems constraint. The runtime must physically store these growing, unpredictable trajectories without triggering the catastrophic fragmentation observed in static allocators. Resolving this constraint requires a shift from contiguous tensor storage to dynamic, block-level paging.
+
 ::: {.callout-checkpoint title="Trajectory prefix dynamics and prefill economics"}
 
 Evaluating prompt anatomy, prefix sharing ratios, and computational prefill costs during multi-turn agent execution.
@@ -271,7 +277,7 @@ Evaluating prompt anatomy, prefix sharing ratios, and computational prefill cost
 
 ## Block-Level Allocation (PagedAttention) {#sec-vol3-vm-pagedattention}
 
-To solve the dual challenges of physical memory fragmentation and zero-copy prefix sharing, Kwon et al. introduced **PagedAttention** [@kwon2023efficient]. Inspired by classical operating system virtual memory paging, PagedAttention breaks the requirement that an agent's KV cache must occupy contiguous memory in accelerator HBM.
+If an operating system required every application to occupy contiguous physical RAM, modern multitasking would collapse the moment memory became fragmented. Early LLM serving engines suffered exactly this collapse, stranding up to 80% of accelerator memory because variable-length agent trajectories required contiguous tensor allocations. To solve the dual challenges of physical memory fragmentation and zero-copy prefix sharing, Kwon et al. introduced **PagedAttention** [@kwon2023efficient]. Inspired by classical operating system virtual memory paging, PagedAttention breaks the requirement that an agent's KV cache must occupy contiguous memory in accelerator HBM.
 
 ::: {#dfn-paged-attention .callout-definition title="PagedAttention"}
 
@@ -322,7 +328,7 @@ PagedAttention fundamentally alters the memory efficiency equation:
 
 ### Copy-on-Write (CoW) for Speculative Trajectories
 
-The most powerful capability unlocked by virtual block paging is **zero-copy branching** via Copy-on-Write (CoW).
+The primary capability unlocked by virtual block paging is **zero-copy branching** via Copy-on-Write (CoW).
 
 In agent deliberation engines (@sec-vol3-deliberation), an agent often evaluates multiple speculative continuations from an identical intermediate state. For example, a code generation agent might fork three parallel rollouts: Branch $A$ attempts an in-place refactor, Branch $B$ rewrites the module from scratch, and Branch $C$ executes an existing test suite.
 
@@ -343,6 +349,8 @@ $$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in unpaged architectures.
 :::
 
+PagedAttention successfully decouples logical tokens from physical silicon blocks, allowing multiple branches to share memory efficiently. However, it requires the serving runtime to explicitly know which requests share a prefix. To handle asynchronous multi-agent swarms where sharing is implicit, the system needs a dynamic indexing structure to discover these overlapping contexts on the fly.
+
 ::: {.callout-checkpoint title="PagedAttention and copy-on-write mechanics"}
 
 Verifying architectural mastery of virtual-to-physical address mapping, block sizing constraints, and Copy-on-Write page sharing.
@@ -358,7 +366,7 @@ Verifying architectural mastery of virtual-to-physical address mapping, block si
 
 ## Radix Tree Prefix Indexing {#sec-vol3-vm-radix-tree}
 
-While PagedAttention provides the physical paging mechanism to store non-contiguous blocks and share identical physical pages across known forks, an autonomous serving system requires a higher-level data structure to **automatically discover and index** reusable prefixes across arbitrary agent requests.
+Imagine ten identical software engineering subagents spun up in parallel to test different patches for the same repository. They all share the exact same 24,000-token system prompt and repository map. Without an indexing mechanism to recognize this overlap, the cluster would allocate ten identical copies of the context, wasting gigabytes of memory. While PagedAttention provides the physical paging mechanism to store non-contiguous blocks and share identical physical pages across known forks, an autonomous serving system requires a higher-level data structure to **automatically discover and index** reusable prefixes across arbitrary agent requests.
 
 In production multi-agent environments, agents do not explicitly declare which parts of their context are shared. Multiple subagents launched independently might share identical system prompts and tool definitions without sharing request handles. To solve this, SGLang introduced **RadixAttention** [@zheng2024sglang].
 
@@ -527,7 +535,7 @@ $$K_{\text{shared}} = \left\lfloor \frac{430.63\text{ GB}}{0.168\text{ GB}} \rig
 
 ::: {#ws-vm-openai-redis-2023 .callout-war-story title="The shared cache boundary: The ChatGPT cache disclosure"}
 
-**Context**: In March 2023, OpenAI experienced a high-profile data disclosure incident in ChatGPT [@openai2023chatgptoutage]. ChatGPT utilized a shared Redis cache in front of its persistent databases to cache user profile and session metadata, accessed via an asynchronous Python client (`redis-py`) running under `asyncio`.
+**Context**: In March 2023, OpenAI experienced a high-profile data disclosure incident in ChatGPT [@openai2023chatgptoutage]. ChatGPT used a shared Redis cache in front of its persistent databases to cache user profile and session metadata, accessed via an asynchronous Python client (`redis-py`) running under `asyncio`.
 
 **Mechanism**: The `redis-py` client maintained an internal pool of shared TCP connections. Under asynchronous execution, requests and responses operate as paired queue operations: a task pushes a query onto the connection and awaits the response. When a request was canceled (e.g., due to a client disconnect or timeout) between the dispatch and the response read, the connection was returned to the shared pool without being purged. The unread response remained queued in the TCP buffer. When an unrelated request subsequently borrowed that connection, it dequeued the orphaned response data belonging to the previous user.
 
@@ -538,6 +546,8 @@ $$K_{\text{shared}} = \left\lfloor \frac{430.63\text{ GB}}{0.168\text{ GB}} \rig
 **Systems lesson**: The lookup logic in Redis was entirely correct; the failure stemmed from assuming that the communication channel delivering an answer was bound to the identity of the requester. A neural Radix prefix cache introduces the exact same architectural vulnerability: physical KV blocks are matched purely on **token sequence identity**, agnostic to user tenant or security domain. If a multi-tenant serving cluster caches a proprietary prompt containing private keys, confidential source code, or patient health information, an adversarial tenant who discovers or guesses the prompt prefix could potentially observe or reconstruct those activations. In production agent runtimes, shared prefix caches must be partitioned by cryptographic tenant boundaries, and block allocation must enforce capability leases to prevent cross-tenant information leakage.
 
 :::
+
+While dynamic prefix indexing and block-level paging resolve the fundamental capacity and compute bottlenecks of agent serving, their implementation introduces subtle edge cases. These mechanisms routinely trap designers who assume neural virtual memory behaves identically to persistent storage or semantic caches.
 
 ::: {.callout-note title="Checkpoint"}
 
