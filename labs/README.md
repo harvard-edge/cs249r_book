@@ -253,7 +253,7 @@ Visit the [Co-Labs site](https://mlsysbook.ai/labs/) and click any lab. They run
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
 python3 -m pip install -r labs/requirements.txt
-python3 -m pip install -e packages/mlsysim
+python3 -m pip install -e mlsysim
 cd labs
 marimo run vol1/lab_01_ml_intro.py
 ```

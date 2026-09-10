@@ -197,13 +197,13 @@ class TestWheelConsistency:
     """Ensure the micropip wheel URL in every lab matches the actual mlsysim version."""
 
     def test_micropip_url_matches_pyproject_version(self, lab_path):
-        """The inline micropip wheel URL must match the version from packages/mlsysim/pyproject.toml."""
+        """The inline micropip wheel URL must match the version from mlsysim/pyproject.toml."""
         try:
             import tomllib
         except ImportError:
             import tomli as tomllib
 
-        pyproject = REPO_ROOT / "packages" / "mlsysim" / "pyproject.toml"
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
         with open(pyproject, "rb") as f:
             version = tomllib.load(f)["project"]["version"]
 
@@ -360,14 +360,14 @@ class TestLabCatalog:
 
     def test_wheel_file_exists_on_disk(self):
         """The wheel file referenced by labs must actually exist in wheels/.
-        If this fails, run: python3 -m build --wheel packages/mlsysim/ && cp packages/mlsysim/dist/mlsysim-*.whl wheels/
+        If this fails, run: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/
         """
         try:
             import tomllib
         except ImportError:
             import tomli as tomllib
 
-        pyproject = REPO_ROOT / "packages" / "mlsysim" / "pyproject.toml"
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
         with open(pyproject, "rb") as f:
             version = tomllib.load(f)["project"]["version"]
 
@@ -375,7 +375,7 @@ class TestLabCatalog:
         assert wheel_path.exists(), (
             f"Wheel file missing: {wheel_path}\n"
             f"Labs reference version {version} but the wheel is not present in wheels/.\n"
-            f"Fix: python3 -m build --wheel packages/mlsysim/ && cp packages/mlsysim/dist/mlsysim-*.whl wheels/\n"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/\n"
             f"This causes BadZipFile in production when micropip fetches the missing URL."
         )
 
@@ -386,7 +386,7 @@ class TestLabCatalog:
         except ImportError:
             import tomli as tomllib
 
-        pyproject = REPO_ROOT / "packages" / "mlsysim" / "pyproject.toml"
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
         with open(pyproject, "rb") as f:
             version = tomllib.load(f)["project"]["version"]
 
@@ -402,7 +402,7 @@ class TestLabCatalog:
         missing = sorted(required - names)
         assert not missing, (
             f"Wheel is missing browser lab toolkit files: {missing}\n"
-            f"Fix: python3 -m build --wheel packages/mlsysim/ && cp packages/mlsysim/dist/mlsysim-*.whl wheels/"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/"
         )
 
 

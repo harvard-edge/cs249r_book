@@ -17,18 +17,18 @@ import os
 # Make `mlsysim` importable without requiring a pip install.
 #
 # Layout reminder:
-#   <repo_root>/packages/mlsysim/                ← project directory (NOT a Python package)
-#   <repo_root>/packages/mlsysim/mlsysim/        ← actual Python package (has __init__.py)
-#   <repo_root>/packages/mlsysim/mlsysim/core/   ← submodule
+#   <repo_root>/mlsysim/                ← project directory (NOT a Python package)
+#   <repo_root>/mlsysim/mlsysim/        ← actual Python package (has __init__.py)
+#   <repo_root>/mlsysim/mlsysim/core/   ← submodule
 #
-# So the directory we must put on sys.path is `<repo_root>/packages/mlsysim/`, NOT
+# So the directory we must put on sys.path is `<repo_root>/mlsysim/`, NOT
 # `<repo_root>/`. The previous `_repo_root` insert "worked" only in dev
-# environments where `mlsysim` was pip-installed (e.g. `pip install -e packages/mlsysim/`),
+# environments where `mlsysim` was pip-installed (e.g. `pip install -e mlsysim/`),
 # masking the bug. CI has no editable install, so the import failed there.
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _book_dir = os.path.dirname(_script_dir)                  # binder/
 _repo_root = os.path.dirname(_book_dir)                   # repo root
-_mlsysim_project = os.path.join(_repo_root, "packages", "mlsysim")  # contains the package
+_mlsysim_project = os.path.join(_repo_root, "mlsysim")  # contains the package
 sys.path.insert(0, _mlsysim_project)
 sys.path.insert(0, _book_dir)
 

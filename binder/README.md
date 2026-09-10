@@ -216,7 +216,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 **Open and evolving**: Community-driven updates keep content current with a fast-moving field.
 
-**Hands-on companion**: Pair with [TinyTorch](../packages/tinytorch/) to build what you learn from scratch.
+**Hands-on companion**: Pair with [TinyTorch](../tinytorch/) to build what you learn from scratch.
 
 ---
 
@@ -339,7 +339,7 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
       <td>Project overview and ecosystem</td>
     </tr>
     <tr>
-      <td><b><a href="../packages/tinytorch/">TinyTorch</a></b></td>
+      <td><b><a href="../tinytorch/">TinyTorch</a></b></td>
       <td>Build ML frameworks from scratch</td>
     </tr>
     <tr>

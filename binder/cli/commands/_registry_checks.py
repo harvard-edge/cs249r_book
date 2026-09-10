@@ -192,7 +192,7 @@ def check_lego_equations(root: Path, paths: list[Path] | None = None) -> list[Re
 
 def run_registry_pytest(root: Path) -> list[RegistryIssue]:
     """Run MLSysIM registry gates plus book-owned usage checks."""
-    mlsysim_root = (root / "packages" / "mlsysim").resolve()
+    mlsysim_root = (root / "mlsysim").resolve()
     tests = [
         mlsysim_root / "tests" / "test_constants_allowlist.py",
         mlsysim_root / "tests" / "test_registry_no_duplicate_specs.py",
@@ -240,13 +240,13 @@ def verify_appendix_lego(root: Path) -> list[RegistryIssue]:
 
 def verify_paper_anchors(root: Path) -> list[RegistryIssue]:
     """Validate paper anchor consistency."""
-    script = root / "packages" / "mlsysim" / "paper" / "scripts" / "validate_anchors.py"
+    script = root / "mlsysim" / "paper" / "scripts" / "validate_anchors.py"
     if not script.exists():
         return [RegistryIssue(code="anchors_missing", message=f"Script not found: {script}")]
 
     proc = subprocess.run(
         [sys.executable, str(script)],
-        cwd=root / "packages" / "mlsysim",
+        cwd=root / "mlsysim",
         capture_output=True,
         text=True,
     )
