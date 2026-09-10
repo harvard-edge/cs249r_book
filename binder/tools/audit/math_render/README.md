@@ -22,17 +22,17 @@ All scripts are designed to run from the **repo root**.
 ./binder/binder check math --scope render-audit
 
 # Targeted script-level audit, useful while developing the audit itself
-python3 tools/audit/audit_math_rendering.py vol1/introduction vol2/inference
+python3 binder/tools/audit/math_render/audit_math_rendering.py vol1/introduction vol2/inference
 
 # Just re-scan an existing build without rebuilding
-python3 tools/audit/audit_math_rendering.py --skip-build
+python3 binder/tools/audit/math_render/audit_math_rendering.py --skip-build
 
 # PDF audit (slower; needs LaTeX toolchain + poppler-utils)
-python3 tools/audit/audit_math_pdf.py vol1/introduction
-python3 tools/audit/audit_math_pdf.py --fixed   # only chapters from the April 2026 fix set
+python3 binder/tools/audit/math_render/audit_math_pdf.py vol1/introduction
+python3 binder/tools/audit/math_render/audit_math_pdf.py --fixed   # only chapters from the April 2026 fix set
 
 # Generate visual spot-check map for the saved PDFs
-python3 tools/audit/audit_pdf_spot_check.py
+python3 binder/tools/audit/math_render/audit_pdf_spot_check.py
 ```
 
 ## Outputs

@@ -10,9 +10,9 @@ A "leak" is a LaTeX command or pattern that appears in user-visible prose
 elements). These render as literal text in browsers and indicate a bug.
 
 Usage (run from repo root):
-    python3 tools/audit/audit_math_rendering.py               # all chapters
-    python3 tools/audit/audit_math_rendering.py vol1/intro    # one chapter
-    python3 tools/audit/audit_math_rendering.py --skip-build  # just scan
+    python3 binder/tools/audit/math_render/audit_math_rendering.py               # all chapters
+    python3 binder/tools/audit/math_render/audit_math_rendering.py vol1/intro    # one chapter
+    python3 binder/tools/audit/math_render/audit_math_rendering.py --skip-build  # just scan
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[4]
 BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "html-vol1",
     "vol2": REPO  / "books" / "_build" / "html-vol2",

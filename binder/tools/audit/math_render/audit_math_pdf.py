@@ -17,10 +17,10 @@ or any other `binder build` invocation -- they all mutate the shared
 `books/_quarto.yml`.
 
 Usage (run from repo root):
-    python3 tools/audit/audit_math_pdf.py vol1/introduction vol2/inference
-    python3 tools/audit/audit_math_pdf.py --fixed     # only chapters we touched
-    python3 tools/audit/audit_math_pdf.py --all       # every chapter
-    python3 tools/audit/audit_math_pdf.py --max-pages 0  # render every page
+    python3 binder/tools/audit/math_render/audit_math_pdf.py vol1/introduction vol2/inference
+    python3 binder/tools/audit/math_render/audit_math_pdf.py --fixed     # only chapters we touched
+    python3 binder/tools/audit/math_render/audit_math_pdf.py --all       # every chapter
+    python3 binder/tools/audit/math_render/audit_math_pdf.py --max-pages 0  # render every page
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[4]
 BINDER = REPO / "binder" / "binder"
 BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "pdf-vol1",
