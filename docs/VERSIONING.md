@@ -142,9 +142,6 @@ follow-up task.
 
 ## Out of scope (today)
 
-- **Periodic-Table** — no publish workflow exists; we'd be adding
-  versioning to a project that doesn't deploy. Establish publishing
-  first.
 - **Reusable build orchestration** — the reusable workflow only does
   prepare. Each project keeps its own build/test/deploy because those
   steps are project-specific (Quarto vs Next.js vs Marimo). Trying to

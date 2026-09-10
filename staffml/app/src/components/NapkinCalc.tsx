@@ -206,7 +206,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
           <div className="mt-2 text-[9px] text-textTertiary/60 italic">
             Formulas from{" "}
             <a
-              href="https://github.com/harvard-edge/cs249r_book/blob/dev/mlsysim/docs/laws-explained.md"
+              href="https://github.com/harvard-edge/cs249r_book/blob/dev/mlsysim/docs/laws-explained.qmd"
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-dotted underline-offset-2 hover:text-textSecondary"
