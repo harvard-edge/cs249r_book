@@ -152,7 +152,16 @@ This operational contrast establishes the governing thesis of this book: systems
 
 ## Anatomy of the Autonomous Runtime {#sec-vol3-intro-anatomy-of-the-autonomous}
 
-When a developer types a natural language request into a terminal, the resulting sequence of API calls, container executions, and memory lookups spans multiple distinct software layers. To operationalize the mathematical tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \pi_\theta, \mathcal{T}, \mathcal{R} \rangle$, an agentic system requires a modular software and hardware architecture. While industry literature frequently conflates agents with prompt templates or Python scripting wrappers [@anthropic2024effective; @openai2024swarm], an enterprise-grade agentic runtime decomposes into five tightly coupled subsystems:
+When a developer types a natural language request into a terminal, the resulting sequence of API calls, container executions, and memory lookups spans multiple distinct software layers. To operationalize the mathematical tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \pi_\theta, \mathcal{T}, \mathcal{R} \rangle$, an agentic system requires a modular software and hardware architecture. 
+
+Consider a concrete scenario: an autonomous agent is trying to fix a bug and decides to run a test suite by executing `pytest`. 
+1. **Perception**: The raw 5,000-line stack trace from the failed test is captured, parsed, and compressed down to the 50 salient lines detailing the actual `AssertionError`.
+2. **State Store**: This compressed observation is appended to the agent's episodic execution log, and the GPU memory controller updates the pointers for the Key-Value cache representing the new context.
+3. **Policy Engine**: The language model reads this context, reasons over the `AssertionError`, and generates a JSON payload requesting an edit to `auth.py`.
+4. **Actuation Fabric**: The outer system takes this JSON payload, validates the schema, and executes the file write inside an isolated Firecracker microVM, ensuring the model cannot overwrite host system files.
+5. **Enforcer**: Before the agent is allowed to proceed, a deterministic budget watchdog verifies that the financial cost limit hasn't been breached, and a test oracle re-runs the test suite to ensure the environment isn't left in a corrupted state.
+
+While industry literature frequently conflates agents with prompt templates or Python scripting wrappers [@anthropic2024effective; @openai2024swarm], an enterprise-grade agentic runtime strictly separates these duties across five tightly coupled subsystems:
 
 ### 1. Perception and context assembly layer
 The perception subsystem manages the translation between high-dimensional external environment state and the finite token sequence ingested by the neural policy (engineered in @sec-vol3-context-working-sets):
@@ -225,7 +234,7 @@ Every turn of an agentic execution cycle splits into two distinct computational 
 :::
 
 1. **The Prefill Phase (Prompt Evaluation):** The model ingests the entire prompt (system instructions, conversation history, tool outputs) of length $T_{\text{prefill}}$. Because all input tokens are known simultaneously, operations execute as dense General Matrix Multiplications (GEMMs). The accelerator's Tensor Cores achieve near-peak floating-point utilization, with model FLOPs utilization (MFU) exceeding $60\%$. The prefill phase is strictly **compute-bound**.
-2. **The Decode Phase (Token Generation):** The model generates one token at a time. For every single generated token, the model must stream all weight parameters $\mathbf{W} \in \mathbb{R}^{P}$ and the entire accumulated KV cache from HBM into on-chip SRAM registers to perform a Matrix-Vector Multiplication (GEMV). Because very few arithmetic operations are performed per byte transferred, the arithmetic intensity is abysmal ($\approx 1\text{--}2\text{ FLOP/Byte}$). The decode phase is strictly **memory-bandwidth bound**.
+2. **The Decode Phase (Token Generation):** The model generates one token at a time. For every single generated token, the model must stream all weight parameters $\mathbf{W} \in \mathbb{R}^{P}$ and the entire accumulated KV cache from HBM into on-chip SRAM registers to perform a Matrix-Vector Multiplication (GEMV). Think of this as a bucket brigade: the GPU tensor cores are incredibly fast workers waiting to do math, but they are starved because the buckets of data (the weights and the KV cache) are being passed over a slow HBM memory bus. Because very few arithmetic operations are performed per byte transferred, the arithmetic intensity is abysmal ($\approx 1\text{--}2\text{ FLOP/Byte}$). The decode phase is strictly **memory-bandwidth bound**.
 
 ### KV cache memory arithmetic
 The physical size of the KV cache for an active trajectory is given by:
@@ -272,7 +281,7 @@ $$P(\text{Success}) = P(E_1 \cap E_2 \cap \dots \cap E_N) = P(E_1) \prod_{t=2}^N
 If we make the optimistic simplifying assumption that single-step success probabilities are independent and identically distributed with constant accuracy $p$:
 $$P_{\text{success}}(N) \le p^N$$
 
-In real-world systems, the independence assumption is strictly optimistic: in practice, an erroneous intermediate action shifts the environment into an unfamiliar, corrupted state, causing conditional success probabilities to decay monotonically over time ($P(E_t \mid \text{Error}_{t-1}) \ll p$). Consequently, $p^N$ represents a strict theoretical upper bound on trajectory reliability.
+In real-world systems, the independence assumption is strictly optimistic: in practice, an erroneous intermediate action shifts the environment into an unfamiliar, corrupted state, causing conditional success probabilities to decay monotonically over time ($P(E_t \mid \text{Error}_{t-1}) \ll p$). Thus, $p^N$ represents a strict theoretical upper bound on trajectory reliability.
 
 ```{python}
 #| label: vol3-intro-trajectory-reliability
@@ -389,13 +398,15 @@ plt.close()
 As demonstrated in @tbl-trajectory-survival and @fig-reliability-wall, even a state-of-the-art model with an extraordinary 95 percent single-step accuracy collapses to a mere `{python} TrajectoryReliability.p95_n20_prose_str` completion rate across a modest 20-step trajectory. When the horizon reaches 50 steps—typical for complex software engineering tasks in SWE-bench [@jimenez2024swebench]—the trajectory success rate drops to a catastrophic `{python} TrajectoryReliability.p95_n50_prose_str`.
 
 ### Why pretraining model scale cannot solve the reliability wall
-A widespread industry fallacy asserts that scaling foundation model parameters will eventually eliminate this problem. The empirical mathematics of scaling laws disprove this hypothesis. According to neural scaling laws [@kaplan2020scaling], model cross-entropy loss $\mathcal{L}$ scales as a power law with compute $C$: $\mathcal{L}(C) \propto C^{-\alpha}$ (where $\alpha \approx 0.05\text{--}0.08$). Improving single-step accuracy from 95 percent to 99.9 percent requires astronomical, economically prohibitive investments in pretraining compute. Yet even at `{python} TrajectoryReliability.frontier_accuracy_prose_str` per-step accuracy, a `{python} TrajectoryReliability.frontier_horizon_str`-step trajectory still suffers a `{python} TrajectoryReliability.frontier_failure_prose_str` probability of total failure.
+A widespread industry fallacy asserts that scaling foundation model parameters will eventually eliminate this problem. The empirical mathematics of scaling laws disprove this hypothesis. According to neural scaling laws [@kaplan2020scaling], model cross-entropy loss $\mathcal{L}$ scales as a power law with compute $C$: $\mathcal{L}(C) \propto C^{-\alpha}$ (where $\alpha \approx 0.05\text{--}0.08$). Improving single-step accuracy from 95 percent to 99.9 percent requires astronomical, economically prohibitive investments in pretraining compute. 
+
+Think of this like building a skyscraper by stacking stones. You can spend billions of dollars perfectly polishing each individual stone so that its cut is 99.9 percent accurate. Yet if you stack 100 stones, the microscopic errors still compound, and the tower collapses. At `{python} TrajectoryReliability.frontier_accuracy_prose_str` per-step accuracy, a `{python} TrajectoryReliability.frontier_horizon_str`-step trajectory still suffers a `{python} TrajectoryReliability.frontier_failure_prose_str` probability of total failure. To build the skyscraper, you don't need smoother stones; you need external steel scaffolding.
 
 The conclusion is inescapable: **The Reliability Wall cannot be breached by model pretraining scale alone.** Trajectory reliability must be engineered at runtime through systems architecture. The runtime must incorporate:
 
 - **Verification & Test Oracles:** Evaluating intermediate post-conditions after every actuation step (detailed in @sec-vol3-verification-recovery).
 - **Test-Time Search:** Exploring alternative solution branches via Monte Carlo Tree Search (MCTS) or beam search [@yao2023tree] (detailed in @sec-vol3-test-time-search).
-- **Rollback & Recovery:** Detecting divergence early and reverting state mutations to clean checkpoints before errors compound into fatal failures (detailed in @sec-vol3-verification-recovery). However, even if the agent never makes a semantic error, it will still collide with a second physical barrier driven purely by memory growth.
+- **Rollback & Recovery:** Detecting divergence early and reverting state mutations to clean checkpoints before errors compound into fatal failures (detailed in @sec-vol3-verification-recovery). Even if the agent never makes a semantic error, it will still collide with a second physical barrier driven purely by memory growth.
 
 ## The Context Accumulation Wall {#sec-vol3-intro-the-context-accumulation-wall}
 
@@ -420,14 +431,14 @@ where $\bar{\Delta}$ is the average tokens added per step. Across a 50-step traj
 
 This latency model exposes a profound system limitation governed by **Amdahl's Law**. In classical computer architecture, Amdahl's Law dictates that the overall speedup of a system is strictly bottlenecked by its unparallelizable, serial components.
 
-In an agentic trajectory, the neural compute time ($T_{\text{prefill}} + T_{\text{decode}}$) can be aggressively accelerated through faster silicon (e.g., HBM3e), systems optimizations (speculative decoding, continuous batching), or reduced precision. However, the environment actuation time ($T_{\text{tool}}$)—such as waiting for a 45-second Python `pip install`, a web page DOM to render, or a remote REST API response—is bound by external physical and network latencies. No amount of GPU scaling can accelerate a blocking external network request.
+In an agentic trajectory, the neural compute time ($T_{\text{prefill}} + T_{\text{decode}}$) can be aggressively accelerated through faster silicon (e.g., HBM3e), systems optimizations (speculative decoding, continuous batching), or reduced precision. The environment actuation time ($T_{\text{tool}}$)—such as waiting for a 45-second Python `pip install`, a web page DOM to render, or a remote REST API response—is bound by external physical and network latencies. No amount of GPU scaling can accelerate a blocking external network request.
 
 As neural inference latency is optimized toward zero, the overall trajectory time asymptotically hits the Amdahl bottleneck of the external environment. **Accelerating the model does not accelerate the environment.** This principle dictates that systems engineers must shift focus from micro-optimizing inference kernels to macro-optimizing the trajectory: parallelizing tool invocations, implementing asynchronous I/O offloading, and aggressively pruning the critical path of the step horizon.
 
 ### The tool-wait memory tax
 A severe, hidden systems inefficiency in naive agent runtimes is the **Tool-Wait Memory Tax** (@fig-tool-wait-memory-tax). Consider an agent running on an 8-GPU node of NVIDIA H100s. At step $t=10$, the agent issues a bash command to run a comprehensive test suite that executes for 45 seconds ($T_{\text{tool}} = 45\text{ s}$).
 
-During those 45 seconds, the neural policy engine is completely idle, awaiting the completion of the child process. However, in a naive serving architecture, the entire multi-gigabyte KV cache associated with that trajectory remains pinned in GPU High Bandwidth Memory (HBM).
+During those 45 seconds, the neural policy engine is completely idle, awaiting the completion of the child process. In a naive serving architecture, the entire multi-gigabyte KV cache associated with that trajectory remains pinned in GPU High Bandwidth Memory (HBM).
 
 This inefficiency is mathematically formalized by **Little's Law** ($L = \lambda W$), which states that the number of concurrent items in a stable system ($L$) equals the long-term average arrival rate ($\lambda$) multiplied by the average time spent in the system ($W$). In an agentic cluster, the number of concurrent active trajectories residing in memory ($L$) scales linearly with the average trajectory duration ($W$). Because $W$ is dominated by these extended external tool waits, a high-throughput serving cluster will rapidly accumulate a massive backlog of suspended trajectories. Because HBM is the scarcest and most expensive resource in modern data centers ($\approx \$40,000$ per accelerator), holding HBM allocated for these stalled trajectories slashes overall cluster throughput and triggers out-of-memory (OOM) cascading failures.
 
@@ -453,7 +464,7 @@ In modern agentic architectures, foundation models are inherently untrusted comp
 In an autonomous agentic system, safety, budget, capability, and transactional invariants must be enforced by a deterministic, non-neural runtime enclosure. The untrusted neural policy must operate strictly as an advisory proposal engine enclosed within an unbypassable execution supervisor.
 :::
 
-This principle is a direct adaptation of the classic operating systems tenet of **Separation of Mechanism and Policy**. In traditional operating systems (like the Hydra kernel), the kernel provides the mechanisms (e.g., page tables, context switching) while user-space or administrators provide the policy (e.g., which pages to evict, scheduling priorities). In agentic MLSys, this separation is strictly inverted: the neural foundation model provides the complex, non-deterministic *policy* (deciding *what* tools to call and formulating the multi-step plan), while the deterministic runtime enclosure provides the unyielding *mechanism* (executing the ABI calls, enforcing budgets, and applying sandboxes).
+This principle is a direct adaptation of the classic operating systems tenet of **Separation of Mechanism and Policy**. Think of the foundation model like a user-space application and the runtime enclosure like the operating system kernel. A user application cannot directly spin a hard drive platter to write a file; it must issue a `write()` syscall, which the kernel intercepts, checks for permissions, and then safely executes. In agentic MLSys, this separation is strictly inverted in terms of complexity: the neural foundation model provides the complex, non-deterministic *policy* (deciding *what* tools to call and formulating the multi-step plan), while the deterministic runtime enclosure provides the unyielding *mechanism* (executing the ABI calls, enforcing budgets, and applying sandboxes).
 
 Under the Invariant Closure Principle, the system architecture explicitly partitions the runtime into two distinct privilege domains:
 
@@ -605,7 +616,7 @@ An agentic system requires far more than wrapping an OpenAI or Anthropic API cli
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *Model scale will eliminate the need for runtime verification.*
-As foundation models scale from hundreds of billions to trillions of parameters, their reasoning accuracy will approach 100 percent, making external test oracles, sandboxes, and verification systems obsolete. However, mathematical compounding error ($P_{\text{success}} \le p^N$) guarantees that even a near-perfect model ($p = 0.99$) fails on long-horizon tasks ($N \ge 100$). Furthermore, foundational computability limits (the Halting Problem) and Gödelian incompleteness dictate that no statistical model can guarantee the correctness of complex, open-ended code generation without external execution and verification.
+As foundation models scale from hundreds of billions to trillions of parameters, their reasoning accuracy will approach 100 percent, making external test oracles, sandboxes, and verification systems obsolete. Yet mathematical compounding error ($P_{\text{success}} \le p^N$) guarantees that even a near-perfect model ($p = 0.99$) fails on long-horizon tasks ($N \ge 100$). Foundational computability limits (the Halting Problem) and Gödelian incompleteness dictate that no statistical model can guarantee the correctness of complex, open-ended code generation without external execution and verification.
 :::
 
 ::: {.fallacy-pitfall}
