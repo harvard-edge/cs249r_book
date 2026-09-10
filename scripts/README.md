@@ -4,7 +4,7 @@ Utility scripts that sit outside the Binder CLI.
 
 Binder is the public command surface for book build/check/fix/format workflows.
 If a task is part of routine book automation or pre-commit, prefer
-`./binder ...`. Keep this directory for one-off audit helpers and
+`./binder/binder ...`. Keep this directory for one-off audit helpers and
 cross-workflow utilities that do not belong to the book CLI.
 
 ## Standalone audit helpers

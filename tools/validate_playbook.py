@@ -72,7 +72,7 @@ def get_title(block):
     return match.group(1).strip() if match else "Unknown Title"
 
 def main():
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/interviews")
+    base_path = Path(__file__).resolve().parents[1] / "staffml"
     tracks = ["cloud", "edge", "mobile", "tinyml"]
     
     all_errors = {}

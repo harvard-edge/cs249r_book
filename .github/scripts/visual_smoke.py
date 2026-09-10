@@ -32,7 +32,7 @@
 #      crossing the figure/caption column on desktop book pages.
 #
 # Usage:
-#   visual_smoke.py --build-dir tinytorch/quarto/_build --site tinytorch
+#   visual_smoke.py --build-dir packages/tinytorch/quarto/_build --site tinytorch
 #                   --pages /index.html /preface.html
 #                   [--report-dir _smoke-report] [--port 0]
 #

@@ -261,7 +261,7 @@ introduce a *different* transform.
 
    Note: the path is `.svg`. The `svg-to-pdf.lua` filter rewrites it
    to `.pdf` for the PDF format only.
-6. From `tinytorch/quarto/`: `make pdf`. Verify visually.
+6. From `packages/tinytorch/quarto/`: `make pdf`. Verify visually.
 
 ## How to edit an existing diagram
 
@@ -269,7 +269,7 @@ introduce a *different* transform.
    Designer both round-trip cleanly; a text editor is fine for
    coordinate or color tweaks).
 2. Save. Don't run any generator — there isn't one anymore.
-3. From `tinytorch/quarto/`: `make pdf`. The Makefile pattern
+3. From `packages/tinytorch/quarto/`: `make pdf`. The Makefile pattern
    rule will reconvert only the changed SVG to PDF and re-render.
 4. Re-render to PNG (`rsvg-convert`) and eyeball it. The PDF builds
    from PNG-equivalent data — if it looks wrong as a PNG, it'll look

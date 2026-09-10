@@ -196,11 +196,11 @@ permissions:
   actions: read
 
 # =============================================================================
-# PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
+# PATHS
 # =============================================================================
-# MLSysBook content lives under book/ to accommodate TinyTorch at root
-# Use ${{ vars.BOOK_ROOT }}, ${{ vars.BOOK_QUARTO }}, etc. in workflow steps
-# Variables: BOOK_ROOT, BOOK_DOCKER, BOOK_TOOLS, BOOK_QUARTO, BOOK_DEPS
+# Directory paths are written literally (books/, binder/, packages/, ...).
+# Repository variables are shared by every branch while the layout is
+# versioned per branch, and fork pull requests receive no variables at all.
 
 jobs:
   build:
@@ -458,8 +458,7 @@ jobs:
 
     env:
       CONTAINER_IMAGE: ${{ format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.platform, inputs.container_tag || 'latest') }}
-      # Using vars.BOOK_DOCKER (repository variable) - works in all contexts
-      DOCKERFILE_PATH: ./${{ vars.BOOK_DOCKER }}/${{ matrix.platform }}/Dockerfile
+      DOCKERFILE_PATH: ./binder/docker/${{ matrix.platform }}/Dockerfile
 
     steps:
       - name: 🛑 Skip build
@@ -528,12 +527,12 @@ jobs:
 
       - name: 🧪 Preflight toolchain (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
-        working-directory: ${{ vars.BOOK_QUARTO }}
+        working-directory: books
         run: |
           set -eu
           # In GitHub's Linux container jobs, $GITHUB_WORKSPACE is the in-container
           # checkout path. The github.workspace expression is the host path.
-          export PYTHONPATH="$GITHUB_WORKSPACE/mlsysim:$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}"
+          export PYTHONPATH="$GITHUB_WORKSPACE/packages/mlsysim:$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}"
           echo "🧪 Running Linux toolchain preflight checks..."
           run_check() {
             CHECK_NAME="$1"
@@ -554,7 +553,7 @@ jobs:
           run_check "python3 on PATH" "command -v python3 >/dev/null"
           run_check "python3 version" "python3 --version"
           run_check "mlsysim import" "python3 -c \"import mlsysim,sys; print('mlsysim:', mlsysim.__file__); print('python:', sys.executable)\""
-          run_check "book tools import" "python3 -c \"from bindery.tools.figures import style; print('book.tools.figures:', style.__file__)\""
+          run_check "book tools import" "python3 -c \"from binder.tools.figures import style; print('book.tools.figures:', style.__file__)\""
           run_check "mlsysim.core import" "python3 -c \"import mlsysim.core; print('mlsysim.core:', mlsysim.core.__file__)\""
           run_check "Rscript on PATH" "command -v Rscript >/dev/null"
           run_check "Rscript version" "Rscript --version | sed -n '1p'"
@@ -663,11 +662,11 @@ jobs:
           Set-Content -Path $scriptPath -Value $fullScript -Encoding UTF8
 
           docker run --rm `
-            -e "PYTHONPATH=C:\workspace\mlsysim;C:\workspace" `
+            -e "PYTHONPATH=C:\workspace\packages\mlsysim;C:\workspace" `
             -e PYTHONIOENCODING=utf-8 `
             -e PYTHONUTF8=1 `
             -v "$($PWD.Path):C:\workspace" `
-            -w "C:\workspace\book\quarto" `
+            -w "C:\workspace\books" `
             ${{ env.CONTAINER_IMAGE }} `
             "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\preflight-script.ps1"
 
@@ -679,12 +678,12 @@ jobs:
 
       - name: 🔨 Build ${{ matrix.format_name }} (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
-        working-directory: ${{ vars.BOOK_QUARTO }}
+        working-directory: books
         env:
           CHROMIUM_FLAGS: "--no-sandbox"
         run: |
           # Keep the in-container checkout first on PYTHONPATH for render-time imports.
-          export PYTHONPATH="$GITHUB_WORKSPACE/mlsysim:$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}"
+          export PYTHONPATH="$GITHUB_WORKSPACE/packages/mlsysim:$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}"
           # Ensure Quarto can find Chromium (installed by Dockerfile but .bashrc not sourced in CI)
           if [ -f "$HOME/.local/share/quarto/chromium/chrome" ]; then
             export QUARTO_CHROMIUM="$HOME/.local/share/quarto/chromium/chrome"
@@ -708,11 +707,11 @@ jobs:
           # EPUB and PDF builds use Quarto's `type: book`, which requires a
           # chapter literally named `index.qmd` at the project root. HTML uses
           # `type: website` with no such requirement but tolerates a same-content
-          # index.qmd. Create a per-job symlink to the volume's landing page so
-          # the book home page carries the correct per-volume content. The
-          # symlink is gitignored to prevent a committed symlink from clobbering
-          # builds via Quarto's website auto-discovery.
-          ln -sf "index-${{ matrix.volume }}.qmd" index.qmd
+          # index.qmd. Copy the volume's landing page to index.qmd for this job
+          # so the book home page carries the correct per-volume content.
+          # index.qmd is gitignored so a committed copy cannot clobber builds
+          # via Quarto's website auto-discovery.
+          cp -f "index-${{ matrix.volume }}.qmd" index.qmd
           quarto render --to ${{ matrix.render_target }} --output-dir "${{ matrix.output_dir }}"
           echo "✅ ${{ matrix.format_name }} build completed"
 
@@ -778,11 +777,11 @@ jobs:
           Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
 
           docker run --rm `
-            -e "PYTHONPATH=C:\workspace\mlsysim;C:\workspace" `
+            -e "PYTHONPATH=C:\workspace\packages\mlsysim;C:\workspace" `
             -e PYTHONIOENCODING=utf-8 `
             -e PYTHONUTF8=1 `
             -v "$($PWD.Path):C:\workspace" `
-            -w "C:\workspace\book\quarto" `
+            -w "C:\workspace\books" `
             ${{ env.CONTAINER_IMAGE }} `
             "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\build-script.ps1"
 
@@ -794,16 +793,16 @@ jobs:
 
       - name: 📉 Compress PDF (Linux)
         if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
-        working-directory: ${{ vars.BOOK_QUARTO }}/${{ matrix.output_dir }}
+        working-directory: books/${{ matrix.output_dir }}
         run: |
           PDF_FILE=$(find . -maxdepth 1 -name "*.pdf" -type f | head -1)
           if [ -n "$PDF_FILE" ]; then
             PDF_NAME=$(basename "$PDF_FILE")
             echo "📉 Compressing $PDF_NAME..."
 
-            SCRIPT_PATH="../../publish/compress_pdf.py"
+            SCRIPT_PATH="../../shared/publish/compress_pdf.py"
             if [ ! -f "$SCRIPT_PATH" ]; then
-              SCRIPT_PATH="${{ github.workspace }}/${{ vars.BOOK_QUARTO }}/publish/compress_pdf.py"
+              SCRIPT_PATH="${{ github.workspace }}/books/shared/publish/compress_pdf.py"
             fi
             python3 "$SCRIPT_PATH" \
               --input "$PDF_NAME" \
@@ -830,9 +829,9 @@ jobs:
             $pdfName = $pdfFile.Name
             Write-Host "📉 Compressing $pdfName..."
 
-            $scriptPath = '..\..\publish\compress_pdf.py'
+            $scriptPath = '..\..\shared\publish\compress_pdf.py'
             if (-not (Test-Path $scriptPath)) {
-              $scriptPath = 'C:\workspace\book\quarto\publish\compress_pdf.py'
+              $scriptPath = 'C:\workspace\books\shared\publish\compress_pdf.py'
             }
 
             python $scriptPath --input $pdfName --output 'compressed.pdf' --quality minimal --verbose
@@ -854,11 +853,11 @@ jobs:
           Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
 
           docker run --rm `
-            -e "PYTHONPATH=C:\workspace\mlsysim;C:\workspace" `
+            -e "PYTHONPATH=C:\workspace\packages\mlsysim;C:\workspace" `
             -e PYTHONIOENCODING=utf-8 `
             -e PYTHONUTF8=1 `
             -v "$($PWD.Path):C:\workspace" `
-            -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" `
+            -w "C:\workspace\books\${{ matrix.output_dir }}" `
             ${{ env.CONTAINER_IMAGE }} `
             "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\compress-pdf-script.ps1"
 
@@ -870,16 +869,16 @@ jobs:
 
       - name: 📚 Compress EPUB (Linux)
         if: matrix.platform == 'linux' && matrix.format_name == 'EPUB' && matrix.enabled
-        working-directory: ${{ vars.BOOK_QUARTO }}/${{ matrix.output_dir }}
+        working-directory: books/${{ matrix.output_dir }}
         run: |
           EPUB_FILE=$(find . -maxdepth 1 -name "*.epub" -type f | head -1)
           if [ -n "$EPUB_FILE" ]; then
             EPUB_NAME=$(basename "$EPUB_FILE")
             echo "📚 Compressing $EPUB_NAME..."
 
-            SCRIPT_PATH="../../publish/compress_epub.py"
+            SCRIPT_PATH="../../shared/publish/compress_epub.py"
             if [ ! -f "$SCRIPT_PATH" ]; then
-              SCRIPT_PATH="${{ github.workspace }}/${{ vars.BOOK_QUARTO }}/publish/compress_epub.py"
+              SCRIPT_PATH="${{ github.workspace }}/books/shared/publish/compress_epub.py"
             fi
             python3 "$SCRIPT_PATH" \
               --input "$EPUB_NAME" \
@@ -906,10 +905,10 @@ jobs:
             Write-Host "📚 Compressing $epubName..."
 
             $scriptPath = $null
-            if (Test-Path '..\..\publish\compress_epub.py') {
-              $scriptPath = '..\..\publish\compress_epub.py'
-            } elseif (Test-Path 'C:\workspace\book\quarto\publish\compress_epub.py') {
-              $scriptPath = 'C:\workspace\book\quarto\publish\compress_epub.py'
+            if (Test-Path '..\..\shared\publish\compress_epub.py') {
+              $scriptPath = '..\..\shared\publish\compress_epub.py'
+            } elseif (Test-Path 'C:\workspace\books\shared\publish\compress_epub.py') {
+              $scriptPath = 'C:\workspace\books\shared\publish\compress_epub.py'
             } else {
               Write-Error '❌ compress_epub.py not found!'
               exit 1
@@ -937,11 +936,11 @@ jobs:
           Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
 
           docker run --rm `
-            -e "PYTHONPATH=C:\workspace\mlsysim;C:\workspace" `
+            -e "PYTHONPATH=C:\workspace\packages\mlsysim;C:\workspace" `
             -e PYTHONIOENCODING=utf-8 `
             -e PYTHONUTF8=1 `
             -v "$($PWD.Path):C:\workspace" `
-            -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" `
+            -w "C:\workspace\books\${{ matrix.output_dir }}" `
             ${{ env.CONTAINER_IMAGE }} `
             "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\compress-epub-script.ps1"
 
@@ -956,7 +955,7 @@ jobs:
         if: matrix.enabled
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ vars.BOOK_QUARTO }}/${{ matrix.output_dir }}
+          path: books/${{ matrix.output_dir }}
 
   collect-outputs:
     name: '📊 Collect Outputs'

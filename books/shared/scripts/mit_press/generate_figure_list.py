@@ -109,10 +109,6 @@ def get_chapter_order_from_config(quarto_dir: Path) -> list[Path]:
         if not config_path.exists():
             continue
         
-        # Follow symlink if needed
-        if config_path.is_symlink():
-            config_path = config_path.resolve()
-        
         try:
             with open(config_path) as f:
                 config = yaml.safe_load(f)

@@ -2,7 +2,7 @@
 
 Date: 2026-04-25
 Manifest: `tools/phase_g/cleanup_manifest.json` (47 items)
-Output: edits applied in place to `interviews/vault/questions/cloud/*.yaml`
+Output: edits applied in place to `staffml/vault/questions/cloud/*.yaml`
 
 ## Totals
 

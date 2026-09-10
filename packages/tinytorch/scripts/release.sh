@@ -96,7 +96,7 @@ fi
 # ============================================================================
 if [ ! -f "pyproject.toml" ]; then
     print_error "pyproject.toml not found"
-    echo "Run this script from the tinytorch/ directory"
+    echo "Run this script from the packages/tinytorch/ directory"
     exit 1
 fi
 

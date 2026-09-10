@@ -3,7 +3,7 @@
 PDF math-rendering audit for MLSysBook chapters.
 
 For each chapter:
-  1. Builds a PDF via `./binder build pdf <vol>/<chap>`.
+  1. Builds a PDF via `./binder/binder build pdf <vol>/<chap>`.
      A build failure is itself a strong signal of a math-rendering bug
      (raw \\command outside math mode causes LaTeX to error out).
   2. Extracts text via `pdftotext` and applies the same leak-pattern
@@ -35,7 +35,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-BINDER = REPO / "book" / "binder"
+BINDER = REPO / "binder" / "binder"
 BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "pdf-vol1",
     # binder writes vol2 PDFs into the per-volume directory if it's
@@ -108,15 +108,14 @@ def list_all_chapters() -> list[tuple[str, str, Path]]:
 
 
 def build_pdf(name: str, volume: str) -> tuple[bool, float, str]:
-    # Per-volume index symlink: PDF builds need `index.qmd` to point
-    # to either `index-vol1.qmd` or `index-vol2.qmd`. CI does this
-    # per-job; we replicate it here.
-    index_link = REPO  / "books" / "index.qmd"
-    target = f"index-{volume}.qmd"
+    # Per-volume index: PDF builds need `index.qmd` to hold the content of
+    # `index-vol1.qmd` or `index-vol2.qmd`. CI copies it per job; we do the
+    # same here.
+    index_path = REPO / "books" / "index.qmd"
     try:
-        if index_link.is_symlink() or index_link.exists():
-            index_link.unlink()
-        index_link.symlink_to(target)
+        if index_path.is_symlink():
+            index_path.unlink()
+        shutil.copyfile(REPO / "books" / f"index-{volume}.qmd", index_path)
     except OSError:
         pass
     vol_flag = f"--{volume}"

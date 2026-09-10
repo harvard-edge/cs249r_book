@@ -1,6 +1,6 @@
 """
 Real-browser regression test for DesignLedger's WASM/IndexedDB persistence
-(mlsysim/mlsysim/labs/state.py).
+(packages/mlsysim/mlsysim/labs/state.py).
 
 Why this exists
 ----------------
@@ -49,7 +49,7 @@ import pytest
 
 
 STATE_PY = (
-    Path(__file__).resolve().parents[2] / "mlsysim" / "mlsysim" / "labs" / "state.py"
+    Path(__file__).resolve().parents[2] / "packages" / "mlsysim" / "mlsysim" / "labs" / "state.py"
 )
 TRIALS = 5
 PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"

@@ -19,7 +19,7 @@ reply text — reads from a single config file:
   ```bash
   python3 projects.py keys             # → book,tinytorch,…,instructors
   python3 projects.py aliases          # → tito:tinytorch,interviews:staffml,…
-  python3 projects.py dirs-overrides   # → staffml:interviews
+  python3 projects.py dirs-overrides   # → tinytorch:packages/tinytorch
   python3 projects.py update-files     # → newline-separated file list
   ```
 
@@ -28,7 +28,7 @@ reply text — reads from a single config file:
 - **`key`** — canonical name used in commit messages, bot replies, and
   section markers (e.g. `staffml`).
 - **`dir`** — on-disk directory holding `.all-contributorsrc` and
-  `README.md` (e.g. `interviews`). May differ from the key.
+  `README.md` (e.g. `packages/tinytorch`). May differ from the key.
 - **`aliases`** — alternate strings recognised in the trigger comment
   (substring-matched, so prefer non-ambiguous tokens).
 - **`section`** — `{emoji, title, marker}` rendered into the root README.
@@ -159,7 +159,7 @@ Automatically adds contributors when you comment on any issue or PR:
    `@all-contributors please add @user for code in TinyTorch, Slides`. Multiple
    projects in one comment are supported.
 2. PR file paths — if the PR only touches files under one top-level project
-   directory (`tinytorch/...`, `labs/...`, etc.), that project is used.
+   directory (`packages/tinytorch/...`, `labs/...`, etc.), that project is used.
 3. Issue labels or title (matched against project names and aliases).
 
 If detection fails or is ambiguous, the workflow replies asking the user to
@@ -249,12 +249,12 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
 
 Project configs (path = on-disk directory, project key in parens):
 ├── .all-contributorsrc              # Root config (legacy / aggregate)
-├── book/.all-contributorsrc         # book
-├── tinytorch/.all-contributorsrc    # tinytorch
+├── binder/.all-contributorsrc       # book
+├── packages/tinytorch/.all-contributorsrc    # tinytorch
 ├── kits/.all-contributorsrc         # kits
 ├── labs/.all-contributorsrc         # labs
-├── mlsysim/.all-contributorsrc      # mlsysim
-├── interviews/.all-contributorsrc   # staffml  (directory ≠ project key)
-├── slides/.all-contributorsrc       # slides
-└── instructors/.all-contributorsrc  # instructors
+├── packages/mlsysim/.all-contributorsrc      # mlsysim
+├── staffml/.all-contributorsrc   # staffml  (directory ≠ project key)
+├── materials/slides/.all-contributorsrc       # slides
+└── materials/instructors/.all-contributorsrc  # instructors
 ```

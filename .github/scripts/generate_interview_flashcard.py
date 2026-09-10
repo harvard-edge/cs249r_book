@@ -90,7 +90,7 @@ def main():
 """
 
     # We append this to a COMMUNITY.md file in the appropriate track directory
-    file_path = f"interviews/{track_folder}/COMMUNITY.md"
+    file_path = f"staffml/{track_folder}/COMMUNITY.md"
     
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     

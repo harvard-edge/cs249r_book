@@ -56,7 +56,7 @@
 
 ## 🛠️ Building Locally
 
-<kbd>cd instructors/</kbd>
+<kbd>cd materials/instructors/</kbd>
 <kbd>quarto preview</kbd>
 
 Requires [Quarto](https://quarto.org/) 1.4+.

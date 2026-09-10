@@ -2,7 +2,7 @@
 """
 Math-rendering audit for MLSysBook HTML output.
 
-For each chapter, builds the HTML (via `./binder build html <chap>`),
+For each chapter, builds the HTML (via `./binder/binder build html <chap>`),
 then scans the rendered HTML for raw LaTeX leakage that escaped MathJax.
 
 A "leak" is a LaTeX command or pattern that appears in user-visible prose
@@ -32,7 +32,7 @@ BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "html-vol1",
     "vol2": REPO  / "books" / "_build" / "html-vol2",
 }
-BINDER = REPO / "book" / "binder"
+BINDER = REPO / "binder" / "binder"
 
 # Patterns that, if found in user-visible HTML text, indicate a rendering bug.
 # Order matters for reporting; most diagnostic first.
@@ -120,7 +120,7 @@ def list_chapters() -> list[tuple[str, str, Path]]:
 
 
 def build_chapter(name: str, volume: str) -> tuple[bool, float, str]:
-    """Run `./binder build html <vol>/<name>` and return (ok, secs, output)."""
+    """Run `./binder/binder build html <vol>/<name>` and return (ok, secs, output)."""
     chap = f"{volume}/{name}"
     t0 = time.time()
     proc = subprocess.run(
