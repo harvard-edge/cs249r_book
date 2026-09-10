@@ -12,20 +12,21 @@ Chapter Metrics & Metadata
 - Companion Code: src/vol3/04_virtual_memory/ (paged_kv_allocator.py, radix_cache_tree.py, cow_speculative_branch.py)
 -->
 
+## Purpose {.unnumbered .unlisted}
+
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{15}{20}{30}{95}{20}{15}
+\mlagentstack{10}{10}{20}{10}{95}{15}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
+_Why does an agent swarm with shared instructions waste eighty percent of accelerator memory?_
 
-## Purpose {.unnumbered .unlisted}
+This chapter introduces the systems architecture required to transform volatile accelerator memory into a virtualized, demand-paged context substrate for autonomous agents. While the token dynamics of an agent's working set govern capacity from an information-theoretic perspective, this chapter focuses on the physical memory allocation mechanics required to sustain long-horizon agent execution. We explore how modern serving systems eliminate internal and external Key-Value cache fragmentation, examine the temporal and spatial prefix locality inherent in iterative tool execution loops, dissect the mechanics of block-level virtual memory translation, and analyze dynamic prefix indexing via Radix trees to support zero-overhead speculative branching in tree search. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
 
-This chapter introduces the systems architecture required to transform volatile accelerator memory into a virtualized, demand-paged context substrate for autonomous agents. While @sec-vol3-working-sets analyzed the token dynamics of an agent's working set from a capacity perspective, this chapter focuses on the physical memory allocation mechanics required to sustain long-horizon agent execution. We explore how modern serving systems eliminate internal and external Key-Value (KV) cache fragmentation, examine the temporal and spatial prefix locality inherent in iterative tool execution loops, dissect the mechanics of block-level virtual memory translation (PagedAttention), and analyze dynamic prefix indexing via Radix trees (RadixAttention) to support zero-overhead speculative branching in tree search.
-
-::: {.callout-note appearance="minimal"}
-Virtual context memory is the operating system abstraction layer that decouples an agent's logical reasoning trajectory from physical accelerator High-Bandwidth Memory (HBM). Without dynamic paging and zero-copy prefix sharing, multi-turn tool execution and test-time deliberation collapse under quadratic prefill compute costs and catastrophic memory fragmentation.
+::: {.content-visible when-format="pdf"}
+\newpage
 :::
 
 ![**Figure 4.1: Virtual context memory as the foundational physical execution substrate in the autonomous agent systems stack.**](/assets/images/svg/vol3/fig-vol3-vm-agent-stack.svg){#fig-vol3-vm-agent-stack}
@@ -123,7 +124,7 @@ As context windows expanded from $4\text{k}$ to $128\text{k}$ and $1\text{M}$ to
 | **Qwen-2.5** [@qwen2024qwen25] | 72B             | 80                  | 8192               | GQA ($8:1$)    | 64 / 8                                    | $163\text{,}840$ ($160\text{ KB}$)           | $5.24\text{ GB}$                | $20.97\text{ GB}$                |
 | **Command R+** [@cohere2024command] | 104B            | 64                  | 12288              | GQA ($8:1$)    | 96 / 8                                    | $131\text{,}072$ ($128\text{ KB}$)           | $4.19\text{ GB}$                | $16.78\text{ GB}$                |
 | **DeepSeek-V2 / V3** [@deepseek2024v2; @deepseek2024v3] | 236B / 671B     | 60                  | 5120               | MLA            | Latent ($512 + 64$)                       | $69\text{,}120$ ($67.5\text{ KB}$)           | $2.21\text{ GB}$                | $8.85\text{ GB}$                 |
-: Memory footprint per token across modern foundation model attention architectures. {#tbl-vol3-vm-model-kv-footprint}
+: Memory footprint per token across modern foundation model attention architectures. {#tbl-vol3-vm-model-kv-footprint tbl-colwidths="[20,10,10,10,10,10,10,10,10]"}
 
 ### Physical Tensor Layouts and Memory Fragmentation
 
@@ -170,7 +171,7 @@ $$X^{(t)} = \left[ \mathbf{x}_{\text{sys}}, \, \mathbf{x}_{\text{tools}}, \, \ma
 | **Environment Context** ($\mathbf{x}_{\text{env}}$)                                    | Repo map, file tree, system environment, user issue description | $2\text{,}000 - 30\text{,}000$ | Static per agent session | Low (updates on major state sync) |
 | **Trajectory History** ($\mathbf{x}_{\text{history}}^{(1:t-1)}$)                       | Prior thought traces, actions executed, observations returned   | $1\text{,}000 - 80\text{,}000$ | Append-only per turn     | Low (strictly monotonic growth)   |
 | **Current Step** ($\mathbf{x}_{\text{action}}^{(t-1)}, \mathbf{x}_{\text{obs}}^{(t)}$) | The latest tool invocation and external observation payload     | $200 - 10\text{,}000$          | Dynamic (new every turn) | High (frequently divergent)       |
-: Structural decomposition and mutation characteristics of an autonomous agent prompt. {#tbl-vol3-vm-prompt-anatomy}
+: Structural decomposition and mutation characteristics of an autonomous agent prompt. {#tbl-vol3-vm-prompt-anatomy tbl-colwidths="[20,40,15,10,15]"}
 
 Notice the critical operational property revealed in @tbl-vol3-vm-prompt-anatomy: the vast majority of tokens in $X^{(t)}$ are **strictly invariant prefixes** of $X^{(t+1)}$.
 
@@ -326,7 +327,7 @@ PagedAttention fundamentally alters the memory efficiency equation:
 |   **$B = 16$**   |                $2.56\text{ MB}$               |          $2.40\text{ MB}$         |  Good ($256$-byte sector alignment)  |           Moderate           | General agent serving (default) |
 |   **$B = 32$**   |                $5.12\text{ MB}$               |          $4.96\text{ MB}$         | Optimal ($512$-byte coalesced burst) |             Low              | High-throughput batch serving   |
 |   **$B = 64$**   |               $10.24\text{ MB}$               |          $9.92\text{ MB}$         |               Optimal                |           Very Low           | Massive batched prefill engines |
-: Trade-offs in PagedAttention block size selection ($B$) across memory efficiency and GPU memory bus throughput. {#tbl-vol3-vm-block-size-tradeoffs}
+: Trade-offs in PagedAttention block size selection ($B$) across memory efficiency and GPU memory bus throughput. {#tbl-vol3-vm-block-size-tradeoffs tbl-colwidths="[10,20,20,20,15,15]"}
 
 ### Copy-on-Write (CoW) for Speculative Trajectories
 
@@ -428,7 +429,7 @@ As depicted in @fig-vol3-vm-radix-tree, maintaining the Radix tree in host runti
 **Variables:**
 
 - Swarm size: $N = 16$ concurrent subagents.
-- Shared prefix length: $L_{\text{shared}} = 24{,}000\text{ tokens}$.
+- Shared prefix length: $L_{\text{shared}} = 24\text{,}000\text{ tokens}$.
 - Unique per-subagent task prompt: $L_{\text{sub}} = 500\text{ tokens}$.
 - KV cache footprint per token: $S_{\text{token}} = 327{,}680\text{ bytes} \approx 320\text{ KB}$.
 - Model parameters: $P = 70 \times 10^9$ ($\text{FLOPs/token} = 2P = 1.4 \times 10^{11}$).
@@ -494,7 +495,7 @@ $$M_{\text{tree}} = M_{\text{KV}}(L_{\text{root}}) + \sum_{d=1}^{D} K^d \cdot M_
 | **Beam Search**      |           4            |        3         |          64          |                       $1\text{,}120\text{,}000$                        |      $58\text{,}000$       |      $19.3\times$     |           $9.50\text{ GB}$          |
 | **Tree-of-Thoughts** |           3            |        4         |          81          |                       $1\text{,}458\text{,}000$                        |      $76\text{,}500$       |      $19.1\times$     |          $12.53\text{ GB}$          |
 | **Dense MCTS**       |           5            |        3         |         125          |                       $2\text{,}187\text{,}500$                        |      $93\text{,}500$       |      $23.4\times$     |          $15.32\text{ GB}$          |
-: Scaling arithmetic for speculative tree search algorithms under naive execution versus Radix tree prefix caching. {#tbl-vol3-vm-deliberation-scaling}
+: Scaling arithmetic for speculative tree search algorithms under naive execution versus Radix tree prefix caching. {#tbl-vol3-vm-deliberation-scaling tbl-colwidths="[15,10,10,10,20,15,10,10]"}
 
 The physical KV cache memory mapping during a branching search rollout is visualized in @fig-vol3-vm-tree-kv-cache.
 
@@ -570,26 +571,30 @@ Before investigating failure modes, verify your analytical understanding of Radi
 
 ## Fallacies and Pitfalls {#sec-vol3-vm-fallacies}
 
-**Fallacy: Prefix caching makes prompt template design and token serialization irrelevant.**
+These common misconceptions about prefix caching and memory paging often lead to degraded agent performance or catastrophic memory crashes in production inference systems.
+
+**Fallacy**: *Prefix caching makes prompt template design and token serialization irrelevant.*
 Assuming that because an inference engine deploys Radix tree prefix caching, developers can format prompt strings without regard for whitespace, JSON structure, or dynamic variable placement. The reality is Radix trees match on exact token IDs, not semantic strings. Subword tokenizers (such as BPE [@sennrich2015neural]) are notoriously sensitive to whitespace and leading characters. Formatting differences drop the cache hit rate from 98% to 0%, forcing a complete prefill. Production prompt compilers must enforce canonical serialization.
 
-**Fallacy: Adopting PagedAttention completely eliminates memory capacity limits in test-time search.**
+**Fallacy**: *Adopting PagedAttention completely eliminates memory capacity limits in test-time search.*
 Believing that zero-copy Copy-on-Write branching allows an agent to expand speculative search trees (Tree-of-Thoughts [@yao2023tree] or MCTS [@browne2012survey]) to arbitrary breadth and depth. While PagedAttention shares parent nodes with zero replication overhead, the leaves of the search tree expand exponentially. Without strict admission control, depth pruning, and token-level budgeting, speculative rollouts trigger memory thrashing.
 
-**Pitfall: Silent cache poisoning across tool-environment mutations (The Semantic Invalidation Dilemma).**
+**Pitfall**: *Silent cache poisoning across tool-environment mutations (The Semantic Invalidation Dilemma).*
 In an autonomous SWE agent, an agent executes a bash command that edits a file. If the prompt included the output of a prior file state, the Radix tree caches this trajectory. If an optimization system rewrites history to insert the updated file state in-place, it invalidates the prefix. More dangerously, cache entries must be leased with cryptographic content hashes to avoid semantic invalidation across independent agent runs.
 
-**Pitfall: Placing dynamic nonces, timestamps, or session IDs at the root of prompt templates.**
+**Pitfall**: *Placing dynamic nonces, timestamps, or session IDs at the root of prompt templates.*
 Prefix matching proceeds strictly from left to right. By placing a millisecond timestamp or random UUID at the root of the prompt string, every incoming request presents a completely unique initial 20 tokens. The Radix tree lookup fails immediately at the root node, causing the entire cluster to operate at a 0% prefix cache hit rate. Dynamic variables must always be placed at the absolute tail of the prompt.
 
 ## Summary {#sec-vol3-vm-summary}
 
+::: {.callout-takeaways title="The Virtual Context Memory Contract"}
 * **Decoupling Logical State from Physical Silicon:** Autonomous agent trajectories must not be allocated as contiguous physical tensors. Block-level paging (PagedAttention) eliminates external fragmentation and bounds internal waste to the final block of a sequence.
 * **Exploiting Trajectory Prefix Locality:** Agent perception-action loops exhibit monotonic prefix expansion. Recomputing prompt prefills on stateless infrastructure wastes over 90% of cluster FLOPs and inflates Time-to-First-Token by orders of magnitude.
 * **Automating Sharing with Dynamic Prefix Trees:** Radix tree indexing (RadixAttention) automatically identifies common prefix paths across multi-turn trajectories, parallel swarms, and speculative search branches, executing chunked prefills only for divergent suffixes.
 * **Speculative Branching via Copy-on-Write:** Evaluating alternative reasoning branches requires aliasing parent page tables rather than copying activation tensors, widening speculative search capacity by over 30x.
 * **Enforcing Strict Prompt Hygiene:** Prefix caching operates on token sequence identity. Non-deterministic JSON serialization, BPE whitespace shifts, and dynamic root nonces drop cache hit rates to zero, inducing cluster-wide queueing thrash.
 * **Bounding Speculative Expansion:** Zero-copy branching does not eliminate memory limits; the leaves of a search tree still expand exponentially, requiring strict admission control and token-level budgeting to prevent out-of-memory crashes.
+:::
 
 [^fn-virtual-memory]: **virtual memory**\index{virtual memory}: A memory management technique that provides an "idealized abstraction of the storage resources that are actually available on a given machine" which "creates the illusion to users of a very large (main) memory."
 [^fn-kv-activation-tensors]: **Key-Value (KV) activation tensors**\index{Key-Value (KV) activation tensors}: High-dimensional memory states maintained by a transformer's attention mechanism to cache the representations of previously seen tokens, preventing redundant recalculations during autoregressive decoding.
@@ -608,6 +613,23 @@ Prefix matching proceeds strictly from left to right. By placing a millisecond t
 
 [^fn-ttft]: **Time-to-First-Token (TTFT)**\index{Time-to-First-Token (TTFT)}: The latency measured from when an inference engine receives a prompt to when it emits the first generated token, largely dominated by the prefill computation.
 
-::: {.callout-chapter-connection title="From volatile context to persistent episodic storage"}
+::: {.callout-chapter-connection title="From Volatile Memory to Persistent State"}
 Virtual context memory optimizes volatile accelerator memory during active execution. However, when an agent finishes an interaction epoch, undergoes state suspension during a human approval loop, or crashes due to infrastructure failure, volatile KV caches in GPU HBM cannot serve as persistent records. In @sec-vol3-checkpointing (*State Checkpointing & Fault Recovery*), we investigate how the active Agent Control Block (ACB) and execution state are safely serialized to non-volatile storage tiers.
 :::
+
+## Quantitative Problems {#sec-vol3-virtual-memory-problems}
+
+**1. PagedAttention Fragmentation Bounds**
+Consider a deployment of Llama-3-70B (FP16, GQA 8:1, $S_{\text{token}} = 160\text{ KB}$) on a GPU cluster. A batch of $N = 256$ agent trajectories are actively generating. Their current context lengths are uniformly distributed between $1\text{,}000$ and $32\text{,}000$ tokens. The system uses PagedAttention with a block size of $B$. 
+*(a)* Derive the expected aggregate internal fragmentation (in MB) across the entire batch for $B \in \{8, 16, 32, 64\}$. 
+*(b)* If the GPU global memory bus requires 512-byte aligned coalesced reads for maximum bandwidth, which block sizes incur a memory access penalty, and why?
+
+**2. Swarm Prefix Locality Economics**
+An automated QA agent is instantiated as a swarm of $10$ parallel workers. Each worker shares an identical root prompt consisting of $18\text{,}000$ tokens of repository context. Each worker then executes a unique tree of thoughts exploring $K=3$ branches to a depth of $D=3$. The incremental tokens added per branch is $\Delta L = 400$ tokens.
+*(a)* Calculate the total physical memory required to cache the KV activations for the entire swarm under a stateless serving architecture versus a Radix tree caching architecture (assume Llama-3-70B FP16 footprint).
+*(b)* Calculate the theoretical FLOPs saved by the Radix cache during the generation of the full search trees across all $10$ workers.
+
+**3. Chunked Prefill Latency**
+A code-refactoring agent completes turn $t=15$ with a context length of $24\text{,}000$ tokens. For turn $t=16$, it appends a $1\text{,}200$-token compiler error and a $200$-token thought block. The inference server operates at an effective prefill throughput of $600\text{ TFLOPS}$ (using a 70B parameter model).
+*(a)* If the server experiences a Radix cache hit on the $24\text{,}000$-token prefix, calculate the chunked prefill latency for the new tokens. 
+*(b)* If a timestamp nonce at the beginning of the system prompt causes a complete cache miss, what is the resulting Time-to-First-Token (TTFT) latency penalty?
