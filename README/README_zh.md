@@ -133,9 +133,9 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [book/](../book/README.md) |
+| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [books/](../books/) |
 | **EXPLORE** | 🔮 Software Co‑Labs | 进行延迟、内存、能耗、成本实验 | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 亲手实现框架 | [tinytorch/](../tinytorch/README.md) |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 亲手实现框架 | [packages/tinytorch/](../packages/tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 在受内存、功耗、时延、安全约束的硬件上工程实现 | [kits/](../kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | 参与所有赛道的竞技与基准测试 | *Coming 2026* |
 
@@ -261,8 +261,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | 我想… | 前往 |
 |--------------|---------|
-| 修正错别字或改进章节 | [bindery/docs/CONTRIBUTING.md](../bindery/docs/CONTRIBUTING.md) |
-| 添加 TinyTorch 模块或修复 bug | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
+| 修正错别字或改进章节 | [binder/docs/CONTRIBUTING.md](../binder/docs/CONTRIBUTING.md) |
+| 添加 TinyTorch 模块或修复 bug | [packages/tinytorch/CONTRIBUTING.md](../packages/tinytorch/CONTRIBUTING.md) |
 | 改进硬件实验 | [kits/README.md](../kits/README.md) |
 | 报告问题 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 | 提问 | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
@@ -291,7 +291,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 | Component | License | What It Means |
 |-----------|---------|---------------|
 | **Book content** | [CC BY‑NC‑ND 4.0](../LICENSE.md) | 在署名、非商业、禁止演绎的前提下自由分发 |
-| **TinyTorch code** | [Apache 2.0](../tinytorch/LICENSE) | 自由使用、修改、分发并附带专利保护 |
+| **TinyTorch code** | [Apache 2.0](../packages/tinytorch/LICENSE) | 自由使用、修改、分发并附带专利保护 |
 
 教材内容（章节、图表、解释）属于教育资料，应在署名且非商业使用的前提下自由共享。软件框架则是供任何人使用、修改、集成的工具。
 

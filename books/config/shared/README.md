@@ -10,24 +10,23 @@ It is not for CSS/SCSS, TeX templates, or other rendering assets.
 ## Active config: how `_quarto.yml` is selected
 
 Quarto looks for `_quarto.yml` at the project root (`books/`). That file
-is a **symlink** the `binder` CLI rewrites every time you build, preview, or
-switch volume/format:
+is a **generated copy** the `binder` CLI writes every time you build, preview,
+or switch volume/format:
 
-    books/_quarto.yml   ->  config/_quarto-{html,pdf,epub}-{vol1,vol2}.yml
+    books/_quarto.yml   <-  config/_quarto-{html,pdf,epub}-{vol1,vol2,vol3,vol4}.yml
 
-The actual file lives in `config/`; the symlink at the project root is just a
-pointer to the currently-active configuration.
+The first line of the copy names its source. Volume builds also copy
+`index-volN.qmd` to `books/index.qmd`. Both copies are gitignored.
 
 **Do not edit `books/_quarto.yml` directly.** Edit the canonical file
-under `config/` instead. The symlink target may be overwritten on the next
-build.
+under `config/` instead. The next build overwrites the copy.
 
-The symlink is managed by [`bindery/cli/core/config.py`](../../../cli/core/config.py)
-(`ConfigManager.setup_symlink`). To switch manually, use the `binder` CLI
-commands or relink by hand:
+The copy is written by [`binder/cli/core/config.py`](../../../binder/cli/core/config.py)
+(`ConfigManager.activate_config`). To switch manually, use the `binder` CLI
+or copy by hand:
 
     cd books/
-    ln -sf config/_quarto-html-vol2.yml _quarto.yml
+    cp config/_quarto-html-vol2.yml _quarto.yml
 
 ### Per-volume landing pages
 
@@ -44,8 +43,8 @@ contains vol2 content.
 **Never commit a `books/index.qmd`** (symlink *or* regular file). A root
 `index.qmd` is auto-discovered by Quarto's website type and silently clobbers
 the per-volume `index-volX.qmd` during render — the vol1 build ends up
-deploying vol2 content. The path is listed in `.gitignore` to prevent the
-`binder` CLI's local symlink from being checked in accidentally.
+deploying vol2 content. The path is listed in `.gitignore` so the `binder`
+CLI's per-build copy is never checked in accidentally.
 
 ## Layout
 

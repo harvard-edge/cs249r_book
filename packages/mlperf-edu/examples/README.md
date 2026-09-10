@@ -7,7 +7,7 @@ the quickstart, and these examples additionally need the dev extra:
 uv sync --locked --extra dev
 ```
 
-Run everything below from the `mlperf-edu/` project directory. The
+Run everything below from the `packages/mlperf-edu/` project directory. The
 [classroom guide](GETTING_STARTED.md) covers teaching context and grading.
 
 The numbered examples form one classroom sequence. They use registered

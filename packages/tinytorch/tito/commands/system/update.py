@@ -33,7 +33,9 @@ class UpdateCommand(BaseCommand):
     TAGS_API = f"https://api.github.com/repos/{REPO}/tags"
     TAG_PREFIX = "tinytorch-v"
     BRANCH = "main"
-    SPARSE_PATH = "tinytorch"
+    SPARSE_PATH = "packages/tinytorch"
+    # Releases from before the packages/ layout kept TinyTorch at the top level.
+    LEGACY_SPARSE_PATH = "tinytorch"
 
     # Directories/files to UPDATE (overwrite with new version)
     UPDATE_DIRS = [
@@ -210,10 +212,10 @@ class UpdateCommand(BaseCommand):
                 self.console.print(f"[red]Git clone failed: {result.stderr}[/red]")
                 return False
 
-            # Set sparse checkout to only get tinytorch/
+            # Set sparse checkout to only get the TinyTorch directory
             self.console.print("[dim]  Fetching tinytorch files...[/dim]")
             result = subprocess.run(
-                ['git', 'sparse-checkout', 'set', self.SPARSE_PATH],
+                ['git', 'sparse-checkout', 'set', self.SPARSE_PATH, self.LEGACY_SPARSE_PATH],
                 capture_output=True,
                 text=True, encoding="utf-8", errors="replace",
                 cwd=repo_dir
@@ -313,8 +315,10 @@ class UpdateCommand(BaseCommand):
             if not self._download_latest(temp_path):
                 return False
 
-            # Source is the downloaded tinytorch/ subdirectory
+            # Source is the downloaded TinyTorch directory
             src_root = temp_path / "repo" / self.SPARSE_PATH
+            if not src_root.is_dir():
+                src_root = temp_path / "repo" / self.LEGACY_SPARSE_PATH
 
             if not src_root.exists():
                 self.console.print("[red]Error: Downloaded files not found[/red]")

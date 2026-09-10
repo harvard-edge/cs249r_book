@@ -71,10 +71,10 @@ echo ""
 echo "▶ Step 1: Running install script (branch: $BRANCH)..."
 export TINYTORCH_BRANCH="$BRANCH"
 export TINYTORCH_NON_INTERACTIVE=1
-curl -fsSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/quarto/install.sh" -o /tmp/install.sh || {
+curl -fsSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/packages/tinytorch/quarto/install.sh" -o /tmp/install.sh || {
     echo "✗ Failed to download install script for branch: $BRANCH"
-    echo "  URL: https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/quarto/install.sh"
-    echo "  Hint: Does the branch '${BRANCH}' exist and contain tinytorch/quarto/install.sh?"
+    echo "  URL: https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/packages/tinytorch/quarto/install.sh"
+    echo "  Hint: Does the branch '${BRANCH}' exist and contain packages/tinytorch/quarto/install.sh?"
     exit 1
 }
 bash /tmp/install.sh

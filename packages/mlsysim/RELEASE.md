@@ -51,15 +51,15 @@ Run this locally to catch the easy failures before the workflow does:
 - [ ] `cd mlsysim && pytest tests/ -q` → 0 failures
 - [ ] Versions aligned: all four places read the same `X.Y.Z`
   ```bash
-  grep -E '^version = ' mlsysim/pyproject.toml
-  grep -E '^__version__ = ' mlsysim/mlsysim/__init__.py
-  grep -E '^version:' mlsysim/CITATION.cff
-  head -3 mlsysim/CHANGELOG.md
+  grep -E '^version = ' packages/mlsysim/pyproject.toml
+  grep -E '^__version__ = ' packages/mlsysim/mlsysim/__init__.py
+  grep -E '^version:' packages/mlsysim/CITATION.cff
+  head -3 packages/mlsysim/CHANGELOG.md
   ```
 - [ ] CHANGELOG top entry is the version about to ship
-- [ ] Optional: `mlsysim/RELEASE_NOTES_<version>.md` written for the GH Release body
+- [ ] Optional: `packages/mlsysim/RELEASE_NOTES_<version>.md` written for the GH Release body
 - [ ] CLI smoke: `mlsysim eval Llama3_8B H100 --batch-size 32` returns a scorecard
-- [ ] Docs render cleanly: `cd mlsysim/docs && quarto render` — no
+- [ ] Docs render cleanly: `cd packages/mlsysim/docs && quarto render` — no
   `Unable to resolve link target` warnings
 
 If anything fails, fix on a PR to dev and merge before tagging. The workflow
@@ -72,7 +72,7 @@ If the workflow fails with an OIDC error, Trusted Publishing has not been
 configured on pypi.org. Do this once:
 
 1. Sign in to <https://pypi.org/> as a maintainer of the `mlsysim` project.
-2. Go to <https://pypi.org/manage/account/bindery/>.
+2. Go to <https://pypi.org/manage/account/binder/>.
 3. Click **Add a new pending publisher** (or **Manage** for existing ones).
 4. Fill in:
 
@@ -112,7 +112,7 @@ Open <https://mlsysbook.ai/mlsysim/> in an incognito window; confirm:
 
 ## Announce (optional)
 
-- Bump `mlsysim/docs/config/announcement.yml` banner if the release is
+- Bump `packages/mlsysim/docs/config/announcement.yml` banner if the release is
   user-visible (major features, breaking changes).
 - Cross-post to the textbook newsletter / course channels.
 

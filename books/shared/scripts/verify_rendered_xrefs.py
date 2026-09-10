@@ -12,7 +12,7 @@ gaps in the past — most recently, the regex only handled `sec-`/`pri-` and
 silently dropped every cross-chapter `@fig-`/`@tbl-`/`@eq-`/`@lst-` ref,
 shipping literal `?@fig-foo` text into the live HTML.
 
-Static pre-commit checks (`./binder check labels --scope orphans`) cannot
+Static pre-commit checks (`./binder/binder check labels --scope orphans`) cannot
 catch this class of bug — they only verify a label exists in *some* source
 file, not that Quarto's render-time crossref resolver actually wired it up.
 
