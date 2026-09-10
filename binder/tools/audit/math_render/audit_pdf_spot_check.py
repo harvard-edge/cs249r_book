@@ -7,7 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[4]
 OUT = REPO / "audit-pdf-output"
 
 # (volume, chapter, friendly description, regex to find on page)

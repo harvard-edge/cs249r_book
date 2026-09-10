@@ -6742,7 +6742,7 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Math: full HTML render audit (delegates to tools/audit/audit_math_rendering.py)
+    # Math: full HTML render audit (delegates to binder/tools/audit/math_render/audit_math_rendering.py)
     # ------------------------------------------------------------------
     #
     # WHY THIS EXISTS
@@ -6761,25 +6761,26 @@ class ValidateCommand:
     def _run_math_render_audit(self, root: Path) -> ValidationRunResult:
         """Build each chapter's HTML and scan for unrendered LaTeX leakage.
 
-        Delegates to `tools/audit/audit_math_rendering.py`. This is slow
+        Delegates to `binder/tools/audit/math_render/audit_math_rendering.py`. This is slow
         (~10 minutes for the full book) and is registered as a manual-stage
         pre-commit hook; it is NOT run on every commit.
         """
         start = time.time()
-        script = root / "tools" / "audit" / "audit_math_rendering.py"
+        repo_root = self.config_manager.root_dir
+        script = repo_root / "binder" / "tools" / "audit" / "math_render" / "audit_math_rendering.py"
         issues: List[ValidationIssue] = []
         if not script.exists():
             issues.append(ValidationIssue(
-                file=str(script.relative_to(root)) if script.is_absolute() else str(script),
+                file=str(script.relative_to(repo_root)) if script.is_absolute() else str(script),
                 line=0,
                 code="render_audit_missing",
-                message="Render-audit script not found — expected tools/audit/audit_math_rendering.py",
+                message="Render-audit script not found — expected binder/tools/audit/math_render/audit_math_rendering.py",
                 severity="error",
                 context="",
             ))
             return ValidationRunResult(
                 name="render-audit",
-                description="Full HTML build + leak scan (delegates to tools/audit/)",
+                description="Full HTML build + leak scan (delegates to binder/tools/audit/math_render/)",
                 files_checked=0,
                 issues=issues,
                 elapsed_ms=int((time.time() - start) * 1000),
@@ -6787,7 +6788,7 @@ class ValidateCommand:
 
         proc = subprocess.run(
             [sys.executable, str(script)],
-            cwd=root,
+            cwd=repo_root,
             capture_output=True,
             text=True,
         )
@@ -6810,7 +6811,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="render-audit",
-            description="Full HTML build + leak scan (delegates to tools/audit/)",
+            description="Full HTML build + leak scan (delegates to binder/tools/audit/math_render/)",
             files_checked=0,
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

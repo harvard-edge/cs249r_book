@@ -16,6 +16,7 @@ cross-workflow utilities that do not belong to the book CLI.
 | `exec_single.py` | Single-scenario execution runner. |
 | `audit_blocks.py` | Audits code block structure across chapters. |
 | `cross-references/` | Cross-reference audit tooling (see `cross-references/README.md`). |
+| `release-smoke/` | Playwright smoke checks for the published sites (`node smoke.mjs <site>`; site keys in `sites.json`, reports under `reports/`). |
 | `version/` | Shared release hash/manifest helpers used by site workflows. |
 
 ## Prerequisites

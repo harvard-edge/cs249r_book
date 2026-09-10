@@ -37,8 +37,7 @@ design-grammar/   ML systems design grammar catalog
 shared/           assets several sites use: brand styles, navbar and footer config,
                   redirects, cross-site scripts, the release pill
 docs/             repository-level docs: this file, CI variables, versioning
-scripts/          standalone utilities outside the binder CLI (versioning, cross-reference audits)
-tools/            monorepo-level audits, release smoke tests, historical cleanup manifests
+scripts/          standalone utilities outside the binder CLI (versioning, cross-reference audits, release smoke tests)
 wheels/           prebuilt wheels the labs WASM smoke test installs
 README/           translated READMEs
 .github/          workflows, workflow scripts, issue templates, the dev landing page

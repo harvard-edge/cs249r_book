@@ -61,6 +61,7 @@ binder/tools/audit/
 ├── fix_script_lane.py             — FIX stage (script lane) + 5 safety checks
 ├── verify.py                      — VERIFY stage (3 checks)
 ├── loop.py                        — orchestrator CLI
+├── math_render/                   — rendered HTML/PDF math-leak audits (see math_render/README.md)
 ├── checks/
 │   ├── __init__.py
 │   ├── vs_period.py               — bare 'vs' → 'vs.'
