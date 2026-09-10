@@ -19,7 +19,7 @@ binder/           book toolchain: the binder CLI, checks, audits, build scripts,
 tinytorch/        TinyTorch build-your-own-framework course, site, and tito CLI
 mlsysim/          MLSys·im analytical modeling library, docs site, paper, tutorial
 mlperf-edu/       MLPerf EDU laptop-scale benchmark suite and site
-labs/             Marimo co-labs (the mlsysbook_labs package) and the labs site
+labs/             Marimo co-labs (the mlsysbook_labs package), the labs site, and the pinned wheels Pyodide installs
 kits/             hardware kit labs (Arduino, Seeed, Raspberry Pi) and site
 slides/           Beamer lecture decks, one per chapter, and the slides portal
 instructors/      The Blueprint, the instructor site
@@ -38,7 +38,6 @@ shared/           assets several sites use: brand styles, navbar and footer conf
                   redirects, cross-site scripts, the release pill
 docs/             repository-level docs: this file, CI variables, versioning
 scripts/          standalone utilities outside the binder CLI (versioning, cross-reference audits, release smoke tests)
-wheels/           prebuilt wheels the labs WASM smoke test installs
 README/           translated READMEs
 .github/          workflows, workflow scripts, issue templates, the dev landing page
 ```
