@@ -121,7 +121,7 @@ def build_image_index() -> dict[str, str]:
 
 def find_current_text(fig_id: str, qmd_file: str) -> dict:
     """Extract current fig-cap and fig-alt from the QMD source."""
-    # binder outputs paths relative to books/ (e.g. contents/vol1/...)
+    # binder outputs paths relative to books/ (e.g. vol1/...)
     qmd_path = REPO_ROOT  / "books" / qmd_file
     if not qmd_path.exists():
         # fallback: try from repo root directly

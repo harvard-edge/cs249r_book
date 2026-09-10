@@ -15,13 +15,13 @@ Key Features:
 
 Usage:
     # Check single file
-    python format_tables.py --check -f quarto/contents/vol1/efficient_ai/efficient_ai.qmd
+    python format_tables.py --check -f quarto/vol1/efficient_ai/efficient_ai.qmd
 
     # Fix single file
-    python format_tables.py --fix -f quarto/contents/vol1/efficient_ai/efficient_ai.qmd
+    python format_tables.py --fix -f quarto/vol1/efficient_ai/efficient_ai.qmd
 
     # Check all files in a directory
-    python format_tables.py --check -d quarto/contents/vol1/model_compression
+    python format_tables.py --check -d quarto/vol1/model_compression
 
     # Fix all chapter files
     python format_tables.py --fix --all
@@ -916,7 +916,7 @@ def main():
     file_group.add_argument('-d', '--directory', type=str,
                            help='Process all .qmd files in a directory recursively')
     file_group.add_argument('--all', action='store_true',
-                           help='Process all .qmd files in quarto/contents/vol1')
+                           help='Process all .qmd files in quarto/vol1')
 
     # Action selection
     action_group = parser.add_mutually_exclusive_group(required=False)

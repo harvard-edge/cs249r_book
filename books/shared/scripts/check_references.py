@@ -26,15 +26,15 @@ from pathlib import Path
 
 VOLUMES = {
     "vol1": {
-        "chapters_dir": Path("contents/vol1"),
+        "chapters_dir": Path("vol1"),
         "bib_file":     Path("contents/references.bib"),
     },
     "vol2": {
-        "chapters_dir": Path("contents/vol2"),
+        "chapters_dir": Path("vol2"),
         "bib_file":     Path("contents/references.bib"),
     },
     "vol3": {
-        "chapters_dir": Path("contents/vol3"),
+        "chapters_dir": Path("vol3"),
         "bib_file":     Path("contents/references.bib"),
     },
 }

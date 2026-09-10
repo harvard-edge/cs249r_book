@@ -45,10 +45,10 @@ def read_all_chapters_from_yaml(yaml_content: str, vol: str) -> list[str]:
 
     # Pattern to match chapter entries (both commented and uncommented)
     # Matches lines like:
-    #   - contents/vol1/introduction/introduction.qmd
-    #   # - contents/vol1/introduction/introduction.qmd
+    #   - vol1/introduction/introduction.qmd
+    #   # - vol1/introduction/introduction.qmd
     pattern = re.compile(
-        rf'^\s*#?\s*-\s*(contents/vol{vol}/[^\s#]+\.qmd)\s*$',
+        rf'^\s*#?\s*-\s*(vol{vol}/[^\s#]+\.qmd)\s*$',
         re.MULTILINE
     )
 

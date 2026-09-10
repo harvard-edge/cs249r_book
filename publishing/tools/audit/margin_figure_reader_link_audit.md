@@ -27,13 +27,13 @@ When inspecting source markdown, use the `Source QMD` line below, then read the 
 
 ### 001. vol1/benchmarking @ line 199: Component speedup rarely survives as end-to-end benchmark speedup.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:199`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:199`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Component speedup rarely survives as end-to-end benchmark speedup.
 - **Figure evidence (`fig-alt`):** Two stacked latency bars compare before and after a 3 times model-stage speedup: the model segment shrinks, but the other pipeline work remains, so 50 milliseconds only falls to about 43 milliseconds.
 
-![Component speedup rarely survives as end-to-end benchmark speedup.](../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_001.svg)
+![Component speedup rarely survives as end-to-end benchmark speedup.](../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -70,13 +70,13 @@ _Paragraph after the margin block:_
 
 ### 002. vol1/benchmarking @ line 415: A 1K test set cannot reliably see a one-point regression.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:415`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_confidence_detectability.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:415`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/benchmarking_confidence_detectability.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** A 1K test set cannot reliably see a one-point regression.
 - **Figure evidence (`fig-alt`):** Horizontal detectability marker: a 1K test set sits in the noisy region, while roughly 2K samples are needed for a plus or minus 1 percentage point confidence interval.
 
-![A 1K test set cannot reliably see a one-point regression.](../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_confidence_detectability.svg)
+![A 1K test set cannot reliably see a one-point regression.](../../quarto/vol1/benchmarking/images/svg/benchmarking_confidence_detectability.svg)
 
 **Source Markdown Excerpt**
 
@@ -113,13 +113,13 @@ _Paragraph after the margin block:_
 
 ### 003. vol1/benchmarking @ line 728: Larger batches push transformer inference from memory-bound to compute-bound.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:728`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:728`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Larger batches push transformer inference from memory-bound to compute-bound.
 - **Figure evidence (`fig-alt`):** BERT batch 1 dot left of ridge and batch 32 dot near compute plateau.
 
-![Larger batches push transformer inference from memory-bound to compute-bound.](../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_002.svg)
+![Larger batches push transformer inference from memory-bound to compute-bound.](../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -156,13 +156,13 @@ _Paragraph after the margin block:_
 
 ### 004. vol1/benchmarking @ line 1912: Burst benchmark FPS collapses once thermal throttling sets in.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:1912`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:1912`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Burst benchmark FPS collapses once thermal throttling sets in.
 - **Figure evidence (`fig-alt`):** FPS holds briefly then drops at thermal throttling knee.
 
-![Burst benchmark FPS collapses once thermal throttling sets in.](../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_003.svg)
+![Burst benchmark FPS collapses once thermal throttling sets in.](../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -199,13 +199,13 @@ _Paragraph after the margin block:_
 
 ### 005. vol1/benchmarking @ line 3363: Deployment power spans ten orders of magnitude, µW to kW.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:3363`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_power_ladder.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:3363`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/benchmarking_power_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Deployment power spans ten orders of magnitude, µW to kW.
 - **Figure evidence (`fig-alt`):** Vertical ladder of orange bars on a log scale spanning deployment power from a neural decision processor at 150 microwatts at the bottom up through a microcontroller at 25 milliwatts, a Raspberry Pi at 3.5 watts, an edge server at 80 watts, an ML server node at 400 watts, to an ML server rack at 10 kilowatts at the top.
 
-![Deployment power spans ten orders of magnitude, µW to kW.](../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_power_ladder.svg)
+![Deployment power spans ten orders of magnitude, µW to kW.](../../quarto/vol1/benchmarking/images/svg/benchmarking_power_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -242,13 +242,13 @@ _Paragraph after the margin block:_
 
 ### 006. vol1/benchmarking @ line 4467: A dominated model loses on both axes of the Pareto frontier.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:4467`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:4467`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.71`
 - **Caption:** A dominated model loses on both axes of the Pareto frontier.
 - **Figure evidence (`fig-alt`):** Tiny Pareto frontier with one dominated point.
 
-![A dominated model loses on both axes of the Pareto frontier.](../../quarto/contents/vol1/benchmarking/images/svg/vol1_benchmarking_margin_004.svg)
+![A dominated model loses on both axes of the Pareto frontier.](../../quarto/vol1/benchmarking/images/svg/vol1_benchmarking_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -285,13 +285,13 @@ _Paragraph after the margin block:_
 
 ### 007. vol1/benchmarking @ line 5203: Mean benchmark latency understates the production tail by an order of magnitude.
 
-- **Source QMD:** `../../quarto/contents/vol1/benchmarking/benchmarking.qmd:5203`
-- **Asset:** `../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_tail_latency_gap.svg`
+- **Source QMD:** `../../quarto/vol1/benchmarking/benchmarking.qmd:5203`
+- **Asset:** `../../quarto/vol1/benchmarking/images/svg/benchmarking_tail_latency_gap.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Mean benchmark latency understates the production tail by an order of magnitude.
 - **Figure evidence (`fig-alt`):** Margin ladder comparing production P99 latency around 150 to 200 milliseconds with a 15 millisecond benchmark mean, annotated as a 10 to 13.3 times gap.
 
-![Mean benchmark latency understates the production tail by an order of magnitude.](../../quarto/contents/vol1/benchmarking/images/svg/benchmarking_tail_latency_gap.svg)
+![Mean benchmark latency understates the production tail by an order of magnitude.](../../quarto/vol1/benchmarking/images/svg/benchmarking_tail_latency_gap.svg)
 
 **Source Markdown Excerpt**
 
@@ -328,13 +328,13 @@ _Paragraph after the margin block:_
 
 ### 008. vol1/conclusion @ line 92: Architecture choices cascade into compression, serving, drift, and governance.
 
-- **Source QMD:** `../../quarto/contents/vol1/conclusion/conclusion.qmd:92`
-- **Asset:** `../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/conclusion/conclusion.qmd:92`
+- **Asset:** `../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Architecture choices cascade into compression, serving, drift, and governance.
 - **Figure evidence (`fig-alt`):** Causal chain from architecture choice to INT8 quantization, P99 serving latency, and drift or governance obligations.
 
-![Architecture choices cascade into compression, serving, drift, and governance.](../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_001.svg)
+![Architecture choices cascade into compression, serving, drift, and governance.](../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -371,13 +371,13 @@ _Paragraph after the margin block:_
 
 ### 009. vol1/conclusion @ line 718: Decode stays memory-bound, left of the roofline ridge.
 
-- **Source QMD:** `../../quarto/contents/vol1/conclusion/conclusion.qmd:718`
-- **Asset:** `../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/conclusion/conclusion.qmd:718`
+- **Asset:** `../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** Decode stays memory-bound, left of the roofline ridge.
 - **Figure evidence (`fig-alt`):** Llama decode dot on H100 memory-bound slope.
 
-![Decode stays memory-bound, left of the roofline ridge.](../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_002.svg)
+![Decode stays memory-bound, left of the roofline ridge.](../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -414,13 +414,13 @@ _Paragraph after the margin block:_
 
 ### 010. vol1/conclusion @ line 787: Mean latency hides the tail; P99 governs user experience.
 
-- **Source QMD:** `../../quarto/contents/vol1/conclusion/conclusion.qmd:787`
-- **Asset:** `../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/conclusion/conclusion.qmd:787`
+- **Asset:** `../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** Mean latency hides the tail; P99 governs user experience.
 - **Figure evidence (`fig-alt`):** Mean latency versus P99 latency.
 
-![Mean latency hides the tail; P99 governs user experience.](../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_margin_003.svg)
+![Mean latency hides the tail; P99 governs user experience.](../../quarto/vol1/conclusion/images/svg/vol1_conclusion_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -457,13 +457,13 @@ _Paragraph after the margin block:_
 
 ### 011. vol1/conclusion @ line 912: Fleet scale turns rare component failures into routine system events.
 
-- **Source QMD:** `../../quarto/contents/vol1/conclusion/conclusion.qmd:912`
-- **Asset:** `../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_fleet_mtbf_ladder.svg`
+- **Source QMD:** `../../quarto/vol1/conclusion/conclusion.qmd:912`
+- **Asset:** `../../quarto/vol1/conclusion/images/svg/vol1_conclusion_fleet_mtbf_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** Fleet scale turns rare component failures into routine system events.
 - **Figure evidence (`fig-alt`):** Margin ladder showing one GPU with about 5.7 years mean time to failure versus a 1024 GPU pool with about 48.8 hours mean time between failures.
 
-![Fleet scale turns rare component failures into routine system events.](../../quarto/contents/vol1/conclusion/images/svg/vol1_conclusion_fleet_mtbf_ladder.svg)
+![Fleet scale turns rare component failures into routine system events.](../../quarto/vol1/conclusion/images/svg/vol1_conclusion_fleet_mtbf_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -500,13 +500,13 @@ _Paragraph after the margin block:_
 
 ### 012. vol1/data_engineering @ line 197: Selection gain is highest where entropy is high and data gravity low.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:197`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_data_gravity_entropy.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:197`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/data_engineering_data_gravity_entropy.svg`
 - **Audit status:** `Pass`; lexical overlap `0.89`
 - **Caption:** Selection gain is highest where entropy is high and data gravity low.
 - **Figure evidence (`fig-alt`):** A 2-by-2 quadrant. The horizontal axis is data gravity (movement cost), the vertical axis is information entropy (signal density). The top-left cell, low gravity and high entropy, is highlighted and labeled high gain; the other three cells are neutral gray.
 
-![Selection gain is highest where entropy is high and data gravity low.](../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_data_gravity_entropy.svg)
+![Selection gain is highest where entropy is high and data gravity low.](../../quarto/vol1/data_engineering/images/svg/data_engineering_data_gravity_entropy.svg)
 
 **Source Markdown Excerpt**
 
@@ -543,13 +543,13 @@ _Paragraph after the margin block:_
 
 ### 013. vol1/data_engineering @ line 856: Small per-window false-positive rates compound into operational failure.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:856`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:856`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.14`
 - **Caption:** Small per-window false-positive rates compound into operational failure.
 - **Figure evidence (`fig-alt`):** A curve of monthly false wakes that stays low then bends sharply upward as the per-window false-positive rate rises; the steep region past the knee is shaded red.
 
-![Small per-window false-positive rates compound into operational failure.](../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_001.svg)
+![Small per-window false-positive rates compound into operational failure.](../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -586,13 +586,13 @@ _Paragraph after the margin block:_
 
 ### 014. vol1/data_engineering @ line 2327: Each drift type traces to the distribution component that shifted.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:2327`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:2327`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Each drift type traces to the distribution component that shifted.
 - **Figure evidence (`fig-alt`):** A three-node locator with vertices labeled p(x), p(y), and p(y\|x) for the distribution components; one vertex is filled to mark which component has drifted, the others gray.
 
-![Each drift type traces to the distribution component that shifted.](../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_002.svg)
+![Each drift type traces to the distribution component that shifted.](../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -629,13 +629,13 @@ _Paragraph after the margin block:_
 
 ### 015. vol1/data_engineering @ line 3192: Local aggregation beats gather-all when network latency dominates.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:3192`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:3192`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Local aggregation beats gather-all when network latency dominates.
 - **Figure evidence (`fig-alt`):** Vertical time ladder comparing gather-all normalization around 120 seconds against local aggregation around 0.2 seconds.
 
-![Local aggregation beats gather-all when network latency dominates.](../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_003.svg)
+![Local aggregation beats gather-all when network latency dominates.](../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -672,13 +672,13 @@ _Paragraph after the margin block:_
 
 ### 016. vol1/data_engineering @ line 3341: Finer annotation granularity multiplies storage and processing scale.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:3341`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:3341`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_004.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Finer annotation granularity multiplies storage and processing scale.
 - **Figure evidence (`fig-alt`):** Vertical count ladder comparing about 2.1 million segmentation-mask labels against 40 scalar bounding-box entries.
 
-![Finer annotation granularity multiplies storage and processing scale.](../../quarto/contents/vol1/data_engineering/images/svg/vol1_data_engineering_margin_004.svg)
+![Finer annotation granularity multiplies storage and processing scale.](../../quarto/vol1/data_engineering/images/svg/vol1_data_engineering_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -715,13 +715,13 @@ _Paragraph after the margin block:_
 
 ### 017. vol1/data_engineering @ line 3561: Full-pool scoring can exceed the label budget before labeling begins.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:3561`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_active_learning_budget.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:3561`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/data_engineering_active_learning_budget.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** Full-pool scoring can exceed the label budget before labeling begins.
 - **Figure evidence (`fig-alt`):** Budget-envelope chart with a 50K-dollar limit marker; the labeling budget fits at the limit, while full-pool scoring extends into the red over-budget region at 100K dollars.
 
-![Full-pool scoring can exceed the label budget before labeling begins.](../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_active_learning_budget.svg)
+![Full-pool scoring can exceed the label budget before labeling begins.](../../quarto/vol1/data_engineering/images/svg/data_engineering_active_learning_budget.svg)
 
 **Source Markdown Excerpt**
 
@@ -758,13 +758,13 @@ _Paragraph after the margin block:_
 
 ### 018. vol1/data_engineering @ line 3853: Access latency spans eight orders of magnitude, cache to internet.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:3853`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_storage_latency_hierarchy.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:3853`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/data_engineering_storage_latency_hierarchy.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Access latency spans eight orders of magnitude, cache to internet.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of storage-access latencies as slate bars, fastest at bottom to slowest at top: L1 0.5 ns, DRAM 100 ns, SSD 100 µs, network 500 µs, internet 100 ms. A red ceiling caps the slowest tier; the span covers about eight orders of magnitude.
 
-![Access latency spans eight orders of magnitude, cache to internet.](../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_storage_latency_hierarchy.svg)
+![Access latency spans eight orders of magnitude, cache to internet.](../../quarto/vol1/data_engineering/images/svg/data_engineering_storage_latency_hierarchy.svg)
 
 **Source Markdown Excerpt**
 
@@ -801,13 +801,13 @@ _Paragraph after the margin block:_
 
 ### 019. vol1/data_engineering @ line 4413: Data debt diverges as accumulation rate rises.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_engineering/data_engineering.qmd:4413`
-- **Asset:** `../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_debt_compounding.svg`
+- **Source QMD:** `../../quarto/vol1/data_engineering/data_engineering.qmd:4413`
+- **Asset:** `../../quarto/vol1/data_engineering/images/svg/data_engineering_debt_compounding.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Data debt diverges as accumulation rate rises.
 - **Figure evidence (`fig-alt`):** Two rising curves compare normalized data debt over time at 10 percent and 30 percent accumulation rates; the 30 percent curve pulls sharply above the 10 percent curve.
 
-![Data debt diverges as accumulation rate rises.](../../quarto/contents/vol1/data_engineering/images/svg/data_engineering_debt_compounding.svg)
+![Data debt diverges as accumulation rate rises.](../../quarto/vol1/data_engineering/images/svg/data_engineering_debt_compounding.svg)
 
 **Source Markdown Excerpt**
 
@@ -844,13 +844,13 @@ _Paragraph after the margin block:_
 
 ### 020. vol1/data_selection @ line 61: Compute supply can outrun high-quality data supply.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:61`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/data_selection_scaling_saturation.svg`
+- **Source QMD:** `../../quarto/vol1/data_selection/data_selection.qmd:61`
+- **Asset:** `../../quarto/vol1/data_selection/images/svg/data_selection_scaling_saturation.svg`
 - **Audit status:** `Pass`; lexical overlap `0.83`
 - **Caption:** Compute supply can outrun high-quality data supply.
 - **Figure evidence (`fig-alt`):** Two diverging trend lines: compute supply rises faster than high-quality data supply, opening a red gap that represents the data wall.
 
-![Compute supply can outrun high-quality data supply.](../../quarto/contents/vol1/data_selection/images/svg/data_selection_scaling_saturation.svg)
+![Compute supply can outrun high-quality data supply.](../../quarto/vol1/data_selection/images/svg/data_selection_scaling_saturation.svg)
 
 **Source Markdown Excerpt**
 
@@ -887,13 +887,13 @@ _Paragraph after the margin block:_
 
 ### 021. vol1/data_selection @ line 726: Past the frontier, data becomes a tax: compute climbs, learning stalls.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:726`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/data_selection_icr_frontier.svg`
+- **Source QMD:** `../../quarto/vol1/data_selection/data_selection.qmd:726`
+- **Asset:** `../../quarto/vol1/data_selection/images/svg/data_selection_icr_frontier.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Past the frontier, data becomes a tax: compute climbs, learning stalls.
 - **Figure evidence (`fig-alt`):** A curve that stays flat and low, then bends sharply upward into a steep climb. A dot marks the bend. The region to the right of the dot is shaded red. The curve is the compute cost per unit of learning: low until the bend, then exploding.
 
-![Past the frontier, data becomes a tax: compute climbs, learning stalls.](../../quarto/contents/vol1/data_selection/images/svg/data_selection_icr_frontier.svg)
+![Past the frontier, data becomes a tax: compute climbs, learning stalls.](../../quarto/vol1/data_selection/images/svg/data_selection_icr_frontier.svg)
 
 **Source Markdown Excerpt**
 
@@ -930,13 +930,13 @@ _Paragraph after the margin block:_
 
 ### 023. vol1/data_selection @ line 2448: One pretraining corpus defect propagates into many downstream tasks.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:2448`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/data_selection/data_selection.qmd:2448`
+- **Asset:** `../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** One pretraining corpus defect propagates into many downstream tasks.
 - **Figure evidence (`fig-alt`):** One red source node at left fans out through arrows to several blue downstream task nodes at right.
 
-![One pretraining corpus defect propagates into many downstream tasks.](../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_002.svg)
+![One pretraining corpus defect propagates into many downstream tasks.](../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -973,13 +973,13 @@ _Paragraph after the margin block:_
 
 ### 024. vol1/data_selection @ line 3202: Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:3202`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/data_selection/data_selection.qmd:3202`
+- **Asset:** `../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.45`
 - **Caption:** Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.
 - **Figure evidence (`fig-alt`):** A threshold curve with a dashed red marker labeled e equals R; the region beyond the threshold is the over-echo zone.
 
-![Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.](../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_003.svg)
+![Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.](../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -1016,13 +1016,13 @@ _Paragraph after the margin block:_
 
 ### 025. vol1/data_selection @ line 4611: Recursive synthetic-data training degrades accuracy across generations.
 
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:4611`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/data_selection/data_selection.qmd:4611`
+- **Asset:** `../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.71`
 - **Caption:** Recursive synthetic-data training degrades accuracy across generations.
 - **Figure evidence (`fig-alt`):** A line falling from a high accuracy at generation one down to a low accuracy at generation five across successive training generations.
 
-![Recursive synthetic-data training degrades accuracy across generations.](../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_004.svg)
+![Recursive synthetic-data training degrades accuracy across generations.](../../quarto/vol1/data_selection/images/svg/vol1_data_selection_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -1059,13 +1059,13 @@ _Paragraph after the margin block:_
 
 ### 026. vol1/frameworks @ line 881: As work grows, useful compute outpaces fixed dispatch cost; the tax shrinks.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:881`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/frameworks_dispatch_tax_divergence.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:881`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/frameworks_dispatch_tax_divergence.svg`
 - **Audit status:** `Pass`; lexical overlap `0.30`
 - **Caption:** As work grows, useful compute outpaces fixed dispatch cost; the tax shrinks.
 - **Figure evidence (`fig-alt`):** Sparkline of two diverging strokes over operation size. A flat blue stroke marks the fixed Python dispatch cost; a green stroke accelerates above it as useful device work grows, the shaded gap widening to the right.
 
-![As work grows, useful compute outpaces fixed dispatch cost; the tax shrinks.](../../quarto/contents/vol1/frameworks/images/svg/frameworks_dispatch_tax_divergence.svg)
+![As work grows, useful compute outpaces fixed dispatch cost; the tax shrinks.](../../quarto/vol1/frameworks/images/svg/frameworks_dispatch_tax_divergence.svg)
 
 **Source Markdown Excerpt**
 
@@ -1102,13 +1102,13 @@ _Paragraph after the margin block:_
 
 ### 027. vol1/frameworks @ line 2635: Training memory dwarfs inference memory.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:2635`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:2635`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** Training memory dwarfs inference memory.
 - **Figure evidence (`fig-alt`):** Vertical memory ladder comparing a ResNet-50 training footprint around 10 to 15 GB against an inference footprint around 102 MB.
 
-![Training memory dwarfs inference memory.](../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_001.svg)
+![Training memory dwarfs inference memory.](../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -1145,13 +1145,13 @@ _Paragraph after the margin block:_
 
 ### 028. vol1/frameworks @ line 3521: Interconnect bandwidth spans ~64$\\times$: HBM far above NVLink, NVLink far above PCIe.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:3521`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/frameworks_bandwidth_hierarchy.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:3521`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/frameworks_bandwidth_hierarchy.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Interconnect bandwidth spans ~64$\\times$: HBM far above NVLink, NVLink far above PCIe.
 - **Figure evidence (`fig-alt`):** Vertical bandwidth ladder on a log axis: HBM at 2,039 GB/s sits far above NVLink at 600 GB/s, which sits far above PCIe at 32 GB/s, spanning roughly 64 times from slowest to fastest interconnect.
 
-![Interconnect bandwidth spans ~64$\\times$: HBM far above NVLink, NVLink far above PCIe.](../../quarto/contents/vol1/frameworks/images/svg/frameworks_bandwidth_hierarchy.svg)
+![Interconnect bandwidth spans ~64$\\times$: HBM far above NVLink, NVLink far above PCIe.](../../quarto/vol1/frameworks/images/svg/frameworks_bandwidth_hierarchy.svg)
 
 **Source Markdown Excerpt**
 
@@ -1188,13 +1188,13 @@ _Paragraph after the margin block:_
 
 ### 029. vol1/frameworks @ line 3558: Overlapping copy and compute costs max(copy, compute), not their sum.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:3558`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:3558`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Overlapping copy and compute costs max(copy, compute), not their sum.
 - **Figure evidence (`fig-alt`):** Two aligned rows: serial execution pays copy plus compute, while overlapped execution pays only the longer max stage.
 
-![Overlapping copy and compute costs max(copy, compute), not their sum.](../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_002.svg)
+![Overlapping copy and compute costs max(copy, compute), not their sum.](../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -1231,13 +1231,13 @@ _Paragraph after the margin block:_
 
 ### 030. vol1/frameworks @ line 3732: Each DataLoader knob relieves a specific input bottleneck.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:3732`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:3732`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Each DataLoader knob relieves a specific input bottleneck.
 - **Figure evidence (`fig-alt`):** DataLoader knobs mapped to CPU parallelism, prefetch depth, and DMA.
 
-![Each DataLoader knob relieves a specific input bottleneck.](../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_003.svg)
+![Each DataLoader knob relieves a specific input bottleneck.](../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -1274,13 +1274,13 @@ _Paragraph after the margin block:_
 
 ### 031. vol1/frameworks @ line 4430: Each framework optimizes for a different system bottleneck.
 
-- **Source QMD:** `../../quarto/contents/vol1/frameworks/frameworks.qmd:4430`
-- **Asset:** `../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/frameworks/frameworks.qmd:4430`
+- **Asset:** `../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Each framework optimizes for a different system bottleneck.
 - **Figure evidence (`fig-alt`):** TensorFlow, PyTorch, and JAX mapped to their strongest design emphasis.
 
-![Each framework optimizes for a different system bottleneck.](../../quarto/contents/vol1/frameworks/images/svg/vol1_frameworks_margin_004.svg)
+![Each framework optimizes for a different system bottleneck.](../../quarto/vol1/frameworks/images/svg/vol1_frameworks_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -1317,13 +1317,13 @@ _Paragraph after the margin block:_
 
 ### 032. vol1/hw_acceleration @ line 84: Hardware acceleration turns on the Machine axis.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:84`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_dam_locator.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:84`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_dam_locator.svg`
 - **Audit status:** `Pass`; lexical overlap `0.80`
 - **Caption:** Hardware acceleration turns on the Machine axis.
 - **Figure evidence (`fig-alt`):** D·A·M taxonomy triangle with three vertices labeled D, A, and M connected by edges. The M (Machine) vertex is filled in solid color; the D and A vertices are gray, marking this chapter as the Machine axis.
 
-![Hardware acceleration turns on the Machine axis.](../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_dam_locator.svg)
+![Hardware acceleration turns on the Machine axis.](../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_dam_locator.svg)
 
 **Source Markdown Excerpt**
 
@@ -1360,13 +1360,13 @@ _Paragraph after the margin block:_
 
 ### 033. vol1/hw_acceleration @ line 850: A DRAM access costs ~100$\\times$ a MAC; data movement dominates energy.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:850`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_energy_ladder.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:850`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_energy_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** A DRAM access costs ~100$\\times$ a MAC; data movement dominates energy.
 - **Figure evidence (`fig-alt`):** A log-scale ladder of energy per operation: DRAM access at 640 pJ is by far the longest bar, MAC arithmetic at 3.7 pJ is much shorter, and SRAM access at 0.5 pJ is shortest, showing memory access costs orders of magnitude more energy than computation.
 
-![A DRAM access costs ~100$\\times$ a MAC; data movement dominates energy.](../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_energy_ladder.svg)
+![A DRAM access costs ~100$\\times$ a MAC; data movement dominates energy.](../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_energy_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -1403,13 +1403,13 @@ _Paragraph after the margin block:_
 
 ### 034. vol1/hw_acceleration @ line 2254: One extra dimension past the tile width tips utilization off a cliff.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:2254`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:2254`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.30`
 - **Caption:** One extra dimension past the tile width tips utilization off a cliff.
 - **Figure evidence (`fig-alt`):** An efficiency curve that holds high up to a tile width of 128, then drops sharply at 129 where a fringe tile appears; the region past the cliff is shaded red.
 
-![One extra dimension past the tile width tips utilization off a cliff.](../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_001.svg)
+![One extra dimension past the tile width tips utilization off a cliff.](../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -1446,13 +1446,13 @@ _Paragraph after the margin block:_
 
 ### 035. vol1/hw_acceleration @ line 3455: Bandwidth tapers steeply as data moves farther from the accelerator.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3455`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:3455`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Bandwidth tapers steeply as data moves farther from the accelerator.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of violet bandwidth bars, widest at top: HBM, then NVLink, then PCIe, down to a narrow network bar at the bottom.
 
-![Bandwidth tapers steeply as data moves farther from the accelerator.](../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_002.svg)
+![Bandwidth tapers steeply as data moves farther from the accelerator.](../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -1489,13 +1489,13 @@ _Paragraph after the margin block:_
 
 ### 036. vol1/hw_acceleration @ line 3619: Low arithmetic intensity pins the workload in the memory-bound regime.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3619`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_roofline_elbow.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:3619`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_roofline_elbow.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Low arithmetic intensity pins the workload in the memory-bound regime.
 - **Figure evidence (`fig-alt`):** Roofline elbow: a blue memory-bound slope rises left to right to a short orange compute-bound ceiling, with a dashed vertical ridge line at the bend and one workload dot sitting low on the blue slope, far below the ridge in the memory-bound region.
 
-![Low arithmetic intensity pins the workload in the memory-bound regime.](../../quarto/contents/vol1/hw_acceleration/images/svg/hw_acceleration_roofline_elbow.svg)
+![Low arithmetic intensity pins the workload in the memory-bound regime.](../../quarto/vol1/hw_acceleration/images/svg/hw_acceleration_roofline_elbow.svg)
 
 **Source Markdown Excerpt**
 
@@ -1532,13 +1532,13 @@ _Paragraph after the margin block:_
 
 ### 037. vol1/hw_acceleration @ line 4498: Mapping choices explode combinatorially as loop dimensions grow.
 
-- **Source QMD:** `../../quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4498`
-- **Asset:** `../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/hw_acceleration/hw_acceleration.qmd:4498`
+- **Asset:** `../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Mapping choices explode combinatorially as loop dimensions grow.
 - **Figure evidence (`fig-alt`):** A line on a log scale rising steeply from a handful of choices at left to a billion-scale search space at right as loop dimensions grow.
 
-![Mapping choices explode combinatorially as loop dimensions grow.](../../quarto/contents/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_003.svg)
+![Mapping choices explode combinatorially as loop dimensions grow.](../../quarto/vol1/hw_acceleration/images/svg/vol1_hw_acceleration_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -1575,13 +1575,13 @@ _Paragraph after the margin block:_
 
 ### 038. vol1/introduction @ line 141: Production ML work is mostly the surrounding system, not the model code alone.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:141`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:141`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Production ML work is mostly the surrounding system, not the model code alone.
 - **Figure evidence (`fig-alt`):** A small orange box labeled ML code 5 percent nested inside a much larger surrounding frame labeled System 95 percent; the inner box occupies a tiny fraction of the outer area.
 
-![Production ML work is mostly the surrounding system, not the model code alone.](../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_001.svg)
+![Production ML work is mostly the surrounding system, not the model code alone.](../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -1618,13 +1618,13 @@ _Paragraph after the margin block:_
 
 ### 039. vol1/introduction @ line 271: Test coverage is a vanishing fraction of the input space.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:271`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:271`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Test coverage is a vanishing fraction of the input space.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of two blue bars: a towering bar for the total input space far above a tiny bar for test-set coverage, the gap between them spanning many orders of magnitude.
 
-![Test coverage is a vanishing fraction of the input space.](../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_002.svg)
+![Test coverage is a vanishing fraction of the input space.](../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -1661,13 +1661,13 @@ _Paragraph after the margin block:_
 
 ### 040. vol1/introduction @ line 1754: Accuracy decays silently under drift.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:1754`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:1754`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.20`
 - **Caption:** Accuracy decays silently under drift.
 - **Figure evidence (`fig-alt`):** A line falling from a high initial accuracy to a lower degraded accuracy as drift increases over time, with no abrupt break.
 
-![Accuracy decays silently under drift.](../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_003.svg)
+![Accuracy decays silently under drift.](../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -1704,13 +1704,13 @@ _Paragraph after the margin block:_
 
 ### 041. vol1/introduction @ line 1978: Moving a byte costs about 145 times an FP16 op, the data-movement tax.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:1978`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/introduction_energy_hierarchy.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:1978`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/introduction_energy_hierarchy.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** Moving a byte costs about 145 times an FP16 op, the data-movement tax.
 - **Figure evidence (`fig-alt`):** Vertical ladder of three orange bars on a log scale, longest at top: DRAM 160 pJ towers far above FP16 1.1 pJ and INT8 0.2 pJ, showing data movement costs orders of magnitude more energy than arithmetic.
 
-![Moving a byte costs about 145 times an FP16 op, the data-movement tax.](../../quarto/contents/vol1/introduction/images/svg/introduction_energy_hierarchy.svg)
+![Moving a byte costs about 145 times an FP16 op, the data-movement tax.](../../quarto/vol1/introduction/images/svg/introduction_energy_hierarchy.svg)
 
 **Source Markdown Excerpt**
 
@@ -1747,13 +1747,13 @@ _Paragraph after the margin block:_
 
 ### 042. vol1/introduction @ line 2027: GPT-2 decode is bandwidth-bound: the data term dominates.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:2027`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/introduction_iron_law_bars.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:2027`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/introduction_iron_law_bars.svg`
 - **Audit status:** `Pass`; lexical overlap `1.00`
 - **Caption:** GPT-2 decode is bandwidth-bound: the data term dominates.
 - **Figure evidence (`fig-alt`):** Horizontal three-segment bar labeled D, C, L for the iron law's data, compute, and latency terms. The data segment is widest and shaded blue, dominating; the compute and latency segments are narrow and gray.
 
-![GPT-2 decode is bandwidth-bound: the data term dominates.](../../quarto/contents/vol1/introduction/images/svg/introduction_iron_law_bars.svg)
+![GPT-2 decode is bandwidth-bound: the data term dominates.](../../quarto/vol1/introduction/images/svg/introduction_iron_law_bars.svg)
 
 **Source Markdown Excerpt**
 
@@ -1790,13 +1790,13 @@ _Paragraph after the margin block:_
 
 ### 043. vol1/introduction @ line 3358: Optimizing only inference leaves end-to-end latency mostly intact.
 
-- **Source QMD:** `../../quarto/contents/vol1/introduction/introduction.qmd:3358`
-- **Asset:** `../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/introduction/introduction.qmd:3358`
+- **Asset:** `../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Optimizing only inference leaves end-to-end latency mostly intact.
 - **Figure evidence (`fig-alt`):** Two stacked latency bars, before and after: the inference segment shrinks sharply in the after bar while the pre-processing and post-processing segments stay the same, so the total barely changes.
 
-![Optimizing only inference leaves end-to-end latency mostly intact.](../../quarto/contents/vol1/introduction/images/svg/vol1_introduction_margin_004.svg)
+![Optimizing only inference leaves end-to-end latency mostly intact.](../../quarto/vol1/introduction/images/svg/vol1_introduction_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -1833,13 +1833,13 @@ _Paragraph after the margin block:_
 
 ### 044. vol1/ml_ops @ line 345: Cumulative manual work overtakes the one-time automation investment near week 20.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_ops/ml_ops.qmd:345`
-- **Asset:** `../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/ml_ops/ml_ops.qmd:345`
+- **Asset:** `../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Cumulative manual work overtakes the one-time automation investment near week 20.
 - **Figure evidence (`fig-alt`):** Two strokes against weeks elapsed: a rising manual-work line crossing a flat one-time pipeline-investment line near week 20, with the area past the crossover shaded.
 
-![Cumulative manual work overtakes the one-time automation investment near week 20.](../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_001.svg)
+![Cumulative manual work overtakes the one-time automation investment near week 20.](../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -1876,13 +1876,13 @@ _Paragraph after the margin block:_
 
 ### 045. vol1/ml_ops @ line 1489: Stretch retraining too far and staleness cost runs away.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_ops/ml_ops.qmd:1489`
-- **Asset:** `../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/ml_ops/ml_ops.qmd:1489`
+- **Asset:** `../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Stretch retraining too far and staleness cost runs away.
 - **Figure evidence (`fig-alt`):** A U-shaped total-cost curve over retraining cadence: a falling stroke and a rising stroke meet at a marked low point near one day, with a dot at the minimum.
 
-![Stretch retraining too far and staleness cost runs away.](../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_002.svg)
+![Stretch retraining too far and staleness cost runs away.](../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -1919,13 +1919,13 @@ _Paragraph after the margin block:_
 
 ### 046. vol1/ml_ops @ line 1980: Edge power budgets span sensors, gateways, and vehicles across orders of magnitude.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_ops/ml_ops.qmd:1980`
-- **Asset:** `../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/ml_ops/ml_ops.qmd:1980`
+- **Asset:** `../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.80`
 - **Caption:** Edge power budgets span sensors, gateways, and vehicles across orders of magnitude.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of orange bars, smallest at bottom: sensor in milliwatts, gateway in watts, automotive in tens of watts.
 
-![Edge power budgets span sensors, gateways, and vehicles across orders of magnitude.](../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_003.svg)
+![Edge power budgets span sensors, gateways, and vehicles across orders of magnitude.](../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -1962,13 +1962,13 @@ _Paragraph after the margin block:_
 
 ### 047. vol1/ml_ops @ line 2271: Drift detection speed is bounded by the sample rate.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_ops/ml_ops.qmd:2271`
-- **Asset:** `../../quarto/contents/vol1/ml_ops/images/svg/ml_ops_drift_threshold_knee.svg`
+- **Source QMD:** `../../quarto/vol1/ml_ops/ml_ops.qmd:2271`
+- **Asset:** `../../quarto/vol1/ml_ops/images/svg/ml_ops_drift_threshold_knee.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Drift detection speed is bounded by the sample rate.
 - **Figure evidence (`fig-alt`):** Two-rung time ladder contrasting high-traffic drift detection at about 17 minutes with low-traffic drift detection at about 10 days.
 
-![Drift detection speed is bounded by the sample rate.](../../quarto/contents/vol1/ml_ops/images/svg/ml_ops_drift_threshold_knee.svg)
+![Drift detection speed is bounded by the sample rate.](../../quarto/vol1/ml_ops/images/svg/ml_ops_drift_threshold_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -2005,13 +2005,13 @@ _Paragraph after the margin block:_
 
 ### 048. vol1/ml_ops @ line 2929: Production debugging starts on the Data axis of D-A-M.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_ops/ml_ops.qmd:2929`
-- **Asset:** `../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/ml_ops/ml_ops.qmd:2929`
+- **Asset:** `../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Production debugging starts on the Data axis of D-A-M.
 - **Figure evidence (`fig-alt`):** A D·A·M triangle with vertices D, A, M; the Data vertex filled in green, the Algorithm and Machine vertices gray.
 
-![Production debugging starts on the Data axis of D-A-M.](../../quarto/contents/vol1/ml_ops/images/svg/vol1_ml_ops_margin_004.svg)
+![Production debugging starts on the Data axis of D-A-M.](../../quarto/vol1/ml_ops/images/svg/vol1_ml_ops_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -2048,13 +2048,13 @@ _Paragraph after the margin block:_
 
 ### 049. vol1/ml_systems @ line 84: Power spans the paradigms from megawatts (cloud) to milliwatts (TinyML).
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:84`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_deployment_span.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:84`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/ml_systems_deployment_span.svg`
 - **Audit status:** `Pass`; lexical overlap `0.86`
 - **Caption:** Power spans the paradigms from megawatts (cloud) to milliwatts (TinyML).
 - **Figure evidence (`fig-alt`):** Vertical bar ladder of four deployment tiers by power on a log scale: Cloud 3 MW, Edge 200 W, Mobile 5 W, TinyML 50 mW, spanning megawatts to milliwatts.
 
-![Power spans the paradigms from megawatts (cloud) to milliwatts (TinyML).](../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_deployment_span.svg)
+![Power spans the paradigms from megawatts (cloud) to milliwatts (TinyML).](../../quarto/vol1/ml_systems/images/svg/ml_systems_deployment_span.svg)
 
 **Source Markdown Excerpt**
 
@@ -2091,13 +2091,13 @@ _Paragraph after the margin block:_
 
 ### 050. vol1/ml_systems @ line 502: Compute capacity outruns memory bandwidth; the widening gap is the memory wall.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:502`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_memory_wall_divergence.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:502`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/ml_systems_memory_wall_divergence.svg`
 - **Audit status:** `Pass`; lexical overlap `0.88`
 - **Caption:** Compute capacity outruns memory bandwidth; the widening gap is the memory wall.
 - **Figure evidence (`fig-alt`):** Two diverging trend strokes: a steep red compute-growth curve pulling away from a shallow blue memory-bandwidth curve, the widening gap between them shaded red. The gap is the memory wall.
 
-![Compute capacity outruns memory bandwidth; the widening gap is the memory wall.](../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_memory_wall_divergence.svg)
+![Compute capacity outruns memory bandwidth; the widening gap is the memory wall.](../../quarto/vol1/ml_systems/images/svg/ml_systems_memory_wall_divergence.svg)
 
 **Source Markdown Excerpt**
 
@@ -2134,13 +2134,13 @@ _Paragraph after the margin block:_
 
 ### 051. vol1/ml_systems @ line 641: Data, Algorithm, and Machine are coupled; move one and the others shift.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:641`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_dam_locator.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:641`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/ml_systems_dam_locator.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Data, Algorithm, and Machine are coupled; move one and the others shift.
 - **Figure evidence (`fig-alt`):** Triangle diagram with three labeled nodes connected by violet edges: D for data at top, A for algorithm at lower left, M for machine at lower right, showing the three axes are coupled.
 
-![Data, Algorithm, and Machine are coupled; move one and the others shift.](../../quarto/contents/vol1/ml_systems/images/svg/ml_systems_dam_locator.svg)
+![Data, Algorithm, and Machine are coupled; move one and the others shift.](../../quarto/vol1/ml_systems/images/svg/ml_systems_dam_locator.svg)
 
 **Source Markdown Excerpt**
 
@@ -2177,13 +2177,13 @@ _Paragraph after the margin block:_
 
 ### 052. vol1/ml_systems @ line 959: Batch-1 inference sits on the memory-bound side of the roofline.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:959`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:959`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Batch-1 inference sits on the memory-bound side of the roofline.
 - **Figure evidence (`fig-alt`):** A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then a flat orange compute-bound ceiling, with a batch-1 workload dot on the memory-bound slope, left of the ridge.
 
-![Batch-1 inference sits on the memory-bound side of the roofline.](../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_001.svg)
+![Batch-1 inference sits on the memory-bound side of the roofline.](../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -2220,13 +2220,13 @@ _Paragraph after the margin block:_
 
 ### 053. vol1/ml_systems @ line 2002: Raw edge data can be wider than the network pipe.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:2002`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:2002`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Raw edge data can be wider than the network pipe.
 - **Figure evidence (`fig-alt`):** Two-rung bandwidth ladder comparing 100 raw 1080p camera feeds at about 18.7 GB per second with a 10G link at about 1.25 GB per second.
 
-![Raw edge data can be wider than the network pipe.](../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_002.svg)
+![Raw edge data can be wider than the network pipe.](../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -2263,13 +2263,13 @@ _Paragraph after the margin block:_
 
 ### 054. vol1/ml_systems @ line 2777: Sustained thermal performance falls well below burst peaks.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:2777`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:2777`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Sustained thermal performance falls well below burst peaks.
 - **Figure evidence (`fig-alt`):** Two horizontal throughput levels: a high burst line and, well below it, a lower sustained line after thermal throttling engages.
 
-![Sustained thermal performance falls well below burst peaks.](../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_003.svg)
+![Sustained thermal performance falls well below burst peaks.](../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -2306,13 +2306,13 @@ _Paragraph after the margin block:_
 
 ### 055. vol1/ml_systems @ line 4551: A faster model stage does not linearly speed up a camera pipeline.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_systems/ml_systems.qmd:4551`
-- **Asset:** `../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/ml_systems/ml_systems.qmd:4551`
+- **Asset:** `../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.78`
 - **Caption:** A faster model stage does not linearly speed up a camera pipeline.
 - **Figure evidence (`fig-alt`):** Two stacked pipeline bars, before and after a 10× model-stage speedup: the model segment shrinks sharply while the other camera-pipeline stages stay fixed, so the total drops only modestly.
 
-![A faster model stage does not linearly speed up a camera pipeline.](../../quarto/contents/vol1/ml_systems/images/svg/vol1_ml_systems_margin_004.svg)
+![A faster model stage does not linearly speed up a camera pipeline.](../../quarto/vol1/ml_systems/images/svg/vol1_ml_systems_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -2349,13 +2349,13 @@ _Paragraph after the margin block:_
 
 ### 056. vol1/ml_workflow @ line 317: Slow iteration loses to fast feedback over time.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:317`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:317`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Slow iteration loses to fast feedback over time.
 - **Figure evidence (`fig-alt`):** Two rising curves over 26 weeks: a steeper hourly-iteration curve overtaking a shallower weekly-iteration curve, the two crossing partway across.
 
-![Slow iteration loses to fast feedback over time.](../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_001.svg)
+![Slow iteration loses to fast feedback over time.](../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -2392,13 +2392,13 @@ _Paragraph after the margin block:_
 
 ### 057. vol1/ml_workflow @ line 1067: Edge summaries beat raw medical-image uploads when bandwidth dominates.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1067`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:1067`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.22`
 - **Caption:** Edge summaries beat raw medical-image uploads when bandwidth dominates.
 - **Figure evidence (`fig-alt`):** Vertical ladder of two bars: a tall bar for raw retinal-image uploads towering over a short bar for compact edge detection summaries sent over the network.
 
-![Edge summaries beat raw medical-image uploads when bandwidth dominates.](../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_002.svg)
+![Edge summaries beat raw medical-image uploads when bandwidth dominates.](../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -2435,13 +2435,13 @@ _Paragraph after the margin block:_
 
 ### 058. vol1/ml_workflow @ line 1786: Production validation is a gate: field sensitivity below the required floor fails deployment.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1786`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:1786`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Production validation is a gate: field sensitivity below the required floor fails deployment.
 - **Figure evidence (`fig-alt`):** A bar for the 78 percent field sensitivity result falling short of a dashed horizontal threshold line marking the 90 percent required floor; the shortfall below the line is shaded red.
 
-![Production validation is a gate: field sensitivity below the required floor fails deployment.](../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_003.svg)
+![Production validation is a gate: field sensitivity below the required floor fails deployment.](../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -2478,13 +2478,13 @@ _Paragraph after the margin block:_
 
 ### 059. vol1/ml_workflow @ line 1998: Cloud and edge lifetime costs cross as scale grows.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1998`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:1998`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_004.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.14`
 - **Caption:** Cloud and edge lifetime costs cross as scale grows.
 - **Figure evidence (`fig-alt`):** Two rising cumulative-cost curves over time: an edge curve starting higher but climbing slowly, a cloud curve starting lower but climbing steeply, crossing at a marked payback point.
 
-![Cloud and edge lifetime costs cross as scale grows.](../../quarto/contents/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_004.svg)
+![Cloud and edge lifetime costs cross as scale grows.](../../quarto/vol1/ml_workflow/images/svg/vol1_ml_workflow_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -2521,13 +2521,13 @@ _Paragraph after the margin block:_
 
 ### 060. vol1/ml_workflow @ line 2117: Late-discovered constraints trigger exponential rework.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:2117`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/ml_workflow_constraint_cost_escalation.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:2117`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/ml_workflow_constraint_cost_escalation.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.20`
 - **Caption:** Late-discovered constraints trigger exponential rework.
 - **Figure evidence (`fig-alt`):** Rising correction-cost curve across six lifecycle stages, from define at 1x to monitor at 32x. The curve steepens as constraints are discovered later in the lifecycle.
 
-![Late-discovered constraints trigger exponential rework.](../../quarto/contents/vol1/ml_workflow/images/svg/ml_workflow_constraint_cost_escalation.svg)
+![Late-discovered constraints trigger exponential rework.](../../quarto/vol1/ml_workflow/images/svg/ml_workflow_constraint_cost_escalation.svg)
 
 **Source Markdown Excerpt**
 
@@ -2564,13 +2564,13 @@ _Paragraph after the margin block:_
 
 ### 061. vol1/ml_workflow @ line 2144: Feedback loops span minutes to quarters across five orders of magnitude.
 
-- **Source QMD:** `../../quarto/contents/vol1/ml_workflow/ml_workflow.qmd:2144`
-- **Asset:** `../../quarto/contents/vol1/ml_workflow/images/svg/ml_workflow_feedback_timescales.svg`
+- **Source QMD:** `../../quarto/vol1/ml_workflow/ml_workflow.qmd:2144`
+- **Asset:** `../../quarto/vol1/ml_workflow/images/svg/ml_workflow_feedback_timescales.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Feedback loops span minutes to quarters across five orders of magnitude.
 - **Figure evidence (`fig-alt`):** Vertical ladder of six feedback-loop cadences as nested blue bars, longest at top to shortest at bottom: quarter, month, week, day, hour, minute. The bar lengths span roughly five orders of magnitude in duration.
 
-![Feedback loops span minutes to quarters across five orders of magnitude.](../../quarto/contents/vol1/ml_workflow/images/svg/ml_workflow_feedback_timescales.svg)
+![Feedback loops span minutes to quarters across five orders of magnitude.](../../quarto/vol1/ml_workflow/images/svg/ml_workflow_feedback_timescales.svg)
 
 **Source Markdown Excerpt**
 
@@ -2607,13 +2607,13 @@ _Paragraph after the margin block:_
 
 ### 062. vol1/model_compression @ line 95: Frontier weights dwarf phone and microcontroller memory; compression bridges the gap.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:95`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:95`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Frontier weights dwarf phone and microcontroller memory; compression bridges the gap.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of blue bars: a 175B FP16 weight footprint at top towers over a phone RAM bar, which towers over a tiny microcontroller RAM bar at the bottom.
 
-![Frontier weights dwarf phone and microcontroller memory; compression bridges the gap.](../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_001.svg)
+![Frontier weights dwarf phone and microcontroller memory; compression bridges the gap.](../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -2650,13 +2650,13 @@ _Paragraph after the margin block:_
 
 ### 063. vol1/model_compression @ line 3238: Quantization pays off only when the Machine axis has the right integer units.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:3238`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/model_compression_dam_locator.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:3238`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/model_compression_dam_locator.svg`
 - **Audit status:** `Pass`; lexical overlap `0.64`
 - **Caption:** Quantization pays off only when the Machine axis has the right integer units.
 - **Figure evidence (`fig-alt`):** Stacked D, A, and M locator boxes with the Machine axis highlighted, marking quantization hardware support as the binding axis for this section.
 
-![Quantization pays off only when the Machine axis has the right integer units.](../../quarto/contents/vol1/model_compression/images/svg/model_compression_dam_locator.svg)
+![Quantization pays off only when the Machine axis has the right integer units.](../../quarto/vol1/model_compression/images/svg/model_compression_dam_locator.svg)
 
 **Source Markdown Excerpt**
 
@@ -2693,13 +2693,13 @@ _Paragraph after the margin block:_
 
 ### 064. vol1/model_compression @ line 3684: Quantization speedup depends on which side of the ridge you occupy.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:3684`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/model_compression_quantization_roofline.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:3684`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/model_compression_quantization_roofline.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Quantization speedup depends on which side of the ridge you occupy.
 - **Figure evidence (`fig-alt`):** Mini roofline with one workload dot on the memory-bound slope labeled mem 2x and one workload dot on the compute-bound ceiling labeled comp 8x, showing that quantization speedup depends on bottleneck regime.
 
-![Quantization speedup depends on which side of the ridge you occupy.](../../quarto/contents/vol1/model_compression/images/svg/model_compression_quantization_roofline.svg)
+![Quantization speedup depends on which side of the ridge you occupy.](../../quarto/vol1/model_compression/images/svg/model_compression_quantization_roofline.svg)
 
 **Source Markdown Excerpt**
 
@@ -2736,13 +2736,13 @@ _Paragraph after the margin block:_
 
 ### 065. vol1/model_compression @ line 5249: Operator fusion cuts memory transfers while arithmetic stays unchanged.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:5249`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:5249`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** Operator fusion cuts memory transfers while arithmetic stays unchanged.
 - **Figure evidence (`fig-alt`):** Two bars: a tall unfused bar with many memory transfers beside a much shorter fused bar with few, while a separate arithmetic bar stays the same height in both.
 
-![Operator fusion cuts memory transfers while arithmetic stays unchanged.](../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_002.svg)
+![Operator fusion cuts memory transfers while arithmetic stays unchanged.](../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -2779,13 +2779,13 @@ _Paragraph after the margin block:_
 
 ### 066. vol1/model_compression @ line 6978: Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:6978`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:6978`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.
 - **Figure evidence (`fig-alt`):** A speedup curve that stays flat and below the break-even line until a marked knee near 90 to 95 percent zeros, then climbs; the low-payoff region left of the knee is shaded red.
 
-![Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.](../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_003.svg)
+![Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.](../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -2822,13 +2822,13 @@ _Paragraph after the margin block:_
 
 ### 067. vol1/model_compression @ line 7321: Compression hits an end-to-end ceiling once non-model work dominates the pipeline.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:7321`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:7321`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_004.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.11`
 - **Caption:** Compression hits an end-to-end ceiling once non-model work dominates the pipeline.
 - **Figure evidence (`fig-alt`):** A horizontal stacked bar: a small 20 percent segment labeled model inference shaded blue, and a wide 80 percent segment labeled other pipeline work in gray.
 
-![Compression hits an end-to-end ceiling once non-model work dominates the pipeline.](../../quarto/contents/vol1/model_compression/images/svg/vol1_model_compression_margin_004.svg)
+![Compression hits an end-to-end ceiling once non-model work dominates the pipeline.](../../quarto/vol1/model_compression/images/svg/vol1_model_compression_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -2865,13 +2865,13 @@ _Paragraph after the margin block:_
 
 ### 068. vol1/model_compression @ line 7434: INT8 quantization: size collapses about 4 times, accuracy holds.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_compression/model_compression.qmd:7434`
-- **Asset:** `../../quarto/contents/vol1/model_compression/images/svg/model_compression_int8_beforeafter.svg`
+- **Source QMD:** `../../quarto/vol1/model_compression/model_compression.qmd:7434`
+- **Asset:** `../../quarto/vol1/model_compression/images/svg/model_compression_int8_beforeafter.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** INT8 quantization: size collapses about 4 times, accuracy holds.
 - **Figure evidence (`fig-alt`):** Two strokes from FP32 to INT8, each ending in a dot. The model-size stroke falls steeply to about a quarter of its start (4x smaller). The accuracy stroke stays flat near the top. Quantization shrinks the model 4 times while accuracy barely moves.
 
-![INT8 quantization: size collapses about 4 times, accuracy holds.](../../quarto/contents/vol1/model_compression/images/svg/model_compression_int8_beforeafter.svg)
+![INT8 quantization: size collapses about 4 times, accuracy holds.](../../quarto/vol1/model_compression/images/svg/model_compression_int8_beforeafter.svg)
 
 **Source Markdown Excerpt**
 
@@ -2908,13 +2908,13 @@ _Paragraph after the margin block:_
 
 ### 069. vol1/model_serving @ line 1036: One noisy neighbor perturbs every workload sharing the node.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:1036`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/model_serving_blast_radius.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:1036`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/model_serving_blast_radius.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.12`
 - **Caption:** One noisy neighbor perturbs every workload sharing the node.
 - **Figure evidence (`fig-alt`):** Schematic of one red source node on the left fanning out through four arrows to four identical blue consumer nodes on the right, showing one-to-many propagation from a single source.
 
-![One noisy neighbor perturbs every workload sharing the node.](../../quarto/contents/vol1/model_serving/images/svg/model_serving_blast_radius.svg)
+![One noisy neighbor perturbs every workload sharing the node.](../../quarto/vol1/model_serving/images/svg/model_serving_blast_radius.svg)
 
 **Source Markdown Excerpt**
 
@@ -2951,13 +2951,13 @@ _Paragraph after the margin block:_
 
 ### 070. vol1/model_serving @ line 1533: Inference is one slice of the latency budget; preprocessing rivals it.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:1533`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/model_serving_latency_budget_bar.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:1533`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/model_serving_latency_budget_bar.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Inference is one slice of the latency budget; preprocessing rivals it.
 - **Figure evidence (`fig-alt`):** Horizontal stacked bar of the request latency budget: a gray preprocessing segment on the left, an orange inference segment of about the same width in the middle, and a thin gray trailing segment on the right. Inference is one slice among equals rather than the whole budget.
 
-![Inference is one slice of the latency budget; preprocessing rivals it.](../../quarto/contents/vol1/model_serving/images/svg/model_serving_latency_budget_bar.svg)
+![Inference is one slice of the latency budget; preprocessing rivals it.](../../quarto/vol1/model_serving/images/svg/model_serving_latency_budget_bar.svg)
 
 **Source Markdown Excerpt**
 
@@ -2994,13 +2994,13 @@ _Paragraph after the margin block:_
 
 ### 071. vol1/model_serving @ line 2719: Model loading lands far outside a tight serving SLO.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:2719`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:2719`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Model loading lands far outside a tight serving SLO.
 - **Figure evidence (`fig-alt`):** Horizontal millisecond scale with a dashed 50 ms SLO marker far left of a red model-load marker around 312 ms.
 
-![Model loading lands far outside a tight serving SLO.](../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_001.svg)
+![Model loading lands far outside a tight serving SLO.](../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -3037,13 +3037,13 @@ _Paragraph after the margin block:_
 
 ### 072. vol1/model_serving @ line 3460: PagedAttention recovers the KV-cache waste of contiguous allocation.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:3460`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:3460`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** PagedAttention recovers the KV-cache waste of contiguous allocation.
 - **Figure evidence (`fig-alt`):** Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used.
 
-![PagedAttention recovers the KV-cache waste of contiguous allocation.](../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_002.svg)
+![PagedAttention recovers the KV-cache waste of contiguous allocation.](../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -3080,13 +3080,13 @@ _Paragraph after the margin block:_
 
 ### 073. vol1/model_serving @ line 3512: As QPS rises, the batching window shrinks while batch size grows.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:3512`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:3512`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** As QPS rises, the batching window shrinks while batch size grows.
 - **Figure evidence (`fig-alt`):** Two strokes against rising QPS: batch size climbs upward while the batching window falls.
 
-![As QPS rises, the batching window shrinks while batch size grows.](../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_003.svg)
+![As QPS rises, the batching window shrinks while batch size grows.](../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -3123,13 +3123,13 @@ _Paragraph after the margin block:_
 
 ### 074. vol1/model_serving @ line 3806: TTFT and TPOT live in different bottleneck regimes.
 
-- **Source QMD:** `../../quarto/contents/vol1/model_serving/model_serving.qmd:3806`
-- **Asset:** `../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/model_serving/model_serving.qmd:3806`
+- **Asset:** `../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** TTFT and TPOT live in different bottleneck regimes.
 - **Figure evidence (`fig-alt`):** A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling. A TTFT dot sits on the orange ceiling; a TPOT dot sits on the blue slope.
 
-![TTFT and TPOT live in different bottleneck regimes.](../../quarto/contents/vol1/model_serving/images/svg/vol1_model_serving_margin_004.svg)
+![TTFT and TPOT live in different bottleneck regimes.](../../quarto/vol1/model_serving/images/svg/vol1_model_serving_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -3166,13 +3166,13 @@ _Paragraph after the margin block:_
 
 ### 075. vol1/nn_architectures @ line 60: Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:60`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_inductive_bias.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:60`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/nn_architectures_inductive_bias.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.18`
 - **Caption:** Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.
 - **Figure evidence (`fig-alt`):** Vertical list of three architectures with a dark-to-light dot ramp: CNN (darkest, strong spatial prior), Transformer (mid), MLP (lightest, no structural prior), ordered by inductive-bias strength.
 
-![Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.](../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_inductive_bias.svg)
+![Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.](../../quarto/vol1/nn_architectures/images/svg/nn_architectures_inductive_bias.svg)
 
 **Source Markdown Excerpt**
 
@@ -3209,13 +3209,13 @@ _Paragraph after the margin block:_
 
 ### 076. vol1/nn_architectures @ line 122: Architecture is the Algorithm axis of D·A·M: it sets the operation-count budget.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:122`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_algorithm_axis.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:122`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/nn_architectures_algorithm_axis.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Architecture is the Algorithm axis of D·A·M: it sets the operation-count budget.
 - **Figure evidence (`fig-alt`):** Vertical three-box D·A·M stack: Data (gray, top), Algorithm (orange, lit, middle), Machine (gray, bottom). The lit Algorithm box marks the axis this chapter is about.
 
-![Architecture is the Algorithm axis of D·A·M: it sets the operation-count budget.](../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_algorithm_axis.svg)
+![Architecture is the Algorithm axis of D·A·M: it sets the operation-count budget.](../../quarto/vol1/nn_architectures/images/svg/nn_architectures_algorithm_axis.svg)
 
 **Source Markdown Excerpt**
 
@@ -3252,13 +3252,13 @@ _Paragraph after the margin block:_
 
 ### 077. vol1/nn_architectures @ line 486: Arithmetic intensity spans ~80$\\times$: ResNet saturates compute, GPT-2 starves for bandwidth.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:486`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_arithmetic_intensity.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:486`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/nn_architectures_arithmetic_intensity.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Arithmetic intensity spans ~80$\\times$: ResNet saturates compute, GPT-2 starves for bandwidth.
 - **Figure evidence (`fig-alt`):** Three stacked horizontal bars on a log scale labeled ResNet 40, MobileNet 21, and GPT-2 0.5 FLOP per byte, the topmost bar far longer than the bottom one.
 
-![Arithmetic intensity spans ~80$\\times$: ResNet saturates compute, GPT-2 starves for bandwidth.](../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_arithmetic_intensity.svg)
+![Arithmetic intensity spans ~80$\\times$: ResNet saturates compute, GPT-2 starves for bandwidth.](../../quarto/vol1/nn_architectures/images/svg/nn_architectures_arithmetic_intensity.svg)
 
 **Source Markdown Excerpt**
 
@@ -3295,13 +3295,13 @@ _Paragraph after the margin block:_
 
 ### 078. vol1/nn_architectures @ line 1331: Weight sharing spares convolution the fully-connected parameter explosion.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:1331`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:1331`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Weight sharing spares convolution the fully-connected parameter explosion.
 - **Figure evidence (`fig-alt`):** Fully connected parameter count versus shared convolution parameters.
 
-![Weight sharing spares convolution the fully-connected parameter explosion.](../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_001.svg)
+![Weight sharing spares convolution the fully-connected parameter explosion.](../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -3338,13 +3338,13 @@ _Paragraph after the margin block:_
 
 ### 079. vol1/nn_architectures @ line 2166: RNNs hold state memory fixed, but latency grows with sequence length.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:2166`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:2166`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.60`
 - **Caption:** RNNs hold state memory fixed, but latency grows with sequence length.
 - **Figure evidence (`fig-alt`):** Flat state memory versus rising serial latency as sequence length grows.
 
-![RNNs hold state memory fixed, but latency grows with sequence length.](../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_002.svg)
+![RNNs hold state memory fixed, but latency grows with sequence length.](../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -3381,13 +3381,13 @@ _Paragraph after the margin block:_
 
 ### 080. vol1/nn_architectures @ line 2959: Doubling the context quadruples attention memory: past the knee, the cost wall is unavoidable.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:2959`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_attention_memory_wall.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:2959`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/nn_architectures_attention_memory_wall.svg`
 - **Audit status:** `Pass`; lexical overlap `0.40`
 - **Caption:** Doubling the context quadruples attention memory: past the knee, the cost wall is unavoidable.
 - **Figure evidence (`fig-alt`):** A flat curve that hockey-sticks sharply upward; a dot marks the knee, and the region to the right of the knee is shaded red as a danger zone.
 
-![Doubling the context quadruples attention memory: past the knee, the cost wall is unavoidable.](../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_attention_memory_wall.svg)
+![Doubling the context quadruples attention memory: past the knee, the cost wall is unavoidable.](../../quarto/vol1/nn_architectures/images/svg/nn_architectures_attention_memory_wall.svg)
 
 **Source Markdown Excerpt**
 
@@ -3424,13 +3424,13 @@ _Paragraph after the margin block:_
 
 ### 081. vol1/nn_architectures @ line 3790: DLRM embedding lookups force all-to-all dependence across shards.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:3790`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:3790`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** DLRM embedding lookups force all-to-all dependence across shards.
 - **Figure evidence (`fig-alt`):** Four embedding shards connected by all-to-all exchange arrows, showing that each shard depends on data from the others.
 
-![DLRM embedding lookups force all-to-all dependence across shards.](../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_003.svg)
+![DLRM embedding lookups force all-to-all dependence across shards.](../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -3467,13 +3467,13 @@ _Paragraph after the margin block:_
 
 ### 082. vol1/nn_architectures @ line 3853: One embedding table fits an 80 GB A100; a second breaches the capacity wall.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:3853`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_capacity_wall.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:3853`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/nn_architectures_capacity_wall.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.22`
 - **Caption:** One embedding table fits an 80 GB A100; a second breaches the capacity wall.
 - **Figure evidence (`fig-alt`):** Three stacked memory bars: a single item embedding table at 51 GB fits below an 80 GB A100 capacity bar, but an item-plus-user pair at 102 GB overshoots it, no longer fitting on one device.
 
-![One embedding table fits an 80 GB A100; a second breaches the capacity wall.](../../quarto/contents/vol1/nn_architectures/images/svg/nn_architectures_capacity_wall.svg)
+![One embedding table fits an 80 GB A100; a second breaches the capacity wall.](../../quarto/vol1/nn_architectures/images/svg/nn_architectures_capacity_wall.svg)
 
 **Source Markdown Excerpt**
 
@@ -3510,13 +3510,13 @@ _Paragraph after the margin block:_
 
 ### 083. vol1/nn_architectures @ line 4772: Moving a value from DRAM costs far more energy than a MAC.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_architectures/nn_architectures.qmd:4772`
-- **Asset:** `../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/nn_architectures/nn_architectures.qmd:4772`
+- **Asset:** `../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Moving a value from DRAM costs far more energy than a MAC.
 - **Figure evidence (`fig-alt`):** DRAM access energy versus MAC energy.
 
-![Moving a value from DRAM costs far more energy than a MAC.](../../quarto/contents/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_004.svg)
+![Moving a value from DRAM costs far more energy than a MAC.](../../quarto/vol1/nn_architectures/images/svg/vol1_nn_architectures_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -3553,13 +3553,13 @@ _Paragraph after the margin block:_
 
 ### 084. vol1/nn_computation @ line 896: Learned features buy accuracy by spending far more arithmetic.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:896`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:896`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.00`
 - **Caption:** Learned features buy accuracy by spending far more arithmetic.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of orange bars, smallest at bottom: rule-based comparisons, then HOG operations, then neural-network matrix MACs at the top, spanning several orders of magnitude.
 
-![Learned features buy accuracy by spending far more arithmetic.](../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_001.svg)
+![Learned features buy accuracy by spending far more arithmetic.](../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -3596,13 +3596,13 @@ _Paragraph after the margin block:_
 
 ### 085. vol1/nn_computation @ line 1838: Neural-network history is a scale explosion in training energy.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:1838`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:1838`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Neural-network history is a scale explosion in training energy.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of orange bars, smallest at bottom: LeNet-scale training energy at the base rising to GPT-4-scale training energy at the top, spanning many orders of magnitude.
 
-![Neural-network history is a scale explosion in training energy.](../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_002.svg)
+![Neural-network history is a scale explosion in training energy.](../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -3639,13 +3639,13 @@ _Paragraph after the margin block:_
 
 ### 086. vol1/nn_computation @ line 2582: ReLU's comparator logic is far cheaper in silicon than a sigmoid exponential.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:2582`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:2582`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** ReLU's comparator logic is far cheaper in silicon than a sigmoid exponential.
 - **Figure evidence (`fig-alt`):** Vertical log-scale ladder of orange bars: a tiny ReLU comparator at the bottom, a much taller sigmoid exponential unit above it, the transistor-count gap spanning orders of magnitude.
 
-![ReLU's comparator logic is far cheaper in silicon than a sigmoid exponential.](../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_003.svg)
+![ReLU's comparator logic is far cheaper in silicon than a sigmoid exponential.](../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -3682,13 +3682,13 @@ _Paragraph after the margin block:_
 
 ### 087. vol1/nn_computation @ line 3583: MNIST is cache-scale; GPT-2 is VRAM-scale.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:3583`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/nn_computation_memory_explosion.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:3583`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/nn_computation_memory_explosion.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** MNIST is cache-scale; GPT-2 is VRAM-scale.
 - **Figure evidence (`fig-alt`):** Log-scale comparison of model memory footprints. MNIST is a small 438 KB cache-scale model, while GPT-2 is a 6 GB VRAM-scale model, separated by roughly four orders of magnitude.
 
-![MNIST is cache-scale; GPT-2 is VRAM-scale.](../../quarto/contents/vol1/nn_computation/images/svg/nn_computation_memory_explosion.svg)
+![MNIST is cache-scale; GPT-2 is VRAM-scale.](../../quarto/vol1/nn_computation/images/svg/nn_computation_memory_explosion.svg)
 
 **Source Markdown Excerpt**
 
@@ -3725,13 +3725,13 @@ _Paragraph after the margin block:_
 
 ### 088. vol1/nn_computation @ line 3921: Matrix multiplication is over 90 percent of forward-pass FLOPs.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:3921`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/nn_computation_matmul_dominance.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:3921`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/nn_computation_matmul_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Matrix multiplication is over 90 percent of forward-pass FLOPs.
 - **Figure evidence (`fig-alt`):** Horizontal stacked bar of the forward-pass floating-point budget. A wide orange segment labeled MatMul fills about 90 percent of the bar; a narrow gray segment fills the remainder, the element-wise work.
 
-![Matrix multiplication is over 90 percent of forward-pass FLOPs.](../../quarto/contents/vol1/nn_computation/images/svg/nn_computation_matmul_dominance.svg)
+![Matrix multiplication is over 90 percent of forward-pass FLOPs.](../../quarto/vol1/nn_computation/images/svg/nn_computation_matmul_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -3768,13 +3768,13 @@ _Paragraph after the margin block:_
 
 ### 089. vol1/nn_computation @ line 5839: Small neural workloads stay memory-bound even on large GPUs.
 
-- **Source QMD:** `../../quarto/contents/vol1/nn_computation/nn_computation.qmd:5839`
-- **Asset:** `../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/nn_computation/nn_computation.qmd:5839`
+- **Asset:** `../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Small neural workloads stay memory-bound even on large GPUs.
 - **Figure evidence (`fig-alt`):** A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling, with the MNIST workload dot deep on the memory-bound slope, far left of the ridge.
 
-![Small neural workloads stay memory-bound even on large GPUs.](../../quarto/contents/vol1/nn_computation/images/svg/vol1_nn_computation_margin_004.svg)
+![Small neural workloads stay memory-bound even on large GPUs.](../../quarto/vol1/nn_computation/images/svg/vol1_nn_computation_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -3811,13 +3811,13 @@ _Paragraph after the margin block:_
 
 ### 090. vol1/responsible_engr @ line 73: The Amazon failure is a Data-axis failure: biased historical signal.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:73`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_dam_locator_data.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:73`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/responsible_engr_dam_locator_data.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** The Amazon failure is a Data-axis failure: biased historical signal.
 - **Figure evidence (`fig-alt`):** D-A-M locator triangle with three nodes: D (Data) at top filled solid green, A (Algorithm) and M (Machine) at the lower corners shown gray, connected by violet edges. The Data node is highlighted.
 
-![The Amazon failure is a Data-axis failure: biased historical signal.](../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_dam_locator_data.svg)
+![The Amazon failure is a Data-axis failure: biased historical signal.](../../quarto/vol1/responsible_engr/images/svg/responsible_engr_dam_locator_data.svg)
 
 **Source Markdown Excerpt**
 
@@ -3854,13 +3854,13 @@ _Paragraph after the margin block:_
 
 ### 091. vol1/responsible_engr @ line 131: One upstream change; many silently affected.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:131`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_blast_radius_sepsis.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:131`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/responsible_engr_blast_radius_sepsis.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** One upstream change; many silently affected.
 - **Figure evidence (`fig-alt`):** A red square source on the left with five arrows fanning out to five identical blue circles on the right, representing one upstream fault propagating to many downstream consumers.
 
-![One upstream change; many silently affected.](../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_blast_radius_sepsis.svg)
+![One upstream change; many silently affected.](../../quarto/vol1/responsible_engr/images/svg/responsible_engr_blast_radius_sepsis.svg)
 
 **Source Markdown Excerpt**
 
@@ -3897,13 +3897,13 @@ _Paragraph after the margin block:_
 
 ### 092. vol1/responsible_engr @ line 155: Past the knee, the proxy decouples from the goal.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:155`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_scale_anchor_goodhart.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:155`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/responsible_engr_scale_anchor_goodhart.svg`
 - **Audit status:** `Pass`; lexical overlap `0.40`
 - **Caption:** Past the knee, the proxy decouples from the goal.
 - **Figure evidence (`fig-alt`):** A curve that stays flat then bends sharply upward at a red knee dot, with the region to the right of the knee shaded red to mark the danger zone.
 
-![Past the knee, the proxy decouples from the goal.](../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_scale_anchor_goodhart.svg)
+![Past the knee, the proxy decouples from the goal.](../../quarto/vol1/responsible_engr/images/svg/responsible_engr_scale_anchor_goodhart.svg)
 
 **Source Markdown Excerpt**
 
@@ -3940,13 +3940,13 @@ _Paragraph after the margin block:_
 
 ### 093. vol1/responsible_engr @ line 643: Random sampling barely reaches small subgroups.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:643`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:643`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Random sampling barely reaches small subgroups.
 - **Figure evidence (`fig-alt`):** Random sampling versus targeted stratified evaluation for a 1 percent subgroup.
 
-![Random sampling barely reaches small subgroups.](../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_001.svg)
+![Random sampling barely reaches small subgroups.](../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -3983,13 +3983,13 @@ _Paragraph after the margin block:_
 
 ### 094. vol1/responsible_engr @ line 665: As automation grows more reliable, human vigilance decays.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:665`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:665`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** As automation grows more reliable, human vigilance decays.
 - **Figure evidence (`fig-alt`):** Automation reliability rises while human vigilance falls.
 
-![As automation grows more reliable, human vigilance decays.](../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_002.svg)
+![As automation grows more reliable, human vigilance decays.](../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -4026,13 +4026,13 @@ _Paragraph after the margin block:_
 
 ### 095. vol1/responsible_engr @ line 1646: Inference dominates lifetime cost; training is a rounding error.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:1646`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_tco_bar.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:1646`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/responsible_engr_tco_bar.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Inference dominates lifetime cost; training is a rounding error.
 - **Figure evidence (`fig-alt`):** Horizontal stacked bar of three-year total cost of ownership: a thin gray training sliver on the left, a wide orange inference segment dominating the middle, and a gray operations segment on the right. Training is a sliver; inference is most of the total.
 
-![Inference dominates lifetime cost; training is a rounding error.](../../quarto/contents/vol1/responsible_engr/images/svg/responsible_engr_tco_bar.svg)
+![Inference dominates lifetime cost; training is a rounding error.](../../quarto/vol1/responsible_engr/images/svg/responsible_engr_tco_bar.svg)
 
 **Source Markdown Excerpt**
 
@@ -4069,13 +4069,13 @@ _Paragraph after the margin block:_
 
 ### 096. vol1/responsible_engr @ line 2183: Training one model can rival a car's annual carbon.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:2183`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:2183`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Training one model can rival a car's annual carbon.
 - **Figure evidence (`fig-alt`):** Model-training emissions versus one passenger-car year.
 
-![Training one model can rival a car's annual carbon.](../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_003.svg)
+![Training one model can rival a car's annual carbon.](../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -4112,13 +4112,13 @@ _Paragraph after the margin block:_
 
 ### 097. vol1/responsible_engr @ line 2736: Audit logs grow without bound as decisions are retained.
 
-- **Source QMD:** `../../quarto/contents/vol1/responsible_engr/responsible_engr.qmd:2736`
-- **Asset:** `../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/responsible_engr/responsible_engr.qmd:2736`
+- **Asset:** `../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Audit logs grow without bound as decisions are retained.
 - **Figure evidence (`fig-alt`):** Append-only audit volume grows with retained decisions.
 
-![Audit logs grow without bound as decisions are retained.](../../quarto/contents/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_004.svg)
+![Audit logs grow without bound as decisions are retained.](../../quarto/vol1/responsible_engr/images/svg/vol1_responsible_engr_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -4155,13 +4155,13 @@ _Paragraph after the margin block:_
 
 ### 098. vol1/training @ line 131: Training cost stays flat across scale, then explodes past the frontier knee.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:131`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/training_cost_asymmetry.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:131`
+- **Asset:** `../../quarto/vol1/training/images/svg/training_cost_asymmetry.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.27`
 - **Caption:** Training cost stays flat across scale, then explodes past the frontier knee.
 - **Figure evidence (`fig-alt`):** A cost curve that stays nearly flat across model scale, then rises almost vertically at the right, with a marked knee point and a shaded danger zone past it. Training cost explodes at frontier scale.
 
-![Training cost stays flat across scale, then explodes past the frontier knee.](../../quarto/contents/vol1/training/images/svg/training_cost_asymmetry.svg)
+![Training cost stays flat across scale, then explodes past the frontier knee.](../../quarto/vol1/training/images/svg/training_cost_asymmetry.svg)
 
 **Source Markdown Excerpt**
 
@@ -4198,13 +4198,13 @@ _Paragraph after the margin block:_
 
 ### 099. vol1/training @ line 234: Training is compute-dominated: data and latency overlap away.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:234`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/training_iron_law_bars.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:234`
+- **Asset:** `../../quarto/vol1/training/images/svg/training_iron_law_bars.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Training is compute-dominated: data and latency overlap away.
 - **Figure evidence (`fig-alt`):** A horizontal bar split into three segments labeled D, C, and L for data, compute, and latency. The middle compute segment is the widest and shaded orange; the data and latency segments are narrow and gray, showing compute dominates training time.
 
-![Training is compute-dominated: data and latency overlap away.](../../quarto/contents/vol1/training/images/svg/training_iron_law_bars.svg)
+![Training is compute-dominated: data and latency overlap away.](../../quarto/vol1/training/images/svg/training_iron_law_bars.svg)
 
 **Source Markdown Excerpt**
 
@@ -4241,13 +4241,13 @@ _Paragraph after the margin block:_
 
 ### 100. vol1/training @ line 1140: Adam state is the largest piece: 2$\\times$ the weights, half of training memory.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:1140`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/training_optimizer_memory.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:1140`
+- **Asset:** `../../quarto/vol1/training/images/svg/training_optimizer_memory.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Adam state is the largest piece: 2$\\times$ the weights, half of training memory.
 - **Figure evidence (`fig-alt`):** A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total.
 
-![Adam state is the largest piece: 2$\\times$ the weights, half of training memory.](../../quarto/contents/vol1/training/images/svg/training_optimizer_memory.svg)
+![Adam state is the largest piece: 2$\\times$ the weights, half of training memory.](../../quarto/vol1/training/images/svg/training_optimizer_memory.svg)
 
 **Source Markdown Excerpt**
 
@@ -4284,13 +4284,13 @@ _Paragraph after the margin block:_
 
 ### 101. vol1/training @ line 1469: Activation memory spans MNIST toys to GPT-scale training.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:1469`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/vol1_training_margin_001.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:1469`
+- **Asset:** `../../quarto/vol1/training/images/svg/vol1_training_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Activation memory spans MNIST toys to GPT-scale training.
 - **Figure evidence (`fig-alt`):** Three-rung memory ladder comparing kilobyte-scale MNIST activations, a 32 GB V100 HBM ceiling, and GPT-2 activation memory above that ceiling.
 
-![Activation memory spans MNIST toys to GPT-scale training.](../../quarto/contents/vol1/training/images/svg/vol1_training_margin_001.svg)
+![Activation memory spans MNIST toys to GPT-scale training.](../../quarto/vol1/training/images/svg/vol1_training_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -4327,13 +4327,13 @@ _Paragraph after the margin block:_
 
 ### 102. vol1/training @ line 2679: Bandwidth steps up the storage to DRAM to HBM hierarchy.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:2679`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/vol1_training_margin_002.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:2679`
+- **Asset:** `../../quarto/vol1/training/images/svg/vol1_training_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Bandwidth steps up the storage to DRAM to HBM hierarchy.
 - **Figure evidence (`fig-alt`):** Three-rung bandwidth ladder for the training data path: storage around 1.5 GB/s, DRAM around 75 GB/s, and V100 HBM around 900 GB/s.
 
-![Bandwidth steps up the storage to DRAM to HBM hierarchy.](../../quarto/contents/vol1/training/images/svg/vol1_training_margin_002.svg)
+![Bandwidth steps up the storage to DRAM to HBM hierarchy.](../../quarto/vol1/training/images/svg/vol1_training_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -4370,13 +4370,13 @@ _Paragraph after the margin block:_
 
 ### 103. vol1/training @ line 4794: FlashAttention swaps the full attention matrix for small SRAM tiles.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:4794`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/vol1_training_margin_003.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:4794`
+- **Asset:** `../../quarto/vol1/training/images/svg/vol1_training_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** FlashAttention swaps the full attention matrix for small SRAM tiles.
 - **Figure evidence (`fig-alt`):** Two-rung memory ladder comparing a full 4096 by 4096 attention matrix at about 64 MB with a 128 by 128 SRAM tile at about 64 KB.
 
-![FlashAttention swaps the full attention matrix for small SRAM tiles.](../../quarto/contents/vol1/training/images/svg/vol1_training_margin_003.svg)
+![FlashAttention swaps the full attention matrix for small SRAM tiles.](../../quarto/vol1/training/images/svg/vol1_training_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -4413,13 +4413,13 @@ _Paragraph after the margin block:_
 
 ### 104. vol1/training @ line 5854: Some models exceed single-GPU memory before anything else matters.
 
-- **Source QMD:** `../../quarto/contents/vol1/training/training.qmd:5854`
-- **Asset:** `../../quarto/contents/vol1/training/images/svg/vol1_training_margin_004.svg`
+- **Source QMD:** `../../quarto/vol1/training/training.qmd:5854`
+- **Asset:** `../../quarto/vol1/training/images/svg/vol1_training_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Some models exceed single-GPU memory before anything else matters.
 - **Figure evidence (`fig-alt`):** 80 GB GPU capacity threshold with 70B FP16 weights above it.
 
-![Some models exceed single-GPU memory before anything else matters.](../../quarto/contents/vol1/training/images/svg/vol1_training_margin_004.svg)
+![Some models exceed single-GPU memory before anything else matters.](../../quarto/vol1/training/images/svg/vol1_training_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -4456,13 +4456,13 @@ _Paragraph after the margin block:_
 
 ### 105. vol2/collective_communication @ line 75: Gradient synchronization devours 30 to 70 percent of each step at scale.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:75`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_comm_dominance.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:75`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/collective_communication_comm_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.71`
 - **Caption:** Gradient synchronization devours 30 to 70 percent of each step at scale.
 - **Figure evidence (`fig-alt`):** Two horizontal bars comparing the step's iron-law terms at frontier scale. The communication bar is wide and shaded violet, dominating; the compute bar is a narrow gray sliver.
 
-![Gradient synchronization devours 30 to 70 percent of each step at scale.](../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_comm_dominance.svg)
+![Gradient synchronization devours 30 to 70 percent of each step at scale.](../../quarto/vol2/collective_communication/images/svg/collective_communication_comm_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -4499,13 +4499,13 @@ _Paragraph after the margin block:_
 
 ### 106. vol2/collective_communication @ line 429: Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:429`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_alpha_beta_dominance.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:429`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/collective_communication_alpha_beta_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.
 - **Figure evidence (`fig-alt`):** Two horizontal bars. Top (large message): a wide blue bandwidth segment labeled n over beta, plus a thin gray latency sliver. Bottom (small message): a wide violet latency segment labeled alpha, plus a thin gray sliver. The dominant term flips.
 
-![Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.](../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_alpha_beta_dominance.svg)
+![Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.](../../quarto/vol2/collective_communication/images/svg/collective_communication_alpha_beta_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -4542,13 +4542,13 @@ _Paragraph after the margin block:_
 
 ### 107. vol2/collective_communication @ line 703: All-to-All traffic scales worse than AllReduce.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:703`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:703`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** All-to-All traffic scales worse than AllReduce.
 - **Figure evidence (`fig-alt`):** All-to-All quadratic connection growth versus the AllReduce curve.
 
-![All-to-All traffic scales worse than AllReduce.](../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_001.svg)
+![All-to-All traffic scales worse than AllReduce.](../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -4585,13 +4585,13 @@ _Paragraph after the margin block:_
 
 ### 108. vol2/collective_communication @ line 820: FSDP trades one step-level collective for two per-layer collectives.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:820`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:820`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** FSDP trades one step-level collective for two per-layer collectives.
 - **Figure evidence (`fig-alt`):** Two symbolic formula rows: data parallelism uses one collective per step, while FSDP uses two N sub L collectives per step.
 
-![FSDP trades one step-level collective for two per-layer collectives.](../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_002.svg)
+![FSDP trades one step-level collective for two per-layer collectives.](../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -4628,13 +4628,13 @@ _Paragraph after the margin block:_
 
 ### 109. vol2/collective_communication @ line 969: Ring latency grows with N; tree stays logarithmic.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:969`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_ring_tree_divergence.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:969`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/collective_communication_ring_tree_divergence.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** Ring latency grows with N; tree stays logarithmic.
 - **Figure evidence (`fig-alt`):** Two trend strokes from a shared origin. A steep red stroke (Ring, latency growing linearly with node count) pulls away above a near-flat blue stroke (Tree, latency growing logarithmically) as the cluster grows.
 
-![Ring latency grows with N; tree stays logarithmic.](../../quarto/contents/vol2/collective_communication/images/svg/collective_communication_ring_tree_divergence.svg)
+![Ring latency grows with N; tree stays logarithmic.](../../quarto/vol2/collective_communication/images/svg/collective_communication_ring_tree_divergence.svg)
 
 **Source Markdown Excerpt**
 
@@ -4671,13 +4671,13 @@ _Paragraph after the margin block:_
 
 ### 110. vol2/collective_communication @ line 1452: Hierarchical collectives shrink payload before it crosses slow tiers.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:1452`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:1452`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Hierarchical collectives shrink payload before it crosses slow tiers.
 - **Figure evidence (`fig-alt`):** Three-rung payload ladder showing M, M over 8, and M over 32, with 32x marked as an annotation.
 
-![Hierarchical collectives shrink payload before it crosses slow tiers.](../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_003.svg)
+![Hierarchical collectives shrink payload before it crosses slow tiers.](../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -4714,13 +4714,13 @@ _Paragraph after the margin block:_
 
 ### 111. vol2/collective_communication @ line 1593: Error feedback carries the residual into the next compressed step.
 
-- **Source QMD:** `../../quarto/contents/vol2/collective_communication/collective_communication.qmd:1593`
-- **Asset:** `../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/collective_communication/collective_communication.qmd:1593`
+- **Asset:** `../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Error feedback carries the residual into the next compressed step.
 - **Figure evidence (`fig-alt`):** Error-feedback loop with residual carried into next step.
 
-![Error feedback carries the residual into the next compressed step.](../../quarto/contents/vol2/collective_communication/images/svg/vol2_collective_communication_margin_004.svg)
+![Error feedback carries the residual into the next compressed step.](../../quarto/vol2/collective_communication/images/svg/vol2_collective_communication_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -4757,13 +4757,13 @@ _Paragraph after the margin block:_
 
 ### 112. vol2/compute_infrastructure @ line 1166: Decode sits deep in the memory-bound regime, far below the ridge.
 
-- **Source QMD:** `../../quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:1166`
-- **Asset:** `../../quarto/contents/vol2/compute_infrastructure/images/svg/compute_infrastructure_decode_roofline.svg`
+- **Source QMD:** `../../quarto/vol2/compute_infrastructure/compute_infrastructure.qmd:1166`
+- **Asset:** `../../quarto/vol2/compute_infrastructure/images/svg/compute_infrastructure_decode_roofline.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Decode sits deep in the memory-bound regime, far below the ridge.
 - **Figure evidence (`fig-alt`):** A roofline: a blue memory-bound slope rising to an orange compute-bound ceiling at the ridge point. A workload dot sits low on the blue slope, far left of the ridge, marking LLM decode as deeply memory-bound.
 
-![Decode sits deep in the memory-bound regime, far below the ridge.](../../quarto/contents/vol2/compute_infrastructure/images/svg/compute_infrastructure_decode_roofline.svg)
+![Decode sits deep in the memory-bound regime, far below the ridge.](../../quarto/vol2/compute_infrastructure/images/svg/compute_infrastructure_decode_roofline.svg)
 
 **Source Markdown Excerpt**
 
@@ -4800,13 +4800,13 @@ _Paragraph after the margin block:_
 
 ### 113. vol2/compute_infrastructure @ line 1944: Data movement dwarfs arithmetic in energy cost.
 
-- **Source QMD:** `../../quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:1944`
-- **Asset:** `../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/compute_infrastructure/compute_infrastructure.qmd:1944`
+- **Asset:** `../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.83`
 - **Caption:** Data movement dwarfs arithmetic in energy cost.
 - **Figure evidence (`fig-alt`):** MAC, HBM read, and DRAM read energy costs.
 
-![Data movement dwarfs arithmetic in energy cost.](../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_001.svg)
+![Data movement dwarfs arithmetic in energy cost.](../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -4843,13 +4843,13 @@ _Paragraph after the margin block:_
 
 ### 114. vol2/compute_infrastructure @ line 3149: Modern GPU racks cross the air-cooling envelope.
 
-- **Source QMD:** `../../quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3149`
-- **Asset:** `../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/compute_infrastructure/compute_infrastructure.qmd:3149`
+- **Asset:** `../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Modern GPU racks cross the air-cooling envelope.
 - **Figure evidence (`fig-alt`):** Linear rack-power scale with a dashed 10 kW air-cooling envelope and a red DGX H100 rack marker around 33 kW.
 
-![Modern GPU racks cross the air-cooling envelope.](../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_002.svg)
+![Modern GPU racks cross the air-cooling envelope.](../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -4886,13 +4886,13 @@ _Paragraph after the margin block:_
 
 ### 115. vol2/compute_infrastructure @ line 3550: Fleet-level MTBF falls inversely with GPU count.
 
-- **Source QMD:** `../../quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3550`
-- **Asset:** `../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/compute_infrastructure/compute_infrastructure.qmd:3550`
+- **Asset:** `../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Fleet-level MTBF falls inversely with GPU count.
 - **Figure evidence (`fig-alt`):** Three-rung time ladder: one GPU has about 50,000 hours MTTF, 1,000 GPUs about 50 hours, and 10,000 GPUs about 5 hours.
 
-![Fleet-level MTBF falls inversely with GPU count.](../../quarto/contents/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_003.svg)
+![Fleet-level MTBF falls inversely with GPU count.](../../quarto/vol2/compute_infrastructure/images/svg/vol2_compute_infrastructure_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -4929,13 +4929,13 @@ _Paragraph after the margin block:_
 
 ### 117. vol2/compute_infrastructure @ line 4040: HBM is 50-fold faster, so CXL is capacity only.
 
-- **Source QMD:** `../../quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4040`
-- **Asset:** `../../quarto/contents/vol2/compute_infrastructure/images/svg/compute_infrastructure_cxl_bandwidth_gap.svg`
+- **Source QMD:** `../../quarto/vol2/compute_infrastructure/compute_infrastructure.qmd:4040`
+- **Asset:** `../../quarto/vol2/compute_infrastructure/images/svg/compute_infrastructure_cxl_bandwidth_gap.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** HBM is 50-fold faster, so CXL is capacity only.
 - **Figure evidence (`fig-alt`):** Two-rung bandwidth ladder comparing HBM3 at about 3.35 terabytes per second with CXL3 at 64 gigabytes per second, annotated as roughly 50 times slower.
 
-![HBM is 50-fold faster, so CXL is capacity only.](../../quarto/contents/vol2/compute_infrastructure/images/svg/compute_infrastructure_cxl_bandwidth_gap.svg)
+![HBM is 50-fold faster, so CXL is capacity only.](../../quarto/vol2/compute_infrastructure/images/svg/compute_infrastructure_cxl_bandwidth_gap.svg)
 
 **Source Markdown Excerpt**
 
@@ -4972,13 +4972,13 @@ _Paragraph after the margin block:_
 
 ### 118. vol2/conclusion @ line 180: Decode sits memory-bound, left of the roofline ridge.
 
-- **Source QMD:** `../../quarto/contents/vol2/conclusion/conclusion.qmd:180`
-- **Asset:** `../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/conclusion/conclusion.qmd:180`
+- **Asset:** `../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** Decode sits memory-bound, left of the roofline ridge.
 - **Figure evidence (`fig-alt`):** Decode dot on memory slope below compute ceiling.
 
-![Decode sits memory-bound, left of the roofline ridge.](../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_001.svg)
+![Decode sits memory-bound, left of the roofline ridge.](../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -5015,13 +5015,13 @@ _Paragraph after the margin block:_
 
 ### 119. vol2/conclusion @ line 214: Storage and communication must be co-designed around matching rates.
 
-- **Source QMD:** `../../quarto/contents/vol2/conclusion/conclusion.qmd:214`
-- **Asset:** `../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/conclusion/conclusion.qmd:214`
+- **Asset:** `../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.86`
 - **Caption:** Storage and communication must be co-designed around matching rates.
 - **Figure evidence (`fig-alt`):** Two matched horizontal bands, one for communication capacity and one for storage bandwidth, with a small label indicating that the rates must be matched.
 
-![Storage and communication must be co-designed around matching rates.](../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_002.svg)
+![Storage and communication must be co-designed around matching rates.](../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -5058,13 +5058,13 @@ _Paragraph after the margin block:_
 
 ### 120. vol2/conclusion @ line 303: Future efficiency needs hardware, algorithm, and orchestration gains together.
 
-- **Source QMD:** `../../quarto/contents/vol2/conclusion/conclusion.qmd:303`
-- **Asset:** `../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/conclusion/conclusion.qmd:303`
+- **Asset:** `../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Future efficiency needs hardware, algorithm, and orchestration gains together.
 - **Figure evidence (`fig-alt`):** Three-rung gain ladder showing orchestration at 10 times, hardware at 4 times, and algorithmic compression at 2.5 times as multiplicative contributors toward a 100 times fleet-efficiency target.
 
-![Future efficiency needs hardware, algorithm, and orchestration gains together.](../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_003.svg)
+![Future efficiency needs hardware, algorithm, and orchestration gains together.](../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -5101,13 +5101,13 @@ _Paragraph after the margin block:_
 
 ### 121. vol2/conclusion @ line 370: A datacenter draws megawatts; the brain runs on ~20 watts.
 
-- **Source QMD:** `../../quarto/contents/vol2/conclusion/conclusion.qmd:370`
-- **Asset:** `../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/conclusion/conclusion.qmd:370`
+- **Asset:** `../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_004.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** A datacenter draws megawatts; the brain runs on ~20 watts.
 - **Figure evidence (`fig-alt`):** Cluster power versus brain power.
 
-![A datacenter draws megawatts; the brain runs on ~20 watts.](../../quarto/contents/vol2/conclusion/images/svg/vol2_conclusion_margin_004.svg)
+![A datacenter draws megawatts; the brain runs on ~20 watts.](../../quarto/vol2/conclusion/images/svg/vol2_conclusion_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -5144,13 +5144,13 @@ _Paragraph after the margin block:_
 
 ### 122. vol2/data_storage @ line 140: Storage is the Infrastructure axis of the fleet stack.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:140`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/data_storage_dai_locator.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:140`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/data_storage_dai_locator.svg`
 - **Audit status:** `Pass`; lexical overlap `0.80`
 - **Caption:** Storage is the Infrastructure axis of the fleet stack.
 - **Figure evidence (`fig-alt`):** Three side-by-side pills labeled D, A, and I. The I pill is filled blue and the D and A pills are gray, marking the Infrastructure axis as this chapter's focus.
 
-![Storage is the Infrastructure axis of the fleet stack.](../../quarto/contents/vol2/data_storage/images/svg/data_storage_dai_locator.svg)
+![Storage is the Infrastructure axis of the fleet stack.](../../quarto/vol2/data_storage/images/svg/data_storage_dai_locator.svg)
 
 **Source Markdown Excerpt**
 
@@ -5187,13 +5187,13 @@ _Paragraph after the margin block:_
 
 ### 123. vol2/data_storage @ line 152: Checkpoint writes dwarf training-data reads by about 1,000 times.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:152`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/data_storage_checkpoint_dominance.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:152`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/data_storage_checkpoint_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Checkpoint writes dwarf training-data reads by about 1,000 times.
 - **Figure evidence (`fig-alt`):** A two-rung ladder on a log scale: a tall blue rung for checkpoint writes at 7.56 PB towering over a tiny rung for per-epoch training data at 6 TB, showing checkpoints move over a thousand times more bytes than the dataset.
 
-![Checkpoint writes dwarf training-data reads by about 1,000 times.](../../quarto/contents/vol2/data_storage/images/svg/data_storage_checkpoint_dominance.svg)
+![Checkpoint writes dwarf training-data reads by about 1,000 times.](../../quarto/vol2/data_storage/images/svg/data_storage_checkpoint_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -5230,13 +5230,13 @@ _Paragraph after the margin block:_
 
 ### 124. vol2/data_storage @ line 486: Bandwidth drops roughly 479$\\times$ across the top three tiers, from HBM to local NVMe.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:486`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/data_storage_bandwidth_cliff.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:486`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/data_storage_bandwidth_cliff.svg`
 - **Audit status:** `Pass`; lexical overlap `0.60`
 - **Caption:** Bandwidth drops roughly 479$\\times$ across the top three tiers, from HBM to local NVMe.
 - **Figure evidence (`fig-alt`):** Three stacked horizontal bars on a log scale, longest at top: HBM at 3.35 TB/s, host DRAM at 200 GB/s, and NVMe at 7 GB/s, showing bandwidth dropping sharply across the top three storage tiers.
 
-![Bandwidth drops roughly 479$\\times$ across the top three tiers, from HBM to local NVMe.](../../quarto/contents/vol2/data_storage/images/svg/data_storage_bandwidth_cliff.svg)
+![Bandwidth drops roughly 479$\\times$ across the top three tiers, from HBM to local NVMe.](../../quarto/vol2/data_storage/images/svg/data_storage_bandwidth_cliff.svg)
 
 **Source Markdown Excerpt**
 
@@ -5273,13 +5273,13 @@ _Paragraph after the margin block:_
 
 ### 125. vol2/data_storage @ line 633: Storage bandwidth demand swings wildly with data modality.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:633`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:633`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Storage bandwidth demand swings wildly with data modality.
 - **Figure evidence (`fig-alt`):** Text training bandwidth versus image training bandwidth.
 
-![Storage bandwidth demand swings wildly with data modality.](../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_001.svg)
+![Storage bandwidth demand swings wildly with data modality.](../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -5316,13 +5316,13 @@ _Paragraph after the margin block:_
 
 ### 126. vol2/data_storage @ line 1656: P99 I/O latency sets the required prefetch depth.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:1656`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:1656`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** P99 I/O latency sets the required prefetch depth.
 - **Figure evidence (`fig-alt`):** Sequence strip showing a 500 ms P99 I/O delay spanning three 200 ms compute windows, which implies a prefetch depth of three batches.
 
-![P99 I/O latency sets the required prefetch depth.](../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_002.svg)
+![P99 I/O latency sets the required prefetch depth.](../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -5359,13 +5359,13 @@ _Paragraph after the margin block:_
 
 ### 127. vol2/data_storage @ line 2034: Repeated egress, not storage, dominates cloud cost.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:2034`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:2034`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Repeated egress, not storage, dominates cloud cost.
 - **Figure evidence (`fig-alt`):** Cloud storage cost bar dominated by repeated egress.
 
-![Repeated egress, not storage, dominates cloud cost.](../../quarto/contents/vol2/data_storage/images/svg/vol2_data_storage_margin_003.svg)
+![Repeated egress, not storage, dominates cloud cost.](../../quarto/vol2/data_storage/images/svg/vol2_data_storage_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -5402,13 +5402,13 @@ _Paragraph after the margin block:_
 
 ### 128. vol2/data_storage @ line 2258: Sharding collapses checkpoint-storm write time by two orders of magnitude.
 
-- **Source QMD:** `../../quarto/contents/vol2/data_storage/data_storage.qmd:2258`
-- **Asset:** `../../quarto/contents/vol2/data_storage/images/svg/data_storage_checkpoint_storm_write_time.svg`
+- **Source QMD:** `../../quarto/vol2/data_storage/data_storage.qmd:2258`
+- **Asset:** `../../quarto/vol2/data_storage/images/svg/data_storage_checkpoint_storm_write_time.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.00`
 - **Caption:** Sharding collapses checkpoint-storm write time by two orders of magnitude.
 - **Figure evidence (`fig-alt`):** Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction.
 
-![Sharding collapses checkpoint-storm write time by two orders of magnitude.](../../quarto/contents/vol2/data_storage/images/svg/data_storage_checkpoint_storm_write_time.svg)
+![Sharding collapses checkpoint-storm write time by two orders of magnitude.](../../quarto/vol2/data_storage/images/svg/data_storage_checkpoint_storm_write_time.svg)
 
 **Source Markdown Excerpt**
 
@@ -5445,13 +5445,13 @@ _Paragraph after the margin block:_
 
 ### 129. vol2/distributed_training @ line 146: Past a communication-to-compute threshold, scaling stops being ideal.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:146`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:146`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.14`
 - **Caption:** Past a communication-to-compute threshold, scaling stops being ideal.
 - **Figure evidence (`fig-alt`):** Two equal-width zones labeled compute and communication with a dashed rho equals one threshold between ideal scaling and waiting.
 
-![Past a communication-to-compute threshold, scaling stops being ideal.](../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_001.svg)
+![Past a communication-to-compute threshold, scaling stops being ideal.](../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -5488,13 +5488,13 @@ _Paragraph after the margin block:_
 
 ### 130. vol2/distributed_training @ line 553: One missing worker stalls the entire AllReduce barrier.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:553`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:553`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** One missing worker stalls the entire AllReduce barrier.
 - **Figure evidence (`fig-alt`):** Five worker dots approach a vertical barrier; one red missing worker causes the peer lanes to stop before the barrier.
 
-![One missing worker stalls the entire AllReduce barrier.](../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_002.svg)
+![One missing worker stalls the entire AllReduce barrier.](../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -5531,13 +5531,13 @@ _Paragraph after the margin block:_
 
 ### 131. vol2/distributed_training @ line 1268: Communication energy climbs from HBM out to the network.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:1268`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:1268`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Communication energy climbs from HBM out to the network.
 - **Figure evidence (`fig-alt`):** Orange energy-per-bit ladder with representative midpoints: InfiniBand 35 pJ, NVLink 7.5 pJ, and HBM 1.5 pJ.
 
-![Communication energy climbs from HBM out to the network.](../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_003.svg)
+![Communication energy climbs from HBM out to the network.](../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -5574,13 +5574,13 @@ _Paragraph after the margin block:_
 
 ### 132. vol2/distributed_training @ line 1716: Optimizer state, not weights, dominates the per-replica training budget.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:1716`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_memory_budget.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:1716`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/distributed_training_memory_budget.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Optimizer state, not weights, dominates the per-replica training budget.
 - **Figure evidence (`fig-alt`):** Ladder of three memory rungs for a 175B-parameter mixed-precision Adam training state: optimizer state 2,100 GB (longest), gradients 350 GB, and weights 350 GB. The optimizer rung is about six times the others.
 
-![Optimizer state, not weights, dominates the per-replica training budget.](../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_memory_budget.svg)
+![Optimizer state, not weights, dominates the per-replica training budget.](../../quarto/vol2/distributed_training/images/svg/distributed_training_memory_budget.svg)
 
 **Source Markdown Excerpt**
 
@@ -5617,13 +5617,13 @@ _Paragraph after the margin block:_
 
 ### 133. vol2/distributed_training @ line 1953: More stages require enough microbatches or the bubble dominates utilization.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:1953`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_pipeline_bubble_tax.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:1953`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/distributed_training_pipeline_bubble_tax.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** More stages require enough microbatches or the bubble dominates utilization.
 - **Figure evidence (`fig-alt`):** Two proportional stacked bars comparing pipeline bubble tax: p8 m32 has about 18 percent idle time, while p16 m16 has about 48 percent idle time.
 
-![More stages require enough microbatches or the bubble dominates utilization.](../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_pipeline_bubble_tax.svg)
+![More stages require enough microbatches or the bubble dominates utilization.](../../quarto/vol2/distributed_training/images/svg/distributed_training_pipeline_bubble_tax.svg)
 
 **Source Markdown Excerpt**
 
@@ -5660,13 +5660,13 @@ _Paragraph after the margin block:_
 
 ### 134. vol2/distributed_training @ line 2061: Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:2061`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:2061`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.
 - **Figure evidence (`fig-alt`):** Violet bandwidth ladder comparing NVLink at 900 GB per second with NDR InfiniBand at 50 GB per second; 18x appears as an annotation.
 
-![Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.](../../quarto/contents/vol2/distributed_training/images/svg/vol2_distributed_training_margin_004.svg)
+![Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.](../../quarto/vol2/distributed_training/images/svg/vol2_distributed_training_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -5703,13 +5703,13 @@ _Paragraph after the margin block:_
 
 ### 135. vol2/distributed_training @ line 3190: The optimal checkpoint cadence balances write overhead against rework risk.
 
-- **Source QMD:** `../../quarto/contents/vol2/distributed_training/distributed_training.qmd:3190`
-- **Asset:** `../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_young_daly_optimum.svg`
+- **Source QMD:** `../../quarto/vol2/distributed_training/distributed_training.qmd:3190`
+- **Asset:** `../../quarto/vol2/distributed_training/images/svg/distributed_training_young_daly_optimum.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** The optimal checkpoint cadence balances write overhead against rework risk.
 - **Figure evidence (`fig-alt`):** Compact checkpoint-interval curve marking 15 minutes as too frequent, about 2.9 hours as the Young-Daly optimum, and 8 hours as sparse.
 
-![The optimal checkpoint cadence balances write overhead against rework risk.](../../quarto/contents/vol2/distributed_training/images/svg/distributed_training_young_daly_optimum.svg)
+![The optimal checkpoint cadence balances write overhead against rework risk.](../../quarto/vol2/distributed_training/images/svg/distributed_training_young_daly_optimum.svg)
 
 **Source Markdown Excerpt**
 
@@ -5746,13 +5746,13 @@ _Paragraph after the margin block:_
 
 ### 136. vol2/edge_intelligence @ line 181: On-device learning hits the memory wall before the compute wall.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:181`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:181`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** On-device learning hits the memory wall before the compute wall.
 - **Figure evidence (`fig-alt`):** Blue memory ladder comparing a 300 MB app budget with a 75 MB local gradient update, with 25 percent marked as an annotation.
 
-![On-device learning hits the memory wall before the compute wall.](../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_001.svg)
+![On-device learning hits the memory wall before the compute wall.](../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -5789,13 +5789,13 @@ _Paragraph after the margin block:_
 
 ### 137. vol2/edge_intelligence @ line 986: Datacenter HBM outruns mobile memory bandwidth by about 34 times.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:986`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_bandwidth_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:986`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_bandwidth_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Datacenter HBM outruns mobile memory bandwidth by about 34 times.
 - **Figure evidence (`fig-alt`):** Two-rung bandwidth ladder. Top rung, data-center HBM3 at 3,350 GB/s, capped by a red ceiling line marking the wall. Bottom rung, mobile LPDDR5X at 100 GB/s, about 34× shorter.
 
-![Datacenter HBM outruns mobile memory bandwidth by about 34 times.](../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_bandwidth_ladder.svg)
+![Datacenter HBM outruns mobile memory bandwidth by about 34 times.](../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_bandwidth_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -5832,13 +5832,13 @@ _Paragraph after the margin block:_
 
 ### 138. vol2/edge_intelligence @ line 1076: Device memory spans about 15,000 times, phone to microcontroller.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:1076`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_device_memory_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:1076`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_device_memory_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Device memory spans about 15,000 times, phone to microcontroller.
 - **Figure evidence (`fig-alt`):** Vertical ladder of four blue bars on a log scale showing device-class memory shrinking by orders of magnitude: smartphone 8 GB, IoT 1 GB, microcontroller flash 4 MB, microcontroller SRAM 520 KB.
 
-![Device memory spans about 15,000 times, phone to microcontroller.](../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_device_memory_ladder.svg)
+![Device memory spans about 15,000 times, phone to microcontroller.](../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_device_memory_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -5875,13 +5875,13 @@ _Paragraph after the margin block:_
 
 ### 139. vol2/edge_intelligence @ line 1202: Adapters make per-user personalization cheap versus full model copies.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:1202`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:1202`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** Adapters make per-user personalization cheap versus full model copies.
 - **Figure evidence (`fig-alt`):** Blue memory ladder comparing a 40 MB full model copy with a 0.2 MB adapter, with 200x marked as an annotation.
 
-![Adapters make per-user personalization cheap versus full model copies.](../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_002.svg)
+![Adapters make per-user personalization cheap versus full model copies.](../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -5918,13 +5918,13 @@ _Paragraph after the margin block:_
 
 ### 140. vol2/edge_intelligence @ line 1860: Learning the new task erodes accuracy on the old one.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:1860`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:1860`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.86`
 - **Caption:** Learning the new task erodes accuracy on the old one.
 - **Figure evidence (`fig-alt`):** Two trend lines: green new-task performance rises while red old-task accuracy falls.
 
-![Learning the new task erodes accuracy on the old one.](../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_003.svg)
+![Learning the new task erodes accuracy on the old one.](../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -5961,13 +5961,13 @@ _Paragraph after the margin block:_
 
 ### 141. vol2/edge_intelligence @ line 2046: Federated learning ships updates, not raw data, cutting network load.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:2046`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:2046`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.70`
 - **Caption:** Federated learning ships updates, not raw data, cutting network load.
 - **Figure evidence (`fig-alt`):** Violet network ladder comparing 200 MB of raw upload with a 2.5 MB federated update, with 80x marked as an annotation.
 
-![Federated learning ships updates, not raw data, cutting network load.](../../quarto/contents/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_004.svg)
+![Federated learning ships updates, not raw data, cutting network load.](../../quarto/vol2/edge_intelligence/images/svg/vol2_edge_intelligence_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -6004,13 +6004,13 @@ _Paragraph after the margin block:_
 
 ### 142. vol2/edge_intelligence @ line 2323: Over-selection closes the round on the first K updates.
 
-- **Source QMD:** `../../quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd:2323`
-- **Asset:** `../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_straggler_cutoff_strip.svg`
+- **Source QMD:** `../../quarto/vol2/edge_intelligence/edge_intelligence.qmd:2323`
+- **Asset:** `../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_straggler_cutoff_strip.svg`
 - **Audit status:** `Pass`; lexical overlap `0.80`
 - **Caption:** Over-selection closes the round on the first K updates.
 - **Figure evidence (`fig-alt`):** Sequence strip showing the first K federated-client updates accepted before the round closes, while a late straggler is dropped.
 
-![Over-selection closes the round on the first K updates.](../../quarto/contents/vol2/edge_intelligence/images/svg/edge_intelligence_straggler_cutoff_strip.svg)
+![Over-selection closes the round on the first K updates.](../../quarto/vol2/edge_intelligence/images/svg/edge_intelligence_straggler_cutoff_strip.svg)
 
 **Source Markdown Excerpt**
 
@@ -6047,13 +6047,13 @@ _Paragraph after the margin block:_
 
 ### 143. vol2/fault_tolerance @ line 132: System MTBF collapses as the fleet grows: 50,000 h to 5 h.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:132`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_mtbf_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:132`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_mtbf_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.20`
 - **Caption:** System MTBF collapses as the fleet grows: 50,000 h to 5 h.
 - **Figure evidence (`fig-alt`):** Time ladder showing system mean time between failures collapsing as fleet size grows: 1 GPU at 50,000 hours, 1,000 GPUs at 50 hours, 10,000 GPUs at 5 hours.
 
-![System MTBF collapses as the fleet grows: 50,000 h to 5 h.](../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_mtbf_ladder.svg)
+![System MTBF collapses as the fleet grows: 50,000 h to 5 h.](../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_mtbf_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -6090,13 +6090,13 @@ _Paragraph after the margin block:_
 
 ### 144. vol2/fault_tolerance @ line 767: One shared dependency fails and takes every node with it.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:767`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_blast.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:767`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_blast.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** One shared dependency fails and takes every node with it.
 - **Figure evidence (`fig-alt`):** A single red fault source on the left with arrows fanning out to five blue nodes on the right, showing one shared dependency taking down all the components that depend on it.
 
-![One shared dependency fails and takes every node with it.](../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_blast.svg)
+![One shared dependency fails and takes every node with it.](../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_blast.svg)
 
 **Source Markdown Excerpt**
 
@@ -6133,13 +6133,13 @@ _Paragraph after the margin block:_
 
 ### 145. vol2/fault_tolerance @ line 1873: Silent data corruption accumulates until it becomes routine.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:1873`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:1873`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Silent data corruption accumulates until it becomes routine.
 - **Figure evidence (`fig-alt`):** Cumulative silent-data-corruption risk over training steps.
 
-![Silent data corruption accumulates until it becomes routine.](../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_001.svg)
+![Silent data corruption accumulates until it becomes routine.](../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -6176,13 +6176,13 @@ _Paragraph after the margin block:_
 
 ### 146. vol2/fault_tolerance @ line 2083: Optimizer state, not weights, dominates checkpoint size.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2083`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:2083`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Optimizer state, not weights, dominates checkpoint size.
 - **Figure evidence (`fig-alt`):** Stacked checkpoint payload bar where weights occupy one quarter and Adam optimizer state occupies about three quarters.
 
-![Optimizer state, not weights, dominates checkpoint size.](../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_002.svg)
+![Optimizer state, not weights, dominates checkpoint size.](../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -6219,13 +6219,13 @@ _Paragraph after the margin block:_
 
 ### 147. vol2/fault_tolerance @ line 2774: Detection latency climbs from seconds (crash) to hours (silent corruption).
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2774`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_detection_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:2774`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_detection_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.12`
 - **Caption:** Detection latency climbs from seconds (crash) to hours (silent corruption).
 - **Figure evidence (`fig-alt`):** A staircase ladder of detection latency on a log scale, ordered by how hard a failure is to see: a process crash at about 30 seconds, a GPU hang at 120 seconds, a network partition at 180 seconds, and silent data corruption at roughly two hours. The span climbs across two to three orders of magnitude.
 
-![Detection latency climbs from seconds (crash) to hours (silent corruption).](../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_detection_ladder.svg)
+![Detection latency climbs from seconds (crash) to hours (silent corruption).](../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_detection_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -6262,13 +6262,13 @@ _Paragraph after the margin block:_
 
 ### 148. vol2/fault_tolerance @ line 3022: A single straggler idles every healthy accelerator.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:3022`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:3022`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** A single straggler idles every healthy accelerator.
 - **Figure evidence (`fig-alt`):** One slow rank blocking healthy ranks at synchronization barrier.
 
-![A single straggler idles every healthy accelerator.](../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_003.svg)
+![A single straggler idles every healthy accelerator.](../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -6305,13 +6305,13 @@ _Paragraph after the margin block:_
 
 ### 149. vol2/fault_tolerance @ line 3242: Redundancy turns days of downtime into seconds.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:3242`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:3242`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.40`
 - **Caption:** Redundancy turns days of downtime into seconds.
 - **Figure evidence (`fig-alt`):** Time ladder showing annual downtime dropping from 3.65 days with one replica to 52.6 minutes with two and 31.5 seconds with three.
 
-![Redundancy turns days of downtime into seconds.](../../quarto/contents/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_004.svg)
+![Redundancy turns days of downtime into seconds.](../../quarto/vol2/fault_tolerance/images/svg/vol2_fault_tolerance_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -6348,13 +6348,13 @@ _Paragraph after the margin block:_
 
 ### 150. vol2/fault_tolerance @ line 3331: A long conversation carries tens of GB of live state.
 
-- **Source QMD:** `../../quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:3331`
-- **Asset:** `../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_kv_live_state_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/fault_tolerance/fault_tolerance.qmd:3331`
+- **Asset:** `../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_kv_live_state_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** A long conversation carries tens of GB of live state.
 - **Figure evidence (`fig-alt`):** Memory ladder comparing a 64-head KV cache at 344 GB with a grouped-query KV cache at 43 GB, with the 8x gap marked as a ratio annotation.
 
-![A long conversation carries tens of GB of live state.](../../quarto/contents/vol2/fault_tolerance/images/svg/fault_tolerance_kv_live_state_ladder.svg)
+![A long conversation carries tens of GB of live state.](../../quarto/vol2/fault_tolerance/images/svg/fault_tolerance_kv_live_state_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -6391,13 +6391,13 @@ _Paragraph after the margin block:_
 
 ### 151. vol2/fleet_orchestration @ line 242: Normal component failure rates guarantee constant fleet failures.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:242`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:242`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Normal component failure rates guarantee constant fleet failures.
 - **Figure evidence (`fig-alt`):** Fleet failure rate rises from single GPU to 10,000 GPUs.
 
-![Normal component failure rates guarantee constant fleet failures.](../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_001.svg)
+![Normal component failure rates guarantee constant fleet failures.](../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -6434,13 +6434,13 @@ _Paragraph after the margin block:_
 
 ### 152. vol2/fleet_orchestration @ line 302: Past about 70 percent utilization, queue wait time explodes.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:302`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_util_knee.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:302`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_util_knee.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Past about 70 percent utilization, queue wait time explodes.
 - **Figure evidence (`fig-alt`):** A wait-time curve that stays flat at low utilization then turns sharply upward toward the right, with a marked knee and a shaded danger zone past it.
 
-![Past about 70 percent utilization, queue wait time explodes.](../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_util_knee.svg)
+![Past about 70 percent utilization, queue wait time explodes.](../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_util_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -6477,13 +6477,13 @@ _Paragraph after the margin block:_
 
 ### 153. vol2/fleet_orchestration @ line 551: Priority inversion is a wait-for chain, not a root-failure tree.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:551`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_dependency_cascade.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:551`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_dependency_cascade.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Priority inversion is a wait-for chain, not a root-failure tree.
 - **Figure evidence (`fig-alt`):** Priority inversion wait-for sketch: a high-priority job waits on a low-priority job holding GPUs, while medium-priority jobs starve the low-priority job's checkpoint exit path.
 
-![Priority inversion is a wait-for chain, not a root-failure tree.](../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_dependency_cascade.svg)
+![Priority inversion is a wait-for chain, not a root-failure tree.](../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_dependency_cascade.svg)
 
 **Source Markdown Excerpt**
 
@@ -6520,13 +6520,13 @@ _Paragraph after the margin block:_
 
 ### 154. vol2/fleet_orchestration @ line 824: Bandwidth cliffs from NVLink to spine across the fabric.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:824`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_bw_hierarchy.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:824`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_bw_hierarchy.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Bandwidth cliffs from NVLink to spine across the fabric.
 - **Figure evidence (`fig-alt`):** A staircase ladder of interconnect bandwidth on a log scale, in violet: NVLink at 900 GB/s within a node, InfiniBand at 50 GB/s within a rack, and the spine at about 12 GB/s across racks. Each boundary is an order-of-magnitude bandwidth cliff.
 
-![Bandwidth cliffs from NVLink to spine across the fabric.](../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_bw_hierarchy.svg)
+![Bandwidth cliffs from NVLink to spine across the fabric.](../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_bw_hierarchy.svg)
 
 **Source Markdown Excerpt**
 
@@ -6563,13 +6563,13 @@ _Paragraph after the margin block:_
 
 ### 155. vol2/fleet_orchestration @ line 1103: Elastic scaling's benefit flattens into saturation.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1103`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:1103`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.60`
 - **Caption:** Elastic scaling's benefit flattens into saturation.
 - **Figure evidence (`fig-alt`):** Elastic scaling curve with linear, sublinear, and saturation phases.
 
-![Elastic scaling's benefit flattens into saturation.](../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_002.svg)
+![Elastic scaling's benefit flattens into saturation.](../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -6606,13 +6606,13 @@ _Paragraph after the margin block:_
 
 ### 156. vol2/fleet_orchestration @ line 1671: Reactive autoscaling opens an SLO gap during cold start.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1671`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:1671`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Reactive autoscaling opens an SLO gap during cold start.
 - **Figure evidence (`fig-alt`):** Demand exceeds capacity until delayed scale-up closes the gap.
 
-![Reactive autoscaling opens an SLO gap during cold start.](../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_003.svg)
+![Reactive autoscaling opens an SLO gap during cold start.](../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -6649,13 +6649,13 @@ _Paragraph after the margin block:_
 
 ### 157. vol2/fleet_orchestration @ line 1782: Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1782`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_sharing_fill.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:1782`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_sharing_fill.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.
 - **Figure evidence (`fig-alt`):** Two stacked bars of an 80 GB GPU's memory. Exclusive hosting: a 26 GB blue used segment and a wide gray dark segment. Shared hosting: a 52 GB blue used segment and a narrow gray dark segment. Sharing reclaims the dark capacity.
 
-![Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.](../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_sharing_fill.svg)
+![Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.](../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_sharing_fill.svg)
 
 **Source Markdown Excerpt**
 
@@ -6692,13 +6692,13 @@ _Paragraph after the margin block:_
 
 ### 158. vol2/fleet_orchestration @ line 2001: Allocated, active, and productive utilization drift far apart.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2001`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:2001`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Allocated, active, and productive utilization drift far apart.
 - **Figure evidence (`fig-alt`):** Allocated, compute-active, and productive GPUs.
 
-![Allocated, active, and productive utilization drift far apart.](../../quarto/contents/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_004.svg)
+![Allocated, active, and productive utilization drift far apart.](../../quarto/vol2/fleet_orchestration/images/svg/vol2_fleet_orchestration_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -6735,13 +6735,13 @@ _Paragraph after the margin block:_
 
 ### 159. vol2/fleet_orchestration @ line 2071: One eviction ripples to many: the preemption cascade.
 
-- **Source QMD:** `../../quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2071`
-- **Asset:** `../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_preempt_cascade.svg`
+- **Source QMD:** `../../quarto/vol2/fleet_orchestration/fleet_orchestration.qmd:2071`
+- **Asset:** `../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_preempt_cascade.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** One eviction ripples to many: the preemption cascade.
 - **Figure evidence (`fig-alt`):** One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many.
 
-![One eviction ripples to many: the preemption cascade.](../../quarto/contents/vol2/fleet_orchestration/images/svg/fleet_orchestration_preempt_cascade.svg)
+![One eviction ripples to many: the preemption cascade.](../../quarto/vol2/fleet_orchestration/images/svg/fleet_orchestration_preempt_cascade.svg)
 
 **Source Markdown Excerpt**
 
@@ -6778,13 +6778,13 @@ _Paragraph after the margin block:_
 
 ### 160. vol2/inference @ line 211: Lifetime serving cost dwarfs one-time training.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:211`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_serving_cost_dominance.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:211`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_serving_cost_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.83`
 - **Caption:** Lifetime serving cost dwarfs one-time training.
 - **Figure evidence (`fig-alt`):** Two horizontal bars comparing lifetime cost terms. The serving OpEx bar is wide and shaded orange, dominating; the training CapEx bar is a narrow gray sliver.
 
-![Lifetime serving cost dwarfs one-time training.](../../quarto/contents/vol2/inference/images/svg/inference_serving_cost_dominance.svg)
+![Lifetime serving cost dwarfs one-time training.](../../quarto/vol2/inference/images/svg/inference_serving_cost_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -6821,13 +6821,13 @@ _Paragraph after the margin block:_
 
 ### 161. vol2/inference @ line 784: Throughput saturates at the batch size where latency hits the SLO.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:784`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_batching_knee.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:784`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_batching_knee.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** Throughput saturates at the batch size where latency hits the SLO.
 - **Figure evidence (`fig-alt`):** A throughput curve that rises steeply then plateaus, with a knee dot marking the optimal batch size. A red wash shades the region past the knee, where larger batches add latency without gaining throughput.
 
-![Throughput saturates at the batch size where latency hits the SLO.](../../quarto/contents/vol2/inference/images/svg/inference_batching_knee.svg)
+![Throughput saturates at the batch size where latency hits the SLO.](../../quarto/vol2/inference/images/svg/inference_batching_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -6864,13 +6864,13 @@ _Paragraph after the margin block:_
 
 ### 162. vol2/inference @ line 1076: Reasoning expands latency about 128 times over fast pattern-matching.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:1076`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_logic_wall_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:1076`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_logic_wall_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Reasoning expands latency about 128 times over fast pattern-matching.
 - **Figure evidence (`fig-alt`):** A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times.
 
-![Reasoning expands latency about 128 times over fast pattern-matching.](../../quarto/contents/vol2/inference/images/svg/inference_logic_wall_ladder.svg)
+![Reasoning expands latency about 128 times over fast pattern-matching.](../../quarto/vol2/inference/images/svg/inference_logic_wall_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -6907,13 +6907,13 @@ _Paragraph after the margin block:_
 
 ### 163. vol2/inference @ line 1971: The KV cache fills HBM, capping concurrent requests.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:1971`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_kv_cache_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:1971`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_kv_cache_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** The KV cache fills HBM, capping concurrent requests.
 - **Figure evidence (`fig-alt`):** Memory ladder on a log scale: a single token uses 0.33 MB, a 128K request uses 43 GB, and the available KV budget is 480 GB.
 
-![The KV cache fills HBM, capping concurrent requests.](../../quarto/contents/vol2/inference/images/svg/inference_kv_cache_ladder.svg)
+![The KV cache fills HBM, capping concurrent requests.](../../quarto/vol2/inference/images/svg/inference_kv_cache_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -6950,13 +6950,13 @@ _Paragraph after the margin block:_
 
 ### 164. vol2/inference @ line 2606: Decode is memory-bound; parallel verification moves work toward the ridge.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:2606`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_decode_roofline.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:2606`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_decode_roofline.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.12`
 - **Caption:** Decode is memory-bound; parallel verification moves work toward the ridge.
 - **Figure evidence (`fig-alt`):** A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge.
 
-![Decode is memory-bound; parallel verification moves work toward the ridge.](../../quarto/contents/vol2/inference/images/svg/inference_decode_roofline.svg)
+![Decode is memory-bound; parallel verification moves work toward the ridge.](../../quarto/vol2/inference/images/svg/inference_decode_roofline.svg)
 
 **Source Markdown Excerpt**
 
@@ -6993,13 +6993,13 @@ _Paragraph after the margin block:_
 
 ### 165. vol2/inference @ line 2678: Speculative decoding's speedup hinges on the acceptance rate.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:2678`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:2678`
+- **Asset:** `../../quarto/vol2/inference/images/svg/vol2_inference_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Speculative decoding's speedup hinges on the acceptance rate.
 - **Figure evidence (`fig-alt`):** Speculative decoding speedup threshold around 70 percent acceptance.
 
-![Speculative decoding's speedup hinges on the acceptance rate.](../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_001.svg)
+![Speculative decoding's speedup hinges on the acceptance rate.](../../quarto/vol2/inference/images/svg/vol2_inference_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -7036,13 +7036,13 @@ _Paragraph after the margin block:_
 
 ### 166. vol2/inference @ line 3308: MoE keeps every expert resident but activates few per token.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:3308`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:3308`
+- **Asset:** `../../quarto/vol2/inference/images/svg/vol2_inference_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.30`
 - **Caption:** MoE keeps every expert resident but activates few per token.
 - **Figure evidence (`fig-alt`):** Memory ladder comparing MoE resident weights at 1342 GB, dense resident weights at 800 GB, and MoE active read at 74 GB.
 
-![MoE keeps every expert resident but activates few per token.](../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_002.svg)
+![MoE keeps every expert resident but activates few per token.](../../quarto/vol2/inference/images/svg/vol2_inference_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -7079,13 +7079,13 @@ _Paragraph after the margin block:_
 
 ### 167. vol2/inference @ line 3931: Two-choice routing flattens the tail imbalance of random placement.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:3931`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:3931`
+- **Asset:** `../../quarto/vol2/inference/images/svg/vol2_inference_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.14`
 - **Caption:** Two-choice routing flattens the tail imbalance of random placement.
 - **Figure evidence (`fig-alt`):** Random-assignment tail curve versus two-choices curve.
 
-![Two-choice routing flattens the tail imbalance of random placement.](../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_003.svg)
+![Two-choice routing flattens the tail imbalance of random placement.](../../quarto/vol2/inference/images/svg/vol2_inference_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -7122,13 +7122,13 @@ _Paragraph after the margin block:_
 
 ### 168. vol2/inference @ line 4470: One tenant's burst eats shared KV cache and starves the rest.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:4470`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:4470`
+- **Asset:** `../../quarto/vol2/inference/images/svg/vol2_inference_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** One tenant's burst eats shared KV cache and starves the rest.
 - **Figure evidence (`fig-alt`):** One bursting tenant propagates SLO impact through a shared pool.
 
-![One tenant's burst eats shared KV cache and starves the rest.](../../quarto/contents/vol2/inference/images/svg/vol2_inference_margin_004.svg)
+![One tenant's burst eats shared KV cache and starves the rest.](../../quarto/vol2/inference/images/svg/vol2_inference_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -7165,13 +7165,13 @@ _Paragraph after the margin block:_
 
 ### 169. vol2/inference @ line 5284: INT4 turns a two-GPU model into a one-GPU candidate.
 
-- **Source QMD:** `../../quarto/contents/vol2/inference/inference.qmd:5284`
-- **Asset:** `../../quarto/contents/vol2/inference/images/svg/inference_quantization_capacity_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/inference/inference.qmd:5284`
+- **Asset:** `../../quarto/vol2/inference/images/svg/inference_quantization_capacity_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** INT4 turns a two-GPU model into a one-GPU candidate.
 - **Figure evidence (`fig-alt`):** Memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model, with the 4x capacity reduction marked as a ratio annotation.
 
-![INT4 turns a two-GPU model into a one-GPU candidate.](../../quarto/contents/vol2/inference/images/svg/inference_quantization_capacity_ladder.svg)
+![INT4 turns a two-GPU model into a one-GPU candidate.](../../quarto/vol2/inference/images/svg/inference_quantization_capacity_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -7208,13 +7208,13 @@ _Paragraph after the margin block:_
 
 ### 170. vol2/introduction @ line 161: Fleet reliability collapses as node count climbs.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:161`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_reliability_knee.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:161`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_reliability_knee.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.17`
 - **Caption:** Fleet reliability collapses as node count climbs.
 - **Figure evidence (`fig-alt`):** A curve of system mean-time-between-failures against fleet size that stays flat then bends sharply downward at a knee, with the region past the knee shaded red, marking the regime where the fleet is almost always in partial failure.
 
-![Fleet reliability collapses as node count climbs.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_reliability_knee.svg)
+![Fleet reliability collapses as node count climbs.](../../quarto/vol2/introduction/images/svg/vol2_introduction_reliability_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -7251,13 +7251,13 @@ _Paragraph after the margin block:_
 
 ### 171. vol2/introduction @ line 932: Gradient synchronization becomes the defining cost of distributed training.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:932`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:932`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Gradient synchronization becomes the defining cost of distributed training.
 - **Figure evidence (`fig-alt`):** GPT-3 weights, FP32 gradient payload, and ring all-reduce traffic.
 
-![Gradient synchronization becomes the defining cost of distributed training.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_001.svg)
+![Gradient synchronization becomes the defining cost of distributed training.](../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -7294,13 +7294,13 @@ _Paragraph after the margin block:_
 
 ### 172. vol2/introduction @ line 1077: Scaling regimes are compute-scarce, data-scarce, or balanced.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:1077`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:1077`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Scaling regimes are compute-scarce, data-scarce, or balanced.
 - **Figure evidence (`fig-alt`):** Classifier for compute-scarce, data-scarce, and balanced regimes.
 
-![Scaling regimes are compute-scarce, data-scarce, or balanced.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_002.svg)
+![Scaling regimes are compute-scarce, data-scarce, or balanced.](../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -7337,13 +7337,13 @@ _Paragraph after the margin block:_
 
 ### 173. vol2/introduction @ line 1468: Past the communication-intensity cliff, adding GPUs stops helping.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:1468`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_ci_knee.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:1468`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_ci_knee.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Past the communication-intensity cliff, adding GPUs stops helping.
 - **Figure evidence (`fig-alt`):** A curve that stays flat at low communication intensity then bends sharply upward past a dashed red threshold line labeled CI, marking the bandwidth-saturation point where adding accelerators stops helping.
 
-![Past the communication-intensity cliff, adding GPUs stops helping.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_ci_knee.svg)
+![Past the communication-intensity cliff, adding GPUs stops helping.](../../quarto/vol2/introduction/images/svg/vol2_introduction_ci_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -7380,13 +7380,13 @@ _Paragraph after the margin block:_
 
 ### 174. vol2/introduction @ line 1513: At fleet scale, a technical bug becomes societal risk.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:1513`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:1513`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `1.00`
 - **Caption:** At fleet scale, a technical bug becomes societal risk.
 - **Figure evidence (`fig-alt`):** One technical bug fanning out to user or system nodes.
 
-![At fleet scale, a technical bug becomes societal risk.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_003.svg)
+![At fleet scale, a technical bug becomes societal risk.](../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -7423,13 +7423,13 @@ _Paragraph after the margin block:_
 
 ### 175. vol2/introduction @ line 1706: At scale only about 4 percent of step time is compute; sync dominates.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:1706`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_coordination_tax.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:1706`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_coordination_tax.svg`
 - **Audit status:** `Pass`; lexical overlap `0.44`
 - **Caption:** At scale only about 4 percent of step time is compute; sync dominates.
 - **Figure evidence (`fig-alt`):** A single horizontal bar of one training step almost entirely filled by a violet synchronization segment, with only a thin compute sliver at the left, showing that at fleet scale the network dominates the step and accelerators sit idle.
 
-![At scale only about 4 percent of step time is compute; sync dominates.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_coordination_tax.svg)
+![At scale only about 4 percent of step time is compute; sync dominates.](../../quarto/vol2/introduction/images/svg/vol2_introduction_coordination_tax.svg)
 
 **Source Markdown Excerpt**
 
@@ -7466,13 +7466,13 @@ _Paragraph after the margin block:_
 
 ### 176. vol2/introduction @ line 2017: Cutting FLOPs alone leaves latency memory-bound.
 
-- **Source QMD:** `../../quarto/contents/vol2/introduction/introduction.qmd:2017`
-- **Asset:** `../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/introduction/introduction.qmd:2017`
+- **Asset:** `../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Cutting FLOPs alone leaves latency memory-bound.
 - **Figure evidence (`fig-alt`):** Memory-bound roofline dot despite FLOP reduction.
 
-![Cutting FLOPs alone leaves latency memory-bound.](../../quarto/contents/vol2/introduction/images/svg/vol2_introduction_margin_004.svg)
+![Cutting FLOPs alone leaves latency memory-bound.](../../quarto/vol2/introduction/images/svg/vol2_introduction_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -7509,13 +7509,13 @@ _Paragraph after the margin block:_
 
 ### 177. vol2/network_fabrics @ line 70: One slow link stalls every peer that waits on it.
 
-- **Source QMD:** `../../quarto/contents/vol2/network_fabrics/network_fabrics.qmd:70`
-- **Asset:** `../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_gpu_fanout.svg`
+- **Source QMD:** `../../quarto/vol2/network_fabrics/network_fabrics.qmd:70`
+- **Asset:** `../../quarto/vol2/network_fabrics/images/svg/network_fabrics_gpu_fanout.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** One slow link stalls every peer that waits on it.
 - **Figure evidence (`fig-alt`):** A schematic fan: one red source node on the left connects by six gray arrows to six blue nodes on the right, showing one node reaching many peers.
 
-![One slow link stalls every peer that waits on it.](../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_gpu_fanout.svg)
+![One slow link stalls every peer that waits on it.](../../quarto/vol2/network_fabrics/images/svg/network_fabrics_gpu_fanout.svg)
 
 **Source Markdown Excerpt**
 
@@ -7552,13 +7552,13 @@ _Paragraph after the margin block:_
 
 ### 178. vol2/network_fabrics @ line 1301: One paused receiver can freeze unrelated flows.
 
-- **Source QMD:** `../../quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1301`
-- **Asset:** `../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_pfc_pause_blast.svg`
+- **Source QMD:** `../../quarto/vol2/network_fabrics/network_fabrics.qmd:1301`
+- **Asset:** `../../quarto/vol2/network_fabrics/images/svg/network_fabrics_pfc_pause_blast.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** One paused receiver can freeze unrelated flows.
 - **Figure evidence (`fig-alt`):** A red source node fans out through arrows to five downstream nodes, showing one pause source affecting many flows.
 
-![One paused receiver can freeze unrelated flows.](../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_pfc_pause_blast.svg)
+![One paused receiver can freeze unrelated flows.](../../quarto/vol2/network_fabrics/images/svg/network_fabrics_pfc_pause_blast.svg)
 
 **Source Markdown Excerpt**
 
@@ -7595,13 +7595,13 @@ _Paragraph after the margin block:_
 
 ### 179. vol2/network_fabrics @ line 1753: Each extra meter pushes the fabric from copper toward optics.
 
-- **Source QMD:** `../../quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1753`
-- **Asset:** `../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/network_fabrics/network_fabrics.qmd:1753`
+- **Asset:** `../../quarto/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.12`
 - **Caption:** Each extra meter pushes the fabric from copper toward optics.
 - **Figure evidence (`fig-alt`):** Vertical reach ladder with four marked levels: package at millimeters, DAC at 1 to 3 meters, AOC at 3 to 30 meters, and fiber at 100 meters.
 
-![Each extra meter pushes the fabric from copper toward optics.](../../quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg)
+![Each extra meter pushes the fabric from copper toward optics.](../../quarto/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -7638,13 +7638,13 @@ _Paragraph after the margin block:_
 
 ### 180. vol2/ops_scale @ line 176: One upstream embedding update can degrade every dependent model.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:176`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_cross_model_blast.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:176`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/ops_scale_cross_model_blast.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** One upstream embedding update can degrade every dependent model.
 - **Figure evidence (`fig-alt`):** Blast-radius fan: one red embedding-update source on the left sends arrows to five downstream model nodes on the right, showing how a model dependency change can degrade many consumers.
 
-![One upstream embedding update can degrade every dependent model.](../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_cross_model_blast.svg)
+![One upstream embedding update can degrade every dependent model.](../../quarto/vol2/ops_scale/images/svg/ops_scale_cross_model_blast.svg)
 
 **Source Markdown Excerpt**
 
@@ -7681,13 +7681,13 @@ _Paragraph after the margin block:_
 
 ### 181. vol2/ops_scale @ line 982: Streaming closes the freshness lag that batch leaves open.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:982`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:982`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.00`
 - **Caption:** Streaming closes the freshness lag that batch leaves open.
 - **Figure evidence (`fig-alt`):** Batch freshness lag versus streaming freshness lag.
 
-![Streaming closes the freshness lag that batch leaves open.](../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_001.svg)
+![Streaming closes the freshness lag that batch leaves open.](../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -7724,13 +7724,13 @@ _Paragraph after the margin block:_
 
 ### 182. vol2/ops_scale @ line 2334: Canary rollout cuts initial exposure by 20x.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:2334`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_canary_exposure_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:2334`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/ops_scale_canary_exposure_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.60`
 - **Caption:** Canary rollout cuts initial exposure by 20x.
 - **Figure evidence (`fig-alt`):** Exposure ladder comparing blue-green deployment at 100 percent of users with a canary rollout at 5 percent of users, with the 20x risk-exposure reduction marked as a ratio annotation.
 
-![Canary rollout cuts initial exposure by 20x.](../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_canary_exposure_ladder.svg)
+![Canary rollout cuts initial exposure by 20x.](../../quarto/vol2/ops_scale/images/svg/ops_scale_canary_exposure_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -7767,13 +7767,13 @@ _Paragraph after the margin block:_
 
 ### 183. vol2/ops_scale @ line 2754: Detecting smaller effects explodes the required sample size.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:2754`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:2754`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** Detecting smaller effects explodes the required sample size.
 - **Figure evidence (`fig-alt`):** Inverse-square curve showing required sample size rising sharply as the detectable effect gets smaller.
 
-![Detecting smaller effects explodes the required sample size.](../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_002.svg)
+![Detecting smaller effects explodes the required sample size.](../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -7810,13 +7810,13 @@ _Paragraph after the margin block:_
 
 ### 184. vol2/ops_scale @ line 3250: As tests multiply, false alerts become mathematically inevitable.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:3250`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:3250`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** As tests multiply, false alerts become mathematically inevitable.
 - **Figure evidence (`fig-alt`):** Saturating curve for one minus one minus alpha to the N, approaching near certainty as the number of tests grows.
 
-![As tests multiply, false alerts become mathematically inevitable.](../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_003.svg)
+![As tests multiply, false alerts become mathematically inevitable.](../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -7853,13 +7853,13 @@ _Paragraph after the margin block:_
 
 ### 185. vol2/ops_scale @ line 4325: At production scale, serving (infer) dominates total cost of ownership.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:4325`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_tco_dominance.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:4325`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/ops_scale_tco_dominance.svg`
 - **Audit status:** `Pass`; lexical overlap `0.62`
 - **Caption:** At production scale, serving (infer) dominates total cost of ownership.
 - **Figure evidence (`fig-alt`):** Stacked bar of the four TCO terms train, infer, data, iter; the infer segment is the widest and shaded orange, the others gray.
 
-![At production scale, serving (infer) dominates total cost of ownership.](../../quarto/contents/vol2/ops_scale/images/svg/ops_scale_tco_dominance.svg)
+![At production scale, serving (infer) dominates total cost of ownership.](../../quarto/vol2/ops_scale/images/svg/ops_scale_tco_dominance.svg)
 
 **Source Markdown Excerpt**
 
@@ -7896,13 +7896,13 @@ _Paragraph after the margin block:_
 
 ### 186. vol2/ops_scale @ line 4869: Every minute of delayed detection compounds the cost.
 
-- **Source QMD:** `../../quarto/contents/vol2/ops_scale/ops_scale.qmd:4869`
-- **Asset:** `../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/ops_scale/ops_scale.qmd:4869`
+- **Asset:** `../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Every minute of delayed detection compounds the cost.
 - **Figure evidence (`fig-alt`):** Time ladder comparing a late five-day detection window with a four-hour automated alert window, marked as a 30x gap.
 
-![Every minute of delayed detection compounds the cost.](../../quarto/contents/vol2/ops_scale/images/svg/vol2_ops_scale_margin_004.svg)
+![Every minute of delayed detection compounds the cost.](../../quarto/vol2/ops_scale/images/svg/vol2_ops_scale_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -7939,13 +7939,13 @@ _Paragraph after the margin block:_
 
 ### 187. vol2/performance_engineering @ line 102: Most transformer inference is memory-bound: the data-movement term dominates the iron law.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:102`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_iron_law_bars.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:102`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/performance_engineering_iron_law_bars.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** Most transformer inference is memory-bound: the data-movement term dominates the iron law.
 - **Figure evidence (`fig-alt`):** Iron-law bar split into three segments, Data, Compute, and Latency. The Data segment is the widest and shaded; Compute and Latency are narrow and gray.
 
-![Most transformer inference is memory-bound: the data-movement term dominates the iron law.](../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_iron_law_bars.svg)
+![Most transformer inference is memory-bound: the data-movement term dominates the iron law.](../../quarto/vol2/performance_engineering/images/svg/performance_engineering_iron_law_bars.svg)
 
 **Source Markdown Excerpt**
 
@@ -7982,13 +7982,13 @@ _Paragraph after the margin block:_
 
 ### 188. vol2/performance_engineering @ line 260: Access energy climbs from registers out to HBM.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:260`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:260`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** Access energy climbs from registers out to HBM.
 - **Figure evidence (`fig-alt`):** Orange energy ladder showing HBM at 640 pJ, SRAM at 0.5 pJ, and register access at 0.01 pJ.
 
-![Access energy climbs from registers out to HBM.](../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_001.svg)
+![Access energy climbs from registers out to HBM.](../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -8025,13 +8025,13 @@ _Paragraph after the margin block:_
 
 ### 189. vol2/performance_engineering @ line 637: Larger batches raise arithmetic intensity toward the ridge.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:637`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:637`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_002.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.00`
 - **Caption:** Larger batches raise arithmetic intensity toward the ridge.
 - **Figure evidence (`fig-alt`):** Roofline thumbnail with a B equals 1 point on the memory-bound slope and a B equals 256 point near the compute plateau.
 
-![Larger batches raise arithmetic intensity toward the ridge.](../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_002.svg)
+![Larger batches raise arithmetic intensity toward the ridge.](../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -8068,13 +8068,13 @@ _Paragraph after the margin block:_
 
 ### 190. vol2/performance_engineering @ line 929: FlashAttention shrinks attention memory about 65 times.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:929`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_flash_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:929`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/performance_engineering_flash_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.33`
 - **Caption:** FlashAttention shrinks attention memory about 65 times.
 - **Figure evidence (`fig-alt`):** A two-rung magnitude ladder on a log scale, in blue. The naive attention rung is about 35 GB of materialized HBM state; the FlashAttention rung is about 537 MB. The gap is roughly 65 times.
 
-![FlashAttention shrinks attention memory about 65 times.](../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_flash_ladder.svg)
+![FlashAttention shrinks attention memory about 65 times.](../../quarto/vol2/performance_engineering/images/svg/performance_engineering_flash_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -8111,13 +8111,13 @@ _Paragraph after the margin block:_
 
 ### 191. vol2/performance_engineering @ line 1251: Lower precision frees memory, enlarging the feasible batch.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1251`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:1251`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Lower precision frees memory, enlarging the feasible batch.
 - **Figure evidence (`fig-alt`):** Memory ladder comparing FP16 KV cache at 80 GB with INT4 KV cache at 20 GB, marked as a 4x reduction.
 
-![Lower precision frees memory, enlarging the feasible batch.](../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_003.svg)
+![Lower precision frees memory, enlarging the feasible batch.](../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -8154,13 +8154,13 @@ _Paragraph after the margin block:_
 
 ### 192. vol2/performance_engineering @ line 1514: Speculative decoding shifts decode toward the compute-bound ridge.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1514`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_specdec_roofline.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:1514`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/performance_engineering_specdec_roofline.svg`
 - **Audit status:** `Pass`; lexical overlap `0.86`
 - **Caption:** Speculative decoding shifts decode toward the compute-bound ridge.
 - **Figure evidence (`fig-alt`):** A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits on the memory-bound slope, shifted rightward toward the ridge.
 
-![Speculative decoding shifts decode toward the compute-bound ridge.](../../quarto/contents/vol2/performance_engineering/images/svg/performance_engineering_specdec_roofline.svg)
+![Speculative decoding shifts decode toward the compute-bound ridge.](../../quarto/vol2/performance_engineering/images/svg/performance_engineering_specdec_roofline.svg)
 
 **Source Markdown Excerpt**
 
@@ -8197,13 +8197,13 @@ _Paragraph after the margin block:_
 
 ### 193. vol2/performance_engineering @ line 2157: The communication tax erodes local MFU into fleet MFU.
 
-- **Source QMD:** `../../quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2157`
-- **Asset:** `../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/performance_engineering/performance_engineering.qmd:2157`
+- **Asset:** `../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** The communication tax erodes local MFU into fleet MFU.
 - **Figure evidence (`fig-alt`):** Two-point trend showing high kernel efficiency falling to lower fleet efficiency because of synchronization tax.
 
-![The communication tax erodes local MFU into fleet MFU.](../../quarto/contents/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_004.svg)
+![The communication tax erodes local MFU into fleet MFU.](../../quarto/vol2/performance_engineering/images/svg/vol2_performance_engineering_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -8240,13 +8240,13 @@ _Paragraph after the margin block:_
 
 ### 194. vol2/responsible_ai @ line 210: Fairness constraints cost a few points of accuracy, the responsibility tax.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:210`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_fairness_tax.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:210`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/responsible_ai_fairness_tax.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Fairness constraints cost a few points of accuracy, the responsibility tax.
 - **Figure evidence (`fig-alt`):** Two columns comparing model accuracy. The unconstrained baseline column (gray) reaches 85 percent; the demographic-parity-constrained column (orange) reaches 81 percent, a 4-point fairness tax.
 
-![Fairness constraints cost a few points of accuracy, the responsibility tax.](../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_fairness_tax.svg)
+![Fairness constraints cost a few points of accuracy, the responsibility tax.](../../quarto/vol2/responsible_ai/images/svg/responsible_ai_fairness_tax.svg)
 
 **Source Markdown Excerpt**
 
@@ -8283,13 +8283,13 @@ _Paragraph after the margin block:_
 
 ### 195. vol2/responsible_ai @ line 549: Error concentrates at the intersection: dark-skinned women.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:549`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_intersectional_quadrant.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:549`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/responsible_ai_intersectional_quadrant.svg`
 - **Audit status:** `Pass`; lexical overlap `0.60`
 - **Caption:** Error concentrates at the intersection: dark-skinned women.
 - **Figure evidence (`fig-alt`):** A labeled 2-by-2 skin-tone-by-gender grid. Most cells show high accuracy, while the dark-skinned women cell is crimson and marked 65 percent, showing the failing intersection hidden by single-axis audits.
 
-![Error concentrates at the intersection: dark-skinned women.](../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_intersectional_quadrant.svg)
+![Error concentrates at the intersection: dark-skinned women.](../../quarto/vol2/responsible_ai/images/svg/responsible_ai_intersectional_quadrant.svg)
 
 **Source Markdown Excerpt**
 
@@ -8326,13 +8326,13 @@ _Paragraph after the margin block:_
 
 ### 196. vol2/responsible_ai @ line 1867: SISA unlearning beats full retraining by about 100 times.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:1867`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_unlearning_cost_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:1867`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/responsible_ai_unlearning_cost_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** SISA unlearning beats full retraining by about 100 times.
 - **Figure evidence (`fig-alt`):** Two-rung cost ladder on a log scale. Top rung, full retraining at 4.6 million dollars; bottom rung, SISA sharded unlearning at 46 thousand dollars, about 100× cheaper.
 
-![SISA unlearning beats full retraining by about 100 times.](../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_unlearning_cost_ladder.svg)
+![SISA unlearning beats full retraining by about 100 times.](../../quarto/vol2/responsible_ai/images/svg/responsible_ai_unlearning_cost_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -8369,13 +8369,13 @@ _Paragraph after the margin block:_
 
 ### 197. vol2/responsible_ai @ line 1979: Exact SHAP cost explodes with feature count.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:1979`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:1979`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Exact SHAP cost explodes with feature count.
 - **Figure evidence (`fig-alt`):** Exact SHAP subset evaluations explode from 3 to 20 features.
 
-![Exact SHAP cost explodes with feature count.](../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_001.svg)
+![Exact SHAP cost explodes with feature count.](../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -8412,13 +8412,13 @@ _Paragraph after the margin block:_
 
 ### 198. vol2/responsible_ai @ line 2078: Responsible AI monitoring becomes its own production data system.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:2078`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_monitoring_scale.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:2078`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/responsible_ai_monitoring_scale.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** Responsible AI monitoring becomes its own production data system.
 - **Figure evidence (`fig-alt`):** Three compact rows showing responsible AI monitoring scale: 150 metrics, 8.64 million events per day, and 7.5 false alerts per day.
 
-![Responsible AI monitoring becomes its own production data system.](../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_monitoring_scale.svg)
+![Responsible AI monitoring becomes its own production data system.](../../quarto/vol2/responsible_ai/images/svg/responsible_ai_monitoring_scale.svg)
 
 **Source Markdown Excerpt**
 
@@ -8455,13 +8455,13 @@ _Paragraph after the margin block:_
 
 ### 199. vol2/responsible_ai @ line 2197: Higher AI accuracy can paradoxically lower human vigilance.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:2197`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:2197`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Higher AI accuracy can paradoxically lower human vigilance.
 - **Figure evidence (`fig-alt`):** Two trend lines: model accuracy rises while the red human override rate falls.
 
-![Higher AI accuracy can paradoxically lower human vigilance.](../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_002.svg)
+![Higher AI accuracy can paradoxically lower human vigilance.](../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -8498,13 +8498,13 @@ _Paragraph after the margin block:_
 
 ### 200. vol2/responsible_ai @ line 2280: Contestability is a production stack, not just a policy word.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:2280`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:2280`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Contestability is a production stack, not just a policy word.
 - **Figure evidence (`fig-alt`):** Vertical neutral governance stack with model card, evaluation, and audit stages; the card stage is accented.
 
-![Contestability is a production stack, not just a policy word.](../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_003.svg)
+![Contestability is a production stack, not just a policy word.](../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -8541,13 +8541,13 @@ _Paragraph after the margin block:_
 
 ### 201. vol2/responsible_ai @ line 2434: Representation cost scales with subgroup coverage, not just dataset size.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:2434`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:2434`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.22`
 - **Caption:** Representation cost scales with subgroup coverage, not just dataset size.
 - **Figure evidence (`fig-alt`):** Two-rung cost ladder comparing one subgroup at about 12.5 million dollars with ten subgroups at about 125 million dollars before harmonization overhead.
 
-![Representation cost scales with subgroup coverage, not just dataset size.](../../quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg)
+![Representation cost scales with subgroup coverage, not just dataset size.](../../quarto/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -8584,13 +8584,13 @@ _Paragraph after the margin block:_
 
 ### 202. vol2/responsible_ai @ line 2625: At fleet scale, rare failures become expected incidents.
 
-- **Source QMD:** `../../quarto/contents/vol2/responsible_ai/responsible_ai.qmd:2625`
-- **Asset:** `../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/responsible_ai/responsible_ai.qmd:2625`
+- **Asset:** `../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.71`
 - **Caption:** At fleet scale, rare failures become expected incidents.
 - **Figure evidence (`fig-alt`):** Saturating risk curve labeled rare at small scale and certain at fleet scale.
 
-![At fleet scale, rare failures become expected incidents.](../../quarto/contents/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_004.svg)
+![At fleet scale, rare failures become expected incidents.](../../quarto/vol2/responsible_ai/images/svg/vol2_responsible_ai_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -8627,13 +8627,13 @@ _Paragraph after the margin block:_
 
 ### 203. vol2/robust_ai @ line 316: In sharded inference, one failed stage fails the whole request.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:316`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:316`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_001.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** In sharded inference, one failed stage fails the whole request.
 - **Figure evidence (`fig-alt`):** One failing shard cascades through pipeline stages to a failed request.
 
-![In sharded inference, one failed stage fails the whole request.](../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_001.svg)
+![In sharded inference, one failed stage fails the whole request.](../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -8670,13 +8670,13 @@ _Paragraph after the margin block:_
 
 ### 204. vol2/robust_ai @ line 1167: Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:1167`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/robust_ai_psi_drift_knee.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:1167`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/robust_ai_psi_drift_knee.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.08`
 - **Caption:** Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.
 - **Figure evidence (`fig-alt`):** A line curve that stays nearly flat across the left and rises sharply into a hockey-stick on the right, with a dot marking the knee and the region to the right of the knee shaded to mark a danger zone.
 
-![Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.](../../quarto/contents/vol2/robust_ai/images/svg/robust_ai_psi_drift_knee.svg)
+![Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.](../../quarto/vol2/robust_ai/images/svg/robust_ai_psi_drift_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -8713,13 +8713,13 @@ _Paragraph after the margin block:_
 
 ### 205. vol2/robust_ai @ line 1325: One surrogate-crafted adversarial example transfers across many models.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:1325`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:1325`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** One surrogate-crafted adversarial example transfers across many models.
 - **Figure evidence (`fig-alt`):** One surrogate-crafted attack fans out to target models.
 
-![One surrogate-crafted adversarial example transfers across many models.](../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_002.svg)
+![One surrogate-crafted adversarial example transfers across many models.](../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -8756,13 +8756,13 @@ _Paragraph after the margin block:_
 
 ### 206. vol2/robust_ai @ line 1431: Data poisoning runs a lifecycle: inject, learn, trigger.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:1431`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:1431`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_003.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** Data poisoning runs a lifecycle: inject, learn, trigger.
 - **Figure evidence (`fig-alt`):** Poisoning lifecycle: inject, learn, trigger.
 
-![Data poisoning runs a lifecycle: inject, learn, trigger.](../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_003.svg)
+![Data poisoning runs a lifecycle: inject, learn, trigger.](../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -8799,13 +8799,13 @@ _Paragraph after the margin block:_
 
 ### 207. vol2/robust_ai @ line 2033: Adversarial robustness costs roughly 26 points of clean accuracy.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:2033`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/robust_ai_robustness_tax.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:2033`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/robust_ai_robustness_tax.svg`
 - **Audit status:** `Pass`; lexical overlap `0.71`
 - **Caption:** Adversarial robustness costs roughly 26 points of clean accuracy.
 - **Figure evidence (`fig-alt`):** Two columns comparing clean ImageNet accuracy. The standard model column reaches 76 percent; the adversarially trained model column reaches about 50 percent, a 26-point robustness tax.
 
-![Adversarial robustness costs roughly 26 points of clean accuracy.](../../quarto/contents/vol2/robust_ai/images/svg/robust_ai_robustness_tax.svg)
+![Adversarial robustness costs roughly 26 points of clean accuracy.](../../quarto/vol2/robust_ai/images/svg/robust_ai_robustness_tax.svg)
 
 **Source Markdown Excerpt**
 
@@ -8842,13 +8842,13 @@ _Paragraph after the margin block:_
 
 ### 208. vol2/robust_ai @ line 2564: Huber loss caps the outlier influence that squared loss amplifies.
 
-- **Source QMD:** `../../quarto/contents/vol2/robust_ai/robust_ai.qmd:2564`
-- **Asset:** `../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/robust_ai/robust_ai.qmd:2564`
+- **Asset:** `../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Huber loss caps the outlier influence that squared loss amplifies.
 - **Figure evidence (`fig-alt`):** MSE curve versus Huber loss curve with gentler tail.
 
-![Huber loss caps the outlier influence that squared loss amplifies.](../../quarto/contents/vol2/robust_ai/images/svg/vol2_robust_ai_margin_004.svg)
+![Huber loss caps the outlier influence that squared loss amplifies.](../../quarto/vol2/robust_ai/images/svg/vol2_robust_ai_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -8885,13 +8885,13 @@ _Paragraph after the margin block:_
 
 ### 209. vol2/security_privacy @ line 938: The attack surface spans Data, Algorithm, and Infrastructure.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:938`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_dai_attack_surface.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:938`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/security_privacy_dai_attack_surface.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** The attack surface spans Data, Algorithm, and Infrastructure.
 - **Figure evidence (`fig-alt`):** Triangle with three labeled nodes connected by edges: D (data), A (algorithm), and I (infrastructure), showing the three coupled attack-surface axes of an ML system.
 
-![The attack surface spans Data, Algorithm, and Infrastructure.](../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_dai_attack_surface.svg)
+![The attack surface spans Data, Algorithm, and Infrastructure.](../../quarto/vol2/security_privacy/images/svg/security_privacy_dai_attack_surface.svg)
 
 **Source Markdown Excerpt**
 
@@ -8928,13 +8928,13 @@ _Paragraph after the margin block:_
 
 ### 210. vol2/security_privacy @ line 1339: Full distributions leak far more than top-k outputs.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:1339`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_output_leakage_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:1339`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/security_privacy_output_leakage_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.12`
 - **Caption:** Full distributions leak far more than top-k outputs.
 - **Figure evidence (`fig-alt`):** Two-rung ladder comparing a full 1000-score output distribution with top-5 returned scores, annotated as a 200 times reduction in exposed scores.
 
-![Full distributions leak far more than top-k outputs.](../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_output_leakage_ladder.svg)
+![Full distributions leak far more than top-k outputs.](../../quarto/vol2/security_privacy/images/svg/security_privacy_output_leakage_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -8971,13 +8971,13 @@ _Paragraph after the margin block:_
 
 ### 211. vol2/security_privacy @ line 2596: Enclave memory caps which models can run securely.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:2596`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:2596`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.25`
 - **Caption:** Enclave memory caps which models can run securely.
 - **Figure evidence (`fig-alt`):** Memory ladder comparing a 128 MB SGX EPC limit with ResNet-50 at 102 MB and ResNet-18 at 12 MB.
 
-![Enclave memory caps which models can run securely.](../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_001.svg)
+![Enclave memory caps which models can run securely.](../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -9014,13 +9014,13 @@ _Paragraph after the margin block:_
 
 ### 212. vol2/security_privacy @ line 2658: Privacy-preserving computation costs orders more latency than encryption.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:2658`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:2658`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** Privacy-preserving computation costs orders more latency than encryption.
 - **Figure evidence (`fig-alt`):** Plaintext, AES, and FHE latency ladder.
 
-![Privacy-preserving computation costs orders more latency than encryption.](../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_002.svg)
+![Privacy-preserving computation costs orders more latency than encryption.](../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -9057,13 +9057,13 @@ _Paragraph after the margin block:_
 
 ### 213. vol2/security_privacy @ line 3341: Each query spends part of the finite $\\epsilon$ privacy budget.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:3341`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:3341`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Each query spends part of the finite $\\epsilon$ privacy budget.
 - **Figure evidence (`fig-alt`):** Budget envelope showing ten privacy-consuming queries reaching an epsilon budget limit of 10.
 
-![Each query spends part of the finite $\\epsilon$ privacy budget.](../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_003.svg)
+![Each query spends part of the finite $\\epsilon$ privacy budget.](../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -9100,13 +9100,13 @@ _Paragraph after the margin block:_
 
 ### 214. vol2/security_privacy @ line 3392: Small sensitive datasets often cannot absorb DP noise without losing utility.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:3392`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_dp_dataset_threshold.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:3392`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/security_privacy_dp_dataset_threshold.svg`
 - **Audit status:** `Pass`; lexical overlap `0.56`
 - **Caption:** Small sensitive datasets often cannot absorb DP noise without losing utility.
 - **Figure evidence (`fig-alt`):** Scale-anchor margin figure showing a 5,000-sample dataset well below the 50,000-sample threshold for effective differential privacy utility.
 
-![Small sensitive datasets often cannot absorb DP noise without losing utility.](../../quarto/contents/vol2/security_privacy/images/svg/security_privacy_dp_dataset_threshold.svg)
+![Small sensitive datasets often cannot absorb DP noise without losing utility.](../../quarto/vol2/security_privacy/images/svg/security_privacy_dp_dataset_threshold.svg)
 
 **Source Markdown Excerpt**
 
@@ -9143,13 +9143,13 @@ _Paragraph after the margin block:_
 
 ### 215. vol2/security_privacy @ line 3540: The attack surface grows faster than the node count.
 
-- **Source QMD:** `../../quarto/contents/vol2/security_privacy/security_privacy.qmd:3540`
-- **Asset:** `../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/security_privacy/security_privacy.qmd:3540`
+- **Asset:** `../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.57`
 - **Caption:** The attack surface grows faster than the node count.
 - **Figure evidence (`fig-alt`):** Quadratic channel curve rising above linear node baseline.
 
-![The attack surface grows faster than the node count.](../../quarto/contents/vol2/security_privacy/images/svg/vol2_security_privacy_margin_004.svg)
+![The attack surface grows faster than the node count.](../../quarto/vol2/security_privacy/images/svg/vol2_security_privacy_margin_004.svg)
 
 **Source Markdown Excerpt**
 
@@ -9186,13 +9186,13 @@ _Paragraph after the margin block:_
 
 ### 216. vol2/sustainable_ai @ line 367: The same job's carbon emissions depend on where it runs.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:367`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_001.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:367`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_001.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.29`
 - **Caption:** The same job's carbon emissions depend on where it runs.
 - **Figure evidence (`fig-alt`):** Carbon-emissions ladder for the same training job: Poland is about 80 tonnes CO2, Quebec about 2 tonnes, with the 40 times difference shown as an annotation rather than a third bar.
 
-![The same job's carbon emissions depend on where it runs.](../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_001.svg)
+![The same job's carbon emissions depend on where it runs.](../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_001.svg)
 
 **Source Markdown Excerpt**
 
@@ -9229,13 +9229,13 @@ _Paragraph after the margin block:_
 
 ### 217. vol2/sustainable_ai @ line 1121: PUE is the infrastructure energy tax on top of compute.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1121`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_002.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:1121`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_002.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** PUE is the infrastructure energy tax on top of compute.
 - **Figure evidence (`fig-alt`):** Two horizontal PUE bars showing the same IT energy base plus infrastructure overhead: plus 58 percent at PUE 1.58 and plus 10 percent at PUE 1.10.
 
-![PUE is the infrastructure energy tax on top of compute.](../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_002.svg)
+![PUE is the infrastructure energy tax on top of compute.](../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_002.svg)
 
 **Source Markdown Excerpt**
 
@@ -9272,13 +9272,13 @@ _Paragraph after the margin block:_
 
 ### 218. vol2/sustainable_ai @ line 1201: Per-byte move energy spans five orders, register to network.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1201`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_energy_per_byte_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:1201`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_energy_per_byte_ladder.svg`
 - **Audit status:** `Pass`; lexical overlap `0.50`
 - **Caption:** Per-byte move energy spans five orders, register to network.
 - **Figure evidence (`fig-alt`):** Six-rung energy staircase on a log scale: network 10,000, NVMe 1,000, DRAM 160, L2 5, L1 1, and register 0.1 pJ per byte, spanning five orders of magnitude.
 
-![Per-byte move energy spans five orders, register to network.](../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_energy_per_byte_ladder.svg)
+![Per-byte move energy spans five orders, register to network.](../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_energy_per_byte_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -9315,13 +9315,13 @@ _Paragraph after the margin block:_
 
 ### 219. vol2/sustainable_ai @ line 1879: Cumulative inference emissions overtake the one-time training cost.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1879`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_inference_crossover.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:1879`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_inference_crossover.svg`
 - **Audit status:** `Pass`; lexical overlap `0.43`
 - **Caption:** Cumulative inference emissions overtake the one-time training cost.
 - **Figure evidence (`fig-alt`):** Two curves over a model's service life: a flat blue training-emissions baseline and a rising red cumulative-inference curve that climbs steeply past it, crossing over so inference dominates total emissions.
 
-![Cumulative inference emissions overtake the one-time training cost.](../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_inference_crossover.svg)
+![Cumulative inference emissions overtake the one-time training cost.](../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_inference_crossover.svg)
 
 **Source Markdown Excerpt**
 
@@ -9358,13 +9358,13 @@ _Paragraph after the margin block:_
 
 ### 220. vol2/sustainable_ai @ line 2420: Substation lead time can run 4$\\times$ longer than GPU procurement.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2420`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_grid_interconnection_ladder.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:2420`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_grid_interconnection_ladder.svg`
 - **Audit status:** `Manual review candidate`; lexical overlap `0.11`
 - **Caption:** Substation lead time can run 4$\\times$ longer than GPU procurement.
 - **Figure evidence (`fig-alt`):** Time ladder comparing a 24-month substation path with a 6-month GPU procurement path, with the fourfold lag marked as a ratio annotation.
 
-![Substation lead time can run 4$\\times$ longer than GPU procurement.](../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_grid_interconnection_ladder.svg)
+![Substation lead time can run 4$\\times$ longer than GPU procurement.](../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_grid_interconnection_ladder.svg)
 
 **Source Markdown Excerpt**
 
@@ -9401,13 +9401,13 @@ _Paragraph after the margin block:_
 
 ### 221. vol2/sustainable_ai @ line 2607: Training power climbs far above steady serving load.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2607`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_003.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:2607`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_003.svg`
 - **Audit status:** `Pass`; lexical overlap `0.38`
 - **Caption:** Training power climbs far above steady serving load.
 - **Figure evidence (`fig-alt`):** Smooth web-serving load versus microsecond training power shock.
 
-![Training power climbs far above steady serving load.](../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_003.svg)
+![Training power climbs far above steady serving load.](../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_003.svg)
 
 **Source Markdown Excerpt**
 
@@ -9444,13 +9444,13 @@ _Paragraph after the margin block:_
 
 ### 222. vol2/sustainable_ai @ line 2669: Below the thermal limit the chip runs safely; cross it and throttling climbs steeply.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2669`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_thermal_throttle_knee.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:2669`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_thermal_throttle_knee.svg`
 - **Audit status:** `Pass`; lexical overlap `0.30`
 - **Caption:** Below the thermal limit the chip runs safely; cross it and throttling climbs steeply.
 - **Figure evidence (`fig-alt`):** A curve that stays flat and low in a green safe zone, then bends sharply upward and turns red as thermal load nears the cooling limit. The green-to-red recoloring marks the throttling tipping point: safe below it, steeply worse above.
 
-![Below the thermal limit the chip runs safely; cross it and throttling climbs steeply.](../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_thermal_throttle_knee.svg)
+![Below the thermal limit the chip runs safely; cross it and throttling climbs steeply.](../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_thermal_throttle_knee.svg)
 
 **Source Markdown Excerpt**
 
@@ -9487,13 +9487,13 @@ _Paragraph after the margin block:_
 
 ### 223. vol2/sustainable_ai @ line 2904: One cooling failure can idle the whole training job.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2904`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_cooling_failure_blast.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:2904`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_cooling_failure_blast.svg`
 - **Audit status:** `Pass`; lexical overlap `0.75`
 - **Caption:** One cooling failure can idle the whole training job.
 - **Figure evidence (`fig-alt`):** Blast-radius fan with one red cooling-failure source sending arrows to six blue affected nodes, labeled to show that a rack failure idles the synchronized training job.
 
-![One cooling failure can idle the whole training job.](../../quarto/contents/vol2/sustainable_ai/images/svg/sustainable_ai_cooling_failure_blast.svg)
+![One cooling failure can idle the whole training job.](../../quarto/vol2/sustainable_ai/images/svg/sustainable_ai_cooling_failure_blast.svg)
 
 **Source Markdown Excerpt**
 
@@ -9530,13 +9530,13 @@ _Paragraph after the margin block:_
 
 ### 224. vol2/sustainable_ai @ line 3271: Radio transmission dwarfs local arithmetic in energy.
 
-- **Source QMD:** `../../quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3271`
-- **Asset:** `../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_004.svg`
+- **Source QMD:** `../../quarto/vol2/sustainable_ai/sustainable_ai.qmd:3271`
+- **Asset:** `../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_004.svg`
 - **Audit status:** `Pass`; lexical overlap `0.67`
 - **Caption:** Radio transmission dwarfs local arithmetic in energy.
 - **Figure evidence (`fig-alt`):** Energy ladder showing wireless transmission around 250,000 pJ per bit dwarfing a 4 pJ FP32 multiply and a 0.1 pJ INT32 add; the radio-to-multiply range is annotated separately.
 
-![Radio transmission dwarfs local arithmetic in energy.](../../quarto/contents/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_004.svg)
+![Radio transmission dwarfs local arithmetic in energy.](../../quarto/vol2/sustainable_ai/images/svg/vol2_sustainable_ai_margin_004.svg)
 
 **Source Markdown Excerpt**
 

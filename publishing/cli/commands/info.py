@@ -625,8 +625,8 @@ class InfoCommand:
         qmd_files: List[Path] = []
 
         # Read both commented and uncommented chapter entries (full intended order)
-        # Pattern: lines like "    - contents/vol1/chapter/chapter.qmd"
-        # or "    # - contents/vol1/chapter/chapter.qmd"
+        # Pattern: lines like "    - vol1/chapter/chapter.qmd"
+        # or "    # - vol1/chapter/chapter.qmd"
         comment_pat = re.compile(
             rf"^\s*#?\s*-\s*({vol_str}/[^\s#]+\.qmd)\s*$",
             re.MULTILINE,

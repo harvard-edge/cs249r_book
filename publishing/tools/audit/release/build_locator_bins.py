@@ -35,7 +35,7 @@ MAX_PER_BIN = 250
 # Map ground-truth chapter → current vol1 QMD path (relative to the repo
 # root). ``None`` means the chapter has no direct dev-branch counterpart
 # (e.g. Part-page placeholders — those edits land in
-# ``contents/vol1/parts/`` files).
+# ``vol1/parts/`` files).
 CHAPTER_TO_QMD: dict[str, str | None] = {
     "Ch1: Introduction": "books/vol1/introduction/introduction.qmd",
     "Ch2: ML Systems": "books/vol1/ml_systems/ml_systems.qmd",

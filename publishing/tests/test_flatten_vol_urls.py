@@ -19,9 +19,9 @@ def test_flatten_vol_urls_rewrites_generated_volume_links(tmp_path: Path) -> Non
     write(
         site / "index.html",
         """
-        <a href="./contents/vol1/index.qmd">Homepage</a>
-        <a href="./contents/vol1/frontmatter/about.html">Preface</a>
-        <a href="./contents/vol1/data_engineering/data_engineering.html">Data Engineering</a>
+        <a href="./vol1/index.qmd">Homepage</a>
+        <a href="./vol1/frontmatter/about.html">Preface</a>
+        <a href="./vol1/data_engineering/data_engineering.html">Data Engineering</a>
         <a href="./contents/frontmatter/socratiq/socratiq.html">SocratiQ</a>
         """,
     )
@@ -29,24 +29,24 @@ def test_flatten_vol_urls_rewrites_generated_volume_links(tmp_path: Path) -> Non
         site / "contents" / "vol1" / "data_engineering" / "data_engineering.html",
         """
         <link href="../../../site_libs/quarto.css" rel="stylesheet">
-        <a href="../contents/vol1/frontmatter/about.html">Preface</a>
-        <a href="../contents/vol1/backmatter/glossary/glossary.html">Glossary</a>
+        <a href="../vol1/frontmatter/about.html">Preface</a>
+        <a href="../vol1/backmatter/glossary/glossary.html">Glossary</a>
         <a href="../contents/frontmatter/socratiq/socratiq.html">SocratiQ</a>
         """,
     )
     write(
         site / "contents" / "vol1" / "backmatter" / "glossary" / "glossary.html",
-        '<a href="../../contents/vol1/data_engineering/data_engineering.html">Data</a>',
+        '<a href="../../vol1/data_engineering/data_engineering.html">Data</a>',
     )
     write(
         site / "contents" / "vol1" / "frontmatter" / "about.html",
-        '<a href="../contents/vol1/data_engineering/data_engineering.html">Data</a>',
+        '<a href="../vol1/data_engineering/data_engineering.html">Data</a>',
     )
     write(site / "contents" / "frontmatter" / "socratiq" / "socratiq.html", "<p>SocratiQ</p>")
-    write(site / "search.json", '{"href":"contents/vol1/data_engineering/data_engineering.html"}')
+    write(site / "search.json", '{"href":"vol1/data_engineering/data_engineering.html"}')
     write(
         site / "sitemap.xml",
-        "<loc>https://mlsysbook.ai/vol1/contents/vol1/data_engineering/data_engineering.html</loc>",
+        "<loc>https://mlsysbook.ai/vol1/vol1/data_engineering/data_engineering.html</loc>",
     )
 
     subprocess.run(["bash", str(SCRIPT), str(site), "vol1"], check=True)
@@ -61,13 +61,13 @@ def test_flatten_vol_urls_rewrites_generated_volume_links(tmp_path: Path) -> Non
     assert 'href="./frontmatter/about.html"' in root_html
     assert 'href="./data_engineering/data_engineering.html"' in root_html
     assert 'href="./contents/frontmatter/socratiq/socratiq.html"' in root_html
-    assert "contents/vol1" not in root_html
+    assert "vol1" not in root_html
 
     chapter_html = (site / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
     assert 'href="../frontmatter/about.html"' in chapter_html
     assert 'href="../backmatter/glossary/glossary.html"' in chapter_html
     assert 'href="../contents/frontmatter/socratiq/socratiq.html"' in chapter_html
-    assert 'href="../contents/vol1/' not in chapter_html
+    assert 'href="../vol1/' not in chapter_html
     assert 'href="../site_libs/quarto.css"' in chapter_html
 
     glossary_html = (site / "backmatter" / "glossary" / "glossary.html").read_text(encoding="utf-8")
