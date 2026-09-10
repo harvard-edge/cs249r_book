@@ -18,7 +18,8 @@ from vault_cli.loader import load_all
 from vault_cli.release import (
     atomic_rename,
     emit_migrations,
-    update_latest_symlink,
+    latest_release_dir,
+    update_latest_pointer,
 )
 from vault_cli.release import (
     snapshot as snapshot_release,
@@ -140,10 +141,8 @@ console = Console()
 
 
 def _latest_db(releases_dir: Path) -> Path | None:
-    link = releases_dir / "latest"
-    if link.is_symlink() or link.exists():
-        return link / "vault.db"
-    return None
+    latest = latest_release_dir(releases_dir)
+    return latest / "vault.db" if latest else None
 
 
 def register(app: typer.Typer) -> None:
@@ -575,7 +574,7 @@ def register(app: typer.Typer) -> None:
 
         # 4. atomic swap (last irreversible step)
         atomic_rename(artifacts.directory, final)
-        update_latest_symlink(releases_dir, version)
+        update_latest_pointer(releases_dir, version)
         console.print(f"[green]published[/green] {version}")
 
         if sign:

@@ -113,12 +113,10 @@ This is where AI systems meet the physical world.
 <kbd>cd kits</kbd>
 
 **Build HTML site**
-<kbd>ln -sf config/_quarto-html.yml _quarto.yml</kbd>
 <kbd>quarto render</kbd>
 
 **Build PDF**
-<kbd>ln -sf config/_quarto-pdf.yml _quarto.yml</kbd>
-<kbd>quarto render --to titlepage-pdf</kbd>
+<kbd>make pdf</kbd>
 
 **Preview with live reload**
 <kbd>quarto preview</kbd>
@@ -178,9 +176,9 @@ kits/
 │   ├── raspi/               # Raspberry Pi labs
 │   └── shared/              # Shared resources (DSP, features)
 ├── assets/                  # Images, styles, scripts
-├── config/                  # Quarto configurations
-│   ├── _quarto-html.yml     # Website config
+├── config/                  # Quarto configuration for the PDF build
 │   └── _quarto-pdf.yml      # PDF config
+├── _quarto.yml              # Website config
 ├── tex/                     # LaTeX includes for PDF
 ├── filters/                 # Lua filters
 └── index.qmd                # Landing page

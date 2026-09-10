@@ -20,12 +20,13 @@ VOLUME_OUTPUTS = {
 
 
 def _active_volume(script_dir: Path) -> str | None:
-    """Identify the active PDF volume from Binder's temporary config link."""
+    """Identify the active PDF volume from the source Binder recorded in _quarto.yml."""
     config = script_dir / "_quarto.yml"
-    if not config.exists():
+    if not config.is_file():
         return None
-    resolved_name = config.resolve().name.lower()
-    return next((volume for volume in VOLUME_OUTPUTS if volume in resolved_name), None)
+    with config.open(encoding="utf-8") as fh:
+        source = fh.readline().lower()
+    return next((volume for volume in VOLUME_OUTPUTS if volume in source), None)
 
 
 def _find_intermediate(script_dir: Path, stem: str, suffix: str) -> Path | None:

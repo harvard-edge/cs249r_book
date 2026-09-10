@@ -39,14 +39,15 @@ RELEASES_DIR = VAULT_DIR / "releases"
 
 
 def resolve_release_version(explicit: str | None) -> str:
-    """Pick the release to export. Prefer explicit; else ``latest`` symlink;
+    """Pick the release to export. Prefer explicit; else ``releases/latest.txt``;
     else most-recent numerically sorted release; else fall back to the HEAD build."""
     if explicit:
         return explicit
-    link = RELEASES_DIR / "latest"
-    if link.exists():
-        target = link.readlink() if link.is_symlink() else link
-        return Path(target).name
+    pointer = RELEASES_DIR / "latest.txt"
+    if pointer.is_file():
+        version = pointer.read_text(encoding="utf-8").strip()
+        if version:
+            return version
     if RELEASES_DIR.exists():
         candidates = sorted(
             [p.name for p in RELEASES_DIR.iterdir() if p.is_dir() and not p.name.startswith(".")]

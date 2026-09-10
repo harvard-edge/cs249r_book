@@ -569,7 +569,7 @@ class InfoCommand:
         for config_path in self._pdf_config_paths(vol):
             if not config_path.exists():
                 continue
-            resolved = config_path.resolve() if config_path.is_symlink() else config_path
+            resolved = config_path
             try:
                 raw = resolved.read_text(encoding="utf-8")
                 parsed = yaml.safe_load(raw)
@@ -593,7 +593,7 @@ class InfoCommand:
         for config_path in self._pdf_config_paths(vol):
             if not config_path.exists():
                 continue
-            resolved = config_path.resolve() if config_path.is_symlink() else config_path
+            resolved = config_path
             try:
                 parsed = yaml.safe_load(resolved.read_text(encoding="utf-8"))
             except Exception:

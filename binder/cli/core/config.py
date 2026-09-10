@@ -1,15 +1,47 @@
 """
 Configuration management for MLSysBook CLI.
 
-Handles Quarto configuration files, symlinks, and format-specific settings.
+Handles Quarto configuration files, the generated _quarto.yml, and format-specific settings.
 """
 
+import shutil
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
 
 console = Console()
+
+ACTIVE_CONFIG_MARKER = "# binder: generated copy of "
+
+
+def write_active_config(active_config: Path, source: Path, book_dir: Path) -> None:
+    """Write *source* to the project's ``_quarto.yml`` with a provenance header.
+
+    Quarto only reads ``_quarto.yml``, so every build copies the chosen
+    configuration there. The first line records the source file so status
+    output and post-render scripts can tell which configuration is active.
+    """
+    header = (
+        f"{ACTIVE_CONFIG_MARKER}{source.relative_to(book_dir).as_posix()}\n"
+        "# Regenerated on every build; edit the source file, not this copy.\n"
+    )
+    # Earlier binder versions left a symlink here. Writing through it would
+    # overwrite the source configuration, so remove it first.
+    if active_config.is_symlink():
+        active_config.unlink()
+    active_config.write_text(header + source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def active_config_source(active_config: Path) -> Optional[str]:
+    """Return the source file recorded in a generated ``_quarto.yml``, or None."""
+    if not active_config.is_file():
+        return None
+    with active_config.open(encoding="utf-8") as fh:
+        first_line = fh.readline()
+    if not first_line.startswith(ACTIVE_CONFIG_MARKER):
+        return None
+    return first_line[len(ACTIVE_CONFIG_MARKER):].strip()
 
 
 def get_output_file(output_dir: Path, format_type: str) -> Optional[Path]:
@@ -182,46 +214,49 @@ class ConfigManager:
 
         return config_map[format_type]
 
-    def setup_symlink(self, format_type: str, volume: Optional[str] = None) -> str:
-        """Setup _quarto.yml symlink for the specified format and optional volume.
+    def activate_config(self, format_type: str, volume: Optional[str] = None) -> str:
+        """Copy the config for a format and optional volume to ``_quarto.yml``.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
+            volume: Optional volume ('vol1'-'vol4') for volume-specific builds
 
         Returns:
-            Name of the config file that was linked
+            Name of the config file that was copied
 
         Raises:
             ValueError: If format_type is not supported
+            FileNotFoundError: If the config file does not exist
         """
         config_file = self.get_config_file(format_type, volume)
 
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
 
-        # Remove existing symlink/file
-        if self.active_config.exists() or self.active_config.is_symlink():
-            self.active_config.unlink()
+        self.activate_config_file(config_file)
 
-        # Create new symlink
-        relative_path = config_file.relative_to(self.book_dir)
-        self.active_config.symlink_to(relative_path)
-
-        # Also setup index.qmd symlink for volume-specific builds
+        # Volume builds also need that volume's landing page as index.qmd
         if volume:
-            self._setup_index_symlink(volume)
+            self._activate_index(volume)
 
         return config_file.name
 
-    def _setup_index_symlink(self, volume: str) -> None:
-        """Setup index.qmd symlink for the specified volume.
+    def activate_config_file(self, source: Path) -> None:
+        """Write *source* as the active ``_quarto.yml``."""
+        write_active_config(self.active_config, source, self.book_dir)
 
-        Quarto book projects require index.qmd at the root level.
-        This method switches the symlink to point to the correct volume's index.
+    def active_config_source(self) -> Optional[str]:
+        """Return the config file the active ``_quarto.yml`` was copied from."""
+        return active_config_source(self.active_config)
+
+    def _activate_index(self, volume: str) -> None:
+        """Copy the volume's landing page to ``index.qmd``.
+
+        Quarto book projects require index.qmd at the root level, so each
+        volume build copies ``index-volN.qmd`` there.
 
         Args:
-            volume: Volume ('vol1' or 'vol2')
+            volume: Volume ('vol1'-'vol4')
         """
         index_map = {
             "vol1": self.index_vol1,
@@ -240,18 +275,22 @@ class ConfigManager:
             console.print(f"[yellow]⚠️ Volume index not found: {index_file}[/yellow]")
             return
 
-        # Remove existing symlink if present
+        # Earlier binder versions left a symlink here; copying through it
+        # would overwrite another volume's index, so remove it first.
         if self.active_index.is_symlink():
             self.active_index.unlink()
-        elif self.active_index.exists():
-            # It's a regular file - this shouldn't happen but handle it
-            console.print(f"[yellow]⚠️ index.qmd is a regular file, removing...[/yellow]")
-            self.active_index.unlink()
+        shutil.copyfile(index_file, self.active_index)
+        console.print(f"[dim]📄 Copied {index_file.name} → index.qmd[/dim]")
 
-        # Create new symlink
-        relative_path = index_file.relative_to(self.book_dir)
-        self.active_index.symlink_to(relative_path)
-        console.print(f"[dim]🔗 Linked index.qmd → {relative_path}[/dim]")
+    def active_index_source(self) -> Optional[str]:
+        """Return the volume index whose content ``index.qmd`` holds, or None."""
+        if not self.active_index.is_file():
+            return None
+        content = self.active_index.read_bytes()
+        for index_file in (self.index_vol1, self.index_vol2, self.index_vol3, self.index_vol4):
+            if index_file.is_file() and index_file.read_bytes() == content:
+                return index_file.name
+        return None
 
     def get_output_dir(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the output directory from Quarto configuration.
@@ -312,21 +351,20 @@ class ConfigManager:
         with open(config_file, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
 
-    def show_symlink_status(self) -> None:
-        """Display current symlink status."""
-        if self.active_config.is_symlink():
-            target = self.active_config.readlink()
-            console.print(f"[dim]  🔗 Active config: {target}[/dim]")
+    def show_active_config(self) -> None:
+        """Display which configuration and index the project is using."""
+        source = self.active_config_source()
+        if source:
+            console.print(f"[dim]  📄 Active config: {source}[/dim]")
         elif self.active_config.exists():
-            console.print("[dim]  📄 Active config: _quarto.yml (regular file)[/dim]")
+            console.print("[dim]  📄 Active config: _quarto.yml (not generated by binder)[/dim]")
         else:
             console.print("[dim]  ❌ No active config found[/dim]")
 
-        # Also show index.qmd status
-        if self.active_index.is_symlink():
-            target = self.active_index.readlink()
-            console.print(f"[dim]  🔗 Active index: {target}[/dim]")
+        index_source = self.active_index_source()
+        if index_source:
+            console.print(f"[dim]  📄 Active index: {index_source}[/dim]")
         elif self.active_index.exists():
-            console.print("[dim]  📄 Active index: index.qmd (regular file)[/dim]")
+            console.print("[dim]  📄 Active index: index.qmd (matches no volume index)[/dim]")
         else:
             console.print("[dim]  ❌ No index.qmd found[/dim]")

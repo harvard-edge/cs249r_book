@@ -251,20 +251,30 @@ def atomic_rename(pending: Path, final: Path) -> None:
     os.rename(pending, final)
 
 
-def update_latest_symlink(releases_dir: Path, version: str) -> None:
-    """Atomically swap ``releases/latest`` → ``<version>`` via rename-over-tmp.
+LATEST_POINTER = "latest.txt"
 
-    Asserts the target directory exists so we don't create a dangling symlink.
+
+def update_latest_pointer(releases_dir: Path, version: str) -> None:
+    """Atomically record ``version`` in ``releases/latest.txt`` via rename-over-tmp.
+
+    Asserts the target directory exists so the pointer never names a missing release.
     """
     target = releases_dir / version
     if not target.is_dir():
         raise FileNotFoundError(f"release dir does not exist: {target}")
-    link = releases_dir / "latest"
-    tmp_link = releases_dir / ".latest.tmp"
-    if tmp_link.exists() or tmp_link.is_symlink():
-        tmp_link.unlink()
-    tmp_link.symlink_to(version, target_is_directory=True)
-    os.replace(tmp_link, link)  # atomic on POSIX
+    pointer = releases_dir / LATEST_POINTER
+    tmp_pointer = releases_dir / f".{LATEST_POINTER}.tmp"
+    tmp_pointer.write_text(f"{version}\n", encoding="utf-8")
+    os.replace(tmp_pointer, pointer)  # atomic on POSIX
+
+
+def latest_release_dir(releases_dir: Path) -> Path | None:
+    """Return the release directory ``releases/latest.txt`` names, or None if unset."""
+    pointer = releases_dir / LATEST_POINTER
+    if not pointer.is_file():
+        return None
+    version = pointer.read_text(encoding="utf-8").strip()
+    return releases_dir / version if version else None
 
 
 __all__ = [
@@ -272,5 +282,6 @@ __all__ = [
     "atomic_rename",
     "emit_migrations",
     "snapshot",
-    "update_latest_symlink",
+    "latest_release_dir",
+    "update_latest_pointer",
 ]

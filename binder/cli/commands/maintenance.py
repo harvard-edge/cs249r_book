@@ -52,13 +52,13 @@ class MaintenanceCommand:
         console.print(f"[blue]🔄 Switching to {format_type.upper()} configuration...[/blue]")
 
         try:
-            # Set up the symlink
-            config_name = self.config_manager.setup_symlink(format_type)
+            # Write the active _quarto.yml
+            config_name = self.config_manager.activate_config(format_type)
             console.print(f"[green]✅ Switched to {format_type.upper()} configuration[/green]")
-            console.print(f"[dim]🔗 Active config: {config_name}[/dim]")
+            console.print(f"[dim]📄 Active config: {config_name}[/dim]")
 
             # Show current status
-            self.config_manager.show_symlink_status()
+            self.config_manager.show_active_config()
 
             return True
 
