@@ -152,6 +152,41 @@ The storage problem joins physics with economics. Physics dictates that data clo
 *Checkpoint writes dwarf training-data reads by about 1,000 times.*
 :::
 
+::: {#fig-storage-compute-gap fig-env="figure" fig-pos="htb" fig-cap="**The Storage-Compute Gap**: While accelerator compute (TFLOPS) and internal high-bandwidth memory (HBM) have grown exponentially, local storage bandwidth (NVMe) has scaled much slower. This growing divergence creates a fuel-line bottleneck where computation must pause to wait for data delivery."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+data = pd.read_csv("data/storage_compute_gap.csv")
+
+fig, ax1 = plt.subplots(figsize=(8, 5))
+ax1.set_yscale('log')
+
+ax1.plot(data['Year'], data['Compute_TFLOPS'], marker='o', color='#E6550D', linewidth=2, label='Compute (TFLOPS)')
+ax1.plot(data['Year'], data['Memory_Bandwidth_GBps'], marker='s', color='#3182BD', linewidth=2, label='HBM Bandwidth (GB/s)')
+ax1.plot(data['Year'], data['Storage_Bandwidth_GBps'], marker='^', color='#756BB1', linewidth=2, label='NVMe Bandwidth (GB/s)')
+
+ax1.set_xlabel('Year', fontsize=10, weight='bold')
+ax1.set_ylabel('Performance (Log Scale)', fontsize=10, weight='bold')
+ax1.set_title('The Widening Storage-Compute Gap (2010-2024)', fontsize=12, weight='bold')
+ax1.grid(True, which="both", ls="--", alpha=0.3)
+ax1.legend(loc='upper left')
+
+for i, txt in enumerate(data['GPU_Architecture']):
+    if data['Year'][i] in [2010, 2016, 2020, 2024]:
+        ax1.annotate(txt, (data['Year'][i], data['Compute_TFLOPS'][i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8)
+
+sns.despine()
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
 The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced earlier. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates a roughly 1.75 TB checkpoint (`{python} StorageFuelLineContext.ckpt_total_gb_str` total, comprising 350 GB of weights plus 1.4 TB of Adaptive Moment Estimation (Adam) optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use these figures to make the engineering constraints concrete.
 
 Those numbers force the storage path. ML access patterns first invert the assumptions behind conventional storage systems; that inversion forces a hierarchy from HBM to cold archive; the hierarchy then requires pipeline equations, direct data paths, and economics that decide which bytes belong at each tier. Checkpoints, retrieval indexes, and synthetic-data provenance are variations on the same fuel-line problem: the storage system must place the right representation at the right distance before the accelerator asks for it.

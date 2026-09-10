@@ -144,6 +144,54 @@ To make the scheduling problem concrete, consider a research organization operat
 
 The economic stakes make these decisions consequential at every scale. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster at `{python} ClusterEconomicsContext.gpu_hour_cost_str` costs `{python} ClusterEconomicsContext.daily_cost_str` per day to operate, whether the GPUs are computing useful work or sitting idle in a queue. If scheduling inefficiencies leave `{python} ClusterEconomicsContext.idle_pct_str` of GPUs idle, that translates to `{python} ClusterEconomicsContext.daily_waste_str` per day in wasted capacity, or about `{python} ClusterEconomicsContext.annual_waste_str` annually. Conversely, improving utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` adds `{python} ClusterEconomicsContext.productive_gpu_gain_str` fully utilized GPU-equivalents of productive capacity without purchasing additional hardware. That gain is equivalent to buying `{python} ClusterEconomicsContext.raw_gpu_equivalent_gain_str` raw GPUs if they ran at the old `{python} ClusterEconomicsContext.util_low_pct_str` utilization. At this scale, a 1 percentage-point improvement in utilization is worth more annually than the salary of the engineer who achieves it. Scheduling is not operational overhead; it is one of the highest-leverage engineering investments in ML infrastructure.
 
+::: {#fig-cluster-size-scaling fig-env="figure" fig-pos="htb" fig-cap="**Cluster Size Scaling**: The exponential growth of state-of-the-art ML training clusters from 2012 to 2024. As models scale, the number of accelerators required has increased by orders of magnitude, transforming orchestration into a massive distributed systems challenge." fig-alt="Line chart showing exponential growth of ML training cluster sizes from 2 GPUs for AlexNet in 2012 to 100,000 GPUs in 2024."}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLUSTER SIZE SCALING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-cluster-size-scaling - introduction
+# │
+# │ Goal: Plot the exponential growth of ML training cluster sizes over time.
+# │ Show: Line chart with log scale on y-axis, annotating key models.
+# │ How: Load data from data/cluster_scaling.csv and plot using matplotlib.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+try:
+    from mlsysim.style import book_style
+    book_style.setup_plot()
+except ImportError:
+    sns.set_theme(style="whitegrid")
+
+data = pd.read_csv("data/cluster_scaling.csv")
+
+fig, ax = plt.subplots(figsize=(8, 5))
+sns.lineplot(data=data, x="Year", y="Accelerators", marker="o", ax=ax, color="#1f77b4", linewidth=2, markersize=8)
+
+for i in range(len(data)):
+    model = data['Model'].iloc[i]
+    if model in ['AlexNet', 'ResNet', 'BERT', 'GPT-3', 'Llama-3', 'Grok-3']:
+        ax.annotate(model, (data['Year'].iloc[i], data['Accelerators'].iloc[i]),
+                    textcoords="offset points", xytext=(-5, 10), ha='right', fontsize=9)
+
+ax.set_yscale("log")
+ax.set_ylabel("Number of Accelerators")
+ax.set_xlabel("Year")
+ax.set_title("The Exponential Growth of ML Training Clusters")
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
 ML workloads present scheduling challenges that distinguish them from ordinary cloud service placement and from HPC workloads that can tolerate flexible resource counts. Gang scheduling[^fn-gang-allor-nothing] represents the most critical difference for synchronous distributed training: a job requiring 1,024 GPUs cannot make useful iteration progress with only 512. Many HPC jobs also need co-scheduled ranks, but synchronous data parallel training exposes the cost at every AllReduce. Every worker must participate in every collective, and a missing worker blocks all others. @Sec-appdx-comm-foundations-allreduce develops the ring and tree AllReduce cost model that makes this constraint physical: the collective stalls until the last worker arrives, so allocating $N$ GPUs but landing $N-1$ leaves the missing rank's peers burning fully idle on the synchronization barrier. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
 
 If gang scheduling is the first hard constraint, topology awareness via **Placement Groups**\index{Placement Group!topology-aware scheduling}[^fn-placement-group-affinity] is the second: to support tensor parallelism, the scheduler must ensure GPUs are placed within the same high-bandwidth NVLink domain rather than scattered across the data center.
