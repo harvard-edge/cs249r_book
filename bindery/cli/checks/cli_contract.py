@@ -244,7 +244,7 @@ def _command_label(argv: Iterable[str]) -> str:
 
 def run_contract(repo_root: Path | None = None) -> list[Violation]:
     root = repo_root or _repo_root()
-    binder = root / "book" / "binder"
+    binder = root / "bindery" / "binder"
     if not binder.exists():
         return [
             Violation(
