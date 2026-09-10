@@ -207,7 +207,6 @@ Some projects are intentionally earlier-stage than the main curriculum:
 
 - [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
-- [ML Systems Design Grammar](design-grammar/README.md) is an experimental framework for reasoning from stable primitives, constraints, and rewrite rules.
 
 ---
 
@@ -971,25 +970,6 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- INSTRUCTORS-CONTRIBUTORS-END -->
-
----
-
-### ⚗️ ML Systems Design Grammar Contributors
-
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table width="100%" style="width:100%">
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

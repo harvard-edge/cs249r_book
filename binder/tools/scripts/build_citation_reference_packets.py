@@ -59,11 +59,6 @@ SCOPES = [
         "paths": ["mlsysim/"],
         "bibs": ["mlsysim/paper/references.bib", "mlsysim/docs/references.bib"],
     },
-    {
-        "name": "design-grammar",
-        "paths": ["design-grammar/"],
-        "bibs": ["design-grammar/paper/references.bib"],
-    },
 ]
 
 QMD_ROOTS = [
@@ -71,7 +66,6 @@ QMD_ROOTS = [
     "staffml",
     "tinytorch",
     "mlsysim",
-    "design-grammar",
 ]
 
 EXCLUDE_PARTS = {
