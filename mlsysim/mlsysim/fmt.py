@@ -672,8 +672,7 @@ def fmt_usd(
     for percentages). It exists so the Pandoc/LaTeX escaping detail of a prose
     dollar sign lives in exactly one place: a bare ``$`` in body prose opens a
     math span and silently swallows downstream tokens, so currency must render
-    as the escaped ``\\$`` (see ``.claude/rules/numbers-and-math-in-prose.md``
-    §4). Authors never type a dollar sign and never type ``prefix=``; they call
+    as the escaped ``\\$``. Authors never type a dollar sign and never type ``prefix=``; they call
     ``fmt_usd(...)`` and the escaping, the optional ``~`` approximation marker,
     and integer rounding are all handled here.
 
@@ -1877,8 +1876,7 @@ def _compact_unit_suffix(display_unit) -> str:
     if str(display_unit) in {"dollar", "USD", "EUR"}:
         raise ValueError(
             "fmt_qty() does not format currency. Use fmt_usd(amount, ...) so the "
-            "dollar sign is escaped for prose and no literal 'USD' is emitted. "
-            "See .claude/rules/numbers-and-math-in-prose.md §4."
+            "dollar sign is escaped for prose and no literal 'USD' is emitted."
         )
     try:
         label = f"{_coerce_unit(display_unit):~P}"

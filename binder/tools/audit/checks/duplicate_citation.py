@@ -1,6 +1,6 @@
 r"""Check: duplicate Pandoc citation keys within a close window.
 
-Rule: .claude/rules/citation.md (duplicate citation density)
+Rule: duplicate citation density
 
     The same `[@key]` cited 3+ times within a tight window (~50 lines)
     inside one file means the cluster needs editorial review. This is not
@@ -45,7 +45,7 @@ from audit.ledger import Issue, make_issue_id
 from audit.protected_contexts import LineWalker
 
 CATEGORY = "duplicate-citation"
-RULE = ".claude/rules/citation.md duplicate citation density"
+RULE = "duplicate citation density"
 RULE_TEXT = (
     "The same citation key cited 3+ times within ~50 lines requires "
     "editorial review: keep repeats that anchor distinct local claims; "
