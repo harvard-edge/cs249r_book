@@ -12,34 +12,32 @@ engine: markdown
 :::
 :::
 
+## Purpose {.unnumbered .unlisted}
+
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{25}{85}{30}{30}{40}{40}
+\mlagentstack{10}{10}{95}{20}{20}{15}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
+_Why does an interactive agent pause lock up millions of dollars of GPU silicon?_
 
-## Purpose {.unnumbered .unlisted}
+In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals by suspending threads and evacuating register state rather than busy-waiting. In agentic systems, human supervisors operate as the ultimate high-latency peripheral, introducing a latency disparity of up to six orders of magnitude compared to machine token generation. If a runtime synchronously blocks execution threads during these human-in-the-loop gates, it pins volatile memory in expensive accelerators, triggering rapid memory starvation, cluster-wide out-of-memory faults, and multi-agent deadlocks. To prevent these catastrophic cascading failures and safely yield control across the supervisory boundary, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
 
-_How do distributed agent runtimes safely yield control to human supervisors, manage the $10^6\times$ latency disparity between machine tokens and human deliberation, and prevent systemic **deadlock**\index{deadlock}s across execution boundaries?_
-
-In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals. When an x86 or ARM CPU issues a disk write or waits on a network packet, the core does not busy-wait in a spin-lock; it executes a context switch, suspends the executing thread's **Process Control Block (PCB)**\index{Process Control Block (PCB)}, evacuates volatile register state, and yields the silicon to ready processes.
-
-In agentic machine learning systems, human supervisors represent the ultimate high-latency peripheral. While a stochastic foundation model generates reasoning tokens across sub-second horizons ($10^{-1}\text{ s}$), human deliberation, verification, and policy authorization operate across human timescales ($10^2\text{ to } 10^5\text{ s}$). If an agentic runtime handles human-in-the-loop oversight by synchronously blocking execution threads or pinning volatile Key-Value (KV) caches in accelerator **High-Bandwidth Memory (HBM)**\index{High-Bandwidth Memory (HBM)}, cluster utilization collapses, memory starvation triggers cascading **out-of-memory (OOM)**\index{out-of-memory (OOM)} faults, and multi-agent workflows experience distributed deadlocks.
-
-This chapter establishes the systems architecture for human-in-the-loop interrupt management. Drawing direct structural parallels to operating system interrupt lines, traps, faults, and Non-Maskable Interrupts (NMIs), we formalize the execution lifecycle of autonomous agents across the supervisory boundary. We formulate the economics of accelerator memory starvation, define asynchronous non-blocking runtime kernels using the **futures and promises**\index{futures and promises} formalism, delineate the **Reversibility Boundary**\index{Reversibility Boundary} under the **Principle of Least Privilege**\index{Principle of Least Privilege}, and apply Coffman's deadlock conditions to guarantee system liveness when humans fail to respond.
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
 
 ::: {.callout-learning-objectives}
 
-- Formulate the systems implications of the $10^6\times$ latency disparity between machine token generation ($10^{-1}\text{ s}$) and human deliberation ($10^2\text{ to } 10^5\text{ s}$).
-- Compute the memory holding cost of idle Key-Value (KV) caches in accelerator High-Bandwidth Memory (HBM) and derive the **swapping breakeven threshold**\index{swapping breakeven threshold} $T_{\text{breakeven}}$.
-- Map the hardware interrupt model (asynchronous IRQs, **synchronous traps**\index{synchronous traps}, faults, and non-maskable interrupts) to foundation model execution runtimes.
-- Design an Agent Interrupt Service Routine (ISR)[^fn-agent-interrupt-service-routine-isr] that transitions the **Agent Control Block (ACB)**\index{Agent Control Block (ACB)} through atomic drain, state snapshotting, and memory dehydration.
-- Implement non-blocking asynchronous execution loops using futures and promises coupled with event-sourced Write-Ahead Logging (WAL).
-- Define the Reversibility Boundary, categorizing actions into invertible operations ($\exists a^{-1}$) versus non-invertible mutations ($\nexists a^{-1}$).
-- Enforce the Principle of Least Privilege and **Monotonic Capability Attenuation**\index{Monotonic Capability Attenuation} via cryptographically signed single-use **capability leases**\index{capability leases}.
-- Prevent distributed multi-agent deadlocks by breaking the four Coffman conditions using optimistic isolation, **watchdog timer**\index{watchdog timer}s, and backward-compensating **Sagas**\index{Sagas}.
+- Explain the systems implications of the $10^6\times$ latency disparity between machine token generation and human deliberation.
+- Calculate the memory holding cost of idle Key-Value (KV) caches in accelerator High-Bandwidth Memory (HBM) and derive the swapping breakeven threshold.
+- Compare the hardware interrupt model to foundation model execution runtimes.
+- Design an Agent Interrupt Service Routine (ISR)[^fn-agent-interrupt-service-routine-isr] that transitions the Agent Control Block (ACB) through atomic drain, state snapshotting, and memory dehydration.
+- Architect non-blocking asynchronous execution loops using futures and promises coupled with event-sourced Write-Ahead Logging (WAL).
+- Evaluate the Reversibility Boundary by categorizing actions into invertible operations versus non-invertible mutations.
+- Design mechanisms to enforce the Principle of Least Privilege via cryptographically signed single-use capability leases and prevent multi-agent deadlocks using Coffman's conditions.
 
 :::
 
@@ -102,7 +100,7 @@ For modern frontier models ($M_{\text{KV}} \approx 10\text{--}40\,\text{GB}$) li
 | **Host NVMe SSD (Tier 2)**       | PCIe Gen5 x4 Direct NVMe     | $14\text{ GB/s}$                                 | $767.1\text{ ms}$                                              | $1{,}534.2\text{ ms}$                       | $1{,}584.2\text{ ms}$                        | $99.8\%$ cost reduction                             | Secondary spill tier for extended human pauses ($300\text{ s} < \Delta t \le 3{,}600\text{ s}$)          |
 | **Remote Object Store (Tier 3)** | 400 Gbps RoCEv2 / InfiniBand | $45\text{ GB/s}$ (Network Aggregate)             | $238.7\text{ ms}$                                              | $477.4\text{ ms}$                           | $577.4\text{ ms}$                            | $99.99\%$ cost reduction                            | Cold checkpoint archive for overnight or asynchronous supervisory review ($\Delta t > 1\text{ h}$)       |
 
-: **Memory Substrate Trade-Offs and Swapping Breakeven Latencies**: Quantitative comparison of transfer bandwidths, evacuation latencies, breakeven thresholds ($T_{\text{breakeven}}$), and cost elimination ratios across memory tiers for a $10.74\text{ GB}$ KV-cache working set during an extended supervisory pause ($1{,}800\text{ s}$). {#tbl-vol3-interrupts-swapping-breakeven}
+: **Memory Substrate Trade-Offs and Swapping Breakeven Latencies**: Quantitative comparison of transfer bandwidths, evacuation latencies, breakeven thresholds ($T_{\text{breakeven}}$), and cost elimination ratios across memory tiers for a $10.74\text{ GB}$ KV-cache working set during an extended supervisory pause ($1{,}800\text{ s}$). {#tbl-vol3-interrupts-swapping-breakeven tbl-colwidths="[15,15,15,12,12,11,10,10]"}
 
 ![**Figure 9.1: The Asymmetric Latency Disparity and KV-Cache Holding Cost**](/assets/images/svg/vol3/09_latency_disparity.svg){#fig-09_latency_disparity}
 
@@ -126,7 +124,7 @@ In a POSIX operating system, the hardware architecture defines an **Interrupt Ve
 | **Non-Maskable Interrupt (NMI)**[^fn-non-maskable-interrupt-nmi]          | Authoritative Administrative Kill Switch           | Wall-clock timeout, budget cap, safety tripwire     | Asynchronous; unmaskable and non-bypassable    | Forcibly purges KV-cache, terminates microVMs, revokes leases                      | Hard real-time kernel preemption ($< 5\text{ ms}$)     |
 | **Interrupt Service Routine (ISR)**       | Agent Interrupt Handler / Reconciler               | Vector dispatched from IDT / Interrupt Vector Table | Kernel-level privileged execution              | Reconciles external delta into context; resumes or aborts ACB                      | Dependent on handler logic ($1\text{--}100\text{ ms}$) |
 
-: **Architectural Mapping Between Classical Operating Systems and Agentic Machine Learning Runtimes**: Structural correspondence between hardware microprocessor primitives and their equivalents in autonomous agent runtime kernels. {#tbl-vol3-interrupts-os-mapping}
+: **Architectural Mapping Between Classical Operating Systems and Agentic Machine Learning Runtimes**: Structural correspondence between hardware microprocessor primitives and their equivalents in autonomous agent runtime kernels. {#tbl-vol3-interrupts-os-mapping tbl-colwidths="[20,20,15,15,20,10]"}
 
 ### Mapping Hardware Interrupts to Foundation Model Runtimes
 
@@ -475,7 +473,7 @@ Outside this domain, actions are **non-invertible** ($\nexists a^{-1}$). Once an
 | **Financial Fund Transfer**              | Irreversible ($\mathcal{D}_{\text{irrev}}$) |                       No                      | External banking ledger / ACH network        | Legal dispute / clawback arbitration protocol               | Days to weeks                   | Multi-Party Human Cryptographic Quorum |
 | **Production Database Schema Migration** | Irreversible ($\mathcal{D}_{\text{irrev}}$) |                       No                      | Persistent customer records / tables         | High-risk restore from Point-in-Time (PITR) backup          | Minutes to hours                | Mandatory DBA Approval Gate            |
 
-: **Taxonomy of Operations Across the Reversibility Boundary**: Classification of agent actions by execution domain, mathematical invertibility, blast radius, rollback mechanics, and supervisory authorization requirements. {#tbl-vol3-interrupts-reversibility-taxonomy}
+: **Taxonomy of Operations Across the Reversibility Boundary**: Classification of agent actions by execution domain, mathematical invertibility, blast radius, rollback mechanics, and supervisory authorization requirements. {#tbl-vol3-interrupts-reversibility-taxonomy tbl-colwidths="[20,15,10,15,15,10,15]"}
 
 ### Capability Systems & Monotonic Attenuation
 
@@ -598,7 +596,7 @@ An agent holding capability $R_j$ may request capability $R_k$ if and only if $R
 | **3. No Preemption**    | Resources cannot be forcibly seized from a thread   | Human gate cannot be bypassed; agent waits forever on unresponsive user  | "Gone for the Weekend" permanent deadlock                    | Authoritative watchdog timer ($\tau_{\text{watchdog}}$) & state preemption | Unanswered supervisory requests trigger safe default rollback or escalation                          |
 | **4. Circular Wait**    | Thread cycle: $T_1 \to R_2 \to T_2 \to R_1$         | Multi-agent approval cycle: Agent A waits on Agent B; Agent B waits on A | Distributed execution freeze across agent fleet              | Global partial ordering of resources ($R_i \prec R_j$) & DAG validation    | Cycle formation is topologically impossible; graph cycles rejected at schedule time                  |
 
-: **Coffman Deadlock Condition Resolution Matrix**: Classical operating system deadlock conditions mapped to agentic system failure modes and their structural runtime mitigations. {#tbl-vol3-interrupts-coffman-resolution}
+: **Coffman Deadlock Condition Resolution Matrix**: Classical operating system deadlock conditions mapped to agentic system failure modes and their structural runtime mitigations. {#tbl-vol3-interrupts-coffman-resolution tbl-colwidths="[15,20,20,15,15,15]"}
 
 ::: {.callout-caution title="War Story: The Accidental API Retry Storm"}
 A major vulnerability in un-interruptible agentic systems is the "accidental DDoS." A startup deployed a multi-agent framework to scrape and aggregate financial data via an external API. When the external provider changed its JSON schema, the agent's parsing tool threw an exception. Because foundation models lack a native hardware clock or the concept of "exponential backoff," the agent immediately invoked the tool again, failed, and repeated. 
@@ -614,29 +612,31 @@ Breaking the Coffman conditions through watchdogs, optimistic concurrency, and s
 
 ## Fallacies and Pitfalls {#sec-vol3-interrupts-fallacies-pitfalls}
 
-**Fallacy: Human feedback is just another conversational user prompt.**
+**Fallacy**: *Human feedback is just another conversational user prompt.*
 A widespread fallacy among LLM application developers is treating human supervisory responses as generic text appended to the conversation context. This antipattern is a severe security vulnerability. If human feedback is injected as unvalidated natural language into the stochastic prompt space, the agent is vulnerable to Indirect Delimiter Hijacking and Supervisor Impersonation. Supervisor approvals must NEVER be passed as raw conversational dialogue. They must be handled out-of-band as structured, cryptographically signed control-plane events injected directly into the deterministic runtime kernel.
 
-**Fallacy: Keeping the KV cache resident for short human pauses is harmless.**
+**Fallacy**: *Keeping the KV cache resident for short human pauses is harmless.*
 Engineers often assume that if a human is expected to respond "within two minutes," swapping the KV cache to host DRAM is an unnecessary optimization. In practice, human response latency follows a heavy-tailed Pareto distribution. A single unexpected coffee break or network disconnection leaves multi-gigabyte KV caches permanently pinned in accelerator memory, starving production clusters. Enforce immediate, proactive memory dehydration. If an action requires human interaction, the KV cache must be evacuated to DRAM/NVMe within 200 ms, freeing HBM unconditionally.
 
-**Pitfall: Automation bias and the rubber-stamping catastrophe.**
+**Pitfall**: *Automation bias and the rubber-stamping catastrophe.*
 When an autonomous agent operates with high empirical reliability, human supervisors inevitably succumb to Automation Bias. They experience cognitive fatigue, stop reading generated diffs, and begin "rubber-stamping" approval requests. When the agent eventually encounters a catastrophic edge case, the human fails to catch it, negating the safety guarantee of the supervisory gate. Mitigation strategies include forced friction gates requiring active cognitive verification, synthetic tripwires for red-teaming, and multi-party quorum requirements for high-risk operations.
 
-**Pitfall: Rehydration state skew.**
+**Pitfall**: *Rehydration state skew.*
 An agent inspects a cluster at T0, determines a remediation is needed, and requests human approval. The human approves the action at T0 + 3 hours. When the agent rehydrates and executes the command, it assumes the environment state is identical to T0. In reality, the cluster state has drifted. Executing the action against stale assumptions corrupts the environment. The runtime must enforce Pre-Execution Invariant Verification. Every capability lease must embed a cryptographic state hash. Upon rehydration, the kernel evaluates the invariant against the live environment before dispatching the tool.
 
 ---
 
 ## Summary {#sec-vol3-interrupts-summary}
 
-- **The Asymmetric Latency Disparity:** The 10^6x gap between neural inference (0.1 s) and human deliberation (10^2 to 10^5 s) dictates that agent runtimes must never synchronously block execution threads or pin volatile KV caches in accelerator High-Bandwidth Memory.
-- **The Hardware Interrupt Model:** Human signals must be formalized as hardware interrupts: out-of-band external IRQs, synchronous SYS_ESCALATE traps, schema invariant exceptions, and Non-Maskable Interrupt (NMI) emergency kill switches.
+::: {.callout-takeaways title="The Asynchronous Interrupt Invariant"}
+
+- **The Asymmetric Latency Disparity:** The $10^6\times$ gap between neural inference and human deliberation dictates that agent runtimes must never synchronously block execution threads or pin volatile KV caches in accelerator memory.
+- **The Hardware Interrupt Model:** Human signals must be formalized as hardware interrupts: out-of-band external IRQs, synchronous `SYS_ESCALATE` traps, schema invariant exceptions, and Non-Maskable Interrupt (NMI) emergency kill switches.
 - **Non-Blocking Durable Execution:** By leveraging futures and promises, runtimes decouple execution loops from supervisory delays, snapshotting state to append-only Write-Ahead Logs and rehydrating on demand.
-- **The Reversibility Boundary:** Non-invertible actions demand cryptographic capability escalation. An unprivileged agent cannot expand its own authority; it must obtain an ephemeral, cryptographically signed capability lease from an authoritative human principal.
-- **Coffman Deadlock Prevention:** Suspending agents while they hold transactional locks induces systemic deadlocks. Runtimes eliminate hold-and-wait via isolated staging workspaces and enforce strict preemption through watchdog timers and Sagas compensating transactions.
-- **Pre-Execution Invariant Verification:** Because environments can drift during human deliberation, agents must verify cryptographic state hashes upon rehydration before executing capability leases.
-- **Monotonic Capability Attenuation:** Agents can reduce their permissions when spawning subagents, but can never autonomously expand their authority without crossing the deterministic Ring 1 supervisor kernel.
+- **The Reversibility Boundary & Capability Escalation:** Non-invertible actions demand cryptographic capability escalation. Agents must obtain ephemeral capability leases and verify environment state hashes upon rehydration.
+- **Coffman Deadlock Prevention:** Suspending agents while they hold transactional locks induces systemic deadlocks. Runtimes eliminate hold-and-wait via isolated staging workspaces and enforce strict preemption through watchdog timers.
+
+:::
 
 [^fn-non-maskable-interrupt-nmi]: **Non-Maskable Interrupt (NMI)**\index{Non-Maskable Interrupt (NMI)}: Asynchronous, unignorable control-plane signal that bypasses model token sampling and sandbox execution boundaries. Unlike maskable IRQs—which drain the current token step before context dehydration—an NMI triggers hard real-time kernel preemption: immediately severing model inference sockets, tearing down microVM container sandboxes, and burning all outstanding capability leases to contain catastrophic runaway failures or adversarial exploits.
 
@@ -644,6 +644,27 @@ An agent inspects a cluster at T0, determines a remediation is needed, and reque
 
 [^fn-agent-promise]: **Agent Promise**\index{Agent Promise}: $\mathcal{P} = \langle \text{id}, \text{state}, v, \tau_{\text{created}}, \tau_{\text{timeout}}, \mathcal{F}_{\text{callback}} \rangle$ is a typed, durable concurrency handle representing an asynchronous external supervisory decision. Instantiating a promise decouples the agent's forward reasoning loop from human deliberation latency, persisting continuation metadata to the Write-Ahead Log and yielding execution threads back to the scheduler event reactor.
 
-::: {.callout-chapter-connection title="Chapter connection: From supervisory interrupts to environment virtualization"}
+::: {.callout-chapter-connection title="From Interrupts to Ephemeral Virtualization"}
 With the runtime architecture for scheduling, actuation boundaries, and human supervisory interrupts established, we have constructed the core operating system control plane for autonomous agents. In Chapter 10 (Environment Virtualization), we examine the virtualization boundary: isolating untrusted stochastic execution within ephemeral microVMs, enforcing copy-on-write filesystem sandboxing, and preventing data exfiltration via information flow taint tracking.
 :::
+
+## Quantitative Problems {#sec-vol3-interrupts-problems}
+
+**1. HBM Holding Cost and the Swapping Breakeven Point**
+An enterprise deploys a fleet of autonomous code-review agents. Each agent maintains an active 64,000-token context, translating to a $21.5\text{ GB}$ KV cache footprint. The GPUs are connected to host memory via PCIe Gen4 x16, providing an effective bidirectional DMA bandwidth of $28\text{ GB/s}$.
+(a) Calculate the one-way evacuation latency to move the KV cache from HBM to host DRAM.
+(b) Assuming a $50\text{ ms}$ kernel scheduling overhead for the transfer, calculate the total round-trip swap latency ($T_{\text{swap}}$).
+(c) The runtime orchestrator currently blocks synchronously, pinning the KV cache. A human reviewer takes on average $4.5$ hours to approve a PR. Given that an H100 node (8x GPUs, $80\text{ GB}$ HBM per GPU) costs $\$32.00$ per hour, calculate the dollar cost of the idle silicon wasted per human review.
+
+**2. Interrupt Handler Dispatch Priority**
+An agent's interrupt vector table assigns priorities to events. Non-Maskable Interrupts (NMI - administrative kill) have priority 0, synchronous `SYS_ESCALATE` traps have priority 1, and asynchronous webhook IRQs have priority 2. The kernel processes an interrupt by draining the current token step ($20\text{ ms}$ max) and dehydrating memory.
+(a) Under a strict priority queue discipline, if an NMI arrives precisely as an asynchronous IRQ is being serviced (memory dehydration is $30\%$ complete, total dehydration time is $800\text{ ms}$), what must the kernel do to bound NMI latency below $5\text{ ms}$?
+(b) Architect the abort sequence for the in-progress DMA transfer to satisfy this hard real-time constraint.
+
+**3. Multi-Agent Deadlock Cycle Detection**
+A cluster of four agents ($A_1, A_2, A_3, A_4$) share access to a single staging environment $E$, a production database write lease $W$, and a human reviewer pool $H$.
+At time $t$, $A_1$ holds an exclusive lock on $E$ and requests $H$. $A_2$ holds $W$ and requests $E$. $A_3$ holds $H$ (waiting for human response) and requests $W$. 
+(a) Draw the resource allocation graph. 
+(b) Does a deadlock exist according to Coffman's conditions? 
+(c) Assuming the runtime implements optimistic copy-on-write sandboxing for $E$ (breaking Mutual Exclusion), trace the execution resolution.
+
