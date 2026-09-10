@@ -27,7 +27,7 @@ fi
 
 # canonical_path|mirror_path_1,mirror_path_2,...
 SYNC_MAP=(
-  "shared/scripts/subscribe-modal.js|site/assets/scripts/subscribe-modal.js,books/shared/assets/scripts/subscribe-modal.js,labs/assets/scripts/subscribe-modal.js,kits/assets/scripts/subscribe-modal.js,packages/mlsysim/docs/scripts/subscribe-modal.js"
+  "shared/scripts/subscribe-modal.js|site/assets/scripts/subscribe-modal.js,books/shared/assets/scripts/subscribe-modal.js,labs/assets/scripts/subscribe-modal.js,kits/assets/scripts/subscribe-modal.js,mlsysim/docs/scripts/subscribe-modal.js"
   "shared/assets/img/logo-seas-shield.png|books/shared/assets/images/icons/logo-seas-shield.png,staffml/app/public/logo-seas-shield.png"
 
   # SCSS partials consumed by the book Quarto build. Sass resolves @import
@@ -39,7 +39,7 @@ SYNC_MAP=(
 )
 
 # Mirrors that are intentionally NOT synced (different content per subsite):
-#   packages/tinytorch/quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
+#   tinytorch/quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
 #   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
 #
 # SocratiQ Interactive Widget (Canonicals only, no mirrors needed):

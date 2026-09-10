@@ -109,7 +109,7 @@ multipliers before the formatter starts owning `×`:
   multiplier lane and should become `*_mult_str`.
 → L0 + L1 on touched files.
 
-**1.2 Formatter change (`packages/mlsysim/mlsysim/fmt.py`).** `fmt_multiple` and
+**1.2 Formatter change (`mlsysim/mlsysim/fmt.py`).** `fmt_multiple` and
 `fmt_multiple_range` return `MarkdownStr(f"{number}×")` (range: `f"{lo}–{hi}×"`).
 Add/extend unit tests in `mlsysim` asserting the visible `×` is present and the number is
 correct. Run `mlsysim` test suite.

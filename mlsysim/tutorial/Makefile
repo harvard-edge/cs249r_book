@@ -1,0 +1,148 @@
+# =============================================================================
+# mlsysim/tutorial/Makefile — Build ISCA tutorial slides
+# =============================================================================
+# Usage:
+#   make              Build the full tutorial deck (PDF)
+#   make svgs         Convert all SVGs to PDFs
+#   make slides       Build slides only (assumes SVGs already converted)
+#   make clean        Remove build artifacts
+#   make check        Build slides and fail on layout warnings
+#   make check-tools  Verify SVG source files and local tools
+#
+# Prerequisites:
+#   - xelatex (TeX Live or MacTeX)
+#   - inkscape (for SVG→PDF conversion)
+#   OR
+#   - rsvg-convert (alternative SVG→PDF, lighter than inkscape)
+# =============================================================================
+
+SHELL := /bin/bash
+
+# Directories
+SLIDES_DIR  := slides
+SVG_DIR     := $(SLIDES_DIR)/images/svg
+PDF_IMG_DIR := $(SLIDES_DIR)/images/pdf
+BUILD_DIR   := _build
+
+# Source files
+MOD1    := $(SLIDES_DIR)/tutorial_module1.tex
+MOD2    := $(SLIDES_DIR)/tutorial_module2.tex
+MOD3    := $(SLIDES_DIR)/tutorial_module3.tex
+MOD4    := $(SLIDES_DIR)/tutorial_module4.tex
+RELATED := $(SLIDES_DIR)/related_work.tex
+
+# All SVG sources (auto-detected)
+SVGS := $(wildcard $(SVG_DIR)/*.svg)
+PDFS := $(patsubst $(SVG_DIR)/%.svg,$(PDF_IMG_DIR)/%.pdf,$(SVGS))
+
+# LaTeX engine — pdflatex + helvet/courier, matching slides/Makefile
+# and mlsysim/paper. Was xelatex+fontspec, which had silent-fallback
+# rendering issues on Ubuntu CI (see 2026-05-12 publish drama).
+LATEX := pdflatex
+LATEX_FLAGS := -interaction=nonstopmode -halt-on-error -output-directory=$(BUILD_DIR)
+
+# SVG converter (try inkscape first, fall back to rsvg-convert)
+SVG2PDF := $(shell command -v inkscape >/dev/null 2>&1 && echo "inkscape --export-type=pdf" || echo "rsvg-convert -f pdf -o")
+
+# =============================================================================
+# TARGETS
+# =============================================================================
+
+.PHONY: all slides svgs clean check check-tools help
+
+all: svgs slides  ## Build everything (SVGs → PDFs → slide deck)
+
+help:  ## Show this help
+	@echo "mlsysim Tutorial Build System"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
+
+# --- SVG → PDF conversion ---
+svgs: $(PDFS)  ## Convert all SVGs to PDF
+
+$(PDF_IMG_DIR)/%.pdf: $(SVG_DIR)/%.svg | $(PDF_IMG_DIR)
+	@echo "SVG → PDF: $<"
+	@if command -v inkscape >/dev/null 2>&1; then \
+		inkscape --export-type=pdf --export-filename=$@ $<; \
+	elif command -v rsvg-convert >/dev/null 2>&1; then \
+		rsvg-convert -f pdf -o $@ $<; \
+	else \
+		echo "ERROR: Neither inkscape nor rsvg-convert found. Install one."; \
+		exit 1; \
+	fi
+
+$(PDF_IMG_DIR):
+	@mkdir -p $@
+
+# --- Slide compilation ---
+# Build both decks. Each .tex is compiled twice so cross-references resolve.
+# The output is BUILD_DIR/<name>.pdf (xelatex -output-directory writes there).
+slides: $(BUILD_DIR)/tutorial_module1.pdf $(BUILD_DIR)/tutorial_module2.pdf $(BUILD_DIR)/tutorial_module3.pdf $(BUILD_DIR)/tutorial_module4.pdf  ## Build all tutorial deck PDFs
+
+$(BUILD_DIR)/tutorial_module1.pdf: $(MOD1) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 1..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module1.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module1.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module1.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_module2.pdf: $(MOD2) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 2..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module2.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module2.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module2.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_module3.pdf: $(MOD3) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 3..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module3.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module3.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module3.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_module4.pdf: $(MOD4) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 4..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module4.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module4.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module4.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR):
+	@mkdir -p $@
+
+# --- Utilities ---
+check: slides  ## Build slides and fail on layout warnings
+	@echo "Checking slide logs for layout warnings..."
+	@logs="$(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module*.log"; \
+	if grep -E 'Overfull \\[hv]box|Underfull \\[hv]box|Frame text is shrunk' $$logs; then \
+		echo ""; \
+		echo "ERROR: slide layout warnings found."; \
+		exit 1; \
+	fi; \
+	echo "  ✓ No overfull, underfull, or shrink warnings"
+
+check-tools:  ## Verify SVG sources and dependencies
+	@echo "SVG figures found: $(words $(SVGS))"
+	@for svg in $(SVGS); do echo "  ✓ $$svg"; done
+	@echo ""
+	@echo "Checking tools..."
+	@command -v $(LATEX) >/dev/null 2>&1 && echo "  ✓ $(LATEX)" || echo "  ✗ $(LATEX) NOT FOUND"
+	@command -v inkscape >/dev/null 2>&1 && echo "  ✓ inkscape" || echo "  ⚠ inkscape not found (trying rsvg-convert)"
+	@command -v rsvg-convert >/dev/null 2>&1 && echo "  ✓ rsvg-convert" || echo "  ⚠ rsvg-convert not found"
+	@echo ""
+	@echo "Slide sources:"
+	@wc -l $(MOD1) $(MOD2) $(MOD3) $(MOD4) $(RELATED) 2>/dev/null || echo "  Some files missing"
+
+clean:  ## Remove all build artifacts
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(SLIDES_DIR)/$(BUILD_DIR)
+	@rm -f $(PDF_IMG_DIR)/*.pdf
+	@rm -f $(SLIDES_DIR)/*.aux $(SLIDES_DIR)/*.log $(SLIDES_DIR)/*.nav
+	@rm -f $(SLIDES_DIR)/*.out $(SLIDES_DIR)/*.snm $(SLIDES_DIR)/*.toc
+	@rm -f $(SLIDES_DIR)/*.vrb $(SLIDES_DIR)/*.fls $(SLIDES_DIR)/*.fdb_latexmk
+	@echo "Clean."
