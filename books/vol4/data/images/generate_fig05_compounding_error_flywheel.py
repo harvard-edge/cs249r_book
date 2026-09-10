@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
+import os
+import math
+
+def create_svg():
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
     <defs>
         <!-- Arrowhead markers -->
         <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -122,3 +126,11 @@
     <path d="M 625 355 L 625 385" fill="none" stroke="#E53E3E" stroke-width="2" marker-end="url(#arrow-red)" />
 
 </svg>
+"""
+    os.makedirs(os.path.dirname("images/svg/fig05_compounding_error_flywheel.svg"), exist_ok=True)
+    with open("images/svg/fig05_compounding_error_flywheel.svg", "w") as f:
+        f.write(svg_content)
+    print("Generated images/svg/fig05_compounding_error_flywheel.svg")
+
+if __name__ == "__main__":
+    create_svg()

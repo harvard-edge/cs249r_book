@@ -28,7 +28,7 @@ def generate_ray_frustum():
 
     # Title or section labels
     sections = [
-        {"title": "(1) Hardware Ingress & Patchification", "x": 150},
+        {"title": "(1) Hardware Ingress &amp; Patchification", "x": 150},
         {"title": "(2) 2D-to-3D Ray Lifting", "x": 450},
         {"title": "(3) Metric Voxel Splatting", "x": 700},
         {"title": "(4) Propagated Uncertainty", "x": 900}

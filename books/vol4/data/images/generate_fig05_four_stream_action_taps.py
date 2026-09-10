@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
+import os
+
+def create_svg():
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
     <defs>
         <!-- Arrowhead marker -->
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -104,3 +107,11 @@
     <text x="910" y="312" class="tap-text">(4)</text>
 
 </svg>
+"""
+    os.makedirs(os.path.dirname("images/svg/fig05_four_stream_action_taps.svg"), exist_ok=True)
+    with open("images/svg/fig05_four_stream_action_taps.svg", "w") as f:
+        f.write(svg_content)
+    print("Generated images/svg/fig05_four_stream_action_taps.svg")
+
+if __name__ == "__main__":
+    create_svg()
