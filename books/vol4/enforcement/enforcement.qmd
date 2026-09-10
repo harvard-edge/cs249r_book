@@ -170,19 +170,12 @@ The mathematical foundation of **forward invariance**\index{Forward invariance},
 
 A **forward-invariant safe set**\index{Forward-invariant safe set} is a designated sub-region of the state space $\mathcal{C} = \{\mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) \ge 0\}$ possessing the property that any state trajectory originating within $\mathcal{C}$ remains strictly within $\mathcal{C}$ for all forward time under admissible control inputs, despite bounded disturbances and model discrepancies.
 
-::: {#nbk-enforcement-forward-invariance-lie-derivatives .callout-notebook title="Forward invariance and Lie derivatives"}
-Consider a continuous-time physical plant whose dynamics are affine in the control input:
-$$\dot{x} = f(x) + g(x)u,$$
-where $x \in \mathcal{X} \subseteq \mathbb{R}^n$ denotes the mechanical state vector (positions, velocities) and $u \in \mathcal{U} \subseteq \mathbb{R}^m$ represents the commanded actuator efforts (phase currents, motor torques). The time derivative of the safety certificate along the system trajectory is computed using Lie derivatives:
-$$\dot{h}(x, u) = \nabla h(x) \cdot \dot{x} = \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u = L_f h(x) + L_g h(x) u.$$
-By Nagumo's viability theorem and Ames's Control Barrier Function framework, the safe set $\mathcal{C}$ is rendered forward-invariant if the control input $u$ satisfies the differential inequality:
-$$\dot{h}(x, u) \ge -\gamma(h(x)),$$
-where $\gamma: \mathbb{R} \to \mathbb{R}$ is an extended class-$\mathcal{K}_\infty$ function (typically selected as a linear contraction rate $\gamma(h) = \gamma_0 h$ with $\gamma_0 > 0$). Substituting the Lie derivatives into this condition yields:
-$$L_f h(x) + L_g h(x) u \ge -\gamma_0 h(x).$$
-Because the dynamics are affine in $u$, this condition transforms the nonlinear set-invariance requirement into an instantaneous affine linear half-space inequality on the control input:
-$$a(x)^T u \le b(x),$$
-where the constraint normal vector $a(x) \in \mathbb{R}^m$ and boundary threshold $b(x) \in \mathbb{R}$ are given by:
-$$a(x) \triangleq -L_g h(x)^T, \quad b(x) \triangleq L_f h(x) + \gamma_0 h(x).$$
+::: {#nbk-enforcement-forward-invariance-lie-derivatives .callout-notebook title="Forward invariance and safety boundaries"}
+To keep the machine safe, we define a "safe set"—a region where no collisions or physical limits are breached. Rather than forecasting the machine's entire future path, Control Barrier Functions evaluate an instantaneous condition: is the current control command vectoring the machine toward a boundary faster than it can safely brake? 
+
+By mathematically constraining how fast the machine is allowed to approach the edge of the safe set, the nonlinear dynamics of the physical plant are transformed into a simple linear constraint on the control input. This guarantees that if the system starts in a safe state, it will always remain in a safe state, as the enforcer will intervene before the boundary is crossed.
+
+For a formal mathematical derivation of Control Barrier Functions, Lie derivatives, and Nagumo's viability theorem, refer to @sec-appendix-control.
 :::
 
 ::: {#dfn-enforcement-control-barrier-function-cbf-qp .callout-definition title="Control barrier function (CBF-QP)"}
@@ -199,13 +192,11 @@ that continuously evaluates barrier certificates $h(\mathbf{x}) \ge 0$ along con
 
 When a learned neural policy proposes an unverified action $u_{\text{nom}}$, the enforcer does not need to forecast the entire future path of the machine. It evaluates this single half-space inequality at the current state $x$. If the proposed action satisfies $a(x)^T u_{\text{nom}} \le b(x)$, the enforcer passes the command to the motor untouched. If the proposed action vectors the trajectory across the boundary $\partial \mathcal{C}$ into the unsafe domain, the enforcer filters the command, deflecting the state trajectory tangentially along the boundary.
 
-The arithmetic of this per-cycle barrier check is direct. Consider an analytical example of a cart with mass $m = 10.0\text{ kg}$ translating along a linear track toward a hard stop at position $p_{\text{max}} = 2.0\text{ m}$. The actuator can deliver a maximum braking force of $u_{\text{max}} = 40.0\text{ N}$, corresponding to a maximum deceleration of $a_{\text{max}} = u_{\text{max}} / m = 4.0\text{ m/s}^2$. For a second-order mechanical system ($\dot{p} = v, \dot{v} = u/m$), a pure position constraint $h(p) = p_{\text{max}} - p$ has relative degree $r = 2$ because control input $u$ does not appear in $\dot{h}(p) = -v$.[^fn-math-cbf-degree] To recover relative degree one ($r = 1$), the barrier function incorporates the kinetic stopping distance:
-$$h(p, v) = (p_{\text{max}} - p) - \frac{v^2}{2 a_{\text{max}}}.$$
-Differentiating with respect to time along the dynamics yields:
-$$\dot{h}(p, v, u) = -\dot{p} - \frac{v \dot{v}}{a_{\text{max}}} = -v - \frac{v (u / m)}{a_{\text{max}}} = -v \left(1 + \frac{u}{u_{\text{max}}}\right).$$
-Suppose the cart is currently at position $p = 1.50\text{ m}$ traveling forward at velocity $v = 1.50\text{ m/s}$. The required stopping distance under maximum deceleration is $(1.50)^2 / (2 \times 4.0) = 0.281\text{ m}$, leaving a barrier value of $h = (2.0 - 1.50) - 0.281 = 0.219\text{ m}$. Choosing a linear contraction rate $\gamma_0 = 2.0\text{ s}^{-1}$, the enforcer requires $\dot{h} \ge -2.0 \times 0.219 = -0.438\text{ m/s}$. Substituting the state values yields the inequality $-1.50 (1 + u / 40.0) \ge -0.438$, which simplifies to $1 + u / 40.0 \le 0.292$, or $u \le -28.3\text{ N}$. If the policy proposes an acceleration command of $u_{\text{nom}} = +10.0\text{ N}$, the enforcer overrides the proposal and commands at least $28.3\text{ N}$ of braking force.
+The arithmetic of this per-cycle barrier check is continuous and instantaneous. Consider a heavy cart moving down a track toward a wall. If the enforcer only looks at the distance to the wall, it might realize there is a problem too late—when the cart is too close to stop given its current momentum.[^fn-math-cbf-degree] Instead, the enforcer's safety barrier combines the cart's position with its kinetic stopping distance (which depends on velocity and braking strength). 
 
-A real machine does not execute continuous, ideal forces on an uncorrupted plant. The nominal barrier assumes exact state feedback and instantaneous torque realization, but the nervous system operates subject to lower-level tracking errors and sensor uncertainty. If the tracking loop exhibits a bounded velocity error $\epsilon_v = 0.10\text{ m/s}$ and the state estimator exhibits a position uncertainty $\epsilon_p = 0.02\text{ m}$, the enforcer cannot evaluate the barrier at the geometric edge of the safe set. It must evaluate an inset barrier $h_{\text{safe}}(x) = h(x) - \delta_{\text{margin}}$. In this analytical example, the worst-case stopping distance under velocity error expands by $\Delta d = (v + \epsilon_v)^2 / (2 a_{\text{max}}) - v^2 / (2 a_{\text{max}}) \approx v \epsilon_v / a_{\text{max}} = (1.50 \times 0.10) / 4.0 = 0.0375\text{ m}$. Combining this stopping deficit with the position uncertainty yields a required barrier inset of $\delta_{\text{margin}} = \epsilon_p + \Delta d = 0.02 + 0.0375 = 0.0575\text{ m}$. Tightening the barrier by this margin reduces the effective barrier value from $0.219\text{ m}$ to $0.1615\text{ m}$, shifting the required intervention threshold earlier in the trajectory.
+At every millisecond, the enforcer calculates exactly how much buffer remains between the cart's required stopping distance and the wall. If the neural policy suddenly commands the cart to accelerate further, the enforcer instantly recognizes that accepting this command would shrink the buffer too fast. It overrides the neural policy and instead commands the exact braking force necessary to bring the cart to a safe halt right at the boundary. For the full mathematical derivations of relative degree and kinetic barrier functions, see @sec-appendix-control.
+
+A real machine does not execute continuous, ideal forces on an uncorrupted plant. The nominal barrier assumes exact state feedback and instantaneous torque realization, but the nervous system operates subject to lower-level tracking errors and sensor uncertainty. Because of this, the enforcer cannot evaluate the barrier at the geometric edge of the safe set. It must mathematically inset the boundary to swallow the worst-case stopping deficit caused by velocity tracking error and position uncertainty, forcing it to intervene earlier in the trajectory.
 
 The safety warrant provided by the barrier calculation is strictly conditional. Forward invariance guarantees that the state remains within $\mathcal{C}$ if and only if five underlying conditions hold simultaneously:
 
@@ -229,19 +220,17 @@ A **minimal-intervention QP projection (safety shield)** is a sub-millisecond co
 
 Formally, this safety filtering mechanism is framed as a **control barrier function quadratic program (CBF-QP)** [@ames2016control]. At each discrete control interval $T_{\text{ctrl}} = 1.0\text{ ms}$ on the bare-metal microcontroller, the enforcer receives a nominal torque command $u_{\text{nom}} \in \mathbb{R}^m$ from the policy mailbox and solves a convex optimization problem.[^fn-hw-cortex-cycles]
 
-::: {#nbk-enforcement-cbf-qp-formulation .callout-notebook title="CBF-QP formulation"}
-**Objective**: Compute the minimal intervention $u^*$:
-$$\begin{aligned}
-u^* = \arg\min_{u \in \mathbb{R}^m} \quad & \frac{1}{2} \|u - u_{\text{nom}}\|^2 \\
-\text{subject to} \quad & a_k(x)^T u \le b_k(x), \quad \forall k \in \{1, \dots, K\}, \\
-& u_{\min} \le u \le u_{\max}.
-\end{aligned}$$
-The objective minimizes the Euclidean norm of the intervention, $\frac{1}{2}\|u - u_{\text{nom}}\|^2$, subject to linear inequality constraints derived from the $K$ active barrier certificates and physical actuator saturation limits. Because the objective function is strictly convex and the constraints form a closed convex polyhedron in control space, the optimization problem yields a unique global minimum that can be solved within deterministic sub-millisecond execution bounds.
-For a single active barrier certificate $a^T u \le b$, the quadratic program admits an exact closed-form analytical solution that eliminates numerical solver iterations entirely. When the nominal input satisfies $a^T u_{\text{nom}} \le b$, the constraint is inactive, the correction is zero, and $u^* = u_{\text{nom}}$. When the proposal violates the boundary such that $a^T u_{\text{nom}} > b$, the optimal command $u^*$ lies directly on the bounding hyperplane $a^T u = b$. Constructing the Lagrangian $\mathcal{L}(u, \lambda) = \frac{1}{2} \|u - u_{\text{nom}}\|^2 + \lambda (a^T u - b)$ with non-negative multiplier $\lambda \ge 0$, setting the gradient $\nabla_u \mathcal{L} = u - u_{\text{nom}} + \lambda a$ to zero yields $u = u_{\text{nom}} - \lambda a$. Substituting this expression into the boundary equality $a^T (u_{\text{nom}} - \lambda a) = b$ produces $a^T u_{\text{nom}} - \lambda \|a\|^2 = b$, which resolves to $\lambda = (a^T u_{\text{nom}} - b) / \|a\|^2$. Substituting $\lambda$ back into the stationarity equation establishes the orthogonal projection:
-$$u^* = u_{\text{nom}} - \frac{\max(0, a^T u_{\text{nom}} - b)}{\|a\|^2} a.$$
+::: {#nbk-enforcement-cbf-qp-formulation .callout-notebook title="Minimal intervention through optimization"}
+**Objective**: Intervene only when necessary, and change the command as little as possible.
+
+The safety filter acts as a mathematical shield. It receives the unverified neural network proposal and checks it against the safety boundary constraints. If the proposal is safe, it passes through untouched. If the proposal would violate a boundary, the filter computes the smallest possible adjustment (the minimal intervention) that brings the command back into the safe zone, while preserving as much of the original intent as possible.
+
+Because this calculation takes the form of a convex quadratic program, it is guaranteed to find a single, optimal solution extremely quickly—often in a fraction of a millisecond on a dedicated microcontroller. 
+
+For a rigorous derivation of the closed-form projection and Lagrange multipliers used in the CBF-QP formulation, see @sec-appendix-control.
 :::
 
-Consider an analytical example for a two-axis planar mechanism where the learned policy proposes a nominal joint torque command $u_{\text{nom}} = [4.0, 3.0]^T\text{ N}\cdot\text{m}$. The barrier certificate enforces the half-space constraint $a^T u \le b$ with normal vector $a = [1.0, 2.0]^T$ and boundary limit $b = 5.0\text{ N}\cdot\text{m}$. Evaluating the nominal proposal yields $a^T u_{\text{nom}} = (1.0)(4.0) + (2.0)(3.0) = 10.0\text{ N}\cdot\text{m}$, which exceeds the admissible threshold by $5.0\text{ N}\cdot\text{m}$. The squared norm of the constraint vector is $\|a\|^2 = 1.0^2 + 2.0^2 = 5.0$. The Lagrange multiplier evaluates to $\lambda = (10.0 - 5.0) / 5.0 = 1.0$, producing a correction vector $\lambda a = [1.0, 2.0]^T\text{ N}\cdot\text{m}$. Subtracting this correction from the nominal input produces the filtered command $u^* = [4.0 - 1.0, 3.0 - 2.0]^T = [3.0, 1.0]^T\text{ N}\cdot\text{m}$. The magnitude of the required physical intervention is $\|u^* - u_{\text{nom}}\| = \sqrt{(-1.0)^2 + (-2.0)^2} = \sqrt{5.0} \approx 2.24\text{ N}\cdot\text{m}$. This orthogonal modification satisfies the boundary condition $a^T u^* = (1.0)(3.0) + (2.0)(1.0) = 5.0\text{ N}\cdot\text{m}$ while preserving the maximum possible component of the policy's intended effort.
+Consider a two-axis robotic arm where the learned policy requests a torque that pushes too far into an unsafe zone. Rather than completely zeroing out the commands or clipping each axis independently (which could cause a sudden, uncoordinated jerk), the enforcer mathematically calculates the shortest distance back to safety. It gently scales back the torque along the precise angle needed to graze the safety boundary. This guarantees the machine avoids the obstacle while preserving the maximum possible amount of the policy's original intent. For a step-by-step mathematical example of evaluating these vector projections, refer to @sec-appendix-control.
 
 @Fig-12-cbf-safety-filter works the minimal-intervention architecture simultaneously across state space $\mathcal{X}$ and control input space $\mathcal{U}$. In state space (panel a), unconstrained policy proposals vectoring across the barrier into the unsafe region are deflected tangentially along the forward-invariant safe set boundary $\partial \mathcal{C}$ inset by the tracking error margin $\delta_{\text{margin}}$. In control space (panel b), the enforcer orthogonally projects the unconstrained command $u_{\text{nom}}$ onto the linear half-space boundary $a^T u \le b$, preserving multi-axis dynamic coupling where heuristic scalar clipping fails to guarantee safety.
 
@@ -268,37 +257,12 @@ Beyond enforcing safety on each instantaneous cycle, the intervention vector $\D
 
 The theoretical guarantee of this minimal intervention projection is an imported result that holds under three specific engineering assumptions. First, the plant dynamics must remain affine in the control input over the control period. Second, the underlying current tracking loop must achieve sufficient closed-loop bandwidth ($10\text{ kHz}$ current regulation beneath the $1000\text{ Hz}$ torque command loop) so that commanded torque matches delivered motor torque. Third, the intersection of the barrier half-spaces and physical actuator saturation limits must remain non-empty ($\mathcal{U}_{\text{safe}} \neq \emptyset$).
 
-::: {#nbk-enforcement-bare-metal-cpu-cycle-budget-sub .callout-notebook title="Bare-metal CPU cycle budget for sub-millisecond CBF-QP solving"}
-**Question**: *Can a bare-metal $480\text{ MHz}$ microcontroller execute an active-set Quadratic Program safety filter inside a $1000\text{ Hz}$ ($1000\,\mu\text{s}$) control loop alongside Field-Oriented Control (FOC) current regulation without missing real-time timer deadlines?*
+::: {#nbk-enforcement-bare-metal-cpu-cycle-budget-sub .callout-notebook title="Can a microcontroller calculate this fast enough?"}
+**Question**: *Can a simple microcontroller execute complex safety optimization thousands of times a second without missing a deadline?*
 
-**Hardware Substrate**: A canonical hard real-time safety microcontroller operating at $f_{\text{CPU}} = 480\text{ MHz}$ with hardware double-precision Floating-Point Unit (FPU), $64\text{ KB}$ Data Tightly-Coupled Memory (DTCM) running at single-cycle access ($0$ wait states).
+**Verdict**: Yes. By avoiding complex operating systems and running directly on "bare-metal" hardware using dedicated, high-speed memory, the entire safety filter—including sensor reading, barrier evaluation, and the optimization solver—can execute in under a quarter of a millisecond ($<225\ \mu\text{s}$). 
 
-**1. Available Real-Time Clock Cycle Budget:**
-For a control loop period $T_{\text{loop}} = 1.0\text{ ms} = 1000\,\mu\text{s}$:
-$$N_{\text{total\_cycles}} = 480\text{ MHz} \times 1.0\text{ ms} = 480{,}000\text{ clock cycles}.$$
-
-**2. Sub-Task Execution Cycle Accounting (Worst-Case Analysis):**
-
-- **State Acquisition & Sensor Ingestion ($T_1$):** Read optical encoder SPI registers and 3-phase ADC current shunts via direct DTCM buffers:
-  $$N_1 \approx 12{,}000\text{ cycles} \quad (25.0\,\mu\text{s}).$$
-
-- **Lease Monotonicity & Tracking Contract Audit ($T_2$):** Verify CRC32, timestamp freshness ($\tau_{\text{lease}} \le 40\text{ ms}$), and position error $\|x - r\| \le \epsilon_{\text{track}}$:
-  $$N_2 \approx 4{,}800\text{ cycles} \quad (10.0\,\mu\text{s}).$$
-
-- **Lie Derivative & Constraint Half-Space Synthesis ($T_3$):** Evaluate $L_f h_k(x)$ and $L_g h_k(x)$ for $K = 6$ barrier certificates (joint position limits, velocity ceilings, and kinematic stopping boundaries):
-  $$N_3 \approx 28{,}800\text{ cycles} \quad (60.0\,\mu\text{s}).$$
-
-- **Active-Set QP Projection Solve ($T_4$):** Primal-Dual active-set solver in pre-allocated static SRAM with $m = 6$ control inputs, $K = 6$ constraints, taking at most $8$ active-set iterations (Cholesky factorizations $\mathcal{O}(m^3)$ and back-solves $\mathcal{O}(m^2)$):
-  $$N_4 \approx 57{,}600\text{ cycles} \quad (120.0\,\mu\text{s}).$$
-
-- **Simplex Boundary Arbitration & PWM Compare Register Reload ($T_5$):** Atomic write of $u^*$ to timer compare registers (`TIMx_CCR1`–`CCR6`):
-  $$N_5 \approx 4{,}800\text{ cycles} \quad (10.0\,\mu\text{s}).$$
-
-**3. Total Worst-Case Execution Time (WCET):**
-$$T_{\text{WCET}} = 25.0 + 10.0 + 60.0 + 120.0 + 10.0 = 225.0\,\mu\text{s} \quad (108{,}000\text{ cycles}).$$
-$$\text{CPU Utilization}_{\text{enforcer}} = \frac{108{,}000}{480{,}000} = 22.5\%.$$
-
-**Verdict**: The entire CBF-QP safety shield consumes only $225\,\mu\text{s}$ ($22.5\%$) of the $1\text{ ms}$ tick interval, leaving $775\,\mu\text{s}$ ($372{,}000\text{ cycles}$, or $77.5\%$ CPU headroom) for background $20\text{ kHz}$ current loop regulation, hardware watchdog heartbeat servicing, and telemetry serialization.
+This uses less than 25% of the processor's available time during a standard 1-millisecond control loop, leaving plenty of headroom for normal motor control operations. For a rigorous, clock-cycle-accurate worst-case execution time (WCET) breakdown, see @sec-appendix-systems.
 :::
 
 On a canonical heterogeneous dual-brain SoC, this safety shield executes inside the bare-metal $1000\text{ Hz}$ ($1000\,\mu\text{s}$) timer interrupt service routine on the real-time microcontroller core. The execution follows a strict deterministic sequence:
@@ -548,15 +512,15 @@ The mathematical guarantees of control barrier functions hold only as long as th
 
 [^fn-inc-therac-25]: **Therac 25**\index{Therac 25}: @leveson1993investigating demonstrated the fatal hazard of replacing physical hardware interlocks with software logic. Therac-25 suffered arithmetic counter overflows, missing mechanical turntable feedback, and shared UI/actuator execution threads, causing catastrophic radiation overdoses.
 
-[^fn-math-cbf-degree]: **CBF Degree**\index{CBF Degree}: Zeroing CBFs require relative degree one ($L_g h \neq 0$). For second-order systems where constraints govern position, filters construct velocity-dependent kinetic stopping boundaries ($h = p_{\max} - p - v^2/(2a_{\max})$) or High-Order CBFs to ensure control inputs appear in first derivatives.
+[^fn-math-cbf-degree]: **CBF Degree**\index{CBF Degree}: If a safety barrier only checks position but the motor commands torque (which affects acceleration), the math cannot see the danger until it is too late. The barrier must look at stopping distance—which involves velocity—so the safety filter can intervene in time. For an in-depth mathematical treatment of relative degree and High-Order CBFs, see @sec-appendix-control.
 
-[^fn-math-margin-loss]: **Margin Loss**\index{Margin Loss}: If steady-state resistance consumes an authority fraction $\alpha \in [0, 1)$, the effective deceleration becomes $a_{\text{eff}} = (1 - \alpha) a_{\text{nom}}$. The stopping distance expands to $d_{\text{stop}}(\alpha) = \frac{d_{\text{stop,nom}}}{1 - \alpha}$, leading to a loss of stopping margin of $\Delta d_{\text{stop}} = d_{\text{stop,nom}} \left( \frac{\alpha}{1 - \alpha} \right)$.
+[^fn-math-margin-loss]: **Margin Loss**\index{Margin Loss}: When an actuator uses much of its force just to overcome gravity or steady-state friction, it has less reserve power available for emergency braking. This causes the required stopping distance to expand significantly. For a detailed derivation of how saturated authority impacts stopping margins, see @sec-appendix-control.
 
-[^fn-math-nagumo-invariance]: **Nagumo Invariance**\index{Nagumo Invariance}: Nagumo (1942) established that dynamic systems remain within closed sets $\mathcal{C}$ if vector fields lie in Bouligand tangent cones at boundaries. @ames2014control synthesized Nagumo's theorem with Lyapunov methods, creating Control Barrier Functions (CBFs) that enforce invariance via convex affine control constraints.
+[^fn-math-nagumo-invariance]: **Nagumo Invariance**\index{Nagumo Invariance}: In essence, if a machine is currently safe and its trajectory always points along or into the safe region whenever it hits the boundary, it will never become unsafe. Control Barrier Functions turn this geometric idea into a simple rule for the motor. For the formal theorems on set invariance and tangent cones, see @sec-appendix-control.
 
-[^fn-math-stopping-dist]: **Stopping Dist**\index{Stopping Dist}: The minimum stopping distance is calculated as $d_{\text{stop}}(v) = v \cdot \tau_{\text{delay}} + \frac{v^2}{2 a_{\text{max}}} + \epsilon_{\text{track}}$, combining delay transport distance, kinematic braking distance, and tracking error.
+[^fn-math-stopping-dist]: **Stopping Dist**\index{Stopping Dist}: The total stopping distance must add up three physical realities: how far the machine travels before the brakes even engage (due to latency), how far it slides while braking (kinetic energy), and the maximum tracking error of the control loop. See @sec-appendix-control for the kinematic derivations.
 
-[^fn-math-tracking-error]: **Tracking Error**\index{Tracking Error}: In a closed-loop mechanical system with active stiffness $K$ subject to an unmodeled external disturbance force bounded by $d_{\text{max}}$, the maximum steady-state tracking error is given by $\epsilon_{\text{track}} = \frac{d_{\text{max}}}{K}$.
+[^fn-math-tracking-error]: **Tracking Error**\index{Tracking Error}: The stiffer the control loop, the tighter the tracking error under an external disturbance force. A weaker control loop will be deflected further by the same force. For the closed-loop stiffness equations, refer to @sec-appendix-control.
 
 [^fn-std-iec60204-sil3]: **IEC 60204-1 SIL 3**\index{IEC 60204-1 SIL 3}: IEC 60204-1 defines functional stops: Category 0 (Safe Torque Off, STO; immediate unpowered mechanical stop), Category 1 (Safe Stop 1, SS1; controlled deceleration then power removal), and Category 2 (Safe Stop 2, SS2; powered standstill). ISO 13849-1 PLe mandates dual-channel hardware safety paths.
 
