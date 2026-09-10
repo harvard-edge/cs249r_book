@@ -52,31 +52,6 @@ This temporal invariant governs machines across all Three Physical Machine Arche
 2. **Manipulators (Articulated Arms / High-Speed Delta Pickers)**: A 6-DOF industrial arm sweeping a $4.0\text{ kg}$ payload at $2.0\text{ m/s}$ relies on model-based feedforward torque $\boldsymbol{\tau}_{\mathrm{ff}} = \mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q})$. An unexpected missing reference forces low-level joint controllers to hold stale currents against gravity or trip mechanical spring brakes, producing shock torques that shear gearbox drive keys.
 3. **Process/Energy Systems (Thermal Extrusion / Chemical Batch Reactors / Gas Turbines)**: In polymer fused-filament 3D printing or continuous flow reactors, mass feed rates and heater thermal powers must obey strict continuous derivative bounds ($d\dot{m}/dt \le \dot{M}_{\max}$, $d\dot{Q}/dt \le \dot{Q}_{\max}$). A step discontinuity in commanded mass flow creates instantaneous nozzle melt-pressure surges ($\Delta P = 4.0\text{--}8.0\text{ MPa}$) that blow out barrel seals or fracture nozzle orifices.[^fn-proc-slew-limit]
 
-::: {#fig-autonomous-miles fig-env="figure" fig-pos="htb" fig-cap="**Autonomous Miles Scaling**: The exponential growth of real-world autonomous miles driven demands highly robust trajectory planning. As fleets scale and operate in more complex environments, the frequency and impact of inference latency gaps escalate, making deterministic continuous trajectory blending critical for safety."}
-
-```{python}
-#| echo: false
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-df = pd.read_csv("data/autonomous_miles.csv")
-sns.set_theme(style="whitegrid")
-fig, ax = plt.subplots(figsize=(8, 5))
-sns.lineplot(data=df, x="Year", y="Cumulative_Miles_Millions", marker="o", linewidth=2.5, color="#2c3e50", ax=ax)
-ax.set_title("Scaling of Autonomous Trajectory Planning in the Wild", fontsize=14, pad=15)
-ax.set_xlabel("Year", fontsize=12)
-ax.set_ylabel("Cumulative Miles (Millions)", fontsize=12)
-ax.set_yscale("log")
-ax.grid(True, which="both", ls="--", alpha=0.7)
-sns.despine()
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
 Above this hard real-time execution loop sits the deliberative Brain tier, hosted on a high-throughput Linux Microprocessor Unit (MPU) or embedded neural accelerator (such as a canonical heterogeneous dual-brain System-on-Chip (SoC) architecture). Here, learned policies—such as Action Chunking with Transformers (ACT) [@zhao2023learning] or Diffusion Policy [@chi2024diffusionpolicy]—process camera frames, point clouds, and tactile signals to propose reference paths. Unlike the deterministic, microsecond-accurate periodic cycle of the motor drives on the real-time MCU, policy inference on the Linux MPU exhibits variable execution time. A forward pass that completes in $35\text{ ms}$ under nominal conditions stretches to $120\text{ ms}$ when image compression buffers clear, and extends beyond $200\text{ ms}$ when operating system context switches, garbage collection pauses, or memory bus contention delay tensor execution on the neural coprocessor. The real-time tracking loop never waits for the upstream model to finish. It consumes whatever reference is resident in its execution buffer when its hardware timer fires, regardless of whether a fresh neural computation has arrived.
 
 When an architecture generates only a single control step ahead ($H = 1$), this timing mismatch immediately breaks physical control. If a policy predicts a motor action for $t + 10\text{ ms}$ but requires $25\text{ ms}$ of compute time to evaluate the network, the output arrives $15\text{ ms}$ after the target instant has already passed into history. The real-time tracking loop arrives at $t + 10\text{ ms}$ with an empty or expired reference buffer. If the low-level MCU controller holds the previous motor currents, the manipulator accelerates unguided under gravitational and external contact loads. If it clamps the mechanical brakes or zeros the drive torques, the sudden step change in acceleration exerts massive shock loads on the gearboxes and dislodges the workpiece. A single-step prediction contract implicitly assumes that computation is instantaneous, an assumption that the physical execution pipeline violates on every single cycle.

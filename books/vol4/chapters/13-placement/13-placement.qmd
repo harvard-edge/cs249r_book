@@ -133,57 +133,6 @@ Each claimant imposes a demand that can be derived from its transfer size per ev
 
 Arithmetic intensity, defined as the ratio of arithmetic operations to memory bytes transferred, indicates whether a computational routine is bounded by execution units or by memory bandwidth during steady-state execution. For a convolution or dense matrix multiplication on the proposal path, an arithmetic intensity of $120\text{ FLOP/byte}$ indicates that arithmetic units will be fully occupied once data resides in local cache or static memory. However, during the initial phase where weights are transferred from dynamic memory, the operational arithmetic intensity drops to zero, converting the accelerator into a high-priority direct memory access engine that saturates the memory bus. Arithmetic intensity reveals whether a workload can hide memory transfer latency behind arithmetic work in isolation, but it provides no information about queue contention, transfer priority, burst duration, or which request waits when two paths access the bus simultaneously.
 
-::: {#fig-placement-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**The Accelerator Memory Wall**: As neural accelerator peak compute scales exponentially, memory bandwidth scales at a much slower rate. This divergence forces physical AI architectures to execute workloads with increasingly high arithmetic intensity, rendering simple real-time reflexes or low-intensity proposals completely memory-bound. This physical contention is the primary driver of execution delay on shared memory buses."}
-
-```{python}
-#| echo: false
-import pandas as pd
-import matplotlib.pyplot as plt
-
-plt.style.use('seaborn-v0_8-whitegrid')
-data = pd.read_csv("data/gpu_memory_wall.csv")
-fig, ax1 = plt.subplots(figsize=(8, 5))
-
-color1 = '#1f77b4'
-color2 = '#d62728'
-
-ax1.set_xlabel('Year', fontsize=10, weight='bold')
-ax1.set_ylabel('Peak Compute (Dense FP16/BF16 TFLOPS)', color=color1, fontsize=10, weight='bold')
-ax1.plot(data['Year'], data['Compute_TFLOPS'], marker='o', color=color1, linewidth=2, label='Compute (TFLOPS)')
-ax1.tick_params(axis='y', labelcolor=color1)
-ax1.set_yscale('log')
-ax1.grid(True, which='both', ls='--', alpha=0.5)
-
-ax2 = ax1.twinx()  
-ax2.set_ylabel('Memory Bandwidth (GB/s)', color=color2, fontsize=10, weight='bold')
-ax2.plot(data['Year'], data['Memory_Bandwidth_GBs'], marker='s', color=color2, linewidth=2, linestyle='--', label='Memory Bandwidth (GB/s)')
-ax2.tick_params(axis='y', labelcolor=color2)
-ax2.set_yscale('log')
-ax2.grid(False)
-
-for idx, row in data.iterrows():
-    ax1.annotate(row['Accelerator'], 
-                 (row['Year'], row['Compute_TFLOPS']),
-                 textcoords="offset points", 
-                 xytext=(0,10), 
-                 ha='center', fontsize=9, weight='bold')
-
-for idx, row in data.iterrows():
-    ai = row['Compute_TFLOPS'] * 1000 / row['Memory_Bandwidth_GBs']
-    ax1.annotate(f"{ai:.0f} FLOP/B", 
-                 (row['Year'], row['Compute_TFLOPS']),
-                 textcoords="offset points", 
-                 xytext=(0,-15), 
-                 ha='center', fontsize=8, color='black')
-
-plt.title('The Accelerator Memory Wall: Compute vs. Memory Bandwidth Scaling', fontsize=12, weight='bold')
-fig.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
 The latency experienced by the enforcement path depends directly on the longest uninterrupted burst permitted on the shared interconnect and the internal banking dynamics of the DRAM subsystem (@fig-13-soc-contention-droop a). In this analytical system, the neural accelerator transfers weights in $256\text{ kB}$ tiles. Across a $12.8\text{ GB/s}$ interface, an uninterrupted $256\text{ kB}$ burst occupies the physical bus for $20.0\,\mu\text{s}$. When the on-chip interconnect uses packet-atomic non-preemptive arbitration (even with AMBA AXI Quality-of-Service `AxQOS` priority tags), an enforcement request that arrives immediately after a tile transfer begins must wait the full $20.0\,\mu\text{s}$ transfer duration. Contention is further compounded inside the dynamic memory controller. Dynamic random-access memory is physically organized into independent banks, where each bank contains a two-dimensional array of storage cells managed by a single row buffer. When an access targets a row already loaded into the buffer (a *row-buffer hit*), data is transferred in column access time ($t_{\text{CAS}} \approx 14\text{ ns}$). If an access targets a different row in the same bank (a *bank conflict* or *row-buffer miss*), the controller must first restore and close the open row by precharging the bank ($t_{\text{RP}} \approx 14\text{ ns}$), activate the newly requested row ($t_{\text{RCD}} \approx 14\text{ ns}$), and execute the column read ($t_{\text{CAS}} \approx 14\text{ ns}$), tripling baseline access latency.
 
 Crucially, modern DRAM memory controllers employ First-Ready First-Come-First-Served (FR-FCFS) scheduling algorithms designed to maximize aggregate bus utilization by prioritizing row-buffer hits over raw transaction arrival order. When the neural engine streams a continuous matrix tile, it holds open active row buffers across multiple DRAM banks. If a high-priority real-time safety read targeting a closed row arrives from the MCU, the DRAM controller repeatedly reorders queued transactions to prioritize remaining hits from the neural stream. If the controller queue contains a pending $64\text{ kB}$ sensor direct memory access burst ($5.0\,\mu\text{s}$) and a $32\text{ kB}$ logging burst ($2.5\,\mu\text{s}$), plus multiple bank conflict precharge cycles, total queuing delay reaches $27.6\,\mu\text{s}$. If the enforcement routine has a total compute allocation of $100\,\mu\text{s}$ within a $1.0\text{ ms}$ physical deadline and was provisioned with $20.0\,\mu\text{s}$ of timing slack, this $27.6\,\mu\text{s}$ memory stall consumes the entire margin and delays the valve closing command by $7.6\,\mu\text{s}$, causing an actuation deadline violation.
