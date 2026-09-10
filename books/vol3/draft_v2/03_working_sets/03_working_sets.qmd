@@ -77,6 +77,8 @@ As a result, autoregressive decode is severely memory-bandwidth bound. The per-t
 
 ## Denning's Working Set Theory {#sec-vol3-working-sets-denning}
 
+![**Figure 3.1: Dynamics of Context Working Sets and Locality**](images/svg/context_working_set_dynamics.svg){#fig-vol3-context-working-set-dynamics}
+
 When an operating system runs a database query, it does not load the entire terabyte database into physical RAM; it loads only the active pages required for the current join operation. In 1968, Peter J. Denning established the Working Set Model for program behavior in virtual memory operating systems (@denning1968) to formalize this dynamic. Denning recognized that software execution is non-uniform: programs exhibit intense temporal and spatial locality, concentrating memory accesses within a compact subset of pages over any interval $\tau$.
 
 Denning defined the working set as the active subset of memory pages referenced by a process within a recent time window. His core insight was that treating memory as a flat, uniform space is an architectural fallacy. Programs exhibit phased execution—looping over tight data structures before migrating to new phases. By continuously tracking and migrating only the "hot" subset of pages into physical RAM and relegating "cold" state to disk, operating systems decouple functional program size from physical hardware constraints.
@@ -115,6 +117,8 @@ In classical operating systems, thrashing occurs when active working sets exceed
 If an engineer attempts to prevent thrashing by simply truncating the oldest tokens from a sliding 4,000-token window, the model's perplexity will instantaneously explode, causing it to output gibberish. Early systems attempted this simple sliding-window truncation to bound the KV cache, but auto-regressive transformers exhibit catastrophic degradation under such naive windowing.
 
 ### The Attention Sink Phenomenon
+
+![**Figure 3.2: Attention Sinks and Streaming Token Eviction Mechanics**](images/svg/attention_sinks_and_eviction.svg){#fig-vol3-attention-sinks-eviction}
 
 @xiao2024streamingllm discovered that when tokens outside a local window $W$ are dropped from the KV cache, model perplexity does not degrade smoothly. Instead, the moment the initial token ($t=0$, typically `[BOS]`) is evicted, perplexity explodes by several orders of magnitude ($>10^3$), rendering generated outputs nonsensical.
 
@@ -195,25 +199,9 @@ When an agent attempts a complex refactor spanning dozens of files and hundreds 
 
 ### Dual-Pathway Compaction Architecture
 
-Production runtimes route context through two complementary compaction engines:
+![**Figure 3.3: Dual-Pathway Semantic Compaction Pipeline**](images/svg/context_compaction_pipeline.svg){#fig-vol3-context-compaction-pipeline}
 
-```text
-Unmanaged Trajectory ──► [ Compaction Trigger: Total Tokens > 75% Budget ]
-                                │
-       ┌────────────────────────┴────────────────────────┐
-       ▼                                                 ▼
-[ Pathway A: Structural Pruning ]               [ Pathway B: State Synthesis ]
-- Head/Tail output slicing                      - Logical epoch partitioning
-- Unified Git Diff delta encoding               - Structured State Ledger JSON
-- Strip inert execution noise                   - Track hypotheses & verified facts
-       │                                                 │
-       └────────────────────────┬────────────────────────┘
-                                ▼
-                 [ Invariant Enclosure Gate ]
-                 - Anchor raw user constraints
-                 - Enforce deterministic test invariants
-                 - Reject unverified semantic drift
-```
+Production runtimes route context through two complementary compaction engines:
 
 #### Pathway A: Deterministic Structural Pruning
 - **Head/Tail Output Slicing:** When tool commands output massive text streams (e.g., test suites emitting 5,000 lines), the engine extracts the initial 25 lines (initialization and command context), the trailing 25 lines (summary status and exit codes), and regex-matched failure blocks (`grep -E 'ERROR|FAIL|Traceback'`), inserting an explicit truncation indicator: `[... 4,950 lines omitted; exit status 1 ...]`.
