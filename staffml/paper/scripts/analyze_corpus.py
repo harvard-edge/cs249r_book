@@ -86,6 +86,15 @@ def resolve_corpus_path() -> Path:
     )
 
 
+def _repo_relative(path: Path) -> str:
+    """Path relative to the repository root, so stats files carry no home directory."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(SCRIPTS_DIR.resolve().parents[2]))
+    except ValueError:
+        return str(resolved)
+
+
 def build_meta(
     data_path: Path,
     source_kind: str,
@@ -103,7 +112,7 @@ def build_meta(
     }
     m["data"] = {
         **_input_fingerprint(data_path),
-        "resolved_path": str(data_path.resolve()),
+        "resolved_path": _repo_relative(data_path),
     }
     if source_kind == "legacy_json" and json_chains_path and json_chains_path.exists():
         m["chains_registry"] = _input_fingerprint(json_chains_path)
