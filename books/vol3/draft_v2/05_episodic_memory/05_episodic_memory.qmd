@@ -16,9 +16,9 @@ engine: markdown
 
 In cognitive science, Endel Tulving famously established the taxonomy distinguishing *semantic memory* (generalized, timeless knowledge about concepts and facts) from *episodic memory* (temporally situated, causally linked recollections of experienced events) [@tulving1972episodic]. When translated into the systems architecture of autonomous AI agents, this distinction defines the boundary between model weights and external storage:
 
-1. **Parametric Memory (Semantic):** The static, frozen weights of the underlying foundation model ($\theta$), acquired through expensive pretraining and post-training runs (@sec-vol3-sft). Parametric memory contains generalized reasoning heuristics, programming syntax, and common-sense knowledge, but remains strictly immutable during inference.
-2. **Volatile Context Memory (Working Set):** The active prompt buffer and its corresponding Key-Value (KV) cache mapped into GPU high-bandwidth memory (HBM) and host DRAM (@sec-vol3-virtual-memory). Context memory acts as the agent's CPU register file and L1 cache—ultra-low latency, highly scarce, and fundamentally volatile.
-3. **Non-Volatile Episodic Memory (Persistent Storage):** External, append-only, indexed secondary storage that captures the agent's historical trajectory epochs, raw tool execution traces, environmental diffs, and intermediate reflections.
+1. **Parametric Memory (Semantic)**\index{Parametric Memory (Semantic)}: The static, frozen weights of the underlying foundation model ($	heta$) [@bommasani2021opportunities], acquired through expensive pretraining and post-training runs (@sec-vol3-sft). Parametric memory contains generalized reasoning heuristics, programming syntax, and common-sense knowledge, but remains strictly immutable during inference.
+2. **Volatile Context Memory (Working Set)**\index{Volatile Context Memory (Working Set)}: The active prompt buffer and its corresponding Key-Value (KV) cache mapped into GPU high-bandwidth memory (HBM) and host DRAM (@sec-vol3-virtual-memory). Context memory acts as the agent's CPU register file and L1 cache—ultra-low latency, highly scarce, and fundamentally volatile.
+3. **Non-Volatile Episodic Memory (Persistent Storage)**\index{Non-Volatile Episodic Memory (Persistent Storage)}: External, append-only, indexed secondary storage that captures the agent's historical trajectory epochs, raw tool execution traces, environmental diffs, and intermediate reflections.
 
 @Fig-vol3-episodic-memory-stack maps this functional progression to the agent hardware and storage hierarchy.
 
@@ -47,10 +47,10 @@ A critical systems failure occurs when an agent crashes mid-trajectory—due to 
 
 To prevent this state divergence, production agent runtimes borrow the foundational principles of database transactions formalized by Jim Gray [@gray1981transaction]:
 
-- **Atomicity:** An agent's tool execution and its corresponding state update must either complete fully or leave the environment unmodified.
-- **Consistency:** An observation appended to episodic memory must satisfy environmental validation invariants (e.g., non-negative execution returncodes, well-formed JSON schema).
-- **Isolation:** Concurrent agent threads operating on shared repositories must not read uncommitted or partial tool outputs from peer agents.
-- **Durability:** Once an action-observation tuple $(a_t, o_t)$ is logged to episodic memory, it must survive catastrophic crashes of the runtime host.
+- **Atomicity**\index{Atomicity}: An agent's tool execution and its corresponding state update must either complete fully or leave the environment unmodified.
+- **Consistency**\index{Consistency}: An observation appended to episodic memory must satisfy environmental validation invariants (e.g., non-negative execution returncodes, well-formed JSON schema).
+- **Isolation**\index{Isolation}: Concurrent agent threads operating on shared repositories must not read uncommitted or partial tool outputs from peer agents.
+- **Durability**\index{Durability}: Once an action-observation tuple $(a_t, o_t)$ is logged to episodic memory, it must survive catastrophic crashes of the runtime host.
 
 ### The Write-Ahead Log (WAL) Invariant
 
@@ -72,7 +72,7 @@ As shown in @fig-vol3-episodic-wal-flow, the agent runtime must never dispatch a
 
 ### Agent Sleep Lifecycle and Rehydration
 
-Persistent episodic memory enables the **Agent Sleep Lifecycle**—an operational design pattern essential for managing compute economics:
+Persistent episodic memory enables the **Agent Sleep Lifecycle**\index{Agent Sleep Lifecycle}—an operational design pattern essential for managing compute economics:
 
 1. **Eviction / Sleep Transition:** When an agent waits for asynchronous external events (such as human approval, long-running CI/CD builds, or remote batch jobs), maintaining its full KV cache in active GPU HBM costs dollars per hour in idle capacity. The runtime serializes the working context:
    - The token sequence and active system prompts are dumped to the episodic event ledger.
@@ -97,41 +97,44 @@ Persistent episodic memory enables the **Agent Sleep Lifecycle**—an operationa
 
 ## Latent Space Indexing {#sec-vol3-episodic-latent-space}
 
-The primary mechanism for querying unstructured episodic text is dense vector retrieval, commonly known as Retrieval-Augmented Generation (RAG). However, treating RAG as an ad-hoc pipeline of text splitting and third-party API calls obscures the deep systems engineering required to operate low-latency, high-recall retrieval over millions of historical trajectory tokens. Latent space indexing is fundamentally a problem of **high-dimensional metric space topology and approximate nearest neighbor search** [@deerwester1990indexing].
+The primary mechanism for querying unstructured episodic text is dense vector retrieval, commonly known as Retrieval-Augmented Generation (RAG) [@lewis2020retrieval]. However, treating RAG as an ad-hoc pipeline of text splitting and third-party API calls obscures the deep systems engineering required to operate low-latency, high-recall retrieval over millions of historical trajectory tokens. Latent space indexing is fundamentally a problem of **high-dimensional metric space topology and approximate nearest neighbor search** [@deerwester1990indexing].
 
 ### High-Dimensional Metric Topologies
 
-In an episodic store, unstructured observation strings $x \in \mathcal{X}$ (such as terminal outputs, compiler errors, and reasoning reflections) are mapped into a dense continuous vector space by an embedding encoder $f_\theta: \mathcal{X} \to \mathbb{R}^D$ as defined in @eq-vol3-episodic-unit-norm:
+In an episodic store, unstructured observation strings $x \in \mathcal{X}$ (such as terminal outputs, compiler errors, and reasoning reflections) are mapped into a dense continuous vector space by an embedding encoder.
 
-$$\mathbf{v}_i = \frac{f_\theta(x_i)}{\|f_\theta(x_i)\|_2}, \quad \|\mathbf{v}_i\|_2 = 1 {#eq-vol3-episodic-unit-norm}$$
-
-where $D$ typically ranges from 768 to 3072 dimensions. Because vectors are normalized to unit length on the unit hypersphere $\mathbb{S}^{D-1}$, the cosine similarity between a query $\mathbf{q} = f_\theta(q)$ and a stored document $\mathbf{v}_i$ simplifies to the standard inner product (@eq-vol3-episodic-inner-product):
-
-$$S_C(\mathbf{q}, \mathbf{v}_i) = \frac{\mathbf{q} \cdot \mathbf{v}_i}{\|\mathbf{q}\|_2 \|\mathbf{v}_i\|_2} = \mathbf{q}^\top \mathbf{v}_i = 1 - \frac{1}{2}\|\mathbf{q} - \mathbf{v}_i\|_2^2 {#eq-vol3-episodic-inner-product}$$
-
-Under unit normalization, maximizing cosine similarity is mathematically identical to minimizing Euclidean ($L_2$) distance.
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+Vectors are typically normalized to unit length, meaning that cosine similarity simplifies to measuring the direct distance between points in this space. Under this geometry, maximizing semantic similarity is computationally identical to minimizing the physical distance between data points.
 
 ### The Curse of Dimensionality in Latent Space
 
-Operating nearest neighbor search over continuous embeddings in $D \ge 1024$ dimensions encounters severe mathematical bottlenecks known collectively as the **Curse of Dimensionality** [@beyer1999nearest]:
+Operating nearest neighbor search over continuous embeddings in $D \ge 1024$ dimensions encounters severe mathematical bottlenecks known collectively as the **Curse of Dimensionality**\index{Curse of Dimensionality} [@beyer1999nearest]:
 
 1. **Concentration of Measure:** In high-dimensional spaces, the volume of a hypersphere of radius $r$ scales as $V_D(r) \propto r^D$. As $D \to \infty$, the volume of the hypersphere is concentrated entirely in an infinitesimally thin shell near the surface.
-2. **Loss of Distance Contrast:** For independent and identically distributed (i.i.d.) random vectors drawn from a continuous distribution, the ratio between the distance to the nearest neighbor and the distance to the farthest neighbor approaches 1 as dimension increases (@eq-vol3-episodic-contrast-ratio):
+2. **Loss of Distance Contrast:** For independent and identically distributed (i.i.d.) random vectors drawn from a continuous distribution, the ratio between the distance to the nearest neighbor and the distance to the farthest neighbor approaches 1 as dimension increases.
 
-$$\lim_{D \to \infty} \frac{\max_i \|\mathbf{q} - \mathbf{v}_i\| - \min_i \|\mathbf{q} - \mathbf{v}_i\|}{\min_i \|\mathbf{q} - \mathbf{v}_i\|} \to 0 {#eq-vol3-episodic-contrast-ratio}$$
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
-This concentration phenomena means that in raw high-dimensional spaces, classical spatial partitioning data structures—such as $k$-d trees and $R$-trees—degrade to $O(N)$ brute-force linear scans. To perform sub-millisecond retrieval across millions of historical memories, agent systems must employ **Approximate Nearest Neighbor (ANN)** indexing.
+This concentration phenomenon means that in raw high-dimensional spaces, classical spatial partitioning data structures—such as $k$-d trees [@bentley1975multidimensional] and $R$-trees [@guttman1984rtrees]—degrade to $O(N)$ brute-force linear scans. To perform sub-millisecond retrieval across millions of historical memories, agent systems must employ **Approximate Nearest Neighbor (ANN)**\index{Approximate Nearest Neighbor (ANN)} indexing.
 
 ### Inverted File Product Quantization (IVF-PQ) and ADC
 
-For memory-constrained episodic runtimes, **Inverted File Product Quantization (IVF-PQ)** [@jegou2011product] provides extreme compression and accelerated search:
+For memory-constrained episodic runtimes, **Inverted File Product Quantization (IVF-PQ)**\index{Inverted File Product Quantization (IVF-PQ)} [@jegou2011product] provides extreme compression and accelerated search:
 
 1. **Inverted File (IVF) Coarse Partitioning:** The vector space is partitioned into $K_{\text{ivf}}$ Voronoi cells using $k$-means clustering over centroids $\{\mathbf{c}_1, \dots, \mathbf{c}_{K_{\text{ivf}}}\}$. At query time, the search engine computes distances only to the nearest $n_{\text{probe}} \ll K_{\text{ivf}}$ centroids, pruning the search space by 95 to 99 percent.
-2. **Product Quantization (PQ):** The residual vector $\mathbf{r} = \mathbf{v} - \mathbf{c}_k$ is split into $M$ orthogonal sub-vectors of dimension $D/M$:
-   $$\mathbf{r} = [\mathbf{r}^{(1)}, \mathbf{r}^{(2)}, \dots, \mathbf{r}^{(M)}], \quad \mathbf{r}^{(m)} \in \mathbb{R}^{D/M}$$
+2. **Product Quantization (PQ):** The residual vector is split into orthogonal sub-vectors.
+   <!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
    Each sub-vector space is quantized using a separate codebook of $K_{\text{pq}} = 256$ centroids (fitting into a single 8-bit byte). A 1536-dimensional FP32 vector (requiring 6,144 bytes) is compressed into $M$ bytes. For $M=64$, this achieves a **$96\times$ compression factor**, enabling tens of millions of episodic memories to reside permanently in host RAM.
 
-3. **Asymmetric Distance Computation (ADC):** At search time, the query vector $\mathbf{q}$ is *not* quantized. The runtime precomputes an $M \times 256$ distance lookup table storing $\|\mathbf{q}^{(m)} - \mathbf{c}_j^{(m)}\|^2$, evaluating the distance according to @eq-vol3-episodic-adc:
+3. **Asymmetric Distance Computation (ADC)**\index{Asymmetric Distance Computation (ADC)}: At search time, the query vector $\mathbf{q}$ is *not* quantized. The runtime precomputes a distance lookup table.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+Evaluating this distance requires only simple table lookups|The runtime precomputes a distance lookup table.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+Evaluating this distance requires only simple table lookups|^2$, evaluating the distance according to @eq-vol3-episodic-adc:
 
 $$d_{\text{ADC}}(\mathbf{q}, \mathbf{v}) = \sum_{m=1}^M \|\mathbf{q}^{(m)} - \mathbf{c}_{k_m}^{(m)}\|^2 {#eq-vol3-episodic-adc}$$
 
@@ -147,9 +150,9 @@ The structural architecture of IVF-PQ and Asymmetric Distance Computation (@fig-
 
 ### Graph-Based Proximity Navigation (HNSW)
 
-Where IVF-PQ optimizes memory footprint through lossy compression, **Hierarchical Navigable Small World (HNSW)** graphs optimize query latency and recall by constructing multi-layer geometric proximity graphs [@malkov2020hnsw].
+Where IVF-PQ optimizes memory footprint through lossy compression, **Hierarchical Navigable Small World (HNSW)**\index{Hierarchical Navigable Small World (HNSW)} graphs optimize query latency and recall by constructing multi-layer geometric proximity graphs [@malkov2020hnsw].
 
-Inspired by skip-lists, an HNSW index builds a hierarchy of graph layers $\ell \in \{0, 1, \dots, L_{\max}\}$. Layer 0 contains every stored vector as a vertex, with edges connecting nearest neighbors according to a modified Delaunay graph heuristic. Each superior layer contains an exponentially decaying fraction of vertices ($p = 1/\ln(M)$), forming long-range "highway" connections across the metric space.
+Inspired by skip-lists [@pugh1990skip], an HNSW index builds a hierarchy of graph layers $\ell \in \{0, 1, \dots, L_{\max}\}$. Layer 0 contains every stored vector as a vertex, with edges connecting nearest neighbors according to a modified Delaunay graph heuristic. Each superior layer contains an exponentially decaying fraction of vertices ($p = 1/\ln(M)$), forming long-range "highway" connections across the metric space.
 
 @Fig-vol3-episodic-hnsw details the hierarchical skip-list structure of HNSW, tracing a query trajectory through sparse routing layers to dense local neighborhoods.
 
@@ -200,15 +203,15 @@ Selecting an appropriate approximate nearest neighbor indexing scheme requires n
 | **IVF-Flat (Voronoi Partitioning)**    | Inverted postings lists by centroid          | $\mathcal{O}(n_{\text{probe}} \cdot D + \frac{n_{\text{probe}} N D}{K_{\text{ivf}}})$         |           $6,148\text{ B}$           | $85\text{--}95\%$ |       Moderate ($k$-means clustering)       |   Append to Voronoi list; periodic re-cluster    | Medium-scale episodic trajectory stores ($10^4 \le N \le 10^6$)  |
 | **IVF-PQ (Product Quantization)**      | Voronoi inverted lists + $M$ byte codes      | $\mathcal{O}(n_{\text{probe}} \cdot D + \frac{n_{\text{probe}} N M}{K_{\text{ivf}}})$ via ADC |        $64\text{ B}$ ($M=64$)        | $75\text{--}90\%$ |     High ($k$-means + $M$ sub-codebooks)    | Requires static codebooks; drift degrades recall | Massive multi-session long-term archives ($N > 10^7$)            |
 | **HNSW (Proximity Skip-Graph)**        | Multi-layer geometric Delaunay graph         | $\mathcal{O}(\log N)$ greedy routing                                                          | $6,144\text{ B} + 8\text{ KB}$ edges | $95\text{--}99\%$ | High ($\mathcal{O}(N \log N)$ beam inserts) | Concurrent lock-free inserts; costly edge repair | Low-latency working episodic memory tier ($10^5 \le N \le 10^7$) |
-| **HNSW-PQ / ScaNN (Hybrid Quantized)** | Skip-graph topology over quantized residuals | $\mathcal{O}(\log N)$ hops + SIMD ADC tables                                                  |      $128\text{--}256\text{ B}$      | $90\text{--}96\%$ |   Very High (joint graph & codebook build)  | Poor (re-indexing required on structural drift)  | Billion-scale distributed agent swarms & shared fleet stores     |
+| **HNSW-PQ / ScaNN (Hybrid Quantized)** [@guo2020accelerating] | Skip-graph topology over quantized residuals | $\mathcal{O}(\log N)$ hops + SIMD ADC tables                                                  |      $128\text{--}256\text{ B}$      | $90\text{--}96\%$ |   Very High (joint graph & codebook build)  | Poor (re-indexing required on structural drift)  | Billion-scale distributed agent swarms & shared fleet stores     |
 
 : **Approximate Nearest Neighbor (ANN) Indexing Topologies**: Structural mechanisms, computational complexity, memory footprints, search accuracy, and operational trade-offs across vector indexing architectures for agent episodic storage. {#tbl-vol3-episodic-ann-comparison tbl-colwidths="[13,15,14,11,9,11,12,15]"}
 
 ### Polarity Blindness and the Limits of Cosine Geometry
 
-Despite their popularity, dense vector stores possess an architectural blind spot that frequently derails autonomous agent reasoning: **Polarity Blindness**.
+Despite their popularity, dense vector stores possess an architectural blind spot that frequently derails autonomous agent reasoning: **Polarity Blindness**\index{Polarity Blindness}.
 
-Because standard embedding models are trained using contrastive objective functions (such as InfoNCE) designed to cluster semantically related documents, sentences that express identical subjects but opposite logical truths often produce cosine similarities exceeding 0.90:
+Because standard embedding models are trained using contrastive objective functions (such as InfoNCE [@oord2018representation]) designed to cluster semantically related documents, sentences that express identical subjects but opposite logical truths often produce cosine similarities exceeding 0.90:
 
 ```python
 # Listing 5.1: Demonstration of Polarity Blindness in Dense Embeddings
@@ -232,11 +235,11 @@ Dense latent spaces capture **thematic topicality**, not **propositional truth**
 
 When an agent operates in structured, deterministic environments—such as large codebases, cloud infrastructure topologies, or microservice meshes—unstructured vector chunking fails. Splitting a 50,000-line software repository into arbitrary 500-token chunks severs function definitions from call sites, discards type signatures, and obscures class inheritance hierarchies.
 
-To provide high-fidelity episodic memory over deterministic environments, systems construct **Structural Knowledge Graphs** grounded in Abstract Syntax Trees (ASTs) [@page1999pagerank].
+To provide high-fidelity episodic memory over deterministic environments, systems construct **Structural Knowledge Graphs**\index{Structural Knowledge Graphs} grounded in Abstract Syntax Trees (ASTs) [@page1999pagerank].
 
 ### Tree-Sitter AST Skeletonization
 
-The foundation of code-aware episodic memory is grammar-based structural parsing via **Tree-Sitter**—an incremental, concrete syntax tree parser generator.
+The foundation of code-aware episodic memory is grammar-based structural parsing via **Tree-Sitter**\index{Tree-Sitter}—an incremental, concrete syntax tree parser generator.
 
 Instead of treating source code as unstructured text, the episodic indexing engine compiles code files into syntax trees. It then applies structural extraction queries to prune function bodies, retaining only the interface skeleton:
 
@@ -248,7 +251,7 @@ This structural pruning discards 90 to 95 percent of raw code tokens while prese
 
 @Fig-vol3-episodic-ast-repomap traces the deterministic transformation from concrete syntax trees to skeletonized symbol interfaces and directed relational graph edges.
 
-::: {#fig-vol3-episodic-ast-repomap fig-env="figure" fig-pos="htb" fig-cap="**Tree-Sitter Concrete Syntax Tree Skeletonization and Dependency Graph**: Concrete syntax trees parsed via incremental Tree-Sitter grammars discard function and method bodies (achieving 95 percent token pruning) while retaining typed symbol signatures. Extracted symbols instantiate graph vertices $V$, while reference lookups instantiate typed dependency edges $E$ for downstream structural ranking. Source: Conceptualized by author based on Tree-Sitter grammar parsing and Aider repomap architectures." fig-alt="Diagram illustrating full source code parsed into a concrete syntax tree, pruned to an interface skeleton by discarding function bodies, and mapped into a directed symbol dependency graph with CALLS and IMPORTS edges."}
+::: {#fig-vol3-episodic-ast-repomap fig-env="figure" fig-pos="htb" fig-cap="**Tree-Sitter Concrete Syntax Tree Skeletonization and Dependency Graph**: Concrete syntax trees parsed via incremental Tree-Sitter grammars discard function and method bodies (achieving 95 percent token pruning) while retaining typed symbol signatures. Extracted symbols instantiate graph vertices $V$, while reference lookups instantiate typed dependency edges $E$ for downstream structural ranking. Source: Conceptualized by author based on Tree-Sitter grammar parsing and Aider repomap architectures [@gauthier2023aider]." fig-alt="Diagram illustrating full source code parsed into a concrete syntax tree, pruned to an interface skeleton by discarding function bodies, and mapped into a directed symbol dependency graph with CALLS and IMPORTS edges."}
 
 <!-- MERMAID SOURCE PRESERVATION
 flowchart TD
@@ -274,7 +277,7 @@ flowchart TD
 
 ### Symbol Dependency Graphs and Personalized PageRank (PPR)
 
-From the extracted AST skeletons, the runtime constructs a directed **Symbol Dependency Graph** $G = (V, E)$:
+From the extracted AST skeletons, the runtime constructs a directed **Symbol Dependency Graph**\index{Symbol Dependency Graph} $G = (V, E)$:
 
 - **Vertices ($V$):** Every uniquely qualified symbol defined in the codebase (e.g., `services.auth.TokenValidator.verify_jwt`).
 - **Edges ($E$):** Directed relationships between symbols:
@@ -284,111 +287,22 @@ From the extracted AST skeletons, the runtime constructs a directed **Symbol Dep
 
 When an agent is tasked with modifying a specific file or fixing a localized bug, simply injecting the target file is insufficient; the model must also understand the upstream callers and downstream dependencies. However, injecting the entire repository graph into the prompt overflows the context budget.
 
-To solve this, the runtime executes **Personalized PageRank (PPR)** over the symbol dependency graph $G$ according to @eq-vol3-episodic-ppr [@page1999pagerank]. Standard PageRank measures global node importance based on random walks. Personalized PageRank biases the random walk teleport probability toward a specific set of **seed vertices** $\mathcal{S} \subset V$ (for example, the files or symbols currently open or edited by the agent):
+To solve this, the runtime executes **Personalized PageRank (PPR)**\index{Personalized PageRank (PPR)} over the symbol dependency graph.
 
-$$\mathbf{\pi} = (1 - d)\mathbf{p} + d \mathbf{W}\mathbf{\pi} {#eq-vol3-episodic-ppr}$$
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
-where:
+Standard PageRank measures global node importance based on random walks. Personalized PageRank biases the random walk probability toward a specific set of seed vertices (e.g., the files or symbols currently open or edited by the agent). Symbols with high PageRank probability represent the structural neighborhood most critical to the agent\'s current focus. The runtime sorts symbols by this relevance score and greedily packs their Tree-Sitter skeletons into the context window until the designated repomap token budget is filled.
 
-- $\mathbf{\pi} \in \mathbb{R}^{|V|}$ is the stationary probability distribution vector over all symbols.
-- $d \in (0, 1)$ is the damping factor (typically $d = 0.85$).
-- $\mathbf{W} = \mathbf{D}^{-1}\mathbf{A}$ is the row-stochastic transition matrix derived from adjacency matrix $\mathbf{A}$.
-- $\mathbf{p} \in \mathbb{R}^{|V|}$ is the personalization teleport vector, defined as:
-  $$p_i = \begin{cases} \frac{1}{|\mathcal{S}|}, & \text{if } v_i \in \mathcal{S} \\ 0, & \text{otherwise} \end{cases}$$
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+Implementing this repomap construction involves executing the PageRank iteration over potentially massive symbol dependency graphs, followed by a greedy knapsack packing algorithm to respect strict context window limits.
 
-Symbols with high PageRank probability $\pi_i$ represent the structural neighborhood most critical to the agent's current focus. The runtime sorts symbols by $\pi_i$ and greedily packs their Tree-Sitter skeletons into the context window until the designated repomap token budget (e.g., 2,048 tokens) is filled:
-
-$$\max_{\mathcal{U} \subseteq V} \sum_{u \in \mathcal{U}} \pi_u \quad \text{subject to} \quad \sum_{u \in \mathcal{U}} \text{tokens}(\text{skeleton}(u)) \le B_{\text{repomap}} {#eq-vol3-episodic-knapsack}$$
-
-```python
-# Listing 5.2: Concrete Implementation of AST Repomap and Personalized PageRank
-import numpy as np
-import scipy.sparse as sp
-from typing import Dict, List, Set
-
-class SymbolDependencyGraph:
-    def __init__(self):
-        self.symbols: List[str] = []
-        self.symbol_to_idx: Dict[str, int] = {}
-        self.edges: List[tuple[int, int]] = []
-        self.skeletons: Dict[str, str] = {}
-
-    def add_symbol(self, name: str, skeleton: str) -> int:
-        if name not in self.symbol_to_idx:
-            idx = len(self.symbols)
-            self.symbols.append(name)
-            self.symbol_to_idx[name] = idx
-            self.skeletons[name] = skeleton
-            return idx
-        return self.symbol_to_idx[name]
-
-    def add_dependency(self, src_symbol: str, dst_symbol: str):
-        u = self.add_symbol(src_symbol, "")
-        v = self.add_symbol(dst_symbol, "")
-        self.edges.append((u, v))
-
-    def compute_personalized_pagerank(
-        self, seed_symbols: List[str], damping: float = 0.85, max_iter: int = 50, tol: float = 1e-6
-    ) -> np.ndarray:
-        N = len(self.symbols)
-        if N == 0:
-            return np.zeros(0)
-
-        # Construct row-stochastic adjacency matrix W
-        rows, cols = zip(*self.edges) if self.edges else ([], [])
-        data = np.ones(len(rows), dtype=np.float32)
-        A = sp.csr_matrix((data, (rows, cols)), shape=(N, N))
-
-        # Degree normalization
-        out_degrees = np.array(A.sum(axis=1)).flatten()
-        out_degrees[out_degrees == 0] = 1.0 # Handle dangling nodes
-        inv_D = sp.diags(1.0 / out_degrees)
-        W = inv_D.dot(A)
-
-        # Setup teleport personalization vector p
-        p = np.zeros(N, dtype=np.float32)
-        valid_seeds = [self.symbol_to_idx[s] for s in seed_symbols if s in self.symbol_to_idx]
-        if valid_seeds:
-            p[valid_seeds] = 1.0 / len(valid_seeds)
-        else:
-            p[:] = 1.0 / N
-
-        # Power iteration
-        pi = p.copy()
-        for _ in range(max_iter):
-            pi_next = (1.0 - damping) * p + damping * W.T.dot(pi)
-            if np.linalg.norm(pi_next - pi, 1) < tol:
-                break
-            pi = pi_next
-        return pi
-
-    def assemble_repomap(self, seed_symbols: List[str], token_budget: int = 1024) -> str:
-        pi = self.compute_personalized_pagerank(seed_symbols)
-        ranked_indices = np.argsort(-pi)
-
-        packed_skeletons = []
-        current_tokens = 0
-
-        for idx in ranked_indices:
-            sym_name = self.symbols[idx]
-            skel = self.skeletons.get(sym_name, "")
-            # Approximate token length: 4 chars per token
-            skel_tokens = max(1, len(skel) // 4)
-            if current_tokens + skel_tokens <= token_budget:
-                packed_skeletons.append(skel)
-                current_tokens += skel_tokens
-            if current_tokens >= token_budget:
-                break
-
-        return "\n\n".join(packed_skeletons)
-```
 
 To reconcile the divergent computational demands of semantic exploratory search and deterministic structural analysis, autonomous agent runtimes rely on multi-modal retrieval architectures. As summarized in @tbl-vol3-episodic-retrieval-modalities, each retrieval modality exhibits distinct indexing substrates, query primitives, token compression ratios, and structural blind spots.
 
 | Retrieval Modality         | Indexing Substrate                           | Primary Query Primitive                                            | Semantic Resolution                               |             Token Density             | Critical Failure Mode                                   | Optimal Systems Role                                       |
 |:---------------------------|:---------------------------------------------|:-------------------------------------------------------------------|:--------------------------------------------------|:-------------------------------------:|:--------------------------------------------------------|:-----------------------------------------------------------|
 | **Dense Vector Search**    | Continuous metric space ($\mathbb{R}^D$)     | Cosine similarity / inner product ($S_C$)                          | Thematic topicality & fuzzy conceptual affinity   |  Low ($256\text{--}512$ tokens/chunk) | Polarity blindness; false positives on negated facts    | Broad exploratory recall; identifies seed entry points     |
-| **Sparse Lexical Search**  | Inverted term index ($\text{TF-IDF}$ / BM25) | Exact term and $n$-gram frequency matching                         | Lexical identity & literal token matching         |             Low to Medium             | Vocabulary mismatch; zero conceptual generalization     | Exact identifier lookups, compiler flags & error codes     |
+| **Sparse Lexical Search**  | Inverted term index ($\text{TF-IDF}$ / BM25 [@robertson2009probabilistic]) | Exact term and $n$-gram frequency matching                         | Lexical identity & literal token matching         |             Low to Medium             | Vocabulary mismatch; zero conceptual generalization     | Exact identifier lookups, compiler flags & error codes     |
 | **Structural AST Repomap** | Directed symbol dependency graph $G=(V, E)$  | Personalized PageRank ($\mathbf{\pi}$) over seed set $\mathcal{S}$ | Syntactic callers, callees & interface boundaries | Exceptional ($95\%$ skeleton pruning) | Blind to dynamic dispatch, reflection & monkey-patching | Deterministic code context; structural interface hydration |
 | **Causal Event Ledger**    | Append-only relational log (WAL / SQLite)    | Relational SQL filter ($\text{status} = \text{'IN'}$)              | Propositional ground truth & temporal precedence  |    High (Structured JSON payloads)    | Rigid schema; requires structured observation parsers   | Authoritative belief state; audit replay & crash recovery  |
 
@@ -396,7 +310,7 @@ To reconcile the divergent computational demands of semantic exploratory search 
 
 ### Hybrid Graph-Vector Traversal Pipelines
 
-In real-world enterprise engineering, episodic queries cannot be answered by graph traversal or vector search alone. As demonstrated by the structural trade-offs in @tbl-vol3-episodic-retrieval-modalities, combining dense latent exploration with topological expansion yields a **Dual-Stage Hybrid Pipeline**:
+In real-world enterprise engineering, episodic queries cannot be answered by graph traversal or vector search alone. As demonstrated by the structural trade-offs in @tbl-vol3-episodic-retrieval-modalities, combining dense latent exploration with topological expansion yields a **Dual-Stage Hybrid Pipeline**\index{Dual-Stage Hybrid Pipeline}:
 
 1. **Stage 1 (Latent Exploration):** The agent's query (e.g., *"Why is authentication timing out during user logout?"*) is embedded into dense latent space. ANN search identifies the top-$k$ semantic code chunks and error logs.
 2. **Stage 2 (Topological Expansion):** The symbols identified in Stage 1 serve as seed nodes $\mathcal{S}$ for Personalized PageRank. Graph traversal expands outward across call graphs and inheritance edges, pulling in referenced interface signatures that vector similarity missed due to keyword mismatch.
@@ -404,7 +318,7 @@ In real-world enterprise engineering, episodic queries cannot be answered by gra
 
 This hybrid graph-vector architecture (@fig-vol3-episodic-hybrid-pipeline) leverages dense vector embeddings to identify high-affinity seed vertices and graph PageRank to retrieve structurally indispensable context.
 
-::: {#fig-vol3-episodic-hybrid-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Dual-Stage Hybrid Graph-Vector Retrieval Architecture**: Dense vector retrieval discovers thematic entry points via HNSW similarity search, which seed Personalized PageRank over the repository symbol dependency graph. A greedy packing knapsack packs top-ranked symbol skeletons into the context budget before final prompt assembly. Source: Conceptualized by author based on @page1999pagerank and modern agent repomap architectures." fig-alt="Architecture diagram showing agent task query entering dense vector search to retrieve seed nodes, spreading probability mass over a symbol dependency graph via Personalized PageRank, and packing ranked AST skeletons into the active token budget."}
+::: {#fig-vol3-episodic-hybrid-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Dual-Stage Hybrid Graph-Vector Retrieval Architecture**: Dense vector retrieval discovers thematic entry points via HNSW similarity search, which seed Personalized PageRank over the repository symbol dependency graph. A greedy packing knapsack packs top-ranked symbol skeletons into the context budget before final prompt assembly. Source: Conceptualized by author based on @page1999pagerank and modern agent repomap architectures [@gauthier2023aider]." fig-alt="Architecture diagram showing agent task query entering dense vector search to retrieve seed nodes, spreading probability mass over a symbol dependency graph via Personalized PageRank, and packing ranked AST skeletons into the active token budget."}
 
 <!-- MERMAID SOURCE PRESERVATION
 flowchart TD
@@ -427,7 +341,7 @@ flowchart TD
 
 ## Continuous Belief Updating & Conflict Resolution {#sec-vol3-episodic-belief-updating}
 
-Autonomous agents operate in **non-stationary environments**: web pages update, codebases are refactored, network ports change, and files are deleted. A fatal systems defect in naive episodic memory implementations is the **Outdated Context Problem**.
+Autonomous agents operate in **non-stationary environments**: web pages update, codebases are refactored, network ports change, and files are deleted. A fatal systems defect in naive episodic memory implementations is the **Outdated Context Problem**\index{Outdated Context Problem}.
 
 Consider an agent operating on a cloud deployment:
 
@@ -437,26 +351,26 @@ Consider an agent operating on a cloud deployment:
 
 If the retrieval engine relies solely on dense cosine similarity, both $o_2$ and $o_{12}$ match the query with high similarity ($S_C > 0.92$). Worse, because $o_2$ may contain more extensive explanatory context from the original startup logs, the vector index may rank $o_2$ *higher* than $o_{12}$. The agent retrieves the stale fact, probes port 5432, encounters a connection failure, and enters a hallucinatory crash loop.
 
-Persistent memory systems cannot treat memory items as immutable, timeless facts. They must implement **Temporal Ordering** and **Truth Maintenance Systems**.
+Persistent memory systems cannot treat memory items as immutable, timeless facts. They must implement **Temporal Ordering**\index{Temporal Ordering} and **Truth Maintenance Systems**\index{Truth Maintenance Systems}.
 
 ### Temporal Ordering: Physical Clocks vs. Logical Clocks
 
 Relying on physical wall-clock timestamps (such as POSIX UTC epoch time) to order episodic memories in distributed agent systems is fraught with failure. In distributed runtimes—where subagents execute on heterogeneous cloud nodes or tools run asynchronously inside isolated microVMs—physical clocks suffer from clock drift, NTP synchronizations, and network asymmetry [@lamport1978time].
 
-To enforce strict causal ordering across multi-turn trajectories, episodic memory stores implement **Lamport Logical Clocks**:
+To enforce strict causal ordering across multi-turn trajectories, episodic memory stores implement **Lamport Logical Clocks**\index{Lamport Logical Clocks}:
 
 - Each agent process maintains an integer clock $L \in \mathbb{N}$, initialized to 0.
-- Before executing an internal reasoning step or tool dispatch, the agent increments its local clock:
-  $$L \leftarrow L + 1$$
-- When transmitting a message or observation $o$ between processes, the payload carries timestamp $L(o)$.
-- Upon receiving an observation from an external tool or subagent with timestamp $L_{\text{recv}}$, the agent updates its clock according to @eq-vol3-episodic-lamport:
-  $$L \leftarrow \max(L, L_{\text{recv}}) + 1 {#eq-vol3-episodic-lamport}$$
+- Before executing an internal reasoning step or tool dispatch, the agent increments its local clock.
+- When transmitting a message or observation between processes, the payload carries the current timestamp.
+- Upon receiving an observation from an external tool or subagent, the agent synchronizes its clock by taking the maximum of its local clock and the received timestamp, then incrementing it.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
 Every memory record committed to the episodic store is indexed by its causal tuple $\langle \text{agent\_id}, L, \text{epoch} \rangle$, providing an unambiguous partial order over historical observations.
 
 ### Doyle's Truth Maintenance System (TMS)
 
-To systematically resolve factual contradictions, advanced agent runtimes incorporate the classic principles of Jon Doyle's **Truth Maintenance Systems (TMS)** [@doyle1979truth].
+To systematically resolve factual contradictions, advanced agent runtimes incorporate the classic principles of Jon Doyle's **Truth Maintenance Systems (TMS)**\index{Truth Maintenance Systems (TMS)} [@doyle1979truth].
 
 A Truth Maintenance System maintains a dynamic dependency network of beliefs, categorizing every belief atom as either:
 
@@ -490,7 +404,7 @@ flowchart TD
 
 :::
 
-When observation $o_{12}$ is ingested, the TMS executes **Dependency-Directed Backtracking**:
+When observation $o_{12}$ is ingested, the TMS executes **Dependency-Directed Backtracking**\index{Dependency-Directed Backtracking}:
 
 1. It identifies the entity-attribute tuple $\langle \texttt{PostgreSQL}, \texttt{listen\_port} \rangle$.
 2. It detects that historical memory $o_2$ asserts $\langle \texttt{PostgreSQL}, \texttt{listen\_port}, \texttt{5432} \rangle$ with $L(o_2) = 4$.
@@ -503,12 +417,12 @@ When the retrieval engine processes a query for the active prompt, it applies an
 
 For enterprise-grade autonomous agents, simply overwriting stale facts with a mutable `UPDATE` query destroys auditability. If an agent causes an operational outage, post-mortem debugging engines (@sec-vol3-telemetry-evaluation) must be able to inspect the exact cognitive state of the agent at the moment the decision was made.
 
-To reconcile the need for historical auditability with active contradiction resolution, the episodic store adopts **Bi-Temporal Modeling** [@snodgrass1986temporal]:
+To reconcile the need for historical auditability with active contradiction resolution, the episodic store adopts **Bi-Temporal Modeling**\index{Bi-Temporal Modeling} [@snodgrass1986temporal]:
 
 Every memory record tracks two independent time dimensions:
 
-1. **Valid Time ($T_V = [t_{v,\text{start}}, t_{v,\text{end}}]$):** The interval during which the fact was true in the physical execution environment.
-2. **Transaction Time ($T_T = [t_{t,\text{start}}, t_{t,\text{end}}]$):** The interval during which the fact was recorded and considered active within the agent's database.
+1. **Valid Time ($T_V = [t_{v,\text{start}}, t_{v,\text{end}}]$)**\index{Valid Time}: The interval during which the fact was true in the physical execution environment.
+2. **Transaction Time ($T_T = [t_{t,\text{start}}, t_{t,\text{end}}]$)**\index{Transaction Time}: The interval during which the fact was recorded and considered active within the agent's database.
 
 @Fig-vol3-episodic-bitemporal-timeline contrasts the physical Valid Time interval with the database Transaction Time interval across successive observations.
 
@@ -588,126 +502,45 @@ The evolution from naive physical timestamps to bi-temporal ledgers represents a
 
 ## Fallacies and Pitfalls {#sec-vol3-episodic-fallacies}
 
-Designing persistent memory systems for stochastic processors is fraught with architectural traps. Below are four common fallacies and two deep systems pitfalls.
+Designing persistent memory systems for stochastic processors is fraught with architectural traps. Below are common fallacies and deep systems pitfalls.
 
-### Fallacy 1: "Context Windows of 2M+ Tokens Make Episodic Memory Obsolete"
+**Pitfall: The Phantom Dependency Trap in AST Repomaps.**
+When constructing symbol dependency graphs for dynamic languages (such as Python or JavaScript), static AST parsers fail to detect dynamic dispatch, runtime monkey-patching, dynamic imports, and reflection. If the runtime relies solely on static AST graphs, it misses these edges, causing the agent to refactor code without realizing it breaks dynamic callers. This must be mitigated by augmenting static AST graphs with dynamic trace ingestion, running the repository's test suite inside an instrumented sandbox to capture runtime execution traces.
 
-With the emergence of frontier models supporting context windows exceeding one to two million tokens, a pervasive engineering misconception claims that external memory systems (vector databases, knowledge graphs) are obsolete relics of an era when context was limited to 4,000 tokens. Proponents argue: *"Simply append every trajectory turn, stdout trace, and file into context."*
+**Pitfall: The Zombie Memory Trap in Long-Lived Agents.**
+In continuous, multi-day agent deployments, episodic vector stores accumulate tens of thousands of temporary observations: ephemeral port allocations, temporary scratch files, and debugging log outputs. Without an eviction and compaction policy, these stale observations become "Zombie Memories" that dilute retrieval recall, consume memory capacity, and trigger catastrophic planning regressions. This is mitigated by implementing Bi-Temporal Time-To-Live (TTL) policies and episodic garbage collection.
 
-This violates fundamental laws of computer systems engineering:
+**Fallacy: Context Windows of 2M+ Tokens Make Episodic Memory Obsolete.**
+With the emergence of frontier models supporting context windows exceeding one to two million tokens, a pervasive engineering misconception claims that external memory systems (vector databases, knowledge graphs) are obsolete. Proponents argue: "Simply append every trajectory turn, stdout trace, and file into context." This violates fundamental laws of computer systems engineering. Evaluating a 2,000,000-token context on every turn creates massive compute bottlenecks due to quadratic attention scaling [@vaswani2017attention], and consumes tens of gigabytes of GPU HBM per concurrent agent session. Context windows are volatile RAM; they are not durable disks.
 
-- **Prefill Compute Complexity:** In standard transformer architectures, the attention mechanism scales quadratically $O(N^2)$ with sequence length during the prefill phase. Evaluating a 2,000,000-token context on every turn creates massive compute bottlenecks, driving Time-to-First-Token (TTFT) from milliseconds to minutes.
-- **Physical Memory Overhead:** Even with Grouped-Query Attention (GQA, @sec-vol3-virtual-memory), a 2M-token KV cache for a large model consumes tens of gigabytes of GPU HBM per concurrent agent session. Serving 100 concurrent agents in VRAM simultaneously becomes physically and economically unfeasible.
-- **Attention Dispersion and Lost-in-the-Middle:** While a model can theoretically *ingest* two million tokens, retrieval accuracy over dense reasoning traces degrades significantly as context expands. Attention entropy increases, and the model's ability to locate fine-grained facts buried in the middle of massive contexts degrades substantially.
+**Fallacy: Cosine Similarity Measures Factual Truth and Relevance.**
+Engineers frequently equate high cosine similarity ($S_C \ge 0.85$) with factual relevance or logical entailment. However, dense embeddings capture semantic thematic affinity, not logical correctness. Two statements expressing opposite factual realities (e.g., "The server started successfully" vs. "The server failed to start") share nearly identical syntactic and contextual distributions, yielding high cosine similarities. Relying solely on similarity thresholds guarantees that negated, contradictory, or obsolete records will pollute the active reasoning context.
 
-Context windows are **RAM**; they are not **Disks**. An operating system does not load an entire 1-terabyte database into CPU L1 cache simply because 64-bit address spaces allow it. Hierarchical memory is an inescapable systems invariant.
+**Fallacy: Episodic Memory Can Be Solved by Naive Text Chunking.**
+Splitting text into arbitrary 500-token chunks with 50-token overlaps works adequately for static document search, but fails catastrophically for autonomous agent trajectories. When applied to code repositories, execution traces, or structured logs, fixed-size chunking slices functions across structural boundaries and shatters JSON payloads into invalid syntactic fragments. Structured environments demand syntactic-aware chunking (e.g., Tree-Sitter AST parsing) that aligns chunk boundaries with deterministic language grammars.
 
-### Fallacy 2: "Cosine Similarity Measures Factual Truth and Relevance"
-
-Engineers frequently equate high cosine similarity ($S_C \ge 0.85$) with factual relevance or logical entailment.
-
-As established in @sec-vol3-episodic-latent-space, dense embeddings capture semantic *thematic affinity*, not logical correctness. Two statements expressing opposite factual realities ("The server started successfully" vs. "The server failed to start") share nearly identical syntactic and contextual distributions, yielding high cosine similarities. Relying solely on similarity thresholds to select context facts guarantees that negated, contradictory, or obsolete records will pollute the active reasoning context.
-
-### Fallacy 3: "Episodic Memory Can Be Solved by Naive Text Chunking"
-
-Splitting text into arbitrary 500-token chunks with 50-token overlaps works adequately for static document search, but it fails catastrophically for autonomous agent trajectories.
-
-When applied to code repositories, execution traces, or structured logs, fixed-size chunking slices functions across structural boundaries, severs variable definitions from their usages, and shatters JSON payloads into invalid syntactic fragments. Structured environments demand **syntactic-aware chunking** (e.g., Tree-Sitter AST parsing) that aligns chunk boundaries with deterministic language grammars.
-
-### Fallacy 4: "Graph Databases Should Completely Replace Vector Stores"
-
-At the opposite extreme, some architects abandon vector stores entirely, attempting to model every episodic observation as an explicit Knowledge Graph (KG) in a graph database (such as Neo4j).
-
-This introduces crippling operational overhead:
-
-- **Schema Rigidity:** Unstructured tool outputs, compiler stack traces, and free-form human feedback resist rigid entity-relation-entity triples ($\langle S, P, O \rangle$). Forcing open-ended text into graphs requires expensive large language model (LLM) extraction passes that introduce extraction hallucinations.
-- **The "Supernode" Bottleneck:** In systems graphs, common entities (e.g., `Object`, `main`, `util`, `console.log`) accumulate millions of edges. Traversing paths through these dense hubs triggers exponential search space explosions, destroying query latency.
-- **Latency Overheads:** Multi-hop relational graph joins incur substantial random memory lookups, resulting in query latencies 10–50$\times$ higher than SIMD-accelerated HNSW vector scans.
-
-Production runtimes succeed not by choosing between vectors and graphs, but by implementing **Hybrid Architectures** (@sec-vol3-episodic-graph-representations).
-
----
-
-### Pitfall 1: The Phantom Dependency Trap in AST Repomaps
-
-When constructing symbol dependency graphs (@sec-vol3-episodic-graph-representations) for dynamic languages (such as Python or JavaScript), static AST parsers fail to detect dynamic dispatch, runtime monkey-patching, dynamic imports (`__import__`), and reflection:
-
-```python
-# Static AST parsers see no relationship between plugin_name and the module
-module = importlib.import_module(f"services.{plugin_name}")
-handler = getattr(module, "execute_task")
-handler()
-```
-
-If the runtime relies solely on static AST graphs, the symbol dependency graph misses this edge. When the agent edits `services/auth_plugin.py`, Personalized PageRank allocates zero probability mass to the plugin, omitting it from the context repomap. The agent proceeds to refactor `execute_task` without realizing it breaks dynamic callers.
-
-**Mitigation:** Augment static AST graphs with **Dynamic Trace Ingestion**. Run the repository's test suite inside an instrumented sandbox, capture runtime execution traces (e.g., via `sys.settrace`), and add dynamic execution edges to the symbol graph.
-
-### Pitfall 2: The Zombie Memory Trap in Long-Lived Agents
-
-In continuous, multi-day agent deployments, episodic vector stores accumulate tens of thousands of temporary observations: ephemeral port allocations, temporary scratch files, and debugging log outputs.
-
-Without an eviction and compaction policy, these stale observations become **Zombie Memories**:
-
-- They dilute retrieval recall by crowding out newer, relevant records.
-- They consume memory capacity and degrade ANN search performance.
-- They trigger catastrophic planning regressions when an agent attempts to manipulate a temporary file or process killed days prior.
-
-**Mitigation:** Implement **Bi-Temporal TTLs (Time-To-Live)** and **Episodic Garbage Collection**. Temporary files and ephemeral port observations are tagged with a short valid-time interval. A background compaction worker periodically purges or summarizes expired records, moving them from active indices to cold archival storage.
-
-To aid systems practitioners in identifying and debugging these architectural traps, @tbl-vol3-episodic-fallacies-pitfalls consolidates the four fallacies and two pitfalls, detailing their erroneous assumptions, failure modes, root causes, and prescribed engineering remedies.
-
-| Anti-Pattern or Pitfall          | Erroneous Premise                                                                          | Systems Failure Manifestation                                                                         | Root Architectural Cause                                                           | Prescribed Engineering Mitigation                                                                    |
-|:---------------------------------|:-------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
-| **Context Window Maximalism**    | "2M+ token contexts render external episodic storage obsolete."                            | $\mathcal{O}(N^2)$ prefill compute wall, KV-cache HBM exhaustion, attention dispersion                | Conflating volatile working RAM with durable non-volatile disk                     | Strict 3-tier memory hierarchy; episodic compaction; paged KV swapping (@sec-vol3-virtual-memory)    |
-| **Cosine Truth Equivalence**     | "Cosine similarity ($S_C \ge 0.90$) guarantees factual correctness and logical relevance." | Polarity blindness; agent ingests contradictory, failed, or negated historical actions                | Contrastive embedding models capture thematic topicality, not propositional logic  | Truth Maintenance Systems (TMS); $\text{IN}/\text{OUT}$ belief filtering; hybrid graph validation    |
-| **Naive Fixed-Size Chunking**    | "Arbitrary 500-token windowing with overlap suffices for all episodic text."               | Shattered syntax trees, broken call graphs, invalid truncated JSON schema fragments                   | Imposing linear text heuristics onto deterministic formal programming languages    | Grammar-aware parsing via Tree-Sitter AST skeletonization (@sec-vol3-episodic-graph-representations) |
-| **Graph Database Monolith**      | "Relational knowledge graphs should completely replace dense vector indexes."              | Supernode graph traversal explosions, schema brittleness, $10\text{--}50\times$ higher lookup latency | Forcing open-ended, unstructured execution logs into rigid entity-relation triples | Dual-stage hybrid retrieval: dense vector entry points seeding topological graph expansion           |
-| **Phantom Dynamic Dependencies** | "Static AST parsing captures all symbol dependencies in a codebase."                       | Incomplete repomaps omitting dynamic imports, reflection, and monkey-patched call sites               | Dynamic runtime dispatch is structurally invisible to static syntactic parsers     | Augment static AST graphs with dynamic test execution traces (`sys.settrace`)                        |
-| **Zombie Memory Accumulation**   | "Episodic memory stores should retain all historical observations indefinitely."           | Retrieval dilution, degraded ANN recall, resurrecting dead ports, processes, and files                | Unbounded append without validity intervals or compaction lifecycles               | Enforce Bi-Temporal Time-To-Live (TTL) and background episodic garbage collection                    |
-
-: **Taxonomy of Architectural Fallacies and Systems Pitfalls in Episodic Memory**: Root causes, failure manifestations, and systems mitigations across the persistent storage stack. {#tbl-vol3-episodic-fallacies-pitfalls tbl-colwidths="[16,18,22,20,24]"}
-
----
-
-### War Story: The Phantom Port Catastrophe
-
-::: {.callout-warning title="War story: The phantom port catastrophe"}
-A continuous integration orchestration agent was deployed to maintain microservice clusters across an enterprise staging environment. The agent utilized a standard dense vector database for its episodic memory, indexing every terminal command, tool output, and operational log.
-
-During a routine deployment, an authentication service failed to bind to its default port (8080) due to a lingering zombie process. The agent diagnosed the failure, executed a fallback remediation script, and successfully bound the service to an ephemeral backup port: **8085**. It recorded observation $o_{14}$: *"Auth service healthy on port 8085."* The integration tests passed, and the task concluded.
-
-Three days later, the underlying Kubernetes node rebooted, resetting the cluster to its standard configuration where the authentication service bound cleanly to port **8080**. The agent was invoked to investigate a transient latency alert. It dispatched an episodic memory query: *"What port does the auth service use?"*
-
-The vector database performed a dense similarity search. Because the historical log from three days earlier contained extensive debugging text directly matching the latency query, chunk $o_{14}$ scored the highest cosine similarity ($S_C = 0.93$). The agent received the stale memory: *"Auth service healthy on port 8085."*
-
-Operating on this zombie belief, the agent executed a health-check probe against port 8085. The connection was refused. Convinced that the authentication service was down, the agent initiated an aggressive disaster-recovery failover: it killed the operational service running on port 8080, wiped its local state caches, and attempted to force-rebuild the cluster.
-
-Because the agent lacked logical clocks, Lamport ordering, or Truth Maintenance Systems, it prioritized an obsolete historical memory over physical runtime reality, turning a minor latency blip into a catastrophic four-hour service outage.
-:::
+**Fallacy: Graph Databases Should Completely Replace Vector Stores.**
+At the opposite extreme, some architects abandon vector stores entirely, attempting to model every episodic observation as an explicit Knowledge Graph (KG) in a graph database (such as Neo4j). This introduces crippling operational overhead, including schema rigidity for unstructured tool outputs, the "supernode" bottleneck where common entities accumulate millions of edges, and latency overheads from multi-hop relational graph joins. Production runtimes succeed not by choosing between vectors and graphs, but by implementing hybrid architectures.
 
 ## Summary {#sec-vol3-episodic-summary}
 
-This chapter has developed the systems foundations of **Episodic Memory**, establishing the non-volatile persistent storage tier of the Von Neumann agent architecture. @Tbl-vol3-episodic-summary-synthesis summarizes the core architectural subsystems, algorithms, and operational trade-offs established in this chapter.
-
-| Subsystem Tier                        | Core Data Structure                 | Governing Algorithm                     | Access Latency | Primary Failure Mode                        | Architectural Mitigation                                                          |
-|:--------------------------------------|:------------------------------------|:----------------------------------------|:---------------|:--------------------------------------------|:----------------------------------------------------------------------------------|
-| **Volatile Transaction Boundary**     | Append-Only Write-Ahead Log (WAL)   | ACID Transaction Commits & Sagas        | 1 – 5 ms       | Inconsistent state commit on crash          | Write-ahead logging prior to actuation dispatch (@eq-vol3-episodic-wal-invariant) |
-| **Unstructured Latent Indexing**      | Metric Proximity Skip-Graphs (HNSW) | Logarithmic Greedy Routing ($efSearch$) | 1.5 – 4 ms     | Polarity blindness & semantic collision     | Unit normalization, ADC quantization & hybrid structural filtering                |
-| **Deterministic Code Representation** | Symbol Dependency Graph $G=(V, E)$  | Tree-Sitter AST Skeletonization & PPR   | 10 – 25 ms     | Token exhaustion & context dispersion       | 95% token pruning via AST extraction & greedy PageRank packing                    |
-| **Continuous Belief Maintenance**     | Bi-Temporal Justification Network   | Lamport Timestamps & Doyle's TMS        | 2 – 8 ms       | Stale memory delusions & temporal conflicts | Strict logical clocks, $\text{IN}/\text{OUT}$ partitions & dynamic probe gates    |
-
-: **Architectural Synthesis of Episodic Memory Systems**: Summary of data structures, algorithms, failure modes, and systems mitigations across the persistent storage tier. {#tbl-vol3-episodic-summary-synthesis tbl-colwidths="[18,20,18,12,16,16]"}
+- **Hierarchical Memory Stack:** Autonomous agents require a strict memory hierarchy, transitioning from volatile GPU HBM (context registers) and host DRAM (KV cache) to non-volatile episodic storage (vector indices, knowledge graphs, and event ledgers) to enable long-running operations and overcome context window limits.
+- **Transactional Persistence:** Safely bridging the volatile/non-volatile boundary requires enforcing the Write-Ahead Log (WAL) invariant, ensuring that proposed actions and state are durably persisted to disk before execution to enable consistent recovery from crashes.
+- **Latent Space Topologies:** High-dimensional vector retrieval (RAG) is foundational but suffers from the curse of dimensionality; production systems utilize Approximate Nearest Neighbor (ANN) indices like IVF-PQ for memory efficiency and HNSW for low-latency graph-based routing.
+- **Polarity Blindness:** Dense embeddings capture thematic affinity but fail to distinguish propositional truth (e.g., success vs. failure), making cosine similarity alone insufficient for deterministic factual retrieval.
+- **Structural Graph Representation:** For deterministic environments like codebases, unstructured chunking is inadequate. Systems must utilize Tree-Sitter AST skeletonization and Personalized PageRank (PPR) over symbol dependency graphs to deterministically pack execution context.
+- **Truth Maintenance and Bi-Temporal Modeling:** Resolving factual contradictions in non-stationary environments requires Lamport logical clocks, Truth Maintenance Systems (TMS) to track belief dependencies (IN/OUT states), and bi-temporal ledgers separating physical validity time from storage transaction time to ensure strict auditability.
+- **Hybrid Retrieval Architectures:** Real-world engineering mandates a dual-stage retrieval pipeline: using dense vector search for latent semantic exploration to find seed nodes, followed by topological graph expansion to retrieve structurally indispensable dependencies missed by semantic similarity.
 
 ### Bridging to State Checkpointing {#sec-vol3-episodic-bridging}
 
-Episodic memory provides the agent with durable persistence, structural environment representations, and causally ordered belief histories. However, autonomous agency involves **environment mutation**. Unlike an operating system that merely writes to local disk blocks, an agent's actions often trigger external side effects across third-party APIs, distributed databases, and physical infrastructure.
+Episodic memory provides the agent with durable persistence, structural environment representations, and causally ordered belief histories. However, autonomous agency involves **environment mutation**\index{environment mutation}. Unlike an operating system that merely writes to local disk blocks, an agent's actions often trigger external side effects across third-party APIs, distributed databases, and physical infrastructure.
 
 What happens when an agent executes an action that fails mid-flight, corrupts external databases, or encounters a Byzantine hallucination?
 
 In @sec-vol3-checkpointing, we investigate the mechanisms required to survive failure:
 
-- Formulating the **Fail-Plausible Fault Model**, recognizing that neural agents fail not by stopping, but by hallucinating convincing, invalid states.
-- Establishing the **Reversibility Boundary**, formally categorizing actions into reversible operations (safe for local rollback) versus irreversible mutations (requiring compensating actions).
-- Designing **Distributed Sagas**, implementing compensating transactions ($A^{-1}$) to unwind multi-step workflows without holding distributed locks.
-- Constructing **Deterministic Rollback Engines**, leveraging Write-Ahead Logging to restore agent and environment consistency across system crashes.
+- Formulating the **Fail-Plausible Fault Model**\index{Fail-Plausible Fault Model}, recognizing that neural agents fail not by stopping, but by hallucinating convincing, invalid states.
+- Establishing the **Reversibility Boundary**\index{Reversibility Boundary}, formally categorizing actions into reversible operations (safe for local rollback) versus irreversible mutations (requiring compensating actions).
+- Designing **Distributed Sagas**\index{Distributed Sagas}, implementing compensating transactions ($A^{-1}$) to unwind multi-step workflows without holding distributed locks.
+- Constructing **Deterministic Rollback Engines**\index{Deterministic Rollback Engines}, leveraging Write-Ahead Logging to restore agent and environment consistency across system crashes.

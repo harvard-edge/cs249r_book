@@ -4,21 +4,21 @@ Supervised fine-tuning on multi-turn execution trajectories represents the found
 
 ## Introduction {#sec-vol3-sft-intro}
 
-In the architecture of an autonomous agent, the foundation model functions as the stochastic central processing unit (CPU). In early prototypes and naive implementations, systems architects rely entirely on in-context learning (ICL) to drive this processor: every execution step is preceded by a monolithic prompt containing dozens of OpenAPI tool definitions, detailed behavioral guardrails, and lengthy few-shot execution demonstrations.
+In the architecture of an autonomous agent, the foundation model functions as the stochastic central processing unit (CPU). In early prototypes and naive implementations, systems architects rely entirely on **in-context learning (ICL)**\index{in-context learning (ICL)} to drive this processor: every execution step is preceded by a monolithic prompt containing dozens of OpenAPI tool definitions, detailed behavioral guardrails, and lengthy few-shot execution demonstrations.
 
 While in-context prompting allows rapid prototyping without dedicated training infrastructure, it imposes severe systems penalties that make it economically and computationally non-viable for production-scale autonomy:
 
-1. **Quadratic Prefill Saturation:** The computational complexity of standard multi-head attention scales quadratically with sequence length $T$ during prompt prefill ($\mathcal{O}(T^2 \cdot d_{\text{model}})$). Appending verbose tool schemas, system rules, and prior execution steps to the prompt causes prefill times to dominate the per-step latency budget.
-2. **Key-Value Cache Exhaustion:** The high-bandwidth memory (HBM) consumed by the Key-Value (KV) cache grows linearly with sequence length:
-   $$\text{Memory}_{\text{KV}} = 2 \times n_{\text{layers}} \times n_{\text{kv}} \times d_{\text{head}} \times T \times b_{\text{bytes}}$$
-   In a 70-billion-parameter model using 16-bit precision and grouped-query attention (GQA) with 8 KV heads ($d_{\text{head}} = 128, n_{\text{layers}} = 80$), maintaining a 32,000-token context history consumes over 10.5 GB of VRAM per active agent instance solely for KV storage. When thousands of concurrent agent sessions run in parallel, KV cache capacity becomes the primary throughput ceiling of the cluster [@kaplan2020scaling].
+1. **Quadratic Prefill Saturation:** The computational complexity of standard multi-head attention [@vaswani2017attention] scales quadratically with sequence length $T$ during prompt prefill ($\mathcal{O}(T^2 \cdot d_{\text{model}})$). Appending verbose tool schemas, system rules, and prior execution steps to the prompt causes prefill times to dominate the per-step latency budget.
+2. **Key-Value Cache Exhaustion:** The high-bandwidth memory (HBM) consumed by the **Key-Value (KV) cache**\index{Key-Value (KV) cache} grows linearly with sequence length.
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+   Maintaining a large context history consumes massive VRAM per active agent instance solely for KV storage. When thousands of concurrent agent sessions run in parallel, KV cache capacity becomes the primary throughput ceiling of the cluster [@kaplan2020scaling].
 3. **Attention Dispersion and "Lost in the Middle":** Transformer attention mechanisms do not maintain uniform fidelity across massive context windows. As demonstrated by @liu2024lost, retrieval accuracy follows a pronounced U-shaped distribution: tokens placed in the middle of long prompts suffer severe recall degradation compared to tokens at the boundaries. When an agent's tool definitions or intermediate scratchpad thoughts are submerged in an expansive prompt, parameter extraction accuracy drops, resulting in hallucinated arguments and invalid schema formatting.
 
 ::: {.callout-note title="Definition: Context Compilation"}
-**Context Compilation** is the mathematical transformation of dynamic runtime prompt context (tool definitions, syntax invariants, and reasoning heuristics) into static neural network weights via supervised gradient descent. Context compilation compresses prompt overhead by up to 85%, eliminates repetitive prefill computation, and mitigates attention degradation across extended horizons.
+**Context Compilation**\index{Context Compilation} is the mathematical transformation of dynamic runtime prompt context (tool definitions, syntax invariants, and reasoning heuristics) into static neural network weights via supervised gradient descent. Context compilation compresses prompt overhead by up to 85%, eliminates repetitive prefill computation, and mitigates attention degradation across extended horizons.
 :::
 
-We formalize this shift through **context compilation**, which maps dynamic prompt scaffolding directly into static policy parameters (@fig-vol3-sft-context-compilation).
+We formalize this shift through **context compilation**\index{Context Compilation}, which maps dynamic prompt scaffolding directly into static policy parameters (@fig-vol3-sft-context-compilation).
 
 ::: {#fig-vol3-sft-context-compilation fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.1: Context Compilation versus In-Context Prompting Runtimes**: Structural comparison of runtime execution profiles. (Top) In-context prompting prepends expansive tool definitions, schema specifications, and few-shot traces to every invocation, incurring quadratic prefill latency $\mathcal{O}(T^2)$ and exhausting accelerator KV-cache capacity (~10.5 GB per agent instance). (Bottom) Context compilation transforms dynamic prompt context into static neural network weights via supervised fine-tuning, shrinking prompt prefixes by up to 85%, eliminating redundant prefill computation, and protecting critical tool-following circuits from attention dispersion. Source: Author illustration." fig-alt="Architectural flowchart contrasting an uncompiled in-context prompting agent against a context-compiled policy runtime."}
 
@@ -26,23 +26,15 @@ We formalize this shift through **context compilation**, which maps dynamic prom
 
 :::
 
-Static instruction tuning (e.g., InstructGPT [@ouyang2022instructgpt]) is fundamentally single-turn and request-scoped: a prompt $x$ maps directly to a completed response $y \sim P_\theta(y \mid x)$. In contrast, an agentic trajectory is stateful and temporally extended. The model must alternate between generating internal chain-of-thought tokens, emitting structured tool call invocations, pausing to await external environment feedback, and digesting non-deterministic execution logs. Bridging this chasm requires an entirely distinct post-training paradigm: **Trajectory Fine-Tuning**.
+Static instruction tuning (e.g., InstructGPT [@ouyang2022instructgpt]) is fundamentally single-turn and request-scoped: a prompt $x$ maps directly to a completed response $y \sim P_\theta(y \mid x)$. In contrast, an agentic trajectory is stateful and temporally extended. The model must alternate between generating internal chain-of-thought tokens, emitting structured tool call invocations, pausing to await external environment feedback, and digesting non-deterministic execution logs. Bridging this chasm requires an entirely distinct post-training paradigm: **Trajectory Fine-Tuning**\index{Trajectory Fine-Tuning}.
 
 ## Trajectory Loss Formulations {#sec-vol3-sft-loss}
 
 To formalize trajectory-level optimization, we model an agent's multi-step execution as an alternating sequence of agent decisions and environmental observations over a horizon of $H$ steps.
 
-A full trajectory $\tau$ is defined as:
-$$\tau = \left( s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_H, a_H, o_H \right)$$
-where:
+A full trajectory captures an agent's multi-step execution as an alternating sequence of internal reasoning, action emissions, and external observations over a defined horizon.
 
-* $s_0$ represents the initial environment state and task prompt.
-* $a_t = (z_t, c_t)$ is the agent's action at step $t$, comprising intermediate reasoning scratchpad tokens $z_t$ (thoughts) and a structured tool call invocation $c_t$.
-* $o_t$ is the observation returned by the external environment (such as standard output, exit codes, or JSON API payloads).
-* $s_{t+1} = \left( s_t, a_t, o_t \right)$ is the updated internal state context available to the agent at step $t+1$.
-
-The joint probability of an executed trajectory under policy $\pi_\theta$ and an external environment transition distribution $P_{\text{env}}$ factorizes causally as:
-$$P(\tau) = P(s_0) \prod_{t=0}^H P_\theta(a_t \mid s_t) P_{\text{env}}(o_t \mid s_t, a_t)$$
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
 @Fig-vol3-sft-pipeline illustrates the end-to-end synthetic trajectory generation, execution verification, rejection sampling, and loss-masking pipeline that produces this training corpus.
 
@@ -52,38 +44,20 @@ $$P(\tau) = P(s_0) \prod_{t=0}^H P_\theta(a_t \mid s_t) P_{\text{env}}(o_t \mid 
 
 ### Standard Next-Token Prediction vs. Trajectory Objectives
 
-In classical pretraining and conversational fine-tuning, the objective is the unweighted cross-entropy loss over all tokens in an arbitrary sequence $X = (x_1, x_2, \dots, x_N)$:
-$$\mathcal{L}_{\text{NTP}}(\theta) = - \sum_{i=1}^N \log P_\theta(x_i \mid x_{<i})$$
-
-Applying $\mathcal{L}_{\text{NTP}}$ directly to an agent trajectory sequence $\tau$ introduces a fundamental mathematical and physical contradiction. In generic text, every token $x_i$ is treated as an output generated by the underlying model distribution. But in an agent trajectory, the token sequence represents a mixture of two disjoint data-generating processes:
-
-1. **The Endogenous Process ($P_\theta$):** Internal reasoning tokens $z_t$ and emitted tool invocations $c_t$, produced directly by the model's forward pass.
-2. **The Exogenous Process ($P_{\text{env}}$):** Initial task instructions $s_0$ and external environment observations $o_t$, produced by third-party operating systems, database engines, network sockets, or physical sensors.
-
-Because $P_{\text{env}}$ is a non-differentiable external system whose governing dynamics lie entirely outside the parameter manifold of the language model, backpropagating gradients through $o_t$ violates causal credit assignment.
-
-The trajectory-level Supervised Fine-Tuning (SFT) objective must therefore evaluate likelihood strictly over the agent's endogenous tokens:
-$$\mathcal{L}_{\text{trajectory}}(\theta) = - \sum_{t=0}^H \log P_\theta(a_t \mid s_t) = - \sum_{t=0}^H \sum_{k=1}^{|a_t|} \log P_\theta(a_{t,k} \mid s_t, a_{t,<k})$$
+In classical pretraining and conversational fine-tuning, the objective is the unweighted cross-entropy loss over all tokens in an arbitrary sequence.
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+Applying this directly to an agent trajectory sequence introduces a contradiction. The token sequence represents a mixture of endogenous processes (internal reasoning and emitted actions) and exogenous processes (external environment observations). Because the environment is a non-differentiable external system whose governing dynamics lie entirely outside the parameter manifold of the language model, backpropagating gradients through external observations violates causal credit assignment. The trajectory-level **Supervised Fine-Tuning (SFT)**\index{Supervised Fine-Tuning (SFT)} objective must therefore evaluate likelihood strictly over the agent's endogenous tokens.
 
 ### Normalization Dynamics Across Variable-Length Observations
 
 When implementing trajectory fine-tuning in distributed training systems, the normalization denominator of the loss function has a decisive impact on optimization stability.
-
-Consider a tokenized trajectory containing a total of $T$ sequence tokens, of which $N_{\text{action}} = \sum_{t=0}^H |a_t|$ are active policy action tokens and $N_{\text{obs}} = \sum_{t=0}^H |o_t|$ are external environment observation tokens ($T = N_{\text{action}} + N_{\text{obs}} + |s_0|$).
-
-If a training framework naively normalizes the masked loss by the total sequence length $T$:
-$$\mathcal{L}_{\text{naive}}(\theta) = - \frac{1}{T} \sum_{t \in \text{actions}} \log P_\theta(x_t \mid x_{<t})$$
-
-the effective gradient magnitude becomes inversely proportional to the verbosity of the external environment. If an agent executes a tool that returns an 8,000-token compiler dump or database query result, $T$ balloons while $N_{\text{action}}$ remains unchanged. As a consequence, the loss contribution of the agent's critical tool call is diluted by an order of magnitude:
-$$\nabla_\theta \mathcal{L}_{\text{naive}} \propto \frac{1}{T} \ll \frac{1}{N_{\text{action}}}$$
-
-This gradient swamping artificially suppresses parameter updates on trajectories that interact with verbose tools. To maintain consistent step sizes across heterogeneous environments, the loss must be normalized strictly by the count of active policy tokens [@deepseek2024v3]:
-$$\mathcal{L}_{\text{trajectory}}(\theta) = - \frac{1}{\sum_{i=1}^T M_i} \sum_{i=1}^T M_i \log P_\theta(x_i \mid x_{<i})$$
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+If a training framework naively normalizes the masked loss by the total sequence length, the effective gradient magnitude becomes inversely proportional to the verbosity of the external environment. If an agent executes a tool that returns an 8,000-token compiler dump, the loss contribution of the agent's critical tool call is diluted by an order of magnitude. This gradient swamping artificially suppresses parameter updates on trajectories that interact with verbose tools. To maintain consistent step sizes across heterogeneous environments, the loss must be normalized strictly by the count of active policy tokens [@deepseek2024v3].
 where $M_i \in \{0, 1\}$ is the binary action mask for token $i$.
 
 ## Action Masking {#sec-vol3-sft-masking}
 
-The systems implementation of trajectory fine-tuning requires enforcing the **Environmental Causality Boundary** within the training pipeline (@fig-vol3-sft-loss-masking).
+The systems implementation of trajectory fine-tuning requires enforcing the **Environmental Causality Boundary**\index{Environmental Causality Boundary} within the training pipeline (@fig-vol3-sft-loss-masking).
 
 ::: {#fig-vol3-sft-loss-masking fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.3: Autoregressive Trajectory Loss Masking and Environmental Causality Boundary**: The token sequence alternates between agent control states (system prompt, user query, thoughts, tool calls) and external environment observations (standard output, exit codes, API payloads). The binary loss mask vector $M_t$ is set strictly to 1 for endogenous agent thoughts and tool call arguments, and 0 for exogenous environment observations and initial prompts. During backpropagation, only masked policy tokens contribute to cross-entropy loss, preventing hallucinated execution collapse and gradient swamping from verbose execution outputs. Source: Author illustration." fig-alt="Technical diagram illustrating token sequence role segmentation, binary loss mask vectors, and backpropagation gating for multi-turn agent trajectories."}
 ![](images/svg/trajectory_loss_masking.svg){width=100%}
@@ -105,56 +79,10 @@ Why is action masking non-negotiable? Training on unmasked trajectories ($M_t = 
 
 ### Systems Implementation of Masked Loss
 
-In modern high-performance training systems (such as PyTorch with FlashAttention and Megatron-LM), action masking is implemented by transforming target sequence arrays prior to computing cross-entropy.
+In modern high-performance training systems (such as PyTorch [@paszke2019pytorch] with FlashAttention [@dao2022flashattention] and Megatron-LM [@shoeybi2019megatron]), action masking is implemented by transforming target sequence arrays prior to computing cross-entropy.
 
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 The standard cross-entropy loss in deep learning frameworks accepts an `ignore_index` argument (typically set to `-100`). Tokens assigned this index are skipped by the CUDA loss kernel, contributing neither to the loss scalar nor to the backward gradient pass.
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class TrajectoryLoss(nn.Module):
-    """
-    Computes masked cross-entropy loss over agent action tokens,
-    ignoring prompt and external observation tokens.
-    """
-    def __init__(self, ignore_index: int = -100):
-        super().__init__()
-        self.ignore_index = ignore_index
-
-    def forward(
-        self,
-        logits: torch.Tensor,       # [B, T, V]
-        targets: torch.Tensor,      # [B, T]
-        action_mask: torch.Tensor   # [B, T] with 1 for actions, 0 for env/prompt
-    ) -> torch.Tensor:
-        # Shift logits and targets for standard causal autoregression
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_targets = targets[..., 1:].contiguous()
-        shift_mask = action_mask[..., 1:].contiguous()
-
-        # Replace non-action tokens in targets with ignore_index
-        masked_targets = torch.where(
-            shift_mask == 1,
-            shift_targets,
-            torch.full_like(shift_targets, self.ignore_index)
-        )
-
-        # Compute cross entropy with token-level reduction
-        # Flatten across batch and sequence dimensions for efficient kernel execution
-        vocab_size = shift_logits.size(-1)
-        loss = F.cross_entropy(
-            shift_logits.view(-1, vocab_size),
-            masked_targets.view(-1),
-            ignore_index=self.ignore_index,
-            reduction='sum'
-        )
-
-        # Strictly normalize by the count of active policy tokens
-        active_tokens = shift_mask.sum().clamp(min=1.0)
-        return loss / active_tokens
-```
 
 ::: {.callout-tip title="Systems Insight: Role Boundary Delimiters"}
 To guarantee that the action mask aligns perfectly with model generation boundaries, production data loaders do not rely on fragile string matching or regular expressions. Instead, the tokenizer is extended with explicit control tokens:
@@ -167,7 +95,7 @@ The data ingestion pipeline sets $M_t = 1$ strictly for tokens falling within th
 
 ## Covariate Shift Mitigation {#sec-vol3-sft-covariate-shift}
 
-The most common trap in agent post-training is **Golden Path Brittleness**.
+The most common trap in agent post-training is **Golden Path Brittleness**\index{Golden Path Brittleness}.
 
 When a training dataset is constructed exclusively from flawless expert demonstrations—where every shell command succeeds, every API returns HTTP 200, and every database query executes without syntax errors—the model learns under the implicit prior that environments are completely deterministic and infallible.
 
@@ -182,11 +110,11 @@ The moment the agent receives an error observation $o_{\text{err}}$, it encounte
 
 ### The Mechanics of Autoregressive Covariate Shift
 
-This phenomenon is governed by **Autoregressive Covariate Shift**. In classical supervised learning, errors are assumed to be independent and identically distributed (i.i.d.). In sequential decision making, however, an error committed at time step $t$ alters the input state for all future time steps $t' > t$.
+This phenomenon is governed by **Autoregressive Covariate Shift**\index{Autoregressive Covariate Shift}. In classical supervised learning, errors are assumed to be independent and identically distributed (i.i.d.). In sequential decision making, however, an error committed at time step $t$ alters the input state for all future time steps $t' > t$.
 
-In their seminal work on imitation learning, @ross2011reduction proved that training a policy strictly on expert demonstrations results in quadratic error compounding with respect to trajectory horizon $H$:
-$$\text{Expected Errors} \le \mathcal{O}\left(\epsilon H^2\right)$$
-where $\epsilon$ represents the single-step policy error probability.
+In their seminal work on imitation learning, @ross2011reduction proved that training a policy strictly on expert demonstrations results in quadratic error compounding with respect to the trajectory horizon.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
 As the agent deviates from the expert demonstration path, it enters unfamiliar states where its error rate is high. In an agentic system, this manifests as a degenerative failure loop:
 
@@ -205,9 +133,9 @@ As the agent deviates from the expert demonstration path, it enters unfamiliar s
 
 ### The DAgger Formulation for Autonomous Agents
 
-To reduce the error bound from quadratic ($\mathcal{O}(\epsilon H^2)$) to linear ($\mathcal{O}(\epsilon H)$), the training distribution must match the policy's own rollout distribution. This is achieved via Dataset Aggregation (**DAgger** [@ross2011reduction]), adapted specifically for agentic execution loops.
+To reduce the error bound from quadratic ($\mathcal{O}(\epsilon H^2)$) to linear ($\mathcal{O}(\epsilon H)$), the training distribution must match the policy's own rollout distribution. This is achieved via Dataset Aggregation (**DAgger**\index{DAgger} [@ross2011reduction]), adapted specifically for agentic execution loops.
 
-In agent post-training, DAgger is operationalized through **Intentional Fault Injection**:
+In agent post-training, DAgger is operationalized through **Intentional Fault Injection**\index{Intentional Fault Injection}:
 
 1. **Sandboxed Chaos Injection:** During synthetic rollout generation (as architected in Chapter 11), the execution sandbox artificially injects deterministic faults:
    * Injecting transient network errors (HTTP 429, 502, 504).
@@ -237,16 +165,9 @@ Deploying 50 independent full-parameter 70B models would require 50 distinct GPU
 
 ### Low-Rank Adaptation (LoRA)
 
-Parameter-Efficient Fine-Tuning (PEFT) via Low-Rank Adaptation (**LoRA** [@hu2021lora]) resolves this challenge. LoRA freezes the pretrained base model weights $W_0 \in \mathbb{R}^{d \times k}$ and parameterizes the accumulated weight update $\Delta W$ as the product of two low-rank matrices:
-$$W = W_0 + \Delta W = W_0 + \frac{\alpha}{r} B A$$
-where:
-
-* $B \in \mathbb{R}^{d \times r}$ is initialized to zeros.
-* $A \in \mathbb{R}^{r \times k}$ is initialized from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$.
-* $r \ll \min(d, k)$ is the adaptation rank (typically $r \in [8, 64]$).
-* $\alpha$ is a constant scaling hyperparameter.
-
-During training, gradients are computed exclusively with respect to $A$ and $B$, leaving $W_0$ untouched.
+**Parameter-Efficient Fine-Tuning (PEFT)**\index{Parameter-Efficient Fine-Tuning (PEFT)} via Low-Rank Adaptation (**LoRA**\index{LoRA} [@hu2021lora]) resolves this challenge. LoRA freezes the pretrained base model weights and parameterizes the accumulated weight update as the product of two low-rank matrices.
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+During training, gradients are computed exclusively with respect to these low-rank adaptations, leaving the base weights untouched.
 
 ::: {#tbl-vol3-peft-memory-footprints}
 | Model Architecture                | Base Weights (16-bit) | Base Weights (NF4 QLoRA) | Rank-16 Adapter ($Q, V$) | Footprint Ratio (Adapter / Base) |
@@ -257,27 +178,27 @@ During training, gradients are computed exclusively with respect to $A$ and $B$,
 : **Parameter-Efficient Fine-Tuning Memory Footprints**: Base model weights versus specialized LoRA adapters across 16-bit and 4-bit NormalFloat precision. {#tbl-vol3-peft-memory-footprints}
 :::
 
-In **Quantized LoRA (QLoRA)** [@dettmers2023qlora], base weights $W_0$ are quantized to 4-bit NormalFloat (NF4) with double dequantization. As shown in @tbl-vol3-peft-memory-footprints, QLoRA compresses the base memory footprint of a 70B model from 140 GB to 35 GB, enabling fine-tuning to execute on commodity hardware while maintaining 16-bit adapter gradients.
+In **Quantized LoRA (QLoRA)**\index{Quantized LoRA (QLoRA)} [@dettmers2023qlora], base weights $W_0$ are quantized to 4-bit NormalFloat (NF4) with double dequantization. As shown in @tbl-vol3-peft-memory-footprints, QLoRA compresses the base memory footprint of a 70B model from 140 GB to 35 GB, enabling fine-tuning to execute on commodity hardware while maintaining 16-bit adapter gradients.
 
 ### Multi-Tenant Serving and Dynamic Adapter Swapping
 
-For agentic execution systems, the transformative architectural advantage of LoRA lies in runtime multi-tenancy (implemented in runtimes like S-LoRA and Punica [@sheng2023flexgen]). @Fig-vol3-sft-lora-adapters illustrates this dual-tier architecture: low-rank parameter decomposition during training on the left, and runtime dynamic adapter streaming in GPU accelerator memory on the right.
+For agentic execution systems, the transformative architectural advantage of LoRA lies in runtime multi-tenancy (implemented in runtimes like S-LoRA [@lin2023slora] and Punica [@chen2023punica]). @Fig-vol3-sft-lora-adapters illustrates this dual-tier architecture: low-rank parameter decomposition during training on the left, and runtime dynamic adapter streaming in GPU accelerator memory on the right.
 
 ::: {#fig-vol3-sft-lora-adapters fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.5: Parameter-Efficient Fine-Tuning and Multi-Tenant Adapter Swapping in Accelerator Memory**: (Left) LoRA parameter decomposition: base model weights $W_0 \in \mathbb{R}^{d \times k}$ are frozen in 4-bit NormalFloat (NF4) precision, while incremental adaptations $\Delta W$ are factorized into low-rank matrices $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$. (Right) Multi-tenant serving architecture: a single 70B quantized base model and shared PagedAttention KV-cache pool reside permanently in GPU HBM (~35 GB). Specialized agent adapters ($\sim 150\text{ MB}$ each for Bash, SQL, and Browser) reside in host RAM and are streamed dynamically over PCIe Gen5 in sub-millisecond transfer times, enabling heterogeneous batched GEMM execution without base model reloading. Source: Adapted from Hu et al. [@hu2021lora] and Sheng et al. [@sheng2023flexgen]." fig-alt="Architectural diagram showing LoRA parameter decomposition on the left and dynamic multi-tenant adapter swapping across host RAM and GPU VRAM on the right."}
 ![](images/svg/lora_adapter_swapping.svg){width=100%}
 :::
 
-1. **Shared Static Footprint:** A single copy of the 70B base model is loaded into GPU HBM alongside a shared PagedAttention KV-cache pool.
+1. **Shared Static Footprint:** A single copy of the 70B base model is loaded into GPU HBM alongside a shared PagedAttention [@kwon2023vllm] KV-cache pool.
 2. **On-Demand Adapter Streaming:** Specialized task adapters ($\sim 150\text{ MB}$ each) reside in host CPU RAM. When an Agent Control Block (ACB) schedules a tool step requiring SQL expertise, the corresponding adapter weights $A_{\text{sql}}, B_{\text{sql}}$ are streamed across PCIe to GPU memory in sub-millisecond transfer times.
 3. **Segmented Batched GEMM:** Serving runtimes execute heterogeneous batches where Request 1 uses the Bash adapter, Request 2 uses the SQL adapter, and Request 3 uses the Kubernetes adapter. The base forward pass is computed in a single unified GEMM ($W_0 X$), while the adapter updates are applied via segmented matrix multiplication, eliminating base-model reloading latency.
 
 ### Schema Generalization vs. Rigid Memorization
 
-A subtle risk in parameter-efficient fine-tuning is **Schema Overfitting**. When a small adapter ($r \le 16$) is trained repeatedly on a fixed set of enterprise APIs, its attention layers overfit to the exact parameter names and structural ordering of those schemas [@tang2023toolalpaca].
+A subtle risk in parameter-efficient fine-tuning is **Schema Overfitting**\index{Schema Overfitting}. When a small adapter ($r \le 16$) is trained repeatedly on a fixed set of enterprise APIs, its attention layers overfit to the exact parameter names and structural ordering of those schemas [@tang2023toolalpaca].
 
 If an API later introduces an optional argument or alters a key from `user_id` to `account_identifier`, the adapter's execution collapses. The model attempts to emit the memorized training arguments rather than attending to the updated schema in the prompt prefix.
 
-To enforce schema generalization during adapter SFT, training pipelines must apply **Schema Regularization**:
+To enforce schema generalization during adapter SFT, training pipelines must apply **Schema Regularization**\index{Schema Regularization}:
 
 * **Argument Aliasing:** Dynamically permuting parameter names during dataset generation (e.g., alternating between `repo_path`, `repository_dir`, and `workspace_root`).
 * **Field Shuffling:** Randomizing JSON schema key ordering across training samples to break positional dependence.
@@ -285,38 +206,31 @@ To enforce schema generalization during adapter SFT, training pipelines must app
 
 ## Fallacies and Pitfalls {#sec-vol3-sft-fallacies}
 
-::: {.callout-caution title="Fallacy: Single-turn instruction tuning naturally generalizes to multi-step agent loops"}
-It is widely assumed that a model fine-tuned on instruction datasets (such as Alpaca, Dolly, or standard chat datasets) can effortlessly execute agentic workflows if prompted with a ReAct loop. In reality, single-turn instruction tuning trains models to act as oracles that produce definitive answers in one shot. When deployed in a multi-turn environment, these models refuse to wait for tool observations, emit unstructured stream-of-consciousness text instead of valid JSON schemas, and cannot maintain a coherent belief state over 30 interaction turns. Trajectory SFT is required to rewire the model's behavioral dynamics from single-turn generation to stateful execution.
-:::
+**Fallacy: Single-turn instruction tuning naturally generalizes to multi-step agent loops.**
+It is widely assumed that a model fine-tuned on instruction datasets (such as Alpaca [@taori2023alpaca], Dolly [@conover2023dolly], or standard chat datasets) can effortlessly execute agentic workflows if prompted with a ReAct [@yao2022react] loop. In reality, single-turn instruction tuning trains models to act as oracles that produce definitive answers in one shot. When deployed in a multi-turn environment, these models refuse to wait for tool observations, emit unstructured stream-of-consciousness text instead of valid JSON schemas, and cannot maintain a coherent belief state over 30 interaction turns. Trajectory SFT is required to rewire the model's behavioral dynamics from single-turn generation to stateful execution.
 
-::: {.callout-caution title="Fallacy: Training on golden paths produces robust production policies"}
+**Fallacy: Training on golden paths produces robust production policies.**
 Curating only optimal, error-free trajectories creates brittle, non-recoverable policies. Under the mathematics of imitation learning, a policy trained without error states has zero probability mass assigned to recovery behaviors. When an environment inevitably throws a socket timeout or syntax exception, the agent enters an out-of-distribution state, causing autoregressive error compounding ($\mathcal{O}(\epsilon H^2)$) and semantic livelocks. Robust production agents require that at least 20% to 30% of the training trajectory corpus consists of environmental failures followed by successful diagnostic and self-healing actions.
-:::
 
-::: {.callout-warning title="Pitfall: Leaking unmasked environment stdout into backpropagation"}
+**Pitfall: Leaking unmasked environment stdout into backpropagation.**
 Failing to enforce $M_t = 0$ over external observation tokens causes the model to attempt to fit the stochastic transition dynamics of the external environment. Over training epochs, this triggers Hallucinated Execution Collapse: the agent begins generating both the action and the environment's response within a single forward pass, bypassing the real environment entirely. Furthermore, verbose tool outputs (such as 10,000-token build logs) swamp the loss gradients, diluting the signal needed to optimize decision-making logic.
-:::
 
-::: {.callout-warning title="Pitfall: Sequence-length loss normalization"}
+**Pitfall: Sequence-length loss normalization.**
 Normalizing masked trajectory loss by the total token length $T$ rather than the active action token count $\sum M_t$ artificially scales gradients by environment verbosity. Trajectories that interact with verbose tools receive tiny gradient updates, while trajectories interacting with compact tools receive large updates. Loss must be normalized strictly by $\sum M_t$.
-:::
 
-::: {.callout-warning title="Pitfall: Benchmark contamination and evaluation leakage"}
-Public agent benchmarks (such as SWE-bench [@jimenez2024swebench], HumanEval, and GAIA) evaluate agents on real GitHub issues and web tasks. When scraping public code repositories or GitHub interaction logs to construct SFT datasets, evaluation instances can easily leak into training splits. Contaminated models memorize specific patches rather than learning generalizable debugging heuristics. Production pipelines must implement 13-gram overlap filtering, dense embedding similarity gating, and git commit blacklisting to ensure rigorous benchmark hygiene.
-:::
+**Pitfall: Benchmark contamination and evaluation leakage.**
+Public agent benchmarks (such as SWE-bench [@jimenez2024swebench], HumanEval [@chen2021codex], and GAIA [@mialon2023gaia]) evaluate agents on real GitHub issues and web tasks. When scraping public code repositories or GitHub interaction logs to construct SFT datasets, evaluation instances can easily leak into training splits. Contaminated models memorize specific patches rather than learning generalizable debugging heuristics. Production pipelines must implement 13-gram overlap filtering, dense embedding similarity gating, and git commit blacklisting to ensure rigorous benchmark hygiene.
 
 ## Summary {#sec-vol3-sft-summary}
 
 Supervised fine-tuning on trajectory data compiles fluid in-context prompts and operational exemplars into static model parameters, optimizing both the systems economics and behavioral reliability of autonomous agents.
 
-::: {.callout-important title="Key Systems Takeaways"}
-1. **Context Compilation:** SFT transforms volatile prompt tokens into permanent weight updates, shrinking prompt prefixes by up to 85%, freeing high-bandwidth KV-cache memory, and eliminating "Lost in the Middle" attention degradation.
-2. **Trajectory Causal Factorization:** Trajectories factorize into endogenous policy actions ($P_\theta$) and exogenous environment transitions ($P_{\text{env}}$). Backpropagation must optimize likelihood exclusively over policy tokens.
-3. **Action Masking:** Enforcing the Environmental Causality Boundary via binary loss masking ($M_t = 1$ for actions, $M_t = 0$ for observations) prevents Hallucinated Execution Collapse and eliminates gradient swamping from verbose system logs.
-4. **Active Token Normalization:** Trajectory loss must be normalized by the active policy token count $\sum M_t$ rather than the total sequence length $T$ to prevent gradient attenuation on verbose tool returns.
-5. **Covariate Shift Mitigation:** Pure expert imitation compounds errors quadratically ($\mathcal{O}(\epsilon H^2)$). Injecting intentional environment faults during synthetic trajectory generation and training on recovery traces reduces error growth to linear bounds ($\mathcal{O}(\epsilon H)$).
-6. **Dynamic Adapter Multi-Tenancy:** Quantized LoRA (QLoRA) and dynamic adapter swapping runtimes enable hundreds of specialized tool policies to share a single base model instance in GPU HBM, supporting sub-millisecond task switching and efficient multi-tenant agent serving.
-:::
+* **Context Compilation:** SFT transforms volatile prompt tokens into permanent weight updates, shrinking prompt prefixes by up to 85%, freeing high-bandwidth KV-cache memory, and eliminating "Lost in the Middle" attention degradation.
+* **Trajectory Causal Factorization:** Trajectories factorize into endogenous policy actions ($P_\theta$) and exogenous environment transitions ($P_{\text{env}}$). Backpropagation must optimize likelihood exclusively over policy tokens.
+* **Action Masking:** Enforcing the Environmental Causality Boundary via binary loss masking ($M_t = 1$ for actions, $M_t = 0$ for observations) prevents Hallucinated Execution Collapse and eliminates gradient swamping from verbose system logs.
+* **Active Token Normalization:** Trajectory loss must be normalized by the active policy token count $\sum M_t$ rather than the total sequence length $T$ to prevent gradient attenuation on verbose tool returns.
+* **Covariate Shift Mitigation:** Pure expert imitation compounds errors quadratically ($\mathcal{O}(\epsilon H^2)$). Injecting intentional environment faults during synthetic trajectory generation and training on recovery traces reduces error growth to linear bounds ($\mathcal{O}(\epsilon H)$).
+* **Dynamic Adapter Multi-Tenancy:** Quantized LoRA (QLoRA) and dynamic adapter swapping runtimes enable hundreds of specialized tool policies to share a single base model instance in GPU HBM, supporting sub-millisecond task switching and efficient multi-tenant agent serving.
 
 ::: {.callout-note title="Chapter Connection: From Supervised Trajectories to Active Reinforcement"}
 Supervised fine-tuning compiles known demonstration trajectories into weights, but imitation remains inherently bounded by the quality and coverage of its training data. A policy trained strictly on SFT cannot discover novel problem-solving paths that surpass its demonstrators, nor can it assign negative probability mass to sub-optimal exploratory actions. In **Chapter 13: Reinforcement Learning**, we transcend the imitation ceiling by exposing policies to active environment reinforcement learning—exploring search spaces via critic-free policy gradients, incentivizing autonomous backtracking, and optimizing directly against verifiable execution rewards.

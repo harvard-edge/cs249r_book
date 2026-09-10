@@ -8,23 +8,23 @@ Multi-agent coordination transforms autonomous agency into distributed computing
 
 ## Introduction {#sec-vol3-multi-agent-intro}
 
-Across the preceding chapters of this book, we engineered the internal architecture of the single autonomous agent: modeling its stochastic processor, managing its volatile context working sets and virtual KV-cache memory, structuring its non-volatile episodic storage and checkpointing, scheduling its execution lifecycle and unprivileged system calls, and adapting its underlying policy through synthetic rollouts and reinforcement learning.
+Across the preceding chapters of this book, we engineered the internal architecture of the single autonomous agent: modeling its stochastic processor, managing its volatile context working sets and virtual KV-cache memory [@kwon2023vllm], structuring its non-volatile episodic storage and checkpointing, scheduling its execution lifecycle and unprivileged system calls, and adapting its underlying policy through synthetic rollouts [@silver2016mastering] and reinforcement learning [@schulman2017proximal].
 
 However, as autonomous systems tackle industrial-scale problems—such as migrating a multi-million-line legacy codebase, orchestrating complex cloud deployments, or executing continuous security auditing—a single monolithic agent encounters inescapable physical walls:
 
-1. **The Context Accumulation Wall:** As the control loop iterates, the active state context grows linearly, but the compute cost of processing attention over that context grows quadratically ($O(N^2)$), and the memory footprint of the KV cache rapidly exhausts GPU High-Bandwidth Memory (HBM).
+1. **The Context Accumulation Wall:** As the control loop iterates, the active state context grows linearly, but the compute cost of processing attention over that context grows quadratically ($O(N^2)$) [@dao2022flashattention], and the memory footprint of the KV cache rapidly exhausts GPU High-Bandwidth Memory (HBM).
 2. **The Reliability Wall (Compounding Error):** As established in @sec-vol3-intro, autonomous trajectories are bound by compounding probability: $P_{\text{success}} \le p^N$. Even with a per-step success rate of $p = 0.95$, a 100-step sequential trajectory completed by a single agent has an end-to-end success probability of only 0.5 percent.
-3. **The Wall-Clock Latency Bottleneck:** Single-threaded autoregressive decoding is memory-bandwidth bound. A single agent processing tasks serially cannot leverage the massive data and task parallelism inherent in enterprise workloads.
+3. **The Wall-Clock Latency Bottleneck:** Single-threaded autoregressive decoding is memory-bandwidth bound. A single agent processing tasks serially cannot leverage the massive data and task parallelism inherent in enterprise workloads [@dean2004mapreduce].
 
 Decomposing monolithic objectives across a distributed ensemble of collaborating agents is therefore an architectural necessity. Yet, early multi-agent frameworks approached this challenge through an anthropomorphic conversational lens: instantiating virtual "personas" (such as "Software Architect," "Senior Developer," "Code Reviewer," or "Project Manager") and placing them inside an unconstrained group chat room where agents exchange unstructured natural language messages over a shared prompt buffer.
 
 In production systems engineering, this conversational metaphor is an operational catastrophe. It introduces **The Three Costs of Unconstrained Swarms**:
 
 - **The Quadratic Communication Tax ($O(M^2)$):** In a pairwise conversational mesh of $M$ agents, the number of communication channels scales as $M(M-1)/2$. Every agent's conversational turn is broadcast into the shared prompt buffer of every other agent, triggering quadratic token consumption, rapid context saturation, and massive GPU inference bills.
-- **Correlated Byzantine Hallucinations:** Because subagents typically run on identical foundation model checkpoints or closely related model families, their error distributions are heavily correlated. Unconstrained peer debate reinforces shared cognitive blindspots and hallucinated premises rather than detecting them, frequently reaching unanimous consensus on catastrophic system actions.
+- **Correlated Byzantine Hallucinations:** Because subagents typically run on identical foundation model checkpoints or closely related model families [@devlin2018bert; @he2016deep; @touvron2023llama], their error distributions are heavily correlated. Unconstrained peer debate reinforces shared cognitive blindspots and hallucinated premises rather than detecting them, frequently reaching unanimous consensus on catastrophic system actions.
 - **Semantic Deadlocks and Conversational Flapping:** Without deterministic coordination protocols and explicit causal ordering, autonomous agents enter infinite conversational loops—arguing endlessly over stylistic minutiae or waiting mutually for missing artifacts without making forward progress.
 
-To scale reliably, multi-agent architectures must abandon conversational metaphors and adopt the rigorous foundations of classical distributed systems. We must treat agents as **Stochastic Compute Nodes**: non-deterministic, fail-plausible processes running over untrusted hardware and neural substrates.
+To scale reliably, multi-agent architectures must abandon conversational metaphors and adopt the rigorous foundations of classical distributed systems. We must treat agents as **Stochastic Compute Nodes**\index{Stochastic Compute Node}: non-deterministic, fail-plausible processes running over untrusted hardware and neural substrates.
 
 Coordinating stochastic compute nodes requires four foundational systems primitives:
 
@@ -41,7 +41,7 @@ An agentic system introduces a fundamentally different computing primitive: the 
 
 ### Mathematical Formulation of an Agent Actor {#sec-vol3-multi-agent-math-formulation}
 
-Drawing upon the foundational Actor model of concurrent computation introduced by @hewitt1973actor and formalized by @agha1986actors, an agent runtime is structured not as a multi-threaded shared-memory program, but as an ensemble of completely decoupled, concurrent **Agent Actors**.
+Drawing upon the foundational Actor model of concurrent computation introduced by @hewitt1973actor and formalized by @agha1986actors, an agent runtime is structured not as a multi-threaded shared-memory program, but as an ensemble of completely decoupled, concurrent **Agent Actors**\index{Agent Actor}.
 
 Formally, an Agent Actor $\mathcal{A}_i$ is defined as a 5-tuple:
 
@@ -49,11 +49,11 @@ $$\mathcal{A}_i = \langle \mathcal{S}_i, \mathcal{M}_i, \pi_i, \mathcal{T}_i, \m
 
 where:
 
-- $\mathcal{S}_i$ is the **Private Internal State** of the actor, encompassing its active prompt working set, system instructions, transient scratchpad, and local KV-cache activations.
-- $\mathcal{M}_i$ is a dedicated, first-in, first-out (FIFO) **Mailbox Queue** holding incoming messages addressed to $\mathcal{A}_i$.
-- $\pi_i(a_t \mid s_t, m)$ is the **Stochastic Policy** (the underlying foundation model weights and decoding hyperparameters) mapping internal state $\mathcal{S}_i$ and incoming message $m \in \mathcal{M}_i$ to candidate actions.
-- $\mathcal{T}_i$ is the **Authorized Toolset**, defining the restricted set of external system calls, microVM executables, and deterministic APIs the actor is permitted to invoke.
-- $\mathcal{C}_i$ is the **Capability Descriptor**, an unforgeable cryptographic lease specifying the actor's permission boundary, allowable filesystem paths, network egress policies, and financial token budget quotas.
+- $\mathcal{S}_i$ is the **Private Internal State**\index{Private Internal State} of the actor, encompassing its active prompt working set, system instructions, transient scratchpad, and local KV-cache activations.
+- $\mathcal{M}_i$ is a dedicated, first-in, first-out (FIFO) **Mailbox Queue**\index{Mailbox Queue} holding incoming messages addressed to $\mathcal{A}_i$.
+- $\pi_i(a_t \mid s_t, m)$ is the **Stochastic Policy**\index{Stochastic Policy} (the underlying foundation model weights and decoding hyperparameters) mapping internal state $\mathcal{S}_i$ and incoming message $m \in \mathcal{M}_i$ to candidate actions.
+- $\mathcal{T}_i$ is the **Authorized Toolset**\index{Authorized Toolset}, defining the restricted set of external system calls, microVM executables, and deterministic APIs the actor is permitted to invoke.
+- $\mathcal{C}_i$ is the **Capability Descriptor**\index{Capability Descriptor}, an unforgeable cryptographic lease specifying the actor's permission boundary, allowable filesystem paths, network egress policies, and financial token budget quotas.
 
 ### The Hewitt-Agha Actor Invariants {#sec-vol3-multi-agent-actor-invariants}
 
@@ -63,7 +63,7 @@ Under the classical Hewitt-Agha formalism, an actor executing in response to an 
 2. **Create a finite number of new actors** with initialized private states, attenuated capability descriptors, and isolated mailboxes.
 3. **Designate the replacement behavior** (the mutated internal state $\mathcal{S}_i'$) that will govern its response to the next message retrieved from its mailbox.
 
-In an agentic architecture, these invariants enforce the foundational principle of **Zero Shared Context**:
+In an agentic architecture, these invariants enforce the foundational principle of **Zero Shared Context**\index{Zero Shared Context}:
 
 $$\mathcal{S}_i \cap \mathcal{S}_j = \emptyset, \quad \forall i \ne j$$
 
@@ -84,13 +84,13 @@ As illustrated in @fig-vol3-multi-agent-topologies and formalized in @tbl-vol3-m
 | **Peer-to-Peer Swarm**              | All-to-all broadcast: $O(M^2)$ channels ($M(M-1)/2$) | Shared conversation buffer; zero prompt isolation                                             | Unbounded; single error or injection pollutes cluster                    | Asynchronous turns; non-deterministic interleaving      | Conversational flapping, quadratic token explosion            | Anti-pattern for production SWE; exploratory brainstorming only ($M \le 3$) |
 | **Hierarchical Supervisor Tree**    | Bounded hierarchy: $O(M)$ vertical channels          | Private actor mailboxes; Zero Shared Context ($\mathcal{S}_i \cap \mathcal{S}_j = \emptyset$) | Bounded to crashed subtree; isolated via restart policies                | Asynchronous RPC with vector clocks and causal barriers | Root planner bottleneck; subagent starvation                  | **Standard for complex software engineering and multi-step tasks**          |
 | **Sequential Assembly Pipeline**    | Linear DAG: $O(M)$ stage handoffs                    | Stage-gated artifact handoffs; downstream isolated from scratchpads                           | Upstream crash stalls pipeline; zero backward contamination              | Synchronous phase barriers; pipeline token passing      | Compounding latency ($T = \sum t_i$); brittle to stage errors | Recommended for linear compilation, linting, and structured document ETL    |
-| **Shared Blackboard (Tuple Space)** | Star topology via broker: $O(M)$ connections         | Decoupled tuple space; agents read/write typed items                                          | Worker failure leaves dangling tuples; broker is single point of failure | Event-driven pub/sub; associative pattern-matching      | Stale tuple race conditions; unconsumed dead-letter entries   | Best-fit for opportunistic multi-model research and open-ended synthesis    |
+| **Shared Blackboard (Tuple Space)** | Star topology via broker: $O(M)$ connections         | Decoupled tuple space; agents read/write typed items [@gelernter1985generative]               | Worker failure leaves dangling tuples; broker is single point of failure | Event-driven pub/sub; associative pattern-matching      | Stale tuple race conditions; unconsumed dead-letter entries   | Best-fit for opportunistic multi-model research and open-ended synthesis    |
 
 : **Multi-Agent Coordination Topologies**: Architectural characteristics, communication complexity, state isolation boundaries, failure blast radii, and operational failure signatures across multi-agent coordination archetypes. {#tbl-vol3-multi-agent-topologies}
 
 ### Erlang-Style Hierarchical Supervision {#sec-vol3-multi-agent-supervision}
 
-In concurrent distributed systems, unconstrained peer-to-peer topologies create unbounded failure cascades. Drawing from Joe Armstrong's foundational architecture for fault-tolerant computing in Erlang/OTP [@armstrong2007erlang], robust multi-agent systems structure actor interactions as **Hierarchical Supervisor Trees**.
+In concurrent distributed systems, unconstrained peer-to-peer topologies create unbounded failure cascades. Drawing from Joe Armstrong's foundational architecture for fault-tolerant computing in Erlang/OTP [@armstrong2007erlang], robust multi-agent systems structure actor interactions as **Hierarchical Supervisor Trees**\index{Hierarchical Supervisor Tree}.
 
 @Fig-vol3-multi-agent-supervisor-trees illustrates the Erlang-style supervisor tree architecture with isolated mailboxes, restart policies, and lease-governed physical workspaces.
 
@@ -104,9 +104,9 @@ In this hierarchy:
 - Supervisors do not perform domain work (such as generating code or executing bash commands); their sole responsibility is task decomposition, subagent lifecycle management, and fault monitoring.
 - Leaf workers execute domain-specific tasks within containerized sandboxes, reporting structured completion status or failure traps back to their immediate parent.
 
-Supervisors enforce explicit **Fault-Recovery Restart Policies**:
+Supervisors enforce explicit **Fault-Recovery Restart Policies**\index{Fault-Recovery Restart Policy}:
 
-- **`one_for_one` Policy:** If a leaf worker crashes (for example, due to an out-of-memory exception during code compilation or an external API timeout), the supervisor restarts **only the failed worker**. Sibling workers continue processing their respective mailboxes with zero disruption. This policy is optimal for decoupled, embarrassingly parallel tasks such as parallel document extraction or static code linting.
+- **`one_for_one` Policy:** If a leaf worker crashes (for example, due to an out-of-memory exception during code compilation or an external API timeout), the supervisor restarts **only the failed worker**. Sibling workers continue processing their respective mailboxes with zero disruption. This policy is optimal for decoupled, embarrassingly parallel tasks such as parallel document extraction [@dean2004mapreduce] or static code linting.
 - **`one_for_all` Policy:** If a worker crashes as a result of corrupting shared external state (for example, executing a malformed database migration script or leaving a shared git worktree in a broken intermediate state), the supervisor terminates **the failed worker and all sibling workers** within that supervision group. The supervisor triggers compensating rollback transactions, restores the shared environment to the last verified checkpoint, and restarts all group actors from a clean baseline.
 
 ### The Actor Lifecycle State Machine {#sec-vol3-multi-agent-lifecycle}
@@ -124,7 +124,7 @@ To prevent compute leaks and runaway inference costs, every agent actor in the c
 - **`IDLE`:** The actor's mailbox is empty. The actor consumes zero GPU compute resources, and its process thread is suspended.
 - **`RECEIVING`:** A message arrives in the mailbox. The runtime verifies the message's cryptographic capability token, validates payload schemas against strict interfaces, and checks tenant rate limits.
 - **`INFERRING`:** The message is formatted into the actor's private context window and submitted to the foundation model inference server.
-- **`TOOL_EXEC`:** The model generates a structured system call. The actor process transitions into an asynchronous wait state while the tool executes inside a hardware-isolated sandbox (MicroVM).
+- **`TOOL_EXEC`:** The model generates a structured system call. The actor process transitions into an asynchronous wait state while the tool executes inside a hardware-isolated sandbox (MicroVM) [@agache2020firecracker].
 - **`REPLYING`:** The tool output is captured, terminal assertions are verified by deterministic oracles, the actor state checkpoint is committed to non-volatile storage, and an immutable response payload is dispatched to the supervisor's mailbox. The actor then transitions back to `IDLE`.
 
 ## Mailbox Isolation {#sec-vol3-multi-agent-mailbox-isolation}
@@ -148,8 +148,8 @@ $$\text{Total Tokens} = \sum_{t=1}^{N} M \cdot |H_t| = O(M \cdot N^2)$$
 Beyond financial waste, shared context causes three forms of **Systemic Degradation**:
 
 1. **Attention Pollution and Context Distraction:** Irrelevant conversational exchanges between Agent C and Agent D occupy precious positions in the context window of Agent A. This dilution degrades the model's retrieval accuracy over critical system prompts and increases the probability of instruction drift.
-2. **KV-Cache Thrashing:** High-throughput LLM serving runtimes rely heavily on prefix caching (as established in @sec-vol3-virtual-memory). When multiple agents write asynchronously to a shared context buffer, turns are interleaved in non-deterministic order ($A \to B \to C$ versus $B \to A \to C$). This non-deterministic interleaving invalidates the common prefix at every turn, forcing the inference engine to recompute attention over the entire history and dropping GPU serving efficiency to near zero.
-3. **Prompt Injection Cascades:** If a single worker agent ingests untrusted external data (such as web search results or customer ticket bodies) containing an indirect prompt injection, that malicious payload is immediately reflected into the shared context of every supervisor and peer in the system, compromising the entire cluster.
+2. **KV-Cache Thrashing:** High-throughput LLM serving runtimes rely heavily on prefix caching [@zheng2023sglang] (as established in @sec-vol3-virtual-memory). When multiple agents write asynchronously to a shared context buffer, turns are interleaved in non-deterministic order ($A \to B \to C$ versus $B \to A \to C$). This non-deterministic interleaving invalidates the common prefix at every turn, forcing the inference engine to recompute attention over the entire history and dropping GPU serving efficiency to near zero.
+3. **Prompt Injection Cascades:** If a single worker agent ingests untrusted external data (such as web search results or customer ticket bodies) containing an indirect prompt injection [@greshake2023more], that malicious payload is immediately reflected into the shared context of every supervisor and peer in the system, compromising the entire cluster.
 
 ### Private Mailbox Architecture and Typed Wire Protocols {#sec-vol3-multi-agent-wire-protocols}
 
@@ -196,7 +196,7 @@ When the recipient actor pops this message from its mailbox, its runtime adapter
 
 In an asynchronous distributed multi-agent system, relying on physical wall-clock timestamps to order events is impossible due to network latency, queuing jitter, and variable inference durations. If Agent $\mathcal{A}_1$ and Agent $\mathcal{A}_2$ execute concurrently, physical timestamps cannot determine whether an action taken by $\mathcal{A}_2$ was causally dependent on an earlier output of $\mathcal{A}_1$.
 
-To establish deterministic causal consistency—essential for reproducible evaluation, time-travel replay debugging, and distributed cycle detection—the multi-agent runtime implements **Vector Clocks** [@lamport1978time; @mattern1989].
+To establish deterministic causal consistency—essential for reproducible evaluation, time-travel replay debugging, and distributed cycle detection—the multi-agent runtime implements **Vector Clocks**\index{Vector Clock} [@lamport1978time; @mattern1989].
 
 Every agent $\mathcal{A}_i$ in an ensemble of size $M$ maintains a local clock vector $V_i = [v_1, v_2, \dots, v_M]$, initialized to zeros:
 
@@ -221,7 +221,7 @@ Using vector clocks, the orchestrator can formally prove whether Event $E_a$ cau
 
 Because agent actors operate asynchronously, a fast upstream producer (such as a high-level planner generating subtasks) can easily overwhelm a slow downstream consumer (such as a worker running comprehensive integration test suites). Without intervention, the consumer's mailbox queue will grow unbounded, causing memory exhaustion and massive queuing latency.
 
-Production multi-agent runtimes enforce **Reactive Backpressure**:
+Production multi-agent runtimes enforce **Reactive Backpressure**\index{Reactive Backpressure}:
 
 - Each actor mailbox defines a strict capacity limit (the *High-Water Mark*).
 - When a mailbox queue depth exceeds this threshold, the runtime transitions the actor into a `THROTTLED` state and propagates backpressure signals upstream.
@@ -231,7 +231,7 @@ Production multi-agent runtimes enforce **Reactive Backpressure**:
 
 A dangerous intuition in AI systems engineering is the belief that if one agent can solve a problem in 10 minutes, ten agents collaborating can solve it in 1 minute.
 
-In physical systems engineering, parallel speedup is strictly bounded by **Amdahl's Law** [@amdahl1967]. When applied to distributed autonomous agents, Amdahl's formulation must be augmented to account for the superlinear costs of context serialization, network round-trips, prompt re-encoding, and inter-agent synchronization: the **Coordination Tax**.
+In physical systems engineering, parallel speedup is strictly bounded by **Amdahl's Law** [@amdahl1967]. When applied to distributed autonomous agents, Amdahl's formulation must be augmented to account for the superlinear costs of context serialization, network round-trips, prompt re-encoding, and inter-agent synchronization: the **Coordination Tax**\index{Coordination Tax}.
 
 ### Derivation of Multi-Agent Amdahl's Law {#sec-vol3-multi-agent-amdahl-derivation}
 
@@ -259,7 +259,7 @@ However, in multi-agent systems, agents are not frictionless mathematical abstra
 1. **Subagent Provisioning and Re-Encoding Overhead ($\beta M$):** Each subagent requires system prompt preambles, schema definitions, context re-encoding, and private KV-cache allocations. As $M$ increases, total cluster memory bandwidth and prompt ingestion costs grow linearly.
 2. **Pairwise Coordination and Synchronization Tax ($\alpha M^2$):** When agents communicate, coordinate access to shared resources, or resolve conflicting file modifications, the synchronization overhead scales quadratically with fleet size.
 
-Incorporating these physical overheads yields **Multi-Agent Amdahl's Law**:
+Incorporating these physical overheads yields **Multi-Agent Amdahl's Law**\index{Multi-Agent Amdahl's Law}:
 
 $$S(M) = \frac{1}{s + \frac{1-s}{M} + \alpha M^2 + \beta M}$$
 
@@ -340,20 +340,20 @@ Production multi-agent systems prevent workspace corruption through three determ
 #### 1. Distributed Workspace Leases (TTL Locks) {#sec-vol3-multi-agent-ttl-leases}
 Pessimistic locking—holding a mutex lock until an agent finishes its task—is dangerous: if an agent hangs in a reasoning loop or experiences an API network timeout, the shared resource remains locked indefinitely, freezing the cluster.
 
-Runtimes enforce **Time-Bounded Leases** [@gray1989leases]:
+Runtimes enforce **Time-Bounded Leases**\index{Time-Bounded Lease} [@gray1989leases]:
 $$\text{Lease} = \langle \text{ResourceID}, \text{AgentID}, \text{Epoch}, \text{TTL} \rangle$$
 An agent is granted exclusive write authority over a module for a strictly bounded duration (such as 30 seconds). The agent must emit periodic heartbeats during active tool execution to refresh the lease. If the agent crashes or exceeds its deadline, the lease expires automatically, releasing the resource to waiting workers.
 
 #### 2. Optimistic Concurrency Control (OCC) with Cryptographic Hashes {#sec-vol3-multi-agent-occ}
 
-For file modifications, runtimes enforce **Optimistic Concurrency Control** [@kung1981optimistic]:
+For file modifications, runtimes enforce **Optimistic Concurrency Control**\index{Optimistic Concurrency Control} [@kung1981optimistic]:
 
 - **Read Phase:** When an agent reads a file, the runtime records the cryptographic digest of its contents: $H_{\text{read}} = \text{SHA256}(\text{content})$. The agent performs all edits inside an isolated in-memory buffer.
 - **Validation Phase:** When the agent submits a patch, the runtime compares $H_{\text{read}}$ against the current live digest on disk, $H_{\text{live}}$.
 - **Write Phase:** If $H_{\text{read}} == H_{\text{live}}$, no concurrent modifications occurred; the patch is committed atomically. If $H_{\text{read}} \ne H_{\text{live}}$, validation fails. The runtime aborts the write and injects a structured conflict payload back into the subagent's mailbox, prompting it to rebase its edits against the updated baseline.
 
 #### 3. Git Worktree Isolation {#sec-vol3-multi-agent-git-worktrees}
-The physical isolation barrier for multi-agent software engineering is the **Git Worktree**. Rather than allowing agents to switch branches in the primary repository checkout, the orchestrator provisions a dedicated, ephemeral worktree for each subagent:
+The physical isolation barrier for multi-agent software engineering is the **Git Worktree**\index{Git Worktree}. Rather than allowing agents to switch branches in the primary repository checkout, the orchestrator provisions a dedicated, ephemeral worktree for each subagent:
 
 ```bash
 # Provision isolated physical filesystem worktree backed by shared object database
@@ -367,8 +367,8 @@ Table @tbl-vol3-multi-agent-concurrency-primitives compares the systems characte
 | Concurrency & Isolation Primitive            | Governed Resource Scope                                        | Concurrency Hazard Prevented                                              | Operational Latency Overhead                                 | Memory & Storage Footprint                                                   | Conflict Detection & Recovery Protocol                                                               |
 |:---------------------------------------------|:---------------------------------------------------------------|:--------------------------------------------------------------------------|:-------------------------------------------------------------|:-----------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
 | **Distributed TTL Leases (Gray & Cheriton)** | Shared databases, external microservices, global locks         | Distributed deadlocks, orphaned process hangs, uncoordinated mutations    | $10\text{--}50\text{ ms}$ periodic heartbeat network traffic | Negligible ($< 1\text{ KB}$ lease state in Raft/Redis store)                 | Automatic expiration on heartbeat timeout; preemption and Sagas backward compensation                |
-| **Optimistic Concurrency Control (OCC)**     | File contents, source code modules, configuration specs        | Lost updates, blind overwrites, dirty writes across parallel edits        | $< 5\text{ ms}$ cryptographic SHA-256 digest hashing         | In-memory write buffer ($\approx \text{file size}$)                          | Atomic abort on $H_{\text{read}} \ne H_{\text{live}}$; injects conflict diff into mailbox for rebase |
-| **Git Worktree Isolation**                   | Repository working directory, `.git/index`, local build caches | `.git/index.lock` collisions, branch switching churn, dirty builds        | $50\text{--}150\text{ ms}$ ephemeral worktree creation       | Shared git object store; $50\text{--}500\text{ MB}$ per checked-out worktree | Three-way merge at supervisor level; rebase or discard via `git worktree remove --force`             |
+| **Optimistic Concurrency Control (OCC)**\index{Optimistic Concurrency Control}     | File contents, source code modules, configuration specs        | Lost updates, blind overwrites, dirty writes across parallel edits        | $< 5\text{ ms}$ cryptographic SHA-256 digest hashing         | In-memory write buffer ($\approx \text{file size}$)                          | Atomic abort on $H_{\text{read}} \ne H_{\text{live}}$; injects conflict diff into mailbox for rebase |
+| **Git Worktree Isolation**\index{Git Worktree}                   | Repository working directory, `.git/index`, local build caches | `.git/index.lock` collisions, branch switching churn, dirty builds        | $50\text{--}150\text{ ms}$ ephemeral worktree creation       | Shared git object store; $50\text{--}500\text{ MB}$ per checked-out worktree | Three-way merge at supervisor level; rebase or discard via `git worktree remove --force`             |
 | **Hardware MicroVMs (Firecracker / KVM)**    | Linux OS kernel, process table, network sockets, root VFS      | Privilege escalation, host kernel escapes, malicious package exfiltration | $15\text{--}45\text{ ms}$ cold-boot execution barrier        | $5\text{ MB}$ base RAM per microVM + ephemeral Copy-on-Write overlay         | Instant VM teardown on unmaskable trap or timeout; instant disk snapshot rollback                    |
 
 : **Workspace Concurrency Control and Isolation Primitives**: Architectural mechanisms, governed resource scopes, operational latency taxes, storage footprints, and recovery protocols for concurrent agent execution environments. {#tbl-vol3-multi-agent-concurrency-primitives}
@@ -380,7 +380,7 @@ In traditional operating systems, deadlocks occur when processes hold mutual loc
 - **Semantic Deadlock:** Agent A emits an API schema and prompts Agent B: *"Please write the unit tests for this schema before I implement the database layer."* Agent B receives the message and responds: *"I cannot write tests without inspecting the actual database column definitions; please implement the database first."* Both agents enter a blocking wait state, consuming mailbox slots while producing zero work.
 - **Semantic Livelock (Conversational Flapping):** Agent A changes variable names from `snake_case` to `camelCase` to satisfy its stylistic prior. Agent B reviews the pull request, flags `camelCase` as violating local project rules, and reverts the code to `snake_case`. Agent A receives the revert, re-asserts its original logic, and changes it back. The ensemble consumes hundreds of thousands of tokens in hyperactive generation, but the system is trapped in an infinite limit cycle.
 
-To detect and terminate semantic deadlocks, the orchestrator maintains an active **Causal Wait-For Graph**:
+To detect and terminate semantic deadlocks, the orchestrator maintains an active **Causal Wait-For Graph**\index{Causal Wait-For Graph}:
 
 $$\mathcal{G} = (\mathcal{V}, \mathcal{E})$$
 
@@ -414,7 +414,7 @@ The result was immediate systemic collapse: servers could no longer create new t
 
 When designing verification pipelines for autonomous systems, software architects frequently propose **Voting and Consensus Protocols**: deploying an ensemble of odd-numbered agents (for example, $2f + 1 = 5$ agents), prompting them to evaluate a candidate action independently, and accepting the action if a simple majority agrees.
 
-This design appeals to classical **Byzantine Fault Tolerance (BFT)** theory [@lamport1982byzantine], which proves that a distributed network can reach reliable consensus despite up to $f$ arbitrary or malicious failures, provided that at least $3f + 1$ total nodes participate.
+This design appeals to classical **Byzantine Fault Tolerance (BFT)**\index{Byzantine Fault Tolerance} theory [@lamport1982byzantine], which proves that a distributed network can reach reliable consensus despite up to $f$ arbitrary or malicious failures, provided that at least $3f + 1$ total nodes participate.
 
 In agentic machine learning systems, **classical BFT assumptions completely collapse**.
 
@@ -427,7 +427,7 @@ $$P(\text{Node } 1 \text{ fails} \cap \text{Node } 2 \text{ fails}) = P(\text{No
 In neural agentic systems, this independence assumption is completely false. Subagents are instantiated from foundation models that share:
 
 - The identical pretraining corpus (Common Crawl, GitHub, arXiv).
-- The identical post-training alignment distribution (RLHF, DPO, instruction fine-tuning).
+- The identical post-training alignment distribution (RLHF [@ouyang2022training], DPO [@rafailov2023direct], instruction fine-tuning [@wei2021finetuned]).
 - The identical tokenization vocabularies and architectural transformer priors.
 
 Consequently, agent failure modes are **heavily correlated**:
@@ -438,7 +438,7 @@ If a programming library has recently undergone a major API breaking change, or 
 
 When 5 identical agents vote on a subtly broken code snippet, they do not produce independent random errors. They arrive at a confident, unanimous **$5-0$ consensus in favor of the hallucinated bug**.
 
-Furthermore, when agents are allowed to deliberate via multi-agent debate without ground-truth anchoring, debate does not eliminate errors; it amplifies **Conversational Sycophancy** [@du2023improving]. Agents systematically defer to whichever peer emits the longest, most authoritative-sounding chain-of-thought argument, regardless of whether the premise is factually correct.
+Furthermore, when agents are allowed to deliberate via multi-agent debate without ground-truth anchoring, debate does not eliminate errors; it amplifies **Conversational Sycophancy**\index{Conversational Sycophancy} [@du2023improving]. Agents systematically defer to whichever peer emits the longest, most authoritative-sounding chain-of-thought argument, regardless of whether the premise is factually correct.
 
 ### The Architectural Law of Verification {#sec-vol3-multi-agent-law-of-verification}
 
@@ -471,7 +471,7 @@ As summarized in @tbl-vol3-multi-agent-verification-paradigms, neural consensus 
 
 When a root supervisor spawns subagents to perform delegated subtasks (such as querying documentation, refactoring code, or executing tests), how does the system ensure a compromised or hallucinating subagent cannot compromise the host environment or exfiltrate sensitive data?
 
-Multi-agent security is governed by the classical **Principle of Least Privilege** [@saltzer1975], implemented via **Monotonic Capability Attenuation** [@miller2006robust].
+Multi-agent security is governed by the classical **Principle of Least Privilege**\index{Principle of Least Privilege} [@saltzer1975], implemented via **Monotonic Capability Attenuation**\index{Monotonic Capability Attenuation} [@miller2006robust].
 
 In an Object-Capability (ocap) model, access control is governed not by ambient user identity, but by unforgeable cryptographic capability tokens. When an agent dispatches a task to a child subagent $\mathcal{A}_{\text{child}}$, it constructs an attenuated capability descriptor $\mathcal{C}_{\text{child}}$:
 

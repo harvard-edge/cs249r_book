@@ -27,15 +27,15 @@ Virtual context memory is the operating system abstraction layer that decouples 
 - **Analyze** the prefix locality inherent in autonomous agent trajectories, demonstrating why stateless inference architectures impose unacceptable quadratic prefill latency penalties during iterative tool use.
 - **Evaluate** the virtual-to-physical address translation mechanics of PagedAttention, understanding how fixed-size block paging eliminates external fragmentation and bounds internal waste.
 - **Formulate** the operational lifecycle of dynamic Radix tree prefix indexing, tracing prefix matching, node splitting, reference counting, and LRU eviction during multi-turn agent conversations.
-- **Architect** Copy-on-Write (CoW) page sharing for speculative search trees (such as Tree-of-Thoughts and MCTS), calculating the memory capacity expansion achieved by aliasing parent reasoning paths.
+- **Architect** Copy-on-Write (CoW) page sharing for speculative search trees (such as Tree-of-Thoughts [@yao2023tree] and MCTS [@browne2012survey]), calculating the memory capacity expansion achieved by aliasing parent reasoning paths.
 - **Diagnose** common systems failure modes in virtual context management, including tokenizer boundary shifts, prompt template instability, and cache invalidation under tool-induced environment mutations.
 :::
 
 ## Introduction {#sec-vol3-vm-intro}
 
-In the classic Von Neumann computer architecture, the central processing unit interacts with a hierarchical memory subsystem: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage. Operating systems bridge these tiers through **virtual memory** [@kilburn1962one; @denning1970virtual], presenting software with an illusion of vast, contiguous, isolated address spaces while dynamically mapping logical pages onto fragmented physical frames in silicon.
+In the classic Von Neumann computer architecture, the central processing unit interacts with a hierarchical memory subsystem: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage. Operating systems bridge these tiers through **virtual memory**\index{virtual memory}[^fn-virtual-memory] [@kilburn1962one; @denning1970virtual], presenting software with an illusion of vast, contiguous, isolated address spaces while dynamically mapping logical pages onto fragmented physical frames in silicon.
 
-An autonomous LLM agent operates under a strikingly similar paradigm. The transformer foundation model functions as the central reasoning engine. Its registers and primary working memory, however, do not consist of standard byte-addressable DRAM. Instead, the active working memory of an agent consists of token sequences materialized as high-dimensional **Key-Value (KV) activation tensors** resident within accelerator High-Bandwidth Memory (HBM).
+An autonomous LLM agent operates under a strikingly similar paradigm. The transformer foundation model [@vaswani2017attention] functions as the central reasoning engine. Its registers and primary working memory, however, do not consist of standard byte-addressable DRAM. Instead, the active working memory of an agent consists of token sequences materialized as high-dimensional **Key-Value (KV) activation tensors**\index{Key-Value (KV) activation tensors}[^fn-kv-activation-tensors] resident within accelerator High-Bandwidth Memory (HBM).
 
 When an agent interacts with external environments—issuing shell commands, querying databases, inspecting web pages, or evaluating speculative reasoning branches—it executes an iterative perception-action loop:
 
@@ -43,10 +43,10 @@ $$s_t \xrightarrow{\text{policy}} a_t \xrightarrow{\text{runtime}} o_t \longrigh
 
 At step $t+1$, the agent's context window contains the entire prior sequence $s_t$, the action $a_t$, and the resulting observation $o_t$. In a conventional, unvirtualized serving infrastructure, this iterative loop triggers two severe systems pathologies:
 
-1. **The Allocation Pathology (Memory Fragmentation):** Standard deep learning frameworks allocate memory in contiguous chunks. Because the runtime cannot predict how many tokens an agent will generate or how many interaction turns a task will require, it must either pre-allocate memory for the theoretical maximum context window (e.g., $128\text{k}$ tokens) or dynamically re-allocate and copy tensors as the sequence grows. Pre-allocation leads to massive **internal fragmentation**, where up to $80\%$ of accelerator HBM sits idle, reserved for tokens that are never generated. Dynamic reallocation causes severe **external fragmentation**, where memory becomes partitioned into unusable gaps, precipitating premature Out-of-Memory (OOM) crashes even when total free memory is abundant [@kwon2023efficient].
-2. **The Compute Pathology (Redundant Prefill):** Consecutive turns of an agent trajectory share between $85\%$ and $98\%$ of their prompt tokens. In test-time search algorithms (such as Tree-of-Thoughts and Monte Carlo Tree Search, detailed in @sec-vol3-deliberation), dozens of speculative branches share identical parent reasoning chains. If the serving runtime treats each turn or branch as an isolated request, it recomputes the prompt prefill from scratch, burning tens of billions of floating-point operations (FLOPs) re-evaluating invariant system instructions, tool schemas, and historical steps.
+1. **The Allocation Pathology (Memory Fragmentation):** Standard deep learning frameworks allocate memory in contiguous chunks. Because the runtime cannot predict how many tokens an agent will generate or how many interaction turns a task will require, it must either pre-allocate memory for the theoretical maximum context window (e.g., $128\text{k}$ tokens) or dynamically re-allocate and copy tensors as the sequence grows. Pre-allocation leads to massive **internal fragmentation**\index{internal fragmentation}[^fn-internal-fragmentation], where up to $80\%$ of accelerator HBM sits idle, reserved for tokens that are never generated. Dynamic reallocation causes severe **external fragmentation**\index{external fragmentation}[^fn-external-fragmentation], where memory becomes partitioned into unusable gaps, precipitating premature Out-of-Memory (OOM) crashes even when total free memory is abundant [@kwon2023efficient].
+2. **The Compute Pathology (Redundant Prefill):** Consecutive turns of an agent trajectory share between $85\%$ and $98\%$ of their prompt tokens. In test-time search algorithms (such as Tree-of-Thoughts [@yao2023tree] and Monte Carlo Tree Search [@browne2012survey], detailed in @sec-vol3-deliberation), dozens of speculative branches share identical parent reasoning chains. If the serving runtime treats each turn or branch as an isolated request, it recomputes the prompt prefill from scratch, burning tens of billions of floating-point operations (FLOPs) re-evaluating invariant system instructions, tool schemas, and historical steps.
 
-Resolving these pathologies requires virtualizing the agent's context memory. Just as Ferranti Atlas engineers resolved core-memory scarcity in 1962 by introducing virtual memory paging [@kilburn1962one], modern agent serving systems introduce **Virtual Context Memory**. By partitioning continuous Key-Value tensors into uniform physical memory blocks and indexing those blocks through dynamic Radix prefix trees, the inference engine decouples logical sequence representations from physical silicon addresses, unlocking zero-copy prefix sharing and demand-paged execution.
+Resolving these pathologies requires virtualizing the agent's context memory. Just as Ferranti Atlas engineers resolved core-memory scarcity in 1962 by introducing virtual memory paging [@kilburn1962one], modern agent serving systems introduce **Virtual Context Memory**\index{Virtual Context Memory}. By partitioning continuous Key-Value tensors into uniform physical memory blocks and indexing those blocks through dynamic Radix prefix trees, the inference engine decouples logical sequence representations from physical silicon addresses, unlocking zero-copy prefix sharing and demand-paged execution.
 
 ::: {#dfn-virtual-context-memory .callout-definition title="Virtual context memory"}
 
@@ -97,20 +97,20 @@ $$M_{\text{KV}}(L) = L \times S_{\text{token}} = 2 \cdot b \cdot n_{\text{layers
 
 As context windows expanded from $4\text{k}$ to $128\text{k}$ and $1\text{M}$ tokens to accommodate dense agent scratchpads and codebases, standard MHA became a severe memory bandwidth and capacity bottleneck. Modern models employ architectural variants that alter the KV tensor layout:
 
-1. **Multi-Query Attention (MQA)** [@shazeer2019fast]: Collapses all Key and Value heads into a single head shared across all Query heads ($n_{\text{kv\_heads}} = 1$). The footprint reduces by a factor of $n_{\text{heads}}$:
+1. **Multi-Query Attention (MQA)**\index{Multi-Query Attention (MQA)}[^fn-mqa] [@shazeer2019fast]: Collapses all Key and Value heads into a single head shared across all Query heads ($n_{\text{kv\_heads}} = 1$). The footprint reduces by a factor of $n_{\text{heads}}$:
    $$S_{\text{token, MQA}} = 2 \times b \times n_{\text{layers}} \times d_{\text{head}}$$
-2. **Grouped-Query Attention (GQA)** [@ainslie2023gqa]: Partitions Query heads into $G$ groups, assigning one Key and one Value head to each group ($n_{\text{kv\_heads}} = G$). The memory footprint scales as:
+2. **Grouped-Query Attention (GQA)**\index{Grouped-Query Attention (GQA)}[^fn-gqa] [@ainslie2023gqa]: Partitions Query heads into $G$ groups, assigning one Key and one Value head to each group ($n_{\text{kv\_heads}} = G$). The memory footprint scales as:
    $$S_{\text{token, GQA}} = 2 \times b \times n_{\text{layers}} \times (G \cdot d_{\text{head}}) = \frac{G}{n_{\text{heads}}} S_{\text{token, MHA}}$$
-3. **Multi-Head Latent Attention (MLA)** [@deepseek2024v2]: Rather than caching uncompressed Key and Value heads, MLA projects Key and Value vectors into a low-dimensional latent space of dimension $d_c \ll n_{\text{heads}} \times d_{\text{head}}$, alongside a decoupled rotary key vector $d_R$. During generation, only the compressed latent vector $\mathbf{c}_t^{\text{KV}}$ and the rotary key $\mathbf{k}_t^R$ are stored:
+3. **Multi-Head Latent Attention (MLA)**\index{Multi-Head Latent Attention (MLA)}[^fn-mla] [@deepseek2024v2]: Rather than caching uncompressed Key and Value heads, MLA projects Key and Value vectors into a low-dimensional latent space of dimension $d_c \ll n_{\text{heads}} \times d_{\text{head}}$, alongside a decoupled rotary key vector $d_R$. During generation, only the compressed latent vector $\mathbf{c}_t^{\text{KV}}$ and the rotary key $\mathbf{k}_t^R$ are stored:
    $$S_{\text{token, MLA}} = b \times n_{\text{layers}} \times (d_c + d_R)$$
 
 | Model Architecture      | Parameter Count | $n_{\text{layers}}$ | $d_{\text{model}}$ | Attention Type | $n_{\text{heads}} / n_{\text{kv\_heads}}$ | $S_{\text{token}}$ (FP16, bytes)             | KV Cache at $32\text{k}$ Tokens | KV Cache at $128\text{k}$ Tokens |
 |:------------------------|:----------------|:--------------------|:-------------------|:---------------|:------------------------------------------|:---------------------------------------------|:--------------------------------|:---------------------------------|
-| **LLaMA-1 / LLaMA-2**   | 70B             | 80                  | 8192               | MHA            | 64 / 64                                   | $1\text{,}310\text{,}720$ ($1.31\text{ MB}$) | $41.94\text{ GB}$               | $167.77\text{ GB}$               |
-| **Llama-3 / Llama-3.1** | 70B             | 80                  | 8192               | GQA ($8:1$)    | 64 / 8                                    | $163\text{,}840$ ($160\text{ KB}$)           | $5.24\text{ GB}$                | $20.97\text{ GB}$                |
-| **Qwen-2.5**            | 72B             | 80                  | 8192               | GQA ($8:1$)    | 64 / 8                                    | $163\text{,}840$ ($160\text{ KB}$)           | $5.24\text{ GB}$                | $20.97\text{ GB}$                |
-| **Command R+**          | 104B            | 64                  | 12288              | GQA ($8:1$)    | 96 / 8                                    | $131\text{,}072$ ($128\text{ KB}$)           | $4.19\text{ GB}$                | $16.78\text{ GB}$                |
-| **DeepSeek-V2 / V3**    | 236B / 671B     | 60                  | 5120               | MLA            | Latent ($512 + 64$)                       | $69\text{,}120$ ($67.5\text{ KB}$)           | $2.21\text{ GB}$                | $8.85\text{ GB}$                 |
+| **LLaMA-1 / LLaMA-2** [@touvron2023llama; @touvron2023llama2] | 70B             | 80                  | 8192               | MHA            | 64 / 64                                   | $1\text{,}310\text{,}720$ ($1.31\text{ MB}$) | $41.94\text{ GB}$               | $167.77\text{ GB}$               |
+| **Llama-3 / Llama-3.1** [@dubey2024llama3] | 70B             | 80                  | 8192               | GQA ($8:1$)    | 64 / 8                                    | $163\text{,}840$ ($160\text{ KB}$)           | $5.24\text{ GB}$                | $20.97\text{ GB}$                |
+| **Qwen-2.5** [@qwen2024qwen25] | 72B             | 80                  | 8192               | GQA ($8:1$)    | 64 / 8                                    | $163\text{,}840$ ($160\text{ KB}$)           | $5.24\text{ GB}$                | $20.97\text{ GB}$                |
+| **Command R+** [@cohere2024command] | 104B            | 64                  | 12288              | GQA ($8:1$)    | 96 / 8                                    | $131\text{,}072$ ($128\text{ KB}$)           | $4.19\text{ GB}$                | $16.78\text{ GB}$                |
+| **DeepSeek-V2 / V3** [@deepseek2024v2; @deepseek2024v3] | 236B / 671B     | 60                  | 5120               | MLA            | Latent ($512 + 64$)                       | $69\text{,}120$ ($67.5\text{ KB}$)           | $2.21\text{ GB}$                | $8.85\text{ GB}$                 |
 : Memory footprint per token across modern foundation model attention architectures. {#tbl-vol3-vm-model-kv-footprint}
 
 ### Physical Tensor Layouts and Memory Fragmentation
@@ -164,9 +164,9 @@ Notice the critical operational property revealed in @tbl-vol3-vm-prompt-anatomy
 
 ### Denning's Principle of Locality in Agent Contexts
 
-In his foundational 1970 paper, Peter Denning established that programs exhibit **temporal locality** (memory locations referenced recently are likely to be referenced again soon) and **spatial locality** (storage locations adjacent to recently referenced memory are likely to be accessed together) [@denning1970virtual].
+In his foundational 1970 paper, Peter Denning established that programs exhibit **temporal locality**\index{temporal locality}[^fn-temporal-locality] (memory locations referenced recently are likely to be referenced again soon) and **spatial locality**\index{spatial locality}[^fn-spatial-locality] (storage locations adjacent to recently referenced memory are likely to be accessed together) [@denning1970virtual].
 
-In autonomous agent systems, context access patterns exhibit an extreme variant: **Trajectory Prefix Locality**.
+In autonomous agent systems, context access patterns exhibit an extreme variant: **Trajectory Prefix Locality**\index{Trajectory Prefix Locality}[^fn-trajectory-prefix-locality].
 
 ::: {#pri-trajectory-prefix-locality .callout-principle title="The Trajectory Prefix Locality Invariant"}
 For any autonomous agent executing an append-only perception-action trajectory of length $T$, the prefix sharing ratio between consecutive turns $t$ and $t+1$:
@@ -184,7 +184,7 @@ When an agent interacts with a conventional stateless inference endpoint, the se
 
 $$\text{FLOPs}_{\text{prefill}}(L) \approx 2 P L + 4 n_{\text{layers}} d_{\text{model}} L^2$$ {#eq-vol3-vm-prefill-flops}
 
-Consider serving Llama-3-70B ($P \approx 7 \times 10^{10}$) on a $32\text{,}768$-token agent prompt. Computing the prefill pass requires:
+Consider serving Llama-3-70B [@dubey2024llama3] ($P \approx 7 \times 10^{10}$) on a $32\text{,}768$-token agent prompt. Computing the prefill pass requires:
 
 $$\text{FLOPs}_{\text{prefill}} \approx 2 \times (7 \times 10^{10}) \times 32\text{,}768 \approx 4.59 \times 10^{15} \text{ FLOPs} \quad (4.59\text{ PFLOPs})$$
 
@@ -192,7 +192,7 @@ On an NVIDIA H100 SXM5 GPU operating at an effective sustained BF16 Tensor Core 
 
 $$T_{\text{prefill}} = \frac{4.59 \times 10^{15} \text{ FLOPs}}{5 \times 10^{14} \text{ FLOPs/s}} \approx 9.18 \text{ seconds}$$
 
-If an agent executes a 20-turn trajectory on a stateless serving infrastructure, the cluster spends over **$180$ seconds** of pure GPU time re-evaluating identical tokens. This redundant computation destroys interactive response times (inflating Time-to-First-Token, TTFT), wastes enormous electrical power, and creates severe queueing backpressure.
+If an agent executes a 20-turn trajectory on a stateless serving infrastructure, the cluster spends over **$180$ seconds** of pure GPU time re-evaluating identical tokens. This redundant computation destroys interactive response times (inflating **Time-to-First-Token (TTFT)**\index{Time-to-First-Token (TTFT)}[^fn-ttft]), wastes enormous electrical power, and creates severe queueing backpressure.
 
 If the serving system caches and reuses the KV states corresponding to $X^{(t)}$, the prefill for turn $t+1$ requires evaluating only the incremental delta $\Delta = |\mathbf{x}_{\text{action}}^{(t)}| + |\mathbf{x}_{\text{obs}}^{(t+1)}|$ (e.g., 500 tokens). Computing 500 tokens on Llama-3-70B requires only $0.07\text{ PFLOPs}$, completing in approximately **$140\text{ ms}$**—a **$65\times$ reduction in prefill latency**.
 
@@ -270,7 +270,7 @@ To solve the dual challenges of physical memory fragmentation and zero-copy pref
 ***PagedAttention***\index{PagedAttention!definition} is an attention algorithm and memory management architecture that stores Key and Value activation vectors in non-contiguous, fixed-size physical memory blocks, translating logical token positions to physical memory addresses via dynamic page tables during kernel execution.
 
 1.  **Significance**: Completely eliminates external memory fragmentation and bounds internal fragmentation to the final memory block of a sequence, unlocking near-$100\%$ accelerator memory utilization.
-2.  **Distinction**: Traditional attention kernels require continuous memory strides to compute $\text{softmax}(QK^T/\sqrt{d})V$. PagedAttention executes attention directly across scattered physical memory blocks through an integrated address lookup table inside GPU SRAM.
+2.  **Distinction**: Traditional attention kernels (such as FlashAttention [@dao2022flashattention]) require continuous memory strides to compute $\text{softmax}(QK^T/\sqrt{d})V$. PagedAttention executes attention directly across scattered physical memory blocks through an integrated address lookup table inside GPU SRAM.
 3.  **Common pitfall**: Assuming small block sizes are unconditionally optimal; excessively small blocks ($B \le 4$) degrade memory coalescing on GPU global memory buses, while large blocks ($B \ge 64$) increase internal tail fragmentation.
 
 :::
@@ -322,7 +322,7 @@ Under unpaged serving, generating three branches from a $32\text{k}$-token conte
 
 With PagedAttention:
 
-1. **Shared Block Aliasing:** When Branch $A$, $B$, and $C$ are initialized, their page tables simply copy the physical block pointers of the parent context. No activation data is copied. The physical blocks enter a shared state, incrementing their internal **reference counter** ($\text{ref\_count} = 3$).
+1. **Shared Block Aliasing:** When Branch $A$, $B$, and $C$ are initialized, their page tables simply copy the physical block pointers of the parent context. No activation data is copied. The physical blocks enter a shared state, incrementing their internal **reference counter**\index{reference counter}[^fn-reference-counter] ($\text{ref\_count} = 3$).
 2. **Copy-on-Write Execution:** As each branch autoregressively generates its own divergent tokens, it writes into its own physical blocks. If a branch needs to write to an unsaturated shared block (e.g., the final block of the prefix containing fewer than $B$ tokens), the allocator allocates a fresh physical block, copies only that single block's tokens ($B \times S_{\text{token}} = 2.56\text{ MB}$), decrements the parent block's reference counter, and redirects the child branch's page table.
 
 <!-- MERMAID SOURCE PRESERVATION
@@ -422,7 +422,7 @@ When an agent submits a prompt $X = (x_0, x_1, \dots, x_{N-1})$ to the serving r
 
 ### Reference Counting and LRU Eviction
 
-Because accelerator HBM is finite, the Radix tree cannot retain all historical trajectories indefinitely. Memory management is governed by a **Reference-Counted LRU Eviction Policy**:
+Because accelerator HBM is finite, the Radix tree cannot retain all historical trajectories indefinitely. Memory management is governed by a **Reference-Counted LRU Eviction Policy**\index{Reference-Counted LRU Eviction Policy}[^fn-lru-eviction]:
 
 - **Active Nodes ($\text{ref\_count} > 0$):** A node currently in use by an active generation thread is **pinned**. It cannot be evicted, as GPU kernels are actively reading or appending to its physical memory blocks.
 - **Cached Nodes ($\text{ref\_count} = 0$):** When an agent turn finishes or an external tool execution begins, the agent's request terminates. The engine does *not* immediately free the physical blocks. Instead, it decrements the reference counters along the trajectory path. Nodes reaching $\text{ref\_count} = 0$ enter the **eviction pool** while remaining resident in HBM.
@@ -495,7 +495,7 @@ $$\text{TTFT}_{\text{subagent } 2\dots 16} = \frac{500 \times 1.4 \times 10^{11}
 
 ### Branching Speculation in Search Trees
 
-In test-time search topologies (such as Tree-of-Thoughts and Monte Carlo Tree Search, @sec-vol3-deliberation), an agent evaluates $K$ alternative actions branching from a root state $s_0$.
+In test-time search topologies (such as Tree-of-Thoughts [@yao2023tree] and Monte Carlo Tree Search [@browne2012survey], @sec-vol3-deliberation), an agent evaluates $K$ alternative actions branching from a root state $s_0$.
 
 If the serving system evaluates these $K^D$ trajectory rollouts independently, total tokens prefilled across the search tree scales exponentially:
 
@@ -585,92 +585,43 @@ Before investigating failure modes, verify your analytical understanding of Radi
 
 ## Fallacies and Pitfalls {#sec-vol3-vm-fallacies}
 
-::: {.callout-warning title="Fallacy: Prefix caching makes prompt template design and token serialization irrelevant"}
-**The Fallacy**: Assuming that because an inference engine deploys Radix tree prefix caching, developers can format prompt strings without regard for whitespace, JSON structure, or dynamic variable placement.
+**Fallacy: Prefix caching makes prompt template design and token serialization irrelevant.**
+Assuming that because an inference engine deploys Radix tree prefix caching, developers can format prompt strings without regard for whitespace, JSON structure, or dynamic variable placement. The reality is Radix trees match on exact token IDs, not semantic strings. Subword tokenizers (such as BPE [@sennrich2015neural]) are notoriously sensitive to whitespace and leading characters. Formatting differences drop the cache hit rate from 98% to 0%, forcing a complete prefill. Production prompt compilers must enforce canonical serialization.
 
-**The Reality**: Radix trees match on **exact token IDs**, not semantic strings. Subword tokenizers (such as BPE) are notoriously sensitive to whitespace and leading characters. Consider formatting a tool schema in JSON. If Turn 1 formats the string as:
-```json
-{"tool": "bash", "args": {"command": "ls -l"}}
-```
-and Turn 2 serializes the dictionary with a space after the colon:
-```json
-{"tool":  "bash",  "args":  {"command":  "ls -l"}}
-```
-the tokenizer emits completely distinct token IDs starting from token position 3. The Radix tree fails to match, dropping the cache hit rate from $98\%$ to **$0\%$**, forcing a complete, expensive prefill forward pass. Production prompt compilers must enforce **canonical serialization** (e.g., deterministic JSON sorting, normalized whitespace, and frozen AST representations).
-:::
+**Fallacy: Adopting PagedAttention completely eliminates memory capacity limits in test-time search.**
+Believing that zero-copy Copy-on-Write branching allows an agent to expand speculative search trees (Tree-of-Thoughts [@yao2023tree] or MCTS [@browne2012survey]) to arbitrary breadth and depth. While PagedAttention shares parent nodes with zero replication overhead, the leaves of the search tree expand exponentially. Without strict admission control, depth pruning, and token-level budgeting, speculative rollouts trigger memory thrashing.
 
-::: {.callout-warning title="Fallacy: Adopting PagedAttention completely eliminates memory capacity limits in test-time search"}
-**The Fallacy**: Believing that zero-copy Copy-on-Write branching allows an agent to expand speculative search trees (Tree-of-Thoughts or MCTS) to arbitrary breadth and depth.
+**Pitfall: Silent cache poisoning across tool-environment mutations (The Semantic Invalidation Dilemma).**
+In an autonomous SWE agent, an agent executes a bash command that edits a file. If the prompt included the output of a prior file state, the Radix tree caches this trajectory. If an optimization system rewrites history to insert the updated file state in-place, it invalidates the prefix. More dangerously, cache entries must be leased with cryptographic content hashes to avoid semantic invalidation across independent agent runs.
 
-**The Reality**: While PagedAttention shares parent nodes with zero replication overhead, the leaves of the search tree expand exponentially:
-
-$$\text{Leaf Count} = K^D$$
-
-Even if each leaf generates only $\Delta L = 256$ tokens, a search tree with branching factor $K = 8$ at depth $D = 4$ generates $4\text{,}096$ concurrent leaf trajectories. The memory consumed by the leaves alone is:
-
-$$M_{\text{leaves}} = 4\text{,}096 \times (256 \times 160\text{ KB}) \approx 167.77\text{ GB}$$
-
-This exhausts available KV cache memory on an 8-GPU node. Without strict **admission control, depth pruning, and token-level budgeting**, speculative rollouts trigger memory thrashing, forcing the runtime to abort branches or swap blocks to slow host DRAM.
-:::
-
-::: {.callout-caution title="Pitfall: Silent cache poisoning across tool-environment mutations (The Semantic Invalidation Dilemma)"}
-**The Mechanism**: In an autonomous SWE agent, an agent executes a bash command that edits a file:
-```bash
-sed -i 's/PORT = 8080/PORT = 9090/g' config.py
-```
-In Turn 1, the prompt included the output of `cat config.py` showing `PORT = 8080`. The Radix tree caches this trajectory. If an optimization system truncates or rewrites history to insert the updated file state *in-place* inside the historical context, it invalidates the prefix.
-
-More dangerously, if the agent runtime attempts to cache environment representations across multiple independent agent runs, changes committed by Agent $A$ will not be reflected in Agent $B$'s cached prefix if the prompt prefix matches an outdated cache entry. Cache entries that incorporate external environment states must be leased with **cryptographic content hashes** ($\text{BLAKE3}$) of the referenced filesystem state.
-:::
-
-::: {.callout-caution title="Pitfall: Placing dynamic nonces, timestamps, or session IDs at the root of prompt templates"}
-**The Mechanism**: Prefix matching proceeds strictly from left to right (token index $0$ to $L-1$). If a mismatch occurs at token index $k$, all subsequent tokens $k+1 \dots L-1$ are inaccessible from that branch of the Radix tree.
-
-**The Reality**: Developers frequently inject session-tracking metadata at the top of system prompts:
-```python
-prompt = f"System: You are an agent. Current Time: {time.time()}. UUID: {uuid.uuid4()}\n{history}"
-```
-By placing a millisecond timestamp or random UUID at the root of the prompt string, every incoming request presents a completely unique initial 20 tokens. The Radix tree lookup fails immediately at the root node. The entire cluster operates at a **$0.0\%$ prefix cache hit rate**, causing prefill compute demand to surge by an order of magnitude and inducing severe cluster-wide queueing livelocks. Dynamic variables must always be placed at the absolute tail of the prompt.
-:::
-
-::: {.callout-note title="Checkpoint"}
-
-Verify your operational understanding of prefix cache invalidation, prompt formatting traps, and memory admission controls:
-
-**Structural Formatting and Serialization:**
-
-- [ ] **Tokenization Boundary Poisoning**: Why does introducing a trailing whitespace or non-deterministic key ordering in a JSON tool schema invalidate the Radix tree path for all subsequent tokens, even when the underlying semantic content is identical?
-- [ ] **Prompt Component Ordering**: Contrast the prefix cache hit rate of an agent prompt template that places a dynamic UTC timestamp at token position 0 versus one that places the timestamp at the trailing edge of the latest user turn.
-
-**Semantic Invalidation and Admission:**
-
-- [ ] **The Invalidation Dilemma**: When an agent executes a bash tool that modifies a source code file (`app/main.py`), how can the runtime verify whether the cached KV activations of previously displayed directory listings or file view outputs remain valid?
-- [ ] **Admission Control in Speculative Search**: Why does PagedAttention alone fail to prevent out-of-memory crashes during wide speculative rollouts, and what threshold triggers emergency preemption (swapping vs. recomputation) in the block allocator?
-
-:::
+**Pitfall: Placing dynamic nonces, timestamps, or session IDs at the root of prompt templates.**
+Prefix matching proceeds strictly from left to right. By placing a millisecond timestamp or random UUID at the root of the prompt string, every incoming request presents a completely unique initial 20 tokens. The Radix tree lookup fails immediately at the root node, causing the entire cluster to operate at a 0% prefix cache hit rate. Dynamic variables must always be placed at the absolute tail of the prompt.
 
 ## Summary {#sec-vol3-vm-summary}
 
-Virtual Context Memory establishes the physical serving substrate for stateful autonomous agents. By translating classical operating system virtual memory paging into neural tensor runtimes, modern serving engines eliminate memory fragmentation and unlock massive prefix reuse across long-horizon trajectories.
+* **Decoupling Logical State from Physical Silicon:** Autonomous agent trajectories must not be allocated as contiguous physical tensors. Block-level paging (PagedAttention) eliminates external fragmentation and bounds internal waste to the final block of a sequence.
+* **Exploiting Trajectory Prefix Locality:** Agent perception-action loops exhibit monotonic prefix expansion. Recomputing prompt prefills on stateless infrastructure wastes over 90% of cluster FLOPs and inflates Time-to-First-Token by orders of magnitude.
+* **Automating Sharing with Dynamic Prefix Trees:** Radix tree indexing (RadixAttention) automatically identifies common prefix paths across multi-turn trajectories, parallel swarms, and speculative search branches, executing chunked prefills only for divergent suffixes.
+* **Speculative Branching via Copy-on-Write:** Evaluating alternative reasoning branches requires aliasing parent page tables rather than copying activation tensors, widening speculative search capacity by over 30x.
+* **Enforcing Strict Prompt Hygiene:** Prefix caching operates on token sequence identity. Non-deterministic JSON serialization, BPE whitespace shifts, and dynamic root nonces drop cache hit rates to zero, inducing cluster-wide queueing thrash.
+* **Bounding Speculative Expansion:** Zero-copy branching does not eliminate memory limits; the leaves of a search tree still expand exponentially, requiring strict admission control and token-level budgeting to prevent out-of-memory crashes.
 
-Table @tbl-vol3-vm-synthesis synthesizes the five foundational layers of the Virtual Context Memory architecture, detailing their core data structures, governing algorithms, operational granularities, failure modes, and systems mitigations.
+[^fn-virtual-memory]: **virtual memory**\index{virtual memory}: A memory management technique that provides an "idealized abstraction of the storage resources that are actually available on a given machine" which "creates the illusion to users of a very large (main) memory."
+[^fn-kv-activation-tensors]: **Key-Value (KV) activation tensors**\index{Key-Value (KV) activation tensors}: High-dimensional memory states maintained by a transformer's attention mechanism to cache the representations of previously seen tokens, preventing redundant recalculations during autoregressive decoding.
+[^fn-internal-fragmentation]: **internal fragmentation**\index{internal fragmentation}: Wasted memory space that occurs when a system allocates memory in fixed-size blocks or continuous chunks that are larger than what the requested data actually requires.
+[^fn-external-fragmentation]: **external fragmentation**\index{external fragmentation}: The scattering of free memory into small, non-contiguous holes over time, which prevents the allocation of large continuous blocks even when the total aggregate free memory is sufficient.
+[^fn-mqa]: **Multi-Query Attention (MQA)**\index{Multi-Query Attention (MQA)}: An attention architecture variant that collapses all Key and Value heads into a single shared head across all Query heads to drastically reduce the KV cache footprint.
+[^fn-gqa]: **Grouped-Query Attention (GQA)**\index{Grouped-Query Attention (GQA)}: An intermediate attention architecture that partitions Query heads into groups and assigns one Key and one Value head to each group, balancing the memory efficiency of MQA with the performance of standard Multi-Head Attention.
+[^fn-mla]: **Multi-Head Latent Attention (MLA)**\index{Multi-Head Latent Attention (MLA)}: An advanced attention mechanism that projects Key and Value vectors into a compressed, low-dimensional latent space to minimize memory consumption during generation.
+[^fn-temporal-locality]: **temporal locality**\index{temporal locality}: The principle that memory locations referenced recently are highly likely to be accessed again in the near future.
+[^fn-spatial-locality]: **spatial locality**\index{spatial locality}: The principle that memory locations physically adjacent to recently referenced memory are highly likely to be accessed soon.
+[^fn-trajectory-prefix-locality]: **Trajectory Prefix Locality**\index{Trajectory Prefix Locality}: The extreme variant of temporal and spatial locality seen in autonomous agents where iterative perception-action loops ensure that the vast majority of tokens in a sequence form an invariant prefix shared with subsequent steps.
+[^fn-cow]: **Copy-on-Write (CoW)**\index{Copy-on-Write (CoW)}: A resource-management technique where multiple callers given access to the same resource share a single pointer until one of them modifies the resource, at which point a private copy is created.
+[^fn-reference-counter]: **reference counter**\index{reference counter}: An integer maintained by the memory allocator indicating the number of active, in-flight agent requests currently mapping a given physical memory block.
+[^fn-radix-tree]: **Radix tree**\index{Radix tree}: A space-optimized, compressed prefix tree (Trie) used by the serving engine to automatically discover and index sequence prefixes across multi-turn trajectories and shared prompts.
+[^fn-lru-eviction]: **Reference-Counted LRU Eviction Policy**\index{Reference-Counted LRU Eviction Policy}: A memory scheduling strategy that retains prefix blocks in accelerator memory until pressure requires eviction, prioritizing the reclaiming of unpinned physical blocks that were accessed least recently.
 
-| Subsystem Layer                | Core Data Structure                              | Governing Algorithm                                                      |                 Operational Granularity                  | Primary Failure Mode                                                    | Architectural Mitigation                                                                 |
-|:-------------------------------|:-------------------------------------------------|:-------------------------------------------------------------------------|:--------------------------------------------------------:|:------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------|
-| **Activation Storage Layer**   | Physical Key-Value Tensors in HBM                | Low-rank latent projections (MLA) / GQA head grouping                    | Per-token scalar activation vectors ($S_{\text{token}}$) | Memory bandwidth wall & physical OOM faults                             | Architectural head reduction ($8:1$ GQA) and latent compression (MLA)                    |
-| **Virtual Block Paging**       | Logical Page Tables & Global Free-Block Pool     | Block-level virtual address translation (@eq-vol3-vm-phys-addr)          |    Fixed-size memory block ($B=16$ or $B=32$ tokens)     | Internal tail fragmentation & allocator contention                      | Uniform block sizing eliminating external fragmentation; bounded tail waste ($< 0.05\%$) |
-| **Dynamic Prefix Index**       | Compressed Radix Tree with token-labeled edges   | Deterministic prefix matching & edge splitting (@sec-vol3-vm-radix-tree) |     Variable-length common token prefix ($M \le N$)      | Tokenizer sensitivity (BPE whitespace shift dropping hit rate to $0\%$) | Deterministic prompt serialization; canonical AST and JSON formatting                    |
-| **Speculative Page Sharing**   | Logical Page Table Aliasing & Reference Counters | Copy-on-Write (CoW) page duplication on branch split                     |  Divergent suffix physical blocks ($L_{\text{branch}}$)  | Premature block deallocation during concurrent child reads              | Reference counting ($\text{ref\_count} \ge 1$); atomic pointer updates on split          |
-| **Cache Eviction & Admission** | Pinned Node Registry & LRU Candidate Queue       | Reference-counted LRU leaf eviction under memory pressure                |          PagedAttention leaf block deallocation          | Severe cache thrashing & dynamic root nonce poisoning                   | Strict immutable prefix ordering; BLAKE3 hash leases; tenant boundary isolation          |
-: Holistic synthesis of the five core subsystem layers comprising the Virtual Context Memory architecture. {#tbl-vol3-vm-synthesis}
-
-::: {.callout-takeaways title="Virtual context memory principles"}
-1.  **Decouple Logical State from Physical Silicon**: Autonomous agent trajectories must not be allocated as contiguous physical tensors. Block-level paging (PagedAttention) eliminates external fragmentation and bounds internal waste to the final block of a sequence.
-2.  **Exploit Trajectory Prefix Locality**: Agent perception-action loops exhibit monotonic prefix expansion ($\lim_{t \to \infty} \rho(t, t+1) = 1.0$). Recomputing prompt prefills on stateless infrastructure wastes over $90\%$ of cluster FLOPs and inflates Time-to-First-Token by orders of magnitude.
-3.  **Dynamic Prefix Trees Automate Sharing**: Radix tree indexing (RadixAttention) automatically identifies common prefix paths across multi-turn trajectories, parallel swarms, and speculative search branches, executing chunked prefills only for divergent suffixes.
-4.  **Speculative Branching via Copy-on-Write**: Evaluating alternative reasoning branches in Tree-of-Thoughts and MCTS requires aliasing parent page tables rather than copying activation tensors, widening speculative search capacity by over $30\times$.
-5.  **Enforce Strict Prompt Hygiene**: Prefix caching operates on token sequence identity. Non-deterministic JSON serialization, BPE whitespace shifts, and dynamic root nonces (timestamps, UUIDs) drop cache hit rates to zero, inducing cluster-wide queueing thrash.
-:::
+[^fn-ttft]: **Time-to-First-Token (TTFT)**\index{Time-to-First-Token (TTFT)}: The latency measured from when an inference engine receives a prompt to when it emits the first generated token, largely dominated by the prefill computation.
 
 ::: {.callout-chapter-connection title="From volatile context to persistent episodic storage"}
 Virtual context memory optimizes volatile accelerator memory during active execution. However, when an agent finishes an interaction epoch, undergoes state suspension during a human approval loop, or crashes due to infrastructure failure, volatile KV caches in GPU HBM cannot serve as persistent records. In @sec-vol3-checkpointing (*State Checkpointing & Fault Recovery*), we investigate how the active Agent Control Block (ACB) and execution state are safely serialized to non-volatile storage tiers.

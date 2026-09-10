@@ -1,69 +1,79 @@
 *How do we map stochastic, variable-length reasoning into predictable computational economics?*
 
 ::: {.callout-note title="Meta paragraph"}
-This chapter bridges the gap between hardware utilization and application-level unit economics. We explore how variable-length generation and the non-linear scaling of KV cache fundamentally change the economic models of compute, shifting away from static instance pricing toward fine-grained token-based abstractions.
+This chapter bridges the gap between hardware utilization and application-level unit economics. We explore how variable-length generation, the memory-bandwidth-bound nature of decoding, and the non-linear scaling of KV cache fundamentally change the economic models of compute, shifting away from static instance pricing toward fine-grained, state-aware token-based abstractions.
 :::
 
 ## 16.1 Introduction
 
-The commercialization of large language models has driven a shift in how we price computational resources. Unlike traditional software services, where costs are closely tied to active connection time or predictable request payloads, autoregressive generation introduces stochastic resource utilization. The fundamental unit of value and cost is the token, yet the hardware cost to process a token varies drastically based on its position in the context window, the model's architecture, and the concurrency of the system. This chapter dissects the microeconomics of token generation.
+The commercialization of large language models has driven a structural shift in how we price computational resources. Unlike traditional microservices, where costs are closely tied to active connection time or predictable request payloads (e.g., bytes transferred), autoregressive generation introduces stochastic resource utilization tied intricately to hardware roofline limits. The fundamental unit of value and cost is the token, yet the hardware footprint required to process a token varies drastically based on its phase (prefill vs. decode), its position in the context window, the model's architecture (dense vs. mixture of experts), and the temporal concurrency of the serving system. This chapter dissects the systems engineering and microeconomics of token generation.
 
-## 16.2 Token Pricing Models: Inputs, Outputs, and Caching
+## 16.2 Token Pricing Models: Inputs, Outputs, and Arithmetic Intensity
 
-Pricing an LLM API requires modeling the underlying hardware constraints, primarily memory bandwidth and compute utilization.
+Pricing an LLM API requires modeling the underlying hardware constraints, primarily **high-bandwidth memory (HBM)**\index{high-bandwidth memory (HBM)} bandwidth and ALU utilization. The dichotomy between input and output pricing is a direct reflection of the **Roofline model**\index{Roofline model} [@williams2009roofline].
 
-Input tokens are typically processed in parallel during the prefill phase, leveraging the high utilization of Matrix-Matrix multiplications (GEMMs). Because this phase is highly compute-bound and can saturate modern GPUs efficiently, input tokens are structurally cheaper to process.
+Input tokens are processed in parallel during the **prefill**\index{prefill} phase. By processing a sequence of tokens simultaneously, the system casts the workload as large Matrix-Matrix multiplications (GEMMs). This achieves high **arithmetic intensity**\index{arithmetic intensity} (FLOPs per byte of memory read), allowing the system to operate in the **compute-bound**\index{compute-bound} regime and saturate modern GPU Tensor Cores. Because prefill effectively amortizes the cost of loading the model weights across the entire input sequence, input tokens are structurally cheaper to process.
 
-Output tokens, conversely, are generated sequentially during the decode phase. This process is memory bandwidth-bound; for each generated token, the model's entire weight matrix must be loaded from HBM to SRAM, resulting in low arithmetic intensity. Consequently, output tokens are priced significantly higher than input tokens.
+Output tokens, conversely, are generated sequentially during the **autoregressive decode**\index{autoregressive decode} phase. This process relies on Matrix-Vector multiplications (GEMVs). For each generated token, the model's entire weight matrix must be streamed from HBM to SRAM. The arithmetic intensity is fundamentally low; the system operates deep in the **memory bandwidth-bound**\index{memory bandwidth-bound} regime, severely underutilizing the ALUs. Consequently, output tokens are priced significantly higher than input tokens, reflecting the scarce resource: memory bandwidth.
 
 ::: {.callout-note title="Checkpoint"}
 Why does increasing the batch size improve the unit economics of output tokens, and what hardware constraint ultimately limits the maximum batch size?
 :::
 
-Recently, providers have introduced context caching. By persisting the KV cache of a frequently used prompt in GPU memory or fast storage, the provider bypasses the prefill compute for subsequent requests. The economics then shift from a compute-cost model to a memory-renting model, where users pay for the time the KV cache occupies high-bandwidth memory.
+To improve decode economics, serving systems maximize batch size to share the weight-loading cost across multiple concurrent requests, shifting the operation back toward a GEMM. However, this is bounded by memory capacity—the KV cache for large batches will eventually exhaust HBM. 
+
+### Speculative Decoding and Economics
+
+**Speculative decoding**\index{Speculative decoding} [@leviathan2023fast; @chen2023accelerating] alters this economic equation by trading cheap, surplus ALU cycles for expensive, scarce memory bandwidth. By using a small "draft" model to guess future tokens and verifying them in parallel with the large model, the system increases the effective batch size of the verification step. If the acceptance rate is high enough, this reduces the total HBM round-trips per generated token, structurally lowering the cost to serve output tokens.
 
 ## 16.3 Context Working Set Costs and the KV Cache
 
-The KV cache is the state maintained during generation to prevent recomputing past tokens. Its size scales linearly with the sequence length and batch size, but the cost to read it scales quadratically as sequences grow (prior to optimizations like FlashAttention).
+The **KV cache**\index{KV cache} is the state maintained during generation to prevent recomputing past tokens. Its capacity scaling is linear with sequence length, batch size, number of layers, and head dimensions. 
 
 ::: {.callout-note title="Napkin Math"}
 **Estimating KV Cache Size**
 
-For a model with $L = 80$ layers, $H = 64$ heads, and a head dimension $D = 128$, stored in FP16 (2 bytes):
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
-Size per token = $2 \text{ (K and V)} \times 2 \text{ bytes} \times L \times H \times D$
-
-Size per token = $2 \times 2 \times 80 \times 64 \times 128 = 2,621,440$ bytes $\approx 2.6$ MB.
-
-For a context window of 100,000 tokens, the KV cache requires $\approx 260$ GB of memory. This exceeds the capacity of a single 80GB H100 GPU, necessitating tensor parallelism or sequence parallelism just to store the context state.
+For modern long-context models (e.g., 100k+ tokens), the KV cache footprint quickly balloons to hundreds of gigabytes per request—exceeding the high-bandwidth memory (HBM) capacity of a single GPU. This memory bottleneck dictates serving economics: systems are forced to employ tensor or sequence parallelism purely to hold the working set, partitioning memory that could otherwise serve concurrent users.
 :::
 
-Managing this massive working set is the primary driver of inference costs. Systems use techniques like PagedAttention to reduce memory fragmentation, but the fundamental economic reality remains: long contexts are expensive not just in compute time, but in the opportunity cost of memory footprint that could otherwise hold concurrent requests.
+Managing this massive, dynamically growing working set is the primary driver of inference infrastructure costs. Prior to optimized memory managers, contiguous memory allocation led to severe fragmentation, wasting expensive HBM. Systems now use techniques like **PagedAttention**\index{PagedAttention} [@kwon2023efficient] to page KV caches into non-contiguous blocks, effectively eliminating **external fragmentation**\index{external fragmentation} and dramatically increasing maximum batch size. 
 
-## 16.4 Multi-Agent Quotas and Compounding Inference
+Recently, providers have introduced **KV Cache Tiering**\index{KV Cache Tiering}. By persisting the KV cache of a frequently used prompt in GPU memory, CPU RAM, or fast NVMe storage, the provider bypasses the prefill compute for subsequent requests. The economics then shift from a compute-cost model to a memory-renting model, where users pay for the time and hierarchy level the KV cache occupies.
 
-As systems evolve from single-turn chat interfaces to autonomous, multi-agent frameworks, token consumption scales exponentially. In a multi-agent system, agents prompt each other, summarize context, and iteratively refine outputs.
+## 16.4 Multi-Agent Quotas, Model Routing, and Compounding Inference
+
+As systems evolve from single-turn chat interfaces to autonomous, multi-agent frameworks, token consumption scales exponentially. In a multi-agent system, agents prompt each other, summarize context, and iteratively refine outputs, leading to a massive expansion in internal "hidden" tokens generated before a user-facing response is produced.
 
 ::: {.callout-note title="Checkpoint"}
 In a multi-agent architecture where agents recursively summarize prior steps, how does the ratio of input tokens to output tokens shift compared to a standard conversational interface?
 :::
 
-To prevent cost overruns, systems must implement strict quota management and token budgets. Budgeting algorithms dynamically allocate tokens based on the priority of the sub-task. Furthermore, the economics favor "flash" or distilled models for intermediate reasoning steps, reserving expensive "pro" models only for final synthesis or highly complex bottlenecks.
+To prevent cost overruns and latency spikes, systems must implement strict quota management and dynamic token budgets. The economics heavily favor intelligent **model routing**\index{model routing}: deploying "flash" or distilled models for intermediate reasoning steps, state transitions, or standard queries, while reserving expensive "pro" models only for final synthesis or complex planning bottlenecks. 
 
-## 16.5 Fallacies and Pitfalls
+**Mixture of Experts (MoE)**\index{Mixture of Experts (MoE)} architectures [@shazeer2017outrageously] further complicate these economics. While MoE models possess a massive total parameter count (requiring vast VRAM capacity), they have a much smaller "active" parameter count per token. This **sparsity**\index{sparsity} allows for faster decode speeds and cheaper token economics relative to dense models of equivalent total size, provided the serving cluster can distribute the experts efficiently across GPUs.
 
-::: {.callout-warning title="Fallacies and pitfalls"}
-**Fallacy: Token count is a perfect proxy for compute cost.**
-*While highly correlated, token count ignores the impact of batching and sequence length. A 1,000-token output generated during a low-traffic period with a batch size of 1 utilizes hardware very differently than the same output generated at peak concurrency.*
+## Fallacies and Pitfalls
 
 **Pitfall: Ignoring the asymmetric cost of prompt caching.**
-*Persisting KV caches saves compute but consumes memory. If the cache hit rate is low, the cost of evicting and loading the cache from NVMe or CPU RAM can exceed the cost of simply recomputing the prefill.*
-:::
+Persisting KV caches saves prefill compute but permanently locks up memory capacity. If the cache hit rate is low, the latency and bandwidth cost of evicting and paging the cache from NVMe or CPU RAM to GPU HBM can exceed the cost of simply recomputing the prefill from scratch. Over-caching reduces the batch size available for other requests, lowering overall cluster throughput.
 
-## 16.6 Summary
+**Fallacy: Token count is a perfect proxy for hardware compute cost.**
+While highly correlated for billing, token count ignores the impact of batching, sequence length, and model architecture (dense vs. MoE). A 1,000-token output generated during a low-traffic period with a batch size of 1 utilizes hardware very differently—and less efficiently—than the same output generated at peak concurrency where weight-loading costs are amortized.
 
-::: {.callout-tip title="Summary"}
-- The transition to token-based economics reflects the underlying hardware realities of autoregressive models: compute-bound prefill (input) vs. memory-bandwidth-bound decode (output).
-- The KV cache dictates the working set size of a request. Its linear scaling with sequence length imposes strict limits on concurrency and drives up the cost of long-context queries.
-- Multi-agent systems introduce exponential token consumption, requiring sophisticated quota management and model routing to remain economically viable.
-:::
+**Pitfall: Treating all generation latency as uniform.**
+Assuming linear generation time fails to account for **Time to First Token (TTFT)**\index{Time to First Token (TTFT)} being compute-bound (prefill) and **Time Between Tokens (TBT)**\index{Time Between Tokens (TBT)} being memory-bandwidth-bound (decode). Optimizing a system for TTFT requires different hardware topologies and parallelism strategies (e.g., sequence parallelism) than optimizing for high-throughput TBT (e.g., tensor parallelism and large batch sizes).
+
+**Fallacy: Speculative decoding always reduces serving costs.**
+Speculative decoding [@leviathan2023fast; @chen2023accelerating] burns surplus ALU cycles to save memory bandwidth. However, if the draft model's acceptance rate is too low (due to complex reasoning tasks or domain shifts), the system wastes compute and actually degrades overall throughput and latency, making the cost per token higher than standard autoregressive decoding.
+
+## Summary
+
+* The transition to token-based economics is a direct mapping of hardware roofline constraints: compute-bound prefill operations (input) yield cheaper tokens, while memory-bandwidth-bound decode operations (output) yield expensive tokens.
+* The KV cache dictates the working set size of an inference request; its linear scaling with sequence length imposes strict limits on concurrency, making long-context queries disproportionately expensive in memory opportunity cost.
+* Memory management techniques like PagedAttention [@kwon2023efficient] are critical for inference economics because they eliminate external fragmentation, allowing the system to maximize batch sizes and amortize memory bandwidth costs during decoding.
+* Speculative decoding [@leviathan2023fast; @chen2023accelerating] alters tokenomics by trading surplus compute (ALU cycles) for a reduction in expensive memory round-trips, structurally lowering decode costs provided the draft model maintains a high acceptance rate.
+* Caching KV states shifts the economic model from paying for compute to renting memory capacity across a hierarchy (HBM, CPU RAM, NVMe), requiring high cache hit rates to be economically viable.
+* Mixture of Experts (MoE) architectures [@shazeer2017outrageously] decouple active parameter count from total parameter capacity, resulting in lower inference costs per token compared to dense models, at the expense of higher total VRAM requirements.
+* Multi-agent architectures trigger compounding token consumption and necessitate dynamic model routing, where cheap, specialized models handle intermediate reasoning and expensive, capable models are reserved for complex bottlenecks.
