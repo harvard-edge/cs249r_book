@@ -143,7 +143,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">🔮</td>
       <td><b>MLSys·im</b></td>
       <td>Calculate memory bottlenecks, network saturation, and scheduling limits at infrastructure scales you can't physically access.</td>
-      <td><a href="https://mlsysbook.ai/mlsysim/">Use simulator</a> · <a href="mlsysim/README.md">Repo guide</a></td>
+      <td><a href="https://mlsysbook.ai/mlsysim/">Use simulator</a> · <a href="packages/mlsysim/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
@@ -170,13 +170,13 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">🎓</td>
       <td><b>Instructor Hub</b></td>
       <td>The AI Engineering Blueprint: two 16-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
-      <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="instructors/README.md">Repo guide</a></td>
+      <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="materials/instructors/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">🎬</td>
       <td><b>Lecture Slides</b></td>
       <td>Beamer slide decks for every chapter, with four theme variants. Drop into your course and teach.</td>
-      <td><a href="https://mlsysbook.ai/slides/">Browse decks</a> · <a href="slides/README.md">Repo guide</a></td>
+      <td><a href="https://mlsysbook.ai/slides/">Browse decks</a> · <a href="materials/slides/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">📬</td>
@@ -206,7 +206,7 @@ The learning loop is: **Read → Explore → Build → Model → Deploy → Prac
 Some projects are intentionally earlier-stage than the main curriculum:
 
 - [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
-- [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
+- [MLPerf EDU](packages/mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
 - [ML Systems Design Grammar](design-grammar/README.md) is an experimental framework for reasoning from stable primitives, constraints, and rewrite rules.
 
 ---
@@ -534,7 +534,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">🔥</td>
       <td><b>Add a TinyTorch module or fix a bug</b></td>
-      <td><a href="tinytorch/CONTRIBUTING.md">TinyTorch contributing guide</a></td>
+      <td><a href="packages/tinytorch/CONTRIBUTING.md">TinyTorch contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🛠️</td>
@@ -544,7 +544,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">🔬</td>
       <td><b>Improve interactive labs or simulator models</b></td>
-      <td><a href="labs/README.md">Labs guide</a> · <a href="mlsysim/README.md">MLSys·im guide</a></td>
+      <td><a href="labs/README.md">Labs guide</a> · <a href="packages/mlsysim/README.md">MLSys·im guide</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
@@ -573,11 +573,11 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
 
 ## License
 
-This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `staffml/app/LICENSE`) is authoritative.
+This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `packages/tinytorch/LICENSE`, `staffml/app/LICENSE`) is authoritative.
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`book/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`materials/slides/`), Instructors (`materials/instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
 | [TinyTorch](packages/tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
 | [MLSys·im](packages/mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
 | [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |

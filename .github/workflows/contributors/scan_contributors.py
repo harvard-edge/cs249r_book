@@ -27,10 +27,10 @@ from pathlib import Path
 
 # Project folders to scan
 PROJECTS = {
-    "book": "book/",
+    "book": "binder/",
     "kits": "kits/",
     "labs": "labs/",
-    "tinytorch": "tinytorch/",
+    "tinytorch": "packages/tinytorch/",
     "staffml": "staffml/",
 }
 

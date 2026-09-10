@@ -182,11 +182,11 @@ shared/release/release-card.html                ← about-page snippet
 
 # Per-project Quarto/Next config: meta tag + pill include
 staffml/app/src/components/Footer.tsx    ← StaffML uses build-time bake
-tinytorch/quarto/_quarto.yml
+packages/tinytorch/quarto/_quarto.yml
 books/config/_quarto-html-vol1.yml
 books/config/_quarto-html-vol2.yml
-mlsysim/docs/config/_quarto-html.yml
+packages/mlsysim/docs/config/_quarto-html.yml
 kits/config/_quarto-html.yml
 labs/config/_quarto-html.yml
-instructors/_quarto.yml
+materials/instructors/_quarto.yml
 ```

@@ -88,10 +88,10 @@ with this layering.
 | Book Vol II      | [`books/shared/assets/styles/style-vol2.scss`](../../books/shared/assets/styles/style-vol2.scss) | [`books/shared/assets/styles/dark-mode-vol2.scss`](../../books/shared/assets/styles/dark-mode-vol2.scss) |
 | Labs             | [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss) | [`labs/assets/styles/dark-mode.scss`](../../labs/assets/styles/dark-mode.scss) |
 | Kits             | [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss) | [`kits/assets/styles/dark-mode.scss`](../../kits/assets/styles/dark-mode.scss) |
-| Slides           | [`slides/assets/styles/style.scss`](../../materials/slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../materials/slides/assets/styles/dark-mode.scss) |
-| Instructors      | [`instructors/assets/styles/style.scss`](../../materials/instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../materials/instructors/assets/styles/dark-mode.scss) |
-| MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../packages/mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../packages/mlsysim/docs/styles/dark-mode.scss) |
-| TinyTorch (Quarto)| [`tinytorch/quarto/assets/styles/style.scss`](../../packages/tinytorch/quarto/assets/styles/style.scss) | [`tinytorch/quarto/assets/styles/dark-mode.scss`](../../packages/tinytorch/quarto/assets/styles/dark-mode.scss) |
+| Slides           | [`materials/slides/assets/styles/style.scss`](../../materials/slides/assets/styles/style.scss) | [`materials/slides/assets/styles/dark-mode.scss`](../../materials/slides/assets/styles/dark-mode.scss) |
+| Instructors      | [`materials/instructors/assets/styles/style.scss`](../../materials/instructors/assets/styles/style.scss) | [`materials/instructors/assets/styles/dark-mode.scss`](../../materials/instructors/assets/styles/dark-mode.scss) |
+| MLSys·im docs    | [`packages/mlsysim/docs/styles/style.scss`](../../packages/mlsysim/docs/styles/style.scss) | [`packages/mlsysim/docs/styles/dark-mode.scss`](../../packages/mlsysim/docs/styles/dark-mode.scss) |
+| TinyTorch (Quarto)| [`packages/tinytorch/quarto/assets/styles/style.scss`](../../packages/tinytorch/quarto/assets/styles/style.scss) | [`packages/tinytorch/quarto/assets/styles/dark-mode.scss`](../../packages/tinytorch/quarto/assets/styles/dark-mode.scss) |
 
 The book Vol I / Vol II theme files in [`books/shared/assets/styles/themes/`](../../books/shared/assets/styles/themes/)
 are **symlinks** to the canonical files in [`shared/styles/themes/`](themes/).

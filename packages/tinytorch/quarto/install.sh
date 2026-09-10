@@ -53,7 +53,7 @@
 #
 # SOURCE
 # ------
-#   https://github.com/harvard-edge/cs249r_book (tinytorch/ subdirectory)
+#   https://github.com/harvard-edge/cs249r_book (packages/tinytorch/ subdirectory)
 #
 # ============================================================================
 
@@ -72,7 +72,11 @@ TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
 TAG_PREFIX="tinytorch-v"
 BRANCH="${TINYTORCH_BRANCH:-main}"
 INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
-SPARSE_PATH="tinytorch"
+# TinyTorch lives at packages/tinytorch/ in the repository. Tags and branches
+# from before that layout kept it at the top level, so both are fetched and
+# whichever exists is installed.
+SPARSE_PATH="packages/tinytorch"
+LEGACY_SPARSE_PATH="tinytorch"
 # Non-interactive mode: skip prompts, use defaults (for CI/testing)
 NON_INTERACTIVE="${TINYTORCH_NON_INTERACTIVE:-}"
 # Version is fetched from GitHub tags (single source of truth)
@@ -602,7 +606,7 @@ do_install() {
 
     # -------------------------------------------------------------------------
     # Step 1: Download from GitHub using sparse checkout
-    # This downloads only the tinytorch/ subdirectory, not the entire repo
+    # This downloads only the TinyTorch subdirectory, not the entire repo
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[1/4]${NC} Downloading from GitHub..."
 
@@ -634,7 +638,10 @@ do_install() {
 
     local original_dir="$PWD"
     cd "$TEMP_DIR/repo"
-    git sparse-checkout set "$SPARSE_PATH" 2>/dev/null
+    git sparse-checkout set "$SPARSE_PATH" "$LEGACY_SPARSE_PATH" 2>/dev/null
+    if [ ! -d "$SPARSE_PATH" ]; then
+        SPARSE_PATH="$LEGACY_SPARSE_PATH"
+    fi
 
     # Capture commit hash for provenance tracking
     COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")

@@ -65,7 +65,7 @@ def plot_roofline(*args, **kwargs):
 
 
 # datasets imported at the end — after all other subpackages are registered.
-# The .gitignore fix (mlsysim/.gitignore overrides root datasets/ exclusion)
+# The .gitignore fix (packages/mlsysim/.gitignore overrides root datasets/ exclusion)
 # ensures the subpackage is included in the built wheel.
 from . import datasets
 from .datasets.registry import Datasets

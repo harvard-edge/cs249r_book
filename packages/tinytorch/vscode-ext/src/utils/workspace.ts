@@ -7,7 +7,7 @@ import * as fs from 'fs';
  *
  * Looks for a directory containing both `src/01_tensor` and `pyproject.toml`,
  * starting from the workspace folders. This handles the case where the VS Code
- * workspace root is the monorepo and tinytorch/ is a subdirectory.
+ * workspace root is the monorepo and packages/tinytorch/ is a subdirectory.
  */
 export function getProjectRoot(): string | undefined {
   const folders = vscode.workspace.workspaceFolders;
@@ -21,8 +21,8 @@ export function getProjectRoot(): string | undefined {
       return root;
     }
 
-    // One level down: workspace contains tinytorch/
-    const nested = path.join(root, 'tinytorch');
+    // Monorepo checkout: workspace contains packages/tinytorch/
+    const nested = path.join(root, 'packages', 'tinytorch');
     if (isTinyTorchRoot(nested)) {
       return nested;
     }

@@ -28,7 +28,7 @@ def test_local_render_env_prefers_current_worktree(monkeypatch, tmp_path: Path):
     env = _local_render_env(SimpleNamespace(root_dir=tmp_path))
 
     paths = env["PYTHONPATH"].split(os.pathsep)
-    assert paths[:2] == [str(tmp_path.resolve()), str((tmp_path / "mlsysim").resolve())]
+    assert paths[:2] == [str(tmp_path.resolve()), str((tmp_path / "packages" / "mlsysim").resolve())]
     assert paths[2] == stale
 
 

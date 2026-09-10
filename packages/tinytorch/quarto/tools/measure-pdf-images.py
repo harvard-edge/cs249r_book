@@ -37,7 +37,7 @@ Pipeline:
      exactly which author line the override should land on.
   7. Emit TSV to stdout.
 
-Usage (from `tinytorch/quarto/`):
+Usage (from `packages/tinytorch/quarto/`):
   python3 tools/measure-pdf-images.py
   python3 tools/measure-pdf-images.py --verbose    # include OK rows
   python3 tools/measure-pdf-images.py --json       # machine-readable

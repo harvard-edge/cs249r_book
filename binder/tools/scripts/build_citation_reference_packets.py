@@ -51,13 +51,13 @@ SCOPES = [
     },
     {
         "name": "tinytorch",
-        "paths": ["tinytorch/"],
-        "bibs": ["tinytorch/paper/references.bib"],
+        "paths": ["packages/tinytorch/"],
+        "bibs": ["packages/tinytorch/paper/references.bib"],
     },
     {
         "name": "mlsysim",
-        "paths": ["mlsysim/"],
-        "bibs": ["mlsysim/paper/references.bib", "mlsysim/docs/references.bib"],
+        "paths": ["packages/mlsysim/"],
+        "bibs": ["packages/mlsysim/paper/references.bib", "packages/mlsysim/docs/references.bib"],
     },
     {
         "name": "design-grammar",

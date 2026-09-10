@@ -182,7 +182,7 @@ def validate_command(cmd: str, valid_commands: Set[str]) -> Tuple[bool, str]:
 def main():
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
 
-    # Find tinytorch root (script is in tinytorch/tools/dev/)
+    # Find tinytorch root (script is in packages/tinytorch/tools/dev/)
     script_path = Path(__file__).resolve()
     tinytorch_root = script_path.parent.parent.parent
 
@@ -190,8 +190,8 @@ def main():
     # try to find it from current working directory
     if not (tinytorch_root / "bin" / "tito").exists():
         cwd = Path.cwd()
-        if (cwd / "tinytorch" / "bin" / "tito").exists():
-            tinytorch_root = cwd / "tinytorch"
+        if (cwd / "packages" / "tinytorch" / "bin" / "tito").exists():
+            tinytorch_root = cwd / "packages" / "tinytorch"
         elif (cwd / "bin" / "tito").exists():
             tinytorch_root = cwd
 

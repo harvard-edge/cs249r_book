@@ -240,13 +240,13 @@ def verify_appendix_lego(root: Path) -> list[RegistryIssue]:
 
 def verify_paper_anchors(root: Path) -> list[RegistryIssue]:
     """Validate paper anchor consistency."""
-    script = root / "mlsysim" / "paper" / "scripts" / "validate_anchors.py"
+    script = root / "packages" / "mlsysim" / "paper" / "scripts" / "validate_anchors.py"
     if not script.exists():
         return [RegistryIssue(code="anchors_missing", message=f"Script not found: {script}")]
 
     proc = subprocess.run(
         [sys.executable, str(script)],
-        cwd=root / "mlsysim",
+        cwd=root / "packages" / "mlsysim",
         capture_output=True,
         text=True,
     )

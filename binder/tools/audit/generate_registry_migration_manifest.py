@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONSTANTS_PATH = REPO_ROOT / "mlsysim" / "mlsysim" / "core" / "constants.py"
+CONSTANTS_PATH = REPO_ROOT / "packages" / "mlsysim" / "mlsysim" / "core" / "constants.py"
 MAP_CONSTANTS_PATH = REPO_ROOT / "scripts" / "map_constants.py"
 OUT_DIR = REPO_ROOT / "binder" / "tools" / "audit" / "artifacts"
 DEAD_OUT = OUT_DIR / "dead_constants_verified.json"

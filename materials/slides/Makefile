@@ -1,5 +1,5 @@
 # =============================================================================
-# slides/Makefile — Build ML Systems lecture slides
+# materials/slides/Makefile — Build ML Systems lecture slides
 # =============================================================================
 # Usage:
 #   make ch01              Build Chapter 1 PDF
@@ -31,7 +31,7 @@ VOL2_CHAPTERS := $(sort $(notdir $(wildcard $(VOL2_SRC)/*_*)))
 
 # LaTeX engine
 # pdflatex with helvet (Helvetica) + courier — same engine + font choice
-# as mlsysim/paper, which has shipped without font issues for months.
+# as packages/mlsysim/paper, which has shipped without font issues for months.
 # Was xelatex+fontspec+texgyreheros, which silently fell back to
 # Liberation Sans on Ubuntu CI and produced blank-text PDFs (2026-05-12).
 LATEX := pdflatex
