@@ -155,6 +155,55 @@ The second signal is unacceptable **Training Duration**\index{Training Duration}
 
 The third signal is **Dataset Scale**\index{Dataset Scale}. When training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks, a single machine is no longer the natural unit of storage or input throughput. Distributed training then becomes a way to feed the model as much as a way to hold it.
 
+::: {#fig-memory-wall-trend fig-env="figure" fig-pos="htb" fig-cap="**The Memory Wall**: The gap between single-device memory capacity and the memory required to train state-of-the-art models has widened exponentially. Training large language models natively requires distributing weights, gradients, and optimizer states across multiple accelerators."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+# Read data
+data = pd.read_csv("data/memory_wall_trends.csv")
+
+# Separate into models and GPUs
+df_gpus = data[data['Type'] == 'GPU']
+df_models = data[data['Type'] == 'Model']
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+# Plot models (Memory required)
+ax.scatter(df_models['Year'], df_models['Memory_GB'], color='#d62728', s=60, label='Model Training Requirement', zorder=3)
+for _, row in df_models.iterrows():
+    ax.annotate(row['Name'], (row['Year'], row['Memory_GB']), textcoords="offset points", xytext=(0,10), ha='center', fontsize=9, color='#d62728')
+
+# Plot GPUs (Memory capacity)
+ax.scatter(df_gpus['Year'], df_gpus['Memory_GB'], color='#1f77b4', marker='s', s=60, label='Single GPU Capacity', zorder=3)
+for _, row in df_gpus.iterrows():
+    ax.annotate(row['Name'], (row['Year'], row['Memory_GB']), textcoords="offset points", xytext=(0,-15), ha='center', fontsize=9, color='#1f77b4')
+
+# Set y-axis to logarithmic to show the exponential gap
+ax.set_yscale('log')
+ax.set_xlabel("Year")
+ax.set_ylabel("Memory (GB) - Log Scale")
+
+# Fill the growing gap
+ax.plot(df_models['Year'], df_models['Memory_GB'], color='#d62728', alpha=0.3, linestyle='--')
+ax.plot(df_gpus['Year'], df_gpus['Memory_GB'], color='#1f77b4', alpha=0.3, linestyle='--')
+
+ax.grid(True, which="major", ls="-", alpha=0.2)
+ax.grid(True, which="minor", ls="--", alpha=0.1)
+ax.legend(loc='upper left')
+
+sns.despine()
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
 ### Distributed training complexity trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
 Distribution changes the optimization problem by adding costs that do not exist inside one machine. Three complexity dimensions decide whether a parallelism strategy is viable, because any one of them can become the binding ceiling. **Communication Overhead**\index{Communication Overhead} is the cost of synchronizing gradients: for a model with $P$ parameters distributed across $N$ devices, all-reduce operations must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element, and on commodity networks this can dominate computation time. **Fault Tolerance**\index{Fault Tolerance} grows harder as the cluster grows, because the expected number of failures per unit time rises linearly with cluster size while the probability that the entire cluster survives an interval without any failure decays exponentially; if a `{python} DistTrainReliabilityFacts.reliability_node_count_str`-node cluster has `{python} DistTrainReliabilityFacts.node_hourly_survival_pct_str` per-node hourly survival, the cluster-level failure probability is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str` per hour, corresponding to a mean time between failures (MTBF) of about `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from per-node survival to cluster MTBF and works the same calculation through a full example, so the reader can reproduce why MTBF collapses as the cluster grows. **Algorithmic Stability**\index{Algorithmic Stability} closes the set, because large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate]. Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
