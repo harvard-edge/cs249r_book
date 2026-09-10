@@ -138,7 +138,7 @@ def _classify(suffix: str):
         return (
             "multiplier_in_suffix",
             "Use fmt_multiple(x) for the number and write the glyph in prose "
-            "as $\\times$ (see .claude/rules/math.md §6 #14).",
+            "as $\\times$.",
         )
     return None
 

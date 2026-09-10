@@ -8,6 +8,8 @@ from PIL import Image
 import numpy as np
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
 def remove_white_background(input_path, output_path, threshold=250):
     """
     Remove white background from image and make it transparent
@@ -50,7 +52,7 @@ def process_callout_icons():
     """Process all callout definition icons to remove white backgrounds"""
 
     # Base directory for icons
-    icon_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/assets/images/icons/callouts")
+    icon_dir = REPO_ROOT / "books/shared/assets/images/icons/callouts"
 
     # Look for definition icon
     patterns = [
@@ -113,7 +115,7 @@ def main():
     print("🎨 Removing white background from callout-definition icon...")
 
     # First, let's find where the icons are located
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/assets/images/icons")
+    base_dir = REPO_ROOT / "books/shared/assets/images/icons"
 
     if not base_dir.exists():
         print(f"❌ Icon directory not found: {base_dir}")

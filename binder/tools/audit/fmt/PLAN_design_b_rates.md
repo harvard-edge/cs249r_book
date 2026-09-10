@@ -53,7 +53,7 @@ paths, not relative paths. Jupyter may execute from the chapter directory, so a
 relative `PYTHONPATH=../..:../../mlsysim` can silently import a stale installed
 `mlsysim` and make the HTML audit lie. Use:
 ```bash
-env PYTHONPATH=/Users/VJ/GitHub/MLSysBook-fmt-audit:/Users/VJ/GitHub/MLSysBook-fmt-audit/mlsysim \
+env PYTHONPATH="$PWD:$PWD/mlsysim" \
   MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/mlsysbook-mplconfig \
   quarto render <chapter.qmd> --to html --output-dir /private/tmp/<out> \
   --execute --execute-daemon-restart --no-cache

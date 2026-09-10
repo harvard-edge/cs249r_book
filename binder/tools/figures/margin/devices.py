@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 devices.py - the canonical margin-figure renderers, in the locked visual
-language (.claude/rules/figure-visual-language.md + margin-figures.md).
+language shared by every margin figure.
 
 This is the single source of truth for HOW a margin device is drawn. Insertion
 work imports these; do not re-implement device shapes elsewhere.
