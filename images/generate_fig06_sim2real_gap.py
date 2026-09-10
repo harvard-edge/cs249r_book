@@ -1,0 +1,65 @@
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
+    <rect width="900" height="400" fill="#ffffff" />
+    <text x="450" y="30" font-family="sans-serif" font-size="18" font-weight="bold" fill="#1F407A" text-anchor="middle">The Multidimensional Sim-to-Real Reality Gap Vector</text>
+
+    <!-- Dynamics -->
+    <g transform="translate(50, 60)">
+        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(a) Dynamics &amp; Contact Mismatch</text>
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <path d="M 30 110 L 350 110" stroke="#2D3748" stroke-width="1" />
+        <path d="M 30 110 L 80 110 L 120 50 L 300 50" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
+        <path d="M 30 110 L 90 110 L 150 40 L 180 70 L 300 70" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real -->
+        <text x="250" y="45" font-family="sans-serif" font-size="10" fill="#1F407A">Simulated (Ideal)</text>
+        <text x="250" y="85" font-family="sans-serif" font-size="10" fill="#A51C30">Physical (Overshoot)</text>
+    </g>
+
+    <!-- Latency -->
+    <g transform="translate(470, 60)">
+        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(b) Actuator &amp; Pipeline Latency</text>
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <path d="M 30 100 L 350 100" stroke="#2D3748" stroke-width="1" />
+        <path d="M 30 80 Q 90 40 150 80 T 270 80" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
+        <path d="M 70 80 Q 130 40 190 80 T 310 80" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real shifted -->
+        <line x1="150" y1="80" x2="190" y2="80" stroke="#2D3748" stroke-width="1" stroke-dasharray="2" />
+        <text x="170" y="95" font-family="sans-serif" font-size="10" fill="#2D3748" text-anchor="middle">35-50ms Delay</text>
+    </g>
+
+    <!-- Sensing -->
+    <g transform="translate(50, 230)">
+        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(c) Sensing &amp; Transduction</text>
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <path d="M 30 90 L 350 90" stroke="#2D3748" stroke-width="1" />
+        <path d="M 30 70 L 150 70 L 180 70 L 300 70" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
+        <path d="M 30 60 L 120 60 L 130 110 L 140 110 L 150 60 L 300 60" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real with dropout & bias -->
+        <text x="135" y="125" font-family="sans-serif" font-size="10" fill="#A51C30" text-anchor="middle">Dropout</text>
+        <text x="250" y="55" font-family="sans-serif" font-size="10" fill="#A51C30">Bias (+3.2mm)</text>
+    </g>
+
+    <!-- Perceptual -->
+    <g transform="translate(470, 230)">
+        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(d) Perceptual Feature Shift</text>
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <circle cx="120" cy="85" r="30" fill="#1F407A" fill-opacity="0.2" stroke="#1F407A" stroke-width="2" stroke-dasharray="4"/>
+        <circle cx="150" cy="85" r="30" fill="#A51C30" fill-opacity="0.2" stroke="#A51C30" stroke-width="2"/>
+        <line x1="120" y1="85" x2="150" y2="85" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
+        <text x="135" y="75" font-family="sans-serif" font-size="10" fill="#2D3748" text-anchor="middle">6.0mm Shift</text>
+        <text x="280" y="75" font-family="sans-serif" font-size="10" fill="#1F407A">Simulated</text>
+        <text x="280" y="100" font-family="sans-serif" font-size="10" fill="#A51C30">Physical</text>
+    </g>
+
+    <defs>
+        <marker id="arrow-dark" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2D3748" />
+        </marker>
+    </defs>
+</svg>
+"""
+
+with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_sim2real_gap.svg", "w") as f:
+    f.write(svg_content)
