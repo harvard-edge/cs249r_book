@@ -1,6 +1,8 @@
 import subprocess
 import os
 
+FIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "svg")
+
 def build_tex(tex_path, pdf_path, svg_path):
     print(f"Compiling {tex_path}...")
     cmd_pdf = ["pdflatex", "-interaction=nonstopmode", os.path.basename(tex_path)]
@@ -330,13 +332,13 @@ fig1_tex = r"""\documentclass[tikz,border=12pt]{standalone}
 \end{document}
 """
 
-with open("/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_sim2real_gap.tex", "w") as f:
+with open(FIG_DIR + "/fig06_sim2real_gap.tex", "w") as f:
     f.write(fig1_tex.strip())
 
 build_tex(
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_sim2real_gap.tex",
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_sim2real_gap.pdf",
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_sim2real_gap.svg"
+    FIG_DIR + "/fig06_sim2real_gap.tex",
+    FIG_DIR + "/fig06_sim2real_gap.pdf",
+    FIG_DIR + "/fig06_sim2real_gap.svg"
 )
 
 # Figure 2: Compounding Covariate Shift and State Support Drift in Behavioral Cloning
@@ -598,11 +600,11 @@ fig2_tex = r"""\documentclass[tikz,border=12pt]{standalone}
 \end{document}
 """
 
-with open("/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_compounding_error.tex", "w") as f:
+with open(FIG_DIR + "/fig06_compounding_error.tex", "w") as f:
     f.write(fig2_tex.strip())
 
 build_tex(
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_compounding_error.tex",
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_compounding_error.pdf",
-    "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/06-training/figures/fig06_compounding_error.svg"
+    FIG_DIR + "/fig06_compounding_error.tex",
+    FIG_DIR + "/fig06_compounding_error.pdf",
+    FIG_DIR + "/fig06_compounding_error.svg"
 )

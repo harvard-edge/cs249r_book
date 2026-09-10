@@ -1542,7 +1542,7 @@ Before flipping to autonomous mode, verify:
 Once in autonomous mode, the operator (future Claude session) executes Phases 0 → 6 with:
 
 1. **Fresh feature branch** off current `dev`: `feat/vault-architecture`.
-2. **Working from** `/Users/VJ/GitHub/MLSysBook-staffml` (the StaffML worktree).
+2. **Working from** a dedicated StaffML worktree.
 3. **Commit style** per the project commit-style guide:
    - No `Co-Authored-By` lines
    - No automated attribution footers
