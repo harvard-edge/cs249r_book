@@ -31,7 +31,7 @@ PROJECTS = {
     "kits": "kits/",
     "labs": "labs/",
     "tinytorch": "tinytorch/",
-    "interviews": "interviews/",
+    "staffml": "staffml/",
 }
 
 # Patterns to exclude (bots, AI tools, etc.)

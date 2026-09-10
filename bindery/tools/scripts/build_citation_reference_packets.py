@@ -45,9 +45,9 @@ SCOPES = [
         "bibs": ["books/references.bib"],
     },
     {
-        "name": "interviews",
-        "paths": ["interviews/"],
-        "bibs": ["interviews/paper/references.bib"],
+        "name": "staffml",
+        "paths": ["staffml/"],
+        "bibs": ["staffml/paper/references.bib"],
     },
     {
         "name": "tinytorch",
@@ -68,7 +68,7 @@ SCOPES = [
 
 QMD_ROOTS = [
     "books",
-    "interviews",
+    "staffml",
     "tinytorch",
     "mlsysim",
     "design-grammar",

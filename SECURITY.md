@@ -48,9 +48,9 @@ These are the components where a vulnerability report makes sense:
 
 | Component | Type | Why it's in scope |
 |---|---|---|
-| **`interviews/staffml/`** | Public Next.js web app | Serves StaffML to users; auth, data integrity, XSS, IDOR, etc. |
-| **`interviews/staffml/worker/`, `staffml-vault-worker/`** | Cloudflare Workers (public API) | Internet-exposed API endpoints |
-| **`interviews/vault-cli/`** | Installable Python CLI | Code-execution risk for vault authors |
+| **`staffml/app/`** | Public Next.js web app | Serves StaffML to users; auth, data integrity, XSS, IDOR, etc. |
+| **`staffml/app/worker/`, `staffml/vault-worker/`** | Cloudflare Workers (public API) | Internet-exposed API endpoints |
+| **`staffml/vault-cli/`** | Installable Python CLI | Code-execution risk for vault authors |
 | **`tinytorch/`** | Installable Python package | Distributed via pip; supply-chain and code-execution risk |
 | **`mlsysim/`** | Installable Python package | Same as above |
 | **`mlperf-edu/`** | Installable Python package | Same as above |

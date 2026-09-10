@@ -139,5 +139,5 @@ print('OK')
 ## See also
 
 - `docs/VERSIONING.md` — contributor-facing how-to
-- `interviews/staffml/src/lib/stats.ts` — StaffML's reference reader
+- `staffml/app/src/lib/stats.ts` — StaffML's reference reader
 - `.github/workflows/_release-publish.yml` — reusable workflow source

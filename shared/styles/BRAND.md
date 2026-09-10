@@ -57,4 +57,4 @@ independent subsite builds; future cleanup should refactor each to
 - SVG assets (`README/curriculum-map.svg`, `site/about/assets/images/ai-engineering-venn.svg`, `books/shared/assets/images/icons/callouts/icon_callout_chapter_forward.svg`) embed the hex value directly.
 - JS: [`site/neural-bg.js`](../../site/neural-bg.js) hardcodes `#A51C30` in its colour list.
 - Python: [`mlsysim/mlsysim/viz/plots.py`](../../packages/mlsysim/mlsysim/viz/plots.py) defines `crimson = "#A51C30"`.
-- TSX: [`interviews/staffml/src/components/EcosystemBar.tsx`](../../interviews/staffml/src/components/EcosystemBar.tsx) uses `#a51c30`.
+- TSX: [`staffml/app/src/components/EcosystemBar.tsx`](../../staffml/app/src/components/EcosystemBar.tsx) uses `#a51c30`.

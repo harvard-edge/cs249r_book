@@ -21,7 +21,7 @@ right place.
 | Add or fix an interactive Co-Lab | **Labs** | [`labs/README.md`](labs/README.md) |
 | Contribute an MLSys·im model, scenario, or scorecard | **MLSys·im** | [`mlsysim/docs/contributing.qmd`](mlsysim/docs/contributing.qmd) |
 | Add a workload to the MLPerf EDU benchmark suite | **MLPerf EDU** | [`mlperf-edu/README.md`](mlperf-edu/README.md) |
-| Author or fix a StaffML interview question | **StaffML** | [`interviews/CONTRIBUTING.md`](interviews/CONTRIBUTING.md) |
+| Author or fix a StaffML interview question | **StaffML** | [`staffml/CONTRIBUTING.md`](staffml/CONTRIBUTING.md) |
 | Improve teaching materials, syllabi, or rubrics | **Instructors** | [`instructors/README.md`](instructors/README.md) |
 | Update slides for a chapter | **Slides** | [`slides/README.md`](slides/README.md) |
 | Change the unified landing site, newsletter wiring, or games | **Site** | [`site/README.md`](site/README.md) |
@@ -64,7 +64,7 @@ README. Each links to the canonical doc rather than restating it.
   At a glance: `book/` for the textbook, `tinytorch/` for the framework,
   `labs/` for browser labs, `kits/` for hardware recipes, `mlsysim/` for
   the simulator, `instructors/` for teaching materials, `slides/` for
-  per-chapter decks, `interviews/` for StaffML, `site/` for the unified
+  per-chapter decks, `staffml/` for StaffML, `site/` for the unified
   landing and newsletter.
 
 ## Universal policies (apply to every project)
@@ -111,10 +111,10 @@ pre-commit for you as a convenience):
 |---|---|
 | Textbook | `./binder setup` (also installs Quarto / Java / epubcheck checks) |
 | TinyTorch | `pip install -r tinytorch/requirements.txt && pip install -e tinytorch/` |
-| StaffML / vault-cli | `pip install -e interviews/vault-cli/[dev]` |
+| StaffML / vault-cli | `pip install -e staffml/vault-cli/[dev]` |
 | MLSys·im | `pip install -e mlsysim/[dev]` |
 | MLPerf EDU | `pip install -e mlperf-edu/[dev]` |
-| StaffML site | `cd interviews/staffml && npm install` |
+| StaffML site | `cd staffml/app && npm install` |
 
 See each sub-project's CONTRIBUTING / README for the full development loop.
 

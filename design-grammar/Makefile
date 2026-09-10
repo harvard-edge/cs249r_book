@@ -7,14 +7,14 @@
 #   make           — same as `make all`
 #   make all       — validate the YAML, regenerate index.html, sync the React TS file
 #   make html      — regenerate design-grammar/index.html from grammar.yml
-#   make sync      — regenerate interviews/staffml/src/data/designGrammar.ts from grammar.yml
+#   make sync      — regenerate staffml/app/src/data/designGrammar.ts from grammar.yml
 #   make validate  — schema-check grammar.yml + run cross-reference invariants
 #   make clean     — remove generated files (DESTRUCTIVE — only run after committing)
 
 REPO := $(shell cd .. && pwd)
 YAML := grammar.yml
 HTML := index.html
-TS   := $(REPO)/interviews/staffml/src/data/designGrammar.ts
+TS   := $(REPO)/staffml/app/src/data/designGrammar.ts
 
 NODE := node
 
@@ -27,7 +27,7 @@ html:
 	@$(NODE) scripts/build-html.mjs
 
 sync:
-	@$(NODE) $(REPO)/interviews/staffml/scripts/sync-design-grammar.mjs
+	@$(NODE) $(REPO)/staffml/app/scripts/sync-design-grammar.mjs
 
 validate:
 	@$(NODE) scripts/validate.mjs
