@@ -2900,8 +2900,9 @@ def backward(self, gradient=None, retain_graph=False):
             scalar output and uses ones_like as the seed.
         retain_graph: If False (default), releases the computation graph after
             backward to free memory. Set True if you need to call backward()
-            multiple times on the same graph (e.g., for higher-order gradients).
-            Matches PyTorch's retain_graph parameter.
+            multiple times on the same graph. Otherwise, recompute the forward
+            pass before using an intermediate again. Retaining this graph does
+            not provide higher-order derivatives; backward uses NumPy arrays.
 
     **Example:**
     ```python
@@ -2934,11 +2935,11 @@ def backward(self, gradient=None, retain_graph=False):
 
     if isinstance(gradient, Tensor):
         gradient = gradient.data
-
-    if self._grad_fn is None and getattr(self, "_graph_released", False):
-        raise RuntimeError(
-            "Trying to backward through the graph a second time. The graph was released "
-            "after the first backward(); pass retain_graph=True to keep it."
+    gradient = np.asarray(gradient)
+    if gradient.shape != self.shape:
+        raise ValueError(
+            f"backward gradient shape {gradient.shape} must match output shape {self.shape}. "
+            "Supply one gradient value per output element."
         )
 
     # ---- Step 1: topological sort -------------------------------------
@@ -2957,12 +2958,20 @@ def backward(self, gradient=None, retain_graph=False):
             continue
         if id(tensor) in seen:
             continue
+        # Check every intermediate before changing any gradients. A released
+        # intermediate has no grad_fn, but it is not a new leaf: stopping there
+        # would silently lose the gradient to the original inputs.
+        if getattr(tensor, "_graph_released", False):
+            raise RuntimeError(
+                "Trying to backward through a graph that was released. "
+                "Recompute the forward pass, or use retain_graph=True on the earlier backward()."
+            )
         seen.add(id(tensor))
         stack.append((tensor, True))
         fn = tensor._grad_fn
         if fn is not None:
             for parent in fn.inputs:
-                if isinstance(parent, Tensor):
+                if isinstance(parent, Tensor) and parent.requires_grad:
                     stack.append((parent, False))
     topo_order.reverse()
 
@@ -3121,6 +3130,28 @@ def test_unit_reused_tensor_gradients():
     h.backward()
     assert np.allclose(W3.grad, 2 ** 8), f"Expected 2^8 = 256, got {W3.grad}"
     print("   ✅ eight reuse levels: gradient is 2^8, computed in one pass")
+
+    # Across separate backward calls, retaining the graph is an explicit choice.
+    leaf = Tensor([2.0], requires_grad=True)
+    shared = leaf * 2
+    (shared * 3).sum().backward(retain_graph=True)
+    (shared * 4).sum().backward()
+    assert np.allclose(leaf.grad, [14.0]), "Both retained branches must reach the leaf"
+    try:
+        (shared * 5).sum().backward()
+    except RuntimeError as error:
+        assert "released" in str(error)
+    else:
+        raise AssertionError("A released intermediate must not silently stop gradient flow")
+    assert np.allclose(leaf.grad, [14.0]), "Rejected backward must leave gradients unchanged"
+
+    vector = Tensor([1.0, 2.0], requires_grad=True)
+    try:
+        vector.backward(np.ones((3, 2)))
+    except ValueError as error:
+        assert "shape" in str(error)
+    else:
+        raise AssertionError("The incoming gradient must match the output shape")
 
     print("✅ Reused-tensor gradients work correctly!")
 

@@ -36,7 +36,13 @@ By the end of this module, you will:
 3. Build the Benchmark class - a standardized performance evaluation framework
 4. Run an ablation and identify Pareto-optimal models from measured results
 
-Let's get started!
+The core reading path is to time one model with `Benchmark`, compare a baseline
+with one optimization, and run an ablation to identify what each change
+contributes. Keep the workload and measurement conditions fixed along that
+path. The statistical comparisons, Pareto analysis, and plotting helpers extend
+the interpretation of those measurements; they become useful after the basic
+comparison is reproducible. All implementations are included, but the timing
+and comparison path provides the foundation for understanding the extensions.
 
 ## 📦 Where This Code Lives in the Final Package
 

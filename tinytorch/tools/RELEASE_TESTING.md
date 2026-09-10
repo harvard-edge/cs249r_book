@@ -7,7 +7,7 @@ pre-release cleanup of 2026-09 — none are hypothetical.
 ## Run it
 
 ```bash
-python3 tools/release_check.py          # all gates (~5 min)
+python3 tools/release_check.py          # all gates (training tests can take 15+ min)
 python3 tools/release_check.py --fast   # skip the two slow gates (~10 s)
 python3 tools/release_check.py --list   # show gates without running
 python3 tools/release_check.py -k spine # run one gate
@@ -87,13 +87,26 @@ Current counts: **147 exercises, 185 graded tests, 67 given cells.**
 | No bare `except:` | Six swallowed real failures. The worst skipped the gradient update entirely, turning "the network never trained" into a pass |
 | No graded cell swallows its own failure | A handler whose body is only a `pass` or a `print` makes the points unreachable. Module 19's ten-point plotting test caught every exception and passed, so the method could draw nothing and still score full marks. The expected-raise idiom is exempt |
 | Every test file imports and collects | Catches a stale import before the suite runs |
+| Source-built reference regressions | Exports all instructor solutions from `src/` into a temporary package and checks graph lifetime, accumulation, quantization, and distillation; stale local exports cannot hide failures |
+| Notebook inventory | Requires exactly the 20 notebooks corresponding to the sources before attempting the journey |
 
 ### Slow gates
 
 | Gate | What it enforces |
 |---|---|
-| Student journey | All 20 notebooks execute end-to-end as `__main__` — every demo, analysis and test, exactly what "Run all" does in Colab |
-| pytest | The full suite, green |
+| Student journey | All 20 instructor notebooks execute end-to-end as `__main__`, each in a fresh interpreter with only earlier modules exported into a temporary package |
+| pytest | The full suite, including the slow training tests, green |
+
+Run `python3 tools/check_reference.py` directly for the numerical regression check.
+It is also wired into pre-commit and CI. Generate notebooks with
+`python3 -m tito.main dev export --all` before running the journey.
+This checks the instructor reference progression; student solution stripping
+and completion enforcement are separate concerns.
+
+Milestone accuracy assertions read the named final metric, rather than any
+percentage printed by a script. The CIFAR learning test lives in
+`test_milestones_training.py` and is marked `slow`; construction-only smoke
+tests remain in `test_milestones_smoke.py`.
 
 ---
 

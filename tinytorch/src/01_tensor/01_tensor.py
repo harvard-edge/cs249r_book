@@ -316,7 +316,21 @@ Tensor wraps with: shape=(2,3), size=6, dtype=float32
 - **Memory Discipline**: One copy per operation. `Function.apply` wraps every result in a fresh Tensor, so no two Tensors ever share a buffer and no operation can corrupt its inputs
 - **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers
 
-**Three of the methods below come before the sections that explain them.** The class is one cell, so you will write `reshape`, `transpose`, and `_validate_matmul_shapes` now, before the Matrix Multiplication section (which motivates the shape check) and the Shape Manipulation section (which explains reshape and transpose). Each APPROACH block is written to be enough on its own; if you want the why first, read those two sections and come back.
+The complete class stays together so its public interface is visible in one
+place. Follow the path from `__init__` to an arithmetic method such as `__add__`,
+then to `Function.apply`. The operation classes after the Tensor definition
+provide the numerical work, and their adjacent tests check each operation.
+
+Three shape rules explain the methods in the class before we inspect them.
+`reshape` changes the grouping of elements without changing their count:
+six values can become a `(2, 3)` matrix, but not a `(2, 4)` matrix. `transpose`
+swaps axes: a `(2, 3)` matrix becomes `(3, 2)`, with entry `(i, j)` moving to
+`(j, i)`. Matrix multiplication contracts the shared dimension:
+`(2, 3) @ (3, 4)` produces `(2, 4)`, whereas `(2, 3) @ (2, 4)` is invalid.
+`_validate_matmul_shapes` checks that contract before NumPy performs the work.
+The later operation sections extend these examples to batched inputs and test
+the rules individually. Utility methods such as `__repr__` help inspect results;
+they can be read after the numerical path is clear.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tensor-class", "solution": true}

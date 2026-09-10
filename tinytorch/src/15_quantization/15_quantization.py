@@ -21,7 +21,7 @@ Welcome to Module 15! You're about to build a complete INT8 quantization system 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML pipeline with profiling (Module 14)
 **You'll Build**: INT8 quantization system with calibration and memory savings
-**You'll Enable**: 4x smaller weight storage, measured on the models you build (hardware with INT8 instructions also runs the multiply faster; NumPy here only simulates the arithmetic)
+**You'll Enable**: Modeling the 4x weight-storage reduction of INT8. TinyTorch keeps its quantized codes in float32 Tensor storage, so this module simulates quantization; it does not reduce the actual NumPy allocation.
 
 **Connection Map**:
 ```
@@ -32,12 +32,12 @@ Profiling (14) → Quantization (15)
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement INT8 quantization with a proper scale and zero point
-2. Build a QuantizedLinear layer that runs the same forward pass on INT8 weights
+2. Build a QuantizedLinear layer that simulates a forward pass with INT8 weight codes
 3. Apply post-training quantization, with calibration, to a whole model
-4. Measure the memory savings with the Profiler from Module 14
+4. Distinguish modeled INT8 memory savings from the actual storage measured by the Profiler
 5. Measure quantization error per layer and know when it matters
 
-Let's make models 4x smaller!
+Let's explore the accuracy and storage tradeoffs of lower precision!
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -72,7 +72,7 @@ from tinytorch.core.activations import ReLU
 INT8_MIN_VALUE = -128
 INT8_MAX_VALUE = 127
 INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
-EPSILON = 1e-8  # Small value for numerical stability (constant tensor detection)
+EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -496,9 +496,9 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     - Clamp with np.clip(values, -128, 127)
     - Constant tensor (every element equals c): there is no range to map, so
       encode every element as code 0 and pick zero_point and scale so that
-      (0 - zero_point) * scale == c. When |c| <= 127 use scale = 1.0 and
-      zero_point = -round(c). When |c| > 127 that zero_point would not fit in
-      a byte, so use scale = |c| and zero_point = -1 (c > 0) or +1 (c < 0)
+      (0 - zero_point) * scale == c. For nonzero c, use scale = |c| and
+      zero_point = -1 (c > 0) or +1 (c < 0). For c = 0, use scale = 1
+      and zero_point = 0. Fractional constants need a fractional scale too.
     """
     ### BEGIN SOLUTION
     data = tensor.data
@@ -511,17 +511,14 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     # All elements have the same value c, so there is no range to map. We encode
     # every element as q=0 and choose zero_point/scale so dequantization recovers
     # the constant via (0 - zero_point) * scale = c.
-    if abs(max_val - min_val) < EPSILON:
+    if max_val == min_val:
         c = min_val
-        if abs(c) <= INT8_MAX_VALUE:
-            # |c| fits the INT8 range: scale=1.0 and zero_point = -round(c).
+        if c == 0:
             scale = 1.0
-            zero_point = int(np.round(-c))
+            zero_point = 0
         else:
-            # |c| exceeds the INT8 range. Keeping scale=1.0 would force
-            # zero_point = -c, which np.clip would saturate to +-128 and
-            # silently corrupt the value. Use zero_point = +-1 and scale = |c|
-            # instead, so (0 - zero_point) * scale = c holds without clamping.
+            # Encode the magnitude in the scale, preserving both fractional
+            # and large constants with a zero point that fits in one byte.
             zero_point = -1 if c > 0 else 1
             scale = abs(c)
         quantized_data = np.zeros_like(data, dtype=np.int8)
@@ -530,8 +527,8 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     # Step 3: Nudge the range to include zero before computing scale.
     # If min_val and max_val share a sign (every post-ReLU activation, for
     # instance), the zero_point implied by the raw range falls outside
-    # [-128, 127]. Clamping it there -- as the constant-tensor branch above
-    # warns -- destroys the affine mapping and silently corrupts every value.
+    # [-128, 127]. Clamping it there destroys the affine mapping and silently
+    # corrupts every value.
     # Widening the range so it straddles zero is what PyTorch and TFLite do,
     # and it costs at most one quantization level of precision.
     min_val = min(min_val, 0.0)
@@ -602,7 +599,7 @@ def test_unit_quantize_int8():
     # regardless of what the constant was, so the zero_point must carry it.
     constant_tensor = Tensor([[2.0, 2.0], [2.0, 2.0]])
     q_const, scale_const, zp_const = quantize_int8(constant_tensor)
-    assert scale_const == 1.0
+    assert scale_const > 0
     restored_const = (q_const.data.astype(np.float32) - zp_const) * scale_const
     assert np.allclose(restored_const, 2.0), (
         f"Constant tensor dequantized to {restored_const} instead of 2.0. "
@@ -627,6 +624,12 @@ def test_unit_quantize_int8():
         f"Large constant tensor dequantized to {restored_large} instead of 500.0. "
         "zero_point must not be clamped for |c| > 127."
     )
+
+    # A fixed scale of 1 would erase fractional constants such as 0.25.
+    for value in (0.0, 0.25, -0.5):
+        q, scale, zero_point = quantize_int8(Tensor([value, value]))
+        restored = (q.data - zero_point) * scale
+        assert np.allclose(restored, value), f"Constant {value} reconstructed as {restored}"
 
     print("✅ INT8 quantization works correctly!")
 
@@ -954,7 +957,7 @@ class QuantizedLinear:
         min_val = min(float(np.min(all_values)), 0.0)
         max_val = max(float(np.max(all_values)), 0.0)
 
-        if abs(max_val - min_val) < EPSILON:
+        if max_val == min_val:
             self.input_scale = 1.0
             self.input_zero_point = 0
         else:

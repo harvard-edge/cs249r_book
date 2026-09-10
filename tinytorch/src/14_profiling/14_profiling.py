@@ -1119,14 +1119,23 @@ against a real model and returns one report.
 
 ```
 count parameters  ─┐
-count FLOPs       ─┼─> Profiler.profile(model, input) ─> a single report dict
+count FLOPs       ─┼─> Profiler.profile_forward_pass(model, input) ─> a report dict
 measure memory    ─┤
 measure latency   ─┘
 ```
 
-Note what it does NOT do: it never estimates a number it could measure, and it
-never reports a measurement without the run count behind it. That distinction is
-the whole subject of Module 19, which you'll build next.
+Read the class through one concrete call: `profile_forward_pass(model,
+input_tensor)`. It uses the supplied input for warmup runs and timed forward
+passes, then combines their summary with size estimates. Follow `count_parameters` separately
+to see a quantity computed from tensor sizes, then `count_flops` to see an
+operation-count estimate. These are different kinds of evidence; a FLOP count
+does not measure elapsed time. The memory helpers add estimates of activations,
+gradients, and optimizer state once that distinction is clear.
+
+The complete class is kept together to show how these measurements share state.
+Its individual methods are exercised in the parameter, FLOP, memory, and
+latency sections below. Module 19 will add comparisons across repeated runs
+and candidate models.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "profiler_class", "solution": true}

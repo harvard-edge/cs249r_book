@@ -14,17 +14,14 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     # All elements have the same value c, so there is no range to map. We encode
     # every element as q=0 and choose zero_point/scale so dequantization recovers
     # the constant via (0 - zero_point) * scale = c.
-    if abs(max_val - min_val) < EPSILON:
+    if max_val == min_val:
         c = min_val
-        if abs(c) <= INT8_MAX_VALUE:
-            # |c| fits the INT8 range: scale=1.0 and zero_point = -round(c).
+        if c == 0:
             scale = 1.0
-            zero_point = int(np.round(-c))
+            zero_point = 0
         else:
-            # |c| exceeds the INT8 range. Keeping scale=1.0 would force
-            # zero_point = -c, which np.clip would saturate to +-128 and
-            # silently corrupt the value. Use zero_point = +-1 and scale = |c|
-            # instead, so (0 - zero_point) * scale = c holds without clamping.
+            # Encode the magnitude in the scale, preserving both fractional
+            # and large constants with a zero point that fits in one byte.
             zero_point = -1 if c > 0 else 1
             scale = abs(c)
         quantized_data = np.zeros_like(data, dtype=np.int8)
@@ -33,8 +30,8 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     # Step 3: Nudge the range to include zero before computing scale.
     # If min_val and max_val share a sign (every post-ReLU activation, for
     # instance), the zero_point implied by the raw range falls outside
-    # [-128, 127]. Clamping it there -- as the constant-tensor branch above
-    # warns -- destroys the affine mapping and silently corrupts every value.
+    # [-128, 127]. Clamping it there destroys the affine mapping and silently
+    # corrupts every value.
     # Widening the range so it straddles zero is what PyTorch and TFLite do,
     # and it costs at most one quantization level of precision.
     min_val = min(min_val, 0.0)
