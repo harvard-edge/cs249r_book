@@ -752,44 +752,35 @@ For LLMs in the decode phase, computation per token is small relative to memory 
 
 For recommendation systems, the bottleneck is often embedding lookup rather than dense computation. Batching strategies must optimize for parallel embedding access patterns rather than matrix multiplication throughput.
 
-::: {#fig-gpu-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**The GPU Memory Wall**: Over the last decade, theoretical compute (peak TFLOPS) has scaled much faster than memory bandwidth (GB/s). The widening gap dramatically increases arithmetic intensity constraints, making large language model inference severely memory-bandwidth bound."}
+::: {#fig-gpu-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Decode inherits the bandwidth deficit**: Peak compute outpaces memory bandwidth by roughly two to one across four accelerator generations, normalized to the V100. Because autoregressive decode reads the full weight set per token, it advances at the bandwidth rate rather than the compute rate. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 showing peak compute reaching 18 times and memory bandwidth 8.9 times by the B200, the gap that bounds decode throughput."}
 
 ```{python}
 #| echo: false
 import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
+from mlsysim import viz
 
-plt.style.use('seaborn-v0_8-whitegrid')
-fig, ax1 = plt.subplots(figsize=(9, 5))
+data = pd.read_csv("data/gpu_memory_wall.csv")
+base = data.iloc[0]
+data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
+data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
 
-df = pd.read_csv("data/gpu_memory_wall.csv")
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.2))
+labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
+ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"],
+        linewidth=2, label="Peak compute")
+ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"],
+        linewidth=2, label="Memory bandwidth")
 
-color1 = '#E67817' # Orange
-ax1.set_xlabel('Year', fontweight='bold')
-ax1.set_ylabel('Peak Compute (TFLOPS)', color=color1, fontweight='bold')
-line1 = ax1.plot(df['Year'], df['Peak_TFLOPS'], color=color1, marker='o', linewidth=2.5, label='Peak Compute (TFLOPS)')
-ax1.tick_params(axis='y', labelcolor=color1)
-ax1.set_yscale('log')
+for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+    ax.annotate(f'{data[col].iloc[-1]:.0f}x', xy=(len(data) - 1, data[col].iloc[-1]),
+                xytext=(6, 0), textcoords="offset points", va="center",
+                fontweight="bold", color=colour)
 
-ax2 = ax1.twinx()
-color2 = '#005A9C' # Blue
-ax2.set_ylabel('Memory Bandwidth (GB/s)', color=color2, fontweight='bold')
-line2 = ax2.plot(df['Year'], df['Memory_Bandwidth_GBps'], color=color2, marker='s', linewidth=2.5, label='Memory Bandwidth (GB/s)')
-ax2.tick_params(axis='y', labelcolor=color2)
-ax2.set_yscale('log')
-
-ax1.set_xticks(df['Year'])
-ax1.set_xticklabels([f"{y}\n({g})" for y, g in zip(df['Year'], df['GPU'])])
-
-# Combined legend
-lines = line1 + line2
-labels = [l.get_label() for l in lines]
-ax1.legend(lines, labels, loc='upper left', frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True)
-
-plt.tight_layout()
-plt.show()
-plt.close()
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
+ax.set_xlabel("NVIDIA data center accelerator")
+ax.legend(loc="upper left", frameon=False)
+ax.margins(x=0.12)
+fig.tight_layout()
 ```
 
 :::

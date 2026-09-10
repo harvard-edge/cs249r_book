@@ -106,53 +106,35 @@ Each claimant imposes a demand that can be derived from its transfer size per ev
 
 Arithmetic intensity, defined as the ratio of arithmetic operations to memory bytes transferred, indicates whether a computational routine is bounded by execution units or by memory bandwidth during steady-state execution. For a convolution or dense matrix multiplication on the proposal path, an arithmetic intensity of $120\text{ FLOP/byte}$ indicates that arithmetic units will be fully occupied once data resides in local cache or static memory. However, during the initial phase where weights are transferred from dynamic memory, the operational arithmetic intensity drops to zero, converting the accelerator into a high-priority direct memory access engine that saturates the memory bus. Arithmetic intensity reveals whether a workload can hide memory transfer latency behind arithmetic work in isolation, but it provides no information about queue contention, transfer priority, burst duration, or which request waits when two paths access the bus simultaneously.
 
-::: {#fig-placement-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**The Accelerator Memory Wall**: As neural accelerator peak compute scales exponentially, memory bandwidth scales at a much slower rate. This divergence forces physical AI architectures to execute workloads with increasingly high arithmetic intensity, rendering simple real-time reflexes or low-intensity proposals completely memory-bound. This physical contention is the primary driver of execution delay on shared memory buses."}
+::: {#fig-placement-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Placement inherits the same bandwidth deficit**: Peak compute and memory bandwidth for data center accelerators, normalized to the V100. The two-to-one divergence sets the ceiling a placement decision works against, since an on-robot budget cannot buy its way past a bandwidth limit. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 showing compute at 18 times and bandwidth at 8.9 times by the B200, the divergence a placement decision must respect."}
 
 ```{python}
 #| echo: false
 import pandas as pd
-import matplotlib.pyplot as plt
+from mlsysim import viz
 
-plt.style.use('seaborn-v0_8-whitegrid')
 data = pd.read_csv("data/gpu_memory_wall.csv")
-fig, ax1 = plt.subplots(figsize=(8, 5))
+base = data.iloc[0]
+data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
+data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
 
-color1 = '#1f77b4'
-color2 = '#d62728'
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.2))
+labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
+ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"],
+        linewidth=2, label="Peak compute")
+ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"],
+        linewidth=2, label="Memory bandwidth")
 
-ax1.set_xlabel('Year', fontsize=10, weight='bold')
-ax1.set_ylabel('Peak Compute (Dense FP16/BF16 TFLOPS)', color=color1, fontsize=10, weight='bold')
-ax1.plot(data['Year'], data['Compute_TFLOPS'], marker='o', color=color1, linewidth=2, label='Compute (TFLOPS)')
-ax1.tick_params(axis='y', labelcolor=color1)
-ax1.set_yscale('log')
-ax1.grid(True, which='both', ls='--', alpha=0.5)
+for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+    ax.annotate(f'{data[col].iloc[-1]:.0f}x', xy=(len(data) - 1, data[col].iloc[-1]),
+                xytext=(6, 0), textcoords="offset points", va="center",
+                fontweight="bold", color=colour)
 
-ax2 = ax1.twinx()  
-ax2.set_ylabel('Memory Bandwidth (GB/s)', color=color2, fontsize=10, weight='bold')
-ax2.plot(data['Year'], data['Memory_Bandwidth_GBs'], marker='s', color=color2, linewidth=2, linestyle='--', label='Memory Bandwidth (GB/s)')
-ax2.tick_params(axis='y', labelcolor=color2)
-ax2.set_yscale('log')
-ax2.grid(False)
-
-for idx, row in data.iterrows():
-    ax1.annotate(row['Accelerator'], 
-                 (row['Year'], row['Compute_TFLOPS']),
-                 textcoords="offset points", 
-                 xytext=(0,10), 
-                 ha='center', fontsize=9, weight='bold')
-
-for idx, row in data.iterrows():
-    ai = row['Compute_TFLOPS'] * 1000 / row['Memory_Bandwidth_GBs']
-    ax1.annotate(f"{ai:.0f} FLOP/B", 
-                 (row['Year'], row['Compute_TFLOPS']),
-                 textcoords="offset points", 
-                 xytext=(0,-15), 
-                 ha='center', fontsize=8, color='black')
-
-plt.title('The Accelerator Memory Wall: Compute vs. Memory Bandwidth Scaling', fontsize=12, weight='bold')
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
+ax.set_xlabel("NVIDIA data center accelerator")
+ax.legend(loc="upper left", frameon=False)
+ax.margins(x=0.12)
 fig.tight_layout()
-plt.show()
-plt.close()
 ```
 
 :::
