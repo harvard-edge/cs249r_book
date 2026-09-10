@@ -2,7 +2,7 @@
 
 This powers::
 
-    ./book/binder check cli --scope contract
+    ./binder check cli --scope contract
 
 The check is intentionally small and example-heavy. It runs read-only commands
 that define the public Binder surface and fails if help text, migration hints,
@@ -10,14 +10,14 @@ or exit codes drift.
 
 Examples of what it catches:
 
-* ``./book/binder build reset pdf --vol1`` accidentally working again.
-  Canonical shape is ``./book/binder reset pdf --vol1``.
-* ``./book/binder pdf reset --vol1`` accidentally working again.
+* ``./binder build reset pdf --vol1`` accidentally working again.
+  Canonical shape is ``./binder reset pdf --vol1``.
+* ``./binder pdf reset --vol1`` accidentally working again.
   Top-level ``html`` / ``pdf`` / ``epub`` are removed; builds live under
   ``build`` and YAML resets live under ``reset``.
-* ``./book/binder reset`` mutating state instead of showing help.
+* ``./binder reset`` mutating state instead of showing help.
   Bare reset is informational; reset needs an explicit target.
-* ``./book/binder check`` omitting a registered check group or scope from
+* ``./binder check`` omitting a registered check group or scope from
   the live catalogue, which makes pre-commit failures harder to debug.
 
 Every failure includes the command, expected condition, and a short output
@@ -239,7 +239,7 @@ def _excerpt(text: str, limit: int = 1400) -> str:
 
 
 def _command_label(argv: Iterable[str]) -> str:
-    return "./book/binder " + " ".join(argv)
+    return "./binder " + " ".join(argv)
 
 
 def run_contract(repo_root: Path | None = None) -> list[Violation]:
@@ -248,12 +248,12 @@ def run_contract(repo_root: Path | None = None) -> list[Violation]:
     if not binder.exists():
         return [
             Violation(
-                file="book/binder",
+                file="binder",
                 line=0,
                 code="cli_contract_missing_entrypoint",
                 message="Binder entry point does not exist.",
                 context=str(binder),
-                suggestion="Restore the public CLI executable at book/binder.",
+                suggestion="Restore the public CLI executable at binder.",
             )
         ]
 
@@ -284,7 +284,7 @@ def run_contract(repo_root: Path | None = None) -> list[Violation]:
             output = _clean_output((exc.stdout or "") + (exc.stderr or ""))
             violations.append(
                 Violation(
-                    file="book/binder",
+                    file="binder",
                     line=0,
                     code="cli_contract_timeout",
                     message=f"{label} timed out after {case.timeout_seconds}s.",

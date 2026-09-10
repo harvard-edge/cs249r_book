@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[4]
-CONTENTS = ROOT / "book/quarto/contents"
+CONTENTS = ROOT / "books"
 
 COLUMN_START_RE = re.compile(r"^:{3,}\s*\{[^}]*\.column-margin\b")
 DIV_CLOSE_RE = re.compile(r"^:{3,}\s*$")

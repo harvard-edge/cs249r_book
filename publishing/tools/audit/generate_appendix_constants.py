@@ -24,8 +24,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MLSYSIM_ROOT = REPO_ROOT / "mlsysim"
 APPENDIX_PATHS = [
-    REPO_ROOT / "book/quarto/contents/vol1/backmatter/appendix_assumptions.qmd",
-    REPO_ROOT / "book/quarto/contents/vol2/backmatter/appendix_assumptions.qmd",
+    REPO_ROOT / "books/vol1/backmatter/appendix_assumptions.qmd",
+    REPO_ROOT / "books/vol2/backmatter/appendix_assumptions.qmd",
 ]
 
 CELL_START = re.compile(r"^```\{python\}\s*$")
@@ -190,7 +190,7 @@ def _render_interconnect_cell() -> str:
         "# │ Goal: Formatted value/unit pairs for reference tables in this section\n"
         "# │ Show: Interconnect value/unit pairs consumed by appendix reference tables\n"
         "# │ How: Read unit-bearing constants and split each into formatted value/unit strings\n"
-        "# │ Source:  book/tools/audit/generate_appendix_constants.py (--write interconnect)\n"
+        "# │ Source:  publishing/tools/audit/generate_appendix_constants.py (--write interconnect)\n"
         "from mlsysim.core import units\n"
         "from mlsysim.fmt import fmt, fmt_val, fmt_unit\n"
         "\n"
@@ -290,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--refresh-yaml",
         action="store_true",
-        help="Refresh book/tools/audits/mlsysim_constants/*.yaml target_source fields",
+        help="Refresh publishing/tools/audits/mlsysim_constants/*.yaml target_source fields",
     )
     args = parser.parse_args(argv)
 

@@ -6,7 +6,7 @@ Reads every .claude/_reviews/emphasis/<vol>/*.yml ledger (schema-tolerant: it fi
 any dict carrying a 'recommendation' key, wherever the agent nested it) and prints
 per-chapter counts, volume totals, and the full actionable fix-list (everything != keep).
 
-Usage:  python3 book/tools/audit/emphasis_rollup.py vol1
+Usage:  python3 publishing/tools/audit/emphasis_rollup.py vol1
 """
 import sys, os, glob, re
 from collections import Counter

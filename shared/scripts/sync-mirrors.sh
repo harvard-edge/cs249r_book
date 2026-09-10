@@ -27,15 +27,15 @@ fi
 
 # canonical_path|mirror_path_1,mirror_path_2,...
 SYNC_MAP=(
-  "shared/scripts/subscribe-modal.js|site/assets/scripts/subscribe-modal.js,book/quarto/assets/scripts/subscribe-modal.js,labs/assets/scripts/subscribe-modal.js,kits/assets/scripts/subscribe-modal.js,mlsysim/docs/scripts/subscribe-modal.js"
-  "shared/assets/img/logo-seas-shield.png|book/quarto/assets/images/icons/logo-seas-shield.png,interviews/staffml/public/logo-seas-shield.png"
+  "shared/scripts/subscribe-modal.js|site/assets/scripts/subscribe-modal.js,books/shared/assets/scripts/subscribe-modal.js,labs/assets/scripts/subscribe-modal.js,kits/assets/scripts/subscribe-modal.js,mlsysim/docs/scripts/subscribe-modal.js"
+  "shared/assets/img/logo-seas-shield.png|books/shared/assets/images/icons/logo-seas-shield.png,interviews/staffml/public/logo-seas-shield.png"
 
   # SCSS partials consumed by the book Quarto build. Sass resolves @import
   # relative to the importing file's physical location (not the symlink
   # target), so each consumer needs a real file with the same content.
-  "shared/styles/_brand.scss|book/quarto/assets/styles/_brand.scss"
-  "shared/styles/themes/_theme-harvard.scss|book/quarto/assets/styles/themes/_theme-harvard.scss"
-  "shared/styles/themes/_theme-eth.scss|book/quarto/assets/styles/themes/_theme-eth.scss"
+  "shared/styles/_brand.scss|books/shared/assets/styles/_brand.scss"
+  "shared/styles/themes/_theme-harvard.scss|books/shared/assets/styles/themes/_theme-harvard.scss"
+  "shared/styles/themes/_theme-eth.scss|books/shared/assets/styles/themes/_theme-eth.scss"
 )
 
 # Mirrors that are intentionally NOT synced (different content per subsite):
@@ -43,8 +43,8 @@ SYNC_MAP=(
 #   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
 #
 # SocratiQ Interactive Widget (Canonicals only, no mirrors needed):
-#   book/quarto/tools/scripts/socratiQ/bundle.js
-#   book/quarto/tools/scripts/socratiQ/assets/style.css
+#   books/tools/scripts/socratiQ/bundle.js
+#   books/tools/scripts/socratiQ/assets/style.css
 
 stale=0
 synced=0

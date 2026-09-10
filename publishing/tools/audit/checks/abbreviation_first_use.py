@@ -528,7 +528,7 @@ def check(
 # ── Adversarial self-test ──────────────────────────────────────────────────
 #
 # Run with:
-#     PYTHONPATH=book/tools python3 book/tools/audit/checks/abbreviation_first_use.py
+#     PYTHONPATH=publishing/tools python3 publishing/tools/audit/checks/abbreviation_first_use.py
 #
 # Each case is (name, text, expected) where `expected` is a set of
 # "under:ABBREV" / "over:ABBREV" markers. The driver runs `check` on the text

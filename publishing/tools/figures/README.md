@@ -11,5 +11,5 @@ Book Tools, not scratch scripts.
   helpers used by the SVG generation workflow.
 
 Script entrypoints that generate, insert, inventory, or render figures remain
-under `book/tools/scripts/`. Keep reusable drawing policy here and keep scripts
+under `publishing/tools/scripts/`. Keep reusable drawing policy here and keep scripts
 thin where practical.

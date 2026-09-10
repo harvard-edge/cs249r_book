@@ -831,7 +831,7 @@ def scan_purpose_overflow(pdf_path: Path, volume: str, repo_root: Path) -> list[
         return None
 
     issues: list[PdfIssue] = []
-    contents_dir = repo_root / "book" / "quarto" / "contents" / volume
+    contents_dir = repo_root  / "books" / volume
     if not contents_dir.exists():
         return issues
 

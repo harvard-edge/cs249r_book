@@ -80,7 +80,7 @@ def _stem_from_artifact(name: str) -> str:
 
 
 def _find_qmd(vol: str, stem: str) -> Path | None:
-    base = REPO_ROOT / "book" / "quarto" / "contents" / vol
+    base = REPO_ROOT  / "books" / vol
     if stem.startswith("appendix_"):
         p = base / "backmatter" / f"{stem}.qmd"
         return p if p.is_file() else None
@@ -178,7 +178,7 @@ def verify_chapter_browser(page, html_path: Path, *, vol: str, check_refs: bool,
 def _artifact_dirs(vol: str, explicit: Path | None) -> Path:
     if explicit:
         return explicit
-    debug_root = REPO_ROOT / "book/quarto/_build/debug" / vol / "html"
+    debug_root = REPO_ROOT / "books/_build/debug" / vol / "html"
     runs = sorted(p for p in debug_root.iterdir() if p.is_dir())
     if not runs:
         raise SystemExit(f"No debug runs in {debug_root}")
@@ -196,7 +196,7 @@ def main() -> int:
     ap.add_argument("--screenshots", type=Path)
     args = ap.parse_args()
 
-    html_dir = REPO_ROOT / "book/quarto/_build/html-audit" / args.vol if args.html_audit else _artifact_dirs(args.vol, args.artifact_dir)
+    html_dir = REPO_ROOT / "books/_build/html-audit" / args.vol if args.html_audit else _artifact_dirs(args.vol, args.artifact_dir)
     html_files = sorted(html_dir.glob("*.html"))
     if args.chapter:
         html_files = [p for p in html_files if _stem_from_artifact(p.name) == args.chapter]
@@ -214,7 +214,7 @@ def main() -> int:
             print("ok" if rep.ok else f"FAIL leaks={rep.leak_count} refs={len(rep.ref_failures)}")
         browser.close()
 
-    out = args.report or REPO_ROOT / "book/tools/audit/artifacts/playwright_{}.json".format(args.vol)
+    out = args.report or REPO_ROOT / "publishing/tools/audit/artifacts/playwright_{}.json".format(args.vol)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps([asdict(r) for r in reports], indent=2))
     passed = sum(1 for r in reports if r.ok)

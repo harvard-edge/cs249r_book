@@ -1,6 +1,6 @@
 # Takeaways ART: Foundations
 
-## book/quarto/contents/vol1/introduction/introduction.qmd
+## books/vol1/introduction/introduction.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, `efficiency-scale-summary-anchor` and Amdahl summary recap cells, existing `callout-takeaways` block.
 - Issues:
@@ -21,13 +21,13 @@
 :::
 ```
 
-## book/quarto/contents/vol1/ml_systems/ml_systems.qmd
+## books/vol1/ml_systems/ml_systems.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, deployment paradigm and fallacy quantitative anchors surfaced in the chapter, existing `callout-takeaways` block.
 - Issues: None
 - Proposed callout: Existing title "Same model, different engineering"; no replacement needed.
 
-## book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd
+## books/vol1/ml_workflow/ml_workflow.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, constraint-propagation and iteration examples referenced from summary, existing `callout-takeaways` block.
 - Issues:
@@ -49,31 +49,31 @@
 :::
 ```
 
-## book/quarto/contents/vol1/data_engineering/data_engineering.qmd
+## books/vol1/data_engineering/data_engineering.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, `DataEngineeringSummaryRecap` and `StorageLoadingRecap` cells, existing `callout-takeaways` block.
 - Issues: None
 - Proposed callout: Existing title "Data is the source code"; no replacement needed.
 
-## book/quarto/contents/vol1/nn_computation/nn_computation.qmd
+## books/vol1/nn_computation/nn_computation.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, `mnist-weights-calc` and `summary-paradigm-cost-recap` cells, existing `callout-takeaways` block.
 - Issues: None
 - Proposed callout: Existing title "The math behind the model"; no replacement needed.
 
-## book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd
+## books/vol1/nn_architectures/nn_architectures.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, architecture-selection and lighthouse-model synthesis, existing `callout-takeaways` block.
 - Issues: None
 - Proposed callout: Existing title "Architecture is infrastructure"; no replacement needed.
 
-## book/quarto/contents/vol1/frameworks/frameworks.qmd
+## books/vol1/frameworks/frameworks.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, Summary section, execution/differentiation/abstraction synthesis, existing `callout-takeaways` block.
 - Issues: None
 - Proposed callout: Existing title "The layer between math and hardware"; no replacement needed.
 
-## book/quarto/contents/vol1/training/training.qmd
+## books/vol1/training/training.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose, learning objectives, clean heading outline, `Optimization impact summary`, `gpt2-summary-calc`, `OptimizationSummaryCalc`, `GPT2SummaryScalingRecap`, final Summary section, `GPT2SummaryChapterRecap`, existing `callout-takeaways` block.
 - Issues:

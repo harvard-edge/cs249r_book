@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-QUARTO = REPO / "publishing" / "quarto"
-CONTENTS = QUARTO / "contents"
+QUARTO = REPO / "publishing"  / "books"
+CONTENTS = QUARTO
 CONFIG = QUARTO / "config"
 
 VOLUMES = ("vol1", "vol2", "vol3", "vol4")

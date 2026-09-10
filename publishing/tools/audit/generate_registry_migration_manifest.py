@@ -5,7 +5,7 @@ Scans mlsysim.core.units for defined symbols, counts repo-wide references,
 and assigns migration targets using scripts/map_constants.py plus heuristics.
 
 Usage:
-    python3 book/tools/audit/generate_registry_migration_manifest.py
+    python3 publishing/tools/audit/generate_registry_migration_manifest.py
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ def count_symbol_refs(files: list[Path], symbols: set[str]) -> dict[str, dict[st
     return per_file
 
 def chapter_key(rel_path: str) -> str | None:
-    m = re.search(r"book/quarto/contents/(vol[12]/[^/]+)/", rel_path)
+    m = re.search(r"books/(vol[12]/[^/]+)/", rel_path)
     return m.group(1) if m else None
 
 def infer_replacement(name: str, mapping: dict[str, str]) -> tuple[str | None, str, str]:
@@ -302,7 +302,7 @@ def main() -> int:
 
     dead = [r for r in records if r.action == "delete_dead"]
     manifest = {
-        "generated_by": "book/tools/audit/generate_registry_migration_manifest.py",
+        "generated_by": "publishing/tools/audit/generate_registry_migration_manifest.py",
         "constants_path": str(CONSTANTS_PATH.relative_to(REPO_ROOT)),
         "symbol_count": len(records),
         "dead_count": len(dead),

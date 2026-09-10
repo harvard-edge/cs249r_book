@@ -10,7 +10,7 @@ OpenAI is optional and only runs when ``--smart-fix`` is passed. The normal
 ``--check`` path is deterministic and does not call the network or modify files.
 
 Usage:
-    python3 bib_mitpress_openai.py --check book/quarto/contents/references.bib
+    python3 bib_mitpress_openai.py --check books/references.bib
     python3 bib_mitpress_openai.py --all --check
     python3 bib_mitpress_openai.py --fix path/to/references.bib
     python3 bib_mitpress_openai.py --smart-fix path/to/references.bib --limit 10
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # script lives at book/tools/scripts/<this>.py
+REPO_ROOT = Path(__file__).resolve().parents[3]  # script lives at publishing/tools/scripts/<this>.py
 BOOK_DIR = REPO_ROOT / "book"
 if str(BOOK_DIR) not in sys.path:
     sys.path.insert(0, str(BOOK_DIR))
@@ -130,9 +130,9 @@ def discover_bib_files() -> list[Path]:
 
 def resolve_files(args: argparse.Namespace) -> list[Path]:
     aliases = {
-        "book": REPO_ROOT / "book/quarto/contents/references.bib",
-        "vol1": REPO_ROOT / "book/quarto/contents/references.bib",
-        "vol2": REPO_ROOT / "book/quarto/contents/references.bib",
+        "book": REPO_ROOT / "books/references.bib",
+        "vol1": REPO_ROOT / "books/references.bib",
+        "vol2": REPO_ROOT / "books/references.bib",
     }
     if args.all:
         return discover_bib_files()
@@ -528,7 +528,7 @@ def main() -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"OpenAI model for --smart-fix (default: {DEFAULT_MODEL})")
     parser.add_argument("--limit", type=int, default=0, help="Limit smart-fix entries sent per file to OpenAI")
     parser.add_argument("--chunk-size", type=int, default=8, help="Number of entries per smart-fix chunk")
-    parser.add_argument("--json", action="store_true", help="Write a JSON report under book/tools/audit/out")
+    parser.add_argument("--json", action="store_true", help="Write a JSON report under publishing/tools/audit/out")
     parser.add_argument("--verbose", action="store_true", help="Include info-level findings in console output")
     parser.add_argument("--max-parallel", type=int, default=max(1, (os.cpu_count() or 4) // 2), help="Maximum number of files to process in parallel")
     args = parser.parse_args()

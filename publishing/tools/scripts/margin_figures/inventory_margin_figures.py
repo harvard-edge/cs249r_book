@@ -23,8 +23,8 @@ except ModuleNotFoundError:  # pragma: no cover - optional metadata enrichment
 
 
 ROOT = Path(__file__).resolve().parents[4]
-CONTENTS = ROOT / "book/quarto/contents"
-AUDIT_DIR = ROOT / "book/tools/audit"
+CONTENTS = ROOT / "books"
+AUDIT_DIR = ROOT / "publishing/tools/audit"
 OPPORTUNITIES = AUDIT_DIR / "margin_figure_opportunities.yml"
 DECISIONS = AUDIT_DIR / "margin_figure_decisions.yml"
 

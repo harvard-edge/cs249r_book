@@ -6,7 +6,7 @@ author. This script just records the inventory of HIGH/MEDIUM/LOW
 figures per volume and chapter so the coverage report can quote the
 baseline numbers without re-running the audit.
 
-Source: ``book/quarto/_build/figure_triage_priorities.json`` lives under the
+Source: ``books/_build/figure_triage_priorities.json`` lives under the
 current repo checkout's generated build directory.
 
 Output: ``ledgers/vol2-figure-audit-pointers.json`` (and a vol1 sibling
@@ -24,7 +24,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from paths import LEDGER_DIR, QUARTO_ROOT, REPO_ROOT
 
-TRIAGE = REPO_ROOT / "book/quarto/_build/figure_triage_priorities.json"
+TRIAGE = REPO_ROOT / "books/_build/figure_triage_priorities.json"
 OUT_DIR = LEDGER_DIR
 
 

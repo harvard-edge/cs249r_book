@@ -2,10 +2,10 @@
 # Render inline-python chapters sequentially and scan archived HTML for spurious .0
 #
 # Usage (from repo root):
-#   ./book/tools/audit/fmt/render_html.sh vol1
-#   ./book/tools/audit/fmt/render_html.sh vol2
+#   ./publishing/tools/audit/fmt/render_html.sh vol1
+#   ./publishing/tools/audit/fmt/render_html.sh vol2
 #
-# Each chapter HTML is copied to book/quarto/_build/html-audit/<vol>/<chapter>.html
+# Each chapter HTML is copied to books/_build/html-audit/<vol>/<chapter>.html
 # before the next build overwrites the fast-build output directory.
 set -euo pipefail
 
@@ -13,14 +13,14 @@ VOL="${1:-vol1}"
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 cd "$ROOT"
 
-AUDIT_PY="book/tools/audit/fmt/audit_html.py"
-ARCHIVE_DIR="book/quarto/_build/html-audit/${VOL}"
+AUDIT_PY="publishing/tools/audit/fmt/audit_html.py"
+ARCHIVE_DIR="books/_build/html-audit/${VOL}"
 mkdir -p "$ARCHIVE_DIR"
 
 case "$VOL" in
   vol1)
     BINDER_VOL=(--vol1)
-    BUILD_DIR="book/quarto/_build/html-vol1/contents/vol1"
+    BUILD_DIR="books/_build/html-vol1/contents/vol1"
     CHAPTERS=(
       introduction/introduction
       ml_systems/ml_systems
@@ -47,7 +47,7 @@ case "$VOL" in
     ;;
   vol2)
     BINDER_VOL=(--vol2)
-    BUILD_DIR="book/quarto/_build/html-vol2/contents/vol2"
+    BUILD_DIR="books/_build/html-vol2/contents/vol2"
     CHAPTERS=(
       introduction/introduction
       compute_infrastructure/compute_infrastructure
@@ -88,7 +88,7 @@ for ch in "${CHAPTERS[@]}"; do
   name="${ch##*/}"
   binder_ch="${VOL}/${name}"
   printf "%-28s " "$name"
-  if ! ./book/binder build html "${BINDER_VOL[@]}" "$binder_ch" --skip-hygiene --skip-validate >/tmp/render_${VOL}_${name}.log 2>&1; then
+  if ! ./binder build html "${BINDER_VOL[@]}" "$binder_ch" --skip-hygiene --skip-validate >/tmp/render_${VOL}_${name}.log 2>&1; then
     echo "BUILD FAIL (see /tmp/render_${VOL}_${name}.log)"
     FAIL=$((FAIL + 1))
     continue

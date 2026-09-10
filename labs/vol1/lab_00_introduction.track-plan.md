@@ -16,8 +16,8 @@ that future labs can replay.
 
 | Lab module | Reading anchor | Claim used in the lab |
 |---|---|---|
-| Opening | `book/quarto/contents/vol1/index.qmd` | Volume I establishes AI engineering as co-design of Data, Algorithm, and Machine under statistical and computational constraints. |
-| Part A | `book/quarto/contents/vol1/introduction/introduction.qmd`, Purpose and AI Moment | ML systems are data-shaped behavior running under physical constraint; deployment is not a late detail. |
+| Opening | `books/vol1/index.qmd` | Volume I establishes AI engineering as co-design of Data, Algorithm, and Machine under statistical and computational constraints. |
+| Part A | `books/vol1/introduction/introduction.qmd`, Purpose and AI Moment | ML systems are data-shaped behavior running under physical constraint; deployment is not a late detail. |
 | Part B | Introduction, Defining ML Systems, D-A-M taxonomy, deployment spectrum | A deployment context changes which axis binds and which evidence a stakeholder accepts. |
 | Part C | Introduction, ML System Lifecycle and fallacies | Later labs repeat a cycle: case, prediction, manipulation, evidence, decision, report. |
 | Part D | Introduction, deployment shapes lifecycle, summary takeaways | Decisions persist because deployed systems are maintained through monitoring, updates, and accountable reports. |

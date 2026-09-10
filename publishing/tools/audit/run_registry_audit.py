@@ -18,8 +18,8 @@ def _run(cmd: list[str], *, cwd: Path | None = None) -> int:
 
 def main() -> int:
     steps: list[tuple[str, list[str], Path | None]] = [
-        ("book registry sources", [sys.executable, "book/tools/audit/book_check_registry_sources.py"], REPO),
-        ("appendix LEGO cells", [sys.executable, "book/tools/audit/generate_appendix_constants.py", "--verify"], REPO),
+        ("book registry sources", [sys.executable, "publishing/tools/audit/book_check_registry_sources.py"], REPO),
+        ("appendix LEGO cells", [sys.executable, "publishing/tools/audit/generate_appendix_constants.py", "--verify"], REPO),
         (
             "mlsysim provenance",
             [sys.executable, "-m", "mlsysim.tools.audit_provenance", "--scope", "all", "--strict"],

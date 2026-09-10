@@ -16,20 +16,20 @@ were made by reading each flagged caption in local chapter context.
 Commands:
 
 ```bash
-python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+python3 publishing/tools/scripts/margin_figures/inventory_margin_figures.py \
   --format csv \
   --output /tmp/mlsysbook-margin-inventory.csv
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --markdown /tmp/mlsysbook-caption-alignment-full.md \
   --csv /tmp/mlsysbook-caption-alignment.csv
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --review-only \
   --markdown /tmp/mlsysbook-caption-alignment-review.md
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --review-threshold 0.30 \
   --review-only \
   --markdown /tmp/mlsysbook-caption-alignment-strict-review.md
-python3 book/tools/scripts/margin_figures/render_margin_reader_link_audit.py
+python3 publishing/tools/scripts/margin_figures/render_margin_reader_link_audit.py
 ```
 
 ## Results
@@ -60,13 +60,13 @@ variables, tables, or captions that intentionally translate nearby math into a
 plain-language takeaway.
 
 The inspectable reader-link packet is
-`book/tools/audit/margin_figure_reader_link_audit.md`. It is the artifact to open
+`publishing/tools/audit/margin_figure_reader_link_audit.md`. It is the artifact to open
 when asking how a particular margin figure maps to the source markdown: every
 entry shows the exact QMD line, the raw `.column-margin` block, the embedded SVG,
 the caption, the `fig-alt`, and the nearest prose anchors.
 
 The companion verdict record is
-`book/tools/audit/margin_figure_reader_alignment_verdicts.md`. It records the
+`publishing/tools/audit/margin_figure_reader_alignment_verdicts.md`. It records the
 author-facing pass/fix judgment for every placed margin figure: 224 pass, 0
 remaining changes needed. The single weak connection found during this audit
 cycle was repaired with the Vol. 1 conclusion reliability bridge sentence before

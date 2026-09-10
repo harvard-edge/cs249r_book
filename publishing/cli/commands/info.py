@@ -176,9 +176,9 @@ class InfoCommand:
             return p if p.is_absolute() else Path.cwd() / p
         base = self.config_manager.book_dir
         if vol1:
-            return base / "contents" / "vol1"
+            return base / "vol1"
         if vol2:
-            return base / "contents" / "vol2"
+            return base / "vol2"
         return base / "contents"
 
     def _qmd_files(self, root: Path) -> List[Path]:
@@ -628,7 +628,7 @@ class InfoCommand:
         # Pattern: lines like "    - contents/vol1/chapter/chapter.qmd"
         # or "    # - contents/vol1/chapter/chapter.qmd"
         comment_pat = re.compile(
-            rf"^\s*#?\s*-\s*(contents/{vol_str}/[^\s#]+\.qmd)\s*$",
+            rf"^\s*#?\s*-\s*({vol_str}/[^\s#]+\.qmd)\s*$",
             re.MULTILINE,
         )
         for m in comment_pat.finditer(raw):

@@ -18,9 +18,9 @@ from typing import Any
 
 def find_repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        if (parent / "book" / "quarto" / "contents").exists():
+        if (parent  / "books").exists():
             return parent
-    raise RuntimeError("Could not locate repository root containing book/quarto/contents")
+    raise RuntimeError("Could not locate repository root containing books")
 
 
 ROOT = find_repo_root()
@@ -28,21 +28,21 @@ ROOT = find_repo_root()
 SCOPES = [
     {
         "name": "vol1",
-        "paths": ["book/quarto/contents/vol1/"],
-        "bibs": ["book/quarto/contents/references.bib"],
+        "paths": ["books/vol1/"],
+        "bibs": ["books/references.bib"],
     },
     {
         "name": "vol2",
-        "paths": ["book/quarto/contents/vol2/"],
-        "bibs": ["book/quarto/contents/references.bib"],
+        "paths": ["books/vol2/"],
+        "bibs": ["books/references.bib"],
     },
     {
         "name": "book-shared",
         "paths": [
-            "book/quarto/contents/frontmatter/",
-            "book/quarto/contents/backmatter/",
+            "books/shared/frontmatter/",
+            "books/shared/backmatter/",
         ],
-        "bibs": ["book/quarto/contents/references.bib"],
+        "bibs": ["books/references.bib"],
     },
     {
         "name": "interviews",
@@ -67,7 +67,7 @@ SCOPES = [
 ]
 
 QMD_ROOTS = [
-    "book/quarto/contents",
+    "books",
     "interviews",
     "tinytorch",
     "mlsysim",
@@ -376,7 +376,7 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
                     "kind": "book-section",
                 }
 
-            root = f"book/quarto/contents/{volume}/{section}/"
+            root = f"books/{volume}/{section}/"
             return {
                 "id": f"{volume}/{section}",
                 "label": f"{volume}/{section}",
@@ -386,7 +386,7 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
         if parts[3] in {"frontmatter", "backmatter"}:
             section = parts[3]
             chapter = parts[4].removesuffix(".qmd")
-            root = f"book/quarto/contents/{section}/{parts[4]}"
+            root = f"books/{section}/{parts[4]}"
             if not parts[4].endswith(".qmd"):
                 root += "/"
             return {

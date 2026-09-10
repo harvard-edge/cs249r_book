@@ -1,6 +1,6 @@
 # Takeaways ART: Fleet Deploy Governance
 
-## book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd
+## books/vol2/performance_engineering/performance_engineering.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; summary recap cells for H100 roofline ridge and FlashAttention state reduction.
@@ -22,7 +22,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/inference/inference.qmd
+## books/vol2/inference/inference.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; calculation-cell index for serving cost, batching, KV cache, sharding, routing, quantized serving, and ranking cascade anchors.
@@ -44,7 +44,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd
+## books/vol2/edge_intelligence/edge_intelligence.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; calculation-cell index for edge spectrum, training overhead, adaptation footprint, federated compression, and orchestration anchors.
@@ -66,7 +66,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/ops_scale/ops_scale.qmd
+## books/vol2/ops_scale/ops_scale.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; calculation-cell index for platform ROI, TCO, feature-store scale, cost monitoring, and monitoring-overhead anchors.
@@ -88,7 +88,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/security_privacy/security_privacy.qmd
+## books/vol2/security_privacy/security_privacy.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; calculation-cell index for model theft, differential privacy, privacy-utility curves, and defense architecture anchors.
@@ -110,7 +110,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/robust_ai/robust_ai.qmd
+## books/vol2/robust_ai/robust_ai.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; summary recap cell for robustness tax; calculation-cell index for SDC probability, drift confidence, PSI/KL/KS, adversarial training cost, and certified radius anchors.
@@ -132,7 +132,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd
+## books/vol2/sustainable_ai/sustainable_ai.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; calculation-cell index for AI compute growth, energy wall, PUE, carbon accounting, data-center energy, training/inference energy, lifecycle emissions, and carbon-aware scheduling anchors.
@@ -154,7 +154,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/responsible_ai/responsible_ai.qmd
+## books/vol2/responsible_ai/responsible_ai.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Summary; current `callout-takeaways`; summary fairness-gap cell; calculation-cell index for fairness tax, metric disagreement, DP-SGD, unlearning, explanation storage, monitoring scale, automation bias, and SHAP overhead anchors.
@@ -176,7 +176,7 @@
 :::
 ```
 
-## book/quarto/contents/vol2/conclusion/conclusion.qmd
+## books/vol2/conclusion/conclusion.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose; h1-h3 outline; Fallacies and Pitfalls; current `callout-takeaways`; scale-facts, fleet-evolution, post-silicon, and Fermi estimate cells.

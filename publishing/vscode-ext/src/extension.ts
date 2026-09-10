@@ -51,7 +51,7 @@ export function activate(context: vscode.ExtensionContext): void {
 function activateInner(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
   if (!root) {
-    vscode.window.showWarningMessage('MLSysBook Workbench: could not find repo root (book/binder not found).');
+    vscode.window.showWarningMessage('MLSysBook Workbench: could not find repo root (binder not found).');
     return;
   }
   initializeRunManager(context);
@@ -244,7 +244,7 @@ function activateInner(context: vscode.ExtensionContext): void {
         ? `--path ${editor.document.uri.fsPath}`
         : '--vol1';
       runInVisibleTerminal(
-        `./book/binder fix headers add ${target} --force`,
+        `./binder fix headers add ${target} --force`,
         root,
         'Add Section IDs',
       );
@@ -252,7 +252,7 @@ function activateInner(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.verifySectionIds', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder check headers --vol1',
+        './binder check headers --vol1',
         root,
         'Verify Section IDs',
       );
@@ -260,7 +260,7 @@ function activateInner(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.validateCrossReferences', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder check labels --scope orphans --vol1',
+        './binder check labels --scope orphans --vol1',
         root,
         'Validate Cross-References',
       );

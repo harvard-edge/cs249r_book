@@ -8,7 +8,7 @@ Two forms to detect:
   1. Hard-coded: '94%' -> '94 percent'
   2. Inline Python: '`{python} val_str`%' -> '`{python} val_str` percent'
 
-Auto-fixable: yes. Mirrors book/tools/scripts/content/fix_percent.py.
+Auto-fixable: yes. Mirrors publishing/tools/scripts/content/fix_percent.py.
 
 Protected contexts this check skips (all via the scanner framework):
 - Code fences, YAML, display math, HTML comments

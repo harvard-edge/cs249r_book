@@ -463,7 +463,7 @@ def check(
 # ── Adversarial self-test (Pass 16 Item B) ──────────────────────────────────
 #
 # Run with:
-#     python3 book/tools/audit/checks/h3_titlecase.py
+#     python3 publishing/tools/audit/checks/h3_titlecase.py
 #
 # Two corpora:
 #

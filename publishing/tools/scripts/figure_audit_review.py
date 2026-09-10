@@ -7,8 +7,8 @@ Uses fig-id as the definitive key throughout — matches id="fig-xxx" in rendere
 HTML to find the exact image <img src="..."> for each figure.
 
 Usage:
-    python3 book/tools/scripts/figure_audit_review.py
-    cd book/quarto && python3 -m http.server 8787
+    python3 publishing/tools/scripts/figure_audit_review.py
+    cd books/ && python3 -m http.server 8787
     # Open http://localhost:8787/_build/figure_review.html
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AUDIT_DIR = REPO_ROOT / ".claude" / "_reviews" / "figure_audit"
-BUILD_DIR = REPO_ROOT / "book" / "quarto" / "_build"
+BUILD_DIR = REPO_ROOT  / "books" / "_build"
 OUTPUT_HTML = BUILD_DIR / "figure_review.html"
 
 
@@ -121,8 +121,8 @@ def build_image_index() -> dict[str, str]:
 
 def find_current_text(fig_id: str, qmd_file: str) -> dict:
     """Extract current fig-cap and fig-alt from the QMD source."""
-    # binder outputs paths relative to book/quarto/ (e.g. contents/vol1/...)
-    qmd_path = REPO_ROOT / "book" / "quarto" / qmd_file
+    # binder outputs paths relative to books/ (e.g. contents/vol1/...)
+    qmd_path = REPO_ROOT  / "books" / qmd_file
     if not qmd_path.exists():
         # fallback: try from repo root directly
         qmd_path = REPO_ROOT / qmd_file
@@ -524,7 +524,7 @@ def main():
     OUTPUT_HTML.write_text(html, encoding="utf-8")
 
     print(f"\nDashboard: {OUTPUT_HTML}")
-    print(f"\n  cd book/quarto && python3 -m http.server 8787")
+    print(f"\n  cd books/ && python3 -m http.server 8787")
     print(f"  http://localhost:8787/_build/figure_review.html")
 
 

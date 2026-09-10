@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-QMD = Path(__file__).resolve().parents[3] / "book/quarto/contents/vol1/training/training.qmd"
+QMD = Path(__file__).resolve().parents[3] / "books/vol1/training/training.qmd"
 
 RULES = [
     (r"(\w+_gb_str)\s*=\s*fmt\(([^)]*)\)", " GB"),

@@ -70,7 +70,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildChapter${fmt}`, (vol: VolumeId, chapter: string) => {
-        const buildCmd = `./book/binder build ${fmtLower} ${chapter} --${vol} -v`;
+        const buildCmd = `./binder build ${fmtLower} ${chapter} --${vol} -v`;
         const label = `Build Chapter ${fmt.toUpperCase()} (${vol}/${chapter})`;
         const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
         if (fmtLower === 'pdf') {
@@ -86,7 +86,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.previewChapter', (vol: VolumeId, chapter: string) => {
       runInVisibleTerminal(
-        `./book/binder preview ${vol}/${chapter}`,
+        `./binder preview ${vol}/${chapter}`,
         root,
         `Preview Chapter (${vol}/${chapter})`,
       );
@@ -98,7 +98,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildVolume${fmt}`, (vol: VolumeId) => {
-        const buildCmd = `./book/binder build ${fmtLower} --${vol} -v`;
+        const buildCmd = `./binder build ${fmtLower} --${vol} -v`;
         const label = `Build Volume ${fmt.toUpperCase()} (${vol})`;
         const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
         showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
@@ -124,7 +124,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
       );
       if (!fmtPick) { return; }
       const fmtLower = fmtPick.id;
-      const buildCmd = `./book/binder build ${fmtLower} --${vol} -v`;
+      const buildCmd = `./binder build ${fmtLower} --${vol} -v`;
       const label = `Build Full Volume ${fmtLower.toUpperCase()} (${vol})`;
       const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
       showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
@@ -170,7 +170,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
       if (!fmtPick) { return; }
       const fmtLower = fmtPick.id;
       const chapterList = chapters.join(',');
-      const buildCmd = `./book/binder build ${fmtLower} ${chapterList} --${vol} -v`;
+      const buildCmd = `./binder build ${fmtLower} ${chapterList} --${vol} -v`;
       const label = `Build Chapters ${fmtLower.toUpperCase()} (${vol}): ${chapters.length} chapter(s)`;
       const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
       showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
@@ -195,7 +195,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
         vscode.window.showWarningMessage('Could not determine volume/chapter for active file.');
         return;
       }
-      const buildCmd = `./book/binder build pdf ${parsed.chapter} --${parsed.volume} -v`;
+      const buildCmd = `./binder build pdf ${parsed.chapter} --${parsed.volume} -v`;
       const fullCmd = withQuartoResetPrefix('pdf', parsed.volume, buildCmd);
       runPdfBuildAndOpen(fullCmd, root, parsed.volume, `Quick Chapter PDF (${parsed.volume}/${parsed.chapter})`);
     })

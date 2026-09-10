@@ -4,8 +4,8 @@
 Reads the alt_text_edits.json and updates fig-alt= attributes in QMD files.
 
 Usage:
-    python3 fix_alt_text.py --edits data/alt_text_edits.json --dry-run book/quarto/contents/vol1/
-    python3 fix_alt_text.py --edits data/alt_text_edits.json book/quarto/contents/vol1/
+    python3 fix_alt_text.py --edits data/alt_text_edits.json --dry-run books/vol1/
+    python3 fix_alt_text.py --edits data/alt_text_edits.json books/vol1/
 """
 import argparse
 import json

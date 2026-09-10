@@ -393,7 +393,7 @@ def test_source_line_match_allows_short_rendered_labels(tmp_path):
 
 
 def test_callout_break_suggestion_moves_existing_late_tcbbreak(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol1" / "hw"
+    qmd_dir = tmp_path  / "books" / "vol1" / "hw"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "hw.qmd"
     qmd.write_text(
@@ -422,7 +422,7 @@ def test_callout_break_suggestion_moves_existing_late_tcbbreak(tmp_path):
 
     cmd = LayoutCommand(_Cfg(tmp_path), None)
     suggestion = cmd._suggest_callout_break_fix(
-        "book/quarto/contents/vol1/hw/hw.qmd",
+        "books/vol1/hw/hw.qmd",
         7,
         "The workload characteristics",
     )
@@ -432,7 +432,7 @@ def test_callout_break_suggestion_moves_existing_late_tcbbreak(tmp_path):
 
 
 def test_callout_break_suggestion_inserts_at_semantic_label(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol1" / "hw"
+    qmd_dir = tmp_path  / "books" / "vol1" / "hw"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "hw.qmd"
     qmd.write_text(
@@ -454,7 +454,7 @@ def test_callout_break_suggestion_inserts_at_semantic_label(tmp_path):
 
     cmd = LayoutCommand(_Cfg(tmp_path), None)
     suggestion = cmd._suggest_callout_break_fix(
-        "book/quarto/contents/vol1/hw/hw.qmd",
+        "books/vol1/hw/hw.qmd",
         8,
         "Item B",
     )
@@ -464,7 +464,7 @@ def test_callout_break_suggestion_inserts_at_semantic_label(tmp_path):
 
 
 def test_callout_break_suggestion_moves_whole_callout_near_start(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol1" / "hw"
+    qmd_dir = tmp_path  / "books" / "vol1" / "hw"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "hw.qmd"
     qmd.write_text(
@@ -482,7 +482,7 @@ def test_callout_break_suggestion_moves_whole_callout_near_start(tmp_path):
 
     cmd = LayoutCommand(_Cfg(tmp_path), None)
     suggestion = cmd._suggest_callout_break_fix(
-        "book/quarto/contents/vol1/hw/hw.qmd",
+        "books/vol1/hw/hw.qmd",
         3,
         "First section",
     )
@@ -491,7 +491,7 @@ def test_callout_break_suggestion_moves_whole_callout_near_start(tmp_path):
 
 
 def test_layout_strategy_routes_callout_source_context(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol1" / "hw"
+    qmd_dir = tmp_path  / "books" / "vol1" / "hw"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "hw.qmd"
     qmd.write_text(
@@ -524,7 +524,7 @@ def test_layout_strategy_routes_callout_source_context(tmp_path):
         usable_bottom_y=660,
         cause="callout/box",
         detail="Second section",
-        source_file="book/quarto/contents/vol1/hw/hw.qmd",
+        source_file="books/vol1/hw/hw.qmd",
         source_line=7,
     )
 
@@ -539,7 +539,7 @@ def test_layout_strategy_routes_callout_source_context(tmp_path):
 
 
 def test_margin_geometry_strategy_routes_source_context(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol1" / "hw"
+    qmd_dir = tmp_path  / "books" / "vol1" / "hw"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "hw.qmd"
     qmd.write_text(
@@ -567,7 +567,7 @@ def test_margin_geometry_strategy_routes_source_context(tmp_path):
     )
     base_row = {
         "finding": finding,
-        "source_file": "book/quarto/contents/vol1/hw/hw.qmd",
+        "source_file": "books/vol1/hw/hw.qmd",
         "source_line": 0,
     }
 
@@ -593,7 +593,7 @@ def test_layout_plan_defers_margin_until_main_flow_is_clean(tmp_path):
         usable_bottom_y=660,
         cause="callout/box",
         detail="Second section",
-        source_file="book/quarto/contents/vol1/hw/hw.qmd",
+        source_file="books/vol1/hw/hw.qmd",
         source_line=7,
         layout_strategy="callout-tcbbreak",
     )
@@ -609,7 +609,7 @@ def test_layout_plan_defers_margin_until_main_flow_is_clean(tmp_path):
         "finding": margin_finding,
         "label": "9",
         "chapter": "Hardware",
-        "source_file": "book/quarto/contents/vol1/hw/hw.qmd",
+        "source_file": "books/vol1/hw/hw.qmd",
         "source_line": 8,
         "section": "Accelerators",
     }
@@ -648,13 +648,13 @@ def test_layout_plan_defers_margin_until_main_flow_is_clean(tmp_path):
 
 def test_source_map_is_scoped_to_pdf_volume(tmp_path):
     root = tmp_path
-    vol1 = root / "book" / "quarto" / "contents" / "vol1" / "introduction"
-    vol2 = root / "book" / "quarto" / "contents" / "vol2" / "introduction"
+    vol1 = root  / "books" / "vol1" / "introduction"
+    vol2 = root  / "books" / "vol2" / "introduction"
     vol1.mkdir(parents=True)
     vol2.mkdir(parents=True)
     (vol1 / "introduction.qmd").write_text("# Introduction\n", encoding="utf-8")
     (vol2 / "introduction.qmd").write_text("# Introduction\n", encoding="utf-8")
-    pdf_dir = root / "book" / "quarto" / "_build" / "pdf-vol1"
+    pdf_dir = root  / "books" / "_build" / "pdf-vol1"
     pdf_dir.mkdir(parents=True)
 
     source_map = LayoutCommand(None, None)._build_source_map(
@@ -662,7 +662,7 @@ def test_source_map_is_scoped_to_pdf_volume(tmp_path):
     )
 
     assert source_map["Introduction"] == (
-        Path("book/quarto/contents/vol1/introduction/introduction.qmd")
+        Path("books/vol1/introduction/introduction.qmd")
     )
 
 
@@ -992,15 +992,13 @@ def test_collision_csv_is_machine_readable(capsys):
 class _Cfg:
     def __init__(self, root):
         self.root_dir = root
-        self.book_dir = root / "book" / "quarto"
+        self.book_dir = root  / "books"
 
 
 def test_pipe_table_extraction_preserves_label_colwidths_and_source(tmp_path):
     qmd_dir = (
         tmp_path
-        / "book"
-        / "quarto"
-        / "contents"
+         / "books"
         / "vol2"
         / "inference"
     )
@@ -1037,7 +1035,7 @@ def test_pipe_table_extraction_preserves_label_colwidths_and_source(tmp_path):
 
 
 def test_pipe_table_extraction_ignores_uncaptioned_tables(tmp_path):
-    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol2" / "ops"
+    qmd_dir = tmp_path  / "books" / "vol2" / "ops"
     qmd_dir.mkdir(parents=True)
     qmd = qmd_dir / "ops.qmd"
     qmd.write_text(

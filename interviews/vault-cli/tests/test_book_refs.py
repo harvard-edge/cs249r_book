@@ -17,7 +17,7 @@ def _vault_with_map(tmp_path: Path, mapping: str) -> Path:
     """Lay out a minimal vault dir whose repo-root has a book/ tree.
 
     vault_dir = <root>/interviews/vault so that vault_dir.parent.parent is the
-    repo root the resolver derives the book/quarto/contents path from.
+    repo root the resolver derives the books path from.
     """
     vault_dir = tmp_path / "interviews" / "vault"
     (vault_dir / "schema").mkdir(parents=True)

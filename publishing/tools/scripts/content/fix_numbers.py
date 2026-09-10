@@ -7,8 +7,8 @@ Python cells, table rows, HTML tags, figure/div attributes, index entries,
 version strings, numbers with units, ranges, decimals, and multi-digit numbers.
 
 Usage:
-    python3 fix_numbers.py --dry-run book/quarto/contents/vol1/
-    python3 fix_numbers.py book/quarto/contents/vol1/
+    python3 fix_numbers.py --dry-run books/vol1/
+    python3 fix_numbers.py books/vol1/
 """
 import argparse
 import re

@@ -12,7 +12,7 @@ roofline, data gravity, napkin math, starving accelerator, latency
 cliff, four pillars framework, and several others.
 
 This check ports the logic of
-`book/tools/scripts/content/fix_capitalization.py`, which was used in
+`publishing/tools/scripts/content/fix_capitalization.py`, which was used in
 round 1 pass 4 to fix 243 violations in vol1. The port preserves the
 proven exception logic while reusing the shared
 `audit.protected_contexts` predicates so new protections added there
@@ -447,7 +447,7 @@ def check(
 # ── Adversarial self-test (Pass 16 Item C) ─────────────────────────────────
 #
 # Run with:
-#     PYTHONPATH=book/tools python3 book/tools/audit/checks/concept_term_capitalization.py
+#     PYTHONPATH=publishing/tools python3 publishing/tools/audit/checks/concept_term_capitalization.py
 #
 # Two corpora:
 #

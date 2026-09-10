@@ -2,8 +2,8 @@
 # Re-run verify_lego_chapter.sh for every chapter listed in lego_chapter_failures.txt.
 #
 # Usage (repo root):
-#   ./book/tools/audit/verify_lego_failed.sh
-#   ./book/tools/audit/verify_lego_failed.sh book/tools/audit/artifacts/lego_chapter_failures.txt
+#   ./publishing/tools/audit/verify_lego_failed.sh
+#   ./publishing/tools/audit/verify_lego_failed.sh publishing/tools/audit/artifacts/lego_chapter_failures.txt
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -21,7 +21,7 @@ while IFS= read -r line; do
   vol="${line%%/*}"
   ch="${line#*/}"
   echo "=== retry $vol/$ch ==="
-  if ./book/tools/audit/verify_lego_chapter.sh "$vol" "$ch"; then
+  if ./publishing/tools/audit/verify_lego_chapter.sh "$vol" "$ch"; then
     echo "OK $line"
   else
     echo "$line" >> "${FAILS}.retry"

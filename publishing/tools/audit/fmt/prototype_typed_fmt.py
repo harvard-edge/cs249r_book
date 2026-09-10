@@ -3,7 +3,7 @@
 prototype_typed_fmt.py — Proof-of-concept for the typed, *guarded* formatter
 family. NOT wired into the book yet; this is the demonstration that the design
 (a) makes illegal values impossible to render and (b) is mechanically
-migratable. Run directly:  python3 book/tools/audit/fmt/prototype_typed_fmt.py
+migratable. Run directly:  python3 publishing/tools/audit/fmt/prototype_typed_fmt.py
 """
 from __future__ import annotations
 import ast

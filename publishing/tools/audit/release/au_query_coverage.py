@@ -6,7 +6,7 @@ to entries whose ``content`` actually starts with ``AU:`` / ``Au:`` /
 ``Comp`` (the true AU/Comp queries; the rest are mis-classified
 em-dash/spacing notes), then assigns each query to one of the eight
 response categories (A-H) defined in
-``book/tools/scripts/mit_press/AU_QUERY_RESPONSES.md``. The verification
+``publishing/tools/scripts/mit_press/AU_QUERY_RESPONSES.md``. The verification
 contract is: every category that has true queries must have a section
 present in the response document.
 
@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
 
 INPUT = DATA_ROOT / "11_au_queries/data/au_queries.json"
-RESPONSE_DOC = REPO_ROOT / "book/tools/scripts/mit_press/AU_QUERY_RESPONSES.md"
+RESPONSE_DOC = REPO_ROOT / "publishing/tools/scripts/mit_press/AU_QUERY_RESPONSES.md"
 OUT_DIR = LEDGER_DIR
 
 CATEGORY_PATTERNS: list[tuple[str, str, str]] = [

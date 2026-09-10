@@ -358,7 +358,7 @@ class DoctorCommand:
         except ImportError:
             _discover_built_epubs = None
 
-        # book_dir is `book/quarto/`; repo root is two levels up.
+        # book_dir is `books/`; repo root is two levels up.
         repo_root = self.config_manager.book_dir.parent.parent
         if _discover_built_epubs is not None:
             epubs = _discover_built_epubs(repo_root)

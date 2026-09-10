@@ -48,8 +48,8 @@ Containerized Linux Build (5-10 minutes):
 ## Usage
 
 ### Registry Paths
-- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-linux`
-- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-windows`
+- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_books/-linux`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_books/-windows`
 
 ### Manual Builds
 You can build the containers locally using these commands:
@@ -76,8 +76,8 @@ gh workflow run book-build-container.yml \
 ```
 
 ### Container Information
-- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-linux`
-- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-windows`
+- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_books/-linux`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_books/-windows`
 - **Tags**: `latest`, `main`, `dev`, branch-specific tags
 - **Linux Size**: ~2-3GB (includes TeX Live, R, Python packages)
 - **Windows Size**: ~4-5GB (includes Windows Server Core + dependencies)
@@ -131,7 +131,7 @@ LC_ALL=en_US.UTF-8
 3. Test locally with `docker build -t test .`
 
 ### Build Issues
-1. Check if container exists: `ghcr.io/harvard-edge/cs249r_book/quarto-linux:latest`
+1. Check if container exists: `ghcr.io/harvard-edge/cs249r_books/-linux:latest`
 2. Verify container has all dependencies
 3. Review container preflight/toolchain logs first
 

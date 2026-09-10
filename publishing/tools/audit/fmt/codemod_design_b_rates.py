@@ -536,7 +536,7 @@ def run(root: Path, *, write: bool, json_path: Path | None) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("book/quarto/contents"))
+    parser.add_argument("--root", type=Path, default=Path("books"))
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()

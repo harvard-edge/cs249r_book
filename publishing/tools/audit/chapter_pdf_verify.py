@@ -3,16 +3,16 @@
 
 Usage (repo root)::
 
-    python3 book/tools/audit/chapter_pdf_verify.py --list
-    python3 book/tools/audit/chapter_pdf_verify.py --vol1 introduction
-    python3 book/tools/audit/chapter_pdf_verify.py --vol1 --all
-    python3 book/tools/audit/chapter_pdf_verify.py --report
+    python3 publishing/tools/audit/chapter_pdf_verify.py --list
+    python3 publishing/tools/audit/chapter_pdf_verify.py --vol1 introduction
+    python3 publishing/tools/audit/chapter_pdf_verify.py --vol1 --all
+    python3 publishing/tools/audit/chapter_pdf_verify.py --report
 
-Ledger: book/tools/audit/artifacts/chapter_pdf_audit.json
-Table:   book/tools/audit/artifacts/chapter_pdf_audit.md
+Ledger: publishing/tools/audit/artifacts/chapter_pdf_audit.json
+Table:   publishing/tools/audit/artifacts/chapter_pdf_audit.md
 
-Builds one chapter at a time via ``./book/binder build pdf --volN <chapter>``.
-Archives PDF + keep-tex output under ``book/quarto/_build/pdf-audit/``.
+Builds one chapter at a time via ``./binder build pdf --volN <chapter>``.
+Archives PDF + keep-tex output under ``books/_build/pdf-audit/``.
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BOOK_DIR = REPO_ROOT / "book/quarto"
-LEDGER_JSON = REPO_ROOT / "book/tools/audit/artifacts/chapter_pdf_audit.json"
-LEDGER_MD = REPO_ROOT / "book/tools/audit/artifacts/chapter_pdf_audit.md"
+BOOK_DIR = REPO_ROOT / "books/"
+LEDGER_JSON = REPO_ROOT / "publishing/tools/audit/artifacts/chapter_pdf_audit.json"
+LEDGER_MD = REPO_ROOT / "publishing/tools/audit/artifacts/chapter_pdf_audit.md"
 
 PDF_NAMES = {
     "vol1": "Machine-Learning-Systems-Vol1.pdf",
@@ -158,7 +158,7 @@ def _chapter_id(vol: str, ch_path: str) -> str:
 
 
 def _qmd_path(vol: str, ch_path: str) -> Path:
-    return REPO_ROOT / "book/quarto/contents" / vol / f"{ch_path}.qmd"
+    return REPO_ROOT / "books" / vol / f"{ch_path}.qmd"
 
 
 def _build_pdf(vol: str, ch_path: str) -> tuple[bool, float, str]:
@@ -166,7 +166,7 @@ def _build_pdf(vol: str, ch_path: str) -> tuple[bool, float, str]:
     log = Path(f"/tmp/render_pdf_{vol}_{name}.log")
     t0 = time.monotonic()
     proc = subprocess.run(
-        ["./book/binder", "build", "pdf", f"--{vol}", name],
+        ["./binder", "build", "pdf", f"--{vol}", name],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -254,7 +254,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             [sys.executable, "-W", "ignore::UserWarning",
-             str(REPO_ROOT / "book/tools/audit/fmt/audit_prose.py"), str(qmd)],
+             str(REPO_ROOT / "publishing/tools/audit/fmt/audit_prose.py"), str(qmd)],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
@@ -271,7 +271,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
 
 def _registry_scan(qmd: Path) -> tuple[bool, str]:
     proc = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "book/tools/audit/book_check_registry_sources.py"), str(qmd)],
+        [sys.executable, str(REPO_ROOT / "publishing/tools/audit/book_check_registry_sources.py"), str(qmd)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -430,9 +430,9 @@ def _write_markdown_table(ledger: dict) -> None:
         "",
         f"**Summary:** {pass_n} pass / {fail_n} fail / {pending_n} pending / {len(rows)} total",
         "",
-        "Re-run one chapter: `python3 book/tools/audit/chapter_pdf_verify.py --vol1 training`",
+        "Re-run one chapter: `python3 publishing/tools/audit/chapter_pdf_verify.py --vol1 training`",
         "",
-        "Archived artifacts: `book/quarto/_build/pdf-audit/<vol>/<chapter>.{pdf,tex}`",
+        "Archived artifacts: `books/_build/pdf-audit/<vol>/<chapter>.{pdf,tex}`",
         "",
     ])
     LEDGER_MD.write_text("\n".join(lines), encoding="utf-8")

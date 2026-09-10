@@ -1,69 +1,163 @@
 # Volume III: Agentic Machine Learning Systems
 
-*Reasoning and acting loops, memory, tools, planning, search, orchestration, evaluation, security, and multi-agent systems.*
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Status-In%20Development-d73a49?style=for-the-badge" alt="Status: In Development">
-  <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=book-vol3.yml"><img src="https://img.shields.io/badge/Feedback-Open%20an%20Issue-0969da?style=for-the-badge&logo=github" alt="Give feedback"></a>
-</p>
-
-> [!CAUTION]
-> **This volume is not finished. I am still writing it.**
-> Chapters are incomplete, the structure will change, and the technical claims have not yet been through the review that Volumes I and II received. Please do not cite it, teach from it, or redistribute excerpts as if it were a released book. You are welcome to read along as it takes shape, and if you spot something wrong, I want to hear about it.
+*The systems engineering of inference-time compute and autonomous control loops.*
 
 ---
 
-## What this book is about
+> **Note:** This is a **sketch**, not a commitment. It exists to test one question: is there a
+> durable fundamentals layer under "agentic" yet, the way the bitter lesson anchors Volume I and
+> scaling laws anchor *Machine Learning Systems at Scale*? The discipline below is the test, not a
+> promise to ship. If the introduction cannot be written at the same altitude as the first two
+> introductions, this volume waits.
 
-Volumes I and II are about producing a good answer to a single request, first on one machine and then across a fleet. Volume III asks what changes when the model stops answering and starts acting: when it runs in a loop, keeps state across steps, calls tools, and pursues a goal over many steps before anyone checks the result.
+## Why a Third Volume
 
-The goal is to teach the systems engineering behind those loops. That means the memory hierarchy that holds an agent's context, the caching and scheduling that make long trajectories affordable, the interfaces and sandboxes that let an agent act without causing harm, the verification that catches errors before they compound, and the coordination and telemetry needed to run many agents at once. The emphasis is on durable principles and physical trade-offs, not on any particular framework or prompting recipe.
+The common objection is correct about the thing it is looking at, and it is looking at the wrong
+thing. The agentic *application surface*, the frameworks, the prompt patterns, the speculation about
+what autonomy will become, is moving too fast to teach. But neither earlier volume was ever written
+on that surface. *Introduction to Machine Learning Systems* is anchored by the bitter lesson;
+*Machine Learning Systems at Scale* is anchored by scaling laws. Those are empirical regularities
+about compute and generalization, not facts about any model or tool.
 
-A few things this book is deliberately not:
+So the question for this volume is not "has the agent field settled?" (it has not). It is narrower
+and answerable: **has the systems substrate beneath agents settled enough to teach?** The wager of
+this sketch is that it mostly has, and that the durable spine is the shift the field has been living
+through since the reasoning-model era:
 
-- A guide to any particular agent framework or orchestration library. Those change every quarter; the constraints underneath them do not.
-- A collection of prompt recipes or templates.
-- A book about agent psychology. Reflection, planning, and memory are treated as runtime mechanisms with costs, not as metaphors.
+> *Machine Learning Systems at Scale* already names the inference-time-compute shift: its
+> introduction draws the three scaling regimes (pretraining, posttraining, test-time), and its
+> inference chapter treats test-time compute as a serving resource. So "inference-time compute is
+> the frontier" cannot be Volume III's thesis; the companion volume said it first. Volume III's
+> thesis is what that compute, spent in a loop with state and tools, turns the system *into*: an
+> **actor**. The unit of engineering stops being the served request and becomes the **trajectory**,
+> the whole sense-decide-act-observe arc a system runs to accomplish a goal.
 
-## Who it is for
+That framing is durable because it is a claim about *what the system becomes when it spends runtime
+compute*, not about which framework wins, and it sits at a different altitude than the companion
+volume's serving treatment (see "Boundaries" below). It also makes the series legible as one
+progression, each volume defined by its **unit of engineering**, which shifts from a structure you
+build (the model, the fleet) to a process you must govern (the trajectory):
 
-Readers who have worked through Volume I and Volume II, or who are comfortable with single-machine and distributed ML systems at that level. The book assumes you know how inference serving, KV caching, and accelerator memory hierarchies work, and builds the agent runtime on top of that.
+| Volume | Title | Unit of engineering | You learn to |
+| --- | --- | --- | --- |
+| I | *Introduction to Machine Learning Systems* | the model | build one system |
+| II | *Machine Learning Systems at Scale* | the fleet | run many, where scaling laws bite |
+| III | *Agentic Machine Learning Systems* | the trajectory | engineer a system that acts |
 
-## Where things stand
+> **Note on the title:** keeping "Learning" in the name holds the series family
+> (`Machine Learning Systems`). "Agentic Machine Systems" drops it; use that only if broadening past
+> learning is deliberate, not by default.
 
-The working outline has five parts. Expect names, order, and scope to change.
+## How I Intend to Write It
 
-1. **Foundations.** What a trajectory is, how it is described, and how control flows through it.
-2. **Training and adaptation.** Fine-tuning on trajectories, reinforcement learning, and test-time search.
-3. **Serving and memory.** Context as a working set, prefix caching and paging, and trajectory scheduling.
-4. **Security and isolation.** Tool interfaces, sandboxing, and verification and recovery.
-5. **Scale and operations.** Multi-agent coordination, telemetry, and evaluation.
+The volume earns durability only by holding altitude. Five rules, all falsifiable:
 
-The chapter drafts live in `publishing/quarto/contents/vol3/`. The detailed chapter-by-chapter plan is in [`OUTLINE.md`](OUTLINE.md), and it tracks the same chapter list as the build.
+1. **No framework, product, or this-year benchmark may appear in the body.** If a chapter cannot be
+   written without naming one, that chapter is too early and gets cut, not faked. This is the single
+   discipline that separates a textbook from a survey that dates in two years.
+2. **Each chapter must state a fundamental, not catalog current practice.** The control loop is
+   robotics and control theory. Multi-agent is distributed systems with stochastic nodes. Inference
+   economics extends Volume II's serving-cost accounting. Teach the substrate the trend sits on.
+3. **The honest holes are written as open problems, not solved methods.** Evaluation of acting
+   systems, and the memory/state architecture, are genuinely unsettled. They are taught as "here is
+   the problem and why it is hard," never as "here is the answer." Naming the frontier honestly is
+   itself durable; faking a method is what dates.
+4. **The introduction is written first, as a feasibility probe.** Exactly the artifact trusted for
+   the first two volumes. If the intro states the inference-compute thesis and frames the substrate
+   with no product names, the volume is viable. If it leans on what today's agents do, the probe has
+   told us to wait, at the cost of one draft.
+5. **One chapter per working session; companions referenced by title.** This volume may name both
+   *Introduction to Machine Learning Systems* and *Machine Learning Systems at Scale* directly.
 
-## Follow along
+## Boundaries with the earlier volumes
 
-I write this volume in the open, so every commit and every editorial decision is visible. If something looks rough, that is because you are watching the book being written. To keep up:
+The asymmetric reference rule still holds: this volume may name *Introduction to Machine Learning
+Systems* and *Machine Learning Systems at Scale* by title, but neither of them points forward to
+this one, so adding Volume III forces no cross-reference edits on either. The real work is keeping
+Volume III at a *different altitude* than ground the companion volumes already cover, so it never
+merely re-announces them.
 
-- **Watch or star** [the repository](https://github.com/harvard-edge/cs249r_book) to see commits as they land.
-- **Subscribe** to the [newsletter](https://buttondown.email/mlsysbook) for occasional updates across the whole series.
-- **Build the draft locally** from the `publishing/` directory with `./binder build html --vol3`. Setup instructions are in the [publishing CLI guide](../../publishing/cli/README.md).
+| Topic | The companion volume owns (keep) | Volume III takes (different altitude) |
+| --- | --- | --- |
+| Inference-time compute | test-time compute as a *serving resource*: scheduler thinking-time, the logic wall, reasoning latency budgets | the system that *spends* it is an **actor**; the engineering unit is the loop/trajectory, not the served request |
+| The action boundary | injection, tool permissions, and side effects as part of *securing ML systems* | the autonomous loop as a *threat model* (Chapter 11 sits above the companion treatment, never repeats it) |
+| Orchestration | *fleet orchestration* = scheduling accelerators | **multi-agent coordination** = many stochastic nodes (renamed so the word does not collide) |
 
-## Feedback and contact
+## Underlying principles (candidate invariants)
 
-I would rather hear about a problem early than after it is in print.
+The spine of each earlier volume is a small set of durable laws (the bitter lesson; the scaling,
+roofline, and serving-cost laws). Volume III is viable only if it has its own. These are the
+candidates, each a claim about compute or systems, not about any tool:
 
-- **Found an error or something unclear?** [Open an issue](https://github.com/harvard-edge/cs249r_book/issues/new?template=book-vol3.yml). The form asks for the chapter and lets you describe what you found.
-- **Have a broader question or suggestion?** Start a thread in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions).
-- **Want to reach me directly?** I am [@profvjreddi](https://github.com/profvjreddi) on GitHub.
+- **The Compounding Baseline.** To first order, end-to-end success decays geometrically with horizon
+  length: for per-step reliability `p`, an `n`-step task succeeds at about `p^n`. This is the
+  baseline, not a scaling law. Real trajectories deviate in both directions: cascading errors let one
+  bad step poison the rest (worse than `p^n`), while verification, recovery, and self-correction
+  raise the effective per-step reliability (better than `p^n`). The durable claim is that horizon
+  length is bounded by per-step reliability, so verification and recovery are mandatory, not optional;
+  the engineering question is what bounds the decay.
+- **Inference-Time Scaling.** Capability improves with runtime compute (samples, steps, search),
+  with diminishing returns; "thinking" becomes a schedulable resource. (The successor axis to
+  training-time scaling.)
+- **The Autonomy Cost Law.** Cost and latency scale with trajectory length times per-step inference,
+  so an agentic system's serving cost is steps times the companion volume's serving cost. Autonomy
+  has a metered budget; depth is an economic decision.
+- **The Control-Loop Invariant.** Every agent is sense, decide, act, observe over state and an
+  environment; the loop, not the model call, is the unit of engineering.
+- **The Action-Boundary Principle.** Capability and risk both scale with what the loop is permitted
+  to do, so both power and vulnerability concentrate at the typed, permissioned action interface.
+- **State as a Memory Hierarchy.** Context is a finite, costly resource with locality; what to
+  retain, retrieve, and evict is a caching problem. (Open: the resolved architecture does not exist
+  yet.)
+- **The Coordination Tax.** `N` stochastic agents pay the distributed-systems coordination cost
+  amplified by nondeterminism; more agents does not buy linear capability.
 
-## License and citation
+## Why a signature version is possible
 
-Like the rest of the series, this volume is released under [CC BY-NC-SA 4.0](../../LICENSE.md). You may read, share, and adapt it for non-commercial use with attribution. Because the text is still changing, please do not cite it yet. A citation entry will be added when the volume reaches a stable release.
+A scan of the 2026 landscape shows the agent-book market is almost entirely two things: framework
+tutorials (build agents with this month's library) that date in roughly eighteen months, and
+research surveys or courses on agent *capabilities* (reasoning, code, robotics). The serious
+engineering-first generalist (*AI Engineering*, O'Reilly 2025) is an application-stack book, not a
+systems-from-first-principles treatment, and not agent-specific. Nobody is writing the
+systems-engineering, invariant-anchored, vendor-neutral treatment of agents that the first two
+volumes' method would produce. That gap is the signature opportunity, and it is wider than it was
+for the earlier volumes precisely because the competing books cluster on the disposable end.
 
-## Related
+## Chapter Map (sketch)
 
-- [Machine Learning Systems series overview](../../README.md)
-- [Volume I: Introduction to Machine Learning Systems](../vol1/README.md) (released)
-- [Volume II: Scaling Machine Learning Systems](../vol2/README.md) (preview)
-- [Volume IV: Physical AI Systems](../vol4/README.md) (in development)
+A 12-chapter, four-part arc that parallels Volumes I and II and holds the substrate altitude.
+
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="5%">#</th>
+      <th width="28%">Chapter</th>
+      <th width="22%">Directory</th>
+      <th width="45%">Core Question</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td colspan="4"><b>Part I &mdash; The Inference-Time Frontier</b> <i>(why a third book exists)</i></td></tr>
+    <tr><td>1</td><td><b>From Trained Models to Acting Systems</b></td><td><code>introduction/</code></td><td>What changes when capability moves from training-time to inference-time compute?</td></tr>
+    <tr><td>2</td><td><b>The Control Loop</b></td><td><code>control_loop/</code></td><td>What is an agent, as a system, beneath the hype?</td></tr>
+    <tr><td>3</td><td><b>Inference-Time Scaling</b></td><td><code>inference_scaling/</code></td><td>How does spending compute at runtime buy capability, and what are the (nascent) laws?</td></tr>
+    <tr><td colspan="4"><b>Part II &mdash; The Substrate</b> <i>(the durable engineering layer)</i></td></tr>
+    <tr><td>4</td><td><b>State and Memory</b></td><td><code>state_memory/</code></td><td>How does an acting system manage what it knows, as a memory hierarchy problem? <i>(open)</i></td></tr>
+    <tr><td>5</td><td><b>Tool and Environment Interfaces</b></td><td><code>tool_interfaces/</code></td><td>How is the boundary between model and world engineered as a typed action surface?</td></tr>
+    <tr><td>6</td><td><b>Multi-Agent Coordination</b></td><td><code>multi_agent/</code></td><td>How do many stochastic nodes coordinate, fail, and stay consistent? (renamed to avoid colliding with the companion volume's fleet orchestration)</td></tr>
+    <tr><td colspan="4"><b>Part III &mdash; Reliability and Economics</b> <i>(quantifiable systems properties)</i></td></tr>
+    <tr><td>7</td><td><b>Error Compounding and Reliability</b></td><td><code>reliability/</code></td><td>How does error accumulate over a trajectory, and how is it bounded?</td></tr>
+    <tr><td>8</td><td><b>The Economics of Autonomy</b></td><td><code>economics/</code></td><td>What does multi-step inference cost, and how is an autonomy budget engineered?</td></tr>
+    <tr><td>9</td><td><b>Evaluating Acting Systems</b></td><td><code>evaluation/</code></td><td>How do you measure a system whose output is a trajectory, not a label? <i>(open)</i></td></tr>
+    <tr><td colspan="4"><b>Part IV &mdash; The Responsible Agent</b> <i>(governing systems that act)</i></td></tr>
+    <tr><td>10</td><td><b>Safety, Control, and Oversight</b></td><td><code>safety_control/</code></td><td>How is an autonomous system contained, permissioned, and kept under human oversight?</td></tr>
+    <tr><td>11</td><td><b>Security of Autonomous Systems</b></td><td><code>security/</code></td><td>What does the autonomous loop add to the action-boundary threat model the companion volume already covers? (sits above, does not repeat it)</td></tr>
+    <tr><td>12</td><td><b>The Durable Core of Autonomy</b></td><td><code>conclusion/</code></td><td>What distills into principle, and what did we deliberately leave out because it is not settled?</td></tr>
+  </tbody>
+</table>
+
+## Status
+
+Sketch / feasibility probe. Nothing here is wired into the build. The next concrete step is to draft
+`introduction/` under the no-product-names rule and judge it against the Volume I and II
+introductions. That draft is the go/no-go.

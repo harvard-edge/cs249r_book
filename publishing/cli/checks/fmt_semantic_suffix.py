@@ -16,7 +16,7 @@ quantities (``fmt_qty``) have their own helpers and are not inspected here.
 
 Invoked by::
 
-    ./book/binder check math --scope suffix-semantics
+    ./binder check math --scope suffix-semantics
 
 Opt-in (``default=False``) until the corpus migration completes; flip the
 Scope to ``default=True`` to make it a pre-commit gate.
@@ -204,7 +204,7 @@ def main() -> int:
     ap.add_argument("paths", nargs="*", type=Path)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-    targets = args.paths or [Path("book/quarto/contents")]
+    targets = args.paths or [Path("books")]
     violations = audit(targets)
     if args.json:
         print(json.dumps([v.__dict__ for v in violations], indent=2))

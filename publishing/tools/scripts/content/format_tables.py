@@ -940,7 +940,7 @@ def main():
 
     # Determine files to process
     script_path = Path(__file__).resolve()
-    # Script is at book/tools/scripts/content/format_tables.py, need 5 parents to get to repo root
+    # Script is at publishing/tools/scripts/content/format_tables.py, need 5 parents to get to repo root
     workspace_root = script_path.parent.parent.parent.parent.parent
     files_to_process = []
 
@@ -965,7 +965,7 @@ def main():
 
     elif args.all:
         # All chapter files
-        core_path = workspace_root / 'quarto' / 'contents' / 'core'
+        core_path = workspace_root / 'books' / 'core'
 
         if not core_path.exists():
             print(f"Error: {core_path} does not exist")

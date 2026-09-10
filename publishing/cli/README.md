@@ -1,8 +1,8 @@
 # MLSysBook CLI (`binder`) — Architecture & Reference
 
-The `./book/binder` CLI is the **single source of truth** for building, checking, fixing, and formatting MLSysBook. Every `book-check-*` pre-commit hook dispatches through `./book/binder check <group>`; CI uses the same commands.
+The `./binder` CLI is the **single source of truth** for building, checking, fixing, and formatting MLSysBook. Every `book-check-*` pre-commit hook dispatches through `./binder check <group>`; CI uses the same commands.
 
-**User-facing command reference:** [`book/docs/BINDER.md`](../docs/BINDER.md) (check/fix tables, pre-commit mapping, examples).
+**User-facing command reference:** [`publishing/docs/BINDER.md`](../docs/BINDER.md) (check/fix tables, pre-commit mapping, examples).
 
 **This file** covers implementation: architecture, scope registry, pre-commit contract, EPUB layers, and how to add new checks.
 
@@ -34,8 +34,8 @@ cli/
 
 ## Check implementation layout
 
-**Goal:** every `./book/binder check …` scope is backed by code under `book/cli/`,
-not by loading arbitrary scripts from `book/tools/` at runtime.
+**Goal:** every `./binder check …` scope is backed by code under `book/cli/`,
+not by loading arbitrary scripts from `publishing/tools/` at runtime.
 
 | Layer | Location | Status |
 |-------|----------|--------|
@@ -45,7 +45,7 @@ not by loading arbitrary scripts from `book/tools/` at runtime.
 | **Fix / maintenance** | `commands/maintenance.py` | Self-contained (no script delegation) |
 
 **Anti-pattern (being phased out):** `importlib` or `subprocess` from Binder into
-`book/tools/scripts/*.py` or `book/tools/bib_lint.py`. Older files may remain
+`publishing/tools/scripts/*.py` or `publishing/tools/bib_lint.py`. Older files may remain
 temporarily as standalone CLIs, but Binder-owned behavior should live in
 `cli/checks/` or `cli/core/` and be imported normally.
 
@@ -71,8 +71,8 @@ To keep the CLI clean:
 
 1. User-facing book automation belongs in Binder: `check`, `fix`, `format`,
    `bib`, `render`, `audit`, `layout`, `clean`, `doctor`, `build`, `preview`.
-2. Pre-commit and CI integrations should call `./book/binder ...` for
-   book workflows. Do not add new hooks that invoke `python3 book/tools/...`
+2. Pre-commit and CI integrations should call `./binder ...` for
+   book workflows. Do not add new hooks that invoke `python3 publishing/tools/...`
    directly.
 3. Standalone scripts are allowed only when they are one of:
    - Quarto post-render hooks that Quarto itself calls;
@@ -82,7 +82,7 @@ To keep the CLI clean:
 4. New checks start in `book/cli/checks/` unless they are tiny enough to keep as
    an inline `_run_*` in `validate.py`.
 
-Do **not** add new pre-commit hooks that call `python3 book/tools/...` directly.
+Do **not** add new pre-commit hooks that call `python3 publishing/tools/...` directly.
 Use the full "Adding a new check" flow below so implementation, diagnostics,
 examples, and pre-commit behavior stay in one contract.
 
@@ -190,9 +190,9 @@ Opt-in bib cleanup scopes are:
 - `key-content`: citekey author/year drift; each finding says whether to rename
   the key/update citations or correct the entry body/year.
 
-The pre-commit hook triggers on `book/quarto/contents/**/*.qmd` and `.bib`
+The pre-commit hook triggers on `books/**/*.qmd` and `.bib`
 changes because citation integrity depends on both prose and bibliography
-source. `hygiene` and `style` use reviewed baselines under `book/tools/` so
+source. `hygiene` and `style` use reviewed baselines under `publishing/tools/` so
 known debt is documented but new debt fails. Use `./binder check bib --json`
 for structured fix output.
 
@@ -233,19 +233,19 @@ Flipping `default=False → default=True` once dev is clean is a one-line edit i
 
 ## Pre-commit Integration
 
-Every `book-*` pre-commit hook routes through `./book/binder`. The hook tree mirrors the binder command tree one-to-one: there is one hook per check group (`book-check-refs`, `book-check-prose`, `book-check-footnotes`, ...). Each hook runs the curated default scopes for its group; opt-in scopes are reachable on the CLI via `--scope` or `--all-scopes`.
+Every `book-*` pre-commit hook routes through `./binder`. The hook tree mirrors the binder command tree one-to-one: there is one hook per check group (`book-check-refs`, `book-check-prose`, `book-check-footnotes`, ...). Each hook runs the curated default scopes for its group; opt-in scopes are reachable on the CLI via `--scope` or `--all-scopes`.
 
 ```yaml
 - id: book-check-<group>
-  entry: ./book/binder check <group>
+  entry: ./binder check <group>
   language: system
   pass_filenames: false
-  files: ^book/quarto/contents/.*\.qmd$
+  files: ^books/.*\.qmd$
 ```
 
 Structural exceptions, all documented inline in `.pre-commit-config.yaml`:
 
-- **CLI contract hook** (`book-check-cli-contract`) — always runs `./book/binder check cli` because it guards help text, removed command aliases, and reset/build command shape. It is read-only and does not inspect staged files.
+- **CLI contract hook** (`book-check-cli-contract`) — always runs `./binder check cli` because it guards help text, removed command aliases, and reset/build command shape. It is read-only and does not inspect staged files.
 
 - **Per-scope split for `labels`** — the `orphans` scope is currently clean only on Vol I (Vol II has forward references to unwritten chapters). The split lets the universally-clean `duplicates` scope cover both volumes while `orphans` stays vol1-only:
 
@@ -266,7 +266,7 @@ The flow that a future maintainer should mimic:
 
 1. **Implement the runner** in `book/cli/commands/validate.py` as `_run_<scope>(self, root: Path) -> ValidationRunResult`. For per-file regex checks, walk `self._qmd_files(root)`. For graph / corpus checks, build the model once and emit `ValidationIssue` entries. If the logic is reusable or more than a few lines, put it in `book/cli/checks/` and have the runner adapt those structured results to Binder's `ValidationIssue` format.
 2. **Register the scope** by adding a `Scope("<name>", "_run_<scope>", default=...)` entry to the right group in the `GROUPS` dict at the top of the file. Mark `default=False` if the scope still fails on dev or is intentionally opt-in.
-3. **Document examples in the code and CLI docs**: every new check module should include bad/good source examples in its module docstring, one example per error code. User-facing scopes should also add the same examples to [`book/docs/BINDER.md`](../docs/BINDER.md) or the relevant Binder doc page. The goal is that a maintainer, author, or automated repair pass can open either the checker or CLI docs and immediately see what mistake it is looking for and what the canonical fix looks like.
+3. **Document examples in the code and CLI docs**: every new check module should include bad/good source examples in its module docstring, one example per error code. User-facing scopes should also add the same examples to [`publishing/docs/BINDER.md`](../docs/BINDER.md) or the relevant Binder doc page. The goal is that a maintainer, author, or automated repair pass can open either the checker or CLI docs and immediately see what mistake it is looking for and what the canonical fix looks like.
 4. **Surface any new flags** in the argparse block in `ValidateCommand.run()`, and dispatch them in `_run_group` if the runner needs them as kwargs.
 5. **Stop.** Pre-commit picks up the new scope automatically because the existing `book-check-<group>` hook already runs every default-True scope in the group. You only add a new pre-commit hook for a brand-new group, or to pass a scope-specific flag (the vol1 / format-check exceptions above).
 
@@ -291,9 +291,9 @@ CLI contract examples:
 
 | Error code | Bad source / command surface | Fix guidance |
 |------------|------------------------------|--------------|
-| `cli_contract_exit` | `./book/binder pdf reset --vol1` exits `0`, or help paths exit `1` | Preserve the public CLI contract: help returns `0`; removed commands and parse errors return `1`. |
-| `cli_contract_missing_output` | `./book/binder check` no longer lists `cli` / `contract` | Update help text and docs when the command tree intentionally changes. |
-| `cli_contract_unexpected_output` | `./book/binder build --help` still mentions `build reset` | Remove stale help; YAML reset is `./book/binder reset <fmt\|all>`. |
+| `cli_contract_exit` | `./binder pdf reset --vol1` exits `0`, or help paths exit `1` | Preserve the public CLI contract: help returns `0`; removed commands and parse errors return `1`. |
+| `cli_contract_missing_output` | `./binder check` no longer lists `cli` / `contract` | Update help text and docs when the command tree intentionally changes. |
+| `cli_contract_unexpected_output` | `./binder build --help` still mentions `build reset` | Remove stale help; YAML reset is `./binder reset <fmt\|all>`. |
 
 Math multiplier examples:
 
@@ -322,7 +322,7 @@ Implementation: `book/cli/commands/validate.py` (`_run_epub_hygiene`, `_run_epub
 
 ### Layer 1 — hygiene (source-level, fast)
 
-Runs in <1s across all SVG and BibTeX files under `book/quarto/contents/`. No EPUB build required. Wired into the pre-commit hook `book-epub-hygiene`.
+Runs in <1s across all SVG and BibTeX files under `books/`. No EPUB build required. Wired into the pre-commit hook `book-epub-hygiene`.
 
 Catches the four source-level patterns that historically broke builds in April 2026 (issues [#1014](https://github.com/harvard-edge/cs249r_book/issues/1014), [#1052](https://github.com/harvard-edge/cs249r_book/issues/1052), [#1148](https://github.com/harvard-edge/cs249r_book/issues/1148)):
 
@@ -356,9 +356,9 @@ Useful when Java is not installed locally and `epubcheck` is unavailable; the ot
 
 ### Layer 3 — epubcheck (built-EPUB, full spec)
 
-Runs the W3C `epubcheck` validator against every EPUB discovered under `book/quarto/_build/epub-vol*/`. Emits `ValidationIssue` records with file, line, column, RSC/OPF code, severity, and human-readable message. When running under GitHub Actions, also emits `::error file=...,line=...::` annotations so findings show up inline on PR diffs.
+Runs the W3C `epubcheck` validator against every EPUB discovered under `books/_build/epub-vol*/`. Emits `ValidationIssue` records with file, line, column, RSC/OPF code, severity, and human-readable message. When running under GitHub Actions, also emits `::error file=...,line=...::` annotations so findings show up inline on PR diffs.
 
-Requires the `epubcheck` Python package (pinned in `book/tools/dependencies/requirements.txt`) plus a Java runtime (JRE 8+). If neither `python -m epubcheck` nor the `epubcheck` system binary is available, the check emits an `epubcheck-missing` issue with install instructions rather than silently passing.
+Requires the `epubcheck` Python package (pinned in `publishing/tools/dependencies/requirements.txt`) plus a Java runtime (JRE 8+). If neither `python -m epubcheck` nor the `epubcheck` system binary is available, the check emits an `epubcheck-missing` issue with install instructions rather than silently passing.
 
 Thresholds (from the command line, environment variables, or the CI workflow). Two modes:
 
@@ -371,7 +371,7 @@ Thresholds (from the command line, environment variables, or the CI workflow). T
   - `--update-baseline` — rewrite the baseline file to the current counts. Run after a cleanup lands; commit the updated file in the same PR. This is how you lower the ceiling.
   - When `--baseline` is supplied, the flat thresholds are ignored.
 
-The canonical baseline lives at `book/tools/audit/epubcheck-baseline.json`. The CI workflow (`book-validate-dev.yml`) uses the ratchet by default — a PR cannot land if epubcheck counts regress past that file. Initial state (April 2026) is `0/0/0` for both volumes, so *any* new FATAL, ERROR, or WARNING blocks the PR.
+The canonical baseline lives at `publishing/tools/audit/epubcheck-baseline.json`. The CI workflow (`book-validate-dev.yml`) uses the ratchet by default — a PR cannot land if epubcheck counts regress past that file. Initial state (April 2026) is `0/0/0` for both volumes, so *any* new FATAL, ERROR, or WARNING blocks the PR.
 
 ### Defense in depth
 
@@ -380,7 +380,7 @@ The three layers exist because none alone is sufficient:
 - **Hygiene alone** is a whitelist of known patterns. It cannot catch a category of error epubcheck invents in a future version, nor renderer-emitted markup (bare `<br>`, `--` in TikZ comments) that only appears after Quarto + post-process have run.
 - **Epubcheck alone** takes ~7 seconds per volume and requires a full EPUB build. Developers under time pressure will find ways around it.
 
-The rendered-EPUB layer also gets belt-and-suspenders support from `book/quarto/scripts/epub_postprocess.py`, a Quarto post-render hook that sanitizes XHTML/SVG/OPF in the built EPUB (strips `--` from HTML comments, closes bare `<br>` tags, strips C0 chars from SVG aria-labels, normalizes URL escapes, aligns the nav item's `mathml` OPF property with the rendered nav content). So a regression caught at source by hygiene, missed there, rescued by post-process, and missed again is still caught by epubcheck in CI. Three independent nets.
+The rendered-EPUB layer also gets belt-and-suspenders support from `books/shared/scripts/epub_postprocess.py`, a Quarto post-render hook that sanitizes XHTML/SVG/OPF in the built EPUB (strips `--` from HTML comments, closes bare `<br>` tags, strips C0 chars from SVG aria-labels, normalizes URL escapes, aligns the nav item's `mathml` OPF property with the rendered nav content). So a regression caught at source by hygiene, missed there, rescued by post-process, and missed again is still caught by epubcheck in CI. Three independent nets.
 
 ## EPUB — How This Integrates with the Book Workflow
 
@@ -401,7 +401,7 @@ Three layers of defense, each invoked automatically at the moment it adds value:
 
 1. **Build:** `./binder build epub --all` (or per-volume). Post-flight already validates — if the final line is `✓ smoke` and `✓ epubcheck`, the file is ready.
 2. **Visual spot-check:** open the file in Sigil or Calibre Editor. Structural checks don't guarantee aesthetic quality.
-3. **Ship:** upload the file from `book/quarto/_build/epub-vol*/`.
+3. **Ship:** upload the file from `books/_build/epub-vol*/`.
 
 ### When CI (or local post-flight) blocks you
 
@@ -415,7 +415,7 @@ epubcheck: regression against baseline (2 FATAL, 15 ERROR total)
 Two dispositions:
 
 - **Real regression:** fix the underlying issue. `./binder check epub help` maps every error code to a source-level fix. `./binder check epub --scope hygiene --fix` auto-repairs the four mechanical classes.
-- **Accepted increase** (e.g., a Quarto upgrade introduced a new warning class you're OK living with): `./binder check epub --scope epubcheck --baseline book/tools/audit/epubcheck-baseline.json --update-baseline` — commit the updated JSON in the same PR so the audit trail is clear.
+- **Accepted increase** (e.g., a Quarto upgrade introduced a new warning class you're OK living with): `./binder check epub --scope epubcheck --baseline publishing/tools/audit/epubcheck-baseline.json --update-baseline` — commit the updated JSON in the same PR so the audit trail is clear.
 
 ### Escape hatches
 
@@ -432,4 +432,4 @@ A new contributor runs `./binder doctor` once. The EPUB section reports Java ava
 
 ## Script Delegation
 
-Some commands still delegate to scripts under `book/tools/scripts/` (spelling, image formats, table formatting, Python formatting). These will be migrated to native CLI modules over time. EPUB checks have already been migrated: the `hygiene` and `epubcheck` scopes live in `book/cli/commands/_epub_checks.py` as pure Python, not subprocess-to-script.
+Some commands still delegate to scripts under `publishing/tools/scripts/` (spelling, image formats, table formatting, Python formatting). These will be migrated to native CLI modules over time. EPUB checks have already been migrated: the `hygiene` and `epubcheck` scopes live in `book/cli/commands/_epub_checks.py` as pure Python, not subprocess-to-script.

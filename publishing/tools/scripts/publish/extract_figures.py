@@ -26,7 +26,7 @@ Options:
     If no output type is specified, generates all three grouped by figure.
 
 Output:
-    Creates FIGURE_LIST_VOL{N}.md in the book/quarto directory.
+    Creates FIGURE_LIST_VOL{N}.md in the books/ directory.
 """
 
 import argparse
@@ -371,7 +371,7 @@ Examples:
     
     if not yaml_path.exists():
         # Try alternate path
-        yaml_path = Path(f'/Users/VJ/GitHub/mlsysbook-vols/book/quarto/config/_quarto-pdf-vol{vol}.yml')
+        yaml_path = Path(f'/Users/VJ/GitHub/mlsysbook-vols/books/config/_quarto-pdf-vol{vol}.yml')
     
     if not yaml_path.exists():
         print(f"Error: YAML config not found at {yaml_path}")

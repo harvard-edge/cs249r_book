@@ -30,9 +30,9 @@ Environment
 
 Outputs
 -------
-- ``book/quarto/contents/{vol}/{chapter}/{chapter}_quizzes.json.new`` — the
+- ``books/{vol}/{chapter}/{chapter}_quizzes.json.new`` — the
   regenerated file. Rename to drop ``.new`` after human review.
-- ``book/tools/scripts/quizzes/_reviews/{chapter}_memo.md`` — a
+- ``publishing/tools/scripts/quizzes/_reviews/{chapter}_memo.md`` — a
   short summary of coverage, type mix, and flags for spot-check.
 
 Each chapter's output is validated with ``validate_quiz_json.py``. A
@@ -65,7 +65,7 @@ REPO_ROOT = Path(
     .strip()
 )
 SPEC_PATH = REPO_ROOT / ".claude" / "rules" / "quiz-generation.md"
-CONTENTS_DIR = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS_DIR = REPO_ROOT  / "books"
 REVIEWS_DIR = HERE / "_reviews"
 VALIDATOR = HERE / "validate_quiz_json.py"
 

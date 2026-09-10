@@ -47,7 +47,7 @@ def clean_build_artifacts(
         (book_dir / ".quarto", "Quarto cache (book)"),
     ]
 
-    contents_core = book_dir / "contents" / "core"
+    contents_core = book_dir / "core"
     if contents_core.exists():
         for chapter_dir in contents_core.glob("*/"):
             if not chapter_dir.is_dir():

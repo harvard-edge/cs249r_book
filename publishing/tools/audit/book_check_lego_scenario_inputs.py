@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS = REPO_ROOT  / "books"
 
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
@@ -194,7 +194,7 @@ def _repo_rel(path: Path) -> str:
 
 def _chapter_key(path: Path) -> str:
     rel = _repo_rel(path)
-    match = re.search(r"book/quarto/contents/(vol[12]/(?:backmatter/)?[^/]+)", rel)
+    match = re.search(r"books/(vol[12]/(?:backmatter/)?[^/]+)", rel)
     return match.group(1) if match else rel
 
 

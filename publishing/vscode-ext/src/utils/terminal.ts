@@ -77,7 +77,7 @@ function shouldRevealOnFailure(): boolean {
 /**
  * Shell-safe prefix so the command runs in the given directory. Reused terminals
  * keep their previous cwd; prefixing with cd ensures the command runs in the
- * intended directory (e.g. repo root for ./book/binder).
+ * intended directory (e.g. repo root for ./binder).
  */
 function withCwd(cwd: string, command: string): string {
   return `cd ${JSON.stringify(cwd)} && ${command}`;

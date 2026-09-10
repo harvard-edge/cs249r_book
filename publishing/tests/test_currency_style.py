@@ -8,15 +8,15 @@ from book.cli.checks.currency_style import (
 
 
 def test_currency_style_allows_single_notation_definition(tmp_path):
-    notation = tmp_path / "book/quarto/contents/vol1/frontmatter/_notation_body.qmd"
+    notation = tmp_path / "books/vol1/frontmatter/_notation_body.qmd"
     notation.parent.mkdir(parents=True)
     notation.write_text(NOTATION_DEFINITION + "\n", encoding="utf-8")
 
-    assert audit([tmp_path / "book/quarto/contents"]) == []
+    assert audit([tmp_path / "books"]) == []
 
 
 def test_currency_style_flags_usd_in_content_sources(tmp_path):
-    content = tmp_path / "book/quarto/contents"
+    content = tmp_path / "books"
     chapter = content / "vol1/ml_ops/ml_ops.qmd"
     quiz = content / "vol2/ops_scale/ops_scale_quizzes.json"
     svg = content / "vol2/sustainable_ai/images/svg/carbon-tco.svg"
@@ -43,7 +43,7 @@ def test_currency_style_flags_usd_in_content_sources(tmp_path):
 
 
 def test_currency_style_flags_fmt_prefix_and_suffix_currency(tmp_path):
-    content = tmp_path / "book/quarto/contents"
+    content = tmp_path / "books"
     chapter = content / "vol1/ml_ops/ml_ops.qmd"
     chapter.parent.mkdir(parents=True)
 
@@ -67,7 +67,7 @@ def test_currency_style_flags_fmt_prefix_and_suffix_currency(tmp_path):
 
 
 def test_currency_style_allows_fmt_usd(tmp_path):
-    content = tmp_path / "book/quarto/contents"
+    content = tmp_path / "books"
     chapter = content / "vol1/ml_ops/ml_ops.qmd"
     chapter.parent.mkdir(parents=True)
 

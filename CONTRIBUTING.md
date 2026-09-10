@@ -15,7 +15,7 @@ right place.
 
 | If you want to... | Project | Read this guide |
 |---|---|---|
-| Fix a typo, improve a chapter, add a figure | **Textbook** | [`book/docs/CONTRIBUTING.md`](book/docs/CONTRIBUTING.md) |
+| Fix a typo, improve a chapter, add a figure | **Textbook** | [`publishing/docs/CONTRIBUTING.md`](publishing/docs/CONTRIBUTING.md) |
 | Add or fix a TinyTorch module / test / milestone | **TinyTorch** | [`tinytorch/CONTRIBUTING.md`](tinytorch/CONTRIBUTING.md) |
 | Improve a hardware lab or board recipe | **Hardware Kits** | [`kits/README.md`](kits/README.md) |
 | Add or fix an interactive Co-Lab | **Labs** | [`labs/README.md`](labs/README.md) |
@@ -109,7 +109,7 @@ pre-commit for you as a convenience):
 
 | Project | Project-specific setup |
 |---|---|
-| Textbook | `./book/binder setup` (also installs Quarto / Java / epubcheck checks) |
+| Textbook | `./binder setup` (also installs Quarto / Java / epubcheck checks) |
 | TinyTorch | `pip install -r tinytorch/requirements.txt && pip install -e tinytorch/` |
 | StaffML / vault-cli | `pip install -e interviews/vault-cli/[dev]` |
 | MLSys·im | `pip install -e mlsysim/[dev]` |
@@ -124,7 +124,7 @@ Do **not** use `git add .` — it's easy to commit unrelated edits, secrets, or
 build artifacts. Stage paths individually:
 
 ```bash
-git add book/quarto/contents/vol1/introduction/introduction.qmd
+git add books/vol1/introduction/introduction.qmd
 git commit -m "Fix caption formatting in introduction (issue #14)"
 ```
 
@@ -172,7 +172,7 @@ merges, a maintainer (or you, on your own PR) can comment:
 ```
 
 You'll be added to the project's recognition table in the README. See
-[`book/docs/CONTRIBUTING.md`](book/docs/CONTRIBUTING.md#contribution-types) for
+[`publishing/docs/CONTRIBUTING.md`](publishing/docs/CONTRIBUTING.md#contribution-types) for
 the full list of contribution types.
 
 ---

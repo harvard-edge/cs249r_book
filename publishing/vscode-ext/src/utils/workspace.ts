@@ -7,7 +7,7 @@ export function getRepoRoot(): string | undefined {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) { return undefined; }
 
-  // First prefer a folder that directly contains book/binder.
+  // First prefer a folder that directly contains binder.
   for (const folder of folders) {
     const rootCandidate = folder.uri.fsPath;
     if (fs.existsSync(path.join(rootCandidate, 'book', 'binder'))) {
@@ -27,7 +27,7 @@ export function getRepoRoot(): string | undefined {
     }
   }
 
-  // No book/binder found — do not return a root. Extension will bail early.
+  // No binder found — do not return a root. Extension will bail early.
   return undefined;
 }
 

@@ -12,7 +12,7 @@ MANIFEST_PATH = REPO_ROOT / "book" / "tools" / "audit" / "artifacts" / "registry
 CONSTANTS_PATH = REPO_ROOT / "mlsysim" / "mlsysim" / "core" / "constants.py"
 
 SCAN_ROOTS = (
-    REPO_ROOT / "book" / "quarto" / "contents",
+    REPO_ROOT  / "books",
     REPO_ROOT / "mlsysim" / "mlsysim",
     REPO_ROOT / "labs",
     REPO_ROOT / "mlsysim" / "examples",

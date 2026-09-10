@@ -7,14 +7,14 @@ Exec a chapter's Python cells, substitute ``{python} Class.var_str`` inline
 refs with rendered values, and print prose previews — without a full HTML build.
 
 Use this while tuning fmt precision: read the sentence aloud, then confirm
-with ``./book/binder build <chapter>`` + ``audit_html.py`` as the final check.
+with ``./binder build <chapter>`` + ``audit_html.py`` as the final check.
 
 See ``fmt/README.md`` for the full chapter workflow.
 
 Usage::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose.py \\
-        book/quarto/contents/vol1/introduction/introduction.qmd
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_prose.py \\
+        books/vol1/introduction/introduction.qmd
 
     # Only lines that use a given LEGO class:
     ... introduction.qmd --class ResNet50DamExample

@@ -179,7 +179,7 @@ def merge_email_addresses(row, col1, col2):
 def main(_):
     token = os.environ["GITHUB_TOKEN"]
     # Get BOOK_QUARTO from environment variable, fallback to default
-    book_quarto = os.environ.get("BOOK_QUARTO", "book/quarto")
+    book_quarto = os.environ.get("BOOK_QUARTO", "books/")
     headers = {"Authorization": f"token {token}"}
     data = []
     next_page = f"https://api.github.com/repos/{OWNER}/{REPO}/commits?sha={BRANCH}&per_page={RESULTS_PER_PAGE}"

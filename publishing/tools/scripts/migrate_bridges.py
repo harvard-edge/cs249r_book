@@ -11,8 +11,8 @@ import re
 import sys
 from pathlib import Path
 
-BOOK_ROOT = Path("/Users/VJ/GitHub/mlsysbook-vols/book/quarto")
-CONTENTS = BOOK_ROOT / "contents"
+BOOK_ROOT = Path("/Users/VJ/GitHub/mlsysbook-vols/books/")
+CONTENTS = BOOK_ROOT
 
 CODE_BLOCK_START = re.compile(r"^```\{python\}")
 CODE_BLOCK_END = re.compile(r"^```\s*$")

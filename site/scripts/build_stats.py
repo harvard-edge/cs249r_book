@@ -251,7 +251,7 @@ def read_last_updated() -> str:
     """Month and year of the newest commit touching book content."""
     try:
         stamp = subprocess.run(
-            ["git", "log", "-1", "--format=%cI", "--", "book/quarto/contents"],
+            ["git", "log", "-1", "--format=%cI", "--", "books"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,

@@ -17,13 +17,13 @@ from pathlib import Path
 
 def find_repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        if (parent / "book" / "quarto" / "contents").exists():
+        if (parent  / "books").exists():
             return parent
-    raise RuntimeError("Could not locate repository root containing book/quarto/contents")
+    raise RuntimeError("Could not locate repository root containing books")
 
 
 ROOT = find_repo_root()
-CONTENTS = ROOT / "book" / "quarto" / "contents"
+CONTENTS = ROOT  / "books"
 OUT_DIR = ROOT / "review" / "cross-references"
 INVENTORY_PATH = OUT_DIR / "inventory.json"
 REPORT_PATH = OUT_DIR / "report.md"
@@ -292,7 +292,7 @@ def write_schema() -> None:
 schema_version: "crossref-chapter-report/v1"
 chapter_report:
   volume: "vol1|vol2"
-  file: "book/quarto/contents/<volume>/<chapter>/<chapter>.qmd"
+  file: "books/<volume>/<chapter>/<chapter>.qmd"
   reviewer: "agent-or-human-name"
   generated_from_packet: "review/cross-references/chapter-packets/<packet>.yml"
   status: "analysis-only|ready-for-edit|needs-human-decision"
@@ -390,7 +390,7 @@ def write_chapter_packets(
 
     for file_key in sorted(file_stats):
         stats = file_stats[file_key]
-        packet_name = file_key.removeprefix("book/quarto/contents/").replace("/", "__").removesuffix(".qmd")
+        packet_name = file_key.removeprefix("books/").replace("/", "__").removesuffix(".qmd")
         path = PACKET_DIR / f"{packet_name}.yml"
         lines: list[str] = []
         lines.append(f"volume: {yaml_scalar(stats['volume'])}")

@@ -2,15 +2,15 @@
 # Learning Objectives Bolding: Run Gemini CLI in parallel across all chapters
 #
 # Usage: From repo root, run:
-#   ./book/tools/scripts/learning_objectives_bolding_parallel.sh
+#   ./publishing/tools/scripts/learning_objectives_bolding_parallel.sh
 #
 # Requires: Gemini CLI installed (npm install -g @google/gemini-cli or brew install gemini-cli)
 # Rate limits: Free tier is 60 req/min. Default MAX_PARALLEL=8 to stay under limit.
-#              Adjust with: MAX_PARALLEL=4 ./book/tools/scripts/learning_objectives_bolding_parallel.sh
+#              Adjust with: MAX_PARALLEL=4 ./publishing/tools/scripts/learning_objectives_bolding_parallel.sh
 
 set -e
 
-# Repo root (script lives at book/tools/scripts/)
+# Repo root (script lives at publishing/tools/scripts/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 cd "$REPO_ROOT"
@@ -20,51 +20,51 @@ MAX_PARALLEL="${MAX_PARALLEL:-2}"
 
 # All chapters with Learning Objectives (exclude compute_infrastructure_expanded—draft)
 CHAPTERS=(
-  "book/quarto/contents/vol1/introduction/introduction.qmd"
-  "book/quarto/contents/vol1/ml_systems/ml_systems.qmd"
-  "book/quarto/contents/vol1/data_engineering/data_engineering.qmd"
-  "book/quarto/contents/vol1/data_selection/data_selection.qmd"
-  "book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd"
-  "book/quarto/contents/vol1/nn_computation/nn_computation.qmd"
-  "book/quarto/contents/vol1/training/training.qmd"
-  "book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd"
-  "book/quarto/contents/vol1/model_compression/model_compression.qmd"
-  "book/quarto/contents/vol1/frameworks/frameworks.qmd"
-  "book/quarto/contents/vol1/benchmarking/benchmarking.qmd"
-  "book/quarto/contents/vol1/ml_ops/ml_ops.qmd"
-  "book/quarto/contents/vol1/model_serving/model_serving.qmd"
-  "book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd"
-  "book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd"
-  "book/quarto/contents/vol1/conclusion/conclusion.qmd"
-  "book/quarto/contents/vol1/backmatter/appendix_algorithm.qmd"
-  "book/quarto/contents/vol1/backmatter/appendix_data.qmd"
-  "book/quarto/contents/vol1/backmatter/appendix_machine.qmd"
-  "book/quarto/contents/vol1/backmatter/appendix_dam.qmd"
-  "book/quarto/contents/vol1/backmatter/appendix_assumptions.qmd"
-  "book/quarto/contents/vol2/introduction/introduction.qmd"
-  "book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd"
-  "book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd"
-  "book/quarto/contents/vol2/data_storage/data_storage.qmd"
-  "book/quarto/contents/vol2/distributed_training/distributed_training.qmd"
-  "book/quarto/contents/vol2/collective_communication/collective_communication.qmd"
-  "book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd"
-  "book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd"
-  "book/quarto/contents/vol2/inference/inference.qmd"
-  "book/quarto/contents/vol2/edge_intelligence/edge_intelligence.qmd"
-  "book/quarto/contents/vol2/ops_scale/ops_scale.qmd"
-  "book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd"
-  "book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd"
-  "book/quarto/contents/vol2/responsible_ai/responsible_ai.qmd"
-  "book/quarto/contents/vol2/robust_ai/robust_ai.qmd"
-  "book/quarto/contents/vol2/security_privacy/security_privacy.qmd"
-  "book/quarto/contents/vol2/conclusion/conclusion.qmd"
+  "books/vol1/introduction/introduction.qmd"
+  "books/vol1/ml_systems/ml_systems.qmd"
+  "books/vol1/data_engineering/data_engineering.qmd"
+  "books/vol1/data_selection/data_selection.qmd"
+  "books/vol1/nn_architectures/nn_architectures.qmd"
+  "books/vol1/nn_computation/nn_computation.qmd"
+  "books/vol1/training/training.qmd"
+  "books/vol1/hw_acceleration/hw_acceleration.qmd"
+  "books/vol1/model_compression/model_compression.qmd"
+  "books/vol1/frameworks/frameworks.qmd"
+  "books/vol1/benchmarking/benchmarking.qmd"
+  "books/vol1/ml_ops/ml_ops.qmd"
+  "books/vol1/model_serving/model_serving.qmd"
+  "books/vol1/responsible_engr/responsible_engr.qmd"
+  "books/vol1/ml_workflow/ml_workflow.qmd"
+  "books/vol1/conclusion/conclusion.qmd"
+  "books/vol1/backmatter/appendix_algorithm.qmd"
+  "books/vol1/backmatter/appendix_data.qmd"
+  "books/vol1/backmatter/appendix_machine.qmd"
+  "books/vol1/backmatter/appendix_dam.qmd"
+  "books/vol1/backmatter/appendix_assumptions.qmd"
+  "books/vol2/introduction/introduction.qmd"
+  "books/vol2/compute_infrastructure/compute_infrastructure.qmd"
+  "books/vol2/network_fabrics/network_fabrics.qmd"
+  "books/vol2/data_storage/data_storage.qmd"
+  "books/vol2/distributed_training/distributed_training.qmd"
+  "books/vol2/collective_communication/collective_communication.qmd"
+  "books/vol2/fault_tolerance/fault_tolerance.qmd"
+  "books/vol2/fleet_orchestration/fleet_orchestration.qmd"
+  "books/vol2/inference/inference.qmd"
+  "books/vol2/edge_intelligence/edge_intelligence.qmd"
+  "books/vol2/ops_scale/ops_scale.qmd"
+  "books/vol2/performance_engineering/performance_engineering.qmd"
+  "books/vol2/sustainable_ai/sustainable_ai.qmd"
+  "books/vol2/responsible_ai/responsible_ai.qmd"
+  "books/vol2/robust_ai/robust_ai.qmd"
+  "books/vol2/security_privacy/security_privacy.qmd"
+  "books/vol2/conclusion/conclusion.qmd"
 )
 
 run_chapter() {
   local file="$1"
   local prompt="Read the instructions at .claude/docs/learning-objectives-gemini-instructions.md, then edit this chapter file to add bolding to Learning Objectives: $file"
   echo "[$(date +%H:%M:%S)] Starting: $file"
-  if gemini -p "$prompt" --include-directories "book/quarto/contents,.claude/docs"; then
+  if gemini -p "$prompt" --include-directories "books,.claude/docs"; then
     echo "[$(date +%H:%M:%S)] Done: $file"
   else
     echo "[$(date +%H:%M:%S)] FAILED: $file" >&2
@@ -89,4 +89,4 @@ done
 
 wait
 echo ""
-echo "All chapters processed. Review changes with: git diff book/quarto/contents/"
+echo "All chapters processed. Review changes with: git diff books/"

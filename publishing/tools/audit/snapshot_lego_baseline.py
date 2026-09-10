@@ -22,7 +22,7 @@ IMPORT_CONSTANTS = re.compile(
 
 
 def qmd_files() -> list[Path]:
-    root = REPO_ROOT / "book" / "quarto" / "contents"
+    root = REPO_ROOT  / "books"
     return sorted(root.rglob("*.qmd"))
 
 
@@ -61,8 +61,8 @@ def run_focal_verify() -> dict:
     script = REPO_ROOT / "book" / "tools" / "audit" / "lego_focal_verify.py"
     if not script.exists():
         return {"skipped": True, "reason": "lego_focal_verify.py missing"}
-    vol1 = REPO_ROOT / "book" / "quarto" / "contents" / "vol1"
-    vol2 = REPO_ROOT / "book" / "quarto" / "contents" / "vol2"
+    vol1 = REPO_ROOT  / "books" / "vol1"
+    vol2 = REPO_ROOT  / "books" / "vol2"
     proc = subprocess.run(
         [sys.executable, str(script), str(vol1), str(vol2)],
         cwd=REPO_ROOT,
@@ -80,7 +80,7 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     chapters = [scan_qmd(p) for p in qmd_files()]
     payload = {
-        "generated_by": "book/tools/audit/snapshot_lego_baseline.py",
+        "generated_by": "publishing/tools/audit/snapshot_lego_baseline.py",
         "chapter_count": len(chapters),
         "total_cells": sum(c["cell_count"] for c in chapters),
         "total_constants_import_cells": sum(c["constants_import_cells"] for c in chapters),

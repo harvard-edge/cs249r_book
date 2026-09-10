@@ -26,7 +26,7 @@ COPYEDIT_LINESTRETCH="2"      # Line spacing for copy-edit PDF (2 = double)
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-QUARTO_DIR="$REPO_ROOT/book/quarto"
+QUARTO_DIR="$REPO_ROOT/books/"
 CONFIG_DIR="$QUARTO_DIR/config"
 
 VOLUME=""

@@ -1,6 +1,6 @@
 # Takeaways ART: Fleet Infrastructure
 
-## book/quarto/contents/vol2/introduction/introduction.qmd
+## books/vol2/introduction/introduction.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose, real heading outline, Scale Moment framing, C$^3$ taxonomy/fleet law sections, Summary, existing callout, chapter connection, opening scale/MTBF calculation cells; no summary-adjacent calculation cell found.
@@ -20,14 +20,14 @@
 
 :::
 
-## book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd
+## books/vol2/compute_infrastructure/compute_infrastructure.qmd
 
 - Recommendation: Keep
 - Evidence reviewed: Purpose, heading outline from accelerator spectrum through pod and emerging technologies, Summary, SummaryScaleScenario and closing recap calculation cells, existing takeaways, chapter connection.
 - Issues: None
 - Proposed callout: Existing title `The data center is the computer`; no replacement needed.
 
-## book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd
+## books/vol2/network_fabrics/network_fabrics.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose, Five-Level Network Model, heading outline across wire/link, transport, topology, fabric behavior, cluster design, monitoring, Summary, existing callout, opening bandwidth hierarchy calculation cell; no summary-adjacent calculation cell found.
@@ -47,14 +47,14 @@
 
 :::
 
-## book/quarto/contents/vol2/data_storage/data_storage.qmd
+## books/vol2/data_storage/data_storage.qmd
 
 - Recommendation: Keep
 - Evidence reviewed: Purpose, heading outline from fuel line through hierarchy, pipeline equation, GPUDirect Storage, economics, checkpoint storage, retrieval, synthetic fuel line, Summary, GDSLatencyRecap and EconRatiosRecap cells, existing takeaways, chapter connection.
 - Issues: None
 - Proposed callout: Existing title `Feed the accelerators or waste them`; no replacement needed.
 
-## book/quarto/contents/vol2/distributed_training/distributed_training.qmd
+## books/vol2/distributed_training/distributed_training.qmd
 
 - Recommendation: Modify
 - Evidence reviewed: Purpose, heading outline across necessity, data/model/tensor/pipeline/hybrid parallelism, RLHF/alignment, strategy comparison, Summary, DistTrainSummaryRecap cell, archetype spectrum, existing callout, chapter connection.
@@ -74,21 +74,21 @@
 
 :::
 
-## book/quarto/contents/vol2/collective_communication/collective_communication.qmd
+## books/vol2/collective_communication/collective_communication.qmd
 
 - Recommendation: Keep
 - Evidence reviewed: Purpose, heading outline across alpha-beta/LogP, primitive vocabulary, AllReduce algorithms, hierarchical communication, compression, libraries, overlap, Summary, communication archetype mapping, existing takeaways, early gradient synchronization and cost-model calculation cells.
 - Issues: None
 - Proposed callout: Existing title `Every byte has a travel cost`; no replacement needed.
 
-## book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd
+## books/vol2/fault_tolerance/fault_tolerance.qmd
 
 - Recommendation: Keep
 - Evidence reviewed: Purpose, heading outline across failure analysis, hardware/software faults, silent data corruption, checkpointing, recovery, elasticity, serving fault tolerance, degradation, observability, case studies, Summary, existing takeaways, reliability-rate and Young-Daly/checkpoint calculation cells.
 - Issues: None
 - Proposed callout: Existing title `Failure is normal operation`; no replacement needed.
 
-## book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd
+## books/vol2/fleet_orchestration/fleet_orchestration.qmd
 
 - Recommendation: Keep
 - Evidence reviewed: Purpose, heading outline across scheduling, orchestration paradigms, topology-aware scheduling, elasticity, cost optimization, custom schedulers, serving resource management, multi-tenancy, utilization debugging, Summary, existing takeaways, cluster economics and utilization calculation cells.

@@ -5,9 +5,9 @@ Enforces the canonical schema and formatting rules documented in
 the project prose style guide §5 Bibliography Hygiene.
 
 Usage:
-    python3 book/tools/bib_lint.py <file.bib> [--check|--fix|--report]
-    python3 book/tools/bib_lint.py --all [--check|--fix|--report]
-    ./book/binder check bib
+    python3 publishing/tools/bib_lint.py <file.bib> [--check|--fix|--report]
+    python3 publishing/tools/bib_lint.py --all [--check|--fix|--report]
+    ./binder check bib
 
 Modes:
     --check   Exit 1 if any violations found; no output rewrites.
@@ -40,9 +40,9 @@ What it does NOT do:
       byte-exact across --fix runs; only FORMATTING changes.
 
 Integration points:
-    - Binder: imported by `./book/binder check bib`, which owns the
+    - Binder: imported by `./binder check bib`, which owns the
       publication gate and emits structured JSON.
-    - Compatibility CLI: `book/tools/bib_lint.py` is a thin wrapper for
+    - Compatibility CLI: `publishing/tools/bib_lint.py` is a thin wrapper for
       ad-hoc reports, formatting, and baseline regeneration.
     - Apply pipeline: the batch review sweep calls `apply_fields()` on
       each .bib file after verified metadata is returned. This
@@ -125,7 +125,7 @@ def save_baseline(violations: list[tuple[str, "Violation"]]) -> None:
                     "bib_lint allow-list: pre-existing violations grandfathered "
                     "at the time of the baseline. New violations NOT in this file "
                     "will block commits. Regenerate via: "
-                    "python3 book/tools/bib_lint.py --all --baseline"
+                    "python3 publishing/tools/bib_lint.py --all --baseline"
                 ),
                 "generated": "2026-04-08",
                 "allowed": entries,
@@ -159,9 +159,9 @@ def save_style_baseline(violations: list[tuple[str, "Violation"]]) -> None:
                     "bib_lint style allow-list: pre-existing warning/info "
                     "metadata debt grandfathered when the Binder bib style "
                     "ratchet was enabled. New warning/info issues NOT in this "
-                    "file will block `./book/binder check bib` with actionable "
+                    "file will block `./binder check bib` with actionable "
                     "suggestions. Regenerate only after reviewing or accepting "
-                    "current debt via: python3 book/tools/bib_lint.py --all "
+                    "current debt via: python3 publishing/tools/bib_lint.py --all "
                     "--style-baseline"
                 ),
                 "generated": "2026-06-14",

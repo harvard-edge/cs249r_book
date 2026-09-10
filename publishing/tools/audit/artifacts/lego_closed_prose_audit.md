@@ -34,8 +34,8 @@ classified closed vs open exports, scanned 48 chars after each `` `{python} *_st
 3. **`fmt_prose_contract`** owns percent/USD/mult; **`lego-prose-units`** owns SI/domain glyphs.
 4. Run both before push:
    ```bash
-   python3 book/tools/audit/book_check_lego_prose_units.py
-   python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+   python3 publishing/tools/audit/book_check_lego_prose_units.py
+   python3 publishing/tools/audit/fmt/fmt_prose_contract.py --root books
    pytest book/tests/test_lego_prose_units.py book/tests/test_fmt_prose_contract.py -q
    ```
 

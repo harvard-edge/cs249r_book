@@ -20,8 +20,8 @@ report means "go look here", not "stylistic nit". Read-only. Exit 1 if findings.
 
 Usage::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py <chapter.qmd> [-v]
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_prose_semantics.py --root books
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_prose_semantics.py <chapter.qmd> [-v]
 """
 from __future__ import annotations
 

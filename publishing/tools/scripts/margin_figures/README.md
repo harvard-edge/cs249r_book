@@ -2,11 +2,11 @@
 
 This directory is the source of truth for generated MLSysBook margin-figure SVGs.
 Generated assets live beside their chapters under
-`book/quarto/contents/<volume>/<chapter>/images/svg/`.
+`books/<volume>/<chapter>/images/svg/`.
 
 Production status: these tools are book production dependencies. The book
 depends on the generated SVGs, and those SVGs depend on this generation workflow
-plus the Book Tools modules under `book/tools/figures/`. Do not delete, move, or
+plus the Book Tools modules under `publishing/tools/figures/`. Do not delete, move, or
 rewrite these files without updating the generation workflow, QMD placements,
 audit records, and this README.
 
@@ -24,8 +24,8 @@ audit records, and this README.
 - `render_margin_contact_sheet.py` renders referenced margin SVGs into contact sheets for visual QA.
 
 Current organization: shared book figure style lives in
-`book/tools/figures/style.py`, and stable margin drawing devices live in
-`book/tools/figures/margin/devices.py`. This directory retains script
+`publishing/tools/figures/style.py`, and stable margin drawing devices live in
+`publishing/tools/figures/margin/devices.py`. This directory retains script
 entrypoints for generation, insertion, inventory, rendering, and compatibility.
 That keeps book-owned plotting policy out of `mlsysim` while preserving simple
 CLI commands for production work.
@@ -34,16 +34,16 @@ Related editorial rules and records:
 
 - `.claude/rules/margin-figures.md`
 - `.claude/rules/figure-visual-language.md`
-- `book/tools/audit/margin_figure_opportunities.yml`
-- `book/tools/audit/margin_figure_decisions.yml`
-- `book/tools/audit/margin_figure_style_audit.md`
+- `publishing/tools/audit/margin_figure_opportunities.yml`
+- `publishing/tools/audit/margin_figure_decisions.yml`
+- `publishing/tools/audit/margin_figure_style_audit.md`
 
 ## Generate
 
 Run from the repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mplconfig python3 book/tools/scripts/margin_figures/generate_margin_figures.py
+MPLCONFIGDIR=/tmp/mplconfig python3 publishing/tools/scripts/margin_figures/generate_margin_figures.py
 ```
 
 Do not hand-edit generated SVGs. Change the Python source, regenerate, then check
@@ -60,7 +60,7 @@ labels, or style decisions rather than timestamps and random clip-path ids.
 2. Search for the asset stem in `generate_margin_figures.py`.
 3. Change the figure-specific values, labels, or device call there.
 4. If the same label-placement or geometry issue affects a whole device family,
-   change `book/tools/figures/margin/devices.py` instead.
+   change `publishing/tools/figures/margin/devices.py` instead.
 5. Regenerate the SVGs and inspect a contact sheet.
 6. Update the QMD caption or `fig-alt` only when the prose takeaway or objective
    accessibility description changes.
@@ -75,7 +75,7 @@ block rather than the Python.
 Render a volume contact sheet:
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_contact_sheet.py \
+python3 publishing/tools/scripts/margin_figures/render_margin_contact_sheet.py \
   --volume vol1 \
   --output /tmp/mlsysbook-vol1-margin-sheet.png
 ```
@@ -83,15 +83,15 @@ python3 book/tools/scripts/margin_figures/render_margin_contact_sheet.py \
 Render a chapter or a few explicit SVGs:
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_contact_sheet.py \
+python3 publishing/tools/scripts/margin_figures/render_margin_contact_sheet.py \
   --chapter vol2/inference \
   --output /tmp/mlsysbook-inference-margin-sheet.png
 ```
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_contact_sheet.py \
-  --svg book/quarto/contents/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg \
-  --svg book/quarto/contents/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg \
+python3 publishing/tools/scripts/margin_figures/render_margin_contact_sheet.py \
+  --svg books/vol2/network_fabrics/images/svg/network_fabrics_physical_reach_ladder.svg \
+  --svg books/vol2/responsible_ai/images/svg/responsible_ai_representation_tax_ladder.svg \
   --output /tmp/mlsysbook-margin-focused-sheet.png
 ```
 
@@ -174,7 +174,7 @@ visibly cliff.
 Audit caption/prose alignment from the repository root:
 
 ```bash
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --markdown /tmp/mlsysbook-caption-alignment.md \
   --csv /tmp/mlsysbook-caption-alignment.csv
 ```
@@ -182,7 +182,7 @@ python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
 To focus the editorial pass on likely issues:
 
 ```bash
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --review-only \
   --markdown /tmp/mlsysbook-caption-alignment-review.md
 ```
@@ -191,7 +191,7 @@ For a stricter "does the narrative, figure, and caption click together" pass,
 raise the review threshold:
 
 ```bash
-python3 book/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
+python3 publishing/tools/scripts/margin_figures/audit_margin_caption_alignment.py \
   --review-threshold 0.30 \
   --review-only \
   --markdown /tmp/mlsysbook-caption-alignment-strict-review.md
@@ -206,28 +206,28 @@ For an inspectable reader-link packet that answers "where is this figure placed,
 what prose is it supporting, and what does the visual encode?", run:
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_reader_link_audit.py
+python3 publishing/tools/scripts/margin_figures/render_margin_reader_link_audit.py
 ```
 
 The default output is
-`book/tools/audit/margin_figure_reader_link_audit.md`. Each entry embeds the SVG,
+`publishing/tools/audit/margin_figure_reader_link_audit.md`. Each entry embeds the SVG,
 shows the exact QMD `.column-margin` source excerpt, records the caption and
 `fig-alt`, and quotes the nearest prose before and after the margin block. This
 is the preferred evidence artifact for editor and LLM-style review.
 
 The corresponding author-facing verdict record is
-`book/tools/audit/margin_figure_reader_alignment_verdicts.md`. It summarizes the
+`publishing/tools/audit/margin_figure_reader_alignment_verdicts.md`. It summarizes the
 same 224 placements with a pass/fix reader-alignment verdict and a compact prose
 anchor for each figure.
 
 For a browser-readable version of the same audit, run:
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_reader_alignment_html.py
+python3 publishing/tools/scripts/margin_figures/render_margin_reader_alignment_html.py
 ```
 
 The default output is
-`book/tools/audit/margin_figure_reader_alignment.html`. Open this file directly
+`publishing/tools/audit/margin_figure_reader_alignment.html`. Open this file directly
 in a browser to review each figure as a card with the SVG, caption, source QMD
 line, strongest prose anchor, `fig-alt`, and expandable placement context. The
 preview SVGs are embedded into the HTML so the page works from `file://` without
@@ -240,23 +240,23 @@ audit without reading the markdown packet linearly.
 List the actual SVG margin figures currently placed in the book:
 
 ```bash
-python3 book/tools/scripts/margin_figures/inventory_margin_figures.py
+python3 publishing/tools/scripts/margin_figures/inventory_margin_figures.py
 ```
 
 Useful targeted checks:
 
 ```bash
-python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+python3 publishing/tools/scripts/margin_figures/inventory_margin_figures.py \
   --chapter vol2/data_storage
 ```
 
 ```bash
-python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+python3 publishing/tools/scripts/margin_figures/inventory_margin_figures.py \
   --untracked-only
 ```
 
 ```bash
-python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+python3 publishing/tools/scripts/margin_figures/inventory_margin_figures.py \
   --format csv \
   --output /tmp/mlsysbook-margin-figures.csv
 ```
@@ -271,7 +271,7 @@ Margin SVGs should have outlined text so the HTML and PDF builds do not depend o
 font availability:
 
 ```bash
-rg -n '<text|font-family|font-size' book/quarto/contents/vol*/**/images/svg/*.svg
+rg -n '<text|font-family|font-size' books/vol*/**/images/svg/*.svg
 ```
 
 For generated margin SVGs, this command should not report live text/font-family

@@ -29,7 +29,7 @@ These tell each project's workflows where its source lives.
 | `TINYTORCH_ROOT` | `tinytorch` | (existing — pre-cutover) |
 | `TINYTORCH_SITE` | `tinytorch/quarto` | tinytorch-publish-live |
 | `BOOK_ROOT` | `book` | (existing — pre-cutover) |
-| `BOOK_QUARTO` | `book/quarto` | (existing — pre-cutover) |
+| `BOOK_QUARTO` | `books/` | (existing — pre-cutover) |
 | `MLSYSIM_ROOT` | `mlsysim` | mlsysim-publish-live, mlsysim-preview-dev |
 | `MLSYSIM_DOCS` | `mlsysim/docs` | same as above |
 | `KITS_ROOT` | `kits` | kits-publish-live |
@@ -72,9 +72,9 @@ completeness.
 
 | Variable | Current value |
 |---|---|
-| `BOOK_DEPS` | `book/tools/dependencies` |
+| `BOOK_DEPS` | `publishing/tools/dependencies` |
 | `BOOK_DOCKER` | `book/docker` |
-| `BOOK_TOOLS` | `book/tools` |
+| `BOOK_TOOLS` | `publishing/tools` |
 | `KITS_DOCS` | `kits` |
 | `LABS_DOCS` | `labs` |
 | `SLIDES_ROOT` | `slides` |
