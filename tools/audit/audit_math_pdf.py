@@ -3,7 +3,7 @@
 PDF math-rendering audit for MLSysBook chapters.
 
 For each chapter:
-  1. Builds a PDF via `./binder build pdf <vol>/<chap>`.
+  1. Builds a PDF via `./binder/binder build pdf <vol>/<chap>`.
      A build failure is itself a strong signal of a math-rendering bug
      (raw \\command outside math mode causes LaTeX to error out).
   2. Extracts text via `pdftotext` and applies the same leak-pattern
@@ -35,7 +35,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-BINDER = REPO / "bindery" / "binder"
+BINDER = REPO / "binder" / "binder"
 BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "pdf-vol1",
     # binder writes vol2 PDFs into the per-volume directory if it's

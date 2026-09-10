@@ -72,7 +72,7 @@ If the workflow fails with an OIDC error, Trusted Publishing has not been
 configured on pypi.org. Do this once:
 
 1. Sign in to <https://pypi.org/> as a maintainer of the `mlsysim` project.
-2. Go to <https://pypi.org/manage/account/bindery/>.
+2. Go to <https://pypi.org/manage/account/binder/>.
 3. Click **Add a new pending publisher** (or **Manage** for existing ones).
 4. Fill in:
 

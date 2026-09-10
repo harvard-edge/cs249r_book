@@ -19,7 +19,7 @@ All scripts are designed to run from the **repo root**.
 
 ```bash
 # HTML audit across the whole book (~10 minutes; Binder public API)
-./binder check math --scope render-audit
+./binder/binder check math --scope render-audit
 
 # Targeted script-level audit, useful while developing the audit itself
 python3 tools/audit/audit_math_rendering.py vol1/introduction vol2/inference

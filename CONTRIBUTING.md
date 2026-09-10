@@ -15,7 +15,7 @@ right place.
 
 | If you want to... | Project | Read this guide |
 |---|---|---|
-| Fix a typo, improve a chapter, add a figure | **Textbook** | [`bindery/docs/CONTRIBUTING.md`](bindery/docs/CONTRIBUTING.md) |
+| Fix a typo, improve a chapter, add a figure | **Textbook** | [`binder/docs/CONTRIBUTING.md`](binder/docs/CONTRIBUTING.md) |
 | Add or fix a TinyTorch module / test / milestone | **TinyTorch** | [`tinytorch/CONTRIBUTING.md`](tinytorch/CONTRIBUTING.md) |
 | Improve a hardware lab or board recipe | **Hardware Kits** | [`kits/README.md`](kits/README.md) |
 | Add or fix an interactive Co-Lab | **Labs** | [`labs/README.md`](labs/README.md) |
@@ -109,7 +109,7 @@ pre-commit for you as a convenience):
 
 | Project | Project-specific setup |
 |---|---|
-| Textbook | `./binder setup` (also installs Quarto / Java / epubcheck checks) |
+| Textbook | `./binder/binder setup` (also installs Quarto / Java / epubcheck checks) |
 | TinyTorch | `pip install -r tinytorch/requirements.txt && pip install -e tinytorch/` |
 | StaffML / vault-cli | `pip install -e staffml/vault-cli/[dev]` |
 | MLSys·im | `pip install -e mlsysim/[dev]` |
@@ -172,7 +172,7 @@ merges, a maintainer (or you, on your own PR) can comment:
 ```
 
 You'll be added to the project's recognition table in the README. See
-[`bindery/docs/CONTRIBUTING.md`](bindery/docs/CONTRIBUTING.md#contribution-types) for
+[`binder/docs/CONTRIBUTING.md`](binder/docs/CONTRIBUTING.md#contribution-types) for
 the full list of contribution types.
 
 ---

@@ -22,7 +22,7 @@ stale parallel source of truth and were not read directly by the book build.
 Useful command:
 
 ```bash
-./binder fix glossary paths
+./binder/binder fix glossary paths
 ```
 
 This prints the canonical glossary files that the book uses.
