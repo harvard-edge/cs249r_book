@@ -20,7 +20,7 @@ What it does
 ------------
 1. Walk a configurable set of roots (default: shared/, book/, kits/,
    labs/, mlsysim/docs/, slides/, instructors/, site/, tinytorch/,
-   interviews/staffml/) and hash every file matching the configured
+   staffml/app/) and hash every file matching the configured
    suffix list.
 2. Group files by hash.
 3. Report any group with >1 path that is NOT entirely contained in the
@@ -80,7 +80,7 @@ DEFAULT_EXCLUDES = [
 
 DEFAULT_ROOTS = [
     "shared", "book", "kits", "labs", "mlsysim/docs", "slides",
-    "instructors", "site", "tinytorch", "interviews/staffml",
+    "instructors", "site", "tinytorch", "staffml/app",
     ".github",
 ]
 

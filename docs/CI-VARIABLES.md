@@ -23,9 +23,9 @@ These tell each project's workflows where its source lives.
 
 | Variable | Current value | Used by |
 |---|---|---|
-| `STAFFML_ROOT` | `interviews/staffml` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev |
-| `VAULT_DIR` | `interviews/vault` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev, staffml-validate-vault |
-| `VAULT_CLI_DIR` | `interviews/vault-cli` | same as above |
+| `STAFFML_ROOT` | `staffml/app` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev |
+| `VAULT_DIR` | `staffml/vault` | staffml-publish-live, staffml-preview-dev, staffml-validate-dev, staffml-validate-vault |
+| `VAULT_CLI_DIR` | `staffml/vault-cli` | same as above |
 | `TINYTORCH_ROOT` | `tinytorch` | (existing — pre-cutover) |
 | `TINYTORCH_SITE` | `tinytorch/quarto` | tinytorch-publish-live |
 | `BOOK_ROOT` | `book` | (existing — pre-cutover) |
@@ -86,7 +86,7 @@ completeness.
 ## What's NOT vars-ified (and why)
 
 - **`paths:` trigger filters** in workflows (the lists like
-  `'interviews/staffml/**'` at the top of `*-validate-dev.yml`).
+  `'staffml/app/**'` at the top of `*-validate-dev.yml`).
   GitHub Actions evaluates these at workflow-load time, *before* vars
   are resolved. If you rename a project root, update the trigger
   filters by hand. The trigger filter is the only thing left in those
@@ -104,8 +104,8 @@ completeness.
   mlsysim's Merkle hash output is sensitive to the Python version,
   and we don't want a generic `vars.PYTHON_VERSION` bump to silently
   invalidate hash equivalence.
-- **`interviews/staffml-vault-worker/`, `interviews/paper/`** — these
-  are sibling top-level projects under `interviews/`, not subpaths
+- **`staffml/vault-worker/`, `staffml/paper/`** — these
+  are sibling top-level projects under `staffml/`, not subpaths
   of `STAFFML_ROOT`. Renaming `STAFFML_ROOT` should NOT cascade to
   them, so they stay literal.
 
@@ -128,7 +128,7 @@ completeness.
 
 ## How to change a value
 
-If you want to rename something (e.g. move `interviews/staffml` to a
+If you want to rename something (e.g. move `staffml/app` to a
 new location):
 
 1. Rename the directory in the source tree.
