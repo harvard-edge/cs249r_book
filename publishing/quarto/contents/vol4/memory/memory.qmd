@@ -128,11 +128,41 @@ Crucially, as the ray traverses free space from the sensor to the obstacle, the 
 
 For closed-loop trajectory optimization and reactive grasping, discrete occupancy grids are insufficient because they lack continuous spatial derivatives. Physical AI systems employ **truncated signed distance fields (TSDFs)** [@curless1996volumetric; @newcombe2011kinectfusion; @oleynikova2017voxblox].[^fn-math-tsdf-fusion] Tri-linear interpolation across adjacent TSDF voxel vertices yields exact continuous spatial distance metrics and analytical spatial gradients. Gradient-based motion planners utilize this continuous derivative to evaluate collision cost gradients, pushing trajectory waypoints smoothly out of obstacle boundaries.
 
-Moving beyond fixed voxel lattices, **3D Gaussian splatting (3DGS)** [@kerbl20233d; @matsuki2024gaussian] provides continuous, spatially indexed, and differentiable spatial memory. A scene is represented as a collection of explicit anisotropic 3D ellipsoidal Gaussians.[^fn-math-3dgs-splatting] During robot operation, online spatial memory updates optimize Gaussian parameters in real time via tile-based differentiable rasterization and gradient backpropagation under combined photometric and geometric depth losses. Gaussians are adaptively densified in under-reconstructed areas and pruned in empty regions, enabling real-time photorealistic novel-view synthesis and continuous collision querying without the memory explosion of uniform volumetric grids (@fig-3dgs-slam-splatam and @tbl-09-spatial-rep).
+Moving beyond fixed voxel lattices, **3D Gaussian splatting (3DGS)** [@kerbl20233d; @matsuki2024gaussian] provides continuous, spatially indexed, and differentiable spatial memory. A scene is represented as a collection of explicit anisotropic 3D ellipsoidal Gaussians.[^fn-math-3dgs-splatting] During robot operation, online spatial memory updates optimize Gaussian parameters in real time via tile-based differentiable rasterization and gradient backpropagation under combined photometric and geometric depth losses. Gaussians are adaptively densified in under-reconstructed areas and pruned in empty regions, enabling real-time photorealistic novel-view synthesis and continuous collision querying without the memory explosion of uniform volumetric grids (@fig-3dgs-slam-splatam and @tbl-09-spatial-rep). The choice between these representations is a choice of growth exponent, not of implementation detail. @Fig-09-volumetric-memory-scaling puts the three side by side across resolution, and the vertical distance between them at high resolution is the difference between a map that fits on the robot and one that does not.
 
 [^fn-math-tsdf-fusion]: For any spatial query point $\mathbf{x} \in \mathbb{R}^3$, let $\pi(\mathbf{x})$ denote the camera pinhole perspective projection and $\mathbf{p}_{\text{cam}}$ the optical center. The projective signed distance is $D(\mathbf{x}) = (\mathbf{x} - \mathbf{p}_{\text{cam}})_z - z_{\text{depth}}(\pi(\mathbf{x}))$. Truncating by distance metric margin $\mu$ yields normalized signed distance $d(\mathbf{x}) = \max\left(-1, \min\left(1, D(\mathbf{x})/\mu\right)\right)$. Voxels integrate incoming frames through running weighted recursive fusion: $D_k(\mathbf{x}) = \frac{W_{k-1}(\mathbf{x}) D_{k-1}(\mathbf{x}) + w_k d_k(\mathbf{x})}{W_{k-1}(\mathbf{x}) + w_k}, \quad W_k(\mathbf{x}) = \min(W_{k-1}(\mathbf{x}) + w_k, W_{\max})$. Tri-linear interpolation yields exact continuous spatial distance metrics and analytical spatial gradients $\nabla d(\mathbf{x}) = \frac{\mathbf{x} - \mathbf{x}_{\text{surf}}}{\|\mathbf{x} - \mathbf{x}_{\text{surf}}\|}$, which allow gradient-based motion planners to evaluate collision cost gradients $\nabla_{\mathbf{x}} \mathcal{C}_{\text{coll}}(\mathbf{x}) = -\nabla d(\mathbf{x})$.
 
 [^fn-math-3dgs-splatting]: A scene is represented as a collection of $M$ explicit anisotropic 3D ellipsoidal Gaussians: $G_i(\mathbf{x}) = \exp\left( -\frac{1}{2} (\mathbf{x} - \boldsymbol{\mu}_i)^T \mathbf{\Sigma}_i^{-1} (\mathbf{x} - \boldsymbol{\mu}_i) \right)$ where center $\boldsymbol{\mu}_i \in \mathbb{R}^3$ and spatial covariance $\mathbf{\Sigma}_i = \mathbf{R}_i \mathbf{S}_i \mathbf{S}_i^T \mathbf{R}_i^T$ are parameterized by a unit quaternion $\mathbf{q}_i \in SO(3)$ and scale vector $\mathbf{s}_i \in \mathbb{R}^3$, accompanied by opacity $\alpha_i \in [0, 1]$ and spherical harmonics color coefficients $\mathbf{c}_i$. The photometric and geometric depth losses are given by $\mathcal{L} = (1 - \lambda) \|\mathbf{I} - \hat{\mathbf{I}}\|_1 + \lambda \mathcal{L}_{\text{D-SSIM}} + \lambda_d \|\mathbf{D} - \hat{\mathbf{D}}\|_1$.
+
+::: {#fig-09-volumetric-memory-scaling fig-env="figure" fig-pos="htb" fig-cap="**The Memory Wall of Discrete Volumetric Representations**: Memory footprint against spatial resolution for a dense voxel grid, a hierarchical octree, and continuous 3D Gaussian splatting. The three curves separate by orders of magnitude because they encode different things: the grid stores volume, the octree stores surface, and the splat representation stores only observed structure." fig-alt="Log-log chart of memory footprint against spatial resolution for three scene representations. The dense voxel grid grows cubically, the hierarchical octree grows quadratically, and continuous 3D Gaussian splatting stays flat, so the gap between them widens by orders of magnitude as resolution rises."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz
+
+data = pd.read_csv("data/volumetric_memory_scaling.csv")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+ax.plot(data['Resolution'], data['Dense_Grid_GB'], marker='o', linewidth=2.5, label='Dense Voxel Grid $\mathcal{O}(N^3)$', color='#d62728')
+ax.plot(data['Resolution'], data['Octree_GB'], marker='s', linewidth=2.5, label='Hierarchical Octree $\mathcal{O}(N^2)$', color='#1f77b4')
+ax.plot(data['Resolution'], data['Continuous_3DGS_GB'], marker='^', linewidth=2.5, label='Continuous 3DGS $\mathcal{O}(K)$', color='#2ca02c')
+
+ax.set_xscale('log', base=2)
+ax.set_yscale('log', base=10)
+
+ax.set_xlabel('Spatial Resolution (Voxels per Dimension)', fontsize=11, fontweight='bold')
+ax.set_ylabel('Memory Footprint (GB)', fontsize=11, fontweight='bold')
+ax.set_title('Spatial memory scaling vs. scene resolution', fontsize=12, fontweight='bold', pad=15)
+ax.legend(title='Representation Model', title_fontsize='11', fontsize='10')
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
 
 Beyond raw metric volumes and radiance fields, foundation-model-driven physical AI requires spatial memory to organize space into semantic hierarchies. The **3D dynamic scene graph (DSG)**, formulated by @rosinol2021kimera in Kimera, bridges metric SLAM with symbolic reasoning by structuring spatial memory into a five-layer hierarchical graph:
 

@@ -435,7 +435,43 @@ At each step, the accelerator's design reflects an important workload of its era
 
 The evolution also reveals a sobering procurement pattern for infrastructure planners: high-end accelerator generations can turn over faster than the facility that houses them. The V100 remained the flagship training GPU for approximately three years (2017--2020). The A100 held that position for roughly two years (2020--2022). Hopper and Blackwell continued that short-cadence pattern in the mid-2020s.
 
-The planning implication is that a data center built for accelerators must anticipate refresh cycles before the first rack arrives. Hardware refresh planning is therefore an integral part of the initial procurement decision, not an afterthought. @Tbl-gpu-evolution compresses that cadence into the major NVIDIA GPU generations and the interconnect and power changes that arrived with them.
+The planning implication is that a data center built for accelerators must anticipate refresh cycles before the first rack arrives. Hardware refresh planning is therefore an integral part of the initial procurement decision, not an afterthought. @Tbl-gpu-evolution compresses that cadence into the major NVIDIA GPU generations and the interconnect and power changes that arrived with them. Those three quantities do not scale together, and a facility sized against only one of them will be wrong about the other two. @Fig-gpu-scaling-trends separates them: compute grows twice as fast as bandwidth and more than five times as fast as power, so a rack refreshed for arithmetic can outrun both its memory system and its power budget.
+
+::: {#fig-gpu-scaling-trends fig-env="figure" fig-pos="htb" fig-cap="**Compute, bandwidth, and power scale at three different rates**: Peak compute, memory bandwidth, and thermal design power for NVIDIA data center accelerators, normalized to the V100. Compute rises 18$\times$, bandwidth 8.9$\times$, and TDP 3.3$\times$, so each generation buys arithmetic faster than it buys the bytes or the watts to feed it. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart with three series normalized to the V100: peak compute reaching 18 times, memory bandwidth 8.9 times, and thermal design power 3.3 times by the B200."}
+
+```{python}
+#| echo: false
+import pandas as pd
+from mlsysim import viz
+
+data = pd.read_csv("data/gpu_scaling_trends.csv")
+base = data.iloc[0]
+data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
+data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
+data["TDP"] = data["TDP_W"] / base["TDP_W"]
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.2))
+labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
+ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"],
+        linewidth=2, label="Peak compute")
+ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"],
+        linewidth=2, label="Memory bandwidth")
+ax.plot(labels, data["TDP"], marker="^", color=COLORS["GreenLine"],
+        linewidth=2, label="Thermal design power")
+
+for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+    ax.annotate(f'{data[col].iloc[-1]:.0f}x', xy=(len(data) - 1, data[col].iloc[-1]),
+                xytext=(6, 0), textcoords="offset points", va="center",
+                fontweight="bold", color=colour)
+
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
+ax.set_xlabel("NVIDIA data center accelerator")
+ax.legend(loc="upper left", frameon=False)
+ax.margins(x=0.12)
+fig.tight_layout()
+```
+
+:::
 
 A subtlety that affects fleet consistency is the **silicon lottery**\index{Silicon lottery!fleet consistency}—the manufacturing reality where microscopic variance in 4nm lithography produces a distribution of chip quality across each wafer. NVIDIA manages this yield curve through aggressive binning: dies capable of sustaining high clock frequencies at strictly controlled voltages under the full thermal design power (TDP) are designated as premium H100 SXM modules, while those with higher leakage currents or minor defects become H100 PCIe cards or are fused down to lower-tier products. Even within the top-tier SXM bin, the achievable boost clock varies based on silicon characteristics. In a synchronous training cluster, the collective communication primitives are blocked by the slowest participant. A single chip running 50 MHz below the fleet average can degrade the effective throughput of the entire cluster by 5--10 percent, which is why sophisticated fleet management systems track per-GPU performance metrics and quarantine underperforming silicon to inference pools where the impact of individual chip variance is less pronounced.
 

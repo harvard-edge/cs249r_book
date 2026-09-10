@@ -277,10 +277,47 @@ Treating the simulator as a development tool external to the machine is an archi
 
 :::
 
-Like any hardware subsystem, the simulator requires a formal interface contract defined at the first budgetable quantities. This contract specifies observation dimensions, action bounds, simulation time step $\Delta t$, transport latency between command issuance and physical actuation, actuator torque and current limits, sensor noise distributions, reset distributions, and termination conditions. If the simulator specifies an observation loop executing at $100\text{ Hz}$ with an assumed zero-delay sensor channel and Gaussian noise with variance $\sigma^2 = 1.0 \times 10^{-4}\text{ (rad/s)}^2$, the policy learns feedback gains tuned to those precise signal statistics. If the physical machine delivers those state observations at $100\text{ Hz}$ but with an unmodeled $15\text{ ms}$ bus transport delay, the phase margin built during training is depleted before the policy executes its first physical control cycle. As demonstrated in the robotic manipulation testbed in @fig-06-sim2real-dactyl, transferring a policy synthesized inside a numerical engine to physical hardware requires enforcing an exact match between the real sensor-actuator cage and its randomized simulated twin [@andrychowicz2020learning].
+Like any hardware subsystem, the simulator requires a formal interface contract defined at the first budgetable quantities. This contract specifies observation dimensions, action bounds, simulation time step $\Delta t$, transport latency between command issuance and physical actuation, actuator torque and current limits, sensor noise distributions, reset distributions, and termination conditions. If the simulator specifies an observation loop executing at $100\text{ Hz}$ with an assumed zero-delay sensor channel and Gaussian noise with variance $\sigma^2 = 1.0 \times 10^{-4}\text{ (rad/s)}^2$, the policy learns feedback gains tuned to those precise signal statistics. If the physical machine delivers those state observations at $100\text{ Hz}$ but with an unmodeled $15\text{ ms}$ bus transport delay, the phase margin built during training is depleted before the policy executes its first physical control cycle. As demonstrated in the robotic manipulation testbed in @fig-06-sim2real-dactyl, transferring a policy synthesized inside a numerical engine to physical hardware requires enforcing an exact match between the real sensor-actuator cage and its randomized simulated twin [@andrychowicz2020learning]. The interface contract matters because the thing behind it changed character. @Fig-06-simulation-scaling traces five orders of magnitude of throughput growth in twelve years, which is what turned the simulator from an offline validation tool into the primary source of training experience.
 
 ::: {#fig-06-sim2real-dactyl fig-env="figure" fig-pos="t" fig-cap="**Sim-to-Real Robotic Transfer Setup with Digital Twin Simulation**: OpenAI's Dactyl apparatus, a 24-DoF Shadow Hand inside a motion-capture cage beside the MuJoCo digital twin it was trained in [@andrychowicz2020learning]. Transfer is bought with domain randomization over friction, restitution, damping, actuator time constants, and lighting, which works by forcing the policy to treat unmodeled physical variation as noise rather than by making the simulator accurate. Attribution: @andrychowicz2020learning." fig-alt="Sim-to-Real Robotic Transfer Setup with Digital Twin Simulation. Authentic experimental apparatus for vision-based dexterous in-hand manipulation from OpenAI's Dactyl project [@andrychowicz2020learning]. (Left) The physical experimental cage housing a 24-DoF anthropomorphic Shadow Dexterous Hand, surrounded by 16 PhaseSpace infrared motion-tracking cameras and 3 Basler RGB cameras for ground-truth state validation and multi-view vision. (Right) The high-throughput MuJoCo simulated digital twin environment used to train reinforcement learning policies across billions of synthetic transitions. Robust sim-to-real transfer is achieved by applying extensive domain randomization over surface friction, restitution, joint damping, actuator time constants, visual lighting, and camera calibration parameters, forcing the neural policy to treat unmodeled physical variations as noise while operating within the supported deployment envelope. Attribution: @andrychowicz2020learning."}
 ![](images/jpg/fig06_real_sim2real_dactyl.jpg){width="95%"}
+:::
+
+::: {#fig-06-simulation-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical Scaling of Physics Simulation Throughput**: Simulation steps per second by year of introduction, from single-core CPU solvers in 2012 to tensorized GPU and TPU environments in 2024. The five-order-of-magnitude rise is what moved policy training from a sampling budget measured in weeks to one measured in hours." fig-alt="Log-scale line chart of physics simulation throughput in steps per second from 2012 to 2024. Single-core CPU simulators sit near two thousand steps per second, and GPU and TPU simulators reach roughly one billion, a rise of about six orders of magnitude."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz
+
+data = pd.read_csv("data/simulation_throughput_scaling.csv")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 5.5))
+ax.plot(data['year'], data['sps'], marker='o', linewidth=2.5, markersize=10, color='#2c3e50')
+
+for i in range(len(data)):
+    plt.annotate(
+        f"{data['simulator'].iloc[i]}\n({data['hardware'].iloc[i]})", 
+        (data['year'].iloc[i], data['sps'].iloc[i]), 
+        textcoords="offset points", 
+        xytext=(0,15), 
+        ha='center',
+        fontsize=9,
+        color='#34495e'
+    )
+                 
+plt.yscale('log')
+plt.xlabel('Year of Introduction', fontsize=12)
+plt.ylabel('Simulation Throughput (Steps per Second)', fontsize=12)
+plt.title('Hardware acceleration of physics simulation (2012–2024)', fontsize=14, pad=20)
+plt.grid(True, which="both", ls="--", alpha=0.4)
+ax.margins(x=0.14, y=0.14)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
 :::
 
 A clear distinction exists between an inaccurate parameter value and an omitted physical mechanism. When a simulator uses an inaccurate rotor inertia, assigning $J = 2.0 \times 10^{-3}\text{ kg}\cdot\text{m}^2$ instead of a true $2.5 \times 10^{-3}\text{ kg}\cdot\text{m}^2$, the equations of motion still compute an acceleration-dependent inertial torque. The parameter error alters the magnitude of the response, but the causal structure remains intact. When a simulator omits an entire physical mechanism, such as drive train backlash, structural compliance, or inter-channel communication jitter, the simulator does not set the corresponding physical effect to zero in a physically supported sense. It provides no mechanism at all. An omitted delay or compliance is unsupported.[^fn-inc-dactyl-friction] A policy trained in an environment with omitted joint compliance assumes infinite structural stiffness, discovering trajectory strategies that command instantaneous torque reversals that shatter gear teeth or excite high-frequency structural resonances on physical hardware.

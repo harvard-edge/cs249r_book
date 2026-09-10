@@ -750,7 +750,40 @@ For **Vision Models**\index{Vision Models}, including convolutional neural netwo
 
 For LLMs in the decode phase, computation per token is small relative to memory bandwidth requirements for loading model weights. The bottleneck is *memory bandwidth*, not *compute*. Larger batches amortize weight loading across more tokens, dramatically improving throughput but with diminishing returns as batch size grows.
 
-For recommendation systems, the bottleneck is often embedding lookup rather than dense computation. Batching strategies must optimize for parallel embedding access patterns rather than matrix multiplication throughput.
+For recommendation systems, the bottleneck is often embedding lookup rather than dense computation. Batching strategies must optimize for parallel embedding access patterns rather than matrix multiplication throughput. Decode therefore does not inherit the headline compute number. @Fig-gpu-memory-wall separates the two growth rates, and a token-by-token decode step tracks the slower one, which is why the same generational upgrade that doubles prefill throughput can leave decode nearly unchanged.
+
+::: {#fig-gpu-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Decode inherits the bandwidth deficit**: Peak compute and memory bandwidth for four accelerator generations, normalized to the V100. Compute rises 18$\times$ against bandwidth's 8.9$\times$, and because decode reads the full weight set once per token it advances at the lower of the two rates. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 showing peak compute reaching 18 times and memory bandwidth 8.9 times by the B200, the gap that bounds decode throughput."}
+
+```{python}
+#| echo: false
+import pandas as pd
+from mlsysim import viz
+
+data = pd.read_csv("data/gpu_memory_wall.csv")
+base = data.iloc[0]
+data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
+data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.2))
+labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
+ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"],
+        linewidth=2, label="Peak compute")
+ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"],
+        linewidth=2, label="Memory bandwidth")
+
+for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+    ax.annotate(f'{data[col].iloc[-1]:.0f}x', xy=(len(data) - 1, data[col].iloc[-1]),
+                xytext=(6, 0), textcoords="offset points", va="center",
+                fontweight="bold", color=colour)
+
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
+ax.set_xlabel("NVIDIA data center accelerator")
+ax.legend(loc="upper left", frameon=False)
+ax.margins(x=0.12)
+fig.tight_layout()
+```
+
+:::
 
 ### The physics of batching: The efficiency curve {#sec-inference-scale-physics-batching-efficiency-curve-021c}
 

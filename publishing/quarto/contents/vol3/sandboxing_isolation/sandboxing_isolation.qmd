@@ -376,7 +376,70 @@ MicroVMs combine the isolation strength of hardware-assisted virtualization with
 | **Legacy VM (QEMU)**          | Full PC Emulation        | `{python} SandboxBudget.qemu_boot_range_str` | `{python} SandboxBudget.qemu_mem_str`   | Full Hardware Hypervisor  | [Safe] Impractical at scale |
 : **Isolation Technologies Comparison**: Quantitative comparison of isolation mechanisms for autonomous agent execution runtimes. {#tbl-isolation-comparison}
 
-As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection. The sub-$100\text{ ms}$ startup bar stated at the opening of this section, and the "impractical at scale" verdict in the table's last row, both follow from a single accounting question: how often is a sandbox torn down and rebuilt inside one agent trajectory, and what does each rebuild cost against the work it contains.
+As summarized in @tbl-isolation-comparison, **MicroVMs represent the golden architectural standard for autonomous coding agents**. They provide full POSIX compatibility (running bash, pytest, git, and python unmodified) while guaranteeing hardware-enforced hypervisor protection. The sub-$100\text{ ms}$ startup bar stated at the opening of this section, and the "impractical at scale" verdict in the table's last row, both follow from a single accounting question: how often is a sandbox torn down and rebuilt inside one agent trajectory, and what does each rebuild cost against the work it contains. Isolation became affordable per tool call rather than per session only recently. @Fig-boot-latency-trend places each primitive against the sub-hundred-millisecond threshold, and the microVM generation is the first to sit below it while still running an unmodified POSIX toolchain.
+
+::: {#fig-boot-latency-trend fig-env="figure" fig-pos="htb" fig-cap="**The Evolution of Virtualization Boot Latency**: Cold-boot time by year of introduction, falling roughly five orders of magnitude from full virtual machines in 2001 to WebAssembly runtimes in 2022. Only the newest primitives clear the sub-hundred-millisecond band where per-call isolation costs less than the tool call it protects." fig-alt="Log-scale scatter of cold-boot latency against year of introduction for isolation primitives from full VMs in 2001 to WebAssembly runtimes in 2022, falling about five orders of magnitude. A shaded band marks the sub-hundred-millisecond agentic isolation target that only the newest primitives reach."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, NullFormatter
+from mlsysim import viz
+
+data = pd.read_csv("data/virtualization_boot_latency.csv")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+
+ax.plot(data["Year"], data["Boot_Latency_ms"], color="gray", alpha=0.7, linestyle="--")
+
+_groups = list(dict.fromkeys(data["Type"]))
+_cmap = plt.get_cmap('viridis', max(len(_groups), 2))
+for _i, _g in enumerate(_groups):
+    _sub = data[data["Type"] == _g]
+    ax.scatter(_sub["Year"], _sub["Boot_Latency_ms"], color=_cmap(_i), label=str(_g), s=120)
+
+ax.set_yscale("log")
+ax.set_ylabel("Cold-Boot Latency (ms)", fontsize=11, fontweight="bold")
+ax.set_xlabel("Year of Introduction", fontsize=11, fontweight="bold")
+ax.set_title("Evolution of sandbox startup latency (2001–2022)", fontsize=12, fontweight="bold", pad=15)
+
+for i in range(len(data)):
+    x = data["Year"].iloc[i]
+    y = data["Boot_Latency_ms"].iloc[i]
+    text = data["Technology"].iloc[i]
+    
+    y_offset = y * 1.4
+    if text == "runC (OCI)":
+        y_offset = y * 0.4
+    elif text == "gVisor":
+        y_offset = y * 1.5
+    elif text == "Wasmtime":
+        y_offset = y * 1.5
+        
+    ax.annotate(
+        text, 
+        (x, y),
+        xytext=(x, y_offset),
+        ha="center", 
+        fontsize=9,
+        color="#34495e"
+    )
+
+ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=10))
+ax.yaxis.set_minor_formatter(NullFormatter())
+
+ax.axhspan(0.1, 100, color="green", alpha=0.1, zorder=0)
+ax.text(2001.5, 20, "Agentic Isolation Target (< 100 ms)", color="green", fontweight="bold", fontsize=9)
+
+ax.legend(title="Isolation Primitive", title_fontsize="9", fontsize="8", loc="upper right")
+ax.margins(x=0.14, y=0.14)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
 
 ::: {#nbk-sandboxing-boot-budget .callout-notebook title="How fast a sandbox has to boot"}
 

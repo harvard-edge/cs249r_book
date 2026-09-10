@@ -409,11 +409,43 @@ To solve the search memory wall, modern agent serving runtimes must implement **
 
 **Math**: Without sharing, each branch stores its own full context of $8{,}000 + 1{,}000 = 9{,}000$ tokens, or $9{,}000 \times 0.3125\text{ MB} = 2.8125\text{ GB}$ per branch, so the budget holds $12.5/2.8125 = 4.44$, meaning $4$ branches. With sharing, the prefix is stored once at $2.5\text{ GB}$ and each branch adds only its $1{,}000$ divergent tokens at $0.3125\text{ GB}$, so the budget holds $(12.5 - 2.5)/0.3125 = 32$ branches.
 
-The saving therefore depends on width. At $B = 4$, independent allocation needs $4 \times 2.8125 = 11.25\text{ GB}$ against a shared $2.5 + 4 \times 0.3125 = 3.75\text{ GB}$, a $1 - 3.75/11.25 = 66.7\%$ reduction. At $B = 32$, independent allocation would need $32 \times 2.8125 = 90\text{ GB}$ against a shared $12.5\text{ GB}$, an $86.1\%$ reduction.
+The saving therefore depends on width. At $B = 4$, independent allocation needs $4 \times 2.8125 = 11.25\text{ GB}$ against a shared $2.5 + 4 \times 0.3125 = 3.75\text{ GB}$, a $1 - 3.75/11.25 = 66.7\%$ reduction. At $B = 32$, independent allocation would need $32 \times 2.8125 = 90\text{ GB}$ against a shared $12.5\text{ GB}$, an $86.1\%$ reduction. @Fig-search-kv-cache extends that arithmetic across the full width range, and the two curves diverge rather than offset: independent allocation crosses the capacity limit while sharing is still climbing gently, which is why prefix sharing behaves as a discount that grows with the width it makes affordable.
 
 **Result**: The same $12.5\text{ GB}$ holds $4$ independent branches or $32$ shared ones, an $8\times$ increase in search width, and the memory saving climbs from $66.7\%$ at four branches to $86.1\%$ at thirty-two.
 
 **Systems insight**: Prefix sharing is not a fixed discount on KV memory. It is a discount that grows with the very width it makes affordable, because the prefix is paid for once no matter how many branches read it. Capacity planning for a search runtime should therefore budget one prefix plus a per-branch delta, which makes the ceiling on search width a function of how far branches diverge rather than of how long the prompt is.
+
+:::
+
+::: {#fig-search-kv-cache fig-env="figure" fig-pos="htb" fig-cap="**KV-Cache Memory Scaling in Multi-Branch Search**: Total KV-cache footprint against search width for independent allocation and radix prefix sharing, on a 70B model with an 8,000-token prefix. Independent allocation crosses the 40 GB capacity limit at about fourteen branches while sharing stays beneath it past one hundred, because the shared prefix is paid for once regardless of width." fig-alt="Two-line chart of total KV-cache memory against number of concurrent search branches. Independent allocation rises linearly to about three hundred sixty gigabytes while radix prefix sharing stays near forty, and a dashed line marks the forty-gigabyte capacity limit that only independent allocation crosses."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz
+
+data = pd.read_csv("data/kv_cache_scaling.csv")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+ax.plot(data['branches'], data['naive_memory_gb'], linewidth=2.5, color='#e74c3c', label='Independent Allocation (Naive)')
+ax.plot(data['branches'], data['radix_memory_gb'], linewidth=2.5, color='#2ecc71', label='Radix Prefix Sharing (CoW)')
+
+# Overlay a typical KV-cache capacity limit (e.g., 40 GB on an 80 GB A100 after weights)
+ax.axhline(40, color='gray', linestyle='--', linewidth=1.5, label='40 GB KV-Cache Capacity Limit')
+
+ax.set_title("KV-cache memory scaling for test-time search (70B model)")
+ax.set_xlabel("Number of Concurrent Search Branches (Width)")
+ax.set_ylabel("Total KV-Cache Memory Allocation (GB)")
+ax.set_xlim(1, 128)
+ax.set_ylim(0, 380)
+ax.grid(True, linestyle='--', alpha=0.7)
+ax.legend(loc='upper left')
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
 
 :::
 
