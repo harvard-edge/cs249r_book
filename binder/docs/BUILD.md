@@ -623,7 +623,7 @@ Once everything is set up, you'll be able to:
 - 🧹 **Clean up artifacts**: `./binder/binder clean`
 
 ### Contributing
-- 📝 **Make edits** to chapter content in `quarto/contents/`
+- 📝 **Make edits** to chapter content in `books/volN/`
 - ✅ **Test locally** before committing
 - 🤝 **Follow best practices** with pre-commit hooks
 - 💪 **Contribute like a pro** to the open-source book
