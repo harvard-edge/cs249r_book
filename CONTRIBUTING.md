@@ -15,13 +15,13 @@ right place.
 
 | If you want to... | Project | Read this guide |
 |---|---|---|
-| Fix a typo, improve a chapter, add a figure | **Textbook** | [`book/docs/CONTRIBUTING.md`](book/docs/CONTRIBUTING.md) |
+| Fix a typo, improve a chapter, add a figure | **Textbook** | [`binder/docs/CONTRIBUTING.md`](binder/docs/CONTRIBUTING.md) |
 | Add or fix a TinyTorch module / test / milestone | **TinyTorch** | [`tinytorch/CONTRIBUTING.md`](tinytorch/CONTRIBUTING.md) |
 | Improve a hardware lab or board recipe | **Hardware Kits** | [`kits/README.md`](kits/README.md) |
 | Add or fix an interactive Co-Lab | **Labs** | [`labs/README.md`](labs/README.md) |
 | Contribute an MLSys·im model, scenario, or scorecard | **MLSys·im** | [`mlsysim/docs/contributing.qmd`](mlsysim/docs/contributing.qmd) |
 | Add a workload to the MLPerf EDU benchmark suite | **MLPerf EDU** | [`mlperf-edu/README.md`](mlperf-edu/README.md) |
-| Author or fix a StaffML interview question | **StaffML** | [`interviews/CONTRIBUTING.md`](interviews/CONTRIBUTING.md) |
+| Author or fix a StaffML interview question | **StaffML** | [`staffml/CONTRIBUTING.md`](staffml/CONTRIBUTING.md) |
 | Improve teaching materials, syllabi, or rubrics | **Instructors** | [`instructors/README.md`](instructors/README.md) |
 | Update slides for a chapter | **Slides** | [`slides/README.md`](slides/README.md) |
 | Change the unified landing site, newsletter wiring, or games | **Site** | [`site/README.md`](site/README.md) |
@@ -61,10 +61,10 @@ README. Each links to the canonical doc rather than restating it.
   (`bundle.js`, `corpus.json`, search indexes) are gitignored — regenerate
   them locally rather than committing.
 * **Where each area lives** — the table above is the authoritative map.
-  At a glance: `book/` for the textbook, `tinytorch/` for the framework,
+  At a glance: `books/` for the textbook, `tinytorch/` for the framework,
   `labs/` for browser labs, `kits/` for hardware recipes, `mlsysim/` for
   the simulator, `instructors/` for teaching materials, `slides/` for
-  per-chapter decks, `interviews/` for StaffML, `site/` for the unified
+  per-chapter decks, `staffml/` for StaffML, `site/` for the unified
   landing and newsletter.
 
 ## Universal policies (apply to every project)
@@ -109,12 +109,12 @@ pre-commit for you as a convenience):
 
 | Project | Project-specific setup |
 |---|---|
-| Textbook | `./book/binder setup` (also installs Quarto / Java / epubcheck checks) |
+| Textbook | `./binder/binder setup` (also installs Quarto / Java / epubcheck checks) |
 | TinyTorch | `pip install -r tinytorch/requirements.txt && pip install -e tinytorch/` |
-| StaffML / vault-cli | `pip install -e interviews/vault-cli/[dev]` |
+| StaffML / vault-cli | `pip install -e staffml/vault-cli/[dev]` |
 | MLSys·im | `pip install -e mlsysim/[dev]` |
 | MLPerf EDU | `pip install -e mlperf-edu/[dev]` |
-| StaffML site | `cd interviews/staffml && npm install` |
+| StaffML site | `cd staffml/app && npm install` |
 
 See each sub-project's CONTRIBUTING / README for the full development loop.
 
@@ -124,7 +124,7 @@ Do **not** use `git add .` — it's easy to commit unrelated edits, secrets, or
 build artifacts. Stage paths individually:
 
 ```bash
-git add book/quarto/contents/vol1/introduction/introduction.qmd
+git add books/vol1/introduction/introduction.qmd
 git commit -m "Fix caption formatting in introduction (issue #14)"
 ```
 
@@ -172,7 +172,7 @@ merges, a maintainer (or you, on your own PR) can comment:
 ```
 
 You'll be added to the project's recognition table in the README. See
-[`book/docs/CONTRIBUTING.md`](book/docs/CONTRIBUTING.md#contribution-types) for
+[`binder/docs/CONTRIBUTING.md`](binder/docs/CONTRIBUTING.md#contribution-types) for
 the full list of contribution types.
 
 ---

@@ -1,1 +1,0 @@
-../../../quarto/tools/scripts/socratiQ/bundle.js

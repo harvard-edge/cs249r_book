@@ -142,9 +142,6 @@ follow-up task.
 
 ## Out of scope (today)
 
-- **Periodic-Table** — no publish workflow exists; we'd be adding
-  versioning to a project that doesn't deploy. Establish publishing
-  first.
 - **Reusable build orchestration** — the reusable workflow only does
   prepare. Each project keeps its own build/test/deploy because those
   steps are project-specific (Quarto vs Next.js vs Marimo). Trying to
@@ -181,12 +178,12 @@ shared/release/release-card.html                ← about-page snippet
 .github/workflows/instructors-publish-live.yml
 
 # Per-project Quarto/Next config: meta tag + pill include
-interviews/staffml/src/components/Footer.tsx    ← StaffML uses build-time bake
+staffml/app/src/components/Footer.tsx    ← StaffML uses build-time bake
 tinytorch/quarto/_quarto.yml
-book/quarto/config/_quarto-html-vol1.yml
-book/quarto/config/_quarto-html-vol2.yml
-mlsysim/docs/config/_quarto-html.yml
-kits/config/_quarto-html.yml
-labs/config/_quarto-html.yml
+books/config/_quarto-html-vol1.yml
+books/config/_quarto-html-vol2.yml
+mlsysim/docs/_quarto.yml
+kits/_quarto.yml
+labs/_quarto.yml
 instructors/_quarto.yml
 ```

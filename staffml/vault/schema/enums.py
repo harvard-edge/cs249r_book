@@ -1,0 +1,222 @@
+"""Single source of truth for Python enum values.
+
+These values mirror ``question_schema.yaml`` (LinkML). That file is the
+canonical schema; this module exists only to provide Python-importable
+constants for validators and typed models that can't read LinkML directly.
+
+Any change here MUST be mirrored in question_schema.yaml and vice versa.
+A CI drift check verifies the two stay in sync (see tools/check_schema_sync.py).
+
+Schema version: 1.0
+"""
+
+from __future__ import annotations
+
+# ─── 4-axis classification ──────────────────────────────────────────────────
+
+VALID_TRACKS: frozenset[str] = frozenset({
+    "tinyml", "edge", "mobile", "cloud", "global",
+})
+
+VALID_LEVELS: frozenset[str] = frozenset({
+    "L1", "L2", "L3", "L4", "L5", "L6+",
+})
+
+VALID_ZONES: frozenset[str] = frozenset({
+    # Pure zones (single skill)
+    "recall", "analyze", "design", "implement",
+    # Compound zones (two skills)
+    "fluency", "diagnosis", "specification",
+    "optimization", "evaluation", "realization",
+    # Mastery (all four skills)
+    "mastery",
+})
+
+VALID_BLOOM_LEVELS: frozenset[str] = frozenset({
+    "remember", "understand", "apply", "analyze", "evaluate", "create",
+})
+
+VALID_PHASES: frozenset[str] = frozenset({
+    "training", "inference", "both",
+})
+
+VALID_STATUSES: frozenset[str] = frozenset({
+    "draft",       # authored but not yet ready for users
+    "published",   # live in the corpus
+    "flagged",     # under review; surface to authors not users
+    "archived",    # retired but content preserved for history
+    "deleted",     # soft-deleted; paired with deletion_reason field
+})
+
+VALID_PROVENANCES: frozenset[str] = frozenset({
+    "human", "llm-draft", "llm-then-human-edited", "imported",
+})
+
+VALID_HUMAN_REVIEW_STATUSES: frozenset[str] = frozenset({
+    "not-reviewed", "verified", "flagged", "needs-rework",
+})
+
+# ─── Competency areas (paper §4) ────────────────────────────────────────────
+
+VALID_COMPETENCY_AREAS: frozenset[str] = frozenset({
+    "compute", "memory", "latency", "precision", "power",
+    "architecture", "optimization", "parallelism", "networking",
+    "deployment", "reliability", "data", "cross-cutting",
+})
+
+# ─── Curated topics (paper §4; 87 as of v1.0) ───────────────────────────────
+# The original paper specified 79; v1.0 adds 8 topics that already had
+# substantive corpus coverage but were missing from the curated list:
+# autograd-computational-graphs, chiplet-architecture,
+# communication-computation-overlap, disaggregated-serving,
+# model-adaptation-systems, recommendation-systems-engineering,
+# software-portability, sustainability-carbon-accounting.
+
+VALID_TOPICS: frozenset[str] = frozenset({
+    # compute (6)
+    "roofline-analysis", "gpu-compute-architecture", "accelerator-comparison",
+    "mcu-compute-constraints", "systolic-dataflow", "compute-cost-estimation",
+    # memory (8)
+    "vram-budgeting", "kv-cache-management", "memory-hierarchy-design",
+    "activation-memory", "memory-mapped-inference", "tensor-arena-planning",
+    "dma-data-movement", "memory-pressure-management",
+    # latency (6)
+    "latency-decomposition", "batching-strategies", "tail-latency",
+    "real-time-deadlines", "profiling-bottleneck-analysis", "queueing-theory",
+    # precision (3)
+    "quantization-fundamentals", "mixed-precision-training", "extreme-quantization",
+    # power (5)
+    "power-budgeting", "thermal-management", "energy-per-operation",
+    "duty-cycling", "datacenter-efficiency",
+    # architecture (7)
+    "transformer-systems-cost", "cnn-efficient-design", "attention-scaling",
+    "mixture-of-experts", "model-size-estimation", "neural-architecture-search",
+    "encoder-decoder-tradeoffs",
+    # optimization (7)
+    "pruning-sparsity", "knowledge-distillation", "kernel-fusion",
+    "graph-compilation", "operator-scheduling", "flash-attention",
+    "speculative-decoding",
+    # parallelism (6)
+    "data-parallelism", "model-tensor-parallelism", "pipeline-parallelism",
+    "3d-parallelism", "gradient-synchronization", "scheduling-resource-management",
+    # networking (6)
+    "collective-communication", "interconnect-topology",
+    "network-bandwidth-bottlenecks", "rdma-transport", "load-balancing",
+    "congestion-control",
+    # deployment (7)
+    "model-serving-infrastructure", "mlops-lifecycle", "ota-firmware-updates",
+    "container-orchestration", "model-format-conversion", "ab-rollout-strategies",
+    "compound-ai-systems",
+    # reliability (6)
+    "fault-tolerance-checkpointing", "distribution-drift-detection",
+    "graceful-degradation", "safety-certification", "adversarial-robustness",
+    "monitoring-observability",
+    # data (7)
+    "data-pipeline-engineering", "feature-store-management",
+    "data-quality-validation", "dataset-curation", "streaming-ingestion",
+    "storage-format-selection", "data-efficiency-selection",
+    # cross-cutting (5)
+    "federated-learning", "differential-privacy", "fairness-evaluation",
+    "responsible-ai", "tco-cost-modeling",
+    # additions (8)
+    "autograd-computational-graphs", "chiplet-architecture",
+    "communication-computation-overlap", "disaggregated-serving",
+    "model-adaptation-systems", "recommendation-systems-engineering",
+    "software-portability", "sustainability-carbon-accounting",
+})
+
+
+# ─── Zone-level affinity (paper §3.3 Table 2) ───────────────────────────────
+# Each zone has a natural level range. A question outside this range is not
+# necessarily wrong but should be reviewed. Used by `vault lint` to emit
+# soft-constraint warnings (paper line 397).
+
+ZONE_LEVEL_AFFINITY: dict[str, set[str]] = {
+    # Widened 2026-04-25 per expert consensus
+    # (staffml/vault/docs/lint_calibration/consensus.yaml + user arbitration).
+    # Each zone admits the levels that experts agreed are pedagogically
+    # meaningful for that zone × level pairing.
+    #
+    # Phase B post-generation widening (2026-04-25, second pass):
+    # B.5's loop targeted under-filled cells the analyzer flagged as
+    # gaps. The judge passed items at extreme-edge (zone, level) pairs
+    # that the consensus rule didn't cover (e.g. realization@L1 for
+    # scaffolded firmware build tasks; recall@L5 for staff-level
+    # foundational-reference recall; mastery@L2-L3 for associate-level
+    # integrative tasks). Widening to admit these — they have <10
+    # supporting items each, all judge-PASS, all internally consistent
+    # via the ZONE_BLOOM_AFFINITY matrix.
+    "recall":         {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "fluency":        {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "analyze":        {"L2", "L3", "L4", "L5", "L6+"},
+    "diagnosis":      {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "design":         {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "specification":  {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "optimization":   {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "evaluation":     {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "realization":    {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "mastery":        {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "implement":      {"L1", "L2", "L3", "L4", "L5", "L6+"},
+}
+
+
+# v0.1.2: zone × bloom_level compatibility matrix (HARD constraint).
+#
+# Each zone implies a cognitive verb. The bloom_level field is the
+# canonical Bloom's-taxonomy verb the question demands. When zone and
+# bloom_level disagree (e.g. zone=recall + bloom=evaluate), the
+# question's classification literally contradicts itself — one of the
+# two fields is wrong.
+#
+# Built per the Education-Reviewer recommendation (lint-calibration
+# 2026-04-25, expert consensus): use this matrix to deterministically
+# identify mistagged questions and reclassify by trusting bloom_level.
+# Rule design: each zone admits its dominant bloom + adjacent verbs in
+# Bloom's hierarchy (remember < understand < apply < analyze < evaluate
+# < create), but rejects clear hierarchy violations (e.g. mastery +
+# remember, evaluation + remember).
+
+ZONE_BLOOM_AFFINITY: dict[str, set[str]] = {
+    "recall":         {"remember", "understand"},
+    "fluency":        {"remember", "understand", "apply"},
+    "analyze":        {"apply", "analyze"},
+    "diagnosis":      {"apply", "analyze", "evaluate"},
+    "design":         {"apply", "analyze", "evaluate", "create"},
+    "specification":  {"apply", "analyze", "evaluate", "create"},
+    "optimization":   {"apply", "analyze", "evaluate", "create"},
+    "evaluation":     {"analyze", "evaluate"},
+    "realization":    {"apply", "analyze", "evaluate", "create"},
+    "mastery":        {"analyze", "evaluate", "create"},
+    "implement":      {"understand", "apply", "analyze", "evaluate", "create"},
+}
+
+
+# Bloom → canonical zone fallback used when a (zone, bloom) pair
+# violates ZONE_BLOOM_AFFINITY. Picks the most direct zone for each
+# bloom verb. Used by reclassification scripts; NOT used by validators.
+
+BLOOM_CANONICAL_ZONE: dict[str, str] = {
+    "remember":   "recall",
+    "understand": "fluency",
+    "apply":      "implement",
+    "analyze":    "analyze",
+    "evaluate":   "evaluation",
+    "create":     "design",
+}
+
+
+__all__ = [
+    "VALID_TRACKS",
+    "VALID_LEVELS",
+    "VALID_ZONES",
+    "VALID_BLOOM_LEVELS",
+    "VALID_PHASES",
+    "VALID_STATUSES",
+    "VALID_PROVENANCES",
+    "VALID_HUMAN_REVIEW_STATUSES",
+    "VALID_COMPETENCY_AREAS",
+    "VALID_TOPICS",
+    "ZONE_LEVEL_AFFINITY",
+    "ZONE_BLOOM_AFFINITY",
+    "BLOOM_CANONICAL_ZONE",
+]

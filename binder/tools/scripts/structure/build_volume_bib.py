@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Build a self-contained references-<vol>.bib for a volume.
+
+Volumes I and II share contents/references.bib. Volumes III and IV each carry
+their own bibliography so the set of sources a new volume rests on can be read
+and checked on its own, without 1,500 unrelated entries in the way.
+
+The invariant this maintains, in both directions:
+
+    every entry in references-<vol>.bib is cited by that volume, and
+    every citation in that volume resolves in references-<vol>.bib
+
+Entry text is copied verbatim from the source bibliography so field formatting,
+DOIs, and URLs stay byte-identical to what was reviewed there.
+
+    python3 binder/tools/scripts/structure/build_volume_bib.py vol3
+    python3 binder/tools/scripts/structure/build_volume_bib.py vol3 --check
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[4]
+CONTENTS = REPO / "books"
+
+# Volumes with a dedicated bibliography. vol1/vol2 deliberately share the
+# main references.bib and are not built by this script.
+DEDICATED = ("vol3", "vol4")
+
+# A pandoc citation key. Crossref prefixes share the @ sigil and are excluded.
+CITE = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z][A-Za-z0-9_:.#$%&+?<>~/-]*)")
+CROSSREF = re.compile(
+    r"^(sec|fig|tbl|eq|lst|algo|pri|nbk|dfn|exmp|lhs|psp|thrm|chk|cs|ws)-", re.I
+)
+ENTRY_HEAD = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+
+
+def cited_keys(vol: str) -> Counter:
+    """Citation keys used by a volume, ignoring fenced code and crossrefs."""
+    found: Counter = Counter()
+    for qmd in sorted((CONTENTS / vol).rglob("*.qmd")):
+        text = strip_fenced_blocks(qmd.read_text(encoding="utf-8", errors="ignore"))
+        for m in CITE.finditer(text):
+            key = m.group(1).rstrip(".,;:)")
+            if len(key) < 4 or CROSSREF.match(key):
+                continue
+            found[key] += 1
+    return found
+
+
+def parse_entries(path: Path) -> dict[str, str]:
+    """Map key -> verbatim entry text, delimited by brace matching."""
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    entries: dict[str, str] = {}
+    for m in ENTRY_HEAD.finditer(text):
+        i = text.index("{", m.start())
+        depth, j = 0, i
+        while j < len(text):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        entries[m.group(2)] = text[m.start() : j + 1]
+    return entries
+
+
+def strip_fenced_blocks(text: str) -> str:
+    """Blank out fenced code blocks, tracking fences line by line.
+
+    A regex of the form ```` ```.*?``` ```` with DOTALL pairs fences positionally,
+    so one stray or indented fence offsets every pair after it and silently
+    deletes running prose. On one vol3 chapter that removed 45% of the file and
+    hid 22 citation keys from the audit, including a genuinely dangling one.
+    Matching the closing fence to its opener line-wise is immune to that.
+    """
+    out, in_fence, fence = [], False, ""
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if not in_fence and stripped.startswith("```"):
+            in_fence, fence = True, stripped[: len(stripped) - len(stripped.lstrip("`"))]
+            out.append("")
+            continue
+        if in_fence:
+            # A closing fence is at least as long as its opener and carries no info string.
+            if stripped.startswith(fence) and not stripped[len(fence) :].strip():
+                in_fence = False
+            out.append("")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def parse_entries_text(text: str) -> dict[str, str]:
+    """parse_entries for an in-memory string."""
+    entries: dict[str, str] = {}
+    for m in ENTRY_HEAD.finditer(text):
+        i = text.index("{", m.start())
+        depth, j = 0, i
+        while j < len(text):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        entries[m.group(2)] = text[m.start() : j + 1]
+    return entries
+
+
+def render(vol: str) -> tuple[str, list[str]]:
+    """Return (file text, missing keys) for a volume's dedicated bibliography."""
+    sources = [
+        CONTENTS / f"references-{vol}.bib",
+        CONTENTS / "references-vol4.bib",
+        CONTENTS / f"references-{vol}-staged.bib",
+        CONTENTS / "references.bib",
+    ]
+    tables = [parse_entries(p) for p in sources]
+
+    picked: dict[str, str] = {}
+    missing: list[str] = []
+    for key in cited_keys(vol):
+        for table in tables:
+            if key in table:
+                picked[key] = table[key]
+                break
+        else:
+            missing.append(key)
+
+    volume_name = {"vol3": "Volume III", "vol4": "Volume IV"}.get(vol, vol)
+    header = (
+        f"% Bibliography for {volume_name}.\n"
+        f"% Self-contained: every entry here is cited by this volume, and every\n"
+        f"% citation in this volume resolves here.\n"
+        f"% Generated by binder/tools/scripts/structure/build_volume_bib.py.\n"
+        f"% Entries are copied verbatim from the reviewed source bibliography.\n\n"
+    )
+    body = "\n\n".join(picked[k] for k in sorted(picked, key=str.lower))
+    return header + body + "\n", sorted(missing)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("volume", nargs="?", choices=DEDICATED, help="omit to do all")
+    ap.add_argument("--check", action="store_true", help="fail if a bib is stale or a citation is unresolved")
+    args = ap.parse_args()
+
+    volumes = [args.volume] if args.volume else list(DEDICATED)
+    failed = False
+    for vol in volumes:
+        out = CONTENTS / f"references-{vol}.bib"
+        text, missing = render(vol)
+        n = text.count("\n@")  + (1 if text.lstrip().startswith("@") else 0)
+        if missing:
+            failed = True
+            print(f"{vol}: {len(missing)} citation(s) resolve nowhere: {', '.join(missing)}", file=sys.stderr)
+        if args.check:
+            # Compare key SETS, not bytes. The bibtex-tidy pre-commit hook
+            # reformats these files after generation, so a byte-exact check
+            # would report stale forever. What matters is the invariant:
+            # the file holds exactly the keys the volume cites.
+            on_disk = set(parse_entries(out))
+            wanted = set(parse_entries_text(text))
+            extra = sorted(on_disk - wanted)
+            absent = sorted(wanted - on_disk)
+            if extra or absent:
+                failed = True
+                print(f"{out.name} is stale.", file=sys.stderr)
+                if absent:
+                    print(f"  cited but not in the file: {', '.join(absent)}", file=sys.stderr)
+                if extra:
+                    print(f"  in the file but uncited : {', '.join(extra)}", file=sys.stderr)
+                print(
+                    f"  Regenerate with: python3 binder/tools/scripts/structure/build_volume_bib.py {vol}",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"{out.name} is current ({len(on_disk)} entries).")
+        else:
+            out.write_text(text, encoding="utf-8")
+            print(f"Wrote {out.relative_to(REPO)} ({n} entries)")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

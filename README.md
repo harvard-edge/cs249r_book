@@ -149,7 +149,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">💼</td>
       <td><b>StaffML</b></td>
       <td>Physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
-      <td><a href="https://mlsysbook.ai/staffml/">Practice</a> · <a href="interviews/README.md">Repo guide</a></td>
+      <td><a href="https://mlsysbook.ai/staffml/">Practice</a> · <a href="staffml/README.md">Repo guide</a></td>
     </tr>
   </tbody>
 </table>
@@ -207,7 +207,6 @@ Some projects are intentionally earlier-stage than the main curriculum:
 
 - [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
-- [ML Systems Design Grammar](design-grammar/README.md) is an experimental framework for reasoning from stable primitives, constraints, and rewrite rules.
 
 ---
 
@@ -529,7 +528,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">📖</td>
       <td><b>Fix a typo or improve a chapter</b></td>
-      <td><a href="book/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
+      <td><a href="binder/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
@@ -549,7 +548,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">💼</td>
       <td><b>Improve assessment or career-readiness content</b></td>
-      <td><a href="interviews/README.md">StaffML guide</a> · <a href="book/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
+      <td><a href="staffml/README.md">StaffML guide</a> · <a href="binder/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>
@@ -573,17 +572,17 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
 
 ## License
 
-This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `interviews/staffml/LICENSE`) is authoritative.
+This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `staffml/app/LICENSE`) is authoritative.
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`book/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
-| [TinyTorch](packages/tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
-| [MLSys·im](packages/mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
-| [StaffML](interviews/staffml/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
-| [StaffML question corpus](interviews/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
-| [TinyDigits dataset](packages/tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
-| [TinyTalks dataset](packages/tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
+| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
+| [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
+| [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
+| [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
+| [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
+| [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
 
 A user-facing summary lives at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
@@ -971,25 +970,6 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- INSTRUCTORS-CONTRIBUTORS-END -->
-
----
-
-### ⚗️ ML Systems Design Grammar Contributors
-
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table width="100%" style="width:100%">
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

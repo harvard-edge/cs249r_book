@@ -133,7 +133,7 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [book/](../book/README.md) |
+| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [books/](../books/) |
 | **EXPLORE** | 🔮 Software Co‑Labs | レイテンシ・メモリ・エネルギー・コストの実験 | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | フレームワーク実装を体験 | [tinytorch/](../tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | メモリ・電力・時間・安全性の制約下でハードウェアをエンジニアリング | [kits/](../kits/README.md) |
@@ -261,7 +261,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | I want to… | Go here |
 |--------------|---------|
-| 誤字修正・章改善 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| 誤字修正・章改善 | [binder/docs/CONTRIBUTING.md](../binder/docs/CONTRIBUTING.md) |
 | TinyTorch モジュール追加・バグ修正 | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
 | ハードウェア実験改善 | [kits/README.md](../kits/README.md) |
 | Issue 報告 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
