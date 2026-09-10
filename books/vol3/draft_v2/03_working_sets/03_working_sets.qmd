@@ -1,14 +1,32 @@
 # Context Working Sets {#sec-vol3-working-sets}
 
-The context window is the volatile L1 cache of an autonomous machine learning system. While software frameworks treat modern long-context windows as unbounded append-only logs, underlying accelerator hardware enforces strict thermodynamic, computational, and memory-bandwidth limits. Unconstrained trajectory accumulation triggers quadratic prefill latency spikes, exhausts high-bandwidth memory (HBM) with linear Key-Value (KV) cache growth, and induces cognitive degradation through attention dispersion. How can an agent runtime sustain execution across unbounded operational horizons over finite physical memory? Peter Denning’s 1968 Working Set Theory provides the systems foundation: an agent does not require its entire historical trajectory to compute its next action, but rather an active, eviction-driven working set of tokens. This chapter formalizes token working-set dynamics, derives the hardware economics of prefill and autoregressive decode regimes, uncovers the mathematical mechanics of attention sinks, and establishes loss-bounded semantic compaction pipelines protected by invariant enclosures.
+## Purpose {.unnumbered .unlisted}
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{15}{25}{35}{95}{20}{15}
+\mlagentstack{10}{10}{20}{10}{95}{15}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
+_Why does an agent with a million-token context window fail to notice an error right in front of it?_
+
+While software frameworks often treat modern long-context windows as unbounded append-only logs, the underlying accelerator hardware enforces strict thermodynamic, computational, and memory-bandwidth limits that degrade both execution latency and reasoning precision as sequences expand. Managing the context window requires viewing it not as an infinite repository but as a highly constrained physical cache that is susceptible to neural thrashing and attention dispersion. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+- **Explain** the arithmetic scaling bottleneck of quadratic prefill and the memory-bandwidth wall of linear Key-Value (KV) cache accumulation.
+- **Calculate** KV cache capacity requirements, prefill latency penalties, and decode streaming bandwidth for long-context generation workloads.
+- **Diagnose** the cognitive degradation caused by attention dilution and rotary embedding decay within unmanaged context trajectories.
+- **Compare** classical operating system paging mechanisms to neural agent token eviction strategies such as StreamingLLM, H2O, and state summarization.
+- **Design** a multi-tiered context management architecture incorporating ephemeral scratchpads, invariant enclosures, and dual-pathway semantic compaction.
+- **Evaluate** the information-theoretic risks of recursive summarization and semantic drift across bounded capacity working sets.
+:::
+
+The context window is the volatile L1 cache of an autonomous machine learning system. While software frameworks treat modern long-context windows as unbounded append-only logs, underlying accelerator hardware enforces strict thermodynamic, computational, and memory-bandwidth limits. Unconstrained trajectory accumulation triggers quadratic prefill latency spikes, exhausts high-bandwidth memory (HBM) with linear Key-Value (KV) cache growth, and induces cognitive degradation through attention dispersion. How can an agent runtime sustain execution across unbounded operational horizons over finite physical memory? Peter Denning’s 1968 Working Set Theory provides the systems foundation: an agent does not require its entire historical trajectory to compute its next action, but rather an active, eviction-driven working set of tokens. This chapter formalizes token working-set dynamics, derives the hardware economics of prefill and autoregressive decode regimes, uncovers the mathematical mechanics of attention sinks, and establishes loss-bounded semantic compaction pipelines protected by invariant enclosures.
 
 ## Introduction {#sec-vol3-working-sets-intro}
 
@@ -63,16 +81,15 @@ When an operating system runs a database query, it does not load the entire tera
 
 Denning defined the working set as the active subset of memory pages referenced by a process within a recent time window. His core insight was that treating memory as a flat, uniform space is an architectural fallacy. Programs exhibit phased execution—looping over tight data structures before migrating to new phases. By continuously tracking and migrating only the "hot" subset of pages into physical RAM and relegating "cold" state to disk, operating systems decouple functional program size from physical hardware constraints.
 
-```text
-Classical Virtual Memory (Denning, 1968)      Neural Agent Context Architecture
-┌────────────────────────────────────────┐   ┌────────────────────────────────────────┐
-│ Virtual Address Space S                │   │ Cumulative Trajectory History (Tokens) │
-│ Physical RAM (Resident Set)            │   │ Accelerator HBM (Active KV Cache)      │
-│ Working Set W(t, tau)                  │   │ Active Working Set W_eps(t, Delta t)   │
-│ Page Thrashing (RAM Saturation)        │   │ Context Overflow / TTFT Wall           │
-│ Secondary Storage (Disk Swap Space)    │   │ Tier-3 Episodic Store / Vector DB      │
-└────────────────────────────────────────┘   └────────────────────────────────────────┘
-```
+| Classical Virtual Memory | Neural Agent Context Architecture | Systemic Role |
+|:---|:---|:---|
+| Virtual Address Space $S$ | Cumulative Trajectory History (Tokens) | The complete, unbounded state footprint. |
+| Physical RAM (Resident Set) | Accelerator HBM (Active KV Cache) | The strictly limited, high-speed physical memory. |
+| Working Set $W(t, \tau)$ | Active Working Set $W_\epsilon(t, \Delta t)$ | The dynamic subset of state required for current execution. |
+| Page Thrashing | Context Overflow & Attention Dispersion | Catastrophic performance collapse when working set exceeds capacity. |
+| Secondary Storage (Disk) | Tier-3 Episodic Store / Vector DB | High-capacity, slow-retrieval cold storage for evicted state. |
+
+: Classical OS Paging vs Neural Context Management {#tbl-vol3-classical-vs-neural tbl-colwidths="[30, 35, 35]"}
 
 This operating systems principle maps directly onto neural agent contexts:
 
@@ -129,9 +146,7 @@ While StreamingLLM prevents perplexity collapse, autonomous agents cannot surviv
 
 This vulnerability intersects with the **"Lost-in-the-Middle"**\index{Lost-in-the-Middle} phenomenon (@liu2024lost). When models retrieve information placed at varying relative depths within context, retrieval accuracy follows a pronounced U-shaped curve: accuracy approaches 100% at the extreme beginning (first 10%) and end (last 10%), but plunges to below 30% across the middle 60%.
 
-The mathematical driver is the phase mechanics of **Rotary Position Embeddings (RoPE)**\index{RoPE}, @su2024), which encodes relative distances between tokens. 
-
-RoPE injects geometric distance directly into the attention dot-product via complex rotations. As the relative distance between a query and a key expands, the rotational interference acts as a low-pass filter, aggressively decaying the semantic resonance between distant tokens. This structural decay enforces a strict recency bias, systematically blindfolding the model to information trapped in the deep middle of the context window.
+The mathematical driver is the phase mechanics of **Rotary Position Embeddings (RoPE)**\index{RoPE}, @su2024), which encodes relative distances between tokens. RoPE injects geometric distance directly into the attention dot-product via complex rotations. As the relative distance between a query and a key expands, the rotational interference acts as a low-pass filter, aggressively decaying the semantic resonance between distant tokens. This structural decay enforces a strict recency bias, systematically blindfolding the model to information trapped in the deep middle of the context window.
 
 Due to how these embeddings decay over distance, queries naturally exhibit strong biases: they attend heavily to immediate neighbors (recency bias) and the initial prefix (sink bias). Tokens stuck in the middle suffer from probability dilution and destructive interference across thousands of competing keys.
 
@@ -139,9 +154,7 @@ Due to how these embeddings decay over distance, queries naturally exhibit stron
 
 To resolve middle amnesia without retaining full dense contexts, modern runtimes employ adaptive sparsification. The **Heavy-Hitter Oracle**\index{Heavy-Hitter Oracle} (H2O, @zhang2023h2o) and FastGen (@ge2024fastgen) identify that intermediate tokens are not uniformly dispensable.
 
-H2O tracks a running cumulative attention score for each token in the KV cache. 
-
-By exploiting the temporal sparsity of attention, the Heavy-Hitter Oracle functions as a neural hardware cache controller. It continuously aggregates attention scores, identifying the critical semantic load-bearing tokens—the \"heavy hitters\"—that consistently anchor the model's reasoning. This allows the system to forcefully evict the inert, low-attention tokens without fracturing the model's coherent understanding of the trajectory.
+H2O tracks a running cumulative attention score for each token in the KV cache. By exploiting the temporal sparsity of attention, the Heavy-Hitter Oracle functions as a neural hardware cache controller. It continuously aggregates attention scores, identifying the critical semantic load-bearing tokens—the "heavy hitters"—that consistently anchor the model's reasoning. This allows the system to forcefully evict the inert, low-attention tokens without fracturing the model's coherent understanding of the trajectory.
 
 When cache consumption reaches its budget, H2O retains:
 
@@ -150,6 +163,16 @@ When cache consumption reaches its budget, H2O retains:
 3. **Heavy-Hitter Tokens ($\text{H}_2$):** Top-$k$ tokens from intermediate history ranked by cumulative score $s_i^{(t)}$, where $k = C_{\text{budget}} - |S| - |W|$.
 
 Empirically, retaining just 20 percent of intermediate KV cache via heavy-hitter scoring preserves over 98 percent of multi-turn reasoning accuracy while slashing decode memory bandwidth by $3\times$ to $5\times$.
+
+| Eviction Strategy | Retention Mechanism | Primary Benefit | Key Vulnerability |
+|:---|:---|:---|:---|
+| **Sliding Window** | Recent $W$ tokens only | Fixed bounded memory | Softmax collapse (evicts sinks), middle amnesia |
+| **StreamingLLM** | Sink tokens (prefix) + Recent window | Prevents perplexity collapse | Still suffers from middle amnesia |
+| **H2O / FastGen** | Sinks + Window + Heavy-Hitters | Preserves sparse load-bearing context | High overhead tracking cumulative attention |
+| **Two-Phase CoT** | Drops uncommitted scratchpad | Eliminates ephemeral reasoning bloat | Requires explicit runtime deliberation phases |
+| **Semantic Compaction** | LLM summarization / structural diffs | Massive context reduction for long horizons | Semantic drift, data processing inequality |
+
+: Comparison of Neural Token Eviction and Sparsification Strategies {#tbl-vol3-eviction-strategies tbl-colwidths="[20, 25, 25, 30]"}
 
 ### Ephemeral Scratchpads & The Two-Phase Commit
 
@@ -229,9 +252,7 @@ In neural architectures, this information decay is accelerated by **paraphrasing
 
 ### Mitigation: The Invariant Enclosure
 
-To guarantee semantic stability across arbitrary operational horizons, production architectures enforce an **Invariant Enclosure**\index{Invariant Enclosure}:
-
-The Invariant Enclosure functions as a robust systems-level sandbox that isolates mission-critical ground truth from the stochastic decay of the language model. By physically separating the prompt components that dictate absolute boundaries—such as safety invariants, API contracts, and user constraints—from the highly volatile conversational history, the runtime structurally guarantees that core directives never degrade, regardless of the depth of recursive summarization.
+To guarantee semantic stability across arbitrary operational horizons, production architectures enforce an **Invariant Enclosure**\index{Invariant Enclosure}. The Invariant Enclosure functions as a robust systems-level sandbox that isolates mission-critical ground truth from the stochastic decay of the language model. By physically separating the prompt components that dictate absolute boundaries—such as safety invariants, API contracts, and user constraints—from the highly volatile conversational history, the runtime structurally guarantees that core directives never degrade, regardless of the depth of recursive summarization.
 
 1. **The Immutable Anchor ($\mathcal{I}_{\text{immutable}}$):** The verbatim user instructions, safety boundaries, test specifications, and negative constraints are stored in read-only memory and injected into every prompt. The summarization engine is strictly forbidden from paraphrasing, compressing, or modifying $\mathcal{I}_{\text{immutable}}$.
 2. **Deterministic Validation Gate:** Before committing synthesized summary $S_k$ to the working set, a deterministic validation hook confirms that:
@@ -247,22 +268,23 @@ The necessity of working-set management, semantic compaction, and invariant encl
 
 ## Fallacies and Pitfalls {#sec-vol3-working-sets-fallacies}
 
-**Fallacy: Million-token windows render context management obsolete.**
+**Fallacy**: *Million-token windows render context management obsolete.*
 A pervasive industry misconception assumes that large context windows (1M+ tokens) eliminate the need for working-set management. While modern architectures can physically ingest 1M tokens without crashing, the laws of hardware economics remain absolute. Prefill latency scales quadratically with length, inflating TTFT from milliseconds to tens of seconds. Autoregressive decode is memory-bandwidth bound ($I_{\text{decode}} \approx 1\ \text{to } 4\ \text{FLOP/Byte}$): reading a 1M-token KV cache on every decode step throttles throughput to single-digit tokens per second. Furthermore, attention dispersion and positional degradation ("Lost-in-the-Middle") severely compromise reasoning accuracy and instruction compliance over monolithic long contexts.
 
-**Pitfall: Unanchored recursive summarization.**
+**Pitfall**: *Unanchored recursive summarization.*
 Attempting to control context growth by repeatedly prompting an LLM to "summarize the conversation so far" guarantees semantic drift collapse. Within 5 to 10 iterations, critical negative constraints, file names, and numerical constants mutate or disappear. Systems must anchor immutable instructions within an Invariant Enclosure and verify state summaries against deterministic environmental ground truth.
 
-**Fallacy: Simple sliding-window truncation is sufficient.**
+**Fallacy**: *Simple sliding-window truncation is sufficient.*
 While sliding-window attention bounds memory and compute, pure sliding windows trigger two catastrophic failure modes: softmax collapse when initial attention sinks are evicted, and middle amnesia when critical past tool outputs are dropped. Systems must combine sliding windows with permanent attention sinks and heavy-hitter retention.
 
-**Pitfall: Accumulating in-flight chain-of-thought in persistent history.**
+**Pitfall**: *Accumulating in-flight chain-of-thought in persistent history.*
 Permitting reasoning scratchpad tokens to accumulate across turns wastes up to 90% of available context capacity. Chain-of-thought tokens are ephemeral calculation states. Runtimes must implement a Two-Phase Commit that evicts scratchpad deliberation once a concrete action is verified, preserving only canonical actions and observations.
 
 Recognizing these physical and operational boundaries allows us to synthesize a unified approach to managing an agent's memory hierarchy.
 
 ## Summary {#sec-vol3-working-sets-summary}
 
+::: {.callout-takeaways title="The Context Working Set Invariant"}
 * **Context as L1 Working Set:** Context provides zero-latency access to active trajectory state, but is bound by accelerator HBM capacity and quadratic prefill compute constraints. It must be actively managed.
 * **Attention Economics Bottleneck:** Prefill is fundamentally compute-bound and scales quadratically, whereas autoregressive decode is strictly memory-bandwidth bound. Linear KV cache growth eventually saturates the memory bus.
 * **Denning's Working Set in Neural Systems:** Token access patterns exhibit extreme power-law locality. Pruning inert tokens and managing an active working set prevents "neural thrashing" and attention dilution.
@@ -270,3 +292,26 @@ Recognizing these physical and operational boundaries allows us to synthesize a 
 * **Two-Phase Commit for Ephemeral CoT:** Intermediate reasoning and scratchpad tokens should be treated as volatile computation state and aggressively pruned once a verified action is committed, preserving vast context capacity.
 * **Loss-Bounded Semantic Compaction:** Unbounded summarization triggers information-theoretic semantic drift. Systems must employ dual-pathway compaction that blends structural pruning with state synthesis.
 * **Invariant Enclosures Ensure Stability:** Critical constraints, system prompts, and safety rules must be pinned in an immutable anchor that bypasses recursive summarization to maintain long-horizon execution stability.
+:::
+
+::: {.callout-chapter-connection title="From Working Sets to Paged Virtual Context"}
+This chapter established the fundamental limits of the physical context window and the necessity of managing it as a bounded working set through eviction and semantic compaction. However, as agentic workflows extend from minutes to weeks, even compacted state ledgers will eventually overflow the accelerator's physical memory limits. In the next chapter, we scale from physical context management to virtual context architecture, exploring how to page cold state out to distributed vector databases and KV stores, and retrieve it back into the active context with microsecond latency.
+:::
+
+## Quantitative Problems {#sec-vol3-working-sets-problems}
+
+1. **KV Cache Memory Bounds:**
+An autonomous coding agent runs on an accelerator with 80 GB of High-Bandwidth Memory (HBM). The agent's underlying policy is a 70-billion parameter model (using Grouped Query Attention) where each token requires exactly 320 KB of KV cache storage across all layers. The model weights consume 38 GB of HBM, and the runtime reserves 2 GB for ephemeral scratchpads and workspace memory.
+   a) Calculate the maximum theoretical context length (in tokens) the agent can sustain before encountering an Out-Of-Memory (OOM) fault.
+   b) If the agent averages 1,500 tokens per action-observation turn, how many turns can the agent execute before it must trigger semantic compaction?
+
+2. **Attention Sink Probability Mass Distribution:**
+A neural agent relies on a token eviction policy that preserves an active sliding window of size $W = 1{,}024$ and an attention sink prefix of size $S = 4$. After processing 50,000 tokens of build logs, the attention distribution for a middle-layer attention head stabilizes such that the sink tokens absorb $65\%$ of the probability mass, while the sliding window tokens absorb $25\%$.
+   a) What is the average attention probability per token in the active window compared to the average attention probability per token in the sink?
+   b) If an unmanaged sliding window policy inadvertently evicts the 4 sink tokens, the $65\%$ probability mass must be redistributed. Assuming the model uniformly redistributes this surplus mass across the remaining $1{,}024$ tokens, how much does the attention weight of an average active token artificially inflate? Explain the impact on the model's perplexity and reasoning stability.
+
+3. **Autoregressive Decode vs. Prefill Arithmetic Intensity:**
+During an agentic code generation task, the context window contains $N = 32{,}000$ tokens. The GPU hardware provides a peak prefill compute throughput of 300 TFLOP/s and a memory bandwidth of 2.0 TB/s. Assume that processing a token during prefill requires $2 \times N$ FLOPs per layer (ignoring constant factors for simplicity), while generating a single token autoregressively requires streaming the entire KV cache (320 KB per token) across the memory bus.
+   a) Calculate the total memory bandwidth required to generate a single token over the $32{,}000$-token context.
+   b) Calculate the maximum theoretical autoregressive generation speed (in tokens per second) before hitting the memory bandwidth wall.
+   c) Compare the arithmetic intensity (FLOPs per byte) of adding a single token during the prefill phase versus generating a single token during the decode phase. Why does the agent appear computationally bound during document ingestion but memory bound during chain-of-thought deliberation?
