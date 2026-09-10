@@ -45,11 +45,9 @@ This chapter establishes the systems architecture for human-in-the-loop interrup
 
 ## Introduction: The Asymmetric Latency Disparity {#sec-vol3-interrupts-intro}
 
-The fundamental tension in human-in-the-loop agentic architectures arises from an unprecedented temporal mismatch between execution tiers.
+When an autonomous agent transitions from pure inference to real-world actuation, it encounters tasks that demand human oversight: approving a git push to a production branch, confirming a financial transaction, authorizing a database drop, or disambiguating contradictory user requirements. The fundamental tension in human-in-the-loop agentic architectures arises from this unprecedented temporal mismatch between execution tiers.
 
-In traditional serving systems (Volumes I and II), hardware resources are scheduled across microsecond and millisecond intervals. A forward-pass GEMM kernel executes on GPU Tensor Cores in tens of microseconds; an autoregressive token decode step completes in 10 to 50 milliseconds; a complete inference request streams back to a user over 500 to 2,000 milliseconds.
-
-When an autonomous agent transitions from pure inference to real-world actuation, it encounters tasks that demand human oversight: approving a git push to a production branch, confirming a financial transaction, authorizing a database drop, or disambiguating contradictory user requirements. The temporal scale immediately fractures:
+In traditional inference serving systems, hardware resources are scheduled across microsecond and millisecond intervals. A forward-pass GEMM kernel executes on GPU Tensor Cores in tens of microseconds; an autoregressive token decode step completes in 10 to 50 milliseconds; a complete inference request streams back to a user over 500 to 2,000 milliseconds. When the system blocks to wait for the human on the aforementioned tasks, the temporal scale immediately fractures:
 
 $$\text{Latency Disparity} = \frac{T_{\text{human}}}{T_{\text{model}}} \approx \frac{10^3\text{ s}}{10^{-3}\text{ s}} = 10^6$$
 
@@ -114,7 +112,7 @@ For modern frontier models ($M_{\text{KV}} \approx 10\text{--}40\,\text{GB}$) li
 
 ## The Hardware Interrupt Analogy {#sec-vol3-interrupts-hardware-analogy}
 
-To build a robust control plane for long-running agents, we must discard ad-hoc conversational metaphors ("chatbots asking follow-up questions") and ground our design in classical operating systems theory.
+When a human operator presses an administrative "Kill Switch" to stop a runaway agent, or an external webhook notifies the system of a CI pipeline failure, the runtime cannot wait for the model to finish generating its current reasoning token. To build a robust control plane for long-running agents responding to these asynchronous events, we must discard ad-hoc conversational metaphors ("chatbots asking follow-up questions") and ground our design in classical operating systems theory.
 
 In a POSIX operating system, the hardware architecture defines an **Interrupt Vector Table (IVT)**\index{Interrupt Vector Table (IVT)}. The CPU continuously samples interrupt lines at instruction boundaries. When an interrupt or exception occurs, the CPU suspends execution, saves state, switches privilege rings, and vectors execution to a registered **Interrupt Service Routine (ISR)**\index{Interrupt Service Routine (ISR)}. @Tbl-vol3-interrupts-os-mapping establishes the structural correspondence between hardware microprocessor primitives and their counterparts in an agentic runtime kernel.
 
@@ -185,11 +183,13 @@ When an interrupt vector fires, the runtime invokes the **Agent Interrupt Servic
 
 : **Figure 9.3: Agent Control Block (ACB) Interrupt Lifecycle and State Transitions**. Finite state machine governing an agent trajectory during interrupt handling. When an interrupt vector is raised, the scheduler either halts execution immediately (for unmaskable NMIs) or allows the active token generation step to drain before capturing an atomic ACB snapshot. Volatile KV cache memory is dehydrated to non-volatile storage, transitioning the agent into `SUSPENDED_HUMAN_GATE` with zero resident GPU allocation. Receipt of a valid cryptographic lease triggers signature verification, state rehydration, and resumption of active decode. If the supervisory watchdog expires, the runtime preempts held locks and triggers backward Sagas compensation. Source: Author analysis. {#fig-vol3-interrupts-lifecycle}
 
+The interrupt service routine safely transitions an agent into a suspended state, clearing its memory footprint. However, an enterprise system must manage thousands of these suspended and active trajectories concurrently without blocking. This requires a shift from synchronous execution models to event-driven architectures that decouple tasks from their completion.
+
 ---
 
 ## Asynchronous Execution & Non-Blocking Runtimes {#sec-vol3-interrupts-async-execution}
 
-To scale agentic systems to thousands of concurrent autonomous workers, the runtime must be built on **Asynchronous, Non-Blocking Durable Execution**, drawing upon the foundational principles of Futures and Promises established by @liskov1988.
+If an agent queries a database and must wait for an administrator to approve the execution plan, locking up the inference thread and accelerator memory for an hour is unacceptable. To scale agentic systems to thousands of concurrent autonomous workers without collapsing the cluster, the runtime must be built on **Asynchronous, Non-Blocking Durable Execution**, drawing upon the foundational principles of Futures and Promises established by @liskov1988.
 
 ### The Futures and Promises Formalism
 
@@ -428,11 +428,13 @@ class AgentInterruptRuntime:
               f"Action={promise.action_type} Payload={json.dumps(promise.payload)}")
 ```
 
+Asynchronous event loops and futures allow the system to multiplex thousands of agents waiting on human gates. However, not all operations require these gates; we must rigorously define when an agent can proceed autonomously and when it must trap into the supervisor kernel. Establishing this boundary is essential for security and operational agility.
+
 ---
 
 ## Capability Escalation & The Reversibility Boundary {#sec-vol3-interrupts-capability-escalation}
 
-Autonomous agents operate under the **Principle of Least Privilege** [@saltzer1975]. An agent initialized to inspect a codebase should possess read-only filesystem capabilities; it must never possess ambient authority to delete cloud infrastructure, commit financial transactions, or broadcast unmonitored external communications.
+An agent initialized to inspect a codebase should possess read-only filesystem capabilities; it must never possess ambient authority to delete cloud infrastructure, commit financial transactions, or broadcast unmonitored external communications. Autonomous agents operate under the **Principle of Least Privilege** [@saltzer1975].
 
 However, complex long-horizon tasks frequently require agents to bridge domains. An agent diagnosing a production outage may start with read-only metrics queries, identify a crashed container, and conclude that the optimal remediation is to restart a Kubernetes deployment. Restarting a deployment crosses the boundary from passive observation to active mutation. How does the system transition authority without giving the model blanket, unconstrained admin permissions?
 
@@ -525,7 +527,7 @@ These leases cryptographically bind an agent's identity to a specific action and
 
 ## Deadlock Prevention & Supervisory Watchdogs {#sec-vol3-interrupts-deadlock-prevention}
 
-When autonomous agents are integrated with human supervisors and shared computing resources, the runtime becomes a distributed multi-tenant operating system. Consequently, it inherits the classic pathology of multi-programmed systems: **Deadlock**.
+If two autonomous agents simultaneously attempt to update a production database schema, and each locks a different table while waiting for a human database administrator to approve the other's operation, the system freezes. When autonomous agents are integrated with human supervisors and shared computing resources, the runtime becomes a distributed multi-tenant operating system. Consequently, it inherits the classic pathology of multi-programmed systems: **Deadlock**.
 
 In 1971, Edward G. Coffman Jr., Michael J. Elphick, and Arie Shoshani published their landmark treatise *"System Deadlocks"*, establishing the four necessary and sufficient conditions for deadlock in computing systems [@coffman1971]. Every agentic software architect must understand how these four conditions manifest in human-in-the-loop workflows:
 
@@ -605,6 +607,8 @@ Driven by its "loop until success" prompt, the agent rapidly fired 10,000 reques
 
 **The Lesson:** Circuit breakers, rate limits, and exponential backoffs must be strictly enforced by the hard-coded OS runtime, not the stochastic model. You cannot rely on a system prompt to tell a model to "wait 5 seconds before retrying."
 :::
+
+Breaking the Coffman conditions through watchdogs, optimistic concurrency, and strict resource ordering ensures system liveness even when human supervisors are entirely absent. While these architectural safeguards protect the system's structural integrity, developers building agentic workflows frequently succumb to design misconceptions that undermine these guarantees.
 
 ---
 

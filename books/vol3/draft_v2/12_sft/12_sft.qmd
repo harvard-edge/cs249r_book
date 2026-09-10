@@ -1,6 +1,6 @@
 # Trajectory Fine-Tuning {#sec-vol3-sft}
 
-Supervised fine-tuning on multi-turn execution trajectories represents the foundational bridge between static pretrained representations and autonomous agency. While pretraining optimizes for next-token entropy across unstructured web text and standard instruction tuning aligns single-turn conversational style, neither endows a model with the causal priors required for multi-step closed-loop actuation. In Part V (Policy Adaptation), following the synthesis and rejection-sampling pipelines of Chapter 11, this chapter examines the systems mechanics of compiling dynamic execution traces directly into model parameters. We formalize trajectory loss objectives, prove why environment observations must be strictly masked during backpropagation, analyze the autoregressive error compounding that produces covariate shift, and evaluate parameter-efficient multi-tenant adapter runtimes. By treating fine-tuning as context compilation, we establish the algorithmic and systems foundations necessary before policies can be exposed to active reinforcement learning in Chapter 13.
+Supervised fine-tuning on multi-turn execution trajectories represents the foundational bridge between static pretrained representations and autonomous agency. While pretraining optimizes for next-token entropy across unstructured web text and standard instruction tuning aligns single-turn conversational style, neither endows a model with the causal priors required for multi-step closed-loop actuation. Following the synthesis and rejection-sampling pipelines of Chapter 11, dynamic execution traces must be compiled directly into model parameters. Trajectory loss objectives, strict masking of environment observations during backpropagation, autoregressive error compounding, and parameter-efficient multi-tenant adapter runtimes form the systems mechanics of this process. By treating fine-tuning as context compilation, we establish the algorithmic and systems foundations necessary before policies can be exposed to active reinforcement learning in Chapter 13.
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
@@ -12,7 +12,7 @@ Supervised fine-tuning on multi-turn execution trajectories represents the found
 
 ## Introduction {#sec-vol3-sft-intro}
 
-In the architecture of an autonomous agent, the foundation model functions as the stochastic central processing unit (CPU). In early prototypes and naive implementations, systems architects rely entirely on **in-context learning (ICL)**\index{in-context learning (ICL)} to drive this processor: every execution step is preceded by a monolithic prompt containing dozens of OpenAPI tool definitions, detailed behavioral guardrails, and lengthy few-shot execution demonstrations.
+Consider an agent deployed to execute a 30-step data migration: sending instructions, reading database schemas, and parsing error logs. In early prototypes and naive implementations, systems architects rely entirely on **in-context learning (ICL)**\index{in-context learning (ICL)} to drive this processor: every execution step is preceded by a monolithic prompt containing dozens of OpenAPI tool definitions, detailed behavioral guardrails, and lengthy few-shot execution demonstrations.
 
 While in-context prompting allows rapid prototyping without dedicated training infrastructure, it imposes severe systems penalties that make it economically and computationally non-viable for production-scale autonomy:
 
@@ -26,7 +26,7 @@ While in-context prompting allows rapid prototyping without dedicated training i
 **Context Compilation**\index{Context Compilation} is the mathematical transformation of dynamic runtime prompt context (tool definitions, syntax invariants, and reasoning heuristics) into static neural network weights via supervised gradient descent. Context compilation compresses prompt overhead by up to 85%, eliminates repetitive prefill computation, and mitigates attention degradation across extended horizons.
 :::
 
-We formalize this shift through **context compilation**\index{Context Compilation}, which maps dynamic prompt scaffolding directly into static policy parameters (@fig-vol3-sft-context-compilation).
+This shift is formalized through **context compilation**\index{Context Compilation}, which maps dynamic prompt scaffolding directly into static policy parameters (@fig-vol3-sft-context-compilation).
 
 ::: {#fig-vol3-sft-context-compilation fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.1: Context Compilation versus In-Context Prompting Runtimes**: Structural comparison of runtime execution profiles. (Top) In-context prompting prepends expansive tool definitions, schema specifications, and few-shot traces to every invocation, incurring quadratic prefill latency $\mathcal{O}(T^2)$ and exhausting accelerator KV-cache capacity (~10.5 GB per agent instance). (Bottom) Context compilation transforms dynamic prompt context into static neural network weights via supervised fine-tuning, shrinking prompt prefixes by up to 85%, eliminating redundant prefill computation, and protecting critical tool-following circuits from attention dispersion. Source: Author illustration." fig-alt="Architectural flowchart contrasting an uncompiled in-context prompting agent against a context-compiled policy runtime."}
 
@@ -34,11 +34,11 @@ We formalize this shift through **context compilation**\index{Context Compilatio
 
 :::
 
-Static instruction tuning (e.g., InstructGPT [@ouyang2022instructgpt]) is fundamentally single-turn and request-scoped: a prompt $x$ maps directly to a completed response $y \sim P_\theta(y \mid x)$. In contrast, an agentic trajectory is stateful and temporally extended. The model must alternate between generating internal chain-of-thought tokens, emitting structured tool call invocations, pausing to await external environment feedback, and digesting non-deterministic execution logs. Bridging this chasm requires an entirely distinct post-training paradigm: **Trajectory Fine-Tuning**\index{Trajectory Fine-Tuning}.
+Static instruction tuning (e.g., InstructGPT [@ouyang2022instructgpt]) is fundamentally single-turn and request-scoped: a prompt $x$ maps directly to a completed response $y \sim P_\theta(y \mid x)$. In contrast, an agentic trajectory is stateful and temporally extended. The model must alternate between generating internal chain-of-thought tokens, emitting structured tool call invocations, pausing to await external environment feedback, and digesting non-deterministic execution logs. Bridging this chasm requires an entirely distinct post-training paradigm: **Trajectory Fine-Tuning**\index{Trajectory Fine-Tuning}. The structural differences between single-turn prompts and multi-turn trajectories fundamentally alter how loss must be calculated across the token sequence.
 
 ## Trajectory Loss Formulations {#sec-vol3-sft-loss}
 
-To formalize trajectory-level optimization, we model an agent's multi-step execution as an alternating sequence of agent decisions and environmental observations over a horizon of $H$ steps.
+When an agent issues a bash command to list directory contents, the terminal returns a string of filenames and permissions. The agent processes this string to decide its next command, but it cannot control the terminal's output. Modeling this dynamic requires formalizing an agent's multi-step execution as an alternating sequence of agent decisions and environmental observations over a horizon of $H$ steps.
 
 A full trajectory captures an agent's multi-step execution as an alternating sequence of internal reasoning, action emissions, and external observations over a defined horizon.
 
@@ -61,11 +61,11 @@ Applying this directly to an agent trajectory sequence introduces a contradictio
 When implementing trajectory fine-tuning in distributed training systems, the normalization denominator of the loss function has a decisive impact on optimization stability.
 <!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 If a training framework naively normalizes the masked loss by the total sequence length, the effective gradient magnitude becomes inversely proportional to the verbosity of the external environment. If an agent executes a tool that returns an 8,000-token compiler dump, the loss contribution of the agent's critical tool call is diluted by an order of magnitude. This gradient swamping artificially suppresses parameter updates on trajectories that interact with verbose tools. To maintain consistent step sizes across heterogeneous environments, the loss must be normalized strictly by the count of active policy tokens [@deepseek2024v3].
-where $M_i \in \{0, 1\}$ is the binary action mask for token $i$.
+where $M_i \in \{0, 1\}$ is the binary action mask for token $i$. Implementing this selective normalization requires physical boundaries between agent cognition and environment feedback.
 
 ## Action Masking {#sec-vol3-sft-masking}
 
-The systems implementation of trajectory fine-tuning requires enforcing the **Environmental Causality Boundary**\index{Environmental Causality Boundary} within the training pipeline (@fig-vol3-sft-loss-masking).
+If a training pipeline inadvertently backpropagates gradients through a 10,000-token compiler error log, the optimizer wastes parameter capacity trying to predict stochastic system noise. The systems implementation of trajectory fine-tuning requires enforcing the **Environmental Causality Boundary**\index{Environmental Causality Boundary} within the training pipeline (@fig-vol3-sft-loss-masking).
 
 ::: {#fig-vol3-sft-loss-masking fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.3: Autoregressive Trajectory Loss Masking and Environmental Causality Boundary**: The token sequence alternates between agent control states (system prompt, user query, thoughts, tool calls) and external environment observations (standard output, exit codes, API payloads). The binary loss mask vector $M_t$ is set strictly to 1 for endogenous agent thoughts and tool call arguments, and 0 for exogenous environment observations and initial prompts. During backpropagation, only masked policy tokens contribute to cross-entropy loss, preventing hallucinated execution collapse and gradient swamping from verbose execution outputs. Source: Author illustration." fig-alt="Technical diagram illustrating token sequence role segmentation, binary loss mask vectors, and backpropagation gating for multi-turn agent trajectories."}
 ![](images/svg/trajectory_loss_masking.svg){width=100%}
@@ -101,11 +101,13 @@ To guarantee that the action mask aligns perfectly with model generation boundar
 The data ingestion pipeline sets $M_t = 1$ strictly for tokens falling within the `thought` and `action` intervals, guaranteeing that backpropagation never leaks into the observation stream.
 :::
 
+While strict masking isolates the policy from environment noise, it creates a new vulnerability: a policy trained exclusively on successful executions will collapse the moment it encounters a real-world error.
+
 ## Covariate Shift Mitigation {#sec-vol3-sft-covariate-shift}
 
-The most common trap in agent post-training is **Golden Path Brittleness**\index{Golden Path Brittleness}.
+Consider an agent trained exclusively on flawless demonstrations where every shell command succeeds and every database query executes without syntax errors. The moment it encounters a real-world `HTTP 504` timeout or a `grep: file not found` error, its execution collapses. This trap is known as **Golden Path Brittleness**\index{Golden Path Brittleness}.
 
-When a training dataset is constructed exclusively from flawless expert demonstrations—where every shell command succeeds, every API returns HTTP 200, and every database query executes without syntax errors—the model learns under the implicit prior that environments are completely deterministic and infallible.
+When a training dataset is constructed exclusively from these flawless expert demonstrations—where every shell command succeeds, every API returns HTTP 200, and every database query executes without syntax errors—the model learns under the implicit prior that environments are completely deterministic and infallible.
 
 During live production deployment, however, the real world intervenes:
 
@@ -160,16 +162,14 @@ By training on thousands of error-recovery pairs, the model learns that environm
 
 ## Parameter-Efficient Fine-Tuning {#sec-vol3-sft-peft}
 
-While full-parameter fine-tuning updates all weights $W \in \mathbb{R}^{d \times k}$ across all transformer layers, deploying distinct full-parameter 70B models for specialized tasks introduces insurmountable systems bottlenecks in production serving.
-
-Consider an enterprise agent platform supporting 50 specialized tools:
+Consider an enterprise agent platform supporting 50 specialized tools, from shell navigation to Kubernetes pod debugging. Deploying 50 independent full-parameter 70B models for these tasks would require 50 distinct GPU serving clusters, demanding millions of dollars in infrastructure overhead.
 
 * $\mathcal{T}_{\text{bash}}$: Shell navigation, git operations, AST manipulation.
 * $\mathcal{T}_{\text{sql}}$: Relational join planning, schema inspection, query tuning.
 * $\mathcal{T}_{\text{browser}}$: DOM accessibility tree navigation, form submission, pagination.
 * $\mathcal{T}_{\text{k8s}}$: Pod debugging, YAML reconciliation, log filtering.
 
-Deploying 50 independent full-parameter 70B models would require 50 distinct GPU serving clusters, demanding millions of dollars in infrastructure overhead.
+While full-parameter fine-tuning updates all weights $W \in \mathbb{R}^{d \times k}$ across all transformer layers, it introduces insurmountable systems bottlenecks in multi-tenant production serving.
 
 ### Low-Rank Adaptation (LoRA)
 
@@ -190,7 +190,7 @@ In **Quantized LoRA (QLoRA)**\index{Quantized LoRA (QLoRA)} [@dettmers2023qlora]
 
 ### Multi-Tenant Serving and Dynamic Adapter Swapping
 
-For agentic execution systems, the transformative architectural advantage of LoRA lies in runtime multi-tenancy (implemented in runtimes like S-LoRA [@lin2023slora] and Punica [@chen2023punica]). @Fig-vol3-sft-lora-adapters illustrates this dual-tier architecture: low-rank parameter decomposition during training on the left, and runtime dynamic adapter streaming in GPU accelerator memory on the right.
+For agentic execution systems, the primary architectural advantage of LoRA lies in runtime multi-tenancy (implemented in runtimes like S-LoRA [@lin2023slora] and Punica [@chen2023punica]). @Fig-vol3-sft-lora-adapters illustrates this dual-tier architecture: low-rank parameter decomposition during training on the left, and runtime dynamic adapter streaming in GPU accelerator memory on the right.
 
 ::: {#fig-vol3-sft-lora-adapters fig-env="figure" fig-pos="htb" fig-cap="**Figure 12.5: Parameter-Efficient Fine-Tuning and Multi-Tenant Adapter Swapping in Accelerator Memory**: (Left) LoRA parameter decomposition: base model weights $W_0 \in \mathbb{R}^{d \times k}$ are frozen in 4-bit NormalFloat (NF4) precision, while incremental adaptations $\Delta W$ are factorized into low-rank matrices $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$. (Right) Multi-tenant serving architecture: a single 70B quantized base model and shared PagedAttention KV-cache pool reside permanently in GPU HBM (~35 GB). Specialized agent adapters ($\sim 150\text{ MB}$ each for Bash, SQL, and Browser) reside in host RAM and are streamed dynamically over PCIe Gen5 in sub-millisecond transfer times, enabling heterogeneous batched GEMM execution without base model reloading. Source: Adapted from Hu et al. [@hu2021lora] and Sheng et al. [@sheng2023flexgen]." fig-alt="Architectural diagram showing LoRA parameter decomposition on the left and dynamic multi-tenant adapter swapping across host RAM and GPU VRAM on the right."}
 ![](images/svg/lora_adapter_swapping.svg){width=100%}
