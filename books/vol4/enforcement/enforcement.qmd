@@ -278,45 +278,20 @@ On a canonical heterogeneous dual-brain SoC, this safety shield executes inside 
 4. **CBF-QP Safety Shield Solve ($35\text{--}150\,\mu\text{s}$):** An active-set QP solver running in pre-allocated static DTCM SRAM evaluates active barrier inequalities and computes $u^* = \arg\min_u \frac{1}{2}\|u - u_{\text{nom}}\|^2$. Dynamic memory allocation (`malloc`) is strictly forbidden to prevent non-deterministic heap fragmentation.
 5. **Simplex Switch Arbitration ($150\text{--}165\,\mu\text{s}$):** If the QP is feasible and constraints hold, $u^*$ is written directly to the PWM timer compare registers. If the intent lease has expired, tracking error exceeds $\epsilon_{\text{track}}$, or actuator saturation renders the feasible control set empty ($\mathcal{U}_{\text{safe}} = \emptyset$), the Simplex switch trips, immediately transferring authority from the unverified policy to the deterministic Fallback Ladder.
 
-The deterministic execution loop that unifies barrier evaluation, active-set quadratic optimization, and Simplex fallback arbitration on bare-metal microcontroller silicon is formalized below:
+The deterministic execution loop that unifies barrier evaluation, active-set optimization, and fallback arbitration on bare-metal microcontroller silicon executes in five distinct stages:
 
-### Bare-metal 1 kHz control barrier function safety shield protocol
+### Bare-Metal Safety Shield Protocol
 
 **Cadence & Invariants:**
-
-- *Execution Cadence:* Hard real-time periodic timer interrupt ($f = 1000\text{ Hz}$, period $T_{\text{loop}} = 1.0\text{ ms}$, maximum allowable hardware timing jitter $< 1.0\,\mu\text{s}$).
-- *Memory Invariant:* Zero dynamic heap allocation (`malloc`/`free` strictly forbidden; all state matrices and solver workspaces statically allocated in DTCM SRAM).
-- *Hardware Authority:* Exclusive direct write access to motor PWM timer compare registers (`TIMx_CCR` / `ePWM_CMPA`) and hardware brake trip GPIOs.
+The protocol runs on a hard real-time periodic timer interrupt (typically 1000 Hz) with near-zero timing jitter. It strictly forbids dynamic memory allocation (no `malloc` or `free`) to guarantee deterministic execution time, and it holds exclusive write access to the hardware motor registers and brake pins.
 
 **Execution Protocol:**
 
-1. **State Acquisition & Innovation Gating (Stage 1):**
-   Sample raw encoder registers $\mathbf{q}_{\text{enc}}$ and phase currents $\mathbf{i}_{\text{phase}}$ via SPI/ADC direct memory access (DMA). Compute reconstructed physical state $\hat{\mathbf{x}}_t = (\hat{\mathbf{q}}_t, \dot{\hat{\mathbf{q}}}_t)$. Evaluate measurement innovation $\mathbf{r}_t \leftarrow \|\mathbf{y}_t - \mathbf{C}\hat{\mathbf{x}}_t\|$. If $\mathbf{r}_t > \gamma_{\text{sensor}}$, assert `ERR_SENSOR_CORRUPTION` and transition to Stage 5 (Fallback Escalation).
-
-2. **Intent Lease & Tracking Contract Audit (Stage 2):**
-   Verify CRC32 checksum of $\mathcal{C}_{\text{prop}}$ in shared SRAM. Compute lease age $\Delta t_{\text{lease}} \leftarrow t_{\text{now}} - \mathcal{C}_{\text{prop}}.t_{\text{stamp}}$. If $\Delta t_{\text{lease}} > \tau_{\text{lease}}$ or CRC mismatch, assert `ERR_LEASE_EXPIRED` and jump to Stage 5. Compute instantaneous tracking error $e(t) \leftarrow \|\hat{\mathbf{q}}_t - \mathcal{C}_{\text{prop}}.\mathbf{r}_t\|$; if $e(t) > \epsilon_{\text{crit}}$, assert `ERR_TRACKING_BREACH` and jump to Stage 5.
-
-3. **Lie Derivative & Inset Barrier Evaluation (Stage 3):**
-   For each active safety barrier $k \in \{1, \dots, K\}$:
-
-   - Compute Lie derivatives along control-affine plant dynamics:
-     $$L_f h_k(\hat{\mathbf{x}}_t) = \nabla h_k(\hat{\mathbf{x}}_t)^T f(\hat{\mathbf{x}}_t), \quad L_g h_k(\hat{\mathbf{x}}_t) = \nabla h_k(\hat{\mathbf{x}}_t)^T g(\hat{\mathbf{x}}_t).$$
-
-   - Construct half-space constraint row:
-     $$\mathbf{a}_k^T \leftarrow -L_g h_k(\hat{\mathbf{x}}_t), \quad b_k \leftarrow L_f h_k(\hat{\mathbf{x}}_t) + \gamma_k (h_k(\hat{\mathbf{x}}_t) - \delta_k).$$
-   If $\mathbf{a}_k^T \mathbf{u}_{\text{nom}} \le b_k, \forall k$ and $\mathbf{u}_{\min} \le \mathbf{u}_{\text{nom}} \le \mathbf{u}_{\max}$: set $\mathbf{u}_t^* \leftarrow \mathbf{u}_{\text{nom}}$, $\mathrm{Regime} \leftarrow \text{NOMINAL\_PASS}$, write $\mathbf{u}_t^*$ to `TIMx_CCR` registers, kick hardware watchdog timer, and return.
-
-4. **Active-Set Minimal-Intervention Quadratic Program Solve (Stage 4):**
-   Initialize active constraint set $\mathcal{W} \leftarrow \{k \mid \mathbf{a}_k^T \mathbf{u}_{\text{nom}} > b_k\} \cup \{i \mid u_{\text{nom}, i} \notin [u_{\min, i}, u_{\max, i}]\}$. Solve convex quadratic program in static DTCM workspace:
-   $$\mathbf{u}^* = \arg\min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2}\|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad \text{s.t.} \quad \mathbf{a}_k^T \mathbf{u} \le b_k, \; \forall k \in \{1, \dots, K\}, \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}.$$
-   If solver converges ($N_{\text{iter}} \le 15$): set $\mathbf{u}_t^* \leftarrow \mathbf{u}^*$, $\mathrm{Regime} \leftarrow \text{QP\_PROJECTED}$, write $\mathbf{u}_t^*$ to `TIMx_CCR` registers, kick watchdog, and return. Else (timeout or infeasibility $\mathcal{U}_{\text{safe}} = \emptyset$), assert `ERR_QP_INFEASIBLE` and escalate to Stage 5.
-
-5. **Simplex Deterministic Fallback Escalation (Stage 5):**
-   Trip Simplex Switch to revoke policy execution authority:
-
-   - Moderate fault ($e(t) \le \epsilon_{\text{crit}}$ and lease expired): set $\mathrm{Regime} \leftarrow \text{FALLBACK\_HOLD}$, compute local position hold torque $\mathbf{u}_{\text{hold}} = \mathbf{K}_p (\mathbf{q}_{\text{hold}} - \hat{\mathbf{q}}_t) - \mathbf{K}_d \dot{\hat{\mathbf{q}}}_t + \mathbf{g}(\hat{\mathbf{q}}_t)$, and write to `TIMx_CCR`.
-   - Severe fault ($e(t) > \epsilon_{\text{crit}}$ or $h_k \le 0$): set $\mathrm{Regime} \leftarrow \text{FALLBACK\_DYNAMIC\_STOP}$, command dynamic braking deceleration $a_{\text{brake}} = a_{\max}$.
-   - Emergency fault (watchdog timeout or over-current): set $\mathrm{Regime} \leftarrow \text{ESTOP\_TRIPPED}$, assert hardware break pin (`TIMx_BKIN`), engaging Safe Torque Off (STO) and spring friction brakes in $< 5\,\mu\text{s}$.
+1. **State Acquisition:** The system samples raw encoder values and phase currents directly from the hardware to reconstruct the true physical state of the machine. If the sensor readings are erratic or corrupted, it immediately trips a fault.
+2. **Intent Audit:** The enforcer checks the proposed action from the Cognitive Brain. It verifies that the "lease" (the time window the action is valid for) hasn't expired and that the data hasn't been corrupted in memory.
+3. **Barrier Evaluation:** The enforcer tests the proposed action against all active safety boundaries (e.g., joint limits, obstacle avoidance zones). If the action is perfectly safe, it is passed directly to the motors.
+4. **Minimal-Intervention Correction:** If the proposed action slightly violates a safety boundary, the enforcer mathematically projects it to the closest safe action. It finds the smallest possible correction that keeps the machine safe without completely abandoning the mission goal. *(For the formal convex optimization and Control Barrier Function formulation of this projection, see @sec-appendix-control).*
+5. **Fallback Escalation:** If no safe correction can be found, or if a critical hardware fault occurs, the enforcer revokes the AI's execution authority entirely and trips a deterministic hardware fallback (ranging from a controlled position hold to a sudden emergency brake).
 
 ## The Fallback Ladder {#sec-enforcement-12-9}
 
