@@ -6,7 +6,7 @@ small-batch prompts for extra-high-reasoning agents to audit calculations.
 Run everything from the task worktree:
 
 ```bash
-cd /Users/VJ/GitHub/MLSysBook-math-audit-workflow
+cd <your math-audit worktree>
 ```
 
 ## Smoke Test One Chapter
