@@ -71,7 +71,7 @@ def main():
         out_dir = os.path.join(CONTENTS, chapter, "data")
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, fname)
-        with open(path, "w", newline="", encoding="utf-8") as fh:
+        with open(path, "w", newline="\n", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=fields)
             w.writeheader()
             w.writerows(data)
