@@ -131,7 +131,7 @@ staffml/
 │       │   ├── release.json
 │       │   ├── d1-migration.sql
 │       │   └── d1-rollback.sql
-│       └── latest -> v1.0.0/           ← symlink
+│       └── latest.txt                  ← names the latest release (v1.0.0)
 │
 ├── vault-cli/                          ← CODE
 │   ├── pyproject.toml                  ← real Python package
@@ -532,7 +532,7 @@ vault publish <version> [--sign] [--schema-change] [--resume]
       vault migrations emit <previous> <version> [--schema-change]
       vault export paper <version>
       vault tag <version>
-      update releases/latest symlink via POSIX rename(2) (atomic; last step)
+      update releases/latest.txt via POSIX rename(2) (atomic; last step)
     Stages output to releases/.pending-<v>/ first; atomic rename on success; deletes
         pending dir on failure. --resume detects orphaned pending dirs. (Fixes C-7.)
     --sign: produces releases/<v>/release.json.minisig via minisign against

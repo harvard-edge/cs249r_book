@@ -43,7 +43,7 @@ class PreviewCommand:
         console.print("[blue]🌐 Starting full book preview server...[/blue]")
 
         # Setup config
-        config_name = self.config_manager.setup_symlink(format_type)
+        config_name = self.config_manager.activate_config(format_type)
         console.print(f"[blue]🔗 Using {config_name}[/blue]")
         console.print("[dim]🛑 Press Ctrl+C to stop the server[/dim]")
 
@@ -91,7 +91,7 @@ class PreviewCommand:
         console.print(f"[blue]🌐 Starting preview for[/blue] [bold]{chapter_display_name}[/bold]")
 
         # Setup HTML config for preview
-        self.config_manager.setup_symlink("html")
+        self.config_manager.activate_config("html")
 
         console.print("[dim]🛑 Press Ctrl+C to stop the server[/dim]")
 

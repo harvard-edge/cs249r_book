@@ -636,10 +636,10 @@ def render_mapped_chapter(
 
     active_config = quarto_dir / "_quarto.yml"
     active_index = quarto_dir / "index.qmd"
-    if not active_config.is_symlink() or not active_index.is_symlink():
-        raise RuntimeError("Expected _quarto.yml and index.qmd to be symlinks")
-    original_config = os.readlink(active_config)
-    original_index = os.readlink(active_index)
+    if not active_config.is_file() or not active_index.is_file():
+        raise RuntimeError("Expected _quarto.yml and index.qmd; run a volume build first")
+    original_config = active_config.read_bytes()
+    original_index = active_index.read_bytes()
     target_index = f"index-{volume}.qmd"
     xref_path = quarto_dir / "._pdfbook_xref.json"
     xref_existed = xref_path.is_file()
@@ -649,10 +649,9 @@ def render_mapped_chapter(
     with _worktree_lock(quarto_dir / "tmp" / "layout-harness" / ".render.lock"):
         mapped_path.write_text(transformed, encoding="utf-8")
         try:
-            active_config.unlink()
-            active_config.symlink_to(harness_config.relative_to(quarto_dir))
+            config_manager.activate_config_file(harness_config)
             active_index.unlink()
-            active_index.symlink_to(target_index)
+            shutil.copyfile(quarto_dir / target_index, active_index)
             subprocess.run(
                 ["quarto", "render", "--to=titlepage-pdf"],
                 cwd=quarto_dir,
@@ -660,12 +659,8 @@ def render_mapped_chapter(
                 check=True,
             )
         finally:
-            if active_config.exists() or active_config.is_symlink():
-                active_config.unlink()
-            active_config.symlink_to(original_config)
-            if active_index.exists() or active_index.is_symlink():
-                active_index.unlink()
-            active_index.symlink_to(original_index)
+            active_config.write_bytes(original_config)
+            active_index.write_bytes(original_index)
             mapped_path.unlink(missing_ok=True)
             if xref_existed:
                 assert xref_snapshot is not None
@@ -705,8 +700,8 @@ def render_mapped_chapter(
         "numbering_source": str(aux_path),
         "pdf": str(pdf_path),
         "source_modified": False,
-        "active_config_restored": os.readlink(active_config) == original_config,
-        "active_index_restored": os.readlink(active_index) == original_index,
+        "active_config_restored": active_config.read_bytes() == original_config,
+        "active_index_restored": active_index.read_bytes() == original_index,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     manifest["manifest"] = str(manifest_path)

@@ -21,6 +21,7 @@ from rich.table import Table
 
 from vault_cli.exit_codes import ExitCode
 from vault_cli.loader import load_all
+from vault_cli.release import latest_release_dir
 
 console = Console()
 
@@ -136,9 +137,9 @@ def _check_release_integrity(vault_dir: Path) -> CheckResult:
     releases_dir = vault_dir / "releases"
     if not releases_dir.exists():
         return CheckResult("release-integrity", "skip", "no releases/ dir")
-    latest = releases_dir / "latest"
-    if not latest.exists():
-        return CheckResult("release-integrity", "warn", "no releases/latest symlink")
+    latest = latest_release_dir(releases_dir)
+    if latest is None:
+        return CheckResult("release-integrity", "warn", "no releases/latest.txt pointer")
     release_json = latest / "release.json"
     if not release_json.exists():
         return CheckResult("release-integrity", "fail", f"{release_json} missing")

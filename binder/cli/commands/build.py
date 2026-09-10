@@ -407,7 +407,7 @@ class BuildCommand:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Setup config
-        config_name = self.config_manager.setup_symlink(format_type)
+        config_name = self.config_manager.activate_config(format_type)
 
         # Get config file
         config_file = self.config_manager.get_config_file(format_type)
@@ -524,8 +524,8 @@ class BuildCommand:
             output_dir = self.config_manager.get_output_dir(format_type)
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Setup correct configuration symlink
-            self.config_manager.setup_symlink(format_type)
+            # Write the active _quarto.yml for this format
+            self.config_manager.activate_config(format_type)
 
             # Set up fast build mode for the target chapters
             self._setup_fast_build_mode(config_file, chapter_files)
@@ -651,8 +651,8 @@ class BuildCommand:
             output_dir = self.config_manager.get_output_dir(format_type, volume)
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Setup volume-specific configuration symlink
-            config_name = self.config_manager.setup_symlink(format_type, volume)
+            # Write the volume's _quarto.yml and index.qmd
+            config_name = self.config_manager.activate_config(format_type, volume)
             console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
 
             # Set up fast build mode for the target chapters
@@ -778,8 +778,8 @@ class BuildCommand:
         output_dir = self.config_manager.get_output_dir(format_type, volume)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Setup config symlink to volume-specific config
-        config_name = self.config_manager.setup_symlink(format_type, volume)
+        # Write the volume's _quarto.yml and index.qmd
+        config_name = self.config_manager.activate_config(format_type, volume)
         console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
 
         # Full volume PDF/EPUB builds must uncomment every chapter in the
@@ -1119,8 +1119,8 @@ class BuildCommand:
             original_config = config_file.read_text(encoding='utf-8')
             self._add_render_section(config_file, files_to_render)
 
-            # Ensure symlink points to the HTML config
-            self.config_manager.setup_symlink("html")
+            # Make the HTML config the active _quarto.yml
+            self.config_manager.activate_config("html")
 
             # Build HTML
             render_cmd = ["quarto", "render", "--to=html"]
@@ -1912,7 +1912,7 @@ class BuildCommand:
             stripped = line.strip()
 
             # Only uncomment chapter-list entries (`# - path.qmd`), not free-form
-            # comments that mention `.qmd` (e.g. index.qmd symlink notes).
+            # comments that mention `.qmd` (e.g. index.qmd notes).
             is_commented_chapter_entry = (
                 stripped.startswith('#')
                 and '.qmd' in line

@@ -268,11 +268,11 @@ cd path/to/MLSysBook
 
 The book uses a **dual-configuration approach** that automatically switches between optimized settings for different output formats:
 
-- **`quarto/config/_quarto-html.yml`** → Optimized for interactive website (clean navigation, TikZ→SVG, cross-references)
-- **`quarto/config/_quarto-pdf.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
-- **`quarto/config/_quarto-epub.yml`** → Optimized for EPUB (e-reader format, reflowable content)
+- **`books/config/_quarto-html-volN.yml`** → Optimized for interactive website (clean navigation, TikZ→SVG, cross-references)
+- **`books/config/_quarto-pdf-volN.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
+- **`books/config/_quarto-epub-volN.yml`** → Optimized for EPUB (e-reader format, reflowable content)
 
-The Binder CLI automatically handles configuration switching using symlinks — **no manual file management needed!**
+Quarto only reads `books/_quarto.yml`, so each build copies the chosen config there and copies the volume's `index-volN.qmd` to `books/index.qmd`. Both copies are generated and gitignored; edit `books/config/` and `books/index-volN.qmd` instead. The Binder CLI makes these copies for you, so **no manual file management is needed.**
 
 ---
 
@@ -323,22 +323,25 @@ If you need direct control without the Binder CLI:
 
 #### Website (HTML) version:
 ```sh
-cd quarto
-ln -sf config/_quarto-html.yml _quarto.yml
+cd books
+cp config/_quarto-html-vol1.yml _quarto.yml
+cp index-vol1.qmd index.qmd
 quarto render --to html
 ```
 
 #### PDF version:
 ```sh
-cd quarto
-ln -sf config/_quarto-pdf.yml _quarto.yml
+cd books
+cp config/_quarto-pdf-vol1.yml _quarto.yml
+cp index-vol1.qmd index.qmd
 quarto render --to=titlepage-pdf
 ```
 
 #### EPUB version:
 ```sh
-cd quarto
-ln -sf config/_quarto-epub.yml _quarto.yml
+cd books
+cp config/_quarto-epub-vol1.yml _quarto.yml
+cp index-vol1.qmd index.qmd
 quarto render --to epub
 ```
 
@@ -495,13 +498,11 @@ pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r req
 
 **Configuration issues?**
 ```sh
-# Check current configuration
-ls -la quarto/_quarto.yml
+# Check which config is active (the first line names its source)
+head -1 books/_quarto.yml
 
-# Should be a symlink to config/_quarto-html.yml or config/_quarto-pdf.yml
-# If not, recreate:
-cd quarto
-ln -sf config/_quarto-html.yml _quarto.yml
+# Regenerate it from a config file:
+./binder/binder switch html
 ```
 
 ### System-Specific Issues

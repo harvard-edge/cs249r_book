@@ -36,7 +36,7 @@ staffml/vault/
 │   │   ├── release.json     ← release_hash, counts, git_sha, timestamp
 │   │   ├── d1-migration.sql ← forward migration
 │   │   └── d1-rollback.sql  ← inverse with prior-row bodies embedded
-│   └── latest -> 0.9.0      ← POSIX atomic-rename symlink
+│   └── latest.txt           ← names the latest release; replaced atomically
 ├── id-registry.yaml         ← APPEND-ONLY log; CI rejects line deletions
 ├── taxonomy.yaml            ← topic graph; DAG-enforced
 ├── chains.yaml              ← chain definitions (optional)

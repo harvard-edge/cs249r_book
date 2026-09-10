@@ -88,11 +88,11 @@ inspection and treat a failed restoration check as a hard stop.
 The renderer takes a non-blocking worktree lock because it temporarily redirects
 `books/_quarto.yml` and `index.qmd`. Two mapped builds must not run in the
 same worktree. For parallel rendering, use one dedicated worktree per running
-build. A build in another worktree is safe because its symlinks and generated
-files are independent.
+build. A build in another worktree is safe because its generated `_quarto.yml`,
+`index.qmd`, and render files are independent.
 
-If rendering fails, verify that `_quarto.yml` and `index.qmd` still point to
-their original targets. The command is designed to restore them even when
+If rendering fails, verify that `_quarto.yml` and `index.qmd` still hold
+their original content. The command is designed to restore them even when
 Quarto or LuaLaTeX exits nonzero.
 
 ## Interpretation limits

@@ -326,7 +326,7 @@ class MLSysBookCLI:
             console.print("[dim]Layout rule: --layout is accepted only for `build pdf --vol1|--vol2`; it runs the same planner as `binder layout --vol1|--vol2 --no-build`.[/dim]")
             return True
 
-        self.config_manager.show_symlink_status()
+        self.config_manager.show_active_config()
         (
             format_type,
             volume,
@@ -433,7 +433,7 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder/binder preview vol1/training[/dim]")
             return True
 
-        self.config_manager.show_symlink_status()
+        self.config_manager.show_active_config()
 
         if len(args) < 1:
             # No target specified - preview entire book
@@ -629,7 +629,7 @@ class MLSysBookCLI:
         console.print(f"[dim]Book directory: {self.config_manager.book_dir}[/dim]")
 
         # Show config status
-        self.config_manager.show_symlink_status()
+        self.config_manager.show_active_config()
 
         # Show chapter count
         chapters = self.chapter_discovery.get_all_chapters()

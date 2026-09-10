@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+from binder.cli.core.config import write_active_config
+
 
 SCRIPT = Path(__file__).resolve().parents[2] / "books" / "shared" / "scripts" / "save_latex_log.py"
 SPEC = importlib.util.spec_from_file_location("save_latex_log", SCRIPT)
@@ -11,12 +13,12 @@ save_latex_log = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(save_latex_log)
 
 
-def test_active_volume_follows_binder_config_link(tmp_path: Path) -> None:
+def test_active_volume_reads_binder_config_source(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     volume_config = config_dir / "_quarto-pdf-vol2.yml"
     volume_config.write_text("project: {}\n", encoding="utf-8")
-    (tmp_path / "_quarto.yml").symlink_to(volume_config.relative_to(tmp_path))
+    write_active_config(tmp_path / "_quarto.yml", volume_config, tmp_path)
 
     assert save_latex_log._active_volume(tmp_path) == "vol2"
 
