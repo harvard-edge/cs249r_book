@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
+import os
+
+svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
   <defs>
     <style>
       .title { font-family: sans-serif; font-size: 22px; font-weight: bold; fill: #1F407A; }
@@ -81,3 +83,7 @@
   <text x="1023" y="405" class="annotation-red">+26.3 cm collision!</text>
 
 </svg>
+"""
+os.makedirs('books/vol4/body/images/svg', exist_ok=True)
+with open('books/vol4/body/images/svg/fig02_stopping_distance.svg', 'w') as f:
+    f.write(svg)

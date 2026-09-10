@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
+import os
+
+svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
   <defs>
     <style>
       .title { font-family: sans-serif; font-size: 24px; font-weight: bold; fill: #1F407A; }
@@ -81,3 +83,8 @@
   <text x="670" y="415" class="annotation">68.4 ms (Fail)</text>
 
 </svg>
+"""
+
+os.makedirs('books/vol4/body/images/svg', exist_ok=True)
+with open('books/vol4/body/images/svg/fig02_latency_waterfall.svg', 'w') as f:
+    f.write(svg)

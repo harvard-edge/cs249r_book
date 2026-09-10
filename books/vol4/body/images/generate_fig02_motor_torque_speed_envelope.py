@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="100%" height="100%">
+import os
+
+svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="100%" height="100%">
   <defs>
     <style>
       .title { font-family: sans-serif; font-size: 20px; font-weight: bold; fill: #1F407A; }
@@ -80,3 +82,7 @@
   <path d="M 750 490 L 750 495 L 950 495 L 950 490" fill="none" stroke="#2D3748" stroke-width="2" />
 
 </svg>
+"""
+os.makedirs('books/vol4/body/images/svg', exist_ok=True)
+with open('books/vol4/body/images/svg/fig02_motor_torque_speed_envelope.svg', 'w') as f:
+    f.write(svg)
