@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
+import math
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
   <defs>
     <!-- Arrowheads -->
     <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -172,3 +175,10 @@
     <path d="M 235 260 L 245 265 L 240 275" fill="none" stroke="#1F407A" stroke-width="1.5"/>
   </g>
 </svg>
+"""
+
+os.makedirs('books/vol4/enforcement/images/svg', exist_ok=True)
+with open('books/vol4/enforcement/images/svg/fig12_cbf_safety_filter.svg', 'w') as f:
+    f.write(svg_content)
+
+print("fig12_cbf_safety_filter.svg generated")
