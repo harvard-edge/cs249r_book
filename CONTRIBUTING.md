@@ -15,7 +15,7 @@ right place.
 
 | If you want to... | Project | Read this guide |
 |---|---|---|
-| Fix a typo, improve a chapter, add a figure | **Textbook** | [`publishing/docs/CONTRIBUTING.md`](publishing/docs/CONTRIBUTING.md) |
+| Fix a typo, improve a chapter, add a figure | **Textbook** | [`bindery/docs/CONTRIBUTING.md`](bindery/docs/CONTRIBUTING.md) |
 | Add or fix a TinyTorch module / test / milestone | **TinyTorch** | [`tinytorch/CONTRIBUTING.md`](tinytorch/CONTRIBUTING.md) |
 | Improve a hardware lab or board recipe | **Hardware Kits** | [`kits/README.md`](kits/README.md) |
 | Add or fix an interactive Co-Lab | **Labs** | [`labs/README.md`](labs/README.md) |
@@ -172,7 +172,7 @@ merges, a maintainer (or you, on your own PR) can comment:
 ```
 
 You'll be added to the project's recognition table in the README. See
-[`publishing/docs/CONTRIBUTING.md`](publishing/docs/CONTRIBUTING.md#contribution-types) for
+[`bindery/docs/CONTRIBUTING.md`](bindery/docs/CONTRIBUTING.md#contribution-types) for
 the full list of contribution types.
 
 ---

@@ -1,1 +1,0 @@
-books/vol3/gemini_outline.md

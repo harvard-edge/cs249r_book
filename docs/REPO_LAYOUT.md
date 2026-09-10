@@ -1,7 +1,7 @@
 # Repository layout
 
 The short version: **book sources live in `books/`. Everything that builds them
-lives in `publishing/`. Build output is disposable and lands in `books/_build/`.**
+lives in `bindery/`. Build output is disposable and lands in `books/_build/`.**
 
 ```
 books/                    ← all book sources; this is the Quarto project root
@@ -22,13 +22,13 @@ books/                    ← all book sources; this is the Quarto project root
   _variables.yml  404.qmd  .quartoignore
   _build/                       render output; gitignored, safe to delete
 
-publishing/               ← the toolchain, not the book
+bindery/               ← the toolchain, not the book
   binder                        the CLI entry point (invoke it as ./binder)
   cli/                          binder implementation
   tools/                        audits, scripts, generators
   tests/  docker/  docs/  config/  vscode-ext/  .layout/
 
-binder                    ← symlink to publishing/binder; run ./binder from the root
+binder                    ← symlink to bindery/binder; run ./binder from the root
 ```
 
 ## Why it looks like this
@@ -42,14 +42,15 @@ to recover anything from history.
 
 There was also a `book` symlink pointing at `publishing/`, so `book/quarto/` and
 `publishing/quarto/` were the same directory under two names, sitting next to a
-`books/` that was a third thing. That symlink is gone. The CLI is now reached as
-`./binder` from the repository root.
+`books/` that was a third thing. That symlink is gone, `publishing/` was renamed `bindery/` because it holds the
+toolchain rather than anything to do with publishing, and the CLI is now reached
+as `./binder` from the repository root.
 
 ## Rules of thumb
 
 - **Editing a chapter?** It is under `books/vol<N>/<chapter>/<chapter>.qmd`.
   There is no other copy. If you find yourself editing something under
-  `publishing/` that looks like prose, stop; you are in the wrong tree.
+  `bindery/` that looks like prose, stop; you are in the wrong tree.
 - **Adding a shared asset?** `books/shared/assets/`. Reference it from a config
   as `shared/assets/...`, which is relative to the Quarto project root.
 - **Paths inside `books/config/*.yml`** are relative to `books/`, so a chapter is
@@ -70,16 +71,14 @@ reports real findings. Scoped runs with `--path` behave exactly as before.
 
 ## One thing this change cannot fix from inside the repository
 
-The GitHub Actions workflows read repository **variables** that are configured
-in GitHub settings, not in the repo:
+The GitHub Actions workflows read repository **variables** configured in GitHub
+settings, not in the repo. All three still point at the old layout:
 
-| Variable | Was | Should now be |
+| Variable | Currently | Must become |
 |---|---|---|
-| `BOOK_ROOT` | `publishing` | `publishing` (unchanged; it is the toolchain) |
+| `BOOK_ROOT` | `publishing` | `bindery` |
 | `BOOK_QUARTO` | `publishing/quarto` | `books` |
-| `BOOK_TOOLS` | `publishing/tools` | `publishing/tools` (unchanged) |
-| `BOOK_DEPS` | — | unchanged |
+| `BOOK_TOOLS` | `publishing/tools` | `bindery/tools` |
 
-`BOOK_QUARTO` is the one that must change. Until it is updated under
-Settings → Secrets and variables → Actions → Variables, any workflow step using
-`${{ vars.BOOK_QUARTO }}` as a working directory will fail to find the book.
+Until they are updated under Settings → Secrets and variables → Actions →
+Variables, any workflow step using them as a working directory will fail.

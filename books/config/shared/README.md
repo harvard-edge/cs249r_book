@@ -22,7 +22,7 @@ pointer to the currently-active configuration.
 under `config/` instead. The symlink target may be overwritten on the next
 build.
 
-The symlink is managed by [`book/cli/core/config.py`](../../../cli/core/config.py)
+The symlink is managed by [`bindery/cli/core/config.py`](../../../cli/core/config.py)
 (`ConfigManager.setup_symlink`). To switch manually, use the `binder` CLI
 commands or relink by hand:
 

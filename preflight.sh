@@ -11,5 +11,5 @@ for V in 1 2; do
   echo "== 3b. collisions vol$V =="; ./binder layout collisions "$P" 2>&1 | grep -E 'collisions:'
   echo "== 3c. margins vol$V =="; ./binder layout margins "$P" --include-overlaps 2>&1 | grep -E 'overlaps [0-9]'
   echo "== 4. gaps vol$V =="; ./binder layout check "$P" --skip-frontmatter 2>&1 | grep -E 'flagged'
-  echo "== 5. purpose-overflow vol$V (must be 0) =="; python3 publishing/tools/audit/check_purpose_overflow.py "$P" --vol vol$V 2>&1 | grep -E '✗|PASS|FAIL'
+  echo "== 5. purpose-overflow vol$V (must be 0) =="; python3 bindery/tools/audit/check_purpose_overflow.py "$P" --vol vol$V 2>&1 | grep -E '✗|PASS|FAIL'
 done
