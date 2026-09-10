@@ -1,14 +1,27 @@
-*How do we map stochastic, variable-length reasoning into predictable computational economics?*
-
-::: {.callout-note title="Meta paragraph"}
-This chapter bridges the gap between hardware utilization and application-level unit economics. We explore how variable-length generation, the memory-bandwidth-bound nature of decoding, and the non-linear scaling of KV cache fundamentally change the economic models of compute, shifting away from static instance pricing toward fine-grained, state-aware token-based abstractions.
-:::
+## Purpose {.unnumbered .unlisted}
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{30}{30}{30}{30}{30}{30}
+\mlagentstack{95}{20}{30}{10}{20}{10}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
+:::
+
+_Why does an agent designed to save human labor consume ten times its salary in API tokens?_
+
+This chapter bridges the gap between hardware utilization and application-level unit economics, exploring how variable-length generation and the non-linear scaling of KV cache fundamentally change the economic models of compute. By shifting away from static instance pricing toward fine-grained, state-aware token-based abstractions, we understand why autonomous loops create exponential cost scaling. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+- Explain the physical hardware constraints that cause asymmetric pricing between prefill and decode tokens.
+- Calculate the memory footprint of the KV cache for a given sequence length and batch size.
+- Diagnose runaway token consumption in multi-agent recursive loops.
+- Compare memory management techniques like PagedAttention against static contiguous allocation for KV caches.
+- Evaluate the economic viability of speculative decoding based on draft model acceptance rates and arithmetic intensity.
+- Architect dynamic model routing policies to optimize Cost-per-Verified-Goal (CPVG).
 :::
 
 
@@ -17,6 +30,15 @@ This chapter bridges the gap between hardware utilization and application-level 
 When a user asks a language model to summarize a 50-page document, the system does not consume compute uniformly. Processing the input document requires a massive, parallel matrix multiplication, while generating the two-paragraph summary relies on a slow, sequential process constrained entirely by how fast memory can be read. The commercialization of large language models has driven a structural shift in how we price these computational resources. Unlike traditional microservices, where costs are closely tied to active connection time or predictable request payloads (e.g., bytes transferred), autoregressive generation introduces stochastic resource utilization tied intricately to hardware roofline limits. The fundamental unit of value and cost is the token, yet the hardware footprint required to process a token varies drastically based on its phase (prefill vs. decode), its position in the context window, the model's architecture (dense vs. mixture of experts), and the temporal concurrency of the serving system.
 
 The microeconomics of token generation trace directly back to these physical hardware constraints. Understanding why a generated word costs more than an input word requires looking at the arithmetic intensity of the underlying operations.
+
+| Metric | Definition | Primary Driver | Optimization Target |
+|---|---|---|---|
+| Cost-per-Token | Price to generate or process one token. | Hardware arithmetic intensity. | Maximize batch size, PagedAttention. |
+| Cost-per-Turn | Total cost of a single user-agent interaction. | Prompt length, KV cache size. | KV cache tiering, prompt compression. |
+| Cost-per-Verified-Goal | Cost to autonomously complete a task. | Agent loop efficiency. | Model routing, early exit conditions. |
+| Opportunity Cost of Idle HBM | Lost revenue from unused memory capacity. | External fragmentation. | Dynamic batching, speculative decoding. |
+
+: Economic Metrics in Agentic Systems {#tbl-economic-metrics tbl-colwidths="[25,30,20,25]"}
 
 ## Token Pricing Models: Inputs, Outputs, and Arithmetic Intensity
 
@@ -66,6 +88,16 @@ In a multi-agent architecture where agents recursively summarize prior steps, ho
 
 To prevent cost overruns and latency spikes, systems must implement strict quota management and dynamic token budgets. The economics heavily favor intelligent **model routing**\index{model routing}: deploying "flash" or distilled models for intermediate reasoning steps, state transitions, or standard queries, while reserving expensive "pro" models only for final synthesis or complex planning bottlenecks. 
 
+| Strategy | Mechanism | Pros | Cons |
+|---|---|---|---|
+| Static Quotas | Fixed token limit per agent. | Predictable cost. | Fails on complex edge cases. |
+| Reactive Throttling | Slows generation when limits near. | Prevents runaway spending. | Increases latency unpredictably. |
+| Dynamic Auctions | Agents bid for tokens based on priority. | Optimal allocation of HBM. | High implementation complexity. |
+| Priority Leases | Reserved capacity for critical agents. | Guaranteed SLAs. | Low utilization during idle periods. |
+
+: Token Allocation Strategies {#tbl-token-allocation tbl-colwidths="[20,30,25,25]"}
+
+
 **Mixture of Experts (MoE)**\index{Mixture of Experts (MoE)} architectures [@shazeer2017outrageously] further complicate these economics. While MoE models possess a massive total parameter count (requiring vast VRAM capacity), they have a much smaller "active" parameter count per token. This **sparsity**\index{sparsity} allows for faster decode speeds and cheaper token economics relative to dense models of equivalent total size, provided the serving cluster can distribute the experts efficiently across GPUs.
 
 ::: {.callout-caution title="War Story: The Automated Cloud Burn"}
@@ -78,22 +110,23 @@ These agentic consumption patterns magnify the impact of hardware constraints. A
 
 The complexity of tokenomics leads to persistent misconceptions about how inference costs are incurred and optimized. Several common fallacies arise from confusing hardware capacity with compute utilization.
 
-**Pitfall: Ignoring the asymmetric cost of prompt caching.**
+**Pitfall**: *Ignoring the asymmetric cost of prompt caching.*
 Persisting KV caches saves prefill compute but permanently locks up memory capacity. If the cache hit rate is low, the latency and bandwidth cost of evicting and paging the cache from NVMe or CPU RAM to GPU HBM can exceed the cost of simply recomputing the prefill from scratch. Over-caching reduces the batch size available for other requests, lowering overall cluster throughput.
 
-**Fallacy: Token count is a perfect proxy for hardware compute cost.**
+**Fallacy**: *Token count is a perfect proxy for hardware compute cost.*
 While highly correlated for billing, token count ignores the impact of batching, sequence length, and model architecture (dense vs. MoE). A 1,000-token output generated during a low-traffic period with a batch size of 1 utilizes hardware very differently—and less efficiently—than the same output generated at peak concurrency where weight-loading costs are amortized.
 
-**Pitfall: Treating all generation latency as uniform.**
+**Pitfall**: *Treating all generation latency as uniform.*
 Assuming linear generation time fails to account for **Time to First Token (TTFT)**\index{Time to First Token (TTFT)} being compute-bound (prefill) and **Time Between Tokens (TBT)**\index{Time Between Tokens (TBT)} being memory-bandwidth-bound (decode). Optimizing a system for TTFT requires different hardware topologies and parallelism strategies (e.g., sequence parallelism) than optimizing for high-throughput TBT (e.g., tensor parallelism and large batch sizes).
 
-**Fallacy: Speculative decoding always reduces serving costs.**
+**Fallacy**: *Speculative decoding always reduces serving costs.*
 Speculative decoding [@leviathan2023fast; @chen2023accelerating] burns surplus ALU cycles to save memory bandwidth. However, if the draft model's acceptance rate is too low (due to complex reasoning tasks or domain shifts), the system wastes compute and actually degrades overall throughput and latency, making the cost per token higher than standard autoregressive decoding.
 
 These pitfalls underscore the necessity of aligning the economic model of token generation with the physical constraints of the hardware executing it. A system that scales autonomously will bankrupt its operators if it does not treat memory capacity and arithmetic intensity as strict design boundaries.
 
-## Summary
+## Summary {#sec-vol3-tokenomics-summary}
 
+::: {.callout-takeaways title="The Systems Tokenomics Invariant"}
 * The transition to token-based economics is a direct mapping of hardware roofline constraints: compute-bound prefill operations (input) yield cheaper tokens, while memory-bandwidth-bound decode operations (output) yield expensive tokens.
 * The KV cache dictates the working set size of an inference request; its linear scaling with sequence length imposes strict limits on concurrency, making long-context queries disproportionately expensive in memory opportunity cost.
 * Memory management techniques like PagedAttention [@kwon2023efficient] are critical for inference economics because they eliminate external fragmentation, allowing the system to maximize batch sizes and amortize memory bandwidth costs during decoding.
@@ -101,3 +134,15 @@ These pitfalls underscore the necessity of aligning the economic model of token 
 * Caching KV states shifts the economic model from paying for compute to renting memory capacity across a hierarchy (HBM, CPU RAM, NVMe), requiring high cache hit rates to be economically viable.
 * Mixture of Experts (MoE) architectures [@shazeer2017outrageously] decouple active parameter count from total parameter capacity, resulting in lower inference costs per token compared to dense models, at the expense of higher total VRAM requirements.
 * Multi-agent architectures trigger compounding token consumption and necessitate dynamic model routing, where cheap, specialized models handle intermediate reasoning and expensive, capable models are reserved for complex bottlenecks.
+:::
+
+::: {.callout-chapter-connection title="From Operational Tokenomics to Distributed Agent Architecture"}
+Having mapped the economic cost of stochastic, variable-length reasoning to physical memory bandwidth and capacity constraints, we now understand why an unconstrained agent can exhaust a cluster's resources. In the next volume, we will zoom out from the single-node tokenomics of the runtime to the distributed systems orchestration required to manage entire fleets of these agents concurrently.
+:::
+
+## Quantitative Problems {#sec-vol3-tokenomics-problems}
+
+1. **KV Cache Memory Capacity Bound:** A serving system uses an 8x H100 GPU node (each with 80 GB HBM). The OS and model weights consume 320 GB total. Assume each token in the KV cache requires $2 \times N_{\text{layers}} \times D_{\text{model}} \times 2$ bytes (FP16). For a 70B parameter model with $N_{\text{layers}}=80$ and $D_{\text{model}}=8192$, calculate the maximum concurrent batch size the system can sustain if every request has a uniform context length of 128,000 tokens.
+2. **Break-Even Speculative Decoding:** An autoregressive decode step takes $t_{\text{AR}} = 20$ ms/token. A speculative draft model can generate 4 draft tokens in $15$ ms total, and the target model verification step for those 4 tokens takes $25$ ms. Let $\alpha$ be the average number of accepted draft tokens per speculative step (where $1 \le \alpha \le 4$). Calculate the minimum acceptance rate $\alpha$ required for speculative decoding to achieve a lower latency-per-token than standard autoregressive decoding.
+3. **Dynamic Auction Clearing Price:** A multi-agent framework allocates 10,000 tokens per second across three agent pools. Pool A (Data Ingestion) values throughput at $\$0.50$ per 1k tokens, Pool B (Code Generation) at $\$1.50$ per 1k tokens, and Pool C (Critical Planning) at $\$5.00$ per 1k tokens. If Pool A demands 8,000 tok/s, Pool B demands 5,000 tok/s, and Pool C demands 2,000 tok/s, calculate the market-clearing price of a token in a first-price auction, and determine how much bandwidth each pool receives.
+4. **Agent Break-Even Economics:** An enterprise replaces a junior software engineer (costing $\$50$/hour, producing 1 verified pull request per 8 hours) with an autonomous coding agent. The agent uses a model priced at $\$10$ per 1M input tokens and $\$30$ per 1M output tokens. A typical agent loop for a pull request requires 50 iterations. Each iteration consumes an average of 40,000 input tokens (reading codebase state and previous steps) and 1,000 output tokens. Calculate the Cost-per-Verified-Goal (CPVG) of the agent and determine if it is economically viable compared to the human engineer.
