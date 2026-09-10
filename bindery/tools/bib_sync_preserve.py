@@ -35,7 +35,7 @@ from typing import Sequence
 
 
 REPO = Path(__file__).resolve().parents[2]
-BOOK = REPO / "book"
+BOOK = REPO / "bindery"
 if str(BOOK) not in sys.path:
     sys.path.insert(0, str(BOOK))
 
@@ -571,7 +571,7 @@ def _run_bib_mechanical_fix(bib_path: Path) -> None:
 
 
 def _run_bib_lint_check(bib_path: Path) -> subprocess.CompletedProcess[str]:
-    binder = REPO / "book" / "binder"
+    binder = REPO / "bindery" / "binder"
     return subprocess.run(
         [sys.executable, str(binder), "check", "bib", "--path", str(bib_path), "--json"],
         cwd=REPO,

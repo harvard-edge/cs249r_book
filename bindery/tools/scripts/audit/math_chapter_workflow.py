@@ -27,7 +27,7 @@ except ImportError as exc:  # pragma: no cover - dependency is declared by repo
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 BOOK_DIR = REPO_ROOT  / "books"
-BINDER = REPO_ROOT / "book" / "binder"
+BINDER = REPO_ROOT / "bindery" / "binder"
 RUNS_DIR = REPO_ROOT / "review" / "math-audit" / "runs"
 
 PDF_NAMES = {

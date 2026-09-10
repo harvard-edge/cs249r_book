@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "quarto" / "scripts" / "save_latex_log.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "books" / "shared" / "scripts" / "save_latex_log.py"
 SPEC = importlib.util.spec_from_file_location("save_latex_log", SCRIPT)
 assert SPEC and SPEC.loader
 save_latex_log = importlib.util.module_from_spec(SPEC)

@@ -10,7 +10,7 @@ export function getRepoRoot(): string | undefined {
   // First prefer a folder that directly contains binder.
   for (const folder of folders) {
     const rootCandidate = folder.uri.fsPath;
-    if (fs.existsSync(path.join(rootCandidate, 'book', 'binder'))) {
+    if (fs.existsSync(path.join(rootCandidate, 'bindery', 'binder'))) {
       return rootCandidate;
     }
   }
@@ -20,7 +20,7 @@ export function getRepoRoot(): string | undefined {
   if (activeFile) {
     let cursor = path.dirname(activeFile);
     while (cursor !== path.dirname(cursor)) {
-      if (fs.existsSync(path.join(cursor, 'book', 'binder'))) {
+      if (fs.existsSync(path.join(cursor, 'bindery', 'binder'))) {
         return cursor;
       }
       cursor = path.dirname(cursor);

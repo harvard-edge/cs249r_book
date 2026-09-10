@@ -32,7 +32,7 @@ BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "html-vol1",
     "vol2": REPO  / "books" / "_build" / "html-vol2",
 }
-BINDER = REPO / "book" / "binder"
+BINDER = REPO / "bindery" / "binder"
 
 # Patterns that, if found in user-visible HTML text, indicate a rendering bug.
 # Order matters for reporting; most diagnostic first.

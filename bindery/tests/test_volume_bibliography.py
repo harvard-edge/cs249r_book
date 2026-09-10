@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-CONTENTS = REPO / "publishing"  / "books"
-CONFIG = REPO / "publishing" / "quarto" / "config"
-BUILDER = REPO / "publishing" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
+CONTENTS = REPO / "books"
+CONFIG = REPO / "books" / "config"
+BUILDER = REPO / "bindery" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
 
 DEDICATED = ("vol3", "vol4")
 SHARED = ("vol1", "vol2")
@@ -70,7 +70,7 @@ def test_config_points_at_the_right_bibliography(vol: str) -> None:
         text = cfg.read_text(encoding="utf-8")
         m = re.search(r"^bibliography:(.*?)(?=^\S)", text, re.M | re.S)
         assert m, f"{cfg.name} declares no bibliography"
-        found = re.findall(r"contents/(references[a-z0-9-]*\.bib)", m.group(1))
+        found = re.findall(r"(?<![\w/.-])(references[a-z0-9-]*\.bib)", m.group(1))
         if found != [expected]:
             problems.append(f"{cfg.name}: {found} (expected ['{expected}'])")
     assert not problems, "Bibliography wiring drift:\n  " + "\n  ".join(problems)

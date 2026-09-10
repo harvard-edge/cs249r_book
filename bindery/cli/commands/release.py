@@ -282,8 +282,8 @@ class ReleaseCommand:
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
-        self.repo_root = self.config_manager.book_dir.parent.parent
-        self.binder = self.repo_root / "book" / "binder"
+        self.repo_root = self.config_manager.root_dir
+        self.binder = self.repo_root / "bindery" / "binder"
 
     def run(self, args: list[str]) -> bool:
         parser = argparse.ArgumentParser(

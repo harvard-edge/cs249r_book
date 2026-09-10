@@ -11,8 +11,8 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-YAML_DIR = REPO_ROOT / "book" / "tools" / "audits" / "mlsysim_constants"
-AUDIT_DIR = REPO_ROOT / "book" / "tools" / "audit"
+YAML_DIR = REPO_ROOT / "bindery" / "tools" / "audits" / "mlsysim_constants"
+AUDIT_DIR = REPO_ROOT / "bindery" / "tools" / "audit"
 
 def _load_merged_mapping() -> dict[str, str]:
     spec = importlib.util.spec_from_file_location(

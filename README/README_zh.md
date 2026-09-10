@@ -133,7 +133,7 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [book/](../book/README.md) |
+| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [books/](../books/) |
 | **EXPLORE** | 🔮 Software Co‑Labs | 进行延迟、内存、能耗、成本实验 | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 亲手实现框架 | [tinytorch/](../tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 在受内存、功耗、时延、安全约束的硬件上工程实现 | [kits/](../kits/README.md) |

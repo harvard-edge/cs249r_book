@@ -445,7 +445,7 @@ class BibCommand:
                 )
                 return False
 
-        binder = repo / "book" / "binder"
+        binder = repo / "bindery" / "binder"
         check_cmd = [sys.executable, str(binder), "check", "bib"]
         if scoped:
             check_cmd.extend(["--path", str(root)])
@@ -477,7 +477,7 @@ class BibCommand:
     def _run_update(self, root: Path, dry_run: bool = False) -> bool:
         """Run betterbib sync-preserve on .bib files."""
         repo = self.config_manager.root_dir
-        script = repo / "book" / "tools" / "bib_sync_preserve.py"
+        script = repo / "bindery" / "tools" / "bib_sync_preserve.py"
         if not script.is_file():
             console.print(f"[red]Missing {script}[/red]")
             return False

@@ -357,17 +357,17 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
         }
 
     parts = rel_path.split("/")
-    if parts[:3] == ["book", "quarto", "contents"] and len(parts) >= 5:
-        if parts[3] in {"vol1", "vol2"}:
-            volume = parts[3]
-            section = parts[4].removesuffix(".qmd")
+    if parts[0] == "books" and len(parts) >= 3:
+        if parts[1] in {"vol1", "vol2"}:
+            volume = parts[1]
+            section = parts[2].removesuffix(".qmd")
 
             if section in {"frontmatter", "backmatter", "parts"}:
                 leaf = parts[-1].removesuffix(".qmd")
                 if parts[-1].startswith("_"):
                     leaf = f"includes/{leaf}"
-                elif section == "backmatter" and len(parts) >= 7:
-                    leaf = parts[5]
+                elif section == "backmatter" and len(parts) >= 5:
+                    leaf = parts[3]
                 unit_id = f"{volume}/{section}/{leaf}"
                 return {
                     "id": unit_id,
@@ -383,11 +383,11 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
                 "root": root,
                 "kind": "book-chapter",
             }
-        if parts[3] in {"frontmatter", "backmatter"}:
-            section = parts[3]
-            chapter = parts[4].removesuffix(".qmd")
-            root = f"books/{section}/{parts[4]}"
-            if not parts[4].endswith(".qmd"):
+        if parts[1] == "shared" and len(parts) >= 4 and parts[2] in {"frontmatter", "backmatter"}:
+            section = parts[2]
+            chapter = parts[3].removesuffix(".qmd")
+            root = f"books/shared/{section}/{parts[3]}"
+            if not parts[3].endswith(".qmd"):
                 root += "/"
             return {
                 "id": f"book-shared/{section}/{chapter}",
@@ -395,7 +395,6 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
                 "root": root,
                 "kind": "book-shared-section",
             }
-
     unit_id = rel_path.removesuffix(".qmd")
     return {
         "id": unit_id,

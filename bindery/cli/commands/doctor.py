@@ -358,8 +358,7 @@ class DoctorCommand:
         except ImportError:
             _discover_built_epubs = None
 
-        # book_dir is `books/`; repo root is two levels up.
-        repo_root = self.config_manager.book_dir.parent.parent
+        repo_root = self.config_manager.root_dir
         if _discover_built_epubs is not None:
             epubs = _discover_built_epubs(repo_root)
             if epubs:
@@ -534,7 +533,7 @@ class DoctorCommand:
     def _check_permissions(self) -> None:
         """Check file permissions for key files."""
         key_files = [
-            ("binder", self.config_manager.root_dir / "binder"),
+            ("binder", self.config_manager.root_dir / "bindery" / "binder"),
         ]
 
         for name, file_path in key_files:

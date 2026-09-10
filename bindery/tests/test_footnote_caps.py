@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-cli_path = str(ROOT / "book")
+cli_path = str(ROOT / "bindery")
 if cli_path not in sys.path:
     sys.path.insert(0, cli_path)
 

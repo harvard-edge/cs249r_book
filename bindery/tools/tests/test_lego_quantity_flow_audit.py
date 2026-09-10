@@ -8,7 +8,7 @@ from pathlib import Path
 from bindery.cli.checks.lego_prose_literals import check_file as check_prose_literals
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
+sys.path.insert(0, str(ROOT / "bindery" / "tools" / "audit"))
 
 from book_check_lego_quantity_flow import check_file  # noqa: E402
 

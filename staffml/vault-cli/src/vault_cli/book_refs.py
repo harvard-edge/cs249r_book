@@ -35,7 +35,7 @@ from vault_cli import yaml_io
 _MAP_RELPATH = ("schema", "topic_chapter_map.yaml")
 
 # Book source tree, relative to the repo root (vault_dir.parent.parent).
-_CONTENTS_RELPATH = ("book", "quarto", "contents")
+_CONTENTS_RELPATH = ("books",)
 
 # `# Chapter Title {#sec-...}` — capture the title, drop the optional anchor.
 _H1_RE = re.compile(r"^#\s+(.+?)\s*(?:\{#.*\})?\s*$")

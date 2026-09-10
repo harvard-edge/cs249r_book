@@ -17,19 +17,19 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-QUARTO = REPO / "publishing"  / "books"
+QUARTO = REPO / "books"
 CONTENTS = QUARTO
 CONFIG = QUARTO / "config"
 
 VOLUMES = ("vol1", "vol2", "vol3", "vol4")
 RESERVED = {"frontmatter", "backmatter", "parts"}
 
-QMD_REF = re.compile(r"contents/[A-Za-z0-9_./-]+\.qmd")
+QMD_REF = re.compile(r"(?<![\w/.-])(?:vol[1-4]|shared)/[A-Za-z0-9_./-]+\.qmd")
 INCLUDE = re.compile(r"\{\{<\s*include\s+([^>}]+?)\s*>\}\}")
 
 
 def config_refs() -> set[str]:
-    """Every contents/*.qmd path any Quarto config mentions."""
+    """Every volume or shared .qmd path any Quarto config mentions."""
     refs: set[str] = set()
     for cfg in CONFIG.rglob("*.yml"):
         refs.update(QMD_REF.findall(cfg.read_text(encoding="utf-8")))
@@ -37,7 +37,7 @@ def config_refs() -> set[str]:
 
 
 def include_refs() -> set[str]:
-    """Every contents/*.qmd pulled in via a Quarto {{< include >}} shortcode."""
+    """Every .qmd pulled in via a Quarto {{< include >}} shortcode."""
     refs: set[str] = set()
     for qmd in CONTENTS.rglob("*.qmd"):
         for raw in INCLUDE.findall(qmd.read_text(encoding="utf-8", errors="ignore")):
@@ -121,9 +121,9 @@ def test_no_stray_build_artifacts(vol: str) -> None:
 
 
 def test_structure_manifest_is_current() -> None:
-    """contents/STRUCTURE.md matches what the PDF configs say."""
+    """books/shared/STRUCTURE.md matches what the PDF configs say."""
     import subprocess
 
-    gen = REPO / "publishing" / "tools" / "scripts" / "structure" / "gen_structure.py"
+    gen = REPO / "bindery" / "tools" / "scripts" / "structure" / "gen_structure.py"
     r = subprocess.run(["python3", str(gen), "--check"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr or r.stdout

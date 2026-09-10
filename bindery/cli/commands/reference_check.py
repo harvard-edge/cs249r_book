@@ -36,7 +36,7 @@ except ImportError:
 
 MIN_TITLE_WORDS = 4
 
-# Default .bib paths relative to repo root (when book_dir.parent.parent is repo root)
+# Default .bib paths, relative to the repository root.
 DEFAULT_BIB_REL_PATHS = [
     "books/references.bib",
 ]

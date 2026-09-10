@@ -366,12 +366,8 @@ Examples:
     
     # Determine paths
     script_dir = Path(__file__).parent
-    book_root = script_dir.parent.parent  # book/
-    yaml_path = book_root / 'quarto' / 'config' / f'_quarto-pdf-vol{vol}.yml'
-    
-    if not yaml_path.exists():
-        # Try alternate path
-        yaml_path = Path(f'/Users/VJ/GitHub/mlsysbook-vols/books/config/_quarto-pdf-vol{vol}.yml')
+    repo_root = Path(__file__).resolve().parents[4]
+    yaml_path = repo_root / 'books' / 'config' / f'_quarto-pdf-vol{vol}.yml'
     
     if not yaml_path.exists():
         print(f"Error: YAML config not found at {yaml_path}")

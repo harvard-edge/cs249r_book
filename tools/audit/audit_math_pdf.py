@@ -35,7 +35,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-BINDER = REPO / "book" / "binder"
+BINDER = REPO / "bindery" / "binder"
 BUILD_DIRS = {
     "vol1": REPO  / "books" / "_build" / "pdf-vol1",
     # binder writes vol2 PDFs into the per-volume directory if it's

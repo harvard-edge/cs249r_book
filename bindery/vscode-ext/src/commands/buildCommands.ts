@@ -17,7 +17,7 @@ const PDF_FILENAMES: Record<VolumeId, string> = {
  * Get the expected PDF path for a given volume (may or may not exist yet).
  */
 function getPdfPath(repoRoot: string, vol: VolumeId): string {
-  return path.join(repoRoot, 'book', 'quarto', '_build', `pdf-${vol}`, PDF_FILENAMES[vol]);
+  return path.join(repoRoot, 'books', '_build', `pdf-${vol}`, PDF_FILENAMES[vol]);
 }
 
 /**

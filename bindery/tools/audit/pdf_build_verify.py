@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT / "book"))
+sys.path.insert(0, str(REPO_ROOT / "bindery"))
 
 from cli.commands._pdf_checks import (  # noqa: E402
     default_pdf_path,

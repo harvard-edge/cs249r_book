@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 BOOK = REPO  / "books"
-BINDER = REPO / "book" / "binder"
+BINDER = REPO / "bindery" / "binder"
 LEDGER = REPO / "bindery/tools/audit/artifacts/chapter_build_sequence.json"
 sys.path.insert(0, str(REPO / "bindery/cli"))
 from core.discovery import get_chapters_from_config

@@ -23,7 +23,7 @@ def repo_root_from_here() -> Path:
 
 
 def yaml_dir(root: Path) -> Path:
-    return root / "book" / "tools" / "audits" / "mlsysim_constants"
+    return root / "bindery" / "tools" / "audits" / "mlsysim_constants"
 
 
 def count_should_change(root: Path) -> int:
@@ -49,7 +49,7 @@ def _load_script_module(name: str, script: Path):
 
 def check_registry_sources(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
     """Scan QMD LEGO cells for banned legacy constant/registry patterns."""
-    mod = _load_script_module("book_check_registry_sources", root / "book" / "tools" / "audit" / "book_check_registry_sources.py")
+    mod = _load_script_module("book_check_registry_sources", root / "bindery" / "tools" / "audit" / "book_check_registry_sources.py")
 
     if paths is None:
         paths = sorted((root  / "books").rglob("*.qmd"))
@@ -92,7 +92,7 @@ def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> li
 
 
 def _load_check_module(name: str, root: Path):
-    return _load_script_module(name, root / "book" / "tools" / "audit" / f"{name}.py")
+    return _load_script_module(name, root / "bindery" / "tools" / "audit" / f"{name}.py")
 
 
 def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
@@ -197,10 +197,10 @@ def run_registry_pytest(root: Path) -> list[RegistryIssue]:
         mlsysim_root / "tests" / "test_constants_allowlist.py",
         mlsysim_root / "tests" / "test_registry_no_duplicate_specs.py",
         mlsysim_root / "tests" / "test_provenance_audit.py",
-        root / "book" / "tests" / "test_appendix_constants.py",
-        root / "book" / "tests" / "test_appendix_lineage.py",
-        root / "book" / "tests" / "test_no_legacy_constant_refs.py",
-        root / "book" / "tests" / "test_mlsysim_registry_coverage.py",
+        root / "bindery" / "tests" / "test_appendix_constants.py",
+        root / "bindery" / "tests" / "test_appendix_lineage.py",
+        root / "bindery" / "tests" / "test_no_legacy_constant_refs.py",
+        root / "bindery" / "tests" / "test_mlsysim_registry_coverage.py",
     ]
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *map(str, tests), "-q", "-o", "addopts="],
@@ -219,7 +219,7 @@ def verify_appendix_lego(root: Path) -> list[RegistryIssue]:
     """Verify appendix LEGO cells match registry specs."""
     mod = _load_script_module(
         "generate_appendix_constants",
-        root / "book" / "tools" / "audit" / "generate_appendix_constants.py",
+        root / "bindery" / "tools" / "audit" / "generate_appendix_constants.py",
     )
 
     issues: list[RegistryIssue] = []

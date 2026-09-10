@@ -8260,8 +8260,8 @@ class ValidateCommand:
     # Read them from that file rather than hardcoding a list here, so adding a
     # new numbered callout type extends this check automatically.
     CUSTOM_BLOCKS_CONFIG = (
-        Path(__file__).resolve().parent.parent.parent
-        / "quarto" / "config" / "shared" / "base" / "custom-numbered-blocks.yml"
+        Path(__file__).resolve().parents[3]
+        / "books" / "config" / "shared" / "base" / "custom-numbered-blocks.yml"
     )
 
     def _custom_callout_prefixes(self) -> List[str]:
@@ -9943,7 +9943,7 @@ class ValidateCommand:
 
     def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
         """Validate .bib references against academic DBs (native implementation)."""
-        repo_root = self.config_manager.book_dir.parent.parent
+        repo_root = self.config_manager.root_dir
         if getattr(ns, "refs_file", None):
             bib_paths = [Path(f) if Path(f).is_absolute() else repo_root / f for f in ns.refs_file]
         else:
@@ -11771,7 +11771,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        raw = check_anti_patterns(repo_root / "book")
+        raw = check_anti_patterns(repo_root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11793,7 +11793,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        raw = check_tag_placement(repo_root / "book")
+        raw = check_tag_placement(repo_root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11815,7 +11815,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        raw = check_xref_resolves(repo_root / "book")
+        raw = check_xref_resolves(repo_root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11837,7 +11837,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        raw = check_makeindex_encap_conflicts(repo_root / "book")
+        raw = check_makeindex_encap_conflicts(repo_root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -12603,7 +12603,7 @@ class ValidateCommand:
         t0 = time.time()
         repo = self.config_manager.root_dir
         qmd_files = self._qmd_files(root)
-        baseline = repo / "book" / "tools" / "audit" / "lego_units_baseline.json"
+        baseline = repo / "bindery" / "tools" / "audit" / "lego_units_baseline.json"
         allowed: set[tuple[str, str, str]] = set()
         if baseline.exists():
             for entry in json.loads(baseline.read_text(encoding="utf-8")):

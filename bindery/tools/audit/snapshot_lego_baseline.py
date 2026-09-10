@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OUT_DIR = REPO_ROOT / "book" / "tools" / "audit" / "artifacts"
+OUT_DIR = REPO_ROOT / "bindery" / "tools" / "audit" / "artifacts"
 OUT_PATH = OUT_DIR / "lego_baseline.json"
 
 CELL_START = re.compile(r"^```\{python\}")
@@ -58,7 +58,7 @@ def scan_qmd(path: Path) -> dict:
 
 
 def run_focal_verify() -> dict:
-    script = REPO_ROOT / "book" / "tools" / "audit" / "lego_focal_verify.py"
+    script = REPO_ROOT / "bindery" / "tools" / "audit" / "lego_focal_verify.py"
     if not script.exists():
         return {"skipped": True, "reason": "lego_focal_verify.py missing"}
     vol1 = REPO_ROOT  / "books" / "vol1"

@@ -179,7 +179,7 @@ def main() -> None:
 
     # 3. Binder bibliography gate.
     log = LOG_DIR / "bib-check.log"
-    rc, out = run(["python3", "binder", "check", "bib", "--json"], log)
+    rc, out = run(["python3", "bindery/binder", "check", "bib", "--json"], log)
     try:
         parsed = json.loads(out)
     except json.JSONDecodeError:

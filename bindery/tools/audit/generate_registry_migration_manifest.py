@@ -23,7 +23,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONSTANTS_PATH = REPO_ROOT / "mlsysim" / "mlsysim" / "core" / "constants.py"
 MAP_CONSTANTS_PATH = REPO_ROOT / "scripts" / "map_constants.py"
-OUT_DIR = REPO_ROOT / "book" / "tools" / "audit" / "artifacts"
+OUT_DIR = REPO_ROOT / "bindery" / "tools" / "audit" / "artifacts"
 DEAD_OUT = OUT_DIR / "dead_constants_verified.json"
 MANIFEST_OUT = OUT_DIR / "registry_migration_manifest.json"
 
