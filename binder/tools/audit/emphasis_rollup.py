@@ -2,11 +2,12 @@
 """
 Roll up per-chapter emphasis ledgers into a volume summary + fix-list.
 
-Reads every .claude/_reviews/emphasis/<vol>/*.yml ledger (schema-tolerant: it finds
+Reads every *.yml ledger in one volume's ledger directory (schema-tolerant: it finds
 any dict carrying a 'recommendation' key, wherever the agent nested it) and prints
 per-chapter counts, volume totals, and the full actionable fix-list (everything != keep).
 
-Usage:  python3 binder/tools/audit/emphasis_rollup.py vol1
+Usage:  python3 binder/tools/audit/emphasis_rollup.py vol1 <ledger-dir>
+        EMPHASIS_LEDGER_DIR=<ledger-dir> python3 binder/tools/audit/emphasis_rollup.py vol1
 """
 import sys, os, glob, re
 from collections import Counter
@@ -40,7 +41,11 @@ def walk(node):
         for v in node:
             yield from walk(v)
 
-reviews = os.path.join(ROOT, '.claude', '_reviews', 'emphasis', VOL)
+reviews = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('EMPHASIS_LEDGER_DIR')
+if not reviews:
+    sys.exit("usage: emphasis_rollup.py <vol> <ledger-dir>  (or set EMPHASIS_LEDGER_DIR)")
+if not os.path.isdir(reviews):
+    sys.exit(f"ledger directory not found: {reviews}")
 order = chapter_order(VOL) or [os.path.basename(p)[:-4] for p in sorted(glob.glob(f"{reviews}/*.yml"))]
 
 rec_tot, actionable, p1_total, per_ch, missing = Counter(), [], 0, [], []
