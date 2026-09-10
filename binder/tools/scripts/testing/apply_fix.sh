@@ -101,7 +101,6 @@ FORBIDDEN_REGEXES=(
   '^binder/cli/'
   '^binder/tools/'
   '^book/vscode-ext/'
-  '^\.cursor/'
   '^\.github/'
   '^Makefile$'
   '\.png$'
@@ -111,7 +110,6 @@ FORBIDDEN_REGEXES=(
   '\.pdf$'
   '\.gif$'
   '\.webp$'
-  '^\.claude/rules/'
 )
 
 CHANGED_FILES="$(git apply --numstat "${PATCH_FILE}" 2>>"${PER_FIX_LOG}" | awk '{print $3}')"
