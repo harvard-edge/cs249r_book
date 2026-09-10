@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
     <rect width="900" height="300" fill="#ffffff" />
     <text x="450" y="30" font-family="sans-serif" font-size="18" font-weight="bold" fill="#1F407A" text-anchor="middle">Compounding Covariate Shift and State Support Drift</text>
 
@@ -20,7 +22,7 @@
         
         <!-- Error Point -->
         <circle cx="150" cy="140" r="5" fill="#A51C30" />
-        <text x="150" y="160" font-family="sans-serif" font-size="12" fill="#2D3748" text-anchor="middle">Error at t=τ</text>
+        <text x="150" y="160" font-family="sans-serif" font-size="12" fill="#2D3748" text-anchor="middle">Error at t=\u03C4</text>
         
         <text x="280" y="155" font-family="sans-serif" font-size="10" fill="#1F407A">Support S_demo</text>
         <text x="260" y="80" font-family="sans-serif" font-size="10" fill="#A51C30">Quadratic Drift</text>
@@ -39,8 +41,8 @@
         <path d="M 30 170 Q 150 170 330 30" stroke="#A51C30" stroke-width="3" fill="none" />
         <path d="M 30 170 L 330 120" stroke="#1F407A" stroke-width="3" fill="none" />
         
-        <text x="250" y="60" font-family="sans-serif" font-size="12" fill="#A51C30">Cloning: O(T²ϵ)</text>
-        <text x="250" y="115" font-family="sans-serif" font-size="12" fill="#1F407A">Recovery: O(Tϵ)</text>
+        <text x="250" y="60" font-family="sans-serif" font-size="12" fill="#A51C30">Cloning: O(T\u00B2\u03F5)</text>
+        <text x="250" y="115" font-family="sans-serif" font-size="12" fill="#1F407A">Recovery: O(T\u03F5)</text>
     </g>
 
     <defs>
@@ -49,3 +51,7 @@
         </marker>
     </defs>
 </svg>
+"""
+
+with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_compounding_error.svg", "w") as f:
+    f.write(svg_content)

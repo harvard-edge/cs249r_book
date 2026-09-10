@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
     <rect width="900" height="400" fill="#ffffff" />
     <text x="450" y="30" font-family="sans-serif" font-size="18" font-weight="bold" fill="#1F407A" text-anchor="middle">The Multidimensional Sim-to-Real Reality Gap Vector</text>
 
@@ -57,3 +59,7 @@
         </marker>
     </defs>
 </svg>
+"""
+
+with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_sim2real_gap.svg", "w") as f:
+    f.write(svg_content)

@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
     <!-- Clean flat 2D textbook engineering style -->
     <!-- Grid/Background -->
     <rect width="900" height="300" fill="#ffffff" />
@@ -76,3 +78,7 @@
         </marker>
     </defs>
 </svg>
+"""
+
+with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_policy_ranking_inversion.svg", "w") as f:
+    f.write(svg_content)
