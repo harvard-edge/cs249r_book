@@ -77,7 +77,7 @@ binder/
   tests/              toolchain tests
   docker/             Linux and Windows build containers
   docs/               toolchain documentation
-  config/  .layout/  vscode-ext/  socratiQ/
+  config/  .layout/  vscode-ext/
   postBuild  requirements.txt
 ```
 
