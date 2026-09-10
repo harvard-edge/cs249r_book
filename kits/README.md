@@ -239,7 +239,7 @@ We welcome contributions to the hardware labs! To contribute:
       <td>ML Systems concepts and theory</td>
     </tr>
     <tr>
-      <td width="25%" align="center"><b><a href="../tinytorch/">TinyTorch</a></b></td>
+      <td width="25%" align="center"><b><a href="../packages/tinytorch/">TinyTorch</a></b></td>
       <td>Build ML frameworks from scratch</td>
     </tr>
     <tr>

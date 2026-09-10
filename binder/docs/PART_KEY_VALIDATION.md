@@ -2,7 +2,7 @@
 
 ## Overview
 
-The part key validation system ensures that all `\part{key:xxx}` commands in your `.qmd` files reference valid keys defined in `quarto/contents/parts/summaries.yml`. This prevents build failures and ensures consistent part titles throughout your book.
+The part key validation system ensures that all `\part{key:xxx}` commands in your `.qmd` files reference valid keys defined in `books/volN/parts/summaries.yml`. This prevents build failures and ensures consistent part titles throughout your book.
 
 ## How It Works
 
@@ -49,7 +49,7 @@ python3 tools/scripts/utilities/validate_part_keys.py
 
 ## Available Keys
 
-The following keys are defined in `quarto/contents/parts/summaries.yml`:
+The following keys are defined in `books/volN/parts/summaries.yml`:
 
 | Key | Title | Type |
 |-----|-------|------|
@@ -95,7 +95,7 @@ When the validation script finds issues:
       - Status: NOT FOUND in summaries.yml
 
 💡 To fix these issues:
-   1. Add the missing keys to quarto/contents/parts/summaries.yml
+   1. Add the missing keys to books/volN/parts/summaries.yml
    2. Or correct the key names in the .qmd files
    3. Or remove the \part{key:xxx} commands if not needed
 ```
@@ -125,7 +125,7 @@ Examples:
 
 2. **Missing key in summaries.yml**:
    ```yaml
-   # Add to quarto/contents/parts/summaries.yml
+   # Add to books/volN/parts/summaries.yml
    - key: "new_section"
      title: "New Section"
      description: "Description here"
@@ -146,7 +146,7 @@ Examples:
 
 2. **Check specific file**:
    ```bash
-   grep -n "\\part{key:" quarto/contents/**/*.qmd
+   grep -n "\\part{key:" books/**/*.qmd
    ```
 
 ---
