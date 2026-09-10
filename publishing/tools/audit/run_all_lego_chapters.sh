@@ -38,7 +38,7 @@ run_vol() {
   local chapters=("$@")
   for ch in "${chapters[@]}"; do
     echo "========== BATCH $vol/$ch $(date -Iseconds) ==========" | tee -a "$LOG"
-    if ./book/tools/audit/verify_lego_chapter.sh "$vol" "$ch" >> "$LOG" 2>&1; then
+    if ./publishing/tools/audit/verify_lego_chapter.sh "$vol" "$ch" >> "$LOG" 2>&1; then
       echo "OK $vol/$ch" | tee -a "$LOG"
     else
       echo "FAIL $vol/$ch" | tee -a "$LOG"

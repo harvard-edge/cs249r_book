@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-BOOK = REPO / "book" / "quarto"
+BOOK = REPO  / "books"
 BINDER = REPO / "book" / "binder"
-LEDGER = REPO / "book/tools/audit/artifacts/chapter_build_sequence.json"
+LEDGER = REPO / "publishing/tools/audit/artifacts/chapter_build_sequence.json"
 sys.path.insert(0, str(REPO / "book/cli"))
 from core.discovery import get_chapters_from_config
 
@@ -52,7 +52,7 @@ def main():
                 failed += 1
                 print(tail)
                 if not args.continue_on_error:
-                    print(f"\nResume: python3 book/tools/audit/chapter_build_sequence.py --{volume} --format {args.format} --from {stem}")
+                    print(f"\nResume: python3 publishing/tools/audit/chapter_build_sequence.py --{volume} --format {args.format} --from {stem}")
                     return 1
     return 1 if failed else 0
 

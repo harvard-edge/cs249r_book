@@ -18,27 +18,27 @@ export function registerPublishCommands(context: vscode.ExtensionContext): void 
   // Named aliases for command palette discoverability
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.cleanArtifacts', () => {
-      void runBookCommand('./book/binder clean', root, {
+      void runBookCommand('./binder clean', root, {
         label: 'Clean build artifacts',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.doctor', () => {
-      void runBookCommand('./book/binder doctor', root, {
+      void runBookCommand('./binder doctor', root, {
         label: 'Doctor (health check)',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.buildGlossary', () => {
-      void runBookCommand('./book/binder fix glossary paths', root, {
+      void runBookCommand('./binder fix glossary paths', root, {
         label: 'Show glossary paths',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.compressImages', () => {
-      void runBookCommand('./book/binder fix images compress --all --smart-compression', root, {
+      void runBookCommand('./binder fix images compress --all --smart-compression', root, {
         label: 'Compress images',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.repoHealth', () => {
-      void runBookCommand('./book/binder fix repo-health', root, {
+      void runBookCommand('./binder fix repo-health', root, {
         label: 'Repo health check',
       });
     }),

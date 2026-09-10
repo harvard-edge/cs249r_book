@@ -13,8 +13,8 @@ awareness to avoid breaking:
 - Code fences, Python cells, YAML, LaTeX math
 
 Usage:
-    python3 fix_capitalization.py --dry-run book/quarto/contents/vol1/
-    python3 fix_capitalization.py book/quarto/contents/vol1/
+    python3 fix_capitalization.py --dry-run books/vol1/
+    python3 fix_capitalization.py books/vol1/
 """
 import argparse
 import re

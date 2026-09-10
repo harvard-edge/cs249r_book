@@ -18,7 +18,7 @@ from pathlib import Path
 from audit_margin_caption_alignment import ROOT, CaptionPacket, collect, strip_markup, words
 
 
-DEFAULT_OUTPUT = ROOT / "book/tools/audit/margin_figure_reader_link_audit.md"
+DEFAULT_OUTPUT = ROOT / "publishing/tools/audit/margin_figure_reader_link_audit.md"
 
 
 def md_escape(text: str) -> str:

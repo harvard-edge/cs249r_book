@@ -209,7 +209,7 @@ def audit_file(path: Path) -> list:
     return findings
 
 def main():
-    root = Path("book/quarto/contents")
+    root = Path("books")
     if not root.exists():
         print(f"ERROR: run from MLSysBook root (expected {root})", file=sys.stderr)
         sys.exit(2)

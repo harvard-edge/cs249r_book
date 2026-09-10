@@ -2,7 +2,7 @@
 """
 Math-rendering audit for MLSysBook HTML output.
 
-For each chapter, builds the HTML (via `./book/binder build html <chap>`),
+For each chapter, builds the HTML (via `./binder build html <chap>`),
 then scans the rendered HTML for raw LaTeX leakage that escaped MathJax.
 
 A "leak" is a LaTeX command or pattern that appears in user-visible prose
@@ -29,8 +29,8 @@ from typing import Iterable
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD_DIRS = {
-    "vol1": REPO / "book" / "quarto" / "_build" / "html-vol1",
-    "vol2": REPO / "book" / "quarto" / "_build" / "html-vol2",
+    "vol1": REPO  / "books" / "_build" / "html-vol1",
+    "vol2": REPO  / "books" / "_build" / "html-vol2",
 }
 BINDER = REPO / "book" / "binder"
 
@@ -106,7 +106,7 @@ def list_chapters() -> list[tuple[str, str, Path]]:
     """Return list of (name, volume, qmd_path) for all chapters in vol1+vol2."""
     chapters = []
     for vol in ("vol1", "vol2"):
-        contents = REPO / "book" / "quarto" / "contents" / vol
+        contents = REPO  / "books" / vol
         for qmd in sorted(contents.glob("*/*.qmd")):
             # Skip non-chapter files (parts, frontmatter sub-files starting with _)
             if qmd.name.startswith("_") and qmd.name not in (
@@ -120,7 +120,7 @@ def list_chapters() -> list[tuple[str, str, Path]]:
 
 
 def build_chapter(name: str, volume: str) -> tuple[bool, float, str]:
-    """Run `./book/binder build html <vol>/<name>` and return (ok, secs, output)."""
+    """Run `./binder build html <vol>/<name>` and return (ok, secs, output)."""
     chap = f"{volume}/{name}"
     t0 = time.time()
     proc = subprocess.run(
@@ -138,7 +138,7 @@ def build_chapter(name: str, volume: str) -> tuple[bool, float, str]:
 def find_html(name: str, volume: str, qmd_path: Path) -> Path | None:
     """Locate the rendered HTML for this chapter."""
     base = BUILD_DIRS[volume]
-    rel = qmd_path.relative_to(REPO / "book" / "quarto").with_suffix(".html")
+    rel = qmd_path.relative_to(REPO  / "books").with_suffix(".html")
     candidate = base / rel
     if candidate.exists():
         return candidate

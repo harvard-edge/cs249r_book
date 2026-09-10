@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-QMD = REPO / "book/quarto/contents/vol1/training/training.qmd"
+QMD = REPO / "books/vol1/training/training.qmd"
 
 SUFFIX_RULES: list[tuple[str, str]] = [
     (r"_gbs_str$", " GB/s"),

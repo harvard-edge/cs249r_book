@@ -411,7 +411,7 @@ class MaintenanceCommand:
         console.print(Panel(table, title="binder fix <topic> <action>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder fix headers add --vol1 --dry-run[/cyan]")
-        console.print("  [cyan]./binder fix headers repair --path book/quarto/contents/vol1/training/training.qmd[/cyan]")
+        console.print("  [cyan]./binder fix headers repair --path books/vol1/training/training.qmd[/cyan]")
         console.print("  [cyan]./binder fix images compress --all --smart-compression --apply[/cyan]")
         console.print("  [cyan]./binder fix repo-health --json[/cyan]")
         console.print("  [cyan]./binder fix footnotes cleanup --vol1 --dry-run[/cyan]")
@@ -422,7 +422,7 @@ class MaintenanceCommand:
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else (Path.cwd() / p).resolve()
-        base = self.config_manager.book_dir / "contents"
+        base = self.config_manager.book_dir
         if vol1 and not vol2:
             return base / "vol1"
         if vol2 and not vol1:
@@ -877,7 +877,7 @@ class MaintenanceCommand:
         console.print("Glossary JSON generation has been retired to avoid stale parallel sources.\n")
 
         for vol in volumes:
-            path = book_dir / "contents" / vol / "backmatter" / "glossary" / "glossary.qmd"
+            path = book_dir / vol / "backmatter" / "glossary" / "glossary.qmd"
             label = "Volume I" if vol == "vol1" else "Volume II"
             if path.exists():
                 console.print(f"[green]✓[/green] {label}: {path}")
@@ -889,7 +889,7 @@ class MaintenanceCommand:
 
     def _find_images_for_compression(self, min_size_mb: int):
         """Find large images under contents for bulk compression."""
-        contents = self.config_manager.book_dir / "contents"
+        contents = self.config_manager.book_dir
         image_files = []
         min_bytes = min_size_mb * 1024 * 1024
         for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):

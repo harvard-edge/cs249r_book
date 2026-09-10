@@ -18,7 +18,7 @@ sys.path.insert(0, str(REPO / "tools" / "audit"))
 from audit_math_rendering import visible_text_from_html, scan_html  # noqa: E402
 
 INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
-ARTIFACTS = REPO / "book/tools/audit/artifacts"
+ARTIFACTS = REPO / "publishing/tools/audit/artifacts"
 
 
 @dataclass
@@ -31,7 +31,7 @@ class LayerResult:
 
 
 def _latest_debug_artifacts(vol: str) -> Path:
-    root = REPO / "book/quarto/_build/debug" / vol / "html"
+    root = REPO / "books/_build/debug" / vol / "html"
     runs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
     if not runs:
         raise SystemExit(f"No binder debug HTML run for {vol}")
@@ -43,7 +43,7 @@ def _stem(name: str) -> str:
 
 
 def sync_artifacts_to_html_audit(vol: str, artifact_dir: Path) -> Path:
-    dest_root = REPO / "book/quarto/_build/html-audit" / vol
+    dest_root = REPO / "books/_build/html-audit" / vol
     dest_root.mkdir(parents=True, exist_ok=True)
     for html in artifact_dir.glob("*.html"):
         (dest_root / f"{_stem(html.name)}.html").write_bytes(html.read_bytes())
@@ -51,7 +51,7 @@ def sync_artifacts_to_html_audit(vol: str, artifact_dir: Path) -> Path:
 
 
 def _chapters_with_inline_python(vol: str) -> list[Path]:
-    base = REPO / "book/quarto/contents" / vol
+    base = REPO / "books" / vol
     out = []
     for qmd in sorted(base.rglob("*.qmd")):
         if qmd.name.startswith("_") and "notation" not in qmd.name:
@@ -64,7 +64,7 @@ def _chapters_with_inline_python(vol: str) -> list[Path]:
 def run_prose_layer(vol: str) -> LayerResult:
     res = LayerResult(layer="audit_prose", ok=True)
     env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
-    script = REPO / "book/tools/audit/fmt/audit_prose.py"
+    script = REPO / "publishing/tools/audit/fmt/audit_prose.py"
     chapters = _chapters_with_inline_python(vol)
     res.total = len(chapters)
     for qmd in chapters:
@@ -82,7 +82,7 @@ def run_prose_layer(vol: str) -> LayerResult:
 
 def run_static_html_layer(vol: str, html_dir: Path) -> LayerResult:
     res = LayerResult(layer="static_html", ok=True)
-    audit_html = REPO / "book/tools/audit/fmt/audit_html.py"
+    audit_html = REPO / "publishing/tools/audit/fmt/audit_html.py"
     html_files = sorted(html_dir.glob("*.html"))
     res.total = len(html_files)
     for html in html_files:
@@ -111,7 +111,7 @@ def run_lego_html_layer(vol: str) -> LayerResult:
     env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
     report_path = ARTIFACTS / f"lego_html_{vol}.json"
     proc = subprocess.run(
-        [sys.executable, str(REPO / "book/tools/audit/fmt/audit_lego_html.py"), "--report", str(report_path)],
+        [sys.executable, str(REPO / "publishing/tools/audit/fmt/audit_lego_html.py"), "--report", str(report_path)],
         cwd=REPO, env=env, capture_output=True, text=True, timeout=3600,
     )
     data = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else []
@@ -136,7 +136,7 @@ def run_playwright_layer(vol: str, artifact_dir: Path) -> LayerResult:
     report = ARTIFACTS / f"playwright_{vol}.json"
     proc = subprocess.run(
         ["uv", "run", "--with", "playwright", "python3",
-         str(REPO / "book/tools/audit/render_playwright_verify.py"),
+         str(REPO / "publishing/tools/audit/render_playwright_verify.py"),
          "--vol", vol, "--artifact-dir", str(artifact_dir), "--report", str(report)],
         cwd=REPO, capture_output=True, text=True, timeout=3600,
     )

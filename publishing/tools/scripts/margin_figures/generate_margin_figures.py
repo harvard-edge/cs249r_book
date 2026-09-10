@@ -14,7 +14,7 @@ LLM/editor notes:
       typography, color semantics, or SVG export behavior for a whole device.
     * A margin figure must serve the paragraph beside it. The chapter placement
       lives in QMD and, for curated/generic figures, in
-      ``book/tools/audit/margin_figure_opportunities.yml`` and
+      ``publishing/tools/audit/margin_figure_opportunities.yml`` and
       ``margin_figure_decisions.yml``. The stable asset name is the candidate id
       with hyphens changed to underscores.
     * Quantitative bars must be honest. If a rectangle length encodes a value,
@@ -27,7 +27,7 @@ LLM/editor notes:
       ``<text>`` or ``font-family`` residue before publication.
 
 Usage:
-    MPLCONFIGDIR=/tmp/mplconfig python3 book/tools/scripts/margin_figures/generate_margin_figures.py
+    MPLCONFIGDIR=/tmp/mplconfig python3 publishing/tools/scripts/margin_figures/generate_margin_figures.py
 """
 
 from __future__ import annotations
@@ -77,8 +77,8 @@ from book.tools.figures.margin.devices import (  # noqa: E402
     taxonomy,
 )
 
-CONTENTS = ROOT / "book/quarto/contents"
-AUDIT_DIR = ROOT / "book/tools/audit"
+CONTENTS = ROOT / "books"
+AUDIT_DIR = ROOT / "publishing/tools/audit"
 OPPORTUNITIES = AUDIT_DIR / "margin_figure_opportunities.yml"
 DECISIONS = AUDIT_DIR / "margin_figure_decisions.yml"
 

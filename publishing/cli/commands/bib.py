@@ -136,16 +136,16 @@ class BibCommand:
         )
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
-        console.print("  [cyan]./binder bib list --path book/quarto/contents/references.bib[/cyan]")
+        console.print("  [cyan]./binder bib list --path books/references.bib[/cyan]")
         console.print("  [cyan]./binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder bib clean --dry-run[/cyan]")
-        console.print("  [cyan]./binder bib update --path book/quarto/contents/references.bib[/cyan]")
+        console.print("  [cyan]./binder bib update --path books/references.bib[/cyan]")
         console.print("  [cyan]./binder bib sync --dry-run[/cyan]")
         console.print(
-            "  [cyan]./book/binder bib normalize[/cyan]   "
+            "  [cyan]./binder bib normalize[/cyan]   "
             "# all git-tracked .bib (run from repo root)"
         )
-        console.print("  [cyan]./book/binder bib normalize --path book/quarto/contents/references.bib[/cyan]")
+        console.print("  [cyan]./binder bib normalize --path books/references.bib[/cyan]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -156,7 +156,7 @@ class BibCommand:
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
-        base = self.config_manager.book_dir / "contents"
+        base = self.config_manager.book_dir
         if vol1 or vol2:
             return base
         return base
@@ -313,7 +313,7 @@ class BibCommand:
 
         # Warn if scoped to a narrow path — citations from other chapters
         # won't be visible, which could cause false positives.
-        contents_dir = self.config_manager.book_dir / "contents"
+        contents_dir = self.config_manager.book_dir
         is_narrow = root != contents_dir and not any(
             root == contents_dir / v for v in ("vol1", "vol2")
         )
@@ -322,7 +322,7 @@ class BibCommand:
                 "[yellow]⚠ Narrow scope:[/yellow] Only citations from QMD files "
                 f"under [cyan]{self._relative(root)}[/cyan] are visible.\n"
                 "  Entries cited by other chapters may appear unused. "
-                "Use the full [cyan]book/quarto/contents[/cyan] tree for safe cleaning.\n"
+                "Use the full [cyan]books[/cyan] tree for safe cleaning.\n"
             )
 
         console.print(
@@ -451,7 +451,7 @@ class BibCommand:
             check_cmd.extend(["--path", str(root)])
         console.print(
             "\n[bold]Step 3/3:[/bold] "
-            "[cyan]./book/binder check bib[/cyan] "
+            "[cyan]./binder check bib[/cyan] "
             "(same curated gate as the pre-commit [cyan]book-check-bib[/cyan] hook)…\n"
         )
         p2 = subprocess.run(

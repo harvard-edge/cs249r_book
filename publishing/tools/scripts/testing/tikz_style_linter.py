@@ -177,7 +177,7 @@ def scan_quarto_root(root: Path) -> int:
     if header_includes.exists():
         global_styles |= collect_defined_styles(read_text(header_includes))
 
-    qmd_files = list((root / "quarto").rglob("*.qmd"))
+    qmd_files = list((root  / "books").rglob("*.qmd"))
     total_issues = 0
     for qmd in qmd_files:
         text = read_text(qmd)

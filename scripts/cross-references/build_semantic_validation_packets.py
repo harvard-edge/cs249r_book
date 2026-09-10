@@ -18,9 +18,9 @@ import yaml
 
 def find_repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        if (parent / "book" / "quarto" / "contents").exists():
+        if (parent  / "books").exists():
             return parent
-    raise RuntimeError("Could not locate repository root containing book/quarto/contents")
+    raise RuntimeError("Could not locate repository root containing books")
 
 
 ROOT = find_repo_root()
@@ -60,7 +60,7 @@ def target_excerpt(lines: list[str], line_no: int, max_lines: int = 18, max_char
 
 
 def packet_name(file_path: str) -> str:
-    return file_path.removeprefix("book/quarto/contents/").replace("/", "__").removesuffix(".qmd") + ".semantic.yml"
+    return file_path.removeprefix("books/").replace("/", "__").removesuffix(".qmd") + ".semantic.yml"
 
 
 def build_packets(inventory_path: Path, out_dir: Path) -> None:

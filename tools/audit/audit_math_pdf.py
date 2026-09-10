@@ -3,7 +3,7 @@
 PDF math-rendering audit for MLSysBook chapters.
 
 For each chapter:
-  1. Builds a PDF via `./book/binder build pdf <vol>/<chap>`.
+  1. Builds a PDF via `./binder build pdf <vol>/<chap>`.
      A build failure is itself a strong signal of a math-rendering bug
      (raw \\command outside math mode causes LaTeX to error out).
   2. Extracts text via `pdftotext` and applies the same leak-pattern
@@ -14,7 +14,7 @@ For each chapter:
 
 NOTE: This script must NOT run concurrently with `audit_math_rendering.py`
 or any other `binder build` invocation -- they all mutate the shared
-`book/quarto/_quarto.yml`.
+`books/_quarto.yml`.
 
 Usage (run from repo root):
     python3 tools/audit/audit_math_pdf.py vol1/introduction vol2/inference
@@ -37,11 +37,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BINDER = REPO / "book" / "binder"
 BUILD_DIRS = {
-    "vol1": REPO / "book" / "quarto" / "_build" / "pdf-vol1",
+    "vol1": REPO  / "books" / "_build" / "pdf-vol1",
     # binder writes vol2 PDFs into the per-volume directory if it's
     # configured (config/_quarto-pdf-vol2.yml). If not present at runtime,
     # the fallback in find_pdf() searches both candidate dirs.
-    "vol2": REPO / "book" / "quarto" / "_build" / "pdf-vol2",
+    "vol2": REPO  / "books" / "_build" / "pdf-vol2",
 }
 OUT_DIR = REPO / "audit-pdf-output"
 
@@ -96,7 +96,7 @@ class PdfReport:
 def list_all_chapters() -> list[tuple[str, str, Path]]:
     chapters = []
     for vol in ("vol1", "vol2"):
-        contents = REPO / "book" / "quarto" / "contents" / vol
+        contents = REPO  / "books" / vol
         for qmd in sorted(contents.glob("*/*.qmd")):
             if qmd.name.startswith("_") and qmd.name not in (
                 "_notation_body.qmd",
@@ -111,7 +111,7 @@ def build_pdf(name: str, volume: str) -> tuple[bool, float, str]:
     # Per-volume index symlink: PDF builds need `index.qmd` to point
     # to either `index-vol1.qmd` or `index-vol2.qmd`. CI does this
     # per-job; we replicate it here.
-    index_link = REPO / "book" / "quarto" / "index.qmd"
+    index_link = REPO  / "books" / "index.qmd"
     target = f"index-{volume}.qmd"
     try:
         if index_link.is_symlink() or index_link.exists():
@@ -143,8 +143,8 @@ def build_pdf(name: str, volume: str) -> tuple[bool, float, str]:
 
 def find_pdf(name: str, volume: str, qmd_path: Path) -> Path | None:
     candidate_dirs = [BUILD_DIRS[volume],
-                      REPO / "book" / "quarto" / "_build" / "pdf-vol1",
-                      REPO / "book" / "quarto" / "_build" / "pdf-vol2"]
+                      REPO  / "books" / "_build" / "pdf-vol1",
+                      REPO  / "books" / "_build" / "pdf-vol2"]
     for base in candidate_dirs:
         if not base.exists():
             continue

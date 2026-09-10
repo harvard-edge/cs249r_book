@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fmt"))
 
 from cell_exec import exec_cell_code, make_exec_namespace  # noqa: E402
 
-CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS = REPO_ROOT  / "books"
 
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")

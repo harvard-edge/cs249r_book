@@ -454,8 +454,8 @@ def _(
         """),
         source_trace({
             "chapter_invariant": "Framework abstractions carry runtime consequences.",
-            "chapter_anchor": "book/quarto/contents/vol1/frameworks/frameworks.qmd",
-            "concept_map": "book/quarto/contents/vol1/frameworks/frameworks_concepts.yml",
+            "chapter_anchor": "books/vol1/frameworks/frameworks.qmd",
+            "concept_map": "books/vol1/frameworks/frameworks_concepts.yml",
             "track_profile": v1_07_profile.track_id,
             "hardware_ref": v1_07_variant.hardware_ref,
             "model_ref": v1_07_variant.model_ref,

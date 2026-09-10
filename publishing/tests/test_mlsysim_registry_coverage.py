@@ -14,8 +14,8 @@ import mlsysim
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOK_ROOTS = (
-    REPO_ROOT / "book" / "quarto" / "contents" / "vol1",
-    REPO_ROOT / "book" / "quarto" / "contents" / "vol2",
+    REPO_ROOT  / "books" / "vol1",
+    REPO_ROOT  / "books" / "vol2",
 )
 
 REGISTRY_ROOTS = (

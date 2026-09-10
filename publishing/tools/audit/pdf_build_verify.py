@@ -15,7 +15,7 @@ from cli.commands._pdf_checks import (  # noqa: E402
     verify_pdf,
 )
 
-BOOK_DIR = REPO_ROOT / "book" / "quarto"
+BOOK_DIR = REPO_ROOT  / "books"
 
 
 def main(argv: list[str] | None = None) -> int:

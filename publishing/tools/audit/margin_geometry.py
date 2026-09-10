@@ -2,7 +2,7 @@
 """Compatibility wrapper for Binder-native margin geometry checks.
 
 Core implementation lives in ``book/cli/checks/margin_geometry.py``. Keep this
-script so older notes and shell history that call ``book/tools/audit`` still
+script so older notes and shell history that call ``publishing/tools/audit`` still
 work, but do not put Binder-critical check logic here.
 """
 

@@ -5,7 +5,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FILTER = ROOT / "book" / "quarto" / "filters" / "dropcap.lua"
+FILTER = ROOT  / "books" / "filters" / "dropcap.lua"
 
 
 def _render(markdown):

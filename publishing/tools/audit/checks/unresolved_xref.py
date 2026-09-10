@@ -12,9 +12,9 @@ reference is unresolved. The per-file `check()` entrypoint required by
 the registry therefore lazy-builds (and memoizes) the corpus-wide ID
 index on first invocation, then validates the references in the current
 file against it. The `scan_corpus()` entrypoint is provided for corpus-wide passes
-(e.g. `python3 book/tools/audit/scan.py --scope vol1`).
+(e.g. `python3 publishing/tools/audit/scan.py --scope vol1`).
 
-Relationship to `./book/binder check refs`:
+Relationship to `./binder check refs`:
 
   The existing `binder check refs` (specifically the `--scope orphans`
   sub-scope, see book/cli/commands/validate.py `_run_unreferenced_labels`)
@@ -81,13 +81,13 @@ _ID_INDEX_CACHE: dict[Path, frozenset[str]] = {}
 
 
 def _content_root(file_path: Path) -> Optional[Path]:
-    """Walk up from `file_path` to find the `book/quarto/contents` root.
+    """Walk up from `file_path` to find the `books` root.
 
     Returns the contents directory containing vol1/ and vol2/, or None
     if `file_path` is not inside such a tree.
     """
     for parent in file_path.resolve().parents:
-        candidate = parent / "book" / "quarto" / "contents"
+        candidate = parent  / "books"
         if candidate.is_dir():
             return candidate
         if parent.name == "contents" and (parent / "vol1").is_dir():
@@ -227,11 +227,11 @@ def check(
 def scan_corpus(root: Path, scope: str = "both") -> list[Issue]:
     """Scan every .qmd in vol1/ + vol2/ and return unresolved-xref issues.
 
-    `root` should be the `book/quarto/contents` directory (or any parent
+    `root` should be the `books` directory (or any parent
     of it — we walk up to find the contents root). `scope` controls the
     Issue id prefix only; defaults to "both".
 
-    This is the entrypoint ``book/tools/audit/scan.py`` calls for corpus-wide
+    This is the entrypoint ``publishing/tools/audit/scan.py`` calls for corpus-wide
     unresolved-xref detection. It deduplicates the cache, so subsequent per-file `check()` calls in
     the same process reuse the index.
     """
@@ -242,13 +242,13 @@ def scan_corpus(root: Path, scope: str = "both") -> list[Issue]:
         contents_root = resolved
     else:
         # Try descending: maybe `root` is the repo root.
-        candidate = resolved / "book" / "quarto" / "contents"
+        candidate = resolved  / "books"
         if candidate.is_dir():
             contents_root = candidate
     if contents_root is None:
         # Walk parents to find one.
         for parent in resolved.parents:
-            candidate = parent / "book" / "quarto" / "contents"
+            candidate = parent  / "books"
             if candidate.is_dir():
                 contents_root = candidate
                 break

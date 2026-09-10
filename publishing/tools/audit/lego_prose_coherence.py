@@ -7,9 +7,9 @@ whether each snippet reads coherently in context.
 
 Usage (repo root)::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/lego_prose_coherence.py --chapter vol2/network_fabrics
-    PYTHONPATH=mlsysim python3 book/tools/audit/lego_prose_coherence.py --all
-    PYTHONPATH=mlsysim python3 book/tools/audit/lego_prose_coherence.py --all --workers 4
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/lego_prose_coherence.py --chapter vol2/network_fabrics
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/lego_prose_coherence.py --all
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/lego_prose_coherence.py --all --workers 4
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ class ProsePacket:
 
 def _chapter_qmd(root: Path, vol: str, name: str) -> Path:
     if name.startswith("appendix_"):
-        return root / f"book/quarto/contents/{vol}/backmatter/{name}.qmd"
-    return root / f"book/quarto/contents/{vol}/{name}/{name}.qmd"
+        return root / f"books/{vol}/backmatter/{name}.qmd"
+    return root / f"books/{vol}/{name}/{name}.qmd"
 
 
 def _lego_cell_lines(qmd: Path) -> dict[str, dict]:
@@ -330,7 +330,7 @@ def main() -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        default=Path("book/tools/audit/artifacts/lego_prose_coherence_report.json"),
+        default=Path("publishing/tools/audit/artifacts/lego_prose_coherence_report.json"),
     )
     parser.add_argument(
         "--strict-coverage",

@@ -12,9 +12,9 @@ For each ``{python} Class.field`` reference in a chapter:
 
 Usage (repo root, after HTML archive exists)::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_rendered_prose.py
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_rendered_prose.py \\
-        --markdown book/tools/audit/artifacts/lego_rendered_prose_audit.md
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_rendered_prose.py
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_rendered_prose.py \\
+        --markdown publishing/tools/audit/artifacts/lego_rendered_prose_audit.md
 """
 
 from __future__ import annotations
@@ -397,13 +397,13 @@ def main() -> int:
 
     report = [audit_chapter(vol, name, qmd, html) for vol, name, qmd, html in paths]
 
-    json_path = args.json or root / "book/tools/audit/artifacts/lego_rendered_prose_audit.json"
+    json_path = args.json or root / "publishing/tools/audit/artifacts/lego_rendered_prose_audit.json"
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    md_path = args.markdown or root / "book/tools/audit/artifacts/lego_rendered_prose_audit.md"
+    md_path = args.markdown or root / "publishing/tools/audit/artifacts/lego_rendered_prose_audit.md"
     _write_markdown(md_path, report)
-    reports_dir = root / "book/tools/audit/artifacts/lego_chapter_reports"
+    reports_dir = root / "publishing/tools/audit/artifacts/lego_chapter_reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     for row in report:
         if row.get("status") in ("NO_QMD", "NO_HTML"):

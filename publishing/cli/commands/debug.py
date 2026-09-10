@@ -77,7 +77,7 @@ def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
     Searches the volume directory first, then falls back to the shared
     directory (e.g. contents/shared/notation.qmd).
     """
-    contents_dir = book_dir / "contents"
+    contents_dir = book_dir
     # Search volume dir and shared dir (covers frontmatter, parts, shared files)
     for matches in [
         list((contents_dir / volume).rglob(f"{chapter}.qmd")),
@@ -275,7 +275,7 @@ class DebugCommand:
         if migrated_legacy:
             console.print(
                 f"[dim]Migrated {len(migrated_legacy)} legacy debug log folder(s) "
-                "to book/quarto/_build/debug/_legacy/[/dim]"
+                "to books/_build/debug/_legacy/[/dim]"
             )
 
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")

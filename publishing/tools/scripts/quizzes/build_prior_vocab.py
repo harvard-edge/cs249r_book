@@ -13,7 +13,7 @@ Usage
     python3 build_prior_vocab.py vol2 distributed_training > _context/vol2/distributed_training/prior_vocab.json
 
 The reading order is extracted from
-``book/quarto/config/_quarto-html-vol{1,2}.yml`` and must match the
+``books/config/_quarto-html-vol{1,2}.yml`` and must match the
 actual sidebar sequence; to update, rerun ``extract_reading_order.sh``
 (or edit :data:`READING_ORDER` below by hand).
 """
@@ -24,7 +24,7 @@ import re
 import sys
 from pathlib import Path
 
-# Source: extracted from book/quarto/config/_quarto-html-vol{1,2}.yml on
+# Source: extracted from books/config/_quarto-html-vol{1,2}.yml on
 # 2026-04-23 (git sha 5eaaa7642). If the sidebar is reordered, update
 # this list and regenerate all prior_vocab.json files.
 READING_ORDER: list[tuple[str, str]] = [
@@ -65,7 +65,7 @@ READING_ORDER: list[tuple[str, str]] = [
     ("vol2", "conclusion"),
 ]
 
-BASE = Path(__file__).resolve().parents[3] / "quarto" / "contents"
+BASE = Path(__file__).resolve().parents[3]  / "books"
 
 
 def _chapter_qmd_path(vol: str, chap: str) -> Path | None:

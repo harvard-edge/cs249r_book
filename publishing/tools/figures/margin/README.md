@@ -4,7 +4,7 @@
 visual language. It owns device geometry, semantic colors, label-size bands, and
 SVG export behavior.
 
-Production scripts under `book/tools/scripts/margin_figures/` import this module
+Production scripts under `publishing/tools/scripts/margin_figures/` import this module
 to generate committed chapter SVGs. The legacy `margin_devices.py` script module
 is only a compatibility wrapper.
 
@@ -13,9 +13,9 @@ is only a compatibility wrapper.
 Most editorial tweaks should happen in one of two places:
 
 - Per-figure data, labels, captions, and asset names:
-  `book/tools/scripts/margin_figures/generate_margin_figures.py`
+  `publishing/tools/scripts/margin_figures/generate_margin_figures.py`
 - Shared device geometry, fonts, colors, label placement, and SVG export:
-  `book/tools/figures/margin/devices.py`
+  `publishing/tools/figures/margin/devices.py`
 
 Do not hand-edit generated SVG files. Regenerate them from Python so HTML and
 PDF stay reproducible.
@@ -25,14 +25,14 @@ PDF stay reproducible.
 From the repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mplconfig python3 book/tools/scripts/margin_figures/generate_margin_figures.py
+MPLCONFIGDIR=/tmp/mplconfig python3 publishing/tools/scripts/margin_figures/generate_margin_figures.py
 ```
 
 Then inspect the output:
 
 ```bash
-python3 book/tools/scripts/margin_figures/render_margin_contact_sheet.py \
-  --svg book/quarto/contents/<volume>/<chapter>/images/svg/<asset>.svg \
+python3 publishing/tools/scripts/margin_figures/render_margin_contact_sheet.py \
+  --svg books/<volume>/<chapter>/images/svg/<asset>.svg \
   --output /tmp/mlsysbook-margin-check.png
 ```
 

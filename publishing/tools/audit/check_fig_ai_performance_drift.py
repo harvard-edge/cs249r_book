@@ -24,7 +24,7 @@ The book plots each generation's *headline* (sparse) marketing throughput, so
 the 2x sparsity factor is applied to the registry's dense figure. A 5% tolerance
 absorbs vendor rounding (e.g. H100 1979x2 = 3958, shown as 4,000).
 
-Usage:  python3 book/tools/audit/check_fig_ai_performance_drift.py
+Usage:  python3 publishing/tools/audit/check_fig_ai_performance_drift.py
 Exit:   0 = figure matches registry, 1 = drift detected.
 """
 from __future__ import annotations

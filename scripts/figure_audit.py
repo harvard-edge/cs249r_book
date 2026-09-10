@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
 # Default paths assuming the script is run from the repository root
-book_dir = "book/quarto/contents"
+book_dir = "books"
 out_dir = ".claude/_reviews/Figure Audit"
 img_tmp_dir = ".claude/_reviews/Figure Audit/audit_images_tmp"
 brief_path = ".claude/_plans/figure-audit-brief.md"

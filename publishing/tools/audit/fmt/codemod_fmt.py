@@ -26,7 +26,7 @@ fmt_prose_contract, then the render checks (MIGRATION.md Phase 3).
 Usage::
 
     # emit the human-adjudication queue (percent / scale / multi-line)
-    python3 codemod_fmt.py queue --root book/quarto/contents --out /tmp/fmt_queue.json
+    python3 codemod_fmt.py queue --root books --out /tmp/fmt_queue.json
 """
 from __future__ import annotations
 

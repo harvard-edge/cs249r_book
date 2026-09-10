@@ -133,7 +133,7 @@ class Figure:
 # ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------
-CHAPTER_RE = re.compile(r"book/quarto/contents/(vol[12]/[^/]+)/images/svg/")
+CHAPTER_RE = re.compile(r"books/(vol[12]/[^/]+)/images/svg/")
 
 def _chapter_of(svg_path: str) -> str:
     m = CHAPTER_RE.search(svg_path)

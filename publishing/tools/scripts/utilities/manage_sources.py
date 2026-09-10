@@ -33,7 +33,7 @@ class SourceChecker:
     """Main class for checking and cleaning source citations"""
 
     def __init__(self, target_directories=None, target_files=None):
-        self.content_dir = Path("contents")
+        self.content_dir = Path(".")
         self.target_directories = target_directories or []
         self.target_files = target_files or []
         self.stats = {

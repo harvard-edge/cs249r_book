@@ -96,10 +96,10 @@ fi
 FORBIDDEN_REGEXES=(
   '^_quarto.*\.yml$'
   '^_metadata\.yml$'
-  '^book/quarto/config/'
+  '^books/config/'
   '\.bib$'
   '^book/cli/'
-  '^book/tools/'
+  '^publishing/tools/'
   '^book/vscode-ext/'
   '^\.cursor/'
   '^\.github/'
@@ -141,9 +141,9 @@ if [ "${EXISTING_COMMITS}" -ge 5 ]; then
 fi
 
 # Resolve chapter qmd path (best effort)
-CHAPTER_QMD="$(find "${WORKTREE}/book/quarto/contents/${VOL}" -type f -name "${CHAPTER}.qmd" | head -1)"
+CHAPTER_QMD="$(find "${WORKTREE}/books/${VOL}" -type f -name "${CHAPTER}.qmd" | head -1)"
 if [ -z "${CHAPTER_QMD}" ]; then
-  CHAPTER_QMD="$(find "${WORKTREE}/book/quarto/contents/${VOL}" -type f -name '*.qmd' -path "*${CHAPTER}*" | head -1)"
+  CHAPTER_QMD="$(find "${WORKTREE}/books/${VOL}" -type f -name '*.qmd' -path "*${CHAPTER}*" | head -1)"
 fi
 
 # Snapshot pre-apply violation counts (for delta detection)

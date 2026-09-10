@@ -21,9 +21,9 @@ If any check fails, the return code is non-zero and the caller should
 roll back. The verifier does NOT modify files.
 
 Usage:
-    python3 book/tools/audit/verify.py --ledger audit-ledger.json \\
+    python3 publishing/tools/audit/verify.py --ledger audit-ledger.json \\
         --changed-files <file1> <file2> ...
-    python3 book/tools/audit/verify.py --ledger audit-ledger.json \\
+    python3 publishing/tools/audit/verify.py --ledger audit-ledger.json \\
         --changed-files-from-ledger
 """
 
@@ -55,7 +55,7 @@ from audit.scan import CHECK_REGISTRY, REPO_ROOT
 #
 # IMPORTANT: hook IDs are the `book-` prefixed names in the root config,
 # NOT the bare names that exist in book/.pre-commit-config.yaml. The root
-# config uses ./book/binder as a CLI wrapper, which handles all path
+# config uses ./binder as a CLI wrapper, which handles all path
 # resolution issues correctly.
 
 SAFE_HOOK_IDS = [
@@ -166,7 +166,7 @@ def verify_precommit_hooks(
     """Run the safe subset of pre-commit hooks against the changed files.
 
     Runs from the REPO ROOT against the root .pre-commit-config.yaml,
-    using the `book-` prefixed hook IDs. The book/binder CLI wrapper
+    using the `book-` prefixed hook IDs. The binder CLI wrapper
     handles all script path resolution.
 
     A hook is considered failed only if its exit code is non-zero AND

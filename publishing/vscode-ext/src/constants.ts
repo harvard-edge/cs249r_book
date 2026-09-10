@@ -60,11 +60,11 @@ export const PRECOMMIT_QMD_FILE_FIXERS: PrecommitFileFixer[] = [
 // =============================================================================
 
 export const PUBLISH_ACTIONS: ActionDef[] = [
-  { id: 'mit-press-vol1', label: 'MIT Press Vol1', command: 'bash book/tools/scripts/publish/mit-press-release.sh --vol1', icon: 'rocket' },
-  { id: 'mit-press-vol2', label: 'MIT Press Vol2', command: 'bash book/tools/scripts/publish/mit-press-release.sh --vol2', icon: 'rocket' },
-  { id: 'mit-press-vol1-copyedit', label: 'MIT Press Vol1 (Copy-edit)', command: 'bash book/tools/scripts/publish/mit-press-release.sh --vol1 --copyedit', icon: 'rocket' },
-  { id: 'extract-figures-vol1', label: 'Extract Figures Vol1', command: './book/binder info figures --vol1 --format markdown', icon: 'file-media' },
-  { id: 'extract-figures-vol2', label: 'Extract Figures Vol2', command: './book/binder info figures --vol2 --format markdown', icon: 'file-media' },
+  { id: 'mit-press-vol1', label: 'MIT Press Vol1', command: 'bash publishing/tools/scripts/publish/mit-press-release.sh --vol1', icon: 'rocket' },
+  { id: 'mit-press-vol2', label: 'MIT Press Vol2', command: 'bash publishing/tools/scripts/publish/mit-press-release.sh --vol2', icon: 'rocket' },
+  { id: 'mit-press-vol1-copyedit', label: 'MIT Press Vol1 (Copy-edit)', command: 'bash publishing/tools/scripts/publish/mit-press-release.sh --vol1 --copyedit', icon: 'rocket' },
+  { id: 'extract-figures-vol1', label: 'Extract Figures Vol1', command: './binder info figures --vol1 --format markdown', icon: 'file-media' },
+  { id: 'extract-figures-vol2', label: 'Extract Figures Vol2', command: './binder info figures --vol2 --format markdown', icon: 'file-media' },
 ];
 
 // =============================================================================
@@ -72,14 +72,14 @@ export const PUBLISH_ACTIONS: ActionDef[] = [
 // =============================================================================
 
 export const MAINTENANCE_ACTIONS: ActionDef[] = [
-  { id: 'clean', label: 'Clean Build Artifacts', command: './book/binder clean', icon: 'trash' },
-  { id: 'doctor', label: 'Doctor (Health Check)', command: './book/binder doctor', icon: 'heart' },
-  { id: 'glossary', label: 'Show Glossary Paths', command: './book/binder fix glossary paths', icon: 'book' },
-  { id: 'compress-images', label: 'Compress Images (Dry Run)', command: './book/binder fix images compress --all --smart-compression', icon: 'file-media' },
-  { id: 'repo-health', label: 'Repo Health Check', command: './book/binder fix repo-health', icon: 'pulse' },
-  { id: 'bib-list', label: 'Bib: List All', command: './book/binder bib list', icon: 'list-unordered' },
-  { id: 'bib-clean-dry', label: 'Bib: Clean (Dry Run)', command: './book/binder bib clean --dry-run', icon: 'eye' },
-  { id: 'bib-sync', label: 'Bib: Sync (Clean + Update)', command: './book/binder bib sync', icon: 'sync' },
+  { id: 'clean', label: 'Clean Build Artifacts', command: './binder clean', icon: 'trash' },
+  { id: 'doctor', label: 'Doctor (Health Check)', command: './binder doctor', icon: 'heart' },
+  { id: 'glossary', label: 'Show Glossary Paths', command: './binder fix glossary paths', icon: 'book' },
+  { id: 'compress-images', label: 'Compress Images (Dry Run)', command: './binder fix images compress --all --smart-compression', icon: 'file-media' },
+  { id: 'repo-health', label: 'Repo Health Check', command: './binder fix repo-health', icon: 'pulse' },
+  { id: 'bib-list', label: 'Bib: List All', command: './binder bib list', icon: 'list-unordered' },
+  { id: 'bib-clean-dry', label: 'Bib: Clean (Dry Run)', command: './binder bib clean --dry-run', icon: 'eye' },
+  { id: 'bib-sync', label: 'Bib: Sync (Clean + Update)', command: './binder bib sync', icon: 'sync' },
 ];
 
 // =============================================================================
@@ -87,24 +87,24 @@ export const MAINTENANCE_ACTIONS: ActionDef[] = [
 // =============================================================================
 
 export const CHECK_ACTIONS: ActionDef[] = [
-  { id: 'check-all', label: 'Check: All', command: './book/binder check all', icon: 'shield' },
-  { id: 'check-refs', label: 'Check: References', command: './book/binder check refs', icon: 'link' },
-  { id: 'check-labels', label: 'Check: Labels', command: './book/binder check labels', icon: 'search' },
-  { id: 'check-headers', label: 'Check: Headers', command: './book/binder check headers', icon: 'symbol-structure' },
-  { id: 'check-footnotes', label: 'Check: Footnotes', command: './book/binder check footnotes', icon: 'note' },
-  { id: 'check-figures', label: 'Check: Figures', command: './book/binder check figures', icon: 'file-media' },
-  { id: 'check-markup', label: 'Check: Markup', command: './book/binder check markup', icon: 'warning' },
-  { id: 'check-code', label: 'Check: Code', command: './book/binder check code', icon: 'code' },
-  { id: 'check-prose', label: 'Check: Prose', command: './book/binder check prose', icon: 'whole-word' },
-  { id: 'check-images', label: 'Check: Images', command: './book/binder check images', icon: 'device-camera' },
-  { id: 'check-tables', label: 'Check: Tables', command: './book/binder check tables', icon: 'table' },
-  { id: 'check-math', label: 'Check: Math', command: './book/binder check math', icon: 'symbol-math' },
-  { id: 'check-index', label: 'Check: Index', command: './book/binder check index', icon: 'list-ordered' },
-  { id: 'check-bib', label: 'Check: Bibliography', command: './book/binder check bib', icon: 'book' },
-  { id: 'check-json', label: 'Check: JSON', command: './book/binder check json', icon: 'json' },
-  { id: 'check-units', label: 'Check: Units', command: './book/binder check units', icon: 'beaker' },
-  { id: 'check-epub', label: 'Check: EPUB', command: './book/binder check epub', icon: 'book' },
-  { id: 'check-sources', label: 'Check: Sources', command: './book/binder check sources', icon: 'references' },
+  { id: 'check-all', label: 'Check: All', command: './binder check all', icon: 'shield' },
+  { id: 'check-refs', label: 'Check: References', command: './binder check refs', icon: 'link' },
+  { id: 'check-labels', label: 'Check: Labels', command: './binder check labels', icon: 'search' },
+  { id: 'check-headers', label: 'Check: Headers', command: './binder check headers', icon: 'symbol-structure' },
+  { id: 'check-footnotes', label: 'Check: Footnotes', command: './binder check footnotes', icon: 'note' },
+  { id: 'check-figures', label: 'Check: Figures', command: './binder check figures', icon: 'file-media' },
+  { id: 'check-markup', label: 'Check: Markup', command: './binder check markup', icon: 'warning' },
+  { id: 'check-code', label: 'Check: Code', command: './binder check code', icon: 'code' },
+  { id: 'check-prose', label: 'Check: Prose', command: './binder check prose', icon: 'whole-word' },
+  { id: 'check-images', label: 'Check: Images', command: './binder check images', icon: 'device-camera' },
+  { id: 'check-tables', label: 'Check: Tables', command: './binder check tables', icon: 'table' },
+  { id: 'check-math', label: 'Check: Math', command: './binder check math', icon: 'symbol-math' },
+  { id: 'check-index', label: 'Check: Index', command: './binder check index', icon: 'list-ordered' },
+  { id: 'check-bib', label: 'Check: Bibliography', command: './binder check bib', icon: 'book' },
+  { id: 'check-json', label: 'Check: JSON', command: './binder check json', icon: 'json' },
+  { id: 'check-units', label: 'Check: Units', command: './binder check units', icon: 'beaker' },
+  { id: 'check-epub', label: 'Check: EPUB', command: './binder check epub', icon: 'book' },
+  { id: 'check-sources', label: 'Check: Sources', command: './binder check sources', icon: 'references' },
 ];
 
 // =============================================================================
@@ -112,11 +112,11 @@ export const CHECK_ACTIONS: ActionDef[] = [
 // =============================================================================
 
 export const INFO_ACTIONS: ActionDef[] = [
-  { id: 'info-stats', label: 'Info: Book Stats', command: './book/binder info stats', icon: 'graph' },
-  { id: 'info-stats-vol1', label: 'Info: Stats Vol1', command: './book/binder info stats --vol1 --by-chapter', icon: 'graph' },
-  { id: 'info-stats-vol2', label: 'Info: Stats Vol2', command: './book/binder info stats --vol2 --by-chapter', icon: 'graph' },
-  { id: 'info-figures', label: 'Info: Figure List', command: './book/binder info figures', icon: 'file-media' },
-  { id: 'info-concepts', label: 'Info: Key Concepts', command: './book/binder info concepts', icon: 'lightbulb' },
-  { id: 'info-headers', label: 'Info: Section Headers', command: './book/binder info headers', icon: 'symbol-structure' },
-  { id: 'info-acronyms', label: 'Info: Acronyms', command: './book/binder info acronyms', icon: 'text-size' },
+  { id: 'info-stats', label: 'Info: Book Stats', command: './binder info stats', icon: 'graph' },
+  { id: 'info-stats-vol1', label: 'Info: Stats Vol1', command: './binder info stats --vol1 --by-chapter', icon: 'graph' },
+  { id: 'info-stats-vol2', label: 'Info: Stats Vol2', command: './binder info stats --vol2 --by-chapter', icon: 'graph' },
+  { id: 'info-figures', label: 'Info: Figure List', command: './binder info figures', icon: 'file-media' },
+  { id: 'info-concepts', label: 'Info: Key Concepts', command: './binder info concepts', icon: 'lightbulb' },
+  { id: 'info-headers', label: 'Info: Section Headers', command: './binder info headers', icon: 'symbol-structure' },
+  { id: 'info-acronyms', label: 'Info: Acronyms', command: './binder info acronyms', icon: 'text-size' },
 ];

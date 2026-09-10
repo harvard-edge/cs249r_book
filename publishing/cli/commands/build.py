@@ -66,7 +66,7 @@ class BuildCommand:
             console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
             return True
 
-        # book_dir is `book/quarto/`; repo root is two levels up.
+        # book_dir is `books/`; repo root is two levels up.
         repo_root = self.config_manager.book_dir.parent.parent
         issues, files_checked = find_hygiene_issues(repo_root)
 
@@ -222,7 +222,7 @@ class BuildCommand:
             console.print(
                 "    [dim]If this is an accepted increase, rerun with "
                 "`./binder check epub --scope epubcheck --baseline "
-                "book/tools/audit/epubcheck-baseline.json --update-baseline` "
+                "publishing/tools/audit/epubcheck-baseline.json --update-baseline` "
                 "and commit the updated JSON.[/dim]"
             )
             overall_ok = False

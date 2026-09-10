@@ -35,9 +35,9 @@ Check functions ask only for the protections they need.
 References:
 - book-prose-merged.md section 10.3 (concept term exceptions)
 - book-prose-merged.md section 10.17 (lessons-learned safety patterns)
-- book/tools/scripts/content/fix_capitalization.py (proven implementation)
-- book/tools/scripts/content/fix_emdash.py (proven implementation)
-- book/tools/scripts/content/fix_percent.py (proven implementation)
+- publishing/tools/scripts/content/fix_capitalization.py (proven implementation)
+- publishing/tools/scripts/content/fix_emdash.py (proven implementation)
+- publishing/tools/scripts/content/fix_percent.py (proven implementation)
 """
 
 from __future__ import annotations

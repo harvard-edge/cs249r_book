@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-CONTENTS = REPO / "publishing" / "quarto" / "contents"
+CONTENTS = REPO / "publishing"  / "books"
 CONFIG = REPO / "publishing" / "quarto" / "config"
 BUILDER = REPO / "publishing" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
 

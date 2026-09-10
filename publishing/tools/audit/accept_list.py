@@ -46,7 +46,7 @@ See `accepted_fps.json`. Top-level is a JSON object:
       "entries": [
         {
           "category": "h3-titlecase",
-          "file": "book/quarto/contents/vol1/.../foo.qmd",  # repo-relative
+          "file": "books/vol1/.../foo.qmd",  # repo-relative
           "line": 478,                                       # hint only
           "before": "### AMD Instinct MI300X {.unnumbered}",
           "rule": "§10.9-proper-noun-hardware",
@@ -70,7 +70,7 @@ from audit.ledger import Issue, Ledger, STATUS_ACCEPTED
 
 SCHEMA_VERSION = 1
 
-# Default accept-list path — next to scan.py in book/tools/audit/.
+# Default accept-list path — next to scan.py in publishing/tools/audit/.
 DEFAULT_ACCEPT_LIST = Path(__file__).resolve().parent / "accepted_fps.json"
 # Notation-specific accept-list (kept separate to avoid mixing categories).
 DEFAULT_NOTATION_ACCEPT_LIST = (
@@ -302,7 +302,7 @@ def format_stale_warnings(result: ApplyResult, max_show: int = 10) -> list[str]:
     if len(result.stale) > max_show:
         lines.append(f"  ... and {len(result.stale) - max_show} more")
     lines.append(
-        "Remove stale entries from book/tools/audit/accepted_fps.json "
+        "Remove stale entries from publishing/tools/audit/accepted_fps.json "
         "if the corresponding source lines have been intentionally edited."
     )
     return lines

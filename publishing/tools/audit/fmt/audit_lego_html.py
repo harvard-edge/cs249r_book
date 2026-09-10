@@ -13,8 +13,8 @@ For each QMD chapter with archived HTML under ``html-audit/<vol>/``:
 
 Usage (repo root)::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py --json
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_html.py
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_html.py --json
 """
 
 from __future__ import annotations
@@ -71,20 +71,20 @@ def _chapter_paths(root: Path) -> list[tuple[str, str, Path, Path]]:
     for vol, names in CHAPTER_LIST.items():
         for name in names:
             if name.startswith("appendix_"):
-                qmd = root / f"book/quarto/contents/{vol}/backmatter/{name}.qmd"
+                qmd = root / f"books/{vol}/backmatter/{name}.qmd"
             else:
-                qmd = root / f"book/quarto/contents/{vol}/{name}/{name}.qmd"
-            html = root / f"book/quarto/_build/html-audit/{vol}/{name}.html"
+                qmd = root / f"books/{vol}/{name}/{name}.qmd"
+            html = root / f"books/_build/html-audit/{vol}/{name}.html"
             if not html.is_file():
                 if name.startswith("appendix_"):
                     html = (
                         root
-                        / f"book/quarto/_build/html-{vol}/contents/{vol}/backmatter/{name}.html"
+                        / f"books/_build/html-{vol}/contents/{vol}/backmatter/{name}.html"
                     )
                 else:
                     html = (
                         root
-                        / f"book/quarto/_build/html-{vol}/contents/{vol}/{name}/{name}.html"
+                        / f"books/_build/html-{vol}/contents/{vol}/{name}/{name}.html"
                     )
             out.append((vol, name, qmd, html))
     return out
@@ -278,7 +278,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[4]
     report = [audit_chapter(vol, name, qmd, html) for vol, name, qmd, html in _chapter_paths(root)]
 
-    out_path = args.report or root / "book/quarto/_build/html-audit/lego_html_verify_report.json"
+    out_path = args.report or root / "books/_build/html-audit/lego_html_verify_report.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 

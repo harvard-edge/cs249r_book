@@ -399,12 +399,12 @@ def _resolve_chapter(quarto_dir: Path, volume: str, spec: str) -> Path:
         path = direct.resolve()
     else:
         stem = supplied.stem
-        matches = sorted((quarto_dir / "contents" / volume).rglob(f"{stem}.qmd"))
+        matches = sorted((quarto_dir / volume).rglob(f"{stem}.qmd"))
         if len(matches) != 1:
             detail = "none" if not matches else ", ".join(str(p) for p in matches)
             raise ValueError(f"Chapter {spec!r} did not resolve uniquely: {detail}")
         path = matches[0].resolve()
-    volume_root = (quarto_dir / "contents" / volume).resolve()
+    volume_root = (quarto_dir / volume).resolve()
     if volume_root not in path.parents:
         raise ValueError(f"Chapter must be under contents/{volume}: {path}")
     return path
@@ -502,7 +502,7 @@ def render_mapped_chapter(
     """Render one configured PDF component with full-volume layout context."""
     quarto_dir = Path(config_manager.book_dir).resolve()
     requested_path = _resolve_chapter(quarto_dir, volume, chapter)
-    volume_root = (quarto_dir / "contents" / volume).resolve()
+    volume_root = (quarto_dir / volume).resolve()
     if requested_path == volume_root / "index.qmd":
         raise ValueError(
             "The volume index.qmd is an HTML landing page, not a PDF component. "

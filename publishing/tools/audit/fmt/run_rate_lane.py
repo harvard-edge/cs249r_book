@@ -34,7 +34,7 @@ def main() -> int:
 
     files = [Path(p) for p in args.qmd]
     if args.all:
-        files = sorted(Path("book/quarto/contents").rglob("*.qmd"))
+        files = sorted(Path("books").rglob("*.qmd"))
     if not files:
         ap.error("pass qmd file(s) or --all")
 

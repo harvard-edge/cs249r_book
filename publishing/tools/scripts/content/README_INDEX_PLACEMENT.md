@@ -40,10 +40,10 @@ python check_index_placement.py file.qmd
 python check_index_placement.py file1.qmd file2.qmd
 
 # Check directory recursively
-python check_index_placement.py -d book/quarto/contents/vol1/
+python check_index_placement.py -d books/vol1/
 
 # Quiet mode (summary only)
-python check_index_placement.py -d book/quarto/contents/ --quiet
+python check_index_placement.py -d books/ --quiet
 ```
 
 ### Pre-commit Hook

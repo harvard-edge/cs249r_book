@@ -115,7 +115,7 @@ def migrate_file(path: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     roots = [
-        _REPO / "book/quarto/contents",
+        _REPO / "books",
         _REPO / "book/labs",
         _REPO / "labs",
         _REPO / "mlsysim/tests",

@@ -1,7 +1,7 @@
 import os
 from PIL import Image
 
-icon_dir = "book/quarto/assets/images/icons/callouts/"
+icon_dir = "books/shared/assets/images/icons/callouts/"
 # Process all v* files and the main file
 files = [f for f in os.listdir(icon_dir) if (f.startswith("icon_callout_war_story") and f.endswith(".png"))]
 

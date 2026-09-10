@@ -22,8 +22,8 @@ Read-only. Exit 0 = clean, 1 = violations.
 
 Usage::
 
-    python3 book/tools/audit/fmt/fmt_prose_contract.py book/quarto/contents/vol1/training/training.qmd
-    python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+    python3 publishing/tools/audit/fmt/fmt_prose_contract.py books/vol1/training/training.qmd
+    python3 publishing/tools/audit/fmt/fmt_prose_contract.py --root books
 """
 from __future__ import annotations
 

@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         if not qmd_paths:
             return 0
     else:
-        contents = root / "book" / "quarto" / "contents"
+        contents = root  / "books"
         qmd_paths = sorted(contents.rglob("*.qmd"))
 
     staged_rels: set[str] = set()

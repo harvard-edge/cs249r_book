@@ -529,7 +529,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">📖</td>
       <td><b>Fix a typo or improve a chapter</b></td>
-      <td><a href="book/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
+      <td><a href="publishing/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
@@ -549,7 +549,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">💼</td>
       <td><b>Improve assessment or career-readiness content</b></td>
-      <td><a href="interviews/README.md">StaffML guide</a> · <a href="book/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
+      <td><a href="interviews/README.md">StaffML guide</a> · <a href="publishing/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>

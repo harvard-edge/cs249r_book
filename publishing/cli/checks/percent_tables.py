@@ -13,7 +13,7 @@ This module enforces the table side. It is imported by BOTH:
   - the validator scope ``_run_mitpress_percent_in_tables`` in
     ``book/cli/commands/validate.py`` (the check that blocks commits), and
   - the formatter target ``_run_percent_tables`` in
-    ``book/cli/commands/formatting.py`` (``./book/binder format percent-tables``).
+    ``book/cli/commands/formatting.py`` (``./binder format percent-tables``).
 
 Keeping the detection (`find_in_text`) and the rewrite (`fix_text`) here — and
 having both the check and the fixer import them — means the two can never
@@ -28,8 +28,8 @@ number-token immediately before "percent" matches, so header labels like
 spelled out.
 
 Run standalone:
-  python3 -m cli.checks.percent_tables --check book/quarto/contents/
-  python3 -m cli.checks.percent_tables book/quarto/contents/   # apply
+  python3 -m cli.checks.percent_tables --check books/
+  python3 -m cli.checks.percent_tables books/   # apply
 """
 
 from __future__ import annotations
@@ -176,7 +176,7 @@ def audit(paths: Iterable[Path]) -> List[Violation]:
                 message=(
                     "Use the % symbol, not the word 'percent', inside tables: "
                     f"'{hit.match}' → '{hit.replacement}'. Run "
-                    "'./book/binder format percent-tables' to auto-fix."
+                    "'./binder format percent-tables' to auto-fix."
                 ),
                 context=hit.context,
                 suggestion=f"{hit.match} → {hit.replacement}",
