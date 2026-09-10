@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800">
+import os
+
+def generate_svg():
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800">
     <defs>
         <style>
             .title { font-family: sans-serif; font-size: 18px; font-weight: bold; fill: #1F407A; }
@@ -154,3 +157,9 @@
     </g>
 
 </svg>
+"""
+    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/planning/images/svg/fig11_seam_timeline_fallback.svg', 'w') as f:
+        f.write(svg_content)
+
+if __name__ == "__main__":
+    generate_svg()
