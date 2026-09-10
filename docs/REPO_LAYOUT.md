@@ -32,7 +32,6 @@ staffml/          StaffML interview-prep product
   paper/            StaffML paper
 site/             mlsysbook.ai landing site: home, about, community, newsletter
 socratiq/         SocratiQ AI learning widget
-design-grammar/   ML systems design grammar catalog
 
 shared/           assets several sites use: brand styles, navbar and footer config,
                   redirects, cross-site scripts, the release pill

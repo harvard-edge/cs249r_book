@@ -50,11 +50,9 @@ NEXT_PUBLIC_VAULT_FALLBACK=
 
 ## What the predev hook does
 
-`npm run dev` runs (in this order):
+`npm run dev` first runs:
 
-1. **`scripts/sync-design-grammar.mjs`** — regenerates
-   `src/data/designGrammar.ts` from `design-grammar/grammar.yml`.
-2. **`scripts/build-local-corpus.mjs`** — runs `vault build --local`
+1. **`scripts/build-local-corpus.mjs`** — runs `vault build --local`
    from the repo root, which:
    - compiles every YAML under `staffml/vault/questions/` to
      `staffml/vault/vault.db` (canonical SQLite),

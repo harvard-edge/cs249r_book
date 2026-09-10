@@ -39,7 +39,6 @@ const pages = [
   { name: "welcome",    path: "/welcome" },
   { name: "about",      path: "/about" },
   { name: "explore",    path: "/explore" },
-  { name: "framework",  path: "/framework" },
   { name: "practice",   path: "/practice" },
   { name: "roofline",   path: "/roofline" },
   { name: "plans",      path: "/plans" },
