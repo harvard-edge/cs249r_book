@@ -36,8 +36,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LABS_ROOT = REPO_ROOT / "labs"
 if str(LABS_ROOT) not in sys.path:
     sys.path.insert(0, str(LABS_ROOT))
-if str(REPO_ROOT / "packages" / "mlsysim") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "packages" / "mlsysim"))
+if str(REPO_ROOT / "mlsysim") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "mlsysim"))
 TEST_HOME = Path(tempfile.gettempdir()) / "mlsysbook-labs-test-home"
 TEST_HOME.mkdir(parents=True, exist_ok=True)
 os.environ["HOME"] = str(TEST_HOME)
@@ -76,7 +76,7 @@ def vol2_lab_path(request):
 @pytest.fixture(scope="session")
 def mlsysim():
     """Import mlsysim once for the session."""
-    sys.path.insert(0, str(REPO_ROOT / "packages" / "mlsysim"))
+    sys.path.insert(0, str(REPO_ROOT / "mlsysim"))
     sys.path.insert(1, str(REPO_ROOT))
     loaded = sys.modules.get("mlsysim")
     if loaded is not None and getattr(loaded, "__file__", None) is None:

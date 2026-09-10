@@ -8,18 +8,21 @@ reached through a symlink.
 
 ## Map
 
+Each project with its own site sits at the top level under the name of its
+URL, so `mlsysbook.ai/tinytorch/` is `tinytorch/` and `mlsysbook.ai/slides/` is
+`slides/`. The folders that support every project follow.
+
 ```
 books/            textbook sources; the Quarto project root for all four volumes
 binder/           book toolchain: the binder CLI, checks, audits, build scripts, tests
-packages/         software that ships on its own
-  mlsysim/          MLSys·im analytical modeling library, docs site, paper, tutorial
-  tinytorch/        TinyTorch build-your-own-framework course, site, and tito CLI
-  mlperf-edu/       MLPerf EDU laptop-scale benchmark suite and site
-materials/        teaching materials
-  slides/           Beamer lecture decks, one per chapter, and the slides portal
-  instructors/      The Blueprint, the instructor site
+
+tinytorch/        TinyTorch build-your-own-framework course, site, and tito CLI
+mlsysim/          MLSys·im analytical modeling library, docs site, paper, tutorial
+mlperf-edu/       MLPerf EDU laptop-scale benchmark suite and site
 labs/             Marimo co-labs (the mlsysbook_labs package) and the labs site
 kits/             hardware kit labs (Arduino, Seeed, Raspberry Pi) and site
+slides/           Beamer lecture decks, one per chapter, and the slides portal
+instructors/      The Blueprint, the instructor site
 staffml/          StaffML interview-prep product
   app/              Next.js web app
   vault/            question corpus (YAML), taxonomy, release artifacts
@@ -28,10 +31,11 @@ staffml/          StaffML interview-prep product
   vault-types/      shared TypeScript types
   paper/            StaffML paper
 site/             mlsysbook.ai landing site: home, about, community, newsletter
-shared/           assets several sites use: brand styles, navbar and footer config,
-                  redirects, cross-site scripts, the release pill
 socratiq/         SocratiQ AI learning widget
 design-grammar/   ML systems design grammar catalog
+
+shared/           assets several sites use: brand styles, navbar and footer config,
+                  redirects, cross-site scripts, the release pill
 docs/             repository-level docs: this file, CI variables, versioning
 scripts/          standalone utilities outside the binder CLI (versioning, cross-reference audits)
 tools/            monorepo-level audits, release smoke tests, historical cleanup manifests
@@ -93,7 +97,7 @@ Launch Binder links for TinyTorch are configured by `binder/postBuild` and
 - **Changing a style, navbar, or redirect shared across sites?** `shared/`.
 - **Running a check or a build?** `./binder/binder check refs` or
   `./binder/binder build pdf --vol1`, from the repository root.
-- **Importing mlsysim from source?** Put `packages/mlsysim` on the Python path.
+- **Importing mlsysim from source?** Put the `mlsysim/` project folder on the Python path.
   The root pytest config, the book configs, and the binder CLI already do.
 - **Writing a workflow?** Write directory paths literally. Repository variables
   are shared by every branch while the layout is versioned per branch, so a path
@@ -110,10 +114,11 @@ The September 2026 reorganization moved every area to the home above:
 | `publishing/`, reached as `book/` and `./binder` | `binder/`, run as `./binder/binder` |
 | `.binder/` | `binder/postBuild`, `binder/requirements.txt` |
 | `interviews/staffml`, `interviews/vault*`, `interviews/staffml-vault-{worker,types}` | `staffml/app`, `staffml/vault*`, `staffml/vault-{worker,types}` |
-| `mlsysim/`, `tinytorch/`, `mlperf-edu/` | `packages/mlsysim/`, `packages/tinytorch/`, `packages/mlperf-edu/` |
-| `slides/`, `instructors/` | `materials/slides/`, `materials/instructors/` |
 | `_quarto.yml` symlinks in kits, labs, and the MLSys·im docs | real `_quarto.yml` files |
 | `staffml/vault/releases/latest` symlink | `staffml/vault/releases/latest.txt` |
+
+TinyTorch, MLSys·im, MLPerf EDU, the slides, and the instructor site stayed at
+the top level, so their GitHub paths and site URLs still match.
 
 Published URLs did not change: mlsysbook.ai keeps `/vol1/`, `/tinytorch/`,
 `/mlsysim/`, `/slides/`, `/instructors/`, and `/staffml/`, and `/interviews/`

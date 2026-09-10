@@ -208,7 +208,7 @@ def _inline_python_latex_operator_warnings(text: str) -> List[str]:
 # with mlsysim.fmt's MarkdownStr migration. They had been guarding against
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
 # mode — a bug class that no longer exists now that fmt() returns a Markdown-
-# rendering string that bypasses the escape. See packages/mlsysim/mlsysim/fmt.py and
+# rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
 # the project math rules.
 
 # A bibliography citation begins at a token boundary.  The negative lookbehind

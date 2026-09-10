@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MLSYSIM_ROOT = REPO_ROOT / "packages" / "mlsysim"
+MLSYSIM_ROOT = REPO_ROOT / "mlsysim"
 APPENDIX_PATHS = [
     REPO_ROOT / "books/vol1/backmatter/appendix_assumptions.qmd",
     REPO_ROOT / "books/vol2/backmatter/appendix_assumptions.qmd",

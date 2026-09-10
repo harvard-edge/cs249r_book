@@ -148,7 +148,7 @@ RELEASE_ID="${LABS_RELEASE_ID:-labs-v${LAB_HELPER_VERSION}-dev}"
 RELEASE_HASH="$(
   cd "${REPO_ROOT}" && \
     python3 scripts/version/release.py compute-hash \
-      --paths labs packages/mlsysim/mlsysim \
+      --paths labs mlsysim/mlsysim \
       --exclude _build _wasm_build .quarto __pycache__ .pytest_cache node_modules "*.pyc" release-manifest.json
 )"
 METADATA_JSON="$(
