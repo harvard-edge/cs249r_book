@@ -292,7 +292,7 @@ Do not edit:
 - shared helpers
 - tests
 - other labs
-- permanent checkout `/Users/VJ/GitHub/MLSysBook`
+- the main checkout
 
 Notebook-local helpers:
 - Prefix with `v1_08_`.

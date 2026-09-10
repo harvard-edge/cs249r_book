@@ -5,8 +5,7 @@ class computes scenario values once, produces formatted `*_str` fields, and pros
 references them with `` `{python} Class.field_str` ``.
 
 This document defines how to author and review LEGO cells. It complements the
-fmt/notation audit lane (`binder/tools/audit/fmt/README.md`), the agent verify
-playbook (`.claude/rules/lego-verify.md`), and pre-commit checks
+fmt/notation audit lane (`binder/tools/audit/fmt/README.md`) and the pre-commit checks
 (`lego-dead-code`, `./binder/binder check math --scope canonical`).
 
 ## Core rule
@@ -167,7 +166,7 @@ See `binder/tools/audit/artifacts/lego_closed_prose_audit.md`.
 
 ### Phase 2 — Naming contract
 
-Every `*_str` output must match its formatter (see `.claude/rules/lego-units.md`):
+Every `*_str` output must match its formatter:
 
 - **Closed-fixed:** `*_w_str`, `*_gb_per_s_str` → typed fmt with pinned `unit=`
 - **Open:** generic `*_str` → `fmt()` and prose supplies unit
@@ -192,7 +191,7 @@ For **`fmt_arithmetic_intensity`**, prefer **no explicit `precision=`** (auto:
 integer-like → 0, fractional → 1). Pass explicit precision only for pinned
 scenario literals (e.g. 300 FLOP/byte). **`7.0 FLOP/byte`** is a smell on exact
 integers; **`153.0 FLOP/byte`** is normal for fractional ridge points at
-precision 1. Agent copy: `.claude/rules/lego-verify.md`.
+precision 1.
 
 **Corpus exec sweep** (all chapter QMDs, shared namespace):
 

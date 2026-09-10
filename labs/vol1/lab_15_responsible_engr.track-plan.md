@@ -211,7 +211,7 @@ The report and Design Ledger should capture:
   revised lab must reinterpret existing fields carefully rather than editing
   shared variant data.
 - Browser rendering is not required for this wave, but syntax and diff checks
-  must pass from `/Users/VJ/GitHub/MLSysBook-labs`.
+  must pass from the labs worktree.
 
 ## Depth Audit
 

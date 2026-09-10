@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -11,4 +13,4 @@ df = pd.DataFrame({
     'required_exposure_hours': n_values,
     'machine_years': n_values / (24 * 365.25)
 })
-df.to_csv('/Users/VJ/GitHub/MLSysBook-figures/books/vol4/chapters/17-frontier/data/exposure_scaling.csv', index=False)
+df.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'exposure_scaling.csv'), index=False)
