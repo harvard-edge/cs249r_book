@@ -1,7 +1,7 @@
 # Content Structure
 
 <!-- GENERATED FILE. Do not edit by hand. -->
-<!-- Regenerate: python3 publishing/tools/scripts/structure/gen_structure.py -->
+<!-- Regenerate: python3 bindery/tools/scripts/structure/gen_structure.py -->
 
 Chapter order is derived from each volume's Quarto PDF config
 (`books/config/_quarto-pdf-<vol>.yml`), which is the canonical
@@ -22,8 +22,8 @@ contents/<vol>/
 ```
 
 The load-bearing invariant is `<chapter>/<chapter>.qmd`: a chapter directory
-and its main file share a name. `publishing/cli/commands/build.py` relies on it,
-and `publishing/tests/test_content_structure.py` enforces it.
+and its main file share a name. `bindery/cli/commands/build.py` relies on it,
+and `bindery/tests/test_content_structure.py` enforces it.
 
 ## Volume I: Introduction to Machine Learning Systems (`vol1`)
 

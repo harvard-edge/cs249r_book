@@ -72,9 +72,9 @@ completeness.
 
 | Variable | Current value |
 |---|---|
-| `BOOK_DEPS` | `publishing/tools/dependencies` |
+| `BOOK_DEPS` | `bindery/tools/dependencies` |
 | `BOOK_DOCKER` | `book/docker` |
-| `BOOK_TOOLS` | `publishing/tools` |
+| `BOOK_TOOLS` | `bindery/tools` |
 | `KITS_DOCS` | `kits` |
 | `LABS_DOCS` | `labs` |
 | `SLIDES_ROOT` | `slides` |
