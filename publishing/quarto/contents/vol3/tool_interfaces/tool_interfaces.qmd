@@ -74,7 +74,64 @@ The client runtime parsed the generated text using regular expressions. This app
 
 Generation 2 introduced native function calling. Inference runtimes designated special token markers (e.g., `<|tool_call|>` and `<|/tool_call|>`) to delimit structured JSON payloads. While this isolated tool invocations from standard dialogue text, the JSON text itself was still generated autoregressively without structural constraints, leaving payload validity subject to model stochasticity.
 
-Generation 3 establishes formal tool ABIs. Tools are registered via typed schemas (JSON Schema Draft 2020-12). At inference time, the model runtime compiles schemas into finite state automata that physically prevent the generation of invalid token sequences. Standardized wire protocols such as the Model Context Protocol (MCP) decouple the host agent runtime from local and remote tool implementations.
+Generation 3 establishes formal tool ABIs. Tools are registered via typed schemas (JSON Schema Draft 2020-12). At inference time, the model runtime compiles schemas into finite state automata that physically prevent the generation of invalid token sequences. Standardized wire protocols such as the Model Context Protocol (MCP) decouple the host agent runtime from local and remote tool implementations. The three generations differ in where correctness is enforced, and @fig-tool-syntax-errors shows what moving that enforcement into the decoder buys: scraping left roughly one call in five malformed, native JSON reduced the rate without eliminating it, and schema-compiled automata drove it to zero because a malformed token can no longer be sampled.
+
+::: {#fig-tool-syntax-errors fig-env="figure" fig-pos="htb" fig-cap="**Tool Invocation Syntax Error Rates (2022--2025)**: Malformed-call rate across three generations of agent-to-software interface, falling from roughly 21 percent under text scraping to effectively zero under constrained decoding. The decisive change is architectural: the third generation makes an invalid call unrepresentable rather than merely unlikely." fig-alt="Chart of tool invocation syntax error rate over time across three generations, dropping from about 21 percent under text scraping to near zero under constrained decoding, with vertical markers at each generational transition."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as ticker
+from mlsysim import viz
+
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['axes.titlesize'] = 11
+plt.rcParams['axes.labelsize'] = 10
+plt.rcParams['xtick.labelsize'] = 9
+plt.rcParams['ytick.labelsize'] = 9
+
+df = pd.read_csv("data/syntax_error_rates.csv")
+df['Date'] = pd.to_datetime(df['Date'])
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 3.5))
+
+generations = df['Generation'].unique()
+colors = ['#d9534f', '#f0ad4e', '#5cb85c']
+markers = ['o', 's', 'D']
+
+for gen, color, marker in zip(generations, colors, markers):
+    gen_data = df[df['Generation'] == gen]
+    ax.plot(gen_data['Date'], gen_data['ErrorRate'], marker=marker, markersize=5,
+            linewidth=2, label=gen, color=color, alpha=0.9)
+
+ax.set_ylabel("Syntax Error Rate (%)")
+ax.set_ylim(-1, 25)
+ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100))
+
+ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+fig.autofmt_xdate(rotation=0, ha='center')
+
+# Annotations
+ax.axvline(pd.to_datetime('2023-06-01'), color='gray', linestyle='--', alpha=0.5)
+ax.text(pd.to_datetime('2023-06-15'), 18, 'Native JSON\nIntroduced', 
+        fontsize=9, color='gray', va='center')
+
+ax.axvline(pd.to_datetime('2024-06-01'), color='gray', linestyle='--', alpha=0.5)
+ax.text(pd.to_datetime('2024-06-15'), 18, 'Constrained\nDecoding', 
+        fontsize=9, color='gray', va='center')
+
+ax.legend(title="", loc='upper right', frameon=True, fontsize=9)
+ax.margins(x=0.14, y=0.14)
+plt.tight_layout()
+
+plt.show()
+plt.close()
+```
+
+:::
 
 ## Model Context Protocol Architecture {#sec-vol3-tools-model-context-protocol-mcp}
 

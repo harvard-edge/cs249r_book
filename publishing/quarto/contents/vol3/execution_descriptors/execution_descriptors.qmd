@@ -406,7 +406,44 @@ $$T_{\text{breakeven}} = \frac{2 \times S_{\text{KV}}}{B_{\text{PCIe}}} \times \
 For a $64\text{K}$-token context on a 70B parameter model ($S_{\text{KV}} \approx 16\,\text{GB}$ in FP16), the one-way transfer over PCIe Gen5 x16 takes:
 $$t_{\text{swap\_out}} = \frac{16\,\text{GB}}{64\,\text{GB/s}} = 0.25\,\text{seconds} \quad (250\,\text{ms})$$
 
-If a tool invocation is predicted to block for more than $T_{\text{breakeven}} \approx 500\,\text{ms}$ (as is the case for virtually all network APIs, compiler invocations, and test suites), the memory manager immediately initiates asynchronous DMA transfer to host DRAM. When the tool completion webhook arrives, the scheduler prefetches the blocks back to GPU HBM before the agent's turn arrives in the run queue, completely hiding transfer latency.
+If a tool invocation is predicted to block for more than $T_{\text{breakeven}} \approx 500\,\text{ms}$ (as is the case for virtually all network APIs, compiler invocations, and test suites), the memory manager immediately initiates asynchronous DMA transfer to host DRAM. When the tool completion webhook arrives, the scheduler prefetches the blocks back to GPU HBM before the agent's turn arrives in the run queue, completely hiding transfer latency. That threshold is not a constant of the runtime; it is a property of the link. @Fig-acb-breakeven sweeps context length across three PCIe generations, and the breakeven point moves by roughly a factor of four between Gen3 and Gen5 for the same model.
+
+::: {#fig-acb-breakeven fig-env="figure" fig-pos="htb" fig-cap="**KV-Cache Swapping Breakeven Thresholds**: Round-trip DMA transfer time against context length for three PCIe generations, on a 70B model. Every generation rises linearly with context, and the breakeven suspension duration rises with it, so the decision to swap depends on the bus as much as on the expected block time." fig-alt="Log-scale line chart of KV-cache transfer time against context length for three PCIe generations. All three rise linearly on the log axis, with Gen5 roughly four times faster than Gen3 at every context length."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz
+
+# Load data
+data = pd.read_csv("data/breakeven_thresholds.csv")
+
+# Filter for the 70B model to keep the plot focused
+data_70b = data[data["Model"] == "70B (327 KB/token)"]
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+_groups = list(dict.fromkeys(data_70b["PCIe Gen"]))
+_cmap = plt.get_cmap('viridis', max(len(_groups), 2))
+for _i, _g in enumerate(_groups):
+    _sub = data_70b[data_70b["PCIe Gen"] == _g]
+    ax.plot(_sub["Context Length"], _sub["Breakeven Time (ms)"], color=_cmap(_i), label=str(_g), marker="o", linewidth=2)
+
+plt.xscale("log", base=2)
+plt.yscale("log")
+plt.xlabel("Context Length (Tokens)")
+plt.ylabel("Breakeven Transfer Time (ms)")
+plt.title("KV-cache PCIe transfer latency (70B model, FP16)")
+plt.xticks([8192, 16384, 32768, 65536, 131072], ["8K", "16K", "32K", "64K", "128K"])
+plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.legend(title="Bus Bandwidth")
+plt.tight_layout()
+
+plt.show()
+plt.close()
+```
+
+:::
 
 ## Fallacies and Pitfalls {#sec-vol3-descriptors-fallacies}
 

@@ -104,7 +104,40 @@ In physical AI hardware design, **crossbar bus and DRAM bank contention**\index{
 
 Each claimant imposes a demand that can be derived from its transfer size per event and its event rate. In an analytical example of a flow-regulation controller sharing a single $64\text{-bit}$ LPDDR4 memory channel rated at $12.8\text{ GB/s}$ peak bandwidth, sensor direct memory access transfers a $64\text{ kB}$ buffer at $1000\text{ Hz}$, generating an average demand of $64.0\text{ MB/s}$. The learned proposal model executes an inference pass every $20\text{ ms}$ ($50\text{ Hz}$), streaming $60\text{ MB}$ of parameters and activation data for an average demand of $3.0\text{ GB/s}$. The enforcement path executes every $1.0\text{ ms}$ ($1000\text{ Hz}$), reading $4\text{ kB}$ of pipeline state and historical sensor logs, consuming $4.0\text{ MB/s}$ on average. Actuator writes require $1\text{ kB}$ per millisecond ($1.0\text{ MB/s}$), cache maintenance evictions contribute $128.0\text{ MB/s}$ in writebacks, and diagnostic telemetry logging transfers $32\text{ kB}$ records at $100\text{ Hz}$ ($3.2\text{ MB/s}$). Summing these rates gives an aggregate demand of $3.2002\text{ GB/s}$, which represents $25.0\%$ of the channel capacity. An engineer who inspects only average utilization would conclude that three-quarters of the bus capacity remains available. But memory arbiters do not schedule average rates, they arbitrate discrete bursts, and two workloads with identical average throughput create distinct interference profiles if one streams continuously in small packets while the other arrives in long, saturating blocks.
 
-Arithmetic intensity, defined as the ratio of arithmetic operations to memory bytes transferred, indicates whether a computational routine is bounded by execution units or by memory bandwidth during steady-state execution. For a convolution or dense matrix multiplication on the proposal path, an arithmetic intensity of $120\text{ FLOP/byte}$ indicates that arithmetic units will be fully occupied once data resides in local cache or static memory. However, during the initial phase where weights are transferred from dynamic memory, the operational arithmetic intensity drops to zero, converting the accelerator into a high-priority direct memory access engine that saturates the memory bus. Arithmetic intensity reveals whether a workload can hide memory transfer latency behind arithmetic work in isolation, but it provides no information about queue contention, transfer priority, burst duration, or which request waits when two paths access the bus simultaneously.
+Arithmetic intensity, defined as the ratio of arithmetic operations to memory bytes transferred, indicates whether a computational routine is bounded by execution units or by memory bandwidth during steady-state execution. For a convolution or dense matrix multiplication on the proposal path, an arithmetic intensity of $120\text{ FLOP/byte}$ indicates that arithmetic units will be fully occupied once data resides in local cache or static memory. However, during the initial phase where weights are transferred from dynamic memory, the operational arithmetic intensity drops to zero, converting the accelerator into a high-priority direct memory access engine that saturates the memory bus. Arithmetic intensity reveals whether a workload can hide memory transfer latency behind arithmetic work in isolation, but it provides no information about queue contention, transfer priority, burst duration, or which request waits when two paths access the bus simultaneously. The same imbalance that governs a data center accelerator governs the memory channel on a robot, only with less headroom. @Fig-placement-memory-wall shows compute outrunning bandwidth roughly two to one across four generations, which is why an arithmetic-intensity argument decides placement more often than a raw throughput number does.
+
+::: {#fig-placement-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Placement Inherits the Same Bandwidth Deficit**: Peak compute and memory bandwidth for data center accelerators, normalized to the V100. Compute rises 18$\times$ against bandwidth's 8.9$\times$, and a placement decision works against that ratio because an on-robot budget cannot buy its way past a bandwidth limit. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 showing compute at 18 times and bandwidth at 8.9 times by the B200, the divergence a placement decision must respect."}
+
+```{python}
+#| echo: false
+import pandas as pd
+from mlsysim import viz
+
+data = pd.read_csv("data/gpu_memory_wall.csv")
+base = data.iloc[0]
+data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
+data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.2))
+labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
+ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"],
+        linewidth=2, label="Peak compute")
+ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"],
+        linewidth=2, label="Memory bandwidth")
+
+for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+    ax.annotate(f'{data[col].iloc[-1]:.0f}x', xy=(len(data) - 1, data[col].iloc[-1]),
+                xytext=(6, 0), textcoords="offset points", va="center",
+                fontweight="bold", color=colour)
+
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
+ax.set_xlabel("NVIDIA data center accelerator")
+ax.legend(loc="upper left", frameon=False)
+ax.margins(x=0.12)
+fig.tight_layout()
+```
+
+:::
 
 The latency experienced by the enforcement path depends directly on the longest uninterrupted burst permitted on the shared interconnect and the internal banking dynamics of the DRAM subsystem (@fig-13-soc-contention-droop a). In this analytical system, the neural accelerator transfers weights in $256\text{ kB}$ tiles. Across a $12.8\text{ GB/s}$ interface, an uninterrupted $256\text{ kB}$ burst occupies the physical bus for $20.0\,\mu\text{s}$. When the on-chip interconnect uses packet-atomic non-preemptive arbitration (even with AMBA AXI Quality-of-Service `AxQOS` priority tags), an enforcement request that arrives immediately after a tile transfer begins must wait the full $20.0\,\mu\text{s}$ transfer duration. Contention is further compounded inside the dynamic memory controller. Dynamic random-access memory is physically organized into independent banks, where each bank contains a two-dimensional array of storage cells managed by a single row buffer. When an access targets a row already loaded into the buffer (a *row-buffer hit*), data is transferred in column access time ($t_{\text{CAS}} \approx 14\text{ ns}$). If an access targets a different row in the same bank (a *bank conflict* or *row-buffer miss*), the controller must first restore and close the open row by precharging the bank ($t_{\text{RP}} \approx 14\text{ ns}$), activate the newly requested row ($t_{\text{RCD}} \approx 14\text{ ns}$), and execute the column read ($t_{\text{CAS}} \approx 14\text{ ns}$), tripling baseline access latency.
 

@@ -60,7 +60,66 @@ This chapter establishes the systems architecture of prefix caching, virtual mem
 
 ## Prefix Locality in Trajectories {#sec-vol3-caching-prefix-locality-in-multi-turn}
 
-Stateless large language model serving benchmarks traditionally assume independent, identically distributed requests where each prompt arrives with little or no shared history. In contrast, real-world autonomous agents—such as software engineering agents executing on SWE-bench, autonomous research assistants, and tool-augmented workflow orchestrators—generate highly stateful, clustered request traces characterized by extreme prefix locality.
+Stateless large language model serving benchmarks traditionally assume independent, identically distributed requests where each prompt arrives with little or no shared history. In contrast, real-world autonomous agents—such as software engineering agents executing on SWE-bench, autonomous research assistants, and tool-augmented workflow orchestrators—generate highly stateful, clustered request traces characterized by extreme prefix locality. Agent sessions sit at the far right of this trend rather than the middle of it. @Fig-vol3-caching-context-scaling shows supported context growing three orders of magnitude in four years, and a cache partitioned for the left edge of that curve will thrash on the right.
+
+::: {#fig-vol3-caching-context-scaling fig-env="figure" fig-pos="htb" fig-cap="**The Context Window Explosion**: Maximum supported context for frontier models from 2020 to 2024, colored by organization, rising from two thousand to two million tokens. KV-cache footprint scales with this axis, which is what makes a statically partitioned cache untenable for multi-turn agents." fig-alt="Log-scale scatter of frontier model context length against release date from 2020 to 2024, colored by organization, rising from two thousand tokens to two million."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from mlsysim import viz
+
+data = pd.read_csv("data/context_length_scaling.csv")
+data['release_date'] = pd.to_datetime(data['release_date'])
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 5))
+
+# Create a scatter plot
+_groups = list(dict.fromkeys(data['org']))
+_cmap = plt.get_cmap('viridis', max(len(_groups), 2))
+for _i, _g in enumerate(_groups):
+    _sub = data[data['org'] == _g]
+    ax.scatter(_sub['release_date'], _sub['context_length'], color=_cmap(_i), label=str(_g), linewidth=0.5, s=100, alpha=0.8, edgecolor='black')
+
+# Customize the axes
+plt.yscale('log', base=2)
+plt.ylabel("Context Length (Tokens)", fontsize=10)
+plt.xlabel("Release Date", fontsize=10)
+plt.title("Frontier model context length scaling (2020-2024)", fontsize=12, weight='bold')
+
+# Formatting y-axis ticks to show actual numbers instead of scientific notation
+def y_fmt(x, pos):
+    if x >= 1000000:
+        return f"{int(x/1000000)}M"
+    elif x >= 1000:
+        return f"{int(x/1000)}k"
+    return str(int(x))
+
+plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(y_fmt))
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+plt.xticks(rotation=45)
+
+# Annotate some key models
+key_models = ["GPT-3", "GPT-4", "Claude 1", "Gemini 1.5 Pro", "Llama 3.1", "Gemini 1.5 Pro 2M", "GPT-4 Turbo", "PaLM", "Claude 3 Opus"]
+for i, row in data.iterrows():
+    if row['model'] in key_models:
+        plt.annotate(row['model'], 
+                     (mdates.date2num(row['release_date']), row['context_length']),
+                     textcoords="offset points", 
+                     xytext=(6, -2) if row['model'] == 'PaLM' else (6, 3), 
+                     ha='left',
+                     fontsize=8)
+
+plt.legend(title="Organization", bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+ax.margins(x=0.14, y=0.14)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
 
 ### Trajectory prompt anatomy and token overlap
 

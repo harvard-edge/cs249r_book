@@ -158,12 +158,47 @@ Consider the running example for the storage analysis. A 175-billion parameter l
 
 The problem is deceptive because storage technology has improved substantially. Non-Volatile Memory Express (NVMe) drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. An H100 moves data internally through high-bandwidth memory (HBM) at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` the sequential bandwidth of a single NVMe drive. This ratio contrasts two tiers; it is not the rate at which storage must supply training inputs, because HBM bandwidth also carries repeated weight, activation, and tensor traffic during computation. The storage feed requirement is instead determined by the input-batch bytes each accelerator needs per iteration. Meeting that requirement still calls for a hierarchy of storage tiers, each matched to a phase of the ML lifecycle and connected by pipelines that hide latency through prefetching and pipelining.
 
-The storage problem joins physics with economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering task is to bridge these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. The resulting design problem is quantitative. It asks how fast each tier must be, how deep the pipeline must run, and which bytes are worth keeping close to the accelerator.
+The storage problem joins physics with economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering task is to bridge these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. The resulting design problem is quantitative. It asks how fast each tier must be, how deep the pipeline must run, and which bytes are worth keeping close to the accelerator. The imbalance is structural rather than incidental. Compute and high-bandwidth memory have advanced together while local storage has not, and @fig-storage-compute-gap shows the resulting divergence: the fuel line into the accelerator now limits the checkpoint far more tightly than the accelerator itself does.
 
 ::: {.column-margin}
 ![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes towering over a tiny rung for per-epoch training data, showing checkpoints move over a thousand times more bytes than the dataset."}
 
 *Checkpoint writes dwarf training-data reads by about 1,000 times.*
+::: {#fig-storage-compute-gap fig-env="figure" fig-pos="htb" fig-cap="**The storage-compute gap**: Accelerator compute, HBM bandwidth, and NVMe bandwidth from 2010 to 2024 on a common log scale. Compute rises fastest and local storage slowest, so the fuel line into the accelerator becomes the binding constraint long before arithmetic does." fig-alt="Log-scale three-line chart from 2010 to 2024 comparing accelerator compute, HBM bandwidth, and NVMe bandwidth. Compute rises fastest and NVMe slowest, so the vertical distance between the top and bottom lines widens over time."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz
+
+data = pd.read_csv("data/storage_compute_gap.csv")
+
+fig, ax1 = plt.subplots(figsize=(8, 5))
+ax1.set_yscale('log')
+
+ax1.plot(data['Year'], data['Compute_TFLOPS'], marker='o', color='#E6550D', linewidth=2, label='Compute (TFLOPS)')
+ax1.plot(data['Year'], data['Memory_Bandwidth_GBps'], marker='s', color='#3182BD', linewidth=2, label='HBM Bandwidth (GB/s)')
+ax1.plot(data['Year'], data['Storage_Bandwidth_GBps'], marker='^', color='#756BB1', linewidth=2, label='NVMe Bandwidth (GB/s)')
+
+ax1.set_xlabel('Year', fontsize=10, weight='bold')
+ax1.set_ylabel('Performance (Log Scale)', fontsize=10, weight='bold')
+ax1.set_title('The widening storage-compute gap (2010-2024)', fontsize=12, weight='bold')
+ax1.grid(True, which="both", ls="--", alpha=0.3)
+ax1.legend(loc='upper left')
+
+for i, txt in enumerate(data['GPU_Architecture']):
+    if data['Year'][i] in [2010, 2016, 2020, 2024]:
+        ax1.annotate(txt, (data['Year'][i], data['Compute_TFLOPS'][i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8)
+
+ax1.margins(x=0.14, y=0.14)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
 :::
 
 The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced earlier. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. This chapter adopts one resumable mixed-precision Adaptive Moment Estimation (Adam) checkpoint contract: FP16 model weights, FP32 master weights, and two FP32 Adam moments, for 14 bytes per parameter. Gradients are recomputed after restore, while scheduler, random-number-generator, and data-loader metadata are negligible at this scale. The resulting checkpoint is `{python} StorageFuelLineContext.ckpt_total_gb_str` every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use this same contract for every checkpoint size, duration, retention total, and lifetime-write calculation.
