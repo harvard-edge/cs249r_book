@@ -13,67 +13,119 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_flatten_vol_urls_rewrites_generated_volume_links(tmp_path: Path) -> None:
-    site = tmp_path / "vol1-site"
+def run(site: Path, vol: str = "vol1") -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(SCRIPT), str(site), vol], capture_output=True, text=True)
 
+
+def build_site(site: Path) -> None:
+    """A small render in the layout Quarto produces from books/vol1/."""
     write(
         site / "index.html",
         """
+        <link href="./site_libs/quarto.css" rel="stylesheet">
         <a href="./vol1/index.qmd">Homepage</a>
         <a href="./vol1/frontmatter/about.html">Preface</a>
-        <a href="./vol1/data_engineering/data_engineering.html">Data Engineering</a>
-        <a href="./contents/frontmatter/socratiq/socratiq.html">SocratiQ</a>
+        <a href="./vol1/data_engineering/data_engineering.html#sec-data">Data Engineering</a>
+        <a href="./shared/frontmatter/socratiq/socratiq.html">SocratiQ</a>
+        <a href="https://mlsysbook.ai/vol1/vol1/data_engineering/data_engineering.html">abs</a>
         """,
     )
     write(
-        site / "contents" / "vol1" / "data_engineering" / "data_engineering.html",
+        site / "vol1" / "data_engineering" / "data_engineering.html",
+        """
+        <link href="../../site_libs/quarto.css" rel="stylesheet">
+        <img src="../../shared/assets/images/cover.png">
+        <a href="../../vol1/index.qmd">Homepage</a>
+        <a href="../frontmatter/about.html">Preface</a>
+        <a href="../../vol1/backmatter/glossary/glossary.html?x=1#g">Glossary</a>
+        <a href="../../shared/frontmatter/socratiq/socratiq.html">SocratiQ</a>
+        <a href="#local">Local</a>
+        <script src="/tools/scripts/socratiQ/bundle.js"></script>
+        <a href="https://mlsysbook.ai/vol1/contents/vol1/training/training.html">legacy</a>
+        """,
+    )
+    write(
+        site / "vol1" / "backmatter" / "glossary" / "glossary.html",
         """
         <link href="../../../site_libs/quarto.css" rel="stylesheet">
-        <a href="../vol1/frontmatter/about.html">Preface</a>
-        <a href="../vol1/backmatter/glossary/glossary.html">Glossary</a>
-        <a href="../contents/frontmatter/socratiq/socratiq.html">SocratiQ</a>
+        <a href="../../data_engineering/data_engineering.html">Data</a>
         """,
     )
-    write(
-        site / "contents" / "vol1" / "backmatter" / "glossary" / "glossary.html",
-        '<a href="../../vol1/data_engineering/data_engineering.html">Data</a>',
-    )
-    write(
-        site / "contents" / "vol1" / "frontmatter" / "about.html",
-        '<a href="../vol1/data_engineering/data_engineering.html">Data</a>',
-    )
-    write(site / "contents" / "frontmatter" / "socratiq" / "socratiq.html", "<p>SocratiQ</p>")
-    write(site / "search.json", '{"href":"vol1/data_engineering/data_engineering.html"}')
-    write(
-        site / "sitemap.xml",
-        "<loc>https://mlsysbook.ai/vol1/vol1/data_engineering/data_engineering.html</loc>",
-    )
+    write(site / "vol1" / "frontmatter" / "about.html", '<a href="../data_engineering/data_engineering.html">Data</a>')
+    write(site / "vol1" / "index.html", "<p>sidebar home</p>")
+    write(site / "shared" / "frontmatter" / "socratiq" / "socratiq.html",
+          '<a href="../../../vol1/data_engineering/data_engineering.html">Data</a>')
+    write(site / "site_libs" / "quarto.css", "")
+    write(site / "search.json", '[{"href": "vol1/data_engineering/data_engineering.html#sec-data"},{"href":"shared/x.html"}]')
+    write(site / "sitemap.xml", "<loc>https://mlsysbook.ai/vol1/vol1/data_engineering/data_engineering.html</loc>")
 
-    subprocess.run(["bash", str(SCRIPT), str(site), "vol1"], check=True)
 
-    redirect_html = (site / "contents" / "vol1" / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
-    assert "http-equiv=\"refresh\"" in redirect_html
+def test_moves_pages_and_rewrites_links_at_every_depth(tmp_path: Path) -> None:
+    site = tmp_path / "vol1-site"
+    build_site(site)
+    result = run(site)
+    assert result.returncode == 0, result.stderr
+
     assert (site / "data_engineering" / "data_engineering.html").exists()
     assert (site / "frontmatter" / "about.html").exists()
+    assert (site / "backmatter" / "glossary" / "glossary.html").exists()
 
     root_html = (site / "index.html").read_text(encoding="utf-8")
     assert 'href="./"' in root_html
     assert 'href="./frontmatter/about.html"' in root_html
-    assert 'href="./data_engineering/data_engineering.html"' in root_html
-    assert 'href="./contents/frontmatter/socratiq/socratiq.html"' in root_html
-    assert "vol1" not in root_html
+    assert 'href="./data_engineering/data_engineering.html#sec-data"' in root_html
+    assert 'href="./shared/frontmatter/socratiq/socratiq.html"' in root_html
+    assert 'href="https://mlsysbook.ai/vol1/data_engineering/data_engineering.html"' in root_html
+    assert "./vol1/" not in root_html
 
-    chapter_html = (site / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
-    assert 'href="../frontmatter/about.html"' in chapter_html
-    assert 'href="../backmatter/glossary/glossary.html"' in chapter_html
-    assert 'href="../contents/frontmatter/socratiq/socratiq.html"' in chapter_html
-    assert 'href="../vol1/' not in chapter_html
-    assert 'href="../site_libs/quarto.css"' in chapter_html
+    chapter = (site / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
+    assert 'href="../site_libs/quarto.css"' in chapter
+    assert 'src="../shared/assets/images/cover.png"' in chapter
+    assert 'href="../"' in chapter
+    assert 'href="../frontmatter/about.html"' in chapter
+    assert 'href="../backmatter/glossary/glossary.html?x=1#g"' in chapter
+    assert 'href="../shared/frontmatter/socratiq/socratiq.html"' in chapter
+    assert 'href="#local"' in chapter
+    assert 'src="/tools/scripts/socratiQ/bundle.js"' in chapter
+    assert 'href="https://mlsysbook.ai/vol1/training/training.html"' in chapter
+    assert "../../vol1/" not in chapter
 
-    glossary_html = (site / "backmatter" / "glossary" / "glossary.html").read_text(encoding="utf-8")
-    assert 'href="../../data_engineering/data_engineering.html"' in glossary_html
+    glossary = (site / "backmatter" / "glossary" / "glossary.html").read_text(encoding="utf-8")
+    assert 'href="../../site_libs/quarto.css"' in glossary
+    assert 'href="../../data_engineering/data_engineering.html"' in glossary
 
-    assert '"data_engineering/data_engineering.html"' in (site / "search.json").read_text(encoding="utf-8")
-    assert "/vol1/data_engineering/data_engineering.html" in (site / "sitemap.xml").read_text(
-        encoding="utf-8"
-    )
+    shared = (site / "shared" / "frontmatter" / "socratiq" / "socratiq.html").read_text(encoding="utf-8")
+    assert 'href="../../../data_engineering/data_engineering.html"' in shared
+
+    assert '"href": "data_engineering/data_engineering.html#sec-data"' in (site / "search.json").read_text()
+    assert "/vol1/vol1/" not in (site / "sitemap.xml").read_text()
+
+
+def test_legacy_urls_redirect_to_clean_pages(tmp_path: Path) -> None:
+    site = tmp_path / "vol1-site"
+    build_site(site)
+    assert run(site).returncode == 0
+
+    for tree, up in (("vol1", "../../"), ("contents/vol1", "../../../")):
+        stub = (site / tree / "data_engineering" / "data_engineering.html").read_text(encoding="utf-8")
+        assert f'http-equiv="refresh" content="0; url={up}data_engineering/data_engineering.html"' in stub
+    home = (site / "contents" / "vol1" / "index.html").read_text(encoding="utf-8")
+    assert 'url=../../"' in home
+
+
+def test_rerun_is_a_no_op(tmp_path: Path) -> None:
+    site = tmp_path / "vol1-site"
+    build_site(site)
+    assert run(site).returncode == 0
+    before = {p: p.read_bytes() for p in site.rglob("*") if p.is_file()}
+    second = run(site)
+    assert second.returncode == 0, second.stderr
+    assert {p: p.read_bytes() for p in site.rglob("*") if p.is_file()} == before
+
+
+def test_missing_volume_tree_fails_loudly(tmp_path: Path) -> None:
+    site = tmp_path / "vol1-site"
+    write(site / "index.html", "<p>no volume tree</p>")
+    result = run(site)
+    assert result.returncode != 0
+    assert "does not exist" in (result.stderr + result.stdout)
