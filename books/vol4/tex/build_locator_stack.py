@@ -33,13 +33,11 @@ ACCENT = {1: ("crimson", "crimsonlight"),
           4: ("purple", "purplelight")}
 
 # slug -> (chapter number as printed, badge label, active tiers, own card id)
-# The chapter number is the position in the reading order, which is why the
-# nervous system directory (04-nervous) prints as chapter 3.
 CHAPTERS = {
     "01-boundary":     (1,  "BOUNDARY",                (1,),   None),
     "02-body":         (2,  "THE BODY",                (1,),   None),
-    "04-nervous":      (3,  "NERVOUS SYSTEM",          (2,),   None),
-    "03-brain":        (4,  "THE BRAIN",               (3,),   None),
+    "03-brain":        (3,  "THE BRAIN",               (3,),   None),
+    "04-nervous":      (4,  "NERVOUS SYSTEM",          (2,),   None),
     "05-data":         (5,  "DATA \\& INGESTION",      (3,),   "b1"),
     "06-training":     (6,  "TRAINING \\& SIM-TO-REAL", (3, 1), None),
     "07-evaluation":   (7,  "EVALUATION \\& METROLOGY", (3, 1), None),
@@ -151,8 +149,8 @@ def build_tex(slug):
 
     # "You are here" emphasis in the tier subtitles, for the chapters that are
     # named there rather than carrying their own card.
-    brain_ref = emph("Ch 04 Brain", slug == "03-brain")
-    nerve_ref = emph("Ch 03 Nervous System", slug == "04-nervous")
+    brain_ref = emph("Ch 03 Brain", slug == "03-brain")
+    nerve_ref = emph("Ch 04 Nervous System", slug == "04-nervous")
     bound_ref = emph("Ch 01 Boundary", slug == "01-boundary")
     body_ref = emph("Ch 02 Body", slug == "02-body")
     gap_ref = emph("Ch 06/07 Reality Gap", slug in ("06-training", "07-evaluation"))
