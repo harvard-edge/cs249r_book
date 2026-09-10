@@ -40,7 +40,6 @@ docs/             repository-level docs: this file, CI variables, versioning
 scripts/          standalone utilities outside the binder CLI (versioning, cross-reference audits)
 tools/            monorepo-level audits, release smoke tests, historical cleanup manifests
 wheels/           prebuilt wheels the labs WASM smoke test installs
-online/           online and executive-education courseware
 README/           translated READMEs
 .github/          workflows, workflow scripts, issue templates, the dev landing page
 ```
