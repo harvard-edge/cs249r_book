@@ -6129,7 +6129,7 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     # Contraction → full form. Body prose forbids contractions as a deliberate
-    # register choice (.claude/rules/prose-craft.md), overriding the copy
+    # register choice, overriding the copy
     # editor's permissive "OK unless excessive." The lone exception is quoted
     # speech / direct dialogue, so we mask double-quoted spans before matching.
     CONTRACTION_EXPANSIONS = {
@@ -7572,8 +7572,7 @@ class ValidateCommand:
         """Flag crossref prefix casing that fights sentence position.
 
         Crossref prefixes render lowercase, so the casing of the @-prefix is
-        purely a function of sentence position (.claude/rules/cross-references.md
-        -> Prefix Casing). This check enforces BOTH directions:
+        purely a function of sentence position. This check enforces BOTH directions:
 
           * Sentence start -- a lowercase @sec-/@fig-/@tbl-/@eq-/@lst-/@alg-
             must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
@@ -7581,8 +7580,7 @@ class ValidateCommand:
             semicolon, open paren, a lowercase word, or a plain-prose colon
             renders a stray capital ("...as Table 2 shows") and must be
             lowercased (@sec-, @fig-, ...). A colon is mid-sentence ONLY in
-            running prose ("...as follows: section 3 derives ..."), per
-            .claude/rules/cross-references.md prefix-casing style. A colon after
+            running prose ("...as follows: section 3 derives ..."). A colon after
             a bold structural label ("**Setup**: @Fig- shows ...") instead
             begins a complete sentence (emphasis.md bold lead-in rule) and is
             classified as a sentence start.
@@ -8296,8 +8294,7 @@ class ValidateCommand:
 
         Code cells are exempt. LEGO cell header comments legitimately cite these
         IDs in their ``Context:`` lines (28 such references book-wide); those are
-        documentation, never rendered, and must not be rewritten. This mirrors
-        the skip-code-and-comments rule in .claude/rules/automation-safety.md.
+        documentation, never rendered, and must not be rewritten.
 
         Added 2026-08-13 after a prose pass converted three ``\\ref{pri-...}``
         references to ``@pri-...``, which would have shipped "principle Principle
@@ -10609,11 +10606,11 @@ class ValidateCommand:
             "pages-has-prefix": f"Remove p./pp. from @{key}'s pages field; keep only the bare range.",
             "doi-with-prefix": f"Store @{key}'s DOI as a bare DOI without https://doi.org/.",
             "journal-abbreviated": f"Spell out @{key}'s journal title using the official full name.",
-            "forbidden-field": f"Remove or convert the forbidden field on @{key} per .claude/rules/bib-check.md.",
+            "forbidden-field": f"Remove or convert the forbidden field on .",
         }
         return suggestions.get(
             rule,
-            f"Fix @{key} per .claude/rules/bib-check.md, then rerun ./binder/binder check bib --json.",
+            f"Fix , then rerun ./binder/binder check bib --json.",
         )
 
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:

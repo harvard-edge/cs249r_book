@@ -252,7 +252,7 @@ for title, desc, color in remedies:
 fig.suptitle('Non-Asymptotic Clopper-Pearson Bounds & Physical Testing Budget Limits',
              fontsize=12.5, fontweight='bold', color=NAVY, y=0.96)
 
-out_dir = '/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/07-evaluation/figures'
+out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg')
 os.makedirs(out_dir, exist_ok=True)
 svg_path = os.path.join(out_dir, 'fig07_confidence_bounds.svg')
 pdf_path = os.path.join(out_dir, 'fig07_confidence_bounds.pdf')
