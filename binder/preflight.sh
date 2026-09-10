@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Pre-flight: "the PDF looks clean" gate. Run from this worktree root.
+# Pre-flight: "the PDF looks clean" gate. Runs from the repo root wherever it is invoked.
 # 1) content gate  2) fresh build  3) nothing-steps-out  4) no-ugly-gaps
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 echo "== 1. CONTENT GATE =="; pre-commit run --all-files
 for V in 1 2; do
   P="books/_build/pdf-vol$V/Machine-Learning-Systems-Vol$V.pdf"
