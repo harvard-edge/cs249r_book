@@ -80,16 +80,39 @@ changing them before `main` has these workflows breaks `main`'s publishes.**
 | `SLIDES_ROOT`, `INSTRUCTORS_ROOT` | `slides`, `instructors` | same |
 | `KITS_ROOT`, `KITS_DOCS`, `LABS_ROOT`, `LABS_DOCS` | `kits`, `kits`, `labs`, `labs` | same |
 
-Once `main` has these workflows:
+Once `main` has these workflows, run the checked script. It deletes nothing
+while `origin/main` or `origin/dev` still has a workflow that reads one of the
+variables:
 
 ```bash
-for v in BOOK_ROOT BOOK_QUARTO BOOK_TOOLS BOOK_DOCKER BOOK_DEPS \
-         TINYTORCH_ROOT TINYTORCH_SITE TINYTORCH_SRC TINYTORCH_TESTS \
-         MLSYSIM_ROOT MLSYSIM_DOCS SLIDES_ROOT INSTRUCTORS_ROOT \
-         STAFFML_ROOT VAULT_DIR VAULT_CLI_DIR KITS_ROOT KITS_DOCS LABS_ROOT LABS_DOCS; do
-  gh variable delete "$v" -R harvard-edge/cs249r_book
-done
+.github/scripts/retire-path-variables.sh          # check both branches, list what is still set
+.github/scripts/retire-path-variables.sh --apply  # delete them
 ```
+
+## Cloudflare zone id
+
+`infra-cloudflare-purge` and `infra-cloudflare-redirects` read
+`vars.CLOUDFLARE_ZONE_ID` and fall back to the `CLOUDFLARE_ZONE_ID` secret. The
+purge workflow also looks the id up through the Cloudflare API when neither is
+set. A zone id is not sensitive, so the variable is optional; its value is on
+the `mlsysbook.ai` overview page in the Cloudflare dashboard.
+
+## Secrets the workflows expect
+
+Secrets hold credentials, so this list names them without values. Set one with
+`gh secret set NAME -R harvard-edge/cs249r_book`, and list what is set with
+`gh secret list -R harvard-edge/cs249r_book`.
+
+| Secret | Used by |
+|---|---|
+| `SSH_DEPLOY_KEY` | every `*-preview-dev` workflow (deploys to `cs249r_book_dev`) |
+| `BUTTONDOWN_API_KEY` | site-preview-dev, site-publish-live, site-refresh-stats, sync-newsletter |
+| `GA4_SERVICE_ACCOUNT_JSON` | site-publish-live, site-refresh-stats |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | staffml-publish-live (vault worker deploy) |
+| `CLOUDFLARE_CACHE_PURGE_TOKEN` | infra-cloudflare-purge |
+| `CLOUDFLARE_REDIRECTS_TOKEN` | infra-cloudflare-redirects (Zone > Config Rules > Edit on `mlsysbook.ai`) |
+| `CLOUDFLARE_ZONE_ID` | infra-cloudflare-purge, infra-cloudflare-redirects (fallback for the variable) |
+| `GEMINI_API_KEY` | staffml-audit-corpus-monthly, staffml-chain-rebuild |
 
 ## What is not a variable, and why
 
