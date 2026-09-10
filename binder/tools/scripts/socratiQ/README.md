@@ -12,4 +12,4 @@ The bundle is committed. The `socratiq-bundle-drift` workflow rebuilds it on any
 pull request that changes the SocratiQ sources, and fails if the committed file
 no longer matches.
 
-The widget itself is documented in [`binder/socratiQ/README.md`](../../../socratiQ/README.md).
+The widget itself is documented in [`socratiq/README.md`](../../../../socratiq/README.md).

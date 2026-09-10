@@ -19,8 +19,8 @@ where Quarto allows).
 What it does
 ------------
 1. Walk a configurable set of roots (default: shared/, books/, kits/,
-   labs/, packages/mlsysim/docs/, materials/slides/, materials/instructors/,
-   site/, packages/tinytorch/,
+   labs/, mlsysim/docs/, slides/, instructors/,
+   site/, tinytorch/,
    staffml/app/) and hash every file matching the configured
    suffix list.
 2. Group files by hash.
@@ -80,8 +80,8 @@ DEFAULT_EXCLUDES = [
 ]
 
 DEFAULT_ROOTS = [
-    "shared", "books", "kits", "labs", "packages/mlsysim/docs", "materials/slides",
-    "materials/instructors", "site", "packages/tinytorch", "staffml/app",
+    "shared", "books", "kits", "labs", "mlsysim/docs", "slides",
+    "instructors", "site", "tinytorch", "staffml/app",
     ".github",
 ]
 

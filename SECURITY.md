@@ -51,10 +51,10 @@ These are the components where a vulnerability report makes sense:
 | **`staffml/app/`** | Public Next.js web app | Serves StaffML to users; auth, data integrity, XSS, IDOR, etc. |
 | **`staffml/app/worker/`, `staffml/vault-worker/`** | Cloudflare Workers (public API) | Internet-exposed API endpoints |
 | **`staffml/vault-cli/`** | Installable Python CLI | Code-execution risk for vault authors |
-| **`packages/tinytorch/`** | Installable Python package | Distributed via pip; supply-chain and code-execution risk |
-| **`packages/mlsysim/`** | Installable Python package | Same as above |
-| **`packages/mlperf-edu/`** | Installable Python package | Same as above |
-| **`binder/vscode-ext/`, `packages/tinytorch/vscode-ext/`, `labs/vscode-ext/`, `kits/vscode-ext/`, `packages/mlsysim/vscode-ext/`** | VSCode extensions | Run inside the user's editor; code-execution risk |
+| **`tinytorch/`** | Installable Python package | Distributed via pip; supply-chain and code-execution risk |
+| **`mlsysim/`** | Installable Python package | Same as above |
+| **`mlperf-edu/`** | Installable Python package | Same as above |
+| **`binder/vscode-ext/`, `tinytorch/vscode-ext/`, `labs/vscode-ext/`, `kits/vscode-ext/`, `mlsysim/vscode-ext/`** | VSCode extensions | Run inside the user's editor; code-execution risk |
 | **`labs/`** | WASM-based browser labs | Same-origin / sandbox-escape risk |
 | **GitHub Actions workflows in `.github/workflows/`** | CI configuration | Token leakage, supply-chain injection |
 | **`site/newsletter/`** | Newsletter pipeline | Subscriber data handling |

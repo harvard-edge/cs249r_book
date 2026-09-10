@@ -57,36 +57,28 @@ Where each project deploys on the `gh-pages` branch. The URL becomes
 ## Retired: directory path variables
 
 These variables named repository directories. Workflows on `dev` no longer
-read them; each path is written in the workflow instead. The stored values
-still describe the layout `main` has today, and `main`'s workflows still read
-them.
+read them; each path is written in the workflow instead. `main`'s workflows
+still read them, so leave them in place until the next `dev` → `main` publish
+carries these workflows to `main`, then delete them.
 
-**Leave these variables unchanged until the next `dev` → `main` publish carries
-these workflows to `main`, then delete them.** Changing a value earlier breaks
-`main`'s publish workflows.
+For most of them the stored value already equals the path the workflows use.
+**`BOOK_*`, `STAFFML_ROOT`, `VAULT_DIR`, and `VAULT_CLI_DIR` do not match, and
+changing them before `main` has these workflows breaks `main`'s publishes.**
 
-| Variable | Stored value (old layout) | Path the workflows now use |
+| Variable | Stored value | Path the workflows now use |
 |---|---|---|
 | `BOOK_ROOT` | `book` | `binder` |
 | `BOOK_QUARTO` | `book/quarto` | `books` |
 | `BOOK_TOOLS` | `book/tools` | `binder/tools` |
 | `BOOK_DOCKER` | `book/docker` | `binder/docker` |
 | `BOOK_DEPS` | `book/tools/dependencies` | `binder/tools/dependencies` |
-| `TINYTORCH_ROOT` | `tinytorch` | `packages/tinytorch` |
-| `TINYTORCH_SITE` | `tinytorch/quarto` | `packages/tinytorch/quarto` |
-| `TINYTORCH_SRC` | `tinytorch/src` | `packages/tinytorch/src` |
-| `TINYTORCH_TESTS` | `tinytorch/tests` | `packages/tinytorch/tests` |
-| `MLSYSIM_ROOT` | `mlsysim` | `packages/mlsysim` |
-| `MLSYSIM_DOCS` | `mlsysim/docs` | `packages/mlsysim/docs` |
-| `SLIDES_ROOT` | `slides` | `materials/slides` |
-| `INSTRUCTORS_ROOT` | `instructors` | `materials/instructors` |
 | `STAFFML_ROOT` | `interviews/staffml` | `staffml/app` |
 | `VAULT_DIR` | `interviews/vault` | `staffml/vault` |
 | `VAULT_CLI_DIR` | `interviews/vault-cli` | `staffml/vault-cli` |
-| `KITS_ROOT` | `kits` | `kits` |
-| `KITS_DOCS` | `kits` | `kits` |
-| `LABS_ROOT` | `labs` | `labs` |
-| `LABS_DOCS` | `labs` | `labs` |
+| `TINYTORCH_ROOT`, `TINYTORCH_SITE`, `TINYTORCH_SRC`, `TINYTORCH_TESTS` | `tinytorch`, `tinytorch/quarto`, `tinytorch/src`, `tinytorch/tests` | same |
+| `MLSYSIM_ROOT`, `MLSYSIM_DOCS` | `mlsysim`, `mlsysim/docs` | same |
+| `SLIDES_ROOT`, `INSTRUCTORS_ROOT` | `slides`, `instructors` | same |
+| `KITS_ROOT`, `KITS_DOCS`, `LABS_ROOT`, `LABS_DOCS` | `kits`, `kits`, `labs`, `labs` | same |
 
 Once `main` has these workflows:
 
