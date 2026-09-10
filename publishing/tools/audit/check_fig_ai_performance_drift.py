@@ -37,7 +37,7 @@ from mlsysim import Hardware, TFLOPs, TOPS, second
 
 QMD = (
     Path(__file__).resolve().parents[2]
-    / "quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd"
+    / "quarto/vol1/hw_acceleration/hw_acceleration.qmd"
 )
 TOL = 0.05  # 5% tolerance for vendor rounding
 

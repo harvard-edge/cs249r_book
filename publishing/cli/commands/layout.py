@@ -3004,7 +3004,7 @@ class LayoutCommand:
 
         Vol I and Vol II intentionally share chapter titles such as
         "Introduction". Source localization must therefore scan only the
-        matching ``contents/volN`` tree when the PDF path/name identifies a
+        matching ``volN`` tree when the PDF path/name identifies a
         volume.
         """
         # Find repo root by walking up from pdf_path until we hit a dir

@@ -9817,7 +9817,7 @@ class ValidateCommand:
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
         """Ensure contents/ has the expected release-time volume structure."""
         t0 = time.time()
-        # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
+        # Resolve to contents dir: root may be contents, or vol1, or vol2
         if root.name in ("vol1", "vol2") and root.parent.name == "contents":
             contents_dir = root.parent
         else:
@@ -10227,8 +10227,8 @@ class ValidateCommand:
         contents = self.config_manager.book_dir
         shared_bib = contents / "references.bib"
         return [
-            self._BibScope("vol1", ("contents/vol1/",), (shared_bib,)),
-            self._BibScope("vol2", ("contents/vol2/",), (shared_bib,)),
+            self._BibScope("vol1", ("vol1/",), (shared_bib,)),
+            self._BibScope("vol2", ("vol2/",), (shared_bib,)),
             self._BibScope(
                 "book-shared",
                 ("contents/frontmatter/", "contents/backmatter/"),
@@ -12009,19 +12009,19 @@ class ValidateCommand:
     # fires again, which is the intent.
     BINARY_UNIT_ALLOWLIST = {
         (
-            "contents/vol1/backmatter/appendix_machine.qmd",
+            "vol1/backmatter/appendix_machine.qmd",
             "fmt_qty(tpuv5_cap, GiB, precision=0, commas=False)",
         ),
         (
-            "contents/vol1/backmatter/appendix_machine.qmd",
+            "vol1/backmatter/appendix_machine.qmd",
             "fmt_qty(tpuv5_sram, MiB, precision=0, commas=False)",
         ),
         (
-            "contents/vol1/frameworks/frameworks.qmd",
+            "vol1/frameworks/frameworks.qmd",
             "fmt_memory(fp16, unit=GiB, commas=False)",
         ),
         (
-            "contents/vol1/frameworks/frameworks.qmd",
+            "vol1/frameworks/frameworks.qmd",
             "fmt_memory(remaining, unit=GiB, commas=False)",
         ),
     }
@@ -12382,9 +12382,9 @@ class ValidateCommand:
         # the full 1,010-page visual baseline verifies the resulting layout.
         # Keep the exceptions exact so other non-100 vectors still fail.
         approved_layout_vectors = {
-            ("contents/vol1/frontmatter/_conventions.qmd", (17, 85)),
-            ("contents/vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("contents/vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/frontmatter/_conventions.qmd", (17, 85)),
+            ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
+            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
         }
 
         for file in files:

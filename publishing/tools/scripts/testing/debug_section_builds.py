@@ -35,7 +35,7 @@ from section_splitter import split_chapter, ChapterStructure
 def find_chapter_qmd(chapter: str, volume: str) -> Path:
     """Locate the .qmd file for a chapter."""
     contents_dir = SCRIPT_DIR.parents[2]  / "books" / volume
-    # Try direct match: contents/vol1/chapter/chapter.qmd
+    # Try direct match: vol1/chapter/chapter.qmd
     for subdir in contents_dir.iterdir():
         if subdir.is_dir():
             qmd = subdir / f"{chapter}.qmd"

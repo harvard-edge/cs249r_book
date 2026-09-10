@@ -1025,7 +1025,7 @@ def test_pipe_table_extraction_preserves_label_colwidths_and_source(tmp_path):
     assert len(entries) == 1
     entry = entries[0]
     assert entry.label == "tbl-cold-start"
-    assert entry.source_file == "contents/vol2/inference/inference.qmd"
+    assert entry.source_file == "vol2/inference/inference.qmd"
     assert entry.source_line == 8
     assert entry.columns == 2
     assert entry.rows == 2

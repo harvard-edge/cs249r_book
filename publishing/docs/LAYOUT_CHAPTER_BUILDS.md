@@ -47,7 +47,7 @@ From the repository root or `book/` directory:
 
 The chapter argument can be a unique QMD stem such as `ml_workflow` or a path
 relative to `books/`, such as
-`contents/vol1/ml_workflow/ml_workflow.qmd`.
+`vol1/ml_workflow/ml_workflow.qmd`.
 
 Outputs are written under:
 

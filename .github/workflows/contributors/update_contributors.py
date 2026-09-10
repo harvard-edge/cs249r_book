@@ -453,8 +453,8 @@ def main(_):
             # The rendered acknowledgements are the per-volume files; a shared
             # contents/frontmatter/acknowledgements/ copy existed but no Quarto config
             # rendered it, so contributor updates never reached the book (fixed 2026-09-07).
-            f"{book_quarto}/contents/vol1/frontmatter/acknowledgements.qmd",
-            f"{book_quarto}/contents/vol2/frontmatter/acknowledgements.qmd",
+            f"{book_quarto}/vol1/frontmatter/acknowledgements.qmd",
+            f"{book_quarto}/vol2/frontmatter/acknowledgements.qmd",
             "README.md",
         ],
         contributors=[

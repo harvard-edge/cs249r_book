@@ -150,7 +150,7 @@ def get_chapter_order_from_config(quarto_dir: Path) -> list[Path]:
             return qmd_files
     
     # Fallback: scan contents directory
-    content_dir = quarto_dir / 'contents/vol1'
+    content_dir = quarto_dir / 'vol1'
     if content_dir.exists():
         return sorted(content_dir.rglob('*.qmd'))
     
@@ -163,7 +163,7 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
     
     if scan_all:
         # Scan all QMD files in contents directory
-        content_dir = quarto_dir / 'contents/vol1'
+        content_dir = quarto_dir / 'vol1'
         qmd_files = sorted(content_dir.rglob('*.qmd')) if content_dir.exists() else []
         print(f"[Figure List] Scanning all: {len(qmd_files)} QMD files", file=sys.stderr)
     else:

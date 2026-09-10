@@ -528,7 +528,7 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
                 tex_path = candidate
                 break
     if tex_path and tex_path.is_file():
-        cover_re = re.compile(r"contents/vol[12]/([^/]+)/images/png/cover_")
+        cover_re = re.compile(r"vol[12]/([^/]+)/images/png/cover_")
         try:
             for i, line in enumerate(tex_path.read_text(errors="replace").splitlines(), 1):
                 m = cover_re.search(line)

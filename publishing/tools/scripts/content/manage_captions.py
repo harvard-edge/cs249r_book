@@ -2114,7 +2114,7 @@ Instead, write DIRECT, ACTIVE statements:
 
         if needing_repair > 0:
             print(f"\n💡 To fix these issues, run:")
-            print(f"   python {__file__} --repair -d {' -d '.join(['contents/vol1/'])}")
+            print(f"   python {__file__} --repair -d {' -d '.join(['vol1/'])}")
         else:
             print(f"\n✅ All captions look good!")
 
@@ -3667,7 +3667,7 @@ Instead, write DIRECT, ACTIVE statements:
                 print(f"  📊 {name:<25} │ {size_str:>8} │ {date_str}")
 
             print("=" * 60)
-            print("💡 Usage: python improve_figure_captions.py -d contents/vol1/ --model MODEL_NAME")
+            print("💡 Usage: python improve_figure_captions.py -d vol1/ --model MODEL_NAME")
             return True
 
         except requests.exceptions.ConnectionError:
@@ -4067,45 +4067,45 @@ def main():
         epilog="""
 Examples:
   # Improve captions with LLM (recommended default):
-  python improve_figure_captions.py -d contents/vol1/
-  python improve_figure_captions.py --improve -d contents/vol1/
+  python improve_figure_captions.py -d vol1/
+  python improve_figure_captions.py --improve -d vol1/
 
   # Using different models:
-  python improve_figure_captions.py -d contents/vol1/ --model llama3.2:3b
-  python improve_figure_captions.py -i -d contents/vol1/ -m qwen2.5:14b
-  python improve_figure_captions.py -d contents/vol1/ --model mistral:7b
+  python improve_figure_captions.py -d vol1/ --model llama3.2:3b
+  python improve_figure_captions.py -i -d vol1/ -m qwen2.5:14b
+  python improve_figure_captions.py -d vol1/ --model mistral:7b
 
   # Content filtering:
-  python improve_figure_captions.py -d contents/vol1/ --figures-only
-  python improve_figure_captions.py -d contents/vol1/ -F  # Short form
-  python improve_figure_captions.py -d contents/vol1/ --tables-only
-  python improve_figure_captions.py -d contents/vol1/ -T  # Short form
-  python improve_figure_captions.py -d contents/vol1/ --listings-only
-  python improve_figure_captions.py -d contents/vol1/ -L  # Short form
+  python improve_figure_captions.py -d vol1/ --figures-only
+  python improve_figure_captions.py -d vol1/ -F  # Short form
+  python improve_figure_captions.py -d vol1/ --tables-only
+  python improve_figure_captions.py -d vol1/ -T  # Short form
+  python improve_figure_captions.py -d vol1/ --listings-only
+  python improve_figure_captions.py -d vol1/ -L  # Short form
 
   # Analysis and utilities:
-  python improve_figure_captions.py --build-map -d contents/vol1/
-  python improve_figure_captions.py -b -d contents/vol1/
-  python improve_figure_captions.py --analyze -d contents/vol1/
-  python improve_figure_captions.py --repair -d contents/vol1/
+  python improve_figure_captions.py --build-map -d vol1/
+  python improve_figure_captions.py -b -d vol1/
+  python improve_figure_captions.py --analyze -d vol1/
+  python improve_figure_captions.py --repair -d vol1/
 
   # Content filtering with other modes:
-  python improve_figure_captions.py --analyze -d contents/vol1/ --figures-only
-  python improve_figure_captions.py --repair -d contents/vol1/ --tables-only
-  python improve_figure_captions.py --build-map -d contents/vol1/ --listings-only
-  python improve_figure_captions.py --build-map -d contents/vol1/ -F
+  python improve_figure_captions.py --analyze -d vol1/ --figures-only
+  python improve_figure_captions.py --repair -d vol1/ --tables-only
+  python improve_figure_captions.py --build-map -d vol1/ --listings-only
+  python improve_figure_captions.py --build-map -d vol1/ -F
 
   # Multiple directories:
-  python improve_figure_captions.py -d contents/vol1/ -d contents/frontmatter/ -m llama3.2:3b
+  python improve_figure_captions.py -d vol1/ -d contents/frontmatter/ -m llama3.2:3b
 
   # Save detailed JSON output:
-  python improve_figure_captions.py -d contents/vol1/ --save-json
+  python improve_figure_captions.py -d vol1/ --save-json
 
   # Cloud LLM providers (no local Ollama required):
-  python improve_figure_captions.py -d contents/vol1/ -p openai -m gpt-4o-mini
-  python improve_figure_captions.py -d contents/vol1/ -p groq -m llama-3.3-70b-versatile
-  python improve_figure_captions.py -d contents/vol1/ -p minimax -m MiniMax-M3
-  python improve_figure_captions.py -d contents/vol1/ --provider minimax --model MiniMax-M3 --api-key sk-...
+  python improve_figure_captions.py -d vol1/ -p openai -m gpt-4o-mini
+  python improve_figure_captions.py -d vol1/ -p groq -m llama-3.3-70b-versatile
+  python improve_figure_captions.py -d vol1/ -p minimax -m MiniMax-M3
+  python improve_figure_captions.py -d vol1/ --provider minimax --model MiniMax-M3 --api-key sk-...
 """
     )
 

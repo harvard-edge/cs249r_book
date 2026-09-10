@@ -20,7 +20,7 @@ mkdir -p "$ARCHIVE_DIR"
 case "$VOL" in
   vol1)
     BINDER_VOL=(--vol1)
-    BUILD_DIR="books/_build/html-vol1/contents/vol1"
+    BUILD_DIR="books/_build/html-vol1/vol1"
     CHAPTERS=(
       introduction/introduction
       ml_systems/ml_systems
@@ -47,7 +47,7 @@ case "$VOL" in
     ;;
   vol2)
     BINDER_VOL=(--vol2)
-    BUILD_DIR="books/_build/html-vol2/contents/vol2"
+    BUILD_DIR="books/_build/html-vol2/vol2"
     CHAPTERS=(
       introduction/introduction
       compute_infrastructure/compute_infrastructure

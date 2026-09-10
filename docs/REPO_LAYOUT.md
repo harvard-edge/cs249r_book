@@ -67,3 +67,19 @@ directory, so `./binder check tables` with no `--path` silently scanned nothing
 and always reported success. Now that the project root and the content root are
 the same directory, the default scan works, and a bare `./binder check <group>`
 reports real findings. Scoped runs with `--path` behave exactly as before.
+
+## One thing this change cannot fix from inside the repository
+
+The GitHub Actions workflows read repository **variables** that are configured
+in GitHub settings, not in the repo:
+
+| Variable | Was | Should now be |
+|---|---|---|
+| `BOOK_ROOT` | `publishing` | `publishing` (unchanged; it is the toolchain) |
+| `BOOK_QUARTO` | `publishing/quarto` | `books` |
+| `BOOK_TOOLS` | `publishing/tools` | `publishing/tools` (unchanged) |
+| `BOOK_DEPS` | — | unchanged |
+
+`BOOK_QUARTO` is the one that must change. Until it is updated under
+Settings → Secrets and variables → Actions → Variables, any workflow step using
+`${{ vars.BOOK_QUARTO }}` as a working directory will fail to find the book.

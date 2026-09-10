@@ -160,7 +160,7 @@ local function to_roman(n)
   return s
 end
 
--- Build ordered list of "part-principles" file stems (e.g. contents/vol1/parts/foundations_principles).
+-- Build ordered list of "part-principles" file stems (e.g. vol1/parts/foundations_principles).
 -- Principles in these files are numbered by part: Part I → I.1, I.2; Part II → II.1, II.2; etc.
 local function part_principles_index(book, fname)
   if not book or not book.render then return nil end

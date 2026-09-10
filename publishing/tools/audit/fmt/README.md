@@ -47,7 +47,7 @@ python3 publishing/tools/audit/audit_math_canonical.py "$CH"
 # 5. HTML render + final scan
 ./binder build html --vol1 vol1/training --skip-hygiene --skip-validate
 python3 publishing/tools/audit/fmt/audit_html.py \
-  books/_build/html-vol1/contents/vol1/training/training.html
+  books/_build/html-vol1/vol1/training/training.html
 ```
 
 Exit code **0** = clean; **1** = findings (or exec failure for prose preview).
