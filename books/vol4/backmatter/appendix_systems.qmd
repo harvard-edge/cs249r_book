@@ -1,0 +1,77 @@
+# Systems and Hardware {#sec-appendix-systems}
+
+This appendix provides a brief, first-principles mathematical and conceptual foundation for the critical systems and hardware concepts that underlie real-time machine learning deployments. The goal is to demystify the low-level interactions between software and physical hardware without requiring a full degree in electrical engineering.
+
+## Real-Time Timers and Watchdogs
+
+In real-time systems, predictability is as important as raw performance. We model a real-time task with a worst-case execution time (WCET), $C$, a deadline, $D$, and a period, $T$. 
+A system is schedulable if all tasks meet their deadlines. 
+
+To enforce these deadlines physically, systems use **Watchdog Timers**. A watchdog is a hardware timer initialized to a value $W_{init}$. Software must periodically reset (or "kick") the watchdog before it reaches $0$. If $W(t)$ is the remaining time at physical time $t$, and the software kicks the watchdog at time $t_k$, we have:
+$$W(t_k) = W_{init}$$
+If at any time $t$, $W(t) \le 0$, the hardware triggers a non-maskable interrupt (NMI) or system reset. This guarantees that if a system hangs or a task exceeds its WCET indefinitely, the hardware will safely reboot the platform.
+
+## Inductive Voltage Droop ($L \frac{di}{dt}$)
+
+When a heavy ML workload (like a large matrix multiplication) suddenly begins on an accelerator, the current draw $i(t)$ increases dramatically over a tiny time window $\Delta t$. 
+Every power delivery network has inherent inductance, $L$. According to Faraday's law of induction, a change in current through an inductor induces a voltage drop $V_{droop}$:
+$$V_{droop} = L \frac{di}{dt}$$
+If $\frac{di}{dt}$ is too large, $V_{droop}$ can cause the supply voltage to drop below the minimum required voltage for the transistors to operate correctly, leading to bit flips or a sudden system crash. Systems engineers mitigate this by adding decoupling capacitors (to provide local charge and smooth $\frac{di}{dt}$) or by throttling the ramp-up rate of compute-intensive kernels.
+
+## Clock Synchronization (IEEE 1588 PTP)
+
+Distributed sensor arrays and autonomous systems require precise time synchronization across the network. The Precision Time Protocol (PTP) allows clocks to synchronize to within sub-microsecond accuracy.
+
+PTP works by exchanging timestamps between a Master ($M$) and a Slave ($S$). The slave needs to compute two values: the time offset $O$ between its clock and the master's clock, and the one-way network propagation delay $D$.
+
+The protocol exchanges four messages, recording four physical timestamps:
+1. $t_1$: Master sends a *Sync* message.
+2. $t_2$: Slave receives the *Sync* message.
+3. $t_3$: Slave sends a *Delay_Req* message.
+4. $t_4$: Master receives the *Delay_Req* message.
+
+Assuming the network delay is symmetric (i.e., Master-to-Slave delay equals Slave-to-Master delay), we can formulate the relationships:
+$$t_2 = t_1 + O + D$$
+$$t_4 = t_3 - O + D$$
+
+Solving this system of linear equations yields the offset $O$:
+$$O = \frac{(t_2 - t_1) - (t_4 - t_3)}{2}$$
+The slave then corrects its local clock by subtracting $O$. The elegance of PTP lies in its hardware timestamping, which records $t_1, t_2, t_3, t_4$ at the MAC layer, eliminating unpredictable OS scheduling jitter.
+
+## SoC Mailboxes and IPC (RPMSG)
+
+Modern System-on-Chips (SoCs) often feature heterogeneous computing: a powerful Application Processor (e.g., ARM Cortex-A) running Linux, and a low-latency Microcontroller (e.g., ARM Cortex-M) handling real-time I/O. 
+
+To communicate, they use a shared memory region and hardware **Mailboxes**. A mailbox is essentially a set of memory-mapped registers. When Processor A writes to Processor B's mailbox register, it triggers a physical interrupt on Processor B. 
+The Remote Processor Messaging (RPMSG) framework standardizes this:
+1. Processor A writes a message payload to a known address in Shared Memory.
+2. Processor A executes a memory barrier (see below).
+3. Processor A writes the buffer's descriptor to Processor B's Mailbox register.
+4. Processor B handles the interrupt, reads the descriptor, and processes the payload.
+
+## Memory Barriers
+
+In modern architectures, memory operations (loads and stores) can be reordered by the CPU pipeline or the cache subsystem to improve performance. However, when interfacing with hardware or shared memory (as in RPMSG), this reordering can be catastrophic.
+
+Consider the RPMSG example:
+```c
+// Processor A
+shared_buffer->data = 42;      // Store 1
+mailbox_register = FLAG_READY; // Store 2
+```
+If the CPU reorders Store 2 to happen before Store 1, Processor B might receive the interrupt, read `shared_buffer->data`, and see stale garbage data.
+
+A **Memory Barrier** (or fence) is an instruction that enforces an ordering constraint. 
+```c
+shared_buffer->data = 42; 
+__sync_synchronize();          // Full Memory Barrier
+mailbox_register = FLAG_READY; 
+```
+Mathematically, if we have memory operations $S_1$ and $S_2$, a barrier ensures a strict temporal happens-before relationship: $t(S_1) < t(S_2)$ globally across all observers (other cores and hardware peripherals) in the system.
+
+## Further Reading
+
+For a deeper dive into these topics, the following texts are foundational:
+- **Computer Organization and Design: The Hardware/Software Interface** by David A. Patterson and John L. Hennessy. Essential for understanding processors, memory hierarchies, and hardware basics.
+- **Modern Operating Systems** by Andrew S. Tanenbaum and Herbert Bos. Comprehensive coverage of IPC, scheduling, and OS primitives.
+- **Real-Time Systems** by Jane W. S. Liu. The definitive mathematical treatment of real-time scheduling and constraints.
