@@ -1,6 +1,6 @@
 # Repository-level tooling (`tools/`)
 
-Scripts and audit artifacts at the **monorepo root** (not `bindery/tools/`, which is textbook-specific).
+Scripts and audit artifacts at the **monorepo root** (not `binder/tools/`, which is textbook-specific).
 
 ## Layout
 
@@ -11,6 +11,6 @@ Scripts and audit artifacts at the **monorepo root** (not `bindery/tools/`, whic
 | `phase_b/` … `phase_g/`, `lint_calibration/` | One-off **cleanup and lint calibration manifests** from past passes (JSON/Markdown). Kept for traceability; not imported by CI or application code. Remove or archive only when maintainers agree the history is no longer needed. |
 | `validate_playbook.py` | Standalone validation helper; see file docstring for usage. |
 
-## Relationship to `bindery/tools/`
+## Relationship to `binder/tools/`
 
-Use `bindery/tools/` for BibTeX, git hooks wiring, quarto scripts, and book prose validators. Use **`tools/` here** for cross-cutting audits, release smoke tests, and historical phase outputs.
+Use `binder/tools/` for BibTeX, git hooks wiring, quarto scripts, and book prose validators. Use **`tools/` here** for cross-cutting audits, release smoke tests, and historical phase outputs.
