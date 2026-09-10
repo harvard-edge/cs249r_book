@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Context Working Sets {#sec-vol3-context-working-sets}
@@ -158,31 +158,109 @@ $$\mathcal{M}_{\text{KV}} = 2 \times b \times L \times h_{\text{kv}} \times d_{\
 
 where $b$ is batch size, $L$ is layer depth, $h_{\text{kv}}$ is the number of key-value heads, $d_{\text{head}}$ is head dimensionality, and $\text{sizeof(dtype)}$ is 2 for FP16/BF16. In standard Multi-Head Attention (MHA), $h_{\text{kv}} = h_q$. In modern architectures employing Grouped-Query Attention (GQA, @dubey2024llama), $h_{\text{kv}} = h_q / g$, where $g$ is the group ratio (typically 8), reducing KV cache size by a factor of 8.
 
-::: {#fig-vol3-context-working-set-dynamics fig-env="figure" fig-pos="htb" fig-cap="**Denning's Working Set Applied to Neural Agent Context**: Unbounded append-only accumulation drives the trajectory into the HBM capacity and TTFT wall, whereas eviction-driven management of the working set $W(t, \Delta t)$ holds the active context inside a bounded budget at constant time-to-first-token." fig-alt="Two-panel diagram. The upper panel plots tokens against trajectory steps for an unmanaged append-only context; the curve climbs past 32k, 96k, and 128k markers and crosses a labeled HBM capacity and time-to-first-token wall, annotated with quadratic prefill explosion, memory-wall decode, and lost-in-the-middle attention dispersion. The lower panel shows a layered active working set: a pinned anchor holding system invariants and tool contracts, a bounded dynamic window holding the active turn, a sliding recent-context window and an ephemeral scratchpad, an eviction and compaction gate, and a structured compaction and episodic storage tier beneath it."}
+::: {#fig-vol3-context-working-set-dynamics fig-env="figure" fig-pos="htb" fig-cap="**Denning's Working Set Applied to Neural Agent Context**: Unbounded append-only accumulation drives the trajectory into the HBM capacity and TTFT wall, whereas eviction-driven management of the working set $W(t, \Delta t)$ holds the active context inside a bounded budget at constant time-to-first-token. The two curves separate on the first eviction and never reconverge, because the managed trajectory pays a bounded prefill on every step while the unmanaged one pays a growing one." fig-alt="Two-panel diagram. The upper panel plots tokens against trajectory steps for an unmanaged append-only context; the curve climbs past 32k, 96k, and 128k markers and crosses a labeled HBM capacity and time-to-first-token wall, annotated with quadratic prefill explosion, memory-wall decode, and lost-in-the-middle attention dispersion. The lower panel shows a layered active working set: a pinned anchor holding system invariants and tool contracts, a bounded dynamic window holding the active turn, a sliding recent-context window and an ephemeral scratchpad, an eviction and compaction gate, and a structured compaction and episodic storage tier beneath it."}
 ![](images/svg/context_working_set_dynamics.svg)
 :::
 
-As illustrated in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged, append-only repository inexorably drives the system toward the HBM capacity ceiling. On an NVIDIA H100 SXM5 GPU with 80 GB of HBM3 (yielding 3.35 TB/s bandwidth), model weights for a 70-billion-parameter model in 8-bit precision consume 70 GB, leaving barely 10 GB for KV cache and scratchpad activations. How long an unmanaged agent survives inside that residual budget depends entirely on what a single token of KV cache costs under the model's attention scheme.
+```{python}
+#| label: vol3-context-headroom
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | RESIDUAL HBM HEADROOM ON ONE ACCELERATOR
+# +-----------------------------------------------------------------------------
+# | Context: The paragraph below and notebook \ref{nbk-context-kv-headroom-ceiling}.
+# |
+# | Goal:    Establish how much HBM is left for KV cache once an INT8 70B model is
+# |          resident, and how many trajectory steps that headroom buys.
+# | Show:    Capacity, weight footprint, residual headroom, per-token KV cost under
+# |          MHA and GQA, and the resulting token and step ceilings.
+# | How:     Read the H100 and Llama-3-70B entries from MLSysIM; size weights with
+# |          memory_from_params and the KV cache with calc_kv_cache_size, which is
+# |          @eq-vol3-context-kv-footprint evaluated at one token.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+from mlsysim.fmt import fmt_memory_capacity
+
+class ContextHeadroom:
+    # +-- 1. LOAD (Constants) --------------------
+    gpu = Hardware.Cloud.H100
+    model = Models.Language.Llama3_70B
+    trace_tokens = 482_000  # scenario assumption: production trace, raw trajectory tokens
+    trace_steps = 28  # scenario assumption: the trajectory step that trace was read at
+    window_tokens = 131_072  # scenario assumption: the model's advertised 128k window
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    step_tokens = trace_tokens // trace_steps
+    capacity = gpu.memory.capacity
+    weights = memory_from_params(model.parameters, BYTES_INT8)
+    headroom = capacity - weights
+    head_dim = model.hidden_dim // model.heads
+    group_ratio = model.heads // model.kv_heads
+    kv_mha_token = calc_kv_cache_size(model.layers, model.heads, head_dim, 1, 1, BYTES_FP16)
+    kv_gqa_token = calc_kv_cache_size(model.layers, model.kv_heads, head_dim, 1, 1, BYTES_FP16)
+    tokens_mha = int((headroom / kv_mha_token).to("").magnitude)
+    tokens_gqa = int((headroom / kv_gqa_token).to("").magnitude)
+    steps_mha = tokens_mha / step_tokens
+    steps_gqa = tokens_gqa / step_tokens
+    window_mha = window_tokens * kv_mha_token
+    window_gqa = window_tokens * kv_gqa_token
+    window_gpus_mha = (window_mha / capacity).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(abs(kv_mha_token.to(MiB).magnitude - 2.5) < 0.01, f"MHA should cost 2.5 MB per token, got {kv_mha_token.to(MiB)}")
+    check(abs(kv_gqa_token.to(MiB).magnitude - 0.3125) < 0.001, f"GQA should cost 0.3125 MB per token, got {kv_gqa_token.to(MiB)}")
+    check(group_ratio == 8, f"Llama-3-70B group ratio should be 8, got {group_ratio}")
+    check(0.30 < steps_mha < 0.40, f"MHA should die inside the first step, got {steps_mha}")
+    check(2.5 < steps_gqa < 3.0, f"GQA should reach the third step, got {steps_gqa}")
+    check(3.5 < window_gpus_mha < 4.5, f"A 128k MHA window should need about four accelerators, got {window_gpus_mha}")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    capacity_gb_str = fmt_memory_capacity(capacity, unit=GiB, precision=0)
+    weights_gb_str = fmt_memory_capacity(weights, unit=GiB, precision=1)
+    headroom_gb_str = fmt_memory_capacity(headroom, unit=GiB, precision=1)
+    headroom_mb_str = fmt_memory_capacity(headroom, unit=MiB, precision=1, commas=True)
+    kv_mha_token_mb_str = fmt_memory_capacity(kv_mha_token, unit=MiB, precision=1)
+    kv_gqa_token_mb_str = fmt_memory_capacity(kv_gqa_token, unit=MiB, precision=4)
+    kv_mha_token_bytes_str = fmt_int(kv_mha_token.to(byte).magnitude)
+    kv_gqa_token_bytes_str = fmt_int(kv_gqa_token.to(byte).magnitude)
+    tokens_mha_str = fmt_int(tokens_mha)
+    tokens_gqa_str = fmt_int(tokens_gqa)
+    steps_mha_str = fmt(steps_mha, precision=2, commas=False)
+    steps_gqa_str = fmt(steps_gqa, precision=2, commas=False)
+    window_mha_gb_str = fmt_memory_capacity(window_mha, unit=GiB, precision=0)
+    window_gqa_gb_str = fmt_memory_capacity(window_gqa, unit=GiB, precision=0)
+    window_gpus_str = fmt_int(int(round(window_gpus_mha)))
+    step_tokens_str = fmt_int(step_tokens)
+    trace_tokens_str = fmt_int(trace_tokens)
+    trace_steps_str = fmt_int(trace_steps)
+    layers_str = fmt_int(model.layers)
+    head_dim_str = fmt_int(head_dim)
+    heads_str = fmt_int(model.heads)
+    kv_heads_str = fmt_int(model.kv_heads)
+    group_ratio_str = fmt_int(group_ratio)
+```
+
+@Fig-vol3-context-working-set-dynamics follows an unmanaged, append-only context as it drives the system toward the HBM capacity ceiling. On an NVIDIA H100 SXM5 GPU carrying `{python} ContextHeadroom.capacity_gb_str` of HBM3, model weights for a 70-billion-parameter model in 8-bit precision consume `{python} ContextHeadroom.weights_gb_str`, leaving `{python} ContextHeadroom.headroom_gb_str` for KV cache and scratchpad activations. How long an unmanaged agent survives inside that residual budget depends entirely on what a single token of KV cache costs under the model's attention scheme.
 
 ::: {#nbk-context-kv-headroom-ceiling .callout-notebook title="How far the residual HBM headroom goes"}
 
-**Problem**: On an H100 whose model weights leave $10\text{ GB}$ of HBM free, how many trajectory steps can an unmanaged agent run before its KV cache exhausts that headroom?
+**Problem**: On an H100 whose model weights leave `{python} ContextHeadroom.headroom_gb_str` of HBM free, how many trajectory steps can an unmanaged agent run before its KV cache exhausts that headroom?
 
-**Variables**: A 70-billion-parameter model with the published Llama-3-70B shape (@dubey2024llama), so $L = 80$ layers, $d_{\text{head}} = 128$, and $h_q = 64$ query heads, decoding in FP16 at $2$ bytes per element. Standard multi-head attention caches all $64$ heads, while Grouped-Query Attention at group ratio $g = 8$ caches $8$. The $10\text{ GB}$ of residual headroom carries over from the paragraph above. Per-step growth of $17{,}214$ tokens is the chapter's own production trace, which records $482{,}000$ raw trajectory tokens at step 28 (@sec-vol3-context-production-case-study-context). Capacities use binary units, so $1\text{ GB} = 1{,}024\text{ MB}$.
+**Variables**: A 70-billion-parameter model with the published Llama-3-70B shape (@dubey2024llama), so the layer depth $L$ is `{python} ContextHeadroom.layers_str`, the head dimension $d_{\text{head}}$ is `{python} ContextHeadroom.head_dim_str`, and the query-head count $h_q$ is `{python} ContextHeadroom.heads_str`, decoding in FP16 at $2$ bytes per element. Standard multi-head attention caches all `{python} ContextHeadroom.heads_str` heads, while Grouped-Query Attention at group ratio $g = 8$ caches `{python} ContextHeadroom.kv_heads_str`. The `{python} ContextHeadroom.headroom_gb_str` of residual headroom carries over from the paragraph above. Per-step growth of `{python} ContextHeadroom.step_tokens_str` tokens is the chapter's own production trace, which records `{python} ContextHeadroom.trace_tokens_str` raw trajectory tokens across `{python} ContextHeadroom.trace_steps_str` steps (@sec-vol3-context-production-case-study-context). Capacities use binary units, so $1\text{ GB} = 1{,}024\text{ MB}$.
 
 **Math**: Evaluating @eq-vol3-context-kv-footprint at batch size $b = 1$ and a single token gives the resident cost of one cached position across the whole model:
 
-$$\mathcal{M}_{\text{KV}}/\text{token} = 2 \times 80 \times h_{\text{kv}} \times 128 \times 2\text{ bytes}$$
+$$\mathcal{M}_{\text{KV}}/\text{token} = 2 \times L \times h_{\text{kv}} \times d_{\text{head}} \times 2\text{ bytes}$$
 
-At $h_{\text{kv}} = 64$ (MHA) that is $2{,}621{,}440$ bytes, or $2.5\text{ MB}$ per token. At $h_{\text{kv}} = 8$ (GQA) it is $327{,}680$ bytes, or $0.3125\text{ MB}$ per token. Dividing the $10{,}240\text{ MB}$ of headroom by each cost gives the token ceiling:
+Under multi-head attention every query head is cached, so one token costs `{python} ContextHeadroom.kv_mha_token_bytes_str` bytes, or `{python} ContextHeadroom.kv_mha_token_mb_str`. Grouped-Query Attention caches one key-value head per group, cutting the same token to `{python} ContextHeadroom.kv_gqa_token_bytes_str` bytes, or `{python} ContextHeadroom.kv_gqa_token_mb_str`. Dividing the `{python} ContextHeadroom.headroom_mb_str` of headroom by each per-token cost gives the token ceiling:
 
-$$\frac{10{,}240\text{ MB}}{2.5\text{ MB}} = 4{,}096\text{ tokens}, \qquad \frac{10{,}240\text{ MB}}{0.3125\text{ MB}} = 32{,}768\text{ tokens}$$
+$$N_{\max} = \frac{\text{residual headroom}}{\mathcal{M}_{\text{KV}}/\text{token}}$$
 
-Converting to trajectory steps at $17{,}214$ tokens per step yields $4{,}096 / 17{,}214 = 0.24$ steps under MHA and $32{,}768 / 17{,}214 = 1.90$ steps under GQA.
+That is `{python} ContextHeadroom.tokens_mha_str` tokens under multi-head attention and `{python} ContextHeadroom.tokens_gqa_str` tokens under Grouped-Query Attention. Dividing each ceiling by the `{python} ContextHeadroom.step_tokens_str` tokens a trajectory step adds yields `{python} ContextHeadroom.steps_mha_str` steps under MHA and `{python} ContextHeadroom.steps_gqa_str` steps under GQA.
 
-**Result**: Multi-head attention exhausts the headroom about a quarter of the way into the first tool observation, and Grouped-Query Attention reaches only the second step. Actually holding the advertised 128k window would demand $131{,}072 \times 2.5\text{ MB} = 320\text{ GB}$ of KV cache under MHA, four entire H100s of HBM, and still $40\text{ GB}$ under GQA.
+**Result**: Multi-head attention exhausts the headroom about a third of the way into the first tool observation, and Grouped-Query Attention reaches only the third step. Actually holding the advertised 128k window would demand `{python} ContextHeadroom.window_mha_gb_str` of KV cache under MHA, `{python} ContextHeadroom.window_gpus_str` times the entire HBM of a single accelerator, and still `{python} ContextHeadroom.window_gqa_gb_str` under GQA.
 
-**Systems insight**: The operative context ceiling is set by residual HBM rather than by the model's advertised window, and the factor of $8$ that GQA buys moves that ceiling from one step to two, not to the roughly 45 steps a median SWE-bench trajectory consumes. Eviction is therefore a precondition for running the agent at all, not a latency optimization bolted on once the trajectory grows long.
+**Systems insight**: The operative context ceiling is set by residual HBM rather than by the model's advertised window, and the factor of `{python} ContextHeadroom.group_ratio_str` that GQA buys moves that ceiling from a fraction of one step to under three, not to the roughly 45 steps a median SWE-bench trajectory consumes. Eviction is therefore a precondition for running the agent at all, not a latency optimization bolted on once the trajectory grows long.
 
 :::
 
@@ -196,11 +274,43 @@ The transition point between the memory-bandwidth-bound regime and the compute-b
 
 $$I^* = \frac{\mathcal{P}_{\max}}{\mathcal{B}_{\text{mem}}}$$ {#eq-vol3-context-machine-balance}
 
-On an NVIDIA H100 SXM5 GPU with peak FP16 Tensor Core throughput of $\mathcal{P}_{\max} = 989.5\ \text{TFLOP/s}$ (without structural sparsity) and memory bandwidth of $\mathcal{B}_{\text{mem}} = 3{,}350\ \text{GB/s}$, the machine balance point is:
+```{python}
+#| label: vol3-context-machine-balance
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | H100 MACHINE BALANCE POINT
+# +-----------------------------------------------------------------------------
+# | Context: The paragraph below and the roofline sketch that follows it.
+# |
+# | Goal:    Evaluate @eq-vol3-context-machine-balance for the accelerator this
+# |          section reasons about.
+# | Show:    Peak FP16 throughput, HBM bandwidth, and the ridge point that
+# |          separates the memory-bound and compute-bound regimes.
+# | How:     Divide the registry peak_flops by the registry memory bandwidth.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-$$I^* = \frac{989.5 \times 10^{12}\ \text{FLOP/s}}{3.35 \times 10^{12}\ \text{Byte/s}} \approx 295.4\ \text{FLOPs/Byte}$$
+class MachineBalance:
+    # +-- 1. LOAD (Constants) --------------------
+    gpu = Hardware.Cloud.H100
 
-Below that threshold the minimum in @eq-vol3-context-roofline selects its bandwidth term, so any computation with operational intensity $I < 295.4\ \text{FLOPs/Byte}$ is strictly memory-bandwidth bound, unable to utilize the GPU's tensor execution units regardless of algorithmic parallelization.
+    # +-- 2. EXECUTE (The Compute) ---------------
+    peak = gpu.compute.peak_flops
+    bandwidth = gpu.memory.bandwidth
+    istar = (peak / bandwidth).to(flop / byte)
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(250 < istar.magnitude < 350, f"H100 machine balance should sit near 300 FLOP/byte, got {istar}")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    peak_str = fmt_flop_rate(peak, unit=TFLOP / second, precision=0)
+    bandwidth_str = fmt_bandwidth(bandwidth, unit=GB / second, precision=0, commas=True)
+    istar_str = fmt_arithmetic_intensity(istar, precision=1)
+```
+
+An NVIDIA H100 SXM5 GPU pairs a peak FP16 Tensor Core throughput $\mathcal{P}_{\max}$ of `{python} MachineBalance.peak_str` (without structural sparsity) with a memory bandwidth $\mathcal{B}_{\text{mem}}$ of `{python} MachineBalance.bandwidth_str`, so @eq-vol3-context-machine-balance places its ridge point at `{python} MachineBalance.istar_str`.
+
+Below that threshold the minimum in @eq-vol3-context-roofline selects its bandwidth term, so any computation whose operational intensity $I$ falls under `{python} MachineBalance.istar_str` is strictly memory-bandwidth bound, unable to utilize the GPU's tensor execution units regardless of algorithmic parallelization.
 
 ```text
        Peak Compute ┌─────────────────────────────────────────┐ (Compute Bound)
@@ -214,7 +324,7 @@ Below that threshold the minimum in @eq-vol3-context-roofline selects its bandwi
                     │               /   Bound)                │
                     │              /                          │
                     │             /                           │
-                    │            / I* = 295.4 FLOP/Byte       │
+                    │            / I* (machine balance)       │
                     └───────────┴─────────────────────────────┘
                                 Operational Intensity (FLOP/Byte)
 ```
@@ -249,18 +359,105 @@ Even under Grouped-Query Attention with $g = 8$, the collapse in @eq-vol3-contex
 
 $$T_{\text{token}} \approx \frac{\text{Model Weights Size} + \mathcal{M}_{\text{KV}}(t)}{\mathcal{B}_{\text{mem}}}$$ {#eq-vol3-context-token-time}
 
-| Context Length ($N$) | Prefill Compute (TFLOPs) | Prefill TTFT (ms) | KV Cache Size (GQA, GB) | Decode Throughput (tok/s/user) | HBM Bandwidth Saturation (%) |
-|:--------------------:|:------------------------:|:-----------------:|:-----------------------:|:------------------------------:|:----------------------------:|
-|      **4,096**       |           0.58           |         42        |           0.52          |              84.2              |            92.4%             |
-|      **16,384**      |           2.45           |        118        |           2.10          |              71.6              |            94.8%             |
-|      **32,768**      |           5.82           |        246        |           4.19          |              58.3              |            97.2%             |
-|      **65,536**      |          14.68           |        582        |           8.39          |              39.1              |            98.6%             |
-|     **131,072**      |          38.12           |       1,420       |          16.78          |              21.4              |            99.4%             |
-|     **524,288**      |          294.50          |       9,840       |          67.11          |              5.2               |            99.8%             |
+```{python}
+#| label: vol3-context-decode-economics
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | DECODE ECONOMICS ACROSS CONTEXT LENGTHS
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-vol3-context-decode-economics and the two paragraphs around it.
+# |
+# | Goal:    Price prefill and decode for one agent turn as the context grows,
+# |          on the smallest machine that can actually hold the longest cache.
+# | Show:    Prefill FLOPs, time-to-first-token, KV footprint, the KV cache's
+# |          share of the per-accelerator decode read, and per-user throughput.
+# | How:     Prefill work is @eq-vol3-context-prefill-flops plus the dense term
+# |          2PN of the intensity ratio above; decode time is
+# |          @eq-vol3-context-token-time applied to one tensor-parallel shard.
+# |          Hardware, model shape, node width, and MFU all come from MLSysIM.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-: **Decode Economics across Context Lengths**: Prefill compute, time-to-first-token, KV cache footprint, decode throughput, and HBM bandwidth saturation for a 70B parameter model on an NVIDIA H100 GPU with 80 GB of HBM3. {#tbl-vol3-context-decode-economics}
+class DecodeEconomics:
+    # +-- 1. LOAD (Constants) --------------------
+    node = Systems.Nodes.DGX_H100
+    gpu = node.accelerator
+    model = Models.Language.Llama3_70B
+    mfu = Literature.Training.MfuInferenceBatched
+    contexts = (4_096, 16_384, 32_768, 65_536, 131_072, 524_288)  # scenario: agent context sweep
 
-As detailed in @tbl-vol3-context-decode-economics, expanding context from 4k to 524k tokens increases Time-To-First-Token (TTFT) by over 230$\times$ and collapses decode throughput from 84 tokens per second to 5 tokens per second. The throughput collapse is @eq-vol3-context-token-time working through unchanged, since the resident KV term grows with context while HBM bandwidth stays fixed. In multi-step agent loops where an agent executes 50 to 100 tool cycles, maintaining an unmanaged 500k context turns an interactive system into an economically non-viable crawl.
+    # +-- 2. EXECUTE (The Compute) ---------------
+    gpus = node.accelerators_per_node
+    peak = gpu.compute.peak_flops
+    bandwidth = gpu.memory.bandwidth
+    capacity = gpu.memory.capacity
+    params = model.parameters.to(param).magnitude
+    weights = memory_from_params(model.parameters, BYTES_FP16)
+    weight_shard = weights / gpus
+    kv_token = model.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16)
+    crossover_tokens = int(round((weight_shard / (kv_token / gpus)).to("").magnitude, -3))
+
+    prefill, ttft, kv, kv_share, throughput = [], [], [], [], []
+    for n in contexts:
+        work = (4 * model.layers * n * n * model.hidden_dim + 2 * params * n) * flop
+        cache = model.get_kv_cache_size(seq_len=n, batch_size=1, precision=BYTES_FP16)
+        read = weight_shard + cache / gpus
+        prefill.append(work)
+        ttft.append((work / (gpus * peak * mfu)).to(second))
+        kv.append(cache)
+        kv_share.append(((cache / gpus) / read).to("").magnitude)
+        throughput.append((bandwidth / read).to(1 / second))
+    ttft_growth = (ttft[-1] / ttft[0]).to("").magnitude
+    throughput_drop = (throughput[0] / throughput[-1]).to("").magnitude
+    peak_read = weight_shard + kv[-1] / gpus
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(abs(kv_token.to(KiB).magnitude - 320) < 1, f"GQA should cost 320 KB per token, got {kv_token.to(KiB)}")
+    check(peak_read < capacity, f"The longest context must still fit one accelerator: {peak_read.to(GB)} vs {capacity.to(GB)}")
+    check(1_000 < ttft_growth < 1_500, f"Time-to-first-token should grow more than a thousandfold, got {ttft_growth}")
+    check(2.0 < throughput_drop < 2.5, f"Per-user decode should fall about twofold, got {throughput_drop}")
+    check(400_000 < crossover_tokens < 460_000, f"The KV slice should overtake the weight shard near 430k tokens, got {crossover_tokens}")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    gpus_str = fmt_int(gpus)
+    weight_shard_gb_str = fmt_memory(weight_shard, unit=GB, precision=1)
+    mfu_pct_str = fmt_percent(mfu, precision=0)
+    crossover_tokens_str = fmt_int(crossover_tokens)
+    ttft_growth_mult_str = fmt_multiple(int(ttft_growth), precision=0, commas=True)
+    throughput_drop_mult_str = fmt_multiple(throughput_drop, precision=1)
+    ttft_min_str = fmt_time(ttft[0], second, precision=2)
+    ttft_max_str = fmt_time(ttft[-1], minute, precision=1)
+
+    _n, _c, _t, _k, _s, _p = [], [], [], [], [], []
+    for i in range(len(contexts)):
+        _n.append(fmt_int(contexts[i]))
+        _c.append(fmt_magnitude(prefill[i], unit=PFLOP, precision=1))
+        _t.append(fmt_magnitude(ttft[i], unit=second, precision=2))
+        _k.append(fmt_magnitude(kv[i], unit=GB, precision=1))
+        _s.append(fmt_percent(kv_share[i], precision=1))
+        _p.append(fmt_magnitude(throughput[i], unit=1 / second, precision=1))
+    n_4k_str, n_16k_str, n_32k_str, n_64k_str, n_128k_str, n_512k_str = _n
+    c_4k_str, c_16k_str, c_32k_str, c_64k_str, c_128k_str, c_512k_str = _c
+    ttft_4k_str, ttft_16k_str, ttft_32k_str, ttft_64k_str, ttft_128k_str, ttft_512k_str = _t
+    kv_4k_str, kv_16k_str, kv_32k_str, kv_64k_str, kv_128k_str, kv_512k_str = _k
+    share_4k_str, share_16k_str, share_32k_str, share_64k_str, share_128k_str, share_512k_str = _s
+    tps_4k_str, tps_16k_str, tps_32k_str, tps_64k_str, tps_128k_str, tps_512k_str = _p
+```
+
+Holding a long agent context therefore takes more HBM than the notebook above leaves on a single accelerator, so production deployments shard the model across the `{python} DecodeEconomics.gpus_str` accelerators of one node with tensor parallelism. Each accelerator then streams its own `{python} DecodeEconomics.weight_shard_gb_str` weight shard plus its own slice of the KV cache on every decode step, while the whole node shares the prefill work.
+
+|            Context Length ($N$)           |        Prefill Compute (PFLOP)        |             Prefill TTFT (s)             |             KV Cache (GB)              |        KV Share of Decode Read (%)        |      Decode Throughput (tok/s/user)     |
+|:-----------------------------------------:|:-------------------------------------:|:----------------------------------------:|:--------------------------------------:|:-----------------------------------------:|:---------------------------------------:|
+|  **`{python} DecodeEconomics.n_4k_str`**  |  `{python} DecodeEconomics.c_4k_str`  |  `{python} DecodeEconomics.ttft_4k_str`  |  `{python} DecodeEconomics.kv_4k_str`  |  `{python} DecodeEconomics.share_4k_str`  |  `{python} DecodeEconomics.tps_4k_str`  |
+|  **`{python} DecodeEconomics.n_16k_str`** |  `{python} DecodeEconomics.c_16k_str` | `{python} DecodeEconomics.ttft_16k_str`  | `{python} DecodeEconomics.kv_16k_str`  |  `{python} DecodeEconomics.share_16k_str` |  `{python} DecodeEconomics.tps_16k_str` |
+|  **`{python} DecodeEconomics.n_32k_str`** |  `{python} DecodeEconomics.c_32k_str` | `{python} DecodeEconomics.ttft_32k_str`  | `{python} DecodeEconomics.kv_32k_str`  |  `{python} DecodeEconomics.share_32k_str` |  `{python} DecodeEconomics.tps_32k_str` |
+|  **`{python} DecodeEconomics.n_64k_str`** |  `{python} DecodeEconomics.c_64k_str` | `{python} DecodeEconomics.ttft_64k_str`  | `{python} DecodeEconomics.kv_64k_str`  |  `{python} DecodeEconomics.share_64k_str` |  `{python} DecodeEconomics.tps_64k_str` |
+| **`{python} DecodeEconomics.n_128k_str`** | `{python} DecodeEconomics.c_128k_str` | `{python} DecodeEconomics.ttft_128k_str` | `{python} DecodeEconomics.kv_128k_str` | `{python} DecodeEconomics.share_128k_str` | `{python} DecodeEconomics.tps_128k_str` |
+| **`{python} DecodeEconomics.n_512k_str`** | `{python} DecodeEconomics.c_512k_str` | `{python} DecodeEconomics.ttft_512k_str` | `{python} DecodeEconomics.kv_512k_str` | `{python} DecodeEconomics.share_512k_str` | `{python} DecodeEconomics.tps_512k_str` |
+
+: **Decode Economics across Context Lengths**: Prefill compute, time-to-first-token, resident KV cache, the KV cache's share of each accelerator's decode read, and per-user decode throughput for a 70B parameter model in FP16, tensor-parallel across the `{python} DecodeEconomics.gpus_str` H100s of one node. Prefill assumes `{python} DecodeEconomics.mfu_pct_str` percent model FLOPs utilization across the node; decode is the bandwidth-bound ceiling of @eq-vol3-context-token-time at batch size 1. {#tbl-vol3-context-decode-economics tbl-colwidths="[16,16,13,13,21,21]"}
+
+As detailed in @tbl-vol3-context-decode-economics, expanding context from 4k to 512k tokens raises time-to-first-token by `{python} DecodeEconomics.ttft_growth_mult_str`, from `{python} DecodeEconomics.ttft_min_str` to `{python} DecodeEconomics.ttft_max_str`, while per-user decode throughput falls by only `{python} DecodeEconomics.throughput_drop_mult_str`. The asymmetry follows from the two equations that govern the phases. Prefill pays the quadratic attention term of @eq-vol3-context-prefill-flops, so its cost explodes with context. Decode pays @eq-vol3-context-token-time, where the fixed `{python} DecodeEconomics.weight_shard_gb_str` weight shard dominates the read until the growing KV slice catches it near `{python} DecodeEconomics.crossover_tokens_str` tokens, at which point the cache becomes the majority of every byte the accelerator streams. Context growth therefore bills the agent at the front of each turn rather than during generation. In a loop of 50 to 100 tool cycles, an unmanaged half-million-token context spends minutes reprocessing history before emitting a single token, and that recurring entry cost is what turns an interactive system into an economically non-viable crawl.
 
 To mitigate this decode bandwidth wall, modern architectures explore architectural compression. The DeepSeek-V3 architecture (@deepseek2024v3) introduces Multi-Head Latent Attention (MLA), which compresses keys and values into a low-rank latent vector $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$ (where $d_c \ll d_{\text{model}}$) prior to caching:
 
@@ -278,13 +475,13 @@ $$W(t, \tau) = \left\{ r \in S \mid \text{page } r \text{ referenced in } [t-\ta
 
 where $S$ is the total address space, $t$ is execution time, and $\tau$ is the working set parameter (the backward-looking reference window). The working set size is the cardinality $w(t, \tau) = |W(t, \tau)|$.
 
-| Virtual Memory Concept (Denning, 1968) | Neural Agent Architecture (Volume III)  | Systems Characteristic                             |
-|:---------------------------------------|:----------------------------------------|:---------------------------------------------------|
-| **Address Space $S$ (Virtual Memory)** | Cumulative Trajectory History           | Total token sequence generated across turns        |
-| **Resident Set (Physical RAM)**        | Context Window (HBM KV Cache)           | Zero-latency working set on accelerator            |
-| **Working Set $W(t, \tau)$**           | Active Working Set $W(t, \Delta t)$     | Tokens actively attended by current step           |
-| **Page Fault / Thrashing**             | Context Overflow / Attention Dispersion | Memory exhaustion, high TTFT, lost-in-the-middle   |
-| **Swap Space (Secondary Storage)**     | L3 Episodic Store (Vector / Disk DB)    | Persistent external storage with indexed retrieval |
+| Virtual Memory Concept (Denning, 1968) | Neural Agent Architecture (Agentic MLSys) | Systems Characteristic                             |
+|:---------------------------------------|:------------------------------------------|:---------------------------------------------------|
+| **Address Space $S$ (Virtual Memory)** | Cumulative Trajectory History             | Total token sequence generated across turns        |
+| **Resident Set (Physical RAM)**        | Context Window (HBM KV Cache)             | Zero-latency working set on accelerator            |
+| **Working Set $W(t, \tau)$**           | Active Working Set $W(t, \Delta t)$       | Tokens actively attended by current step           |
+| **Page Fault / Thrashing**             | Context Overflow / Attention Dispersion   | Memory exhaustion, high TTFT, lost-in-the-middle   |
+| **Swap Space (Secondary Storage)**     | L3 Episodic Store (Vector / Disk DB)      | Persistent external storage with indexed retrieval |
 
 : **Virtual Memory Mapped onto Neural Agent Context**: Each classical construct from Denning's 1968 model has a direct counterpart in agent context architecture, including the failure mode that follows from exhausting it. {#tbl-vol3-context-virtual-memory-mapping}
 
@@ -348,7 +545,7 @@ A robust agent runtime structures context into explicit, compartmentalized funct
 │                     STRUCTURED CONTEXT LAYOUT SCHEME                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ <system_instruction>                                                        │
-│   Role: Autonomous Software Engineer (Volume III Runtime)                   │
+│   Role: Autonomous Software Engineer (Agentic MLSys Runtime)                │
 │   Invariants: American English, CMOS Figure Format, Zero AI Trailers        │
 │ </system_instruction>                                                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -426,7 +623,7 @@ Symbols are sorted in descending order of this PageRank centrality score and gre
 
 When an agent's active trajectory exceeds hardware or latency thresholds, runtime systems must evict non-critical tokens from the KV cache. However, naive eviction policies (such as simple sliding-window truncation) trigger catastrophic failure in auto-regressive transformers, and the retention topologies that avoid it differ mainly in which positions they treat as ineligible for eviction (@fig-vol3-context-attention-sinks).
 
-::: {#fig-vol3-context-attention-sinks fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: A dense cache grows as $O(N)$ until it exhausts HBM, StreamingLLM bounds it to sink tokens plus a rolling window at the cost of middle amnesia, and heavy-hitter retention (H2O, FastGen) additionally keeps the intermediate tokens carrying most of the attention mass." fig-alt="Three-panel comparison of key-value cache retention policies. The first panel shows a dense unbounded cache retaining every token from the prompt to the current position, with an order-N footprint, memory-bound decode, and out-of-memory failure. The second panel shows StreamingLLM retaining roughly four sink tokens plus a rolling window of about 1,024 recent tokens, giving a bounded footprint and stable softmax but discarding the middle of the trajectory. The third panel shows heavy-hitter retention keeping sink tokens, three ranked heavy hitters, and a sliding window, tracked by a running cumulative attention score."}
+::: {#fig-vol3-context-attention-sinks fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: A dense cache grows as $O(N)$ until it exhausts HBM, StreamingLLM bounds it to sink tokens plus a rolling window at the cost of middle amnesia, and heavy-hitter retention (H2O, FastGen) additionally keeps the intermediate tokens carrying most of the attention mass. Each policy buys a bounded cache by choosing what it is willing to forget, so the panels differ in that choice rather than in their memory ceiling." fig-alt="Three-panel comparison of key-value cache retention policies. The first panel shows a dense unbounded cache retaining every token from the prompt to the current position, with an order-N footprint, memory-bound decode, and out-of-memory failure. The second panel shows StreamingLLM retaining roughly four sink tokens plus a rolling window of about 1,024 recent tokens, giving a bounded footprint and stable softmax but discarding the middle of the trajectory. The third panel shows heavy-hitter retention keeping sink tokens, three ranked heavy hitters, and a sliding window, tracked by a running cumulative attention score."}
 ![](images/svg/attention_sinks_and_eviction.svg)
 :::
 
@@ -522,11 +719,11 @@ Elastic placement of that kind is normally judged as a load balancing problem, w
 
 While KV-cache eviction algorithms operate at the sub-token tensor level inside the inference engine, autonomous agent runtimes also require **Semantic Context Compaction** operating at the application layer. When an agent engages in extended tasks spanning 50 to 100 turns, token accumulation inevitably approaches the model's context threshold $\theta_{\text{compact}}$ (typically 75 percent of maximum context capacity).
 
-::: {#fig-vol3-context-compaction-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical Semantic Context Compaction Pipeline**: Verbose trajectory history passes through deterministic structural pruning and state synthesis, then a drift-verification gate, before it is committed to a compacted working set of pinned anchor, state ledger, git diff, and repomap." fig-alt="Four-stage pipeline diagram. Stage one shows trajectory bloat from verbose tool output, raw file payloads, and in-flight reasoning scratchpads, with a compaction trigger at 75 percent of the token budget. Stage two shows two parallel engines: deterministic structural pruning using head and tail slicing, Tree-Sitter repomaps, and git diffs, and state synthesis that distills reasoning turns into a state ledger, evicts scratchpad tokens, and locks an invariant enclosure. Stage three shows a semantic entropy check, a state consistency gate against git status, and an archival flush to an external vector store. Stage four shows the compacted working set holding a pinned system anchor, condensed state ledger, structured git diff, repomap, and the immediate turn window."}
+::: {#fig-vol3-context-compaction-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical Semantic Context Compaction Pipeline**: Verbose trajectory history passes through deterministic structural pruning and state synthesis, then a drift-verification gate, before it is committed to a compacted working set of pinned anchor, state ledger, git diff, and repomap. The drift gate is the load-bearing stage, because compaction is lossy by construction and without a check that the synthesized state still entails the original the pipeline trades context length for correctness." fig-alt="Four-stage pipeline diagram. Stage one shows trajectory bloat from verbose tool output, raw file payloads, and in-flight reasoning scratchpads, with a compaction trigger at 75 percent of the token budget. Stage two shows two parallel engines: deterministic structural pruning using head and tail slicing, Tree-Sitter repomaps, and git diffs, and state synthesis that distills reasoning turns into a state ledger, evicts scratchpad tokens, and locks an invariant enclosure. Stage three shows a semantic entropy check, a state consistency gate against git status, and an archival flush to an external vector store. Stage four shows the compacted working set holding a pinned system anchor, condensed state ledger, structured git diff, repomap, and the immediate turn window."}
 ![](images/svg/context_compaction_pipeline.svg)
 :::
 
-As shown in @fig-vol3-context-compaction-pipeline, context compaction transforms an unmanageably bloated trajectory buffer into a compact, semantically dense state representation. The pipeline operates across four discrete stages:
+@Fig-vol3-context-compaction-pipeline follows a bloated trajectory buffer through compaction into a compact, semantically dense state representation. The pipeline operates across four discrete stages:
 
 ### Stage 1: Triage and compaction triggering
 
@@ -765,14 +962,24 @@ Allowing chain-of-thought scratchpad tokens to accumulate in persistent trajecto
 
 Principle \ref{pri-vol3-attention-working-set} earns the cache analogy in this chapter, and also marks where it breaks. Context behaves like an L1 working set in that it is fast, finite and worth managing by locality. It differs in the way that matters most for correctness: a cache miss is slow, whereas a token outside the window is simply absent, so eviction policy here is a question about what the agent can still know.
 
-## Chapter Summary {#sec-vol3-context-summary}
+## Summary {#sec-vol3-context-summary}
 
-- **Context as L1 Cache:** The accelerator context window is the L1 cache of neural computing: zero-retrieval-latency access, but physically bounded by High Bandwidth Memory (HBM) and computationally bound by quadratic attention ($O(L^2)$).
-- **Decode Economics:** While prompt prefill is compute-bound, autoregressive decode is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\ \text{FLOP/Byte}$). Generating tokens over multi-gigabyte KV caches throttles throughput and explodes inference cost.
-- **Denning's Working Set for Agents:** Peter Denning's 1968 Working Set theory applies directly to token sequences. Agents do not access history uniformly; less than 8 percent of tokens capture over 85 percent of attention mass. Active working set management $W(t, \Delta t)$ prevents memory thrashing.
-- **Attention Sinks and Sparsification:** Window-based attention collapses unless initial **Attention Sinks** ($S \approx 4$ tokens) are retained to absorb surplus softmax probability mass. Dynamic sparsification algorithms (H2O, FastGen) track cumulative attention scores to retain heavy-hitter tokens.
-- **OS-Level and Distributed Scheduling:** PagedAttention prevents memory fragmentation by virtualizing the KV cache, while Chunked Prefill and Prefill-Decode Disaggregation decouple context state from physical execution hardware for cluster-wide load balancing.
-- **Structural Codebase Representation:** Production coding agents navigate large codebases by replacing raw file ingestion with Tree-Sitter AST skeletonization and PageRank-ordered symbol repomaps.
-- **Hierarchical Compaction:** When context exceeds budget thresholds ($\theta_{\text{compact}}$), runtimes combine deterministic structural pruning (head/tail slicing, git diffs) with structured state synthesis.
-- **Invariant Enclosures:** To prevent semantic drift and entropy collapse across multi-step compaction, immutable user constraints, security boundaries, and test criteria must be anchored verbatim.
-- **Ephemeral Scratchpads:** Chain-of-thought tokens must be treated as transient deliberation registers and pruned post-action via a Two-Phase Commit, preserving only committed actions and observations in persistent history.
+The attention context window operates as the scarce, high-speed L1 cache of an autonomous system. Because long-horizon trajectories rapidly exhaust accelerator memory and inflate quadratic attention costs, runtimes must manage context dynamically—treating raw prompt history not as an append-only archive, but as an actively evicted working set.
+
+::: {.callout-takeaways title="Context working sets and attentional eviction"}
+* **Context as L1 Cache:** The accelerator context window is the L1 cache of neural computing: zero-retrieval-latency access, but physically bounded by High Bandwidth Memory (HBM) and computationally bound by quadratic attention ($O(L^2)$).
+* **Decode Economics:** While prompt prefill is compute-bound, autoregressive decode is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\ \text{FLOP/Byte}$). Generating tokens over multi-gigabyte KV caches throttles throughput and explodes inference cost.
+* **Denning's Working Set for Agents:** Peter Denning's 1968 Working Set theory applies directly to token sequences. Agents do not access history uniformly; less than 8 percent of tokens capture over 85 percent of attention mass. Active working set management $W(t, \Delta t)$ prevents memory thrashing.
+* **Attention Sinks and Sparsification:** Window-based attention collapses unless initial **Attention Sinks** ($S \approx 4$ tokens) are retained to absorb surplus softmax probability mass. Dynamic sparsification algorithms (H2O, FastGen) track cumulative attention scores to retain heavy-hitter tokens.
+* **OS-Level and Distributed Scheduling:** PagedAttention prevents memory fragmentation by virtualizing the KV cache, while Chunked Prefill and Prefill-Decode Disaggregation decouple context state from physical execution hardware for cluster-wide load balancing.
+* **Structural Codebase Representation:** Production coding agents navigate large codebases by replacing raw file ingestion with Tree-Sitter AST skeletonization and PageRank-ordered symbol repomaps.
+* **Hierarchical Compaction:** When context exceeds budget thresholds ($\theta_{\text{compact}}$), runtimes combine deterministic structural pruning (head/tail slicing, git diffs) with structured state synthesis.
+* **Invariant Enclosures:** To prevent semantic drift and entropy collapse across multi-step compaction, immutable user constraints, security boundaries, and test criteria must be anchored verbatim.
+* **Ephemeral Scratchpads:** Chain-of-thought tokens must be treated as transient deliberation registers and pruned post-action via a Two-Phase Commit, preserving only committed actions and observations in persistent history.
+:::
+
+Context management is not a compression trick; it is an architectural contract between what the model actively attends to and what the external runtime stores. Treating context as an ephemeral, actively managed working set bounds quadratic compute growth and protects long-running agents from memory exhaustion and attentional degradation.
+
+::: {.callout-chapter-connection title="From working memory to prefix caching and paging"}
+Managing what resides inside an individual context window controls single-trajectory token budgets, but serving thousands of concurrent agentic workflows requires hardware-level memory management across requests. @Sec-vol3-prefix-caching-paging examines the underlying serving substrate: adapting OS virtual memory paging to neural activations via PagedAttention and Radix prefix trees to share immutable KV blocks across branching trajectories.
+:::

@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Prefix Caching and Paging {#sec-vol3-prefix-caching-paging}
@@ -195,17 +195,99 @@ The ratio of Query heads ($n_{\text{q\_heads}}$) to Key-Value heads ($n_{\text{k
 2. **Multi-Query Attention (MQA):** All Query heads share a single Key head and a single Value head per layer ($n_{\text{kv\_heads}} = 1$) [@shazeer2019fast]. MQA slashes the KV cache memory footprint by a factor equal to $n_{\text{q\_heads}}$, but can slightly degrade fine-grained recall on complex reasoning tasks.
 3. **Grouped-Query Attention (GQA):** Query heads are partitioned into $G$ equal groups, where all Query heads within a group share a single Key head and a single Value head ($n_{\text{kv\_heads}} = n_{\text{q\_heads}} / G$) [@ainslie2023]. GQA achieves the high task quality of MHA while delivering up to an $8\times$ reduction in KV cache memory consumption.
 
-| Model Architecture |   Parameters   | Attention Type | $n_{\text{layers}}$ | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ | $d_{\text{head}}$ | Bytes/Token (FP16) | 32k KV Cache Size | 64k KV Cache Size |
-|:-------------------|:--------------:|:--------------:|:-------------------:|:--------------------------------------------:|:-----------------:|:------------------:|:-----------------:|:-----------------:|
-| Llama-2-70B        |      70B       |      MHA       |          80         |                   64 / 64                    |        128        |      1.31 MB       |      41.9 GB      |      83.8 GB      |
-| Llama-3-8B         |       8B       |      GQA       |          32         |                    32 / 8                    |        128        |       131 kB       |      4.19 GB      |      8.38 GB      |
-| Llama-3-70B        |      70B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
-| Qwen-2.5-72B       |      72B       |      GQA       |          80         |                    64 / 8                    |        128        |       328 kB       |      10.49 GB     |      20.97 GB     |
-| DeepSeek-V3 (MLA)  | 671B (37B act) |      MLA       |          61         |               128 / 1 (latent)               |        576        |      70.2 kB       |      2.25 GB      |      4.49 GB      |
+```{python}
+#| label: vol3-caching-attention-footprint
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | KV FOOTPRINT BY ATTENTION SCHEME
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-vol3-caching-model-kv-footprint and the paragraph that reads it.
+# |
+# | Goal:    Price one cached token under multi-head, grouped-query, and latent
+# |          attention, using real models rather than a stylized shape.
+# | Show:    Layer depth, head ratio, head dimension, per-token bytes, and the
+# |          resident cache at two agent-scale contexts.
+# | How:     Every shape comes from the MLSysIM model registry; sizing goes
+# |          through get_kv_cache_size, which takes the latent path for a model
+# |          that declares an MLA rank and the standard path otherwise.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-: **KV-Cache Footprint by Attention Architecture**: Per-token KV bytes and total context buffer requirements for frontier model architectures at 16-bit precision. Grouped-query and latent attention cut the per-token cost by nearly an order of magnitude relative to multi-head attention, which is what makes long multi-turn agent contexts affordable at all. {#tbl-vol3-caching-model-kv-footprint}
+class AttentionFootprint:
+    # +-- 1. LOAD (Constants) --------------------
+    models = (
+        Models.Language.GPT3,
+        Models.Language.Llama3_8B,
+        Models.Language.Llama3_70B,
+        Models.Language.DeepSeek_V3,
+    )
+    short_ctx = 32_768  # scenario: a single agent turn carrying recent history
+    long_ctx = 65_536  # scenario: a long multi-turn trajectory
 
-As demonstrated in @tbl-vol3-caching-model-kv-footprint, while GQA substantially reduces per-token memory overhead compared to legacy MHA, maintaining multi-turn agent contexts ($32\text{k} \text{--} 64\text{k}$ tokens) still consumes $10.5\text{ to } 21\text{ GB}$ of accelerator memory per active trajectory on 70B-class models. When dozens of autonomous agents execute concurrently across a GPU cluster, memory capacity—rather than compute throughput—becomes the primary bottleneck.
+    # +-- 2. EXECUTE (The Compute) ---------------
+    per_token, short_kv, long_kv = [], [], []
+    schemes, head_specs, dims = [], [], []
+    for m in models:
+        per_token.append(m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16))
+        short_kv.append(m.get_kv_cache_size(seq_len=short_ctx, batch_size=1, precision=BYTES_FP16))
+        long_kv.append(m.get_kv_cache_size(seq_len=long_ctx, batch_size=1, precision=BYTES_FP16))
+        if m.kv_lora_rank is not None:
+            schemes.append("MLA")
+            head_specs.append("%d / latent" % m.heads)
+            dims.append("%d (latent)" % (m.kv_lora_rank + m.qk_rope_head_dim))
+        else:
+            kv = m.kv_heads or m.heads
+            schemes.append("MHA" if kv == m.heads else "GQA")
+            head_specs.append("%d / %d" % (m.heads, kv))
+            dims.append("%d" % (m.hidden_dim // m.heads))
+    mha_over_gqa = (per_token[0] / per_token[2]).to("").magnitude
+    gqa_over_mla = (per_token[2] / per_token[3]).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(schemes == ["MHA", "GQA", "GQA", "MLA"], f"The roster must span all three attention schemes, got {schemes}")
+    check(per_token[0] > per_token[1] and per_token[2] > per_token[3], "Per-token cost must fall as the scheme sheds cached heads")
+    check(10 < mha_over_gqa < 20, f"Multi-head should cost roughly an order of magnitude more per token, got {mha_over_gqa}")
+    check(
+        models[0].parameters > models[2].parameters and per_token[0] > per_token[2],
+        "The multi-head model is both larger and more expensive per token, which is the point to check",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    names, params_cells, scheme_cells, layers_cells, heads_cells, dim_cells = [], [], [], [], [], []
+    token_cells, short_cells, long_cells = [], [], []
+    for i in range(len(models)):
+        names.append(fmt_text(models[i].name))
+        params_cells.append(fmt_params(models[i].parameters))
+        scheme_cells.append(fmt_text(schemes[i]))
+        layers_cells.append(fmt_int(models[i].layers))
+        heads_cells.append(fmt_text(head_specs[i]))
+        dim_cells.append(fmt_text(dims[i]))
+        token_cells.append(fmt_memory(per_token[i]))
+        short_cells.append(fmt_memory(short_kv[i], unit=GB, precision=1))
+        long_cells.append(fmt_memory(long_kv[i], unit=GB, precision=1))
+    gpt3_name_str, l8b_name_str, l70b_name_str, dsv3_name_str = names
+    gpt3_params_str, l8b_params_str, l70b_params_str, dsv3_params_str = params_cells
+    gpt3_scheme_str, l8b_scheme_str, l70b_scheme_str, dsv3_scheme_str = scheme_cells
+    gpt3_layers_str, l8b_layers_str, l70b_layers_str, dsv3_layers_str = layers_cells
+    gpt3_heads_str, l8b_heads_str, l70b_heads_str, dsv3_heads_str = heads_cells
+    gpt3_dim_str, l8b_dim_str, l70b_dim_str, dsv3_dim_str = dim_cells
+    gpt3_token_str, l8b_token_str, l70b_token_str, dsv3_token_str = token_cells
+    gpt3_short_str, l8b_short_str, l70b_short_str, dsv3_short_str = short_cells
+    gpt3_long_str, l8b_long_str, l70b_long_str, dsv3_long_str = long_cells
+    mha_over_gqa_mult_str = fmt_multiple(mha_over_gqa, precision=1)
+    gqa_over_mla_mult_str = fmt_multiple(gqa_over_mla, precision=1)
+```
+
+| Model Architecture                          |                   Parameters                  |                 Attention Type                |              $n_{\text{layers}}$              | $n_{\text{q\_heads}} / n_{\text{kv\_heads}}$ |             $d_{\text{head}}$              |              Bytes/Token (FP16)              |                 32k KV Cache                 |                 64k KV Cache                |
+|:--------------------------------------------|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:--------------------------------------------:|:------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|:-------------------------------------------:|
+| `{python} AttentionFootprint.gpt3_name_str` | `{python} AttentionFootprint.gpt3_params_str` | `{python} AttentionFootprint.gpt3_scheme_str` | `{python} AttentionFootprint.gpt3_layers_str` | `{python} AttentionFootprint.gpt3_heads_str` | `{python} AttentionFootprint.gpt3_dim_str` | `{python} AttentionFootprint.gpt3_token_str` | `{python} AttentionFootprint.gpt3_short_str` | `{python} AttentionFootprint.gpt3_long_str` |
+| `{python} AttentionFootprint.l8b_name_str`  |  `{python} AttentionFootprint.l8b_params_str` |  `{python} AttentionFootprint.l8b_scheme_str` |  `{python} AttentionFootprint.l8b_layers_str` | `{python} AttentionFootprint.l8b_heads_str`  | `{python} AttentionFootprint.l8b_dim_str`  | `{python} AttentionFootprint.l8b_token_str`  | `{python} AttentionFootprint.l8b_short_str`  |  `{python} AttentionFootprint.l8b_long_str` |
+| `{python} AttentionFootprint.l70b_name_str` | `{python} AttentionFootprint.l70b_params_str` | `{python} AttentionFootprint.l70b_scheme_str` | `{python} AttentionFootprint.l70b_layers_str` | `{python} AttentionFootprint.l70b_heads_str` | `{python} AttentionFootprint.l70b_dim_str` | `{python} AttentionFootprint.l70b_token_str` | `{python} AttentionFootprint.l70b_short_str` | `{python} AttentionFootprint.l70b_long_str` |
+| `{python} AttentionFootprint.dsv3_name_str` | `{python} AttentionFootprint.dsv3_params_str` | `{python} AttentionFootprint.dsv3_scheme_str` | `{python} AttentionFootprint.dsv3_layers_str` | `{python} AttentionFootprint.dsv3_heads_str` | `{python} AttentionFootprint.dsv3_dim_str` | `{python} AttentionFootprint.dsv3_token_str` | `{python} AttentionFootprint.dsv3_short_str` | `{python} AttentionFootprint.dsv3_long_str` |
+
+: **KV-Cache Footprint by Attention Architecture**: Per-token KV bytes and resident cache at two agent-scale contexts, at 16-bit precision. Per-token cost is set by layer depth, key-value head count, and head dimension, not by parameter count, which is why the largest model in the table is also the most expensive per token by a wide margin. {#tbl-vol3-caching-model-kv-footprint tbl-colwidths="[16,9,10,9,12,10,12,11,11]"}
+
+As demonstrated in @tbl-vol3-caching-model-kv-footprint, the cost of a cached token tracks the attention scheme rather than the parameter count: multi-head attention charges `{python} AttentionFootprint.mha_over_gqa_mult_str` what grouped-query attention charges on a model less than half its size, and latent attention takes another `{python} AttentionFootprint.gqa_over_mla_mult_str` off that. Even so, a grouped-query 70B model holding a multi-turn agent context still commits `{python} AttentionFootprint.l70b_short_str` to `{python} AttentionFootprint.l70b_long_str` of accelerator memory per active trajectory. When dozens of autonomous agents execute concurrently across a GPU cluster, memory capacity—rather than compute throughput—becomes the primary bottleneck.
 
 ### Physical tensor layouts and memory fragmentation
 
@@ -384,7 +466,7 @@ In human-in-the-loop interactions and complex agent workflows, agent execution i
 
 In classical operating systems, a process's *working set* is the minimum amount of physical memory required to make forward progress without thrashing. For an active agent trajectory, the working set is strictly the entire uncompressed KV cache of its context history.
 
-If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), just 20 idle agent sessions can exhaust the entire cluster's memory, causing out-of-memory (OOM) crashes and stalling active generation.
+If an agent's $64\text{k}$-token KV cache ($21\text{ GB}$ on Llama-3-70B) remains pinned in accelerator HBM while the agent is blocked waiting for an external tool, that GPU memory is completely unavailable to concurrent requests. On an 8-GPU H100 node ($640\text{ GB}$ total HBM), the model's own FP16 weights claim $140\text{ GB}$ before a single request arrives, so roughly 20 idle agent sessions exhaust what remains, causing out-of-memory (OOM) crashes and stalling active generation.
 
 Conversely, if the serving runtime unilaterally discards the idle agent's KV cache to free memory, resuming the agent when the tool finishes forces a full $64\text{k}$-token prefill recomputation, incurring a 10-second latency penalty and wasting cluster compute.
 
@@ -526,7 +608,7 @@ If the serving system evaluates these $K^D$ trajectory rollouts independently, t
 
 $$\text{Tokens}_{\text{naive}} = \sum_{d=0}^{D} K^d \cdot \left( L_{\text{root}} + d \cdot \Delta L \right) = O\left( K^D \cdot L_{\text{root}} \right)$$
 
-For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving requires prefilling over **$12.2\text{ million}$ tokens**, requiring hours of GPU time and rendering test-time search economically impossible.
+For a $24\text{k}$-token prompt expanding a 3-step tree with branching factor $K = 8$, naive serving prefills **$12.3\text{ million}$ tokens at the leaf level alone**, and roughly $14\text{ million}$ across the whole tree. At a sustained $500\text{ TFLOP/s}$ that is about a GPU-hour of prefill to answer one query, which is what makes naive test-time search economically impossible.
 
 ### Copy-on-write prefix sharing in radix trees
 
@@ -627,7 +709,7 @@ By placing the millisecond-precision dynamic timestamp and random UUID at the ve
 The failure propagated through five distinct stages:
 
 1. **Zero-Hit Prefix Invalidation:** When requests arrived at the inference engine, the Radix tree traversal failed immediately at token position 12. The engine was unable to reuse any cached physical blocks for the subsequent $35\text{k}$ tokens of tool schemas, repository context, and conversation history.
-2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $14\times$.
+2. **Compute Explosion:** The cluster was instantly forced to execute full $35\text{k}$-token prefill computations for every single turn of every active agent. Effective cluster compute demand surged by $11.6\times$, the reciprocal of the $8.6$ percent of prefill the cluster had still been paying for.
 3. **Radix Tree Eviction Thrashing:** To allocate physical blocks for the massive surge of incoming prefills, the PagedAttention memory manager entered aggressive LRU eviction mode. Because new prefixes diverged immediately at the root, the Radix tree allocator created thousands of short-lived, fragmented branches. High-utility cached prefixes from other active workflows were prematurely evicted.
 4. **Queueing Backpressure and Pinned Block Exhaustion:** Dictated by Little's Law ($L = \lambda W$), as prefill latency ($W$) exploded from $220\text{ ms}$ to over $11\text{ seconds}$ under constant arrival rate ($\lambda$), the number of concurrent requests actively trapped in the system ($L$) skyrocketed. Requests that had already begun decoding could not complete because the GPU Tensor Cores were saturated with prefill compute. As partially decoded sequences accumulated, their pinned physical blocks completely exhausted the global free list.
 5. **Cascading Worker Death:** When an active decode step requested an additional physical block from an exhausted free pool with zero evictable zero-ref-count blocks, the allocation call failed. Rather than graceful throttling, worker processes crashed with CUDA out-of-memory exceptions, triggering cluster-wide leader election storms.
@@ -666,11 +748,21 @@ While Copy-on-Write PagedAttention eliminates prefix duplication, speculative tr
 
 This chapter gives principle \ref{pri-vol3-prefix-coherence} both halves of its claim. Prefix sharing is what makes multi-turn serving affordable, and coherence is what keeps the saving honest, because a cached prefix is valid only while the tokens and the model that produced it are unchanged.
 
-## Chapter Summary {#sec-vol3-caching-summary}
+## Summary {#sec-vol3-caching-summary}
 
-- **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85 to 95 percent prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
-- **PagedAttention Virtual Memory:** Adapting operating system virtual memory paging to transformer KV caches partitions tensors into fixed-size physical blocks (e.g., 16 or 32 tokens), eliminating external fragmentation, bounding internal fragmentation to $< 0.05\%$, and enabling Copy-on-Write sharing.
-- **Radix Tree Indexing:** Organizing physical KV blocks as a dynamic Radix tree allows serving runtimes (such as SGLang) to match incoming token sequences against cached GPU memory in sub-millisecond time, executing chunked prefills exclusively for new suffix tokens.
-- **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving swap breakevens under $100\text{ ms}$.
-- **Prefill-Decode Disaggregation:** Physically separating compute-bound prefill nodes from memory-bandwidth-bound decode nodes over 400–800 Gbps RDMA interconnects eliminates Head-of-Line blocking, isolates latency SLOs, and increases serving goodput by up to $4\times$.
-- **Static Prefix Discipline:** Prompt templates must place immutable tokens (system instructions, tool schemas) strictly ahead of mutable variables and observation deltas to prevent catastrophic Radix cache thrashing.
+Prefix caching and virtual memory paging establish the physical serving substrate for multi-turn agentic systems. By treating Key-Value activation tensors as demand-paged memory blocks organized in Radix prefix trees, runtimes reclaim GPU memory across branching reasoning trees and eliminate redundant prefill computation.
+
+::: {.callout-takeaways title="Radix prefix caching and paged KV memory"}
+* **Prefix Locality in Trajectories:** Real-world agent workloads exhibit 85 to 95 percent prompt token overlap between consecutive turns. Recomputing prefixes from scratch wastes massive GPU compute and degrades response times.
+* **PagedAttention Virtual Memory:** Adapting operating system virtual memory paging to transformer KV caches partitions tensors into fixed-size physical blocks (e.g., 16 or 32 tokens), eliminating external fragmentation, bounding internal fragmentation to $< 0.05\%$, and enabling Copy-on-Write sharing.
+* **Radix Tree Indexing:** Organizing physical KV blocks as a dynamic Radix tree allows serving runtimes (such as SGLang) to match incoming token sequences against cached GPU memory in sub-millisecond time, executing chunked prefills exclusively for new suffix tokens.
+* **Hierarchical KV Paging:** Decoupling logical context retention from physical accelerator HBM residency allows runtimes to offload idle agent KV blocks over PCIe Gen5/CXL to Host DRAM during long tool-execution pauses, achieving swap breakevens under $100\text{ ms}$.
+* **Prefill-Decode Disaggregation:** Physically separating compute-bound prefill nodes from memory-bandwidth-bound decode nodes over 400–800 Gbps RDMA interconnects eliminates Head-of-Line blocking, isolates latency SLOs, and increases serving goodput by up to $4\times$.
+* **Static Prefix Discipline:** Prompt templates must place immutable tokens (system instructions, tool schemas) strictly ahead of mutable variables and observation deltas to prevent catastrophic Radix cache thrashing.
+:::
+
+Paged memory management proves that foundation model serving is an operating systems problem. By structuring memory allocation around the physical reality of attention tensors and token prefix locality, modern serving engines turn what would otherwise be an unmanageable memory footprint into an amortized, demand-paged infrastructure resource.
+
+::: {.callout-chapter-connection title="From KV paging to trajectory scheduling"}
+Memory virtualization and Radix caching optimize the physical storage of attention activations on individual nodes, but deploying agents at production scale introduces severe scheduling challenges across accelerator clusters. @Sec-vol3-trajectory-scheduling addresses the cluster coordination problem: dispatching and scheduling stateful trajectories under heavy-tailed Pareto execution times, preemption under memory pressure, and multi-tier swapping.
+:::

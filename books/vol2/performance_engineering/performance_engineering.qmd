@@ -781,7 +781,7 @@ The memory-bound nature of inference also explains a common source of confusion:
 
 ## Serving Regimes: Batch Size and Prefill-Decode {#sec-performance-engineering-serving-regimes-9f2c}
 
-When an LLM serving endpoint goes live, serving requests individually at batch size 1 wastes over 90 percent of an accelerator's compute capacity and inflates per-token cost. Yet naively lumping requests into larger batches can cause latency spikes if prompt processing and token generation are treated as identical operations. The serving regime—how a system manages the batch dimension and divides prompt processing from token generation—determines whether decode stays pinned to the memory-bound slope or climbs toward the compute roof. These two structural features are levers through which all subsequent optimization techniques act.
+When an LLM serving endpoint goes live, serving requests individually at batch size 1 wastes over 90 percent of an accelerator's compute capacity and inflates per-token cost. Yet naively lumping requests into larger batches can cause latency spikes if prompt processing and token generation are treated as identical operations. The serving regime (how a system manages the batch dimension and divides prompt processing from token generation) determines whether decode stays pinned to the memory-bound slope or climbs toward the compute roof. These two structural features are levers through which all subsequent optimization techniques act.
 
 ### Batch size as the universal control knob {#sec-performance-engineering-batch-size}
 
@@ -1883,9 +1883,9 @@ Speculative decoding pays off when the draft model is cheap and its proposed tok
 
 A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The mixture-of-experts architecture\index{MoE!performance engineering} resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. Routing inputs to specialized sub-networks allows MoE to break the iron link between model size and inference cost.
 
-For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication. Sparse activation improves the iron law budget only when inactive experts stay off the critical path and the router avoids creating a new AllToAll or load-imbalance bottleneck.
+For performance engineering, the central question is whether active-parameter savings exceed the runtime costs of routing, memory residency, and cross-device communication.
 
-A standard MoE transformer layer replaces the feed-forward network with multiple parallel "expert" FFNs and a lightweight **Router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism places different experts on different devices, and an AllToAll exchange moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance remain smaller than the dense compute they replace.
+A standard MoE transformer layer replaces the dense feed-forward network with multiple parallel "expert" sub-networks coordinated by a lightweight router\index{Router!Mixture of Experts}. When experts are partitioned across multiple accelerators, an AllToAll collective must exchange each token's hidden states with its assigned device before execution can resume. If that communication runs exposed on the critical path, interconnect latency quickly erodes the arithmetic savings of sparse execution. Preserving those savings requires the same principle that governs tensor-parallel GEMMs and data-parallel gradient exchanges: overlapping communication with computation so network fabrics transfer data while arithmetic engines remain fully engaged.
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
@@ -2605,7 +2605,7 @@ Optimization begins by measuring the whole workload before touching individual k
 
 : **Optimization Paths by Primary Bottleneck**: Diagnostic map from bottleneck class to the ordered interventions that should be tried before the next profiling pass. {#tbl-performance-engineering-bottleneck-paths tbl-colwidths="[14,16,70]"}
 
-The fourth step is to apply and verify. Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from the roofline classification step with the new profile, as the bottleneck may have shifted.
+Closing the diagnostic loop requires verifying every intervention against fresh telemetry: implement the highest-impact optimization, reprofile the execution timeline, and verify that the target metric improved. Because resolving one bottleneck inevitably shifts pressure to another, engineers iterate from the roofline classification step with the updated profile until the system satisfies its target SLO.
 
 ### Combining techniques {#sec-performance-engineering-combining}
 

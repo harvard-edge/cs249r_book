@@ -1,9 +1,9 @@
-"""Prose-integrity detectors: sentence starts, hand-typed attributions, italics.
+"""Prose-integrity detectors: sentence starts, hand-typed attributions, italics, standalone prose.
 
 Added 2026-08-14 after a tone-audit pass introduced nine banned section
 meta-openers, two of which left a sentence starting with a lowercase word
 ("...energy budget. this section introduces..."). Nothing in the gate set
-noticed. These three detectors cover failure classes that read as obviously
+noticed. These detectors cover failure classes that read as obviously
 wrong to a human but pass every existing check.
 
 Shared design: scan body prose only. Fenced code, inline code spans, math,
@@ -202,3 +202,101 @@ def find_underscore_italics(text: str) -> List[Hit]:
                 )
             )
     return hits
+
+
+# ── D. series-dependent volume naming (standalone prose) ────────────────────
+
+_XREF = re.compile(r"@[a-zA-Z0-9_-]+")
+_BLOCK_ID = re.compile(r"\{#[^}]*\}")
+_HTML_COMMENT = re.compile(r"<!--.*?-->")
+
+_STANDALONE_PATTERNS = [
+    re.compile(r"\bthis\s+volume\b", re.IGNORECASE),
+    re.compile(r"\bcompanion\s+volumes?\b", re.IGNORECASE),
+    re.compile(r"\b(?:four|three|two)[\s-]volume\b", re.IGNORECASE),
+    re.compile(r"\b(?:first|second|third|fourth|subsequent|preceding|previous|next|earlier|later)\s+volume\b", re.IGNORECASE),
+    re.compile(r"\bVolume\s+(?:I{1,3}|IV|V|VI{0,3}|IX|X|\d+)\b"),
+    re.compile(r"\bVol\.\s*(?:I{1,3}|IV|V|VI{0,3}|IX|X|\d+)\b"),
+    re.compile(r"\b(?:all|the)\s+(?:four|three|two|\d+)\s+volumes\b", re.IGNORECASE),
+    re.compile(r"\bacross\s+volumes\b", re.IGNORECASE),
+    re.compile(r"\bother\s+volumes\b", re.IGNORECASE),
+    re.compile(r"\bin\s+each\s+volume\b", re.IGNORECASE),
+]
+
+
+def _scan_standalone_lines(text: str) -> Iterator[tuple[int, str, str]]:
+    """Yield (line_no, masked_line, raw_line) for content lines (prose, callouts, headings, lists)."""
+    in_fence = False
+    in_yaml = False
+    in_comment = False
+    in_display_math = False
+    for i, raw in enumerate(text.splitlines(), 1):
+        stripped = raw.strip()
+        if i == 1 and stripped == "---":
+            in_yaml = True
+            continue
+        if in_yaml:
+            if stripped == "---":
+                in_yaml = False
+            continue
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped.count("$$") % 2 == 1:
+            in_display_math = not in_display_math
+            continue
+        if in_display_math:
+            continue
+        if stripped.startswith("#|") or stripped.startswith("%"):
+            continue
+        if "<!--" in stripped and "-->" not in stripped:
+            in_comment = True
+            continue
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if stripped.startswith("<!--") and stripped.endswith("-->"):
+            continue
+        if not stripped:
+            continue
+
+        masked = raw
+        for pat in (_INLINE_CODE, _DISPLAY_MATH, _MATH, _INDEX, _URL, _XREF, _BLOCK_ID, _HTML_COMMENT):
+            masked = pat.sub(lambda m: " " * len(m.group(0)), masked)
+        yield i, masked, raw
+
+
+def find_standalone_prose(text: str) -> List[Hit]:
+    """Flag series-dependent volume naming in prose.
+
+    Each book in the curriculum must read as a standalone work when published.
+    Disallows referring to 'this volume', 'Volume I', 'Volume 1', 'companion volume',
+    'four-volume', etc. Legitimate uses of volume (data volume, storage volume,
+    traffic volume, physical/liquid volume) and code/math references are not flagged.
+    """
+    hits: List[Hit] = []
+    for line_no, masked, raw in _scan_standalone_lines(text):
+        line_matches = []
+        for pat in _STANDALONE_PATTERNS:
+            for m in pat.finditer(masked):
+                line_matches.append((m.start(), m.end(), m.group(0)))
+        if not line_matches:
+            continue
+        line_matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+        last_end = -1
+        for start, end, match_str in line_matches:
+            if start >= last_end:
+                hits.append(
+                    Hit(
+                        line=line_no,
+                        match=match_str,
+                        context=raw.strip()[:140],
+                        detail=match_str,
+                    )
+                )
+                last_end = end
+    return hits
+

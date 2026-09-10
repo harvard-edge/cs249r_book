@@ -102,7 +102,39 @@ Part I System Architecture:
 
 ---
 
-### Chapter 03: The Nervous System (`04-nervous.qmd`)
+### Chapter 03: The Deliberative Brain (`03-brain.qmd`)
+
+#### 1. Hennessy & Patterson (2019) — Computer Architecture: A Quantitative Approach
+* **Reference**: Hennessy, John L., and David A. Patterson. *Computer Architecture: A Quantitative Approach*. 6th ed. Morgan Kaufmann, 2019.
+* **Citekey**: `@hennessy2019computer`
+* **Core Insight**: The Roofline Model, the Memory Wall, Amdahl’s Law, and Domain-Specific Architectures (DSA). Provides the quantitative framework relating floating-point performance ($P_{\text{peak}}$), memory bandwidth ($B_{\text{mem}}$), and operational arithmetic intensity ($I = \text{FLOP/byte}$).
+* **Why Physical AI Must Cite It**: Deep learning models running on edge robots are severely memory-bandwidth bound. Hennessy & Patterson provides the theoretical apparatus to analyze why edge SoCs stall on weight streaming during single-step policy execution.
+* **Placement**: Section 3.3, introducing the Roofline model and memory bus bottlenecks.
+
+#### 2. Horowitz (2014) — Computing's Energy Problem
+* **Reference**: Horowitz, Mark. "1.1 Computing's Energy Problem (and What We Can Do About It)." In *IEEE International Solid-State Circuits Conference (ISSCC) Digest of Technical Papers*, 10–14. IEEE, 2014.
+* **Citekey**: `@horowitz2014computing`
+* **Core Insight**: The physics of computational energy consumption. A 16-bit floating-point multiply-accumulate (MAC) consumes $\approx 0.2\text{ pJ}$, whereas fetching that same 16-bit operand from external LPDDR DRAM consumes $\approx 300\text{--}500\text{ pJ}$—a **$1500\times$ to $2500\times$ energy tax** for data movement.
+* **Why Physical AI Must Cite It**: In mobile robots operating on battery power, memory access drains battery energy and produces silicon heat far faster than computation itself. Horowitz proves why model quantization and on-chip SRAM reuse are thermodynamic imperatives.
+* **Placement**: Section 3.4, discussing thermal dissipation envelopes and edge SoC power budgets.
+
+#### 3. Jouppi et al. (2017, 2023) — Tensor Processing Unit (TPUv1 & TPUv4)
+* **Reference**: Jouppi, Norman P. et al. "In-Datacenter Performance Analysis of a Tensor Processing Unit." In *ACM/IEEE International Symposium on Computer Architecture (ISCA)*, 1–12. IEEE, 2017; and "TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning with Hardware Support for Embeddings." In *ISCA*, 2023.
+* **Citekey**: `@jouppi2017`, `@jouppi2023`
+* **Core Insight**: 2D Systolic Array architectures for matrix multiplication. Weights are held stationary while activations flow through a grid of arithmetic processing elements (PEs), eliminating intermediate register-file and cache reads.
+* **Why Physical AI Must Cite It**: Teaches students the microarchitectural difference between GPU SIMT streaming multiprocessors and dedicated NPU/TPU systolic arrays deployed on edge robots.
+* **Placement**: Section 3.5, contrasting edge accelerator dataflows (weight-stationary vs. output-stationary).
+
+#### 4. Yun et al. (2013) — MemGuard: Memory Bandwidth Reservation
+* **Reference**: Yun, Heechul et al. "MemGuard: Memory Bandwidth Reservation System for Efficient Performance Isolation in Multi-Core Platforms." In *IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)*, 55–64. IEEE, 2013.
+* **Citekey**: `@yun2013memguard`
+* **Core Insight**: Memory bus contention on heterogeneous Systems-on-Chip (SoCs). When an unprivileged GPU/NPU accelerator saturates shared DRAM bandwidth with dense weight fetches, real-time CPU cores suffer massive memory latency spikes ($>10\text{ ms}$).
+* **Why Physical AI Must Cite It**: Directly addresses the "silent crash" failure mode in robotics where running an embodied foundation model causes real-time CAN bus or IMU interrupt handlers to miss timing deadlines.
+* **Placement**: Section 3.6, under heterogeneous compute SoC scheduling and shared bus contention.
+
+---
+
+### Chapter 04: The Nervous System (`04-nervous.qmd`)
 
 #### 1. Liu & Layland (1973) — Rate Monotonic & EDF Scheduling
 * **Reference**: Liu, C. L., and James W. Layland. "Scheduling Algorithms for Multiprogramming in a Hard-Real-Time Environment." *Journal of the ACM* 20, no. 1 (1973): 46–61.
@@ -111,53 +143,21 @@ Part I System Architecture:
   $$U = \sum_{i=1}^n \frac{C_i}{T_i} \le n \left(2^{1/n} - 1\right) \xrightarrow{n \to \infty} \ln 2 \approx 0.693$$
   and proved the optimality of dynamic-priority Earliest Deadline First (EDF) ($U \le 1.0$).
 * **Why Physical AI Must Cite It**: Robotic control loops must meet strict temporal deadlines (e.g., $1\text{ kHz}$ motor loops, $100\text{ Hz}$ trajectory filters). Liu & Layland proves whether a given set of periodic tasks will provably avoid deadline misses.
-* **Placement**: Section 3.2, introducing real-time operating systems (RTOS) scheduling algorithms.
+* **Placement**: Section 4.2, introducing real-time operating systems (RTOS) scheduling algorithms.
 
 #### 2. Sha, Rajkumar, & Lehoczky (1990) — Priority Inheritance Protocols
 * **Reference**: Sha, Lui, Ragunathan Rajkumar, and John P. Lehoczky. "Priority Inheritance Protocols: An Architectural Approach to Real-Time Synchronization." *IEEE Transactions on Computers* 39, no. 9 (1990): 1175–1185.
 * **Citekey**: `@sha1990priority`
 * **Core Insight**: Solves the Unbounded Priority Inversion problem (the bug that famously froze the Mars Pathfinder spacecraft in 1997). Formalized the Priority Inheritance Protocol (PIP) and Priority Ceiling Protocol (PCP), mathematically bounding the blocking duration of high-priority tasks to at most one lower-priority critical section.
 * **Why Physical AI Must Cite It**: In a physical robot, if a high-priority motor control task shares a mutex with a low-priority logging thread, a medium-priority vision thread can preempt the logger, indefinitely stalling the motor loop and causing catastrophic physical failure.
-* **Placement**: Section 3.3, covering multi-threaded synchronization and lock contention on microcontrollers.
+* **Placement**: Section 4.3, covering multi-threaded synchronization and lock contention on microcontrollers.
 
 #### 3. Kopetz (2011) — Time-Triggered Architecture (TTA)
 * **Reference**: Kopetz, Hermann. *Real-Time Systems: Design Principles for Distributed Embedded Applications*. 2nd ed. Springer, 2011.
 * **Citekey**: `@kopetz2011real`
 * **Core Insight**: Time-Triggered Architecture (TTA) vs. Event-Triggered Architecture. Establishes determinism, composability, global clock synchronization, and the "babbling idiot" failure mode where a malfunctioning node floods a bus with noise.
 * **Why Physical AI Must Cite It**: Serves as the primary reference for deterministic fieldbus communication (EtherCAT Distributed Clocks, TSN IEEE 802.1Qbv, and Time-Triggered Ethernet).
-* **Placement**: Section 3.4, fieldbus comparison and deterministic clock synchronization.
-
----
-
-### Chapter 04: The Deliberative Brain (`03-brain.qmd`)
-
-#### 1. Hennessy & Patterson (2019) — Computer Architecture: A Quantitative Approach
-* **Reference**: Hennessy, John L., and David A. Patterson. *Computer Architecture: A Quantitative Approach*. 6th ed. Morgan Kaufmann, 2019.
-* **Citekey**: `@hennessy2019computer`
-* **Core Insight**: The Roofline Model, the Memory Wall, Amdahl’s Law, and Domain-Specific Architectures (DSA). Provides the quantitative framework relating floating-point performance ($P_{\text{peak}}$), memory bandwidth ($B_{\text{mem}}$), and operational arithmetic intensity ($I = \text{FLOP/byte}$).
-* **Why Physical AI Must Cite It**: Deep learning models running on edge robots are severely memory-bandwidth bound. Hennessy & Patterson provides the theoretical apparatus to analyze why edge SoCs stall on weight streaming during single-step policy execution.
-* **Placement**: Section 4.3, introducing the Roofline model and memory bus bottlenecks.
-
-#### 2. Horowitz (2014) — Computing's Energy Problem
-* **Reference**: Horowitz, Mark. "1.1 Computing's Energy Problem (and What We Can Do About It)." In *IEEE International Solid-State Circuits Conference (ISSCC) Digest of Technical Papers*, 10–14. IEEE, 2014.
-* **Citekey**: `@horowitz2014computing`
-* **Core Insight**: The physics of computational energy consumption. A 16-bit floating-point multiply-accumulate (MAC) consumes $\approx 0.2\text{ pJ}$, whereas fetching that same 16-bit operand from external LPDDR DRAM consumes $\approx 300\text{--}500\text{ pJ}$—a **$1500\times$ to $2500\times$ energy tax** for data movement.
-* **Why Physical AI Must Cite It**: In mobile robots operating on battery power, memory access drains battery energy and produces silicon heat far faster than computation itself. Horowitz proves why model quantization and on-chip SRAM reuse are thermodynamic imperatives.
-* **Placement**: Section 4.4, discussing thermal dissipation envelopes and edge SoC power budgets.
-
-#### 3. Jouppi et al. (2017, 2023) — Tensor Processing Unit (TPUv1 & TPUv4)
-* **Reference**: Jouppi, Norman P. et al. "In-Datacenter Performance Analysis of a Tensor Processing Unit." In *ACM/IEEE International Symposium on Computer Architecture (ISCA)*, 1–12. IEEE, 2017; and "TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning with Hardware Support for Embeddings." In *ISCA*, 2023.
-* **Citekey**: `@jouppi2017`, `@jouppi2023`
-* **Core Insight**: 2D Systolic Array architectures for matrix multiplication. Weights are held stationary while activations flow through a grid of arithmetic processing elements (PEs), eliminating intermediate register-file and cache reads.
-* **Why Physical AI Must Cite It**: Teaches students the microarchitectural difference between GPU SIMT streaming multiprocessors and dedicated NPU/TPU systolic arrays deployed on edge robots.
-* **Placement**: Section 4.5, contrasting edge accelerator dataflows (weight-stationary vs. output-stationary).
-
-#### 4. Yun et al. (2013) — MemGuard: Memory Bandwidth Reservation
-* **Reference**: Yun, Heechul et al. "MemGuard: Memory Bandwidth Reservation System for Efficient Performance Isolation in Multi-Core Platforms." In *IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)*, 55–64. IEEE, 2013.
-* **Citekey**: `@yun2013memguard`
-* **Core Insight**: Memory bus contention on heterogeneous Systems-on-Chip (SoCs). When an unprivileged GPU/NPU accelerator saturates shared DRAM bandwidth with dense weight fetches, real-time CPU cores suffer massive memory latency spikes ($>10\text{ ms}$).
-* **Why Physical AI Must Cite It**: Directly addresses the "silent crash" failure mode in robotics where running an embodied foundation model causes real-time CAN bus or IMU interrupt handlers to miss timing deadlines.
-* **Placement**: Section 4.6, under heterogeneous compute SoC scheduling and shared bus contention.
+* **Placement**: Section 4.4, fieldbus comparison and deterministic clock synchronization.
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Tool Interfaces {#sec-vol3-tool-interfaces}
@@ -231,7 +231,7 @@ That warning describes the direction most deployments consider, in which argumen
 
 ## Tool Definition Economics {#sec-vol3-tools-tool-definition-economics-ousterhout}
 
-::: {.callout-definition title="Deep vs. Shallow Modules"}
+::: {.callout-definition title="Deep vs. shallow modules"}
 A **Deep Module** is a software abstraction that provides powerful functionality behind a simple, compact interface [@ousterhout2018philosophy]. Conversely, a **Shallow Module** exposes a wide, complex interface that provides relatively little underlying functionality.
 :::
 
@@ -243,27 +243,104 @@ Every tool registered with an agent must have its name, description, parameter n
 
 Consider an agent managing a cloud Kubernetes infrastructure:
 
-- **The Shallow Approach (100 Micro-Tools):**
+```{python}
+#| label: vol3-tools-schema-tax
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | PROMPT TOKEN TAX OF A TOOL CATALOG
+# +-----------------------------------------------------------------------------
+# | Context: The two bullets below and @tbl-vol3-tools-deep-vs-shallow.
+# |
+# | Goal:    Price a shallow tool catalog against a single deep module, in the
+# |          currency the agent actually spends: prefill tokens per step.
+# | Show:    Static schema footprint, its cost across a trajectory, and the
+# |          reduction a deep module buys.
+# | How:     Multiply catalog size by per-tool schema cost, then by trajectory
+# |          depth, since the whole catalog is re-read on every step. The tool
+# |          counts and schema sizes are design assumptions of this example and
+# |          are declared here rather than pulled from a registry; no vendor
+# |          publishes a canonical bytes-per-tool-schema figure.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+def _pct_precision(ratio):
+    """Keep a fractional endpoint without inventing one on a whole endpoint."""
+    value = ratio * 100
+    return 0 if abs(value - round(value)) < 1e-9 else 1
+
+class SchemaTax:
+    # +-- 1. LOAD (Constants) --------------------
+    shallow_tools = 100  # scenario assumption: one tool per Kubernetes operation
+    tokens_per_tool = 350  # scenario assumption: typical JSON schema for one tool
+    deep_tokens = 120  # scenario assumption: schema for a single kubectl primitive
+    trajectory_steps = 30  # scenario assumption: steps in the worked trajectory
+    catalog_min, catalog_max = 50, 200  # scenario assumption: shallow catalog range
+    deep_min, deep_max = 2, 5  # scenario assumption: deep catalog range
+    footprint_min, footprint_max = 20_000, 60_000  # scenario assumption: shallow prompt range
+    deep_footprint_min, deep_footprint_max = 500, 1_500
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    shallow_footprint = shallow_tools * tokens_per_tool
+    trajectory_tokens = shallow_footprint * trajectory_steps
+    schema_reduction = 1 - deep_tokens / shallow_footprint
+    count_reduction_low = 1 - deep_max / catalog_min
+    count_reduction_high = 1 - deep_min / catalog_max
+    footprint_reduction_low = 1 - deep_footprint_max / footprint_min
+    footprint_reduction_high = 1 - deep_footprint_min / footprint_max
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(shallow_footprint == 35_000, f"The worked catalog should cost 35,000 tokens, got {shallow_footprint}")
+    check(trajectory_tokens > 1_000_000, f"A 30-step trajectory should re-read more than a million tokens, got {trajectory_tokens}")
+    check(0.99 < schema_reduction < 1.0, f"A deep module should cut schema overhead by more than 99 percent, got {schema_reduction}")
+    check(
+        count_reduction_low < count_reduction_high and footprint_reduction_low < footprint_reduction_high,
+        "Each reduction range must run from its weakest to its strongest case",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    shallow_tools_str = fmt_int(shallow_tools)
+    tokens_per_tool_str = fmt_int(tokens_per_tool)
+    deep_tokens_str = fmt_int(deep_tokens)
+    trajectory_steps_str = fmt_int(trajectory_steps)
+    shallow_footprint_str = fmt_int(shallow_footprint)
+    trajectory_tokens_str = fmt_int(trajectory_tokens)
+    schema_reduction_str = fmt_percent(schema_reduction, precision=1, style="prose")
+    count_range_str = fmt_range(catalog_min, catalog_max, kind="number", precision=0)
+    deep_range_str = fmt_range(deep_min, deep_max, kind="number", precision=0)
+    footprint_range_str = fmt_range(footprint_min, footprint_max, kind="number", precision=0)
+    deep_footprint_range_str = fmt_range(deep_footprint_min, deep_footprint_max, kind="number", precision=0)
+    count_reduction_range_str = fmt_text(
+        fmt_percent(count_reduction_low, precision=_pct_precision(count_reduction_low), style="number"),
+        "\u2013",
+        fmt_percent(count_reduction_high, precision=_pct_precision(count_reduction_high), style="symbol"),
+    )
+    footprint_reduction_range_str = fmt_text(
+        fmt_percent(footprint_reduction_low, precision=_pct_precision(footprint_reduction_low), style="number"),
+        "\u2013",
+        fmt_percent(footprint_reduction_high, precision=_pct_precision(footprint_reduction_high), style="symbol"),
+    )
+```
+
+- **The Shallow Approach (One Tool per Operation):**
   The architect exposes discrete tools for every possible operation: `list_pods`, `get_pod_logs`, `delete_pod`, `scale_deployment`, `restart_statefulset`, `update_ingress`, and so on.
-  Each tool requires approximately 350 tokens of JSON schema documentation.
-  For 100 tools, the schema consumes:
-  $$\text{Schema Footprint} = 100 \times 350 = 35,000\text{ tokens}$$
-  Before the user types a single prompt character, 35,000 tokens of the context window are consumed by static API signatures. Across a 30-step trajectory, the model re-reads these 35,000 tokens on every step, wasting over 1,000,000 tokens of GPU prefill compute. Furthermore, large tool catalogs induce **attention dilution**: the model's attention heads struggle to distinguish between overlapping parameter signatures, increasing parameter hallucination rates.
+  Each tool requires approximately `{python} SchemaTax.tokens_per_tool_str` tokens of JSON schema documentation, so a catalog of `{python} SchemaTax.shallow_tools_str` tools consumes:
+  $$\text{Schema Footprint} = N_{\text{tools}} \times \text{tokens per schema}$$
+  That is `{python} SchemaTax.shallow_footprint_str` tokens of the context window spent on static API signatures before the user types a single prompt character. Across a `{python} SchemaTax.trajectory_steps_str`-step trajectory the model re-reads them on every step, spending `{python} SchemaTax.trajectory_tokens_str` tokens of prefill compute on a catalog that never changes. Furthermore, large tool catalogs induce **attention dilution**: the model's attention heads struggle to distinguish between overlapping parameter signatures, increasing parameter hallucination rates.
 
 - **The Deep Approach (Universal Primitive):**
   The architect exposes a single deep module: `kubectl_exec(command: string)`.
-  The tool schema requires 120 tokens.
-  The model uses its pretrained understanding of the `kubectl` CLI syntax to compose commands dynamically, reducing schema overhead by 99.6 percent while supporting the entire surface area of the Kubernetes API.
+  The tool schema requires `{python} SchemaTax.deep_tokens_str` tokens.
+  The model uses its pretrained understanding of the `kubectl` CLI syntax to compose commands dynamically, reducing schema overhead by `{python} SchemaTax.schema_reduction_str` while supporting the entire surface area of the Kubernetes API.
 
 @Tbl-vol3-tools-deep-vs-shallow formalizes this systems trade-off across real-world operational dimensions.
 
-| Design Dimension            |    Shallow Micro-Tool Architecture     |       Deep Module Architecture      |                 Systems Impact                 |
-|:----------------------------|:--------------------------------------:|:-----------------------------------:|:----------------------------------------------:|
-| **Interface Surface**       |         50--200 distinct tools         |        2--5 expressive tools        |   90--98% reduction in registered tool count   |
-| **System Prompt Footprint** |         20,000--60,000 tokens          |          500--1,500 tokens          | Saves 80--95% of prefill compute and KV memory |
-| **Attention Accuracy**      | Degrades significantly ($> 30$ tools)  |      Near-optimal ($< 5$ tools)     |      Eliminates tool-selection confusion       |
-| **Compositionality**        | Low (requires orchestrator roundtrips) | High (pipelines, loops, sub-shells) |   Compound actions execute in a single turn    |
-| **Validation Burden**       |   High (dozens of schema validators)   |    Low (single unified executor)    |      Centralized sandboxing and auditing       |
+| Design Dimension            |           Shallow Micro-Tool Architecture           |               Deep Module Architecture               |                                       Systems Impact                                      |
+|:----------------------------|:---------------------------------------------------:|:----------------------------------------------------:|:-----------------------------------------------------------------------------------------:|
+| **Interface Surface**       | `{python} SchemaTax.count_range_str` distinct tools | `{python} SchemaTax.deep_range_str` expressive tools |     `{python} SchemaTax.count_reduction_range_str` reduction in registered tool count     |
+| **System Prompt Footprint** |   `{python} SchemaTax.footprint_range_str` tokens   | `{python} SchemaTax.deep_footprint_range_str` tokens | Saves `{python} SchemaTax.footprint_reduction_range_str` of prefill compute and KV memory |
+| **Attention Accuracy**      |        Degrades significantly ($> 30$ tools)        |              Near-optimal ($< 5$ tools)              |                            Eliminates tool-selection confusion                            |
+| **Compositionality**        |        Low (requires orchestrator roundtrips)       |         High (pipelines, loops, sub-shells)          |                         Compound actions execute in a single turn                         |
+| **Validation Burden**       |          High (dozens of schema validators)         |            Low (single unified executor)             |                            Centralized sandboxing and auditing                            |
 
 : **Shallow Micro-Tools versus Deep Modules**: Interface surface, system-prompt footprint, attention accuracy, compositionality, and validation burden for the two tool-catalog designs. The tool-count and prompt-footprint rows move together, which is why collapsing a catalog into a few deep modules buys back prefill compute and attention headroom at the same time. {#tbl-vol3-tools-deep-vs-shallow}
 
@@ -323,7 +400,7 @@ $$q_{t+1} = \delta^*(q_t, \text{decode}(y_t))$$
 
 :::
 
-As illustrated in @fig-vol3-tools-grammar-decoding, this architecture yields three profound systems benefits:
+@Fig-vol3-tools-grammar-decoding traces the three systems benefits this architecture yields:
 
 - **Zero Syntax Failure Rate:** It is mathematically impossible for the engine to emit an invalid JSON delimiter, unclosed brace, or illegal field name.
 - **Elimination of Self-Correction Loops:** The system never incurs the latency or token cost of re-prompting the model with error tracebacks to fix malformed syntax.
@@ -463,7 +540,7 @@ Where `CanonicalJSON` sorts object keys lexicographically to guarantee that iden
 
 ### Distributed lock and replay pipeline
 
-As illustrated in @fig-vol3-tools-idempotency-flow, the tool gateway coordinates idempotency through a distributed state store (such as Redis or DynamoDB):
+@Fig-vol3-tools-idempotency-flow follows the tool gateway as it coordinates idempotency through a distributed state store such as Redis or DynamoDB:
 
 - **State Store Lookup:** When a tool invocation arrives with idempotency key $\eta$, the gateway checks the store:
   - **Case A (`NOT_FOUND`):** This is the first attempt. The gateway atomically writes `SET key "IN_FLIGHT" NX PX 30000` (acquiring a distributed lease lock) and appends an intent record to a Write-Ahead Log (WAL).
@@ -659,14 +736,24 @@ When a model emits invalid tool JSON, dumping a raw traceback and asking it to "
 
 Principle \ref{pri-vol3-strict-action-abi} is developed here into four separable requirements, and the chapter's central warning is that satisfying the first three does not satisfy the fourth. A typed, versioned, idempotent wire protocol constrains what a call may say. It does not constrain what the call is permitted to do.
 
-## Chapter Summary {#sec-vol3-tools-summary}
+## Summary {#sec-vol3-tools-summary}
 
-- **Typed ABIs over string scraping:** Robust agent systems reject fragile regex text parsing, interfacing with deterministic environments through typed, versioned ABIs.
-- **Model Context Protocol (MCP):** MCP standardizes client-server capability negotiation and duplex JSON-RPC communication over `stdio` and `SSE`, solving the $M \times N$ integration scaling bottleneck.
-- **Wire protocols are not security boundaries:** Wire protocols only standardize serialization; isolation and privilege control must be enforced below the wire via operating system sandboxes.
-- **Ousterhout’s Deep Modules:** Designing a few expressive, deep tools (such as persistent shells and atomic file editors) saves up to 95 percent of prompt token overhead compared to shallow micro-tool catalogs.
-- **Grammar-constrained logit decoding:** Compiling schemas into Deterministic Finite Automata (DFAs) allows CUDA kernels to mask invalid token logits to $-\infty$, mathematically guaranteeing 100 percent syntactic compliance at sub-millisecond latency.
-- **At-most-once execution via idempotency:** Binding mutating tool calls to cryptographic trajectory nonces $\eta$ and distributed lease locks guarantees that network retry loops never trigger duplicate real-world mutations.
-- **Schema evolution and tracing:** Forward-compatible schemas, tolerant readers, and OpenTelemetry trace propagation are required to maintain stability and observability across distributed agent workflows.
-- **Execution control and backpressure:** Agent runtimes must implement circuit breakers, transparent backoff, and chunked streaming responses to protect downstream APIs and avoid context exhaustion.
-- **Semantic signal translation:** Tool runtimes must decode raw POSIX signals and exit codes into actionable diagnostic feedback, utilizing head-and-tail buffering to preserve context limits.
+Tool interfaces govern the crucial boundary where statistical token generators interact with deterministic system APIs. By replacing unstructured natural language string parsing with typed, versioned ABIs (such as the Model Context Protocol), grammar-constrained logit masking, and cryptographic idempotency keys, systems turn brittle text completions into enforceable system calls.
+
+::: {.callout-takeaways title="Model Context Protocol and tool invocation contracts"}
+* **Typed ABIs over string scraping:** Robust agent systems reject fragile regex text parsing, interfacing with deterministic environments through typed, versioned ABIs.
+* **Model Context Protocol (MCP):** MCP standardizes client-server capability negotiation and duplex JSON-RPC communication over `stdio` and `SSE`, solving the $M \times N$ integration scaling bottleneck.
+* **Wire protocols are not security boundaries:** Wire protocols only standardize serialization; isolation and privilege control must be enforced below the wire via operating system sandboxes.
+* **Ousterhout’s Deep Modules:** Designing a few expressive, deep tools (such as persistent shells and atomic file editors) saves up to 95 percent of prompt token overhead compared to shallow micro-tool catalogs.
+* **Grammar-constrained logit decoding:** Compiling schemas into Deterministic Finite Automata (DFAs) allows CUDA kernels to mask invalid token logits to $-\infty$, mathematically guaranteeing 100 percent syntactic compliance at sub-millisecond latency.
+* **At-most-once execution via idempotency:** Binding mutating tool calls to cryptographic trajectory nonces $\eta$ and distributed lease locks guarantees that network retry loops never trigger duplicate real-world mutations.
+* **Schema evolution and tracing:** Forward-compatible schemas, tolerant readers, and OpenTelemetry trace propagation are required to maintain stability and observability across distributed agent workflows.
+* **Execution control and backpressure:** Agent runtimes must implement circuit breakers, transparent backoff, and chunked streaming responses to protect downstream APIs and avoid context exhaustion.
+* **Semantic signal translation:** Tool runtimes must decode raw POSIX signals and exit codes into actionable diagnostic feedback, utilizing head-and-tail buffering to preserve context limits.
+:::
+
+Standardizing the tool interface turns the model from a passive responder into an active client of external systems. Yet structured schemas and grammar-constrained decoding only guarantee syntactic validity: a syntactically perfect JSON payload can still issue a catastrophic command or delete a production database.
+
+::: {.callout-chapter-connection title="From tool protocols to execution sandboxing"}
+Structured tool protocols establish how an agent expresses operational intent, but syntactic validity offers zero defense against destructive actions or prompt injection attacks. @Sec-vol3-sandboxing-isolation moves beneath the wire protocol to explore execution sandboxing: enforcing hardware virtualization, ephemeral Copy-on-Write workspaces, and seccomp syscall filters to contain untrusted agent reasoning within strict fault domains.
+:::

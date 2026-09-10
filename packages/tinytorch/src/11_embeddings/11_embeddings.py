@@ -558,9 +558,62 @@ def test_unit_embedding():
 
     print("✅ Embedding layer works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_embedding()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Embedding gradients
+
+The forward pass is a lookup, so it is hard to get wrong. The backward pass is
+where embeddings are actually interesting, and where the bug is invisible: if you
+write `grad_weight[indices] = grad` instead of `np.add.at`, a token that appears
+twice in a sequence keeps only one of its two gradients. The forward output is
+identical, the loss still falls, and the table simply learns more slowly than it
+should for exactly the tokens that matter most.
+
+**What we're testing**: Scatter-add accumulation for repeated indices, and that
+untouched rows receive no gradient at all
+**Why it matters**: Assignment instead of accumulation silently halves the signal
+for frequent tokens, which are the ones a language model sees most
+**Expected**: Row 0 (used twice) gets twice the gradient of row 2 (used once);
+row 1 (unused) stays exactly zero
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-embedding-backward", "locked": true, "points": 10}
+def test_unit_embedding_backward():
+    """🧪 Test Embedding gradient accumulation."""
+    print("🧪 Unit Test: Embedding gradients...")
+
+    embed = Embedding(vocab_size=4, embed_dim=2)
+
+    # Token 0 appears twice, token 2 once, tokens 1 and 3 not at all.
+    tokens = Tensor([0, 2, 0])
+    output = embed.forward(tokens)
+    output.sum().backward()
+
+    grad = embed.weight.grad
+    assert grad is not None, "No gradient reached embed.weight"
+
+    # Every position contributes a gradient of 1 to its row.
+    assert np.allclose(grad[0], [2.0, 2.0]), (
+        f"Row 0 is used twice so its gradient should be [2, 2], got {grad[0]}. "
+        "Indexed assignment overwrites instead of accumulating; use np.add.at."
+    )
+    assert np.allclose(grad[2], [1.0, 1.0]), (
+        f"Row 2 is used once so its gradient should be [1, 1], got {grad[2]}"
+    )
+    assert np.allclose(grad[1], [0.0, 0.0]), (
+        f"Row 1 is never looked up so its gradient must stay zero, got {grad[1]}"
+    )
+    assert np.allclose(grad[3], [0.0, 0.0]), (
+        f"Row 3 is never looked up so its gradient must stay zero, got {grad[3]}"
+    )
+
+    print("✅ Embedding gradients accumulate correctly!")
+
+if __name__ == "__main__":
+    test_unit_embedding_backward()
 
 # %% [markdown]
 """
@@ -656,7 +709,7 @@ class PositionalEncoding:
         Args:
             x: Input embeddings of shape (batch_size, seq_len, embed_dim)
             start_pos: Position of the first token in x. 0 for a whole sequence;
-                       Module 18's KV cache feeds one token at a time and passes
+                       Module 18's KV cache will feed one token at a time and pass
                        the number of tokens already cached.
 
         Returns:
@@ -671,7 +724,11 @@ class PositionalEncoding:
         4. Add to input embeddings
 
         HINTS:
-        - pos_embeddings.data[np.newaxis, :, :] adds the batch dimension
+        - Use pos_embeddings.reshape(1, seq_len, embed_dim) to add the batch dimension.
+          Do NOT write Tensor(pos_embeddings.data[np.newaxis]): reading .data and
+          re-wrapping it builds a new leaf tensor, which cuts these positions out of
+          the graph. The forward output looks identical and the gradient silently
+          never reaches the parameter.
         - Use x + pos_embeddings_batched for element-wise addition
         """
         ### BEGIN SOLUTION
@@ -824,7 +881,6 @@ def test_unit_positional_encoding():
 
     print("✅ Positional encoding works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_positional_encoding()
 
@@ -1114,7 +1170,6 @@ def test_unit_sinusoidal_embeddings():
 
     print("✅ Sinusoidal embeddings work correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_sinusoidal_embeddings()
 
@@ -1395,7 +1450,7 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     Forward pass through complete embedding system.
 
     start_pos is the position of the first token in `tokens`. It is 0 for a whole
-    sequence; Module 18's KV cache feeds one token at a time and passes how many
+    sequence; Module 18's KV cache will feed one token at a time and pass how many
     tokens are already cached, so each new token gets its true position.
 
     TODO: Compose token embed + optional scaling + positional encoding
@@ -1553,7 +1608,6 @@ def test_unit_complete_embedding_system():
 
     print("✅ Complete embedding system works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_complete_embedding_system()
 
@@ -1609,7 +1663,6 @@ def analyze_embedding_memory_scaling():
     print("• Learned PE adds memory but may improve task-specific performance")
     print("• Sinusoidal PE saves memory and allows longer sequences")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_embedding_memory_scaling()
 
@@ -1665,7 +1718,6 @@ def analyze_embedding_performance():
     print("• Memory bandwidth becomes bottleneck for large embedding dimensions")
     print("• Cache locality important for repeated token patterns")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_embedding_performance()
 
@@ -1740,7 +1792,6 @@ def analyze_positional_encoding_strategies():
     print(f"  - Cannot adapt to task-specific position patterns")
     print(f"  - May be suboptimal for highly position-dependent tasks")
 
-# Run analysis when developing/testing this module
 if __name__ == "__main__":
     analyze_positional_encoding_strategies()
 
@@ -1769,6 +1820,7 @@ def test_module():
     print("Running unit tests...")
     test_unit_embedding_init()
     test_unit_embedding()
+    test_unit_embedding_backward()
     test_unit_positional_encoding_init()
     test_unit_positional_encoding()
     test_unit_sinusoidal_table()
@@ -1882,7 +1934,7 @@ def test_module():
 
 Answer these to deepen your understanding of embedding systems and their implications:
 
-### 1. Memory Scaling
+### Question 1: Memory Scaling
 You implemented an embedding layer with vocab_size=50,000 and embed_dim=512.
 - How many parameters does this embedding table contain? _____ million
 - If using FP32 (4 bytes per parameter), how much memory does this use? _____ MB
@@ -1890,7 +1942,7 @@ You implemented an embedding layer with vocab_size=50,000 and embed_dim=512.
 
 ---
 
-### 2. Lookup Complexity
+### Question 2: Lookup Complexity
 Your embedding layer performs table lookups for token indices.
 - What is the time complexity of looking up a single token? O(_____)
 - For a batch of 32 sequences, each of length 128, how many lookup operations? _____
@@ -1898,7 +1950,7 @@ Your embedding layer performs table lookups for token indices.
 
 ---
 
-### 3. Positional Encoding Trade-offs
+### Question 3: Positional Encoding Trade-offs
 You implemented both learned and sinusoidal positional encodings.
 - Learned PE for max_seq_len=2048, embed_dim=512 adds how many parameters? _____
 - What happens if you try to process a sequence longer than max_seq_len with learned PE? _____
@@ -1906,7 +1958,7 @@ You implemented both learned and sinusoidal positional encodings.
 
 ---
 
-### 4. Production Implications
+### Question 4: Production Implications
 Your complete EmbeddingLayer combines token and positional embeddings.
 - In GPT-3 (vocab_size≈50K, embed_dim≈12K), approximately what percentage of total parameters are in the embedding table? _____%
 - If you wanted to reduce memory usage by 50%, which would be more effective: halving vocab_size or halving embed_dim? _____

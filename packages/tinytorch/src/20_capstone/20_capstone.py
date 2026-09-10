@@ -31,8 +31,8 @@ Modules 01-13 → Optimization Suite (14-18) → Benchmarking (19) → Submissio
 
 ## 🎯 Learning Objectives
 By the end of this capstone, you will:
-1. Use Module 19's benchmarking tools to measure model performance comprehensively
-2. Apply optimization techniques from Modules 14-18 to improve baseline models
+1. Use Module 19's `precise_timer` to measure latency and throughput as two separate measurements
+2. Apply optimization techniques from Modules 15 and 16 to improve a baseline model
 3. Generate standardized JSON submissions following industry best practices
 4. Validate submissions against a schema for reproducibility
 5. Compare baseline vs. optimized models with quantitative metrics
@@ -47,15 +47,16 @@ Let's get started!
 
 ```python
 # Final package structure:
-from tinytorch.olympics import generate_submission, BenchmarkReport
+from tinytorch.olympics import BenchmarkReport, generate_submission, save_submission, validate_submission_schema
 
 # Benchmark your model
-report = BenchmarkReport()
+report = BenchmarkReport(model_name="my_model")
 report.benchmark_model(my_model, X_test, y_test)
 
-# Generate submission
+# Generate, validate, and save the submission (a plain dict, written as JSON)
 submission = generate_submission(report)
-submission.save("my_submission.json")
+validate_submission_schema(submission)
+save_submission(submission, "my_submission.json")
 ```
 
 **Why this matters:**
@@ -73,7 +74,7 @@ submission.save("my_submission.json")
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
-- `time` (for latency measurements)
+- `time` (for the report timestamp)
 - `json` (for submission serialization)
 - `pathlib` (for file path handling)
 - `platform` (for system information)
@@ -82,7 +83,8 @@ submission.save("my_submission.json")
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.layers` (Linear layer from Module 03)
 - `tinytorch.core.activations` (ReLU from Module 02)
-- Optimization modules 14-18 (optional, for advanced workflows)
+- `tinytorch.perf.benchmarking` (`precise_timer` from Module 19, used for every timing)
+- `tinytorch.perf.profiling`, `tinytorch.perf.quantization`, `tinytorch.perf.compression` (Modules 14, 15, 16; imported only inside the optimization workflow example)
 
 **Dependency Flow**:
 ```
@@ -140,18 +142,17 @@ This module shows you how to:
 4. **Document optimizations** - Tracking what techniques were applied and their impact
 5. **Share professionally** - Generating submission files that work like research papers
 
-Let's build a benchmarking and submission system worthy of production ML!
+Let's build the benchmarking and submission system.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp olympics
 #| export
 import numpy as np
-rng = np.random.default_rng(7)
 import time
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 import platform
 import sys
 
@@ -159,6 +160,11 @@ import sys
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
+from tinytorch.perf.benchmarking import precise_timer  # Module 19's timing context manager
+
+# One generator for the two example workflows below. The unit tests seed their
+# own generators so a test's numbers never depend on which cells ran before it.
+rng = np.random.default_rng(7)
 
 # %% [markdown]
 """
@@ -269,6 +275,8 @@ Example:
 
 Trade-off: Batching increases throughput but adds latency!
 ```
+
+Because the two pull in opposite directions, `BenchmarkReport` measures them with two different calls: latency times `model.forward` on one sample, and throughput times `model.forward` on the whole test batch and divides the batch size by that time. Deriving one from the other (`1000 / latency_ms`) would erase exactly the trade-off this box describes.
 
 ### Why Variance Matters
 
@@ -425,7 +433,8 @@ class SimpleMLP:
         ### END SOLUTION
 
     def parameters(self):
-        """Return model parameters for perf."""
+        """Return every parameter (fc1 first, then fc2) so count_parameters,
+        Module 14's Profiler, and Module 16's magnitude_prune can walk them."""
         return self.fc1.parameters() + self.fc2.parameters()
 
     def count_parameters(self):
@@ -474,7 +483,48 @@ This small model is perfect for demonstrating optimization impact without long b
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Benchmark Report Class
+### 🧪 Unit Test: SimpleMLP
+
+This test validates the SimpleMLP model works correctly for benchmarking demonstrations.
+
+**What we're testing**: Model creation, parameter counting, and forward pass
+**Why it matters**: The model must work correctly before we can benchmark it
+**Expected**: Correct output shapes and no NaN values
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-simple-mlp", "locked": true, "points": 10}
+def test_unit_simple_mlp():
+    """🧪 Test SimpleMLP model creation and forward pass."""
+    print("🧪 Unit Test: SimpleMLP...")
+
+    # Test model creation with default parameters
+    model = SimpleMLP()
+    assert model is not None, "Model should be created"
+
+    # Test with custom parameters
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+
+    # Test parameter count
+    param_count = model.count_parameters()
+    expected_params = (10 * 20 + 20) + (20 * 3 + 3)  # fc1 + fc2
+    assert param_count == expected_params, f"Expected {expected_params} parameters, got {param_count}"
+
+    # Test forward pass
+    rng = np.random.default_rng(7)
+    X = Tensor(rng.standard_normal((5, 10)))  # 5 samples, 10 features
+    output = model.forward(X)
+
+    assert output.shape == (5, 3), f"Expected output shape (5, 3), got {output.shape}"
+    assert not np.isnan(output.data).any(), "Output should not contain NaN values"
+
+    print("✅ SimpleMLP works correctly!")
+
+if __name__ == "__main__":
+    test_unit_simple_mlp()
+
+# %% [markdown]
+"""
+## 🏗️ Benchmark Report Class
 
 The BenchmarkReport class encapsulates all benchmark results and provides methods for comprehensive measurement and professional reporting.
 
@@ -535,8 +585,9 @@ class BenchmarkReport:
         2. Model size (MB) - Deployment cost (assumes FP32)
         3. Accuracy - Task performance (classification accuracy)
         4. Latency (mean ± std, and the median) - Inference speed and consistency,
-           timed with perf_counter after a few untimed warmup runs (Module 19)
-        5. Throughput - Maximum samples/second capacity
+           timed with Module 19's precise_timer after a few untimed warmup runs
+        5. Throughput - Samples per second when the whole test batch goes through
+           one forward call, timed separately from latency (see Foundations)
         """
         # Count parameters and stored size (see measure_memory)
         param_count = model.count_parameters()
@@ -555,6 +606,21 @@ class BenchmarkReport:
         std_latency = np.std(latencies)
         median_latency = np.median(latencies)
 
+        # Throughput: time the WHOLE batch through one forward call, num_runs times,
+        # after its own untimed warmup. This is a separate measurement, not
+        # 1000 / latency: batching raises samples/second without making any one
+        # sample faster (Foundations, "Latency vs. Throughput")
+        batch_size = X_test.shape[0]
+        for _ in range(min(5, num_runs)):
+            _ = model.forward(X_test)
+        batch_seconds = []
+        for _ in range(num_runs):
+            with precise_timer() as timer:
+                _ = model.forward(X_test)
+            batch_seconds.append(timer.elapsed)
+        # Median batch time, floored so a batch that measures 0.0 s cannot divide by zero
+        throughput = batch_size / max(np.median(batch_seconds), 1e-9)
+
         # Store metrics (all as Python native types for JSON serialization)
         self.metrics = {
             'parameter_count': int(param_count),
@@ -563,9 +629,7 @@ class BenchmarkReport:
             'latency_ms_mean': float(avg_latency),
             'latency_ms_std': float(std_latency),
             'latency_ms_median': float(median_latency),
-            # Floor the denominator so an empty model that measures 0.0 ms
-            # cannot divide by zero
-            'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
+            'throughput_samples_per_sec': float(throughput)
         }
 
         print(f"\n📊 Benchmark Results for {self.model_name}:")
@@ -573,35 +637,45 @@ class BenchmarkReport:
         print(f"  Size: {model_size_mb:.2f} MB")
         print(f"  Accuracy: {accuracy*100:.1f}%")
         print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
+        print(f"  Throughput: {throughput:,.0f} samples/sec (batch of {batch_size})")
 
         return self.metrics
 
-    def measure_latency(self, model, X_sample, num_runs=100):
+    def measure_latency(self, model, X_batch, num_runs=100):
         """
-        Measure inference latency over multiple runs.
+        Measure single-sample inference latency over multiple runs.
+
+        Args:
+            model: Model with a .forward() method
+            X_batch: Test inputs (Tensor); only the first sample, X_batch[:1], is timed
+            num_runs: Number of timed runs (default: 100)
+
+        Returns:
+            List of per-run latencies in milliseconds
 
         TODO: Time single-sample inference over multiple runs
 
         APPROACH:
         1. Run a few untimed warmup calls first (Module 19)
         2. Run inference num_runs times
-        3. Measure each run with time.perf_counter()
-        4. Convert to milliseconds
-        5. Return list of latencies
+        3. Time each run with Module 19's precise_timer() context manager
+        4. Convert seconds to milliseconds
+        5. Return the list of latencies
 
         HINTS:
-        - Use time.perf_counter() before and after model.forward()
+        - `with precise_timer() as timer:` around model.forward(); timer.elapsed
+          holds the seconds once the block exits
         - Multiply by 1000 to convert seconds to milliseconds
-        - Use X_sample[:1] for single-sample timing
+        - Use X_batch[:1] so each call sees exactly one sample
         """
         ### BEGIN SOLUTION
         for _ in range(min(5, num_runs)):
-            _ = model.forward(X_sample[:1])
+            _ = model.forward(X_batch[:1])
         latencies = []
         for _ in range(num_runs):
-            start = time.perf_counter()
-            _ = model.forward(X_sample[:1])
-            latencies.append((time.perf_counter() - start) * 1000)
+            with precise_timer() as timer:
+                _ = model.forward(X_batch[:1])
+            latencies.append(timer.elapsed * 1000)
         return latencies
         ### END SOLUTION
 
@@ -649,13 +723,13 @@ Metric Decision Tree:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Design Choice: Why num_runs=100?
+### Design Choice: Warmup, Then num_runs=100
 
-We run inference 100 times by default to:
-- **Warm up** the system (first runs are often slower)
-- **Capture variance** (some runs hit cache, others miss)
-- **Average out noise** (OS interrupts, GC pauses)
-- **Get confidence intervals** (via std dev)
+`measure_latency` makes a few untimed calls first, then times 100 calls:
+- **Warmup is untimed**, so first-call costs (allocations, cold caches) stay out of the numbers
+- **100 timed runs** average out OS interrupts and GC pauses, and the std shows how consistent the model is
+- **The median is reported alongside mean ± std** because a few slow outliers drag the mean; the submission compares medians for that reason
+- **Std is a spread, not a confidence interval**: it says how wide the distribution is, not how sure you are of the mean
 
 ```
 Single Run (Unreliable):        Multiple Runs (Reliable):
@@ -663,12 +737,12 @@ Single Run (Unreliable):        Multiple Runs (Reliable):
 │ Run 1: 12.3ms           │     │ Run 1: 12.3ms           │
 │                         │     │ Run 2: 9.8ms            │
 │ Result: 12.3ms          │     │ Run 3: 10.1ms           │
-│ Confidence: Low         │     │ ...                     │
+│ Spread: unknown         │     │ ...                     │
 │ (Could be outlier!)     │     │ Run 100: 10.2ms         │
 │                         │     │                         │
 │                         │     │ Result: 10.0ms ± 0.5ms  │
-│                         │     │ Confidence: High        │
-│                         │     │ (Statistically sound)   │
+│                         │     │ Spread: visible         │
+│                         │     │ (median 10.1ms)         │
 └─────────────────────────┘     └─────────────────────────┘
 ```
 
@@ -695,7 +769,64 @@ This design decision makes our submissions JSON-compatible without custom encode
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Submission Generation
+### 🧪 Unit Test: BenchmarkReport
+
+This test validates the BenchmarkReport class captures all required metrics.
+
+**What we're testing**: Report initialization, metric collection, and value ranges
+**Why it matters**: Benchmarks must be comprehensive and accurate for reproducibility
+**Expected**: All required metrics present with valid types and ranges
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchmark-report", "locked": true, "points": 15}
+def test_unit_benchmark_report():
+    """🧪 Test BenchmarkReport class functionality."""
+    print("🧪 Unit Test: BenchmarkReport...")
+
+    # Create report
+    report = BenchmarkReport(model_name="test_model")
+
+    # Check initialization
+    assert report.model_name == "test_model", "Model name should be set correctly"
+    assert report.timestamp is not None, "Timestamp should be set"
+    assert report.system_info is not None, "System info should be collected"
+    assert 'platform' in report.system_info, "Should have platform info"
+    assert 'python_version' in report.system_info, "Should have Python version"
+
+    # Create test data
+    rng = np.random.default_rng(7)
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
+
+    # Benchmark model
+    metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
+
+    # Check metrics exist
+    required_metrics = [
+        'parameter_count', 'model_size_mb', 'accuracy',
+        'latency_ms_mean', 'latency_ms_std', 'throughput_samples_per_sec'
+    ]
+    for metric in required_metrics:
+        assert metric in metrics, f"Missing metric: {metric}"
+
+    # Check metric types and ranges
+    assert isinstance(metrics['parameter_count'], int), "Parameter count should be int"
+    assert metrics['parameter_count'] > 0, "Should have positive parameter count"
+    assert metrics['model_size_mb'] > 0, "Model size should be positive"
+    assert 0 <= metrics['accuracy'] <= 1, "Accuracy should be in [0, 1]"
+    assert metrics['latency_ms_mean'] > 0, "Latency should be positive"
+    assert metrics['latency_ms_std'] >= 0, "Standard deviation should be non-negative"
+    assert metrics['throughput_samples_per_sec'] > 0, "Throughput should be positive"
+
+    print("✅ BenchmarkReport works correctly!")
+
+if __name__ == "__main__":
+    test_unit_benchmark_report()
+
+# %% [markdown]
+"""
+## 🏗️ Submission Generation
 
 The core function that generates a standardized JSON submission from benchmark results.
 
@@ -775,9 +906,10 @@ def generate_submission(
         optimized_size = optimized_report.metrics['model_size_mb']
 
         submission['improvements'] = {
-            # Floor the denominator so an empty model that measures 0.0 ms cannot divide by zero
+            # Floor both denominators: an empty model measures 0.0 ms, and a model
+            # pruned to sparsity 1.0 stores 0 bytes
             'speedup': float(baseline_latency / max(optimized_latency, 1e-6)),
-            'compression_ratio': float(baseline_size / optimized_size),
+            'compression_ratio': float(baseline_size / max(optimized_size, 1e-9)),
             'accuracy_delta': float(
                 optimized_report.metrics['accuracy'] - baseline_report.metrics['accuracy']
             )
@@ -921,7 +1053,358 @@ In production ML, schema validation is what makes benchmarks trustworthy and com
 
 # %% [markdown]
 """
-## 🔧 Integration: Complete Example Workflow
+### 🧪 Unit Test: Submission Generation
+
+This test validates the submission generation creates proper JSON structure.
+
+**What we're testing**: Submission structure, required fields, and optional fields
+**Why it matters**: Submissions must be schema-compliant for community sharing
+**Expected**: Valid JSON structure with all required fields
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-generation", "locked": true, "points": 15}
+def test_unit_submission_generation():
+    """🧪 Test generate_submission() function."""
+    print("🧪 Unit Test: Submission Generation...")
+
+    # Create baseline report
+    rng = np.random.default_rng(7)
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
+
+    baseline_report = BenchmarkReport(model_name="baseline_model")
+    baseline_report.benchmark_model(model, X_test, y_test, num_runs=10)
+
+    # Generate submission with baseline only
+    submission = generate_submission(baseline_report)
+
+    # Check submission structure
+    assert isinstance(submission, dict), "Submission should be a dictionary"
+    assert 'tinytorch_version' in submission, "Should have version field"
+    assert 'submission_type' in submission, "Should have submission type"
+    assert 'timestamp' in submission, "Should have timestamp"
+    assert 'system_info' in submission, "Should have system info"
+    assert 'baseline' in submission, "Should have baseline results"
+
+    # Check baseline structure
+    baseline = submission['baseline']
+    assert 'model_name' in baseline, "Baseline should have model name"
+    assert 'metrics' in baseline, "Baseline should have metrics"
+    assert baseline['model_name'] == "baseline_model", "Model name should match"
+
+    # Test with student name
+    submission_with_name = generate_submission(baseline_report, student_name="Test Student")
+    assert 'student_name' in submission_with_name, "Should include student name when provided"
+    assert submission_with_name['student_name'] == "Test Student", "Student name should match"
+
+    print("✅ Submission generation works correctly!")
+
+if __name__ == "__main__":
+    test_unit_submission_generation()
+
+# %% [markdown]
+"""
+### The Submission Schema
+
+Before a submission is worth comparing against anyone else's, it has to be
+readable by the tooling that aggregates it. The validator below is the contract:
+it names the required fields and the ranges their values must fall in. It ships
+with the package so the graders and your own scripts can apply the same rules.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "validate-submission-schema", "solution": false}
+#| export
+def validate_submission_schema(submission: Dict[str, Any]) -> bool:
+    """
+    Validate submission JSON conforms to required schema.
+
+    This function ensures submissions are:
+    - Complete (no missing required fields)
+    - Type-safe (correct data types)
+    - Valid (values in acceptable ranges)
+
+    Used for automated validation before accepting community submissions.
+    """
+    # Check required top-level fields
+    required_fields = ['tinytorch_version', 'submission_type', 'timestamp', 'system_info', 'baseline']
+    for field in required_fields:
+        if field not in submission:
+            raise AssertionError(f"Missing required field: {field}")
+
+    # Check field types
+    assert isinstance(submission['tinytorch_version'], str), "Version should be string"
+    assert isinstance(submission['submission_type'], str), "Submission type should be string"
+    assert isinstance(submission['timestamp'], str), "Timestamp should be string"
+    assert isinstance(submission['system_info'], dict), "System info should be dict"
+    assert isinstance(submission['baseline'], dict), "Baseline should be dict"
+
+    # Check baseline structure
+    baseline = submission['baseline']
+    assert 'model_name' in baseline, "Baseline missing model_name"
+    assert 'metrics' in baseline, "Baseline missing metrics"
+
+    # Check metrics structure and types
+    metrics = baseline['metrics']
+    required_metrics = ['parameter_count', 'model_size_mb', 'accuracy', 'latency_ms_mean']
+    for metric in required_metrics:
+        if metric not in metrics:
+            raise AssertionError(f"Missing metric in baseline: {metric}")
+
+    # Check metric value ranges
+    assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
+    assert metrics['parameter_count'] > 0, "Parameter count must be positive"
+    assert metrics['model_size_mb'] > 0, "Model size must be positive"
+    assert metrics['latency_ms_mean'] > 0, "Latency must be positive"
+
+    # Check system info
+    system_info = submission['system_info']
+    assert 'platform' in system_info, "System info missing platform"
+    assert 'python_version' in system_info, "System info missing python_version"
+
+    return True
+
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Schema Validation
+
+This test validates submissions conform to the required schema.
+
+**What we're testing**: Required fields, type safety, value constraints
+**Why it matters**: Schema validation enables automated aggregation and comparison
+**Expected**: Valid submissions pass, invalid submissions fail with clear errors
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
+def test_unit_submission_schema():
+    """🧪 Test submission schema validation."""
+    print("🧪 Unit Test: Submission Schema...")
+
+    # Create valid submission
+    rng = np.random.default_rng(7)
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
+
+    report = BenchmarkReport(model_name="test_model")
+    report.benchmark_model(model, X_test, y_test, num_runs=10)
+
+    submission = generate_submission(report)
+
+    # Validate schema
+    assert validate_submission_schema(submission), "Submission should pass schema validation"
+
+    # Test with optimized results
+    optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)
+    optimized_report = BenchmarkReport(model_name="optimized_model")
+    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=10)
+
+    submission_with_opt = generate_submission(
+        report,
+        optimized_report,
+        techniques_applied=["pruning"]
+    )
+
+    # Validate optimized submission
+    assert validate_submission_schema(submission_with_opt), "Optimized submission should pass validation"
+    assert 'optimized' in submission_with_opt, "Should have optimized section"
+    assert 'improvements' in submission_with_opt, "Should have improvements section"
+
+    print("✅ Submission schema validation works correctly!")
+
+if __name__ == "__main__":
+    test_unit_submission_schema()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Submission with Optimization
+
+This test validates submissions with both baseline and optimized results.
+
+**What we're testing**: Optimized section, techniques list, improvements calculation
+**Why it matters**: Comparing baseline vs optimized is the core value of benchmarking
+**Expected**: Proper improvements calculation with speedup, compression, accuracy delta
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-submission-with-optimization", "locked": true, "points": 10}
+def test_unit_submission_with_optimization():
+    """🧪 Test submission with baseline + optimized comparison."""
+    print("🧪 Unit Test: Submission with Optimization...")
+
+    # Create baseline
+    rng = np.random.default_rng(7)
+    baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
+
+    baseline_report = BenchmarkReport(model_name="baseline")
+    baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=10)
+
+    # Create optimized version (smaller model for demo)
+    optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)
+    optimized_report = BenchmarkReport(model_name="optimized")
+    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=10)
+
+    # Generate submission with both
+    techniques = ["model_sizing", "pruning"]
+    submission = generate_submission(
+        baseline_report,
+        optimized_report,
+        student_name="Test Student",
+        techniques_applied=techniques
+    )
+
+    # Check optimized section exists
+    assert 'optimized' in submission, "Should have optimized section"
+    optimized = submission['optimized']
+    assert 'model_name' in optimized, "Optimized section should have model name"
+    assert 'metrics' in optimized, "Optimized section should have metrics"
+    assert 'techniques_applied' in optimized, "Should have techniques list"
+    assert optimized['techniques_applied'] == techniques, "Techniques should match"
+
+    # Check improvements section
+    assert 'improvements' in submission, "Should have improvements section"
+    improvements = submission['improvements']
+    assert 'speedup' in improvements, "Should have speedup metric"
+    assert 'compression_ratio' in improvements, "Should have compression ratio"
+    assert 'accuracy_delta' in improvements, "Should have accuracy delta"
+
+    # Check improvement values are reasonable
+    assert improvements['speedup'] > 0, "Speedup should be positive"
+    assert improvements['compression_ratio'] > 0, "Compression ratio should be positive"
+    assert -1 <= improvements['accuracy_delta'] <= 1, "Accuracy delta should be in [-1, 1]"
+
+    print("✅ Submission with optimization works correctly!")
+
+if __name__ == "__main__":
+    test_unit_submission_with_optimization()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Improvements Calculation
+
+This test validates the mathematical correctness of improvement metrics.
+
+**What we're testing**: Speedup, compression ratio, accuracy delta formulas
+**Why it matters**: Incorrect calculations would invalidate all comparisons
+**Expected**: Exact match with manual calculations
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-improvements-calculation", "locked": true, "points": 10}
+def test_unit_improvements_calculation():
+    """🧪 Test speedup/compression/accuracy calculations are correct."""
+    print("🧪 Unit Test: Improvements Calculation...")
+
+    # Create baseline with known metrics
+    baseline_report = BenchmarkReport(model_name="baseline")
+    baseline_report.metrics = {
+        'parameter_count': 1000,
+        'model_size_mb': 4.0,
+        'accuracy': 0.80,
+        'latency_ms_mean': 10.0,
+        'latency_ms_std': 1.0,
+        'throughput_samples_per_sec': 100.0
+    }
+    baseline_report.timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    baseline_report.system_info = {'platform': 'test', 'python_version': '3.9', 'numpy_version': '1.20'}
+
+    # Create optimized with 2x speedup, 2x compression, 5% accuracy loss
+    optimized_report = BenchmarkReport(model_name="optimized")
+    optimized_report.metrics = {
+        'parameter_count': 500,
+        'model_size_mb': 2.0,
+        'accuracy': 0.75,
+        'latency_ms_mean': 5.0,
+        'latency_ms_std': 0.5,
+        'throughput_samples_per_sec': 200.0
+    }
+    optimized_report.timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    optimized_report.system_info = baseline_report.system_info
+
+    # Generate submission
+    submission = generate_submission(baseline_report, optimized_report)
+
+    improvements = submission['improvements']
+
+    # Verify calculations
+    # Speedup = baseline_latency / optimized_latency = 10.0 / 5.0 = 2.0
+    assert abs(improvements['speedup'] - 2.0) < 0.01, f"Expected speedup 2.0, got {improvements['speedup']}"
+
+    # Compression = baseline_size / optimized_size = 4.0 / 2.0 = 2.0
+    assert abs(improvements['compression_ratio'] - 2.0) < 0.01, f"Expected compression 2.0, got {improvements['compression_ratio']}"
+
+    # Accuracy delta = 0.75 - 0.80 = -0.05
+    assert abs(improvements['accuracy_delta'] - (-0.05)) < 0.001, f"Expected accuracy delta -0.05, got {improvements['accuracy_delta']}"
+
+    print("✅ Improvements calculation is correct!")
+
+if __name__ == "__main__":
+    test_unit_improvements_calculation()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: JSON Serialization
+
+This test validates save_submission() creates valid, round-trip compatible JSON.
+
+**What we're testing**: File creation, JSON validity, round-trip preservation
+**Why it matters**: Submissions must be loadable and shareable
+**Expected**: Valid JSON that loads with identical structure
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-json-serialization", "locked": true, "points": 10}
+def test_unit_json_serialization():
+    """🧪 Test save_submission() creates valid JSON files."""
+    print("🧪 Unit Test: JSON Serialization...")
+
+    # Create submission
+    rng = np.random.default_rng(7)
+    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
+
+    report = BenchmarkReport(model_name="test_model")
+    report.benchmark_model(model, X_test, y_test, num_runs=10)
+
+    submission = generate_submission(report, student_name="Test Student")
+
+    # Save to file
+    test_file = "/tmp/test_submission_unit.json"
+    filepath = save_submission(submission, test_file)
+
+    # Check file exists
+    assert Path(filepath).exists(), "Submission file should exist"
+
+    # Load and verify JSON is valid
+    loaded_json = json.loads(Path(test_file).read_text())
+
+    # Verify structure is preserved
+    assert loaded_json['tinytorch_version'] == submission['tinytorch_version'], "Version should match"
+    assert loaded_json['student_name'] == submission['student_name'], "Student name should match"
+    assert loaded_json['baseline']['model_name'] == submission['baseline']['model_name'], "Model name should match"
+
+    # Verify metrics are preserved
+    baseline_metrics = loaded_json['baseline']['metrics']
+    original_metrics = submission['baseline']['metrics']
+    assert baseline_metrics['accuracy'] == original_metrics['accuracy'], "Accuracy should match"
+    assert baseline_metrics['parameter_count'] == original_metrics['parameter_count'], "Parameter count should match"
+
+    # Verify JSON can be dumped again (round-trip test)
+    round_trip = json.dumps(loaded_json, indent=2)
+    assert len(round_trip) > 0, "JSON should serialize again"
+
+    # Clean up
+    Path(test_file).unlink()
+
+    print("✅ JSON serialization works correctly!")
+
+if __name__ == "__main__":
+    test_unit_json_serialization()
+
+# %% [markdown]
+"""
+## 🔧 Integration: From Model to Submission
 
 This section demonstrates the complete workflow from model to submission.
 Students can modify this to benchmark their own models!
@@ -988,7 +1471,6 @@ def run_example_benchmark():
     return submission
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     run_example_benchmark()
 
@@ -1028,7 +1510,7 @@ Production ML Workflow:
 
 # %% [markdown]
 """
-## 🔧 Integration: Advanced Optimization Workflow
+### Advanced Optimization Workflow
 
 This section demonstrates using the complete optimization pipeline from Modules 14-19:
 - Module 14 (Profiling): Measure baseline performance and identify bottlenecks
@@ -1152,13 +1634,12 @@ def run_optimization_workflow_example():
     return submission
 
 
-# Run the systems analysis
 if __name__ == "__main__":
     run_optimization_workflow_example()
 
 # %% [markdown]
 """
-### Combining Multiple Optimizations
+#### Combining Multiple Optimizations
 
 In production ML, you often stack optimizations for cumulative benefits:
 
@@ -1191,464 +1672,6 @@ The submission's `techniques_applied` list documents this for reproducibility:
 
 This tells other engineers EXACTLY what you did, so they can reproduce or build on your work!
 """
-
-# %% [markdown]
-"""
-## 🧪 Unit Tests: Verifying Each Component
-
-Individual unit tests for each component, following TinyTorch testing patterns.
-
-**Testing Strategy:**
-1. **Unit tests** - Test each class/function in isolation
-2. **Integration test** - Test complete workflow end-to-end (in test_module)
-3. **Schema validation** - Ensure submissions conform to standard
-4. **Edge cases** - Test with missing optional fields, extreme values
-
-Each test validates one specific aspect and provides clear feedback.
-"""
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: SimpleMLP
-
-This test validates the SimpleMLP model works correctly for benchmarking demonstrations.
-
-**What we're testing**: Model creation, parameter counting, and forward pass
-**Why it matters**: The model must work correctly before we can benchmark it
-**Expected**: Correct output shapes and no NaN values
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-simple-mlp", "locked": true, "points": 10}
-def test_unit_simple_mlp():
-    """🧪 Test SimpleMLP model creation and forward pass."""
-    print("🧪 Unit Test: SimpleMLP...")
-
-    # Test model creation with default parameters
-    model = SimpleMLP()
-    assert model is not None, "Model should be created"
-
-    # Test with custom parameters
-    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-
-    # Test parameter count
-    param_count = model.count_parameters()
-    expected_params = (10 * 20 + 20) + (20 * 3 + 3)  # fc1 + fc2
-    assert param_count == expected_params, f"Expected {expected_params} parameters, got {param_count}"
-
-    # Test forward pass
-    rng = np.random.default_rng(7)
-    X = Tensor(rng.standard_normal((5, 10)))  # 5 samples, 10 features
-    output = model.forward(X)
-
-    assert output.shape == (5, 3), f"Expected output shape (5, 3), got {output.shape}"
-    assert not np.isnan(output.data).any(), "Output should not contain NaN values"
-
-    print("✅ SimpleMLP works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_simple_mlp()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: BenchmarkReport
-
-This test validates the BenchmarkReport class captures all required metrics.
-
-**What we're testing**: Report initialization, metric collection, and value ranges
-**Why it matters**: Benchmarks must be comprehensive and accurate for reproducibility
-**Expected**: All required metrics present with valid types and ranges
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-benchmark-report", "locked": true, "points": 15}
-def test_unit_benchmark_report():
-    """🧪 Test BenchmarkReport class functionality."""
-    print("🧪 Unit Test: BenchmarkReport...")
-
-    # Create report
-    report = BenchmarkReport(model_name="test_model")
-
-    # Check initialization
-    assert report.model_name == "test_model", "Model name should be set correctly"
-    assert report.timestamp is not None, "Timestamp should be set"
-    assert report.system_info is not None, "System info should be collected"
-    assert 'platform' in report.system_info, "Should have platform info"
-    assert 'python_version' in report.system_info, "Should have Python version"
-
-    # Create test data
-    rng = np.random.default_rng(7)
-    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(rng.standard_normal((50, 10)))
-    y_test = rng.integers(0, 3, 50)
-
-    # Benchmark model
-    metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-    # Check metrics exist
-    required_metrics = [
-        'parameter_count', 'model_size_mb', 'accuracy',
-        'latency_ms_mean', 'latency_ms_std', 'throughput_samples_per_sec'
-    ]
-    for metric in required_metrics:
-        assert metric in metrics, f"Missing metric: {metric}"
-
-    # Check metric types and ranges
-    assert isinstance(metrics['parameter_count'], int), "Parameter count should be int"
-    assert metrics['parameter_count'] > 0, "Should have positive parameter count"
-    assert metrics['model_size_mb'] > 0, "Model size should be positive"
-    assert 0 <= metrics['accuracy'] <= 1, "Accuracy should be in [0, 1]"
-    assert metrics['latency_ms_mean'] > 0, "Latency should be positive"
-    assert metrics['latency_ms_std'] >= 0, "Standard deviation should be non-negative"
-    assert metrics['throughput_samples_per_sec'] > 0, "Throughput should be positive"
-
-    print("✅ BenchmarkReport works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_benchmark_report()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: Submission Generation
-
-This test validates the submission generation creates proper JSON structure.
-
-**What we're testing**: Submission structure, required fields, and optional fields
-**Why it matters**: Submissions must be schema-compliant for community sharing
-**Expected**: Valid JSON structure with all required fields
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-submission-generation", "locked": true, "points": 15}
-def test_unit_submission_generation():
-    """🧪 Test generate_submission() function."""
-    print("🧪 Unit Test: Submission Generation...")
-
-    # Create baseline report
-    rng = np.random.default_rng(7)
-    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(rng.standard_normal((50, 10)))
-    y_test = rng.integers(0, 3, 50)
-
-    baseline_report = BenchmarkReport(model_name="baseline_model")
-    baseline_report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-    # Generate submission with baseline only
-    submission = generate_submission(baseline_report)
-
-    # Check submission structure
-    assert isinstance(submission, dict), "Submission should be a dictionary"
-    assert 'tinytorch_version' in submission, "Should have version field"
-    assert 'submission_type' in submission, "Should have submission type"
-    assert 'timestamp' in submission, "Should have timestamp"
-    assert 'system_info' in submission, "Should have system info"
-    assert 'baseline' in submission, "Should have baseline results"
-
-    # Check baseline structure
-    baseline = submission['baseline']
-    assert 'model_name' in baseline, "Baseline should have model name"
-    assert 'metrics' in baseline, "Baseline should have metrics"
-    assert baseline['model_name'] == "baseline_model", "Model name should match"
-
-    # Test with student name
-    submission_with_name = generate_submission(baseline_report, student_name="Test Student")
-    assert 'student_name' in submission_with_name, "Should include student name when provided"
-    assert submission_with_name['student_name'] == "Test Student", "Student name should match"
-
-    print("✅ Submission generation works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_submission_generation()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: Schema Validation
-
-This test validates submissions conform to the required schema.
-
-**What we're testing**: Required fields, type safety, value constraints
-**Why it matters**: Schema validation enables automated aggregation and comparison
-**Expected**: Valid submissions pass, invalid submissions fail with clear errors
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
-def validate_submission_schema(submission: Dict[str, Any]) -> bool:
-    """
-    Validate submission JSON conforms to required schema.
-
-    This function ensures submissions are:
-    - Complete (no missing required fields)
-    - Type-safe (correct data types)
-    - Valid (values in acceptable ranges)
-
-    Used for automated validation before accepting community submissions.
-    """
-    # Check required top-level fields
-    required_fields = ['tinytorch_version', 'submission_type', 'timestamp', 'system_info', 'baseline']
-    for field in required_fields:
-        if field not in submission:
-            raise AssertionError(f"Missing required field: {field}")
-
-    # Check field types
-    assert isinstance(submission['tinytorch_version'], str), "Version should be string"
-    assert isinstance(submission['submission_type'], str), "Submission type should be string"
-    assert isinstance(submission['timestamp'], str), "Timestamp should be string"
-    assert isinstance(submission['system_info'], dict), "System info should be dict"
-    assert isinstance(submission['baseline'], dict), "Baseline should be dict"
-
-    # Check baseline structure
-    baseline = submission['baseline']
-    assert 'model_name' in baseline, "Baseline missing model_name"
-    assert 'metrics' in baseline, "Baseline missing metrics"
-
-    # Check metrics structure and types
-    metrics = baseline['metrics']
-    required_metrics = ['parameter_count', 'model_size_mb', 'accuracy', 'latency_ms_mean']
-    for metric in required_metrics:
-        if metric not in metrics:
-            raise AssertionError(f"Missing metric in baseline: {metric}")
-
-    # Check metric value ranges
-    assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
-    assert metrics['parameter_count'] > 0, "Parameter count must be positive"
-    assert metrics['model_size_mb'] > 0, "Model size must be positive"
-    assert metrics['latency_ms_mean'] > 0, "Latency must be positive"
-
-    # Check system info
-    system_info = submission['system_info']
-    assert 'platform' in system_info, "System info missing platform"
-    assert 'python_version' in system_info, "System info missing python_version"
-
-    return True
-
-def test_unit_submission_schema():
-    """🧪 Test submission schema validation."""
-    print("🧪 Unit Test: Submission Schema...")
-
-    # Create valid submission
-    rng = np.random.default_rng(7)
-    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(rng.standard_normal((50, 10)))
-    y_test = rng.integers(0, 3, 50)
-
-    report = BenchmarkReport(model_name="test_model")
-    report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-    submission = generate_submission(report)
-
-    # Validate schema
-    assert validate_submission_schema(submission), "Submission should pass schema validation"
-
-    # Test with optimized results
-    optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)
-    optimized_report = BenchmarkReport(model_name="optimized_model")
-    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=10)
-
-    submission_with_opt = generate_submission(
-        report,
-        optimized_report,
-        techniques_applied=["pruning"]
-    )
-
-    # Validate optimized submission
-    assert validate_submission_schema(submission_with_opt), "Optimized submission should pass validation"
-    assert 'optimized' in submission_with_opt, "Should have optimized section"
-    assert 'improvements' in submission_with_opt, "Should have improvements section"
-
-    print("✅ Submission schema validation works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_submission_schema()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: Submission with Optimization
-
-This test validates submissions with both baseline and optimized results.
-
-**What we're testing**: Optimized section, techniques list, improvements calculation
-**Why it matters**: Comparing baseline vs optimized is the core value of benchmarking
-**Expected**: Proper improvements calculation with speedup, compression, accuracy delta
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-submission-with-optimization", "locked": true, "points": 10}
-def test_unit_submission_with_optimization():
-    """🧪 Test submission with baseline + optimized comparison."""
-    print("🧪 Unit Test: Submission with Optimization...")
-
-    # Create baseline
-    rng = np.random.default_rng(7)
-    baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(rng.standard_normal((50, 10)))
-    y_test = rng.integers(0, 3, 50)
-
-    baseline_report = BenchmarkReport(model_name="baseline")
-    baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=10)
-
-    # Create optimized version (smaller model for demo)
-    optimized_model = SimpleMLP(input_size=10, hidden_size=15, output_size=3)
-    optimized_report = BenchmarkReport(model_name="optimized")
-    optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=10)
-
-    # Generate submission with both
-    techniques = ["model_sizing", "pruning"]
-    submission = generate_submission(
-        baseline_report,
-        optimized_report,
-        student_name="Test Student",
-        techniques_applied=techniques
-    )
-
-    # Check optimized section exists
-    assert 'optimized' in submission, "Should have optimized section"
-    optimized = submission['optimized']
-    assert 'model_name' in optimized, "Optimized section should have model name"
-    assert 'metrics' in optimized, "Optimized section should have metrics"
-    assert 'techniques_applied' in optimized, "Should have techniques list"
-    assert optimized['techniques_applied'] == techniques, "Techniques should match"
-
-    # Check improvements section
-    assert 'improvements' in submission, "Should have improvements section"
-    improvements = submission['improvements']
-    assert 'speedup' in improvements, "Should have speedup metric"
-    assert 'compression_ratio' in improvements, "Should have compression ratio"
-    assert 'accuracy_delta' in improvements, "Should have accuracy delta"
-
-    # Check improvement values are reasonable
-    assert improvements['speedup'] > 0, "Speedup should be positive"
-    assert improvements['compression_ratio'] > 0, "Compression ratio should be positive"
-    assert -1 <= improvements['accuracy_delta'] <= 1, "Accuracy delta should be in [-1, 1]"
-
-    print("✅ Submission with optimization works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_submission_with_optimization()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: Improvements Calculation
-
-This test validates the mathematical correctness of improvement metrics.
-
-**What we're testing**: Speedup, compression ratio, accuracy delta formulas
-**Why it matters**: Incorrect calculations would invalidate all comparisons
-**Expected**: Exact match with manual calculations
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-improvements-calculation", "locked": true, "points": 10}
-def test_unit_improvements_calculation():
-    """🧪 Test speedup/compression/accuracy calculations are correct."""
-    print("🧪 Unit Test: Improvements Calculation...")
-
-    # Create baseline with known metrics
-    baseline_report = BenchmarkReport(model_name="baseline")
-    baseline_report.metrics = {
-        'parameter_count': 1000,
-        'model_size_mb': 4.0,
-        'accuracy': 0.80,
-        'latency_ms_mean': 10.0,
-        'latency_ms_std': 1.0,
-        'throughput_samples_per_sec': 100.0
-    }
-    baseline_report.timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-    baseline_report.system_info = {'platform': 'test', 'python_version': '3.9', 'numpy_version': '1.20'}
-
-    # Create optimized with 2x speedup, 2x compression, 5% accuracy loss
-    optimized_report = BenchmarkReport(model_name="optimized")
-    optimized_report.metrics = {
-        'parameter_count': 500,
-        'model_size_mb': 2.0,
-        'accuracy': 0.75,
-        'latency_ms_mean': 5.0,
-        'latency_ms_std': 0.5,
-        'throughput_samples_per_sec': 200.0
-    }
-    optimized_report.timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-    optimized_report.system_info = baseline_report.system_info
-
-    # Generate submission
-    submission = generate_submission(baseline_report, optimized_report)
-
-    improvements = submission['improvements']
-
-    # Verify calculations
-    # Speedup = baseline_latency / optimized_latency = 10.0 / 5.0 = 2.0
-    assert abs(improvements['speedup'] - 2.0) < 0.01, f"Expected speedup 2.0, got {improvements['speedup']}"
-
-    # Compression = baseline_size / optimized_size = 4.0 / 2.0 = 2.0
-    assert abs(improvements['compression_ratio'] - 2.0) < 0.01, f"Expected compression 2.0, got {improvements['compression_ratio']}"
-
-    # Accuracy delta = 0.75 - 0.80 = -0.05
-    assert abs(improvements['accuracy_delta'] - (-0.05)) < 0.001, f"Expected accuracy delta -0.05, got {improvements['accuracy_delta']}"
-
-    print("✅ Improvements calculation is correct!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_improvements_calculation()
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: JSON Serialization
-
-This test validates save_submission() creates valid, round-trip compatible JSON.
-
-**What we're testing**: File creation, JSON validity, round-trip preservation
-**Why it matters**: Submissions must be loadable and shareable
-**Expected**: Valid JSON that loads with identical structure
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-json-serialization", "locked": true, "points": 10}
-def test_unit_json_serialization():
-    """🧪 Test save_submission() creates valid JSON files."""
-    print("🧪 Unit Test: JSON Serialization...")
-
-    # Create submission
-    rng = np.random.default_rng(7)
-    model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(rng.standard_normal((50, 10)))
-    y_test = rng.integers(0, 3, 50)
-
-    report = BenchmarkReport(model_name="test_model")
-    report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-    submission = generate_submission(report, student_name="Test Student")
-
-    # Save to file
-    test_file = "/tmp/test_submission_unit.json"
-    filepath = save_submission(submission, test_file)
-
-    # Check file exists
-    assert Path(filepath).exists(), "Submission file should exist"
-
-    # Load and verify JSON is valid
-    loaded_json = json.loads(Path(test_file).read_text())
-
-    # Verify structure is preserved
-    assert loaded_json['tinytorch_version'] == submission['tinytorch_version'], "Version should match"
-    assert loaded_json['student_name'] == submission['student_name'], "Student name should match"
-    assert loaded_json['baseline']['model_name'] == submission['baseline']['model_name'], "Model name should match"
-
-    # Verify metrics are preserved
-    baseline_metrics = loaded_json['baseline']['metrics']
-    original_metrics = submission['baseline']['metrics']
-    assert baseline_metrics['accuracy'] == original_metrics['accuracy'], "Accuracy should match"
-    assert baseline_metrics['parameter_count'] == original_metrics['parameter_count'], "Parameter count should match"
-
-    # Verify JSON can be dumped again (round-trip test)
-    round_trip = json.dumps(loaded_json, indent=2)
-    assert len(round_trip) > 0, "JSON should serialize again"
-
-    # Clean up
-    Path(test_file).unlink()
-
-    print("✅ JSON serialization works correctly!")
-
-# Run test immediately when developing
-if __name__ == "__main__":
-    test_unit_json_serialization()
 
 # %% [markdown]
 """
@@ -1702,21 +1725,15 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 20")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of benchmarking, reproducibility, and ML systems integration:
 
-### Reflecting on the Complete ML Systems Journey
-
 You've built an entire ML framework across 20 modules. This capstone asks you to step back and reflect on the complete systems journey—from tensors to production-ready benchmarking.
 
-### End-to-End System Integration
+### Question 1: End-to-End System Integration
 
 Modern ML systems aren't just individual components working in isolation—they're carefully orchestrated pipelines where each piece connects to form a cohesive whole.
 
@@ -1750,7 +1767,7 @@ Data → Tensor (M01) → Layers (M03) → Model → Training (M08)
 
 **Reflection Question:** When you imported `from tinytorch.core.tensor import Tensor` in Module 15 (Quantization), the Tensor already had gradient tracking from Module 06. How does this "single source of truth" design simplify system integration compared to having separate BasicTensor and GradTensor classes?
 
-### Benchmarking Methodology: Science Meets Engineering
+### Question 2: Benchmarking Methodology: Science Meets Engineering
 
 Effective benchmarking requires rigorous methodology that bridges scientific measurement with engineering pragmatism.
 
@@ -1816,7 +1833,7 @@ Single measurement: 12.3ms
 
 **Reflection Question:** Your benchmark runs inference 100 times and reports mean latency. A production API serves 1 million requests/day. Which percentile (p50, p90, p99) matters more for user experience, and why isn't mean sufficient?
 
-### Performance Measurement Traps and How to Avoid Them
+### Question 3: Performance Measurement Traps and How to Avoid Them
 
 Real-world benchmarking is full of subtle traps that can invalidate your measurements.
 
@@ -1898,7 +1915,7 @@ def good_benchmark():
 
 **Reflection Question:** You benchmark a model at batch_size=32 and report 50ms latency (1.56ms per sample). A production API serves requests one at a time. Will real users experience 1.56ms latency? Why or why not?
 
-### Schema Validation: Making Results Machine-Readable
+### Question 4: Schema Validation: Making Results Machine-Readable
 
 Your submission format uses JSON Schema validation—a powerful pattern for ensuring data quality and enabling automation.
 
@@ -1955,7 +1972,7 @@ plot_accuracy_vs_speedup(all_submissions)
 
 **Reflection Question:** Your submission schema requires `model_size_mb` as a float. Why is this better than allowing users to write "4MB" or "4.0 megabytes" as strings? Think about aggregation and comparison.
 
-### The Complete ML Systems Lifecycle
+### Question 5: The Complete ML Systems Lifecycle
 
 This capstone represents the final stage of the ML systems lifecycle—but it's also the beginning of the next iteration.
 
@@ -2009,7 +2026,7 @@ This capstone represents the final stage of the ML systems lifecycle—but it's 
 
 **Reflection Question:** You deploy a model with 92% accuracy and 10ms latency. Three months later, users complain it's slow. Monitoring shows 30ms latency now (same model, same code). You didn't save system_info in your original benchmark. What went wrong, and how does proper benchmarking prevent this?
 
-### Your Path Forward: From Learning to Production
+### Question 6: Your Path Forward: From Learning to Production
 
 You've completed an educational framework, but the patterns you learned apply directly to production systems.
 
@@ -2090,7 +2107,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🚀 MODULE SUMMARY: Capstone: Benchmarking & Submission
+## 🚀 MODULE SUMMARY: Capstone
 
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
 
@@ -2107,7 +2124,7 @@ Congratulations! You've completed the TinyTorch capstone by building a professio
 - **Reproducibility requirements**: System context, schema validation, and standardized reporting
 - **Production patterns**: How real ML systems measure and compare model performance
 
-### The Complete TinyTorch Journey
+The complete journey:
 
 ```
 Module 01: Tensor          -> Built foundation
@@ -2129,5 +2146,5 @@ You started Module 01 with a simple Tensor class. Now you have:
 
 Export with: `tito module complete 20`
 
-**Congratulations on completing TinyTorch!**
+**Next**: The TorchPerf Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's. Congratulations on completing TinyTorch!
 """

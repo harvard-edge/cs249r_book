@@ -40,6 +40,11 @@ from mlsysim.physics import (
     calc_mtbf_node,
     calc_pipeline_bubble,
     calc_kv_cache_size,
+    calc_mla_cache_size,
+    calc_pareto_scale,
+    calc_pareto_survival,
+    calc_pareto_conditional_survival,
+    calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
     calc_queue_latency_mmc,
     calc_failure_probability,
@@ -567,6 +572,92 @@ class TestPipelineBubble:
         assert bubble_64 < bubble_8
 
 # ======================================================================
+# Pareto trajectory-length helpers
+# ======================================================================
+
+class TestParetoTrajectory:
+    """Heavy-tailed agent trajectory lengths and the decreasing hazard rate."""
+
+    ALPHA = 1.1
+    MEAN = 24.8
+
+    def test_scale_from_measured_mean(self):
+        # x_min = mean * (alpha - 1) / alpha
+        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
+        assert scale == pytest.approx(2.2545, abs=1e-3)
+
+    def test_fit_reproduces_the_measured_tail(self):
+        # The same two parameters must place ~1 percent beyond a P99 of 142.
+        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
+        assert calc_pareto_survival(142, scale, self.ALPHA) == pytest.approx(0.010, abs=2e-3)
+
+    def test_scale_cancels_in_conditional_survival(self):
+        # P(N > 100 | N > 50) depends only on the ratio and the tail index.
+        for scale in (1.0, 2.2545, 5.0):
+            assert calc_pareto_conditional_survival(50, 100, self.ALPHA) == pytest.approx(
+                calc_pareto_survival(100, scale, self.ALPHA)
+                / calc_pareto_survival(50, scale, self.ALPHA)
+            )
+
+    def test_hazard_rate_decreases(self):
+        """A longer-running trajectory is likelier to keep running, not less."""
+        young = calc_pareto_conditional_survival(10, 20, self.ALPHA)
+        old = calc_pareto_conditional_survival(500, 1000, self.ALPHA)
+        assert young == pytest.approx(old)  # scale-free: doubling is doubling
+        assert calc_pareto_conditional_survival(50, 100, self.ALPHA) > math.exp(-50 / self.MEAN)
+
+    def test_mean_residual_life_grows_with_attained_service(self):
+        assert calc_pareto_mean_residual_life(50, self.ALPHA) == pytest.approx(500.0)
+        assert calc_pareto_mean_residual_life(100, self.ALPHA) > calc_pareto_mean_residual_life(50, self.ALPHA)
+
+    def test_no_finite_mean_below_alpha_one(self):
+        with pytest.raises(ValueError):
+            calc_pareto_scale(self.MEAN, 0.9)
+        with pytest.raises(ValueError):
+            calc_pareto_mean_residual_life(50, 1.0)
+
+    def test_survival_is_one_below_the_scale(self):
+        assert calc_pareto_survival(1.0, 2.2545, self.ALPHA) == 1.0
+
+
+# ======================================================================
+# calc_mla_cache_size
+# ======================================================================
+
+class TestMLACacheSize:
+    """MLA cache = L * (kv_lora_rank + qk_rope_head_dim) * S * B * bytes.
+
+    The absent factor of two is the point: Multi-Head Latent Attention keeps one
+    compressed latent per token per layer instead of a separate K and V tensor
+    per key-value head.
+    """
+
+    def test_known_answer_deepseek_v3(self):
+        # DeepSeek-V3: 61 layers, d_c = 512, decoupled rotary key = 64.
+        # 61 * (512 + 64) * 1 * 1 * 2 = 70,272 bytes per token.
+        result = calc_mla_cache_size(
+            n_layers=61, kv_lora_rank=512, qk_rope_head_dim=64,
+            seq_len=1, batch_size=1, bytes_per_elem=2,
+        )
+        assert result.to(ureg.byte).magnitude == pytest.approx(70272)
+
+    def test_scales_linearly_with_sequence(self):
+        one = calc_mla_cache_size(61, 512, 64, seq_len=1, batch_size=1)
+        many = calc_mla_cache_size(61, 512, 64, seq_len=32000, batch_size=1)
+        assert many.to(ureg.byte).magnitude == pytest.approx(
+            32000 * one.to(ureg.byte).magnitude
+        )
+
+    def test_far_smaller_than_grouped_query_of_same_depth(self):
+        mla = calc_mla_cache_size(61, 512, 64, seq_len=1, batch_size=1)
+        gqa = calc_kv_cache_size(
+            n_layers=61, n_heads=8, head_dim=128,
+            seq_len=1, batch_size=1, bytes_per_elem=2,
+        )
+        assert mla < gqa
+
+
+# ======================================================================
 # calc_kv_cache_size
 # ======================================================================
 
@@ -850,6 +941,22 @@ class TestTwoProportionSampleSize:
         # p=0.05, delta=0.001, z=1.96/0.84 -> 744,800 exactly
         n = calc_two_proportion_sample_size(0.05, 0.001)
         assert n == pytest.approx(744_800, rel=1e-9)
+
+    def test_pooled_form_matches_the_textbook_equation(self):
+        """The pooled form carries both arms' variance, so it needs more tasks."""
+        simple = calc_two_proportion_sample_size(0.30, 0.05)
+        pooled = calc_two_proportion_sample_size(0.30, 0.05, pooled=True)
+        assert math.ceil(pooled) == 1375
+        assert pooled > simple
+
+    def test_pooled_default_is_off_so_existing_callers_do_not_move(self):
+        assert calc_two_proportion_sample_size(0.05, 0.001) == pytest.approx(
+            calc_two_proportion_sample_size(0.05, 0.001, pooled=False)
+        )
+
+    def test_pooled_rejects_a_rate_that_leaves_the_unit_interval(self):
+        with pytest.raises(ValueError):
+            calc_two_proportion_sample_size(0.9, 0.2, pooled=True)
 
     def test_quadruples_when_lift_halves(self):
         n1 = calc_two_proportion_sample_size(0.05, 0.002)

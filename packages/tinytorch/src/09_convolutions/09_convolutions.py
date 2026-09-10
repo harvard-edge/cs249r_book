@@ -92,7 +92,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.autograd` (gradient tracking from Module 06)
 
-**Important**: This module builds on the complete training pipeline.
+This module builds on the complete training pipeline.
 Spatial operations will integrate with your existing layers and training system.
 
 **Dependency Flow**:
@@ -158,7 +158,7 @@ Convolution achieves dramatic parameter reduction (more than 1000×!) while pres
 
 # %% [markdown]
 """
-## 📐 Foundations
+## 📐 Foundations: Convolution, Step by Step
 
 ### Understanding Convolution Step by Step
 
@@ -353,7 +353,7 @@ def validate_4d_input(x, layer_name):
 
 # %% [markdown]
 """
-### Conv2d Implementation - Building the Core of Computer Vision
+### Conv2d Implementation: Building the Core of Computer Vision
 
 Conv2d is the workhorse of computer vision. It slides learned filters across images to detect patterns like edges, textures, and eventually complex objects.
 
@@ -844,8 +844,8 @@ Examples:
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-output-shape", "locked": true, "points": 5}
 def test_unit_conv2d_output_shape():
-    """Test Conv2d._compute_output_shape for various configurations."""
-    print("Testing Conv2d output shape computation...")
+    """🧪 Test Conv2d._compute_output_shape for various configurations."""
+    print("🧪 Unit Test: Conv2d Output Shape...")
 
     # Same padding: output == input
     conv_same = Conv2d(3, 16, kernel_size=3, padding=1, stride=1)
@@ -872,7 +872,7 @@ def test_unit_conv2d_output_shape():
     oh, ow = conv_5x5._compute_output_shape(32, 32)
     assert (oh, ow) == (28, 28), f"5x5 kernel: expected (28, 28), got ({oh}, {ow})"
 
-    print("Conv2d output shape computation works correctly!")
+    print("✅ Conv2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_output_shape()
@@ -902,8 +902,8 @@ Before padding (1, 1, 3, 3):       After padding=1 (1, 1, 5, 5):
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-padding", "locked": true, "points": 5}
 def test_unit_conv2d_padding():
-    """Test Conv2d._apply_padding for zero-padding behavior."""
-    print("Testing Conv2d padding...")
+    """🧪 Test Conv2d._apply_padding for zero-padding behavior."""
+    print("🧪 Unit Test: Conv2d Padding...")
 
     # No padding: input unchanged
     conv_no_pad = Conv2d(1, 1, kernel_size=3, padding=0)
@@ -934,7 +934,7 @@ def test_unit_conv2d_padding():
     assert result.shape[0] == 2, "Batch dim should be unchanged"
     assert result.shape[1] == 3, "Channel dim should be unchanged"
 
-    print("Conv2d padding works correctly!")
+    print("✅ Conv2d padding works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_padding()
@@ -968,8 +968,8 @@ Convolution = Sliding Window Dot Products:
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-convolve", "locked": true, "points": 15}
 def test_unit_conv2d_convolve_loops():
-    """Test Conv2d._convolve_loops with known input/weight values."""
-    print("Testing Conv2d convolution loops...")
+    """🧪 Test Conv2d._convolve_loops with known input/weight values."""
+    print("🧪 Unit Test: Conv2d Convolution Loops...")
 
     # Create a Conv2d with known weights (1 input channel, 1 output channel, 2x2 kernel)
     conv = Conv2d(in_channels=1, out_channels=1, kernel_size=2, bias=False)
@@ -1012,7 +1012,7 @@ def test_unit_conv2d_convolve_loops():
     assert np.allclose(output2[0, 0], expected_ch0), f"Channel 0 mismatch"
     assert np.allclose(output2[0, 1], expected_ch1), f"Channel 1 mismatch"
 
-    print("Conv2d convolution loops work correctly!")
+    print("✅ Conv2d convolution loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_convolve_loops()
@@ -1032,8 +1032,8 @@ and gradient tracking.
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-forward", "locked": true, "points": 15}
 def test_unit_conv2d():
-    """Test Conv2d forward pass with multiple configurations."""
-    print("Testing Conv2d...")
+    """🧪 Test Conv2d forward pass with multiple configurations."""
+    print("🧪 Unit Test: Conv2d Forward...")
 
     # Test 1: Basic convolution without padding
     print("  Testing basic convolution...")
@@ -1176,7 +1176,7 @@ The key difference: MaxPool takes max(window), AvgPool takes mean(window).
 
 # %% [markdown]
 """
-### MaxPool2d Implementation - Preserving Strong Features
+### MaxPool2d Implementation: Preserving Strong Features
 
 MaxPool2d finds the strongest activation in each spatial window, creating a compressed representation that keeps the most important information.
 
@@ -1472,7 +1472,7 @@ class MaxPool2d:
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Output Shape
+### 🧪 Unit Test: MaxPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after max pooling.
@@ -1492,8 +1492,8 @@ Common case: kernel=2, stride=2, padding=0
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_maxpool2d_output_shape():
-    """Test MaxPool2d._compute_pool_output_shape."""
-    print("Testing MaxPool2d output shape computation...")
+    """🧪 Test MaxPool2d._compute_pool_output_shape."""
+    print("🧪 Unit Test: MaxPool2d Output Shape...")
 
     # Standard 2x2 pooling with stride 2: halves dimensions
     pool = MaxPool2d(kernel_size=2, stride=2)
@@ -1514,14 +1514,14 @@ def test_unit_maxpool2d_output_shape():
     oh, ow = pool_large._compute_pool_output_shape(16, 16)
     assert (oh, ow) == (4, 4), f"4x4 stride 4: expected (4, 4), got ({oh}, {ow})"
 
-    print("MaxPool2d output shape computation works correctly!")
+    print("✅ MaxPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_output_shape()
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Loops
+### 🧪 Unit Test: MaxPool2d Loops
 
 This test validates that `_maxpool_loops` correctly finds the maximum
 value in each pooling window.
@@ -1544,8 +1544,8 @@ MaxPool2d sliding window (2x2, stride 2):
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-loops", "locked": true, "points": 7}
 def test_unit_maxpool2d_loops():
-    """Test MaxPool2d._maxpool_loops with known values."""
-    print("Testing MaxPool2d loops...")
+    """🧪 Test MaxPool2d._maxpool_loops with known values."""
+    print("🧪 Unit Test: MaxPool2d Loops...")
 
     pool = MaxPool2d(kernel_size=2, stride=2)
 
@@ -1572,14 +1572,14 @@ def test_unit_maxpool2d_loops():
     output_neg = pool_small._maxpool_loops(padded_neg, 1, 1, 1, 1)
     assert output_neg[0, 0, 0, 0] == -1.0, f"Max of negatives: expected -1.0, got {output_neg[0,0,0,0]}"
 
-    print("MaxPool2d loops work correctly!")
+    print("✅ MaxPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_loops()
 
 # %% [markdown]
 """
-### AvgPool2d Implementation - Smoothing and Generalizing Features
+### AvgPool2d Implementation: Smoothing and Generalizing Features
 
 AvgPool2d computes the average of each spatial window, creating smoother features that are less sensitive to noise and exact pixel positions.
 
@@ -1868,7 +1868,7 @@ class AvgPool2d:
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Output Shape
+### 🧪 Unit Test: AvgPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after average pooling.
@@ -1880,8 +1880,8 @@ the spatial dimensions after average pooling.
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-output-shape", "locked": true, "points": 3}
 def test_unit_avgpool2d_output_shape():
-    """Test AvgPool2d._compute_pool_output_shape."""
-    print("Testing AvgPool2d output shape computation...")
+    """🧪 Test AvgPool2d._compute_pool_output_shape."""
+    print("🧪 Unit Test: AvgPool2d Output Shape...")
 
     # Standard 2x2 pooling: halves dimensions
     pool = AvgPool2d(kernel_size=2, stride=2)
@@ -1897,14 +1897,14 @@ def test_unit_avgpool2d_output_shape():
     oh, ow = pool_overlap._compute_pool_output_shape(5, 5)
     assert (oh, ow) == (3, 3), f"Overlapping: expected (3, 3), got ({oh}, {ow})"
 
-    print("AvgPool2d output shape computation works correctly!")
+    print("✅ AvgPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_output_shape()
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Loops
+### 🧪 Unit Test: AvgPool2d Loops
 
 This test validates that `_avgpool_loops` correctly computes the mean of
 each pooling window.
@@ -1929,8 +1929,8 @@ Top-left: (1+2+5+6)/4 = 3.5
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-loops", "locked": true, "points": 7}
 def test_unit_avgpool2d_loops():
-    """Test AvgPool2d._avgpool_loops with known values."""
-    print("Testing AvgPool2d loops...")
+    """🧪 Test AvgPool2d._avgpool_loops with known values."""
+    print("🧪 Unit Test: AvgPool2d Loops...")
 
     pool = AvgPool2d(kernel_size=2, stride=2)
 
@@ -1955,7 +1955,7 @@ def test_unit_avgpool2d_loops():
     max_output = pool_max._maxpool_loops(padded, 1, 1, 2, 2)
     assert np.all(output <= max_output), "Average should always be <= maximum"
 
-    print("AvgPool2d loops work correctly!")
+    print("✅ AvgPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_loops()
@@ -2672,119 +2672,6 @@ if __name__ == "__main__":
     test_unit_pooling()
 
 # %% [markdown]
-"""
-## 📊 Systems Analysis: Spatial Operation Performance
-
-Let's understand ONE key systems concept: **computational complexity and memory trade-offs in spatial operations**.
-
-This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
-def analyze_convolution_complexity():
-    """📊 Analyze convolution computational complexity across different configurations."""
-    print("📊 Analyzing Convolution Complexity...")
-
-    # Test configurations optimized for educational demonstration (smaller sizes)
-    configs = [
-        {"input": (1, 3, 16, 16), "conv": (8, 3, 3), "name": "Small (16×16)"},
-        {"input": (1, 3, 24, 24), "conv": (12, 3, 3), "name": "Medium (24×24)"},
-        {"input": (1, 3, 32, 32), "conv": (16, 3, 3), "name": "Large (32×32)"},
-        {"input": (1, 3, 16, 16), "conv": (8, 3, 5), "name": "Large Kernel (5×5)"},
-    ]
-
-    print(f"{'Configuration':<20} {'FLOPs':<15} {'Memory (MB)':<12} {'Time (ms)':<10}")
-    print("-" * 70)
-
-    for config in configs:
-        # Create convolution layer
-        in_ch = config["input"][1]
-        out_ch, k_size = config["conv"][0], config["conv"][2]
-        conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
-
-        # Create input tensor
-        x = Tensor(rng.standard_normal(config["input"]))
-
-        # Calculate theoretical FLOPs
-        batch, in_channels, h, w = config["input"]
-        out_channels, kernel_size = config["conv"][0], config["conv"][2]
-
-        # Each output element requires in_channels * kernel_size² multiply-adds
-        flops_per_output = in_channels * kernel_size * kernel_size * 2  # 2 for MAC
-        total_outputs = batch * out_channels * h * w  # Assuming same size with padding
-        total_flops = flops_per_output * total_outputs
-
-        # Measure memory usage
-        input_memory = np.prod(config["input"]) * 4  # float32 = 4 bytes
-        weight_memory = out_channels * in_channels * kernel_size * kernel_size * 4
-        output_memory = batch * out_channels * h * w * 4
-        total_memory = (input_memory + weight_memory + output_memory) / (1024 * 1024)  # MB
-
-        # Measure execution time
-        start_time = time.time()
-        _ = conv(x)
-        end_time = time.time()
-        exec_time = (end_time - start_time) * 1000  # ms
-
-        print(f"{config['name']:<20} {total_flops:<15,} {total_memory:<12.2f} {exec_time:<10.2f}")
-
-    print("\n💡 Key Insights:")
-    print("🔸 FLOPs scale as O(H×W×C_in×C_out×K²) - quadratic in spatial and kernel size")
-    print("🔸 Memory scales linearly with spatial dimensions and channels")
-    print("🔸 Large kernels dramatically increase computational cost")
-    print("🚀 This motivates more efficient convolution variants that reduce computational cost")
-
-# Run the systems analysis
-if __name__ == "__main__":
-    analyze_convolution_complexity()
-
-# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
-def analyze_pooling_effects():
-    """📊 Analyze pooling's impact on spatial dimensions and features."""
-    print("\n📊 Analyzing Pooling Effects...")
-
-    # Create sample input with spatial structure
-    # Simple edge pattern that pooling should preserve differently
-    pattern = np.zeros((1, 1, 8, 8))
-    pattern[0, 0, :, 3:5] = 1.0  # Vertical edge
-    pattern[0, 0, 3:5, :] = 1.0  # Horizontal edge
-    x = Tensor(pattern)
-
-    print("Original 8×8 pattern:")
-    print(x.data[0, 0])
-
-    # Test different pooling strategies
-    pools = [
-        (MaxPool2d(2, stride=2), "MaxPool 2×2"),
-        (AvgPool2d(2, stride=2), "AvgPool 2×2"),
-        (MaxPool2d(4, stride=4), "MaxPool 4×4"),
-        (AvgPool2d(4, stride=4), "AvgPool 4×4"),
-    ]
-
-    print(f"\n{'Operation':<15} {'Output Shape':<15} {'Feature Preservation'}")
-    print("-" * 60)
-
-    for pool_op, name in pools:
-        result = pool_op(x)
-        # Measure how much of the original pattern is preserved
-        preservation = np.sum(result.data > 0.1) / np.prod(result.shape)
-        print(f"{name:<15} {str(result.shape):<15} {preservation:<.2%}")
-
-        print(f"  Output:")
-        print(f"  {result.data[0, 0]}")
-        print()
-
-    print("💡 Key Insights:")
-    print("🔸 MaxPool preserves sharp features better (edge detection)")
-    print("🔸 AvgPool smooths features (noise reduction)")
-    print("🔸 Larger pooling windows lose more spatial detail")
-    print("🚀 Choice depends on task: classification vs detection vs segmentation")
-
-# Run the systems analysis
-if __name__ == "__main__":
-    analyze_pooling_effects()
-
-# %% [markdown]
 r"""
 ## 🔧 Integration: Building a Complete CNN
 
@@ -2862,7 +2749,7 @@ This hierarchical approach mirrors human vision: we first detect edges, then sha
 
 # %% [markdown]
 """
-### SimpleCNN Implementation - Putting It All Together
+### SimpleCNN Implementation: Putting It All Together
 
 Now we'll build a complete CNN that demonstrates how convolution and pooling work together. This is your first step from processing individual tensors to understanding complete images!
 
@@ -3103,6 +2990,117 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 📊 Systems Analysis: Spatial Operation Performance
+
+Let's understand ONE key systems concept: **computational complexity and memory trade-offs in spatial operations**.
+
+This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
+def analyze_convolution_complexity():
+    """📊 Analyze convolution computational complexity across different configurations."""
+    print("📊 Analyzing Convolution Complexity...")
+
+    # Test configurations optimized for educational demonstration (smaller sizes)
+    configs = [
+        {"input": (1, 3, 16, 16), "conv": (8, 3, 3), "name": "Small (16×16)"},
+        {"input": (1, 3, 24, 24), "conv": (12, 3, 3), "name": "Medium (24×24)"},
+        {"input": (1, 3, 32, 32), "conv": (16, 3, 3), "name": "Large (32×32)"},
+        {"input": (1, 3, 16, 16), "conv": (8, 3, 5), "name": "Large Kernel (5×5)"},
+    ]
+
+    print(f"{'Configuration':<20} {'FLOPs':<15} {'Memory (MB)':<12} {'Time (ms)':<10}")
+    print("-" * 70)
+
+    for config in configs:
+        # Create convolution layer
+        in_ch = config["input"][1]
+        out_ch, k_size = config["conv"][0], config["conv"][2]
+        conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
+
+        # Create input tensor
+        x = Tensor(rng.standard_normal(config["input"]))
+
+        # Calculate theoretical FLOPs
+        batch, in_channels, h, w = config["input"]
+        out_channels, kernel_size = config["conv"][0], config["conv"][2]
+
+        # Each output element requires in_channels * kernel_size² multiply-adds
+        flops_per_output = in_channels * kernel_size * kernel_size * 2  # 2 for MAC
+        total_outputs = batch * out_channels * h * w  # Assuming same size with padding
+        total_flops = flops_per_output * total_outputs
+
+        # Measure memory usage
+        input_memory = np.prod(config["input"]) * 4  # float32 = 4 bytes
+        weight_memory = out_channels * in_channels * kernel_size * kernel_size * 4
+        output_memory = batch * out_channels * h * w * 4
+        total_memory = (input_memory + weight_memory + output_memory) / (1024 * 1024)  # MB
+
+        # Measure execution time
+        start_time = time.time()
+        _ = conv(x)
+        end_time = time.time()
+        exec_time = (end_time - start_time) * 1000  # ms
+
+        print(f"{config['name']:<20} {total_flops:<15,} {total_memory:<12.2f} {exec_time:<10.2f}")
+
+    print("\n💡 Key Insights:")
+    print("🔸 FLOPs scale as O(H×W×C_in×C_out×K²) - quadratic in spatial and kernel size")
+    print("🔸 Memory scales linearly with spatial dimensions and channels")
+    print("🔸 Large kernels dramatically increase computational cost")
+    print("🚀 This motivates more efficient convolution variants that reduce computational cost")
+
+if __name__ == "__main__":
+    analyze_convolution_complexity()
+
+# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
+def analyze_pooling_effects():
+    """📊 Analyze pooling's impact on spatial dimensions and features."""
+    print("\n📊 Analyzing Pooling Effects...")
+
+    # Create sample input with spatial structure
+    # Simple edge pattern that pooling should preserve differently
+    pattern = np.zeros((1, 1, 8, 8))
+    pattern[0, 0, :, 3:5] = 1.0  # Vertical edge
+    pattern[0, 0, 3:5, :] = 1.0  # Horizontal edge
+    x = Tensor(pattern)
+
+    print("Original 8×8 pattern:")
+    print(x.data[0, 0])
+
+    # Test different pooling strategies
+    pools = [
+        (MaxPool2d(2, stride=2), "MaxPool 2×2"),
+        (AvgPool2d(2, stride=2), "AvgPool 2×2"),
+        (MaxPool2d(4, stride=4), "MaxPool 4×4"),
+        (AvgPool2d(4, stride=4), "AvgPool 4×4"),
+    ]
+
+    print(f"\n{'Operation':<15} {'Output Shape':<15} {'Feature Preservation'}")
+    print("-" * 60)
+
+    for pool_op, name in pools:
+        result = pool_op(x)
+        # Measure how much of the original pattern is preserved
+        preservation = np.sum(result.data > 0.1) / np.prod(result.shape)
+        print(f"{name:<15} {str(result.shape):<15} {preservation:<.2%}")
+
+        print(f"  Output:")
+        print(f"  {result.data[0, 0]}")
+        print()
+
+    print("💡 Key Insights:")
+    print("🔸 MaxPool preserves sharp features better (edge detection)")
+    print("🔸 AvgPool smooths features (noise reduction)")
+    print("🔸 Larger pooling windows lose more spatial detail")
+    print("🚀 Choice depends on task: classification vs detection vs segmentation")
+
+if __name__ == "__main__":
+    analyze_pooling_effects()
+
+# %% [markdown]
+"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -3238,17 +3236,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 09")
 
-# Run module test when this cell is executed
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of spatial operations and their systems implications:
 
-### 1. Conv2d Memory Footprint
+### Question 1: Conv2d Memory Footprint
 A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 - Calculate the memory footprint during the forward pass
 - Consider: input activations, output activations, filter weights, and biases
@@ -3258,7 +3252,7 @@ A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 
 ---
 
-### 2. Spatial Locality and CPU Performance
+### Question 2: Spatial Locality and CPU Performance
 Why are CNNs faster on CPUs than fully-connected networks of similar parameter count?
 
 **Consider**:
@@ -3270,7 +3264,7 @@ Why are CNNs faster on CPUs than fully-connected networks of similar parameter c
 
 ---
 
-### 3. Im2col Trade-off
+### Question 3: Im2col Trade-off
 The im2col algorithm transforms convolution into matrix multiplication, using more memory but speeding up computation.
 
 **When is this trade-off worthwhile?**
@@ -3283,7 +3277,7 @@ The im2col algorithm transforms convolution into matrix multiplication, using mo
 
 ---
 
-### 4. Pooling's Systems Benefits
+### Question 4: Pooling's Systems Benefits
 MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 **What's the systems benefit beyond reducing parameters?**
@@ -3296,7 +3290,7 @@ MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 ---
 
-### 5. Mobile ML Deployment
+### Question 5: Mobile ML Deployment
 Why do mobile ML models prefer depthwise-separable convolutions over standard Conv2d?
 
 **Analyze the FLOPs**:

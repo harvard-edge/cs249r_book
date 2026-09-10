@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Multi-Agent Systems and Coordination Topologies {#sec-vol3-multi-agent}
@@ -165,9 +165,9 @@ Robust systems engineering mandates explicit **Backpressure** mechanisms. When a
 
 ## Multi-Agent Topology Taxonomy {#sec-vol3-multi-agent-topology-taxonomy-hierarchical-peer-to-peer}
 
-The communication graph connecting multi-agent nodes governs the runtime's scalability, failure blast radius, and verification guarantees. As illustrated in @fig-multi-agent-topologies, production systems categorize coordination topologies into four archetypes.
+The communication graph connecting multi-agent nodes governs the runtime's scalability, failure blast radius, and verification guarantees. @Fig-multi-agent-topologies sorts production coordination topologies into four archetypes.
 
-::: {#fig-multi-agent-topologies fig-env="figure" fig-pos="htb" fig-cap="**Multi-Agent Coordination Topologies**: Architectural trade-offs across communication complexity, failure blast-radii, and isolation boundaries." fig-alt="Diagram comparing four multi-agent topologies: Peer-to-Peer Swarm with O(M^2) quadratic complexity, Hierarchical Supervisor Tree with O(M) bounded complexity, Sequential Assembly Pipeline with linear phase gates, and Shared Blackboard with decoupled asynchronous tuple space."}
+::: {#fig-multi-agent-topologies fig-env="figure" fig-pos="htb" fig-cap="**Multi-Agent Coordination Topologies**: Architectural trade-offs across communication complexity, failure blast-radii, and isolation boundaries. The three properties are not independent choices, because the same edge that shortens a communication path also carries corrupted state, so isolation is what a designer trades to get either one." fig-alt="Diagram comparing four multi-agent topologies: Peer-to-Peer Swarm with O(M^2) quadratic complexity, Hierarchical Supervisor Tree with O(M) bounded complexity, Sequential Assembly Pipeline with linear phase gates, and Shared Blackboard with decoupled asynchronous tuple space."}
 ![](images/svg/multi_agent_topologies.svg)
 :::
 
@@ -228,7 +228,48 @@ If the parallelizable fraction is distributed across $M$ concurrent subagents, c
 
 $$S_{\text{classical}}(M) = \frac{1}{s + \frac{1-s}{M}}$$
 
-As $M \to \infty$, the speedup is strictly bounded by $1/s$. If $s = 0.15$ (15 percent of the task is inherently sequential), the maximum theoretical speedup is $6.67\times$, regardless of whether 10 or 10,000 agents are deployed.
+```{python}
+#| label: vol3-coordination-amdahl-ceiling
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | THE CEILING A SEQUENTIAL FRACTION IMPOSES
+# +-----------------------------------------------------------------------------
+# | Context: The Amdahl paragraph immediately below.
+# |
+# | Goal:    Show what a fixed sequential fraction costs a fan-out of subagents,
+# |          and that the ceiling does not move with the agent count.
+# | Show:    Speedup at a modest and an extreme fan-out, and the asymptote.
+# | How:     calc_amdahls_speedup with the parallel fraction 1 - s. The ceiling
+# |          is 1/s, which the guard checks the large fan-out approaches.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+class CoordinationCeiling:
+    # +-- 1. LOAD (Constants) --------------------
+    sequential = 0.15  # scenario assumption: fraction that cannot be parallelized
+    small_fanout = 10  # scenario assumption: a modest subagent fleet
+    large_fanout = 10_000  # scenario assumption: a fan-out far past any practical limit
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    parallel = 1 - sequential
+    speedup_small = calc_amdahls_speedup(parallel, small_fanout)
+    speedup_large = calc_amdahls_speedup(parallel, large_fanout)
+    ceiling = 1 / sequential
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(speedup_small < speedup_large < ceiling, "Speedup must rise with fan-out and stay under the ceiling")
+    check(ceiling - speedup_large < 0.01, f"A fan-out of {large_fanout} should sit within a hundredth of the ceiling, got {ceiling - speedup_large}")
+    check(abs(ceiling - 1 / sequential) < 1e-12, "The ceiling is the reciprocal of the sequential fraction and nothing else")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    sequential_str = fmt(sequential, precision=2, commas=False)
+    sequential_pct_str = fmt_percent(sequential, precision=0, style="prose")
+    small_fanout_str = fmt_int(small_fanout)
+    large_fanout_str = fmt_int(large_fanout)
+    ceiling_mult_str = fmt_multiple(ceiling, precision=2)
+```
+
+As $M \to \infty$, the speedup is strictly bounded by $1/s$. At a sequential fraction $s$ of `{python} CoordinationCeiling.sequential_str`, meaning `{python} CoordinationCeiling.sequential_pct_str` of the task cannot be parallelized, the maximum theoretical speedup is `{python} CoordinationCeiling.ceiling_mult_str`, regardless of whether `{python} CoordinationCeiling.small_fanout_str` or `{python} CoordinationCeiling.large_fanout_str` agents are deployed.
 
 However, in multi-agent systems, agents are not frictionless CPU ALUs. Coordinating $M$ stochastic agents introduces severe systemic overhead:
 
@@ -241,36 +282,8 @@ $$S(M) = \frac{1}{s + \frac{1-s}{M} + \alpha M^2 + \beta M}$$
 
 where $\alpha > 0$ is the pairwise synchronization coefficient and $\beta > 0$ is the subagent provisioning coefficient.
 
-::: {#fig-coordination-tax-scaling fig-env="figure" fig-pos="htb" fig-cap="**The Coordination Tax and Multi-Agent Amdahl’s Law**: Analytical speedup curves showing the optimal scaling point ($M^*$) and the subsequent collapse into the Negative Return Collapse Zone caused by quadratic communication overhead." fig-alt="Graph illustrating Multi-Agent Amdahl's Law. Speedup rises to an optimal peak between 4 and 6 agents, after which quadratic coordination tax causes speedup to drop below 1x, demonstrating thrashing and negative returns."}
-```{python}
-#| echo: false
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-data = pd.read_csv("data/amdahls_law_multi_agent.csv")
-
-plt.figure(figsize=(8, 5))
-sns.set_theme(style="whitegrid")
-
-plt.plot(data["Agents"], data["Classical_Speedup"], label="Classical Amdahl's Law", linestyle="--", color="gray")
-plt.plot(data["Agents"], data["Multi_Agent_Speedup"], label="Multi-Agent Amdahl's Law (with Coordination Tax)", color="firebrick", linewidth=2.5)
-
-plt.axhline(1.0, color="black", linestyle=":", label="No Speedup (1x)")
-plt.axvline(4.4, color="black", linestyle="-.", alpha=0.5, label="Optimal Fleet Size ($M^* \\approx 4.4$)")
-
-plt.title("Scaling of Multi-Agent Speedup with Coordination Tax", fontsize=14)
-plt.xlabel("Number of Agents ($M$)", fontsize=12)
-plt.ylabel("Speedup", fontsize=12)
-plt.xlim(1, 20)
-plt.ylim(0, 5)
-plt.xticks(range(1, 21, 2))
-plt.legend(fontsize=10)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
+::: {#fig-coordination-tax-scaling fig-env="figure" fig-pos="htb" fig-cap="**The Coordination Tax and Multi-Agent Amdahl’s Law**: Analytical speedup curves showing the optimal scaling point ($M^*$) and the subsequent collapse into the Negative Return Collapse Zone caused by quadratic communication overhead. The curve turns down rather than flattening, which is what separates this from classical Amdahl behavior. Past $M^*$ each additional agent removes throughput, so the fleet size is a value to solve for and not a budget to spend." fig-alt="Graph illustrating Multi-Agent Amdahl's Law. Speedup rises to an optimal peak between 4 and 6 agents, after which quadratic coordination tax causes speedup to drop below 1x, demonstrating thrashing and negative returns."}
+![](images/svg/coordination_tax_scaling.svg)
 :::
 
 ### The negative return collapse zone
@@ -563,7 +576,7 @@ When a foundation model API drops a connection or a worker micro-VM reboots, the
 
 The greatest operational risk in a scaled multi-agent deployment is the **Cascading Failure**: a localized error in a single leaf worker triggering a domino effect that consumes all available cluster token quotas and brings down enterprise infrastructure.
 
-As illustrated in @fig-supervisor-tree-isolation, production runtimes deploy Erlang-style supervisor trees and isolation firewalls to eliminate cascading collapse.
+@Fig-supervisor-tree-isolation shows the Erlang-style supervisor trees and isolation firewalls production runtimes deploy to eliminate cascading collapse.
 
 ::: {#fig-supervisor-tree-isolation fig-env="figure" fig-pos="htb" fig-cap="**Erlang-Style Supervisor Trees and Fault-Isolation Firewalls**: Runtime architecture detailing hierarchical actor supervision, private FIFO mailboxes, restart policies (one-for-one vs. one-for-all), and circuit breakers." fig-alt="Diagram of an Erlang-style multi-agent supervisor tree. Root supervisor manages Code and Verify supervisors. Workers have private mailboxes. Pytest worker crashes with OOM, contained by supervisor. Right side shows one-for-one and one-for-all policies, distributed workspace leases, and circuit breakers."}
 ![](images/svg/supervisor_tree_isolation.svg)
@@ -648,13 +661,25 @@ Configuring failing subagents to automatically retry tool calls or inference req
 
 Principle \ref{pri-vol3-stochastic-actors} is stress-tested here on the assumption that usually rescues redundancy. Replication tolerates faults when failures are independent; subagents sharing a pretraining checkpoint fail together, so adding them multiplies the coordination cost without buying the reliability that multiplication is supposed to pay for.
 
-## Chapter Summary {#sec-vol3-multi-agent-summary}
+## Summary {#sec-vol3-multi-agent-summary}
 
-- **Stochastic Node Foundations:** Multi-agent collaboration is distributed computing over non-deterministic, fail-plausible nodes. Systems must abandon conversational anthropomorphic metaphors in favor of the formal Actor model: private state, FIFO mailboxes, and explicit message serialization.
-- **Zero Shared Context & Causality:** Shared conversation buffers trigger $O(M \cdot N^2)$ token explosion. Private mailboxes enforce mathematical context isolation. The system reconstructs message causality and limits OOM crashes using logical vector clocks and explicit backpressure.
-- **Topological Invariants:** Peer-to-peer swarms suffer from $O(M^2)$ quadratic message overhead and cyclic deadlocks. Production systems rely on Hierarchical Supervisor Trees ($O(M)$ bounded fanout) and Sequential Assembly Pipelines with explicit verification gates.
-- **Multi-Agent Amdahl’s Law:** Parallel agent scaling is constrained by sequential bottlenecks and the Coordination Tax ($C_{\text{tax}} = \alpha M^2 + \beta M$). In production software tasks, effective speedup peaks at $M^* \approx 4\text{--}6$ agents before collapsing into negative returns.
+Multi-agent coordination transforms autonomous agency into distributed computing over stochastic, fail-plausible actor nodes. As agent counts scale, naive anthropomorphic conversation templates trigger quadratic context explosions, semantic livelocks, and catastrophic concurrency collisions. Robust multi-agent architectures discard conversational metaphors in favor of classical distributed systems engineering: strict Actor isolation, bounded communication topologies, vector-clock causality, and hardware-backed concurrency control.
+
+::: {.callout-takeaways title="Hierarchical delegation and IPC topologies"}
+
+- **Stochastic Node Foundations:** Multi-agent collaboration is distributed computing over non-deterministic, fail-plausible nodes. Systems must abandon anthropomorphic conversational metaphors in favor of the formal Actor model: private state, FIFO mailboxes, and explicit message serialization.
+- **Zero Shared Context & Causality:** Shared conversation buffers trigger $\mathcal{O}(M \cdot N^2)$ token explosion. Private mailboxes enforce context isolation, while logical vector clocks and explicit backpressure bound queue depths and prevent out-of-memory crashes.
+- **Topological Invariants:** Peer-to-peer swarms suffer from $\mathcal{O}(M^2)$ quadratic message overhead and cyclic deadlocks. Production systems rely on Hierarchical Supervisor Trees ($\mathcal{O}(M)$ bounded fanout) and Sequential Assembly Pipelines with explicit verification gates.
+- **Multi-Agent Amdahl's Law:** Parallel agent scaling is constrained by sequential bottlenecks and the Coordination Tax ($C_{\text{tax}} = \alpha M^2 + \beta M$). In production software tasks, effective speedup peaks at $M^* \approx 4\text{--}6$ agents before collapsing into negative returns.
 - **Concurrency Control & Idempotency:** Concurrent mutations mandate Git worktree isolation, distributed TTL leases, and optimistic concurrency control (OCC). Furthermore, because network failures force automatic retries, all agent tool calls must be strictly idempotent.
-- **Cycle Detection & Tracing:** Semantic deadlocks and conversational livelocks are mitigated by maintaining causal message DAGs and enforcing $\epsilon$-progress tripwires. Distributed tracing (W3C trace contexts) allows engineers to observe latencies across the swarm.
+- **Cycle Detection & Tracing:** Semantic deadlocks and conversational livelocks are mitigated by maintaining causal message DAGs and enforcing $\epsilon$-progress tripwires. Distributed tracing (W3C trace contexts) exposes cross-agent latencies and causal dependencies.
 - **Correlated Byzantine Failures:** Because foundation models share pretraining weights, voting-based LLM consensus fails. Deterministic software oracles (AST parsers, compilers, test suites) strictly dominate neural critics as verification boundaries.
 - **Fault-Isolation Firewalls:** Robust runtime architectures implement Erlang supervisor restart policies (`one_for_one` vs. `one_for_all`), monotonic capability attenuation, and adaptive circuit breakers with Decorrelated Jitter to prevent cascading cluster failure.
+
+:::
+
+Multi-agent systems demonstrate that scaling agency is fundamentally a problem of distributed systems coordination. By enforcing strict message passing, bounded supervisor fanouts, and deterministic concurrency controls, engineering teams can deploy collaborating groups of agents while avoiding the quadratic context explosions and livelocks that plague unconstrained swarms.
+
+::: {.callout-chapter-connection title="From agent coordination to production telemetry"}
+Structuring distributed agent communication prevents message collapse, but evaluating whether a fleet of autonomous agents delivers reliable business value requires deep observability and standardized evaluation harnesses. @Sec-vol3-telemetry-evaluation builds the evaluation gyms, distributed telemetry span hierarchies, and Trajectory Goodput economics required to measure, benchmark, and govern autonomous agents in production.
+:::

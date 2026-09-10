@@ -167,6 +167,11 @@ class TransformerWorkload(Workload):
     hidden_dim: Optional[int] = None
     heads: Optional[int] = None
     kv_heads: Optional[int] = None
+    # Multi-Head Latent Attention (DeepSeek-V2/V3). When both are present the
+    # model caches one compressed latent per token per layer instead of a K and
+    # a V tensor per key-value head, so KV sizing takes the MLA path below.
+    kv_lora_rank: Optional[int] = None
+    qk_rope_head_dim: Optional[int] = None
     training_ops: Optional[Quantity] = None
     training_tokens: Optional[Quantity] = None
     training_accelerators_ref: Optional[Quantity] = None
@@ -197,7 +202,18 @@ class TransformerWorkload(Workload):
         return (param_count * bpp * ureg.byte).to(ureg.byte)
 
     def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
-        from ..physics import calc_kv_cache_size
+        from ..physics import calc_kv_cache_size, calc_mla_cache_size
+
+        if self.kv_lora_rank is not None and self.qk_rope_head_dim is not None:
+            return calc_mla_cache_size(
+                n_layers=self.layers,
+                kv_lora_rank=self.kv_lora_rank,
+                qk_rope_head_dim=self.qk_rope_head_dim,
+                seq_len=seq_len,
+                batch_size=batch_size,
+                bytes_per_elem=precision,
+            )
+
         h_dim = self.hidden_dim or 4096
         n_heads = self.heads or 32
         head_dim = h_dim // n_heads

@@ -29,8 +29,6 @@ Layers (03) → Training (08) → CNNs (09) → Acceleration (17)
 (building blocks) (learning)   (spatial)  (speed up)
 ```
 
-**Prerequisites**: Module 01 (Tensor) and Module 14 (Profiling, for the measurement habits)
-
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement vectorized operations for maximum throughput
@@ -134,7 +132,7 @@ When: Element-wise operations, small tensors
 Solution: Kernel fusion, memory layout optimization
 ```
 
-### The Roofline Model - Your Performance Compass
+### The Roofline Model: Your Performance Compass
 
 Every processor has fundamental limits:
 
@@ -167,7 +165,7 @@ Real-world performance wins:
 
 # %% [markdown]
 """
-## 📐 Foundations: Vectorization: From Loops to Lightning
+## 📐 Foundations: Vectorization, From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -359,7 +357,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Kernel Fusion: Eliminating Memory Bottlenecks
+## 🏗️ Implementation: Kernel Fusion
 
 ### The Memory Bandwidth Crisis
 
@@ -501,7 +499,7 @@ fused version must stay numerically faithful to the unfused definition
 
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
-    """🔬 Test fused GELU activation implementation."""
+    """🧪 Test 🔬 Test fused GELU activation implementation."""
     print("🧪 Unit Test: Fused GELU...")
 
     # Test basic properties
@@ -547,6 +545,10 @@ if __name__ == "__main__":
 ### 🧪 Unit Test: Fusion Performance
 
 Let's quantify the impact of kernel fusion by comparing fused vs unfused implementations.
+
+**What we're testing**: The unfused GELU matches the fused one numerically and costs more time
+**Why it matters**: Fusion only earns its keep if the temporaries it removes show up as wall-clock
+**Expected**: Identical outputs, and the fused version at least as fast
 """
 
 # %% nbgrader={"grade": false, "grade_id": "unfused-gelu", "solution": true}
@@ -686,7 +688,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Cache-Aware Matrix Multiplication
+## 🏗️ Cache-Aware Matrix Multiplication
 
 For large matrices that don't fit in cache, we need **tiling** (also called blocking).
 This breaks the computation into cache-sized chunks for better performance.
@@ -872,6 +874,109 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🔧 Integration: Measuring Acceleration Gains with Profiler
+
+Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
+
+This is how professional ML engineers work: profile → optimize → measure → repeat.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
+# Import Profiler from Module 14 (Module 17 comes after Module 14)
+from tinytorch.perf.profiling import Profiler
+
+def explore_acceleration_with_profiler():
+    """📊 Demonstrate acceleration gains using Profiler from Module 14."""
+
+    print("📊 Measuring Acceleration Gains with Profiler")
+    print("=" * 70)
+
+    profiler = Profiler()
+
+    # Create two simple models: one slow (loop-based), one fast (vectorized)
+    class SlowLinear:
+        """Linear layer using explicit loops (slow)."""
+        def __init__(self, in_features, out_features):
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
+
+        def forward(self, x):
+            # Explicit loop implementation (for demonstration)
+            batch_size = x.shape[0]
+            out_features = self.weight.shape[1]
+            result = np.zeros((batch_size, out_features), dtype=np.float32)
+
+            for i in range(batch_size):
+                for j in range(out_features):
+                    for k in range(x.shape[1]):
+                        result[i, j] += x.data[i, k] * self.weight.data[k, j]
+
+            return Tensor(result)
+
+    class FastLinear:
+        """Linear layer using vectorized matmul (fast)."""
+        def __init__(self, in_features, out_features):
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
+
+        def forward(self, x):
+            # Vectorized implementation
+            return vectorized_matmul(x, self.weight)
+
+    in_features, out_features = 128, 64
+    batch_size = 32
+
+    # Create models
+    slow_model = SlowLinear(in_features, out_features)
+    fast_model = FastLinear(in_features, out_features)
+
+    # Create input
+    input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
+
+    print("\n🐢 BEFORE: Loop-based implementation")
+    print("-" * 70)
+
+    # Both models do exactly the same arithmetic: one multiply and one add per
+    # (batch, in, out) triple. We count it here rather than calling
+    # profiler.count_flops, because that dispatches on the class name and these
+    # local classes are neither 'Linear' nor 'Sequential'. It would silently fall
+    # through to prod(input_shape) and report 4,096 instead of 524,288.
+    total_flops = 2 * batch_size * in_features * out_features
+
+    # Measure slow model
+    slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
+
+    print(f"   Latency: {slow_latency:.2f} ms")
+    print(f"   FLOPs: {total_flops:,}")
+    print(f"   Throughput: {total_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
+
+    print("\n🚀 AFTER: Vectorized implementation")
+    print("-" * 70)
+
+    # Measure fast model. Same FLOP count: the arithmetic is identical, only the
+    # execution differs. That is the whole point of the comparison.
+    fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
+
+    print(f"   Latency: {fast_latency:.2f} ms")
+    print(f"   FLOPs: {total_flops:,}")
+    print(f"   Throughput: {total_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
+
+    print("\n📈 ACCELERATION GAINS")
+    print("=" * 70)
+    speedup = slow_latency / fast_latency
+    print(f"   Speedup: {speedup:.1f}x faster")
+    print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
+    print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
+
+    print("\n💡 Key Insight:")
+    print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
+    print(f"   that use SIMD instructions and cache-friendly memory access patterns.")
+    print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
+    print("\n✅ This is the power of acceleration: same math, different execution!")
+
+if __name__ == "__main__":
+    explore_acceleration_with_profiler()
+
+# %% [markdown]
+"""
 ## 📊 Systems Analysis: Performance Scaling Patterns
 
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
@@ -1023,7 +1128,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 📊 Memory Efficiency Analysis
+### Memory Efficiency Analysis
 
 Understanding memory allocation patterns is crucial for perf.
 Let's measure how different implementations use memory.
@@ -1082,7 +1187,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Optimization Insights: Production Acceleration Strategy
+### Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
@@ -1249,103 +1354,6 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration: Measuring Acceleration Gains with Profiler
-
-Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
-
-This is how professional ML engineers work: profile → optimize → measure → repeat.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-acceleration", "solution": false}
-# Import Profiler from Module 14 (Module 17 comes after Module 14)
-from tinytorch.perf.profiling import Profiler
-
-def explore_acceleration_with_profiler():
-    """📊 Demonstrate acceleration gains using Profiler from Module 14."""
-
-    print("📊 Measuring Acceleration Gains with Profiler")
-    print("=" * 70)
-
-    profiler = Profiler()
-
-    # Create two simple models: one slow (loop-based), one fast (vectorized)
-    class SlowLinear:
-        """Linear layer using explicit loops (slow)."""
-        def __init__(self, in_features, out_features):
-            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
-
-        def forward(self, x):
-            # Explicit loop implementation (for demonstration)
-            batch_size = x.shape[0]
-            out_features = self.weight.shape[1]
-            result = np.zeros((batch_size, out_features), dtype=np.float32)
-
-            for i in range(batch_size):
-                for j in range(out_features):
-                    for k in range(x.shape[1]):
-                        result[i, j] += x.data[i, k] * self.weight.data[k, j]
-
-            return Tensor(result)
-
-    class FastLinear:
-        """Linear layer using vectorized matmul (fast)."""
-        def __init__(self, in_features, out_features):
-            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
-
-        def forward(self, x):
-            # Vectorized implementation
-            return vectorized_matmul(x, self.weight)
-
-    in_features, out_features = 128, 64
-    batch_size = 32
-
-    # Create models
-    slow_model = SlowLinear(in_features, out_features)
-    fast_model = FastLinear(in_features, out_features)
-
-    # Create input
-    input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
-
-    print("\n🐢 BEFORE: Loop-based implementation")
-    print("-" * 70)
-
-    # Measure slow model
-    slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
-    slow_flops = profiler.count_flops(slow_model, (batch_size, in_features))
-
-    print(f"   Latency: {slow_latency:.2f} ms")
-    print(f"   FLOPs: {slow_flops:,}")
-    print(f"   Throughput: {slow_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
-
-    print("\n🚀 AFTER: Vectorized implementation")
-    print("-" * 70)
-
-    # Measure fast model
-    fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
-    fast_flops = profiler.count_flops(fast_model, (batch_size, in_features))
-
-    print(f"   Latency: {fast_latency:.2f} ms")
-    print(f"   FLOPs: {fast_flops:,}")
-    print(f"   Throughput: {fast_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
-
-    print("\n📈 ACCELERATION GAINS")
-    print("=" * 70)
-    speedup = slow_latency / fast_latency
-    print(f"   Speedup: {speedup:.1f}x faster")
-    print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
-    print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
-
-    print("\n💡 Key Insight:")
-    print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
-    print(f"   that use SIMD instructions and cache-friendly memory access patterns.")
-    print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
-    print("\n✅ This is the power of acceleration: same math, different execution!")
-
-if __name__ == "__main__":
-    explore_acceleration_with_profiler()
-
-# %% [markdown]
-"""
 ## 🧪 Module Integration Test
 
 Final validation that all acceleration components work together correctly.
@@ -1481,17 +1489,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 17")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of acceleration techniques and their systems implications:
 
-### 1. Arithmetic Intensity Analysis
+### Question 1: Arithmetic Intensity Analysis
 You implemented vectorized matrix multiplication and fused GELU.
 - Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
 - Arithmetic intensity: _____ FLOPs/byte
@@ -1500,7 +1504,7 @@ You implemented vectorized matrix multiplication and fused GELU.
 
 ---
 
-### 2. Kernel Fusion Memory Benefits
+### Question 2: Kernel Fusion Memory Benefits
 Your fused_gelu combines 7 operations into a single expression.
 - Unfused version memory accesses: 7 reads + 7 writes = _____ per element
 - Fused version memory accesses: 1 read + 1 write = _____ per element
@@ -1509,7 +1513,7 @@ Your fused_gelu combines 7 operations into a single expression.
 
 ---
 
-### 3. Production Optimization Strategy
+### Question 3: Production Optimization Strategy
 Based on your decision framework analysis:
 For edge deployment (memory critical, stability required, hardware diverse):
 - Priority 1 technique: _____ (low risk, universal)
@@ -1588,8 +1592,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - **Kernel Fusion**: Critical for memory-bound workloads, reduces intermediate storage by 4-5×
 - **Optimization Strategy**: Start simple (vectorization), add complexity as needed
 
-### Production Impact
-Your acceleration techniques enable:
+In production, these techniques enable:
 - **Training larger models** within memory constraints
 - **Faster iteration cycles** during research and development
 - **Better hardware utilization** across different deployment targets

@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Telemetry, Distributed Tracing, and Trajectory Benchmarking {#sec-vol3-telemetry-evaluation}
@@ -134,7 +134,7 @@ A model with $95\%$ single-step accuracy collapses to a $7.7\%$ success rate ove
 
 The gap between a reported score and deployed behavior is not confined to agents, and it is not confined to language models. A clinical prediction model that reached hundreds of hospitals on the strength of a number its own vendor published shows what that gap costs once an independent group finally measures it (\ref{ws-telemetry-epic-sepsis-2021}).
 
-::: {#ws-telemetry-epic-sepsis-2021 .callout-war-story title="The Epic Sepsis Model external validation (2021)"}
+::: {#ws-telemetry-epic-sepsis-2021 .callout-war-story title="The Epic Sepsis model external validation (2021)"}
 
 **Context**: The Epic Sepsis Model is a proprietary early-warning score that flags hospitalized patients at risk of sepsis, and by 2021 it was implemented at hundreds of US hospitals. Its developer reported an area under the receiver operating characteristic curve between 0.76 and 0.83. No independent validation had been published [@wong2021esm].
 
@@ -158,7 +158,7 @@ To replace static datasets with interactive environments, the systems community 
 
 Building a production-grade evaluation gym requires solving severe systems engineering challenges: isolation, state reset latency, and benchmark air-gapping. @Fig-vol3-hermetic-gym details the architectural components of a hermetic agent evaluation gym.
 
-::: {#fig-vol3-hermetic-gym fig-env="figure" fig-pos="htb" fig-cap="**Hermetic Environment Gym Architecture for Agent Evaluation**: The architecture isolates the agent in an air-gapped, zero-trust sandbox with copy-on-write filesystem snapshotting, local mock servers, and an independent verification harness." fig-alt="Diagram of a hermetic environment gym showing the three columns: Evaluation Orchestrator with task registry and worker pool, Hermetic Sandbox Gym with network virtualization air-gap and copy-on-write storage stack, and Verification Oracles with hidden test patches and result evaluation."}
+::: {#fig-vol3-hermetic-gym fig-env="figure" fig-pos="htb" fig-cap="**Hermetic Environment Gym Architecture for Agent Evaluation**: The architecture isolates the agent in an air-gapped, zero-trust sandbox with copy-on-write filesystem snapshotting, local mock servers, and an independent verification harness. Hermeticity is a measurement requirement before it is a security one, because a run that can reach the network cannot be repeated, so a score produced without these boundaries measures the day it was collected." fig-alt="Diagram of a hermetic environment gym showing the three columns: Evaluation Orchestrator with task registry and worker pool, Hermetic Sandbox Gym with network virtualization air-gap and copy-on-write storage stack, and Verification Oracles with hidden test patches and result evaluation."}
 ![](images/svg/hermetic_eval_gym_architecture.svg)
 :::
 
@@ -246,11 +246,11 @@ This architectural sparsity creates a profound systems asymmetry in agentic serv
 
 @Fig-vol3-goodput-pareto visualizes the Trajectory Goodput Pareto frontier across diverse systems configurations.
 
-::: {#fig-vol3-goodput-pareto fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Goodput Pareto Frontier**: Accuracy versus inference compute economics. The chart plots task success rate (Pass@$k$) against Cost-per-Goal across dense baselines, sparse MoE cascades, and test-time search." fig-alt="Plot showing the Trajectory Goodput Pareto Frontier. Success rate rises as Cost-per-Goal increases. Sparse MoE cascade achieves maximum Goodput at Point B, while unconstrained swarms enter the diminishing returns zone at Point F."}
+::: {#fig-vol3-goodput-pareto fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Goodput Pareto Frontier**: Accuracy vs. inference compute economics. The chart plots task success rate (Pass@$k$) against Cost-per-Goal across dense baselines, sparse MoE cascades, and test-time search." fig-alt="Plot showing the Trajectory Goodput Pareto Frontier. Success rate rises as Cost-per-Goal increases. Sparse MoE cascade achieves maximum Goodput at Point B, while unconstrained swarms enter the diminishing returns zone at Point F."}
 ![](images/svg/trajectory_goodput_pareto.svg)
 :::
 
-As shown in @fig-vol3-goodput-pareto, peak Trajectory Goodput occurs not at the maximum raw accuracy (Point E or F), but at Point B, where a dynamic cascade routes simple steps to small sparse MoE models and reserves heavy frontier models exclusively for error-recovery branches. Pushing past Point E into unconstrained agentic swarms (Point F) incurs a catastrophic economic penalty, requiring $4\times$ more capital for a negligible $+2.8\%$ gain in resolved tasks.
+@Fig-vol3-goodput-pareto places peak Trajectory Goodput at Point B rather than at maximum raw accuracy (Point E or F), where a dynamic cascade routes simple steps to small sparse MoE models and reserves heavy frontier models for error-recovery branches. Pushing past Point E into unconstrained agentic swarms (Point F) incurs a catastrophic economic penalty, requiring $4\times$ more capital for a negligible $+2.8\%$ gain in resolved tasks.
 
 ## Significance Under Non-Determinism {#sec-vol3-telemetry-statistical-significance-under-non-determinism}
 
@@ -270,7 +270,75 @@ To determine whether an observed improvement is statistically significant, syste
 
 The required sample size $N$ to detect an effect size $\Delta p$ with sufficient statistical significance and power is mathematically demanding (the formal derivation and sample size equations are detailed in @sec-vol3-appendix-math-bootstrap).
 
-For example, to reliably detect a modest $5\%$ capability delta (e.g. improving from 30 to 35 percent success rate) with $80\%$ power, the evaluation suite must evaluate at least **1,380 independent tasks**. Evaluating on only 50 or 100 tasks yields statistical power below $15\%$. Under such low power, observed improvements are indistinguishable from a coin toss, and production deployments will routinely ship severe capability regressions masked by evaluation noise.
+```{python}
+#| label: vol3-eval-sample-size
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | HOW MANY TASKS AN EVALUATION SUITE NEEDS
+# +-----------------------------------------------------------------------------
+# | Context: The statistical-power paragraph immediately below.
+# |
+# | Goal:    Size the evaluation suite required to call a capability delta, and
+# |          state what a suite of the size teams actually run can resolve.
+# | Show:    Required tasks per configuration, and the smallest delta a 50-task
+# |          and a 100-task suite can detect.
+# | How:     calc_two_proportion_sample_size in its pooled form is the source
+# |          of truth, matching the equation displayed in
+# |          @sec-vol3-appendix-math-bootstrap. The delta a fixed suite can
+# |          resolve is recovered by bisecting that same function.
+# +-----------------------------------------------------------------------------
+import math
+
+from mlsysim import *
+
+def _detectable(baseline, suite):
+    """Delta whose pooled sample size is exactly `suite`.
+
+    Bisects the registry formula rather than restating its constants, so the
+    inverse cannot drift from the forward direction.
+    """
+    low, high = 1e-4, 1.0 - baseline - 1e-6
+    for _ in range(200):
+        mid = (low + high) / 2
+        if calc_two_proportion_sample_size(baseline, mid, pooled=True) > suite:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2
+
+class EvaluationPower:
+    # +-- 1. LOAD (Constants) --------------------
+    baseline = 0.30  # scenario assumption: incumbent agent success rate
+    improved = 0.35  # scenario assumption: candidate agent success rate
+    small_suite = 50  # scenario assumption: a suite teams commonly run
+    typical_suite = 100  # scenario assumption: a suite teams commonly run
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    delta = improved - baseline
+    required = math.ceil(calc_two_proportion_sample_size(baseline, delta, pooled=True))
+    small_delta = _detectable(baseline, small_suite)
+    typical_delta = _detectable(baseline, typical_suite)
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(required > 1_000, f"Detecting a five-point delta should demand more than a thousand tasks, got {required}")
+    check(typical_delta > delta and small_delta > typical_delta, "A smaller suite must resolve only a larger delta")
+    check(
+        abs(calc_two_proportion_sample_size(baseline, typical_delta, pooled=True) - typical_suite) < 1e-3,
+        "The recovered delta must round-trip through the sample-size formula",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    baseline_str = fmt_percent(baseline, precision=0, style="prose")
+    improved_str = fmt_percent(improved, precision=0, style="prose")
+    delta_str = fmt_pp(delta * 100, precision=0)
+    required_str = fmt_int(required)
+    small_suite_str = fmt_int(small_suite)
+    typical_suite_str = fmt_int(typical_suite)
+    small_delta_str = fmt_pp(small_delta * 100, precision=1)
+    typical_delta_str = fmt_pp(typical_delta * 100, precision=1)
+```
+
+For example, to reliably detect a modest `{python} EvaluationPower.delta_str` capability delta (improving from `{python} EvaluationPower.baseline_str` to `{python} EvaluationPower.improved_str` success rate) with 80 percent power, the evaluation suite must evaluate at least **`{python} EvaluationPower.required_str` independent tasks per configuration**. Turned around, the same formula says what a smaller suite can resolve: `{python} EvaluationPower.typical_suite_str` tasks detect nothing below `{python} EvaluationPower.typical_delta_str`, and `{python} EvaluationPower.small_suite_str` tasks nothing below `{python} EvaluationPower.small_delta_str`. A suite that size cannot distinguish a real improvement from evaluation noise, and production deployments will routinely ship severe capability regressions masked by it.
 
 ### Non-parametric Monte Carlo bootstrap confidence intervals
 
@@ -301,7 +369,7 @@ An agentic trajectory, however, is a non-deterministic, stateful loop that can e
 
 ### The three-tier span hierarchy
 
-To capture agent execution semantics cleanly, tracing runtimes structure telemetry into a strict three-tier span hierarchy, as illustrated in @fig-vol3-otel-trace:
+To capture agent execution semantics cleanly, tracing runtimes structure telemetry into the strict three-tier span hierarchy @fig-vol3-otel-trace lays out:
 
 1. **Root Span (`agent.trajectory`):** Encapsulates the entire end-to-end task execution from user intent submission to final goal completion or abort. Attributes record high-level metadata: `task.goal`, `trajectory.status`, total elapsed wall-clock time, total accumulated token counts, and total monetary cost across all models.
 2. **Iteration Span (`agent.step`):** Child span of the trajectory, created for every iteration of the agent's control loop. Attributes record the zero-indexed loop step (`agent.step.index`), current reasoning role (e.g. `planner`, `coder`, `verifier`), and intermediate scratchpad hypotheses.
@@ -312,7 +380,7 @@ To capture agent execution semantics cleanly, tracing runtimes structure telemet
 
 @Fig-vol3-otel-trace illustrates the OpenTelemetry GenAI span hierarchy and timeline attribution for an autonomous software repair agent.
 
-::: {#fig-vol3-otel-trace fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical OpenTelemetry GenAI Distributed Trace Graph**: Structured span hierarchy attributing multi-model inference latency, token counts, tool I/O execution, and W3C context propagation." fig-alt="Diagram of an OpenTelemetry GenAI trace hierarchy showing root span agent.trajectory and child step spans with nested gen_ai.inference and tool.execution subspans."}
+::: {#fig-vol3-otel-trace fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical OpenTelemetry GenAI Distributed Trace Graph**: Structured span hierarchy attributing multi-model inference latency, token counts, tool I/O execution, and W3C context propagation. The nesting is what makes the trace diagnostic rather than descriptive. A flat log records that a trajectory was slow, while the hierarchy attributes the time to the step that spent it and to the model or tool underneath that step." fig-alt="Diagram of an OpenTelemetry GenAI trace hierarchy showing root span agent.trajectory and child step spans with nested gen_ai.inference and tool.execution subspans."}
 ![](images/svg/otel_genai_trace_hierarchy.svg)
 :::
 
@@ -678,12 +746,26 @@ Comparing two agent architectures on small benchmark samples (e.g. $N = 30$ task
 
 :::
 
-## Chapter Summary {#sec-vol3-telemetry-summary}
+## Summary {#sec-vol3-telemetry-summary}
 
-- **Interactive Hermetic Gyms:** Static question-answering benchmarks have collapsed under data contamination and open-loop limitations. Agents must be evaluated inside interactive, stateful software environments (SWE-bench, WebArena) featuring Copy-on-Write filesystem snapshotting, micro-VM isolation, and complete network air-gapping.
+Evaluating and observing autonomous agent systems requires a fundamental shift from static token-level perplexity to dynamic, stateful trajectory benchmarking. Because foundation model execution is inherently stochastic, systems engineering demands interactive hermetic evaluation environments, statistical significance frameworks, OpenTelemetry span hierarchies, and Trajectory Goodput economic models.
+
+::: {.callout-takeaways title="Interactive hermetic gyms and trajectory goodput"}
+
+- **Interactive Hermetic Gyms:** Static question-answering benchmarks have collapsed under data contamination and open-loop limitations. Agents must be evaluated inside interactive, stateful software environments (SWE-bench, WebArena) featuring Copy-on-Write filesystem snapshotting, microVM isolation, and complete network air-gapping.
 - **Trajectory Goodput and Fleet Economics:** Algorithmic capability is measured by the unbiased Pass@$k$ estimator, while serving economics are governed by Trajectory Goodput ($G = N_{\text{success}} / (C_{\text{tokens}} + C_{\text{compute}})$). Sparse MoE architectures maximize Goodput by reducing active compute per token by $3.6\text{--}5.4\times$ during long-context agent loops.
 - **Statistical Significance under Non-Determinism:** Hardware floating-point non-associativity, MoE collective routing jitter, and tool latencies make agent execution stochastic. Detecting meaningful capability deltas requires formal sample size sizing ($N \ge 1,\!000$) and non-parametric Monte Carlo bootstrap confidence intervals.
-- **OpenTelemetry GenAI Tracing:** Production observability requires structured distributed tracing conforming to OpenTelemetry GenAI conventions, organizing telemetry into a three-tier span hierarchy (`agent.trajectory` $\to$ `agent.step` $\to$ `gen_ai.inference` / `tool.execution`) with W3C TraceContext propagation across asynchronous queues and stochastic search trees. To prevent telemetry systems from crashing under massive context windows, architectures must employ **Payload Offloading** (storing raw prompts in S3 and embedding URIs in spans) and **Tail-based Sampling** (retroactively preserving $100\%$ of failed agent traces while downsampling routine successes).
+- **OpenTelemetry GenAI Tracing:** Production observability requires structured distributed tracing conforming to OpenTelemetry GenAI conventions, organizing telemetry into a three-tier span hierarchy (`agent.trajectory` $\to$ `agent.step` $\to$ `gen_ai.inference` / `tool.execution`) with W3C TraceContext propagation across asynchronous queues and stochastic search trees. To prevent telemetry systems from crashing under massive context windows, architectures must employ **Payload Offloading** (storing raw prompts in object storage and embedding URIs in spans) and **Tail-based Sampling** (retroactively preserving $100\%$ of failed agent traces while downsampling routine successes).
 - **Deterministic Event Sourcing and Time Travel:** Capturing non-deterministic boundary interactions into immutable event streams enables bit-exact offline replay at zero token cost. Time-travel debuggers empower engineers to rewind state vectors, restore CoW filesystem checkpoints, and fork counterfactual exploration branches to isolate root causes.
 - **Trajectory Profiling and Causal Localization:** Profiling decomposes total latency across prefill, decode, and tool I/O, applying Amdahl's Law to target true systems bottlenecks. Automated contrastive trace diffing isolates the exact failure-inducing step and context snippet.
 - **Canary Gates and Supervisory Oversight:** Automated CI/CD pipelines utilize Sequential Probability Ratio Testing (SPRT) to detect regressions within 20 canary trajectories. Supervisory telemetry tracks the $10^6\times$ human-tool latency asymmetry, monitoring dwell times and intervention rates to prevent catastrophic rubber-stamping automation bias.
+
+:::
+
+Observability transforms an agent from an uninspectable black box into an accountable production service. When evaluation environments isolate state and distributed tracing captures causal lineage across multi-step execution, engineering teams can measure real trajectory progress, identify silent regressions, and optimize serving economics under strict operational bounds.
+
+::: {.callout-chapter-connection title="From telemetry benchmarks to the agentic synthesis"}
+Rigorous telemetry and interactive benchmarks complete the operational discipline required to run autonomous systems in production. With all five architectural parts established, the curriculum turns to the book's grand synthesis: @sec-vol3-conclusion unifies the foundational laws governing autonomous agency—from the inference-time bitter lesson to the reversibility boundary—and examines the frontier where software trajectories meet embodied physical intelligence.
+:::
+
+\part{key:synthesis}
