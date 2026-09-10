@@ -816,6 +816,13 @@ class ValidateCommand:
         ],
         "sources": [
             Scope("citations", "_run_sources"),
+            # Case studies must cite a source that resolves in their volume
+            # bibliography. Errors block; the missing-Provenance warning is
+            # opt-in so it never blocks, matching the original script.
+            Scope("case-studies", "_run_case_study_sources",
+                  note="case studies cite a source that resolves"),
+            Scope("case-study-provenance", "_run_case_study_provenance_lines", default=False,
+                  note="warning: a case study has no Provenance line"),
         ],
         "references": [
             # Hits external academic DBs (slow, network-dependent).
@@ -9891,6 +9898,47 @@ class ValidateCommand:
             "audit.checks.source_citations",
             "sources",
             "Source citation validation",
+        )
+
+    def _case_study_findings(self, severity: str) -> tuple:
+        from cli.checks import case_study_provenance
+
+        checked, findings = case_study_provenance.collect(repo=self.config_manager.root_dir)
+        issues = [
+            ValidationIssue(
+                file=f.file,
+                line=f.line,
+                code=f.code,
+                message=f.message,
+                severity=f.severity,
+            )
+            for f in findings
+            if f.severity == severity
+        ]
+        return checked, issues
+
+    def _run_case_study_sources(self, root: Path) -> ValidationRunResult:
+        """sources --scope case-studies: every case study cites a source that resolves."""
+        start = time.time()
+        checked, issues = self._case_study_findings("error")
+        return ValidationRunResult(
+            name="case-studies",
+            description="Case studies cite a source in the volume bibliography",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_case_study_provenance_lines(self, root: Path) -> ValidationRunResult:
+        """sources --scope case-study-provenance: case studies carry a Provenance line."""
+        start = time.time()
+        checked, issues = self._case_study_findings("warning")
+        return ValidationRunResult(
+            name="case-study-provenance",
+            description="Case studies carry a Provenance line",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
         )
 
     def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:

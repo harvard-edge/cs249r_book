@@ -8,7 +8,7 @@ from bindery.cli.checks.currency_style import (
 
 
 def test_currency_style_allows_single_notation_definition(tmp_path):
-    notation = tmp_path / "books/vol1/frontmatter/_notation_body.qmd"
+    notation = tmp_path / "books/shared/_partials/_notation_body.qmd"
     notation.parent.mkdir(parents=True)
     notation.write_text(NOTATION_DEFINITION + "\n", encoding="utf-8")
 

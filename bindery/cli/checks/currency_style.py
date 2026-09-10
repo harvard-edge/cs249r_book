@@ -43,8 +43,7 @@ CURRENCY_MATH_SPAN_PATTERN = re.compile(
     r"\\\([^)]*\b\d[\d,]*(?:\.\d+)?[KMBT]\),\s+[A-Za-z][\w-]*"
 )
 # The notation body is shared by all volumes and lives outside any one of them.
-# (It also carried the dead "book/" prefix, which is a symlink git never reports.)
-NOTATION_REL_PATH = Path("books/shared/partials/_notation_body.qmd")
+NOTATION_REL_PATH = Path("books/shared/_partials/_notation_body.qmd")
 NOTATION_DEFINITION = (
     "*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise "
     "noted, dollar-denominated costs are U.S. dollars (USD)."
@@ -95,9 +94,9 @@ def iter_html_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def _is_allowed_notation_definition(path: Path, line: str) -> bool:
-    # Match on the trailing "_shared/_notation_body.qmd" rather than the whole
-    # relative path: the tree is reachable as both bindery/ and book/ (a
-    # symlink), so a full-path comparison silently fails through one of them.
+    # Match on the trailing "_partials/_notation_body.qmd" rather than the whole
+    # path, so the check holds whether it runs from the repository root or from
+    # books/.
     tail = Path(*path.parts[-2:]) if len(path.parts) >= 2 else path
     expected_tail = Path(*NOTATION_REL_PATH.parts[-2:])
     return tail == expected_tail and line.strip() == NOTATION_DEFINITION
@@ -135,7 +134,7 @@ def _audit_file(path: Path) -> list[Violation]:
                             "Render dollar amounts with `fmt_usd(value, ...)` "
                             "(escapes `$` automatically); for plain prose use "
                             "`$`. Keep the currency-code definition only in "
-                            "vol1/frontmatter/_notation_body.qmd."
+                            "books/shared/_partials/_notation_body.qmd."
                         ),
                     )
                 )
