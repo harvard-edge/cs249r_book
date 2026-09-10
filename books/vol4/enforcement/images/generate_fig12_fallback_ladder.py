@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
+import os
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
   <defs>
     <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="10" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 0 L 10 0 L 5 10 Z" fill="#2D3748"/>
@@ -64,3 +66,10 @@
   <line x1="500" y1="280" x2="500" y2="300" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-down)"/>
   <line x1="500" y1="390" x2="500" y2="410" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-down)"/>
 </svg>
+"""
+
+os.makedirs('books/vol4/enforcement/images/svg', exist_ok=True)
+with open('books/vol4/enforcement/images/svg/fig12_fallback_ladder.svg', 'w') as f:
+    f.write(svg_content)
+
+print("fig12_fallback_ladder.svg generated")
