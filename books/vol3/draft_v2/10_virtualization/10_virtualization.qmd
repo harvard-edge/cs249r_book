@@ -1,12 +1,28 @@
 # Environment Virtualization {#sec-vol3-virtualization}
 
-Agentic machine learning systems transform foundation models [@bommasani2021opportunities] from passive, query-answering oracles into active, stateful agents capable of issuing commands, compiling software, querying databases, and mutating external environments. However, because neural processors lack any architectural separation between supervisory instructions and untrusted data (the violation of the classical $W \oplus X$ invariant), foundation models must be treated under a zero-trust security axiom: the neural policy is permanently vulnerable to co-optation via prompt injection. Consequently, security, multi-tenant safety, and state hermeticity cannot be delegated to probabilistic guardrails or system prompts; they must be enforced at the runtime virtualization layer. This chapter formalizes the systems engineering required to contain autonomous agents: hardware-assisted microVM runtimes (KVM/Firecracker) delivering sub-50 ms cold boots, ephemeral Copy-on-Write (CoW) filesystem overlays enabling sub-2 ms zero-contamination teardowns, and Information Flow Control (IFC) lattice models paired with multi-layer egress taint tracking. Together, these primitives establish the secure execution substrate required both for safe production deployment and for the massive, execution-based synthetic data flywheels analyzed in Part V.
+## Purpose {.unnumbered .unlisted}
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{15}{25}{15}{20}{35}{95}
+\mlagentstack{10}{10}{95}{20}{20}{15}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
+:::
+
+_Why does an unconstrained language model violate the fundamental security contract of computing?_
+
+Agentic machine learning systems transform foundation models from passive oracles into active agents capable of issuing commands, compiling software, and mutating external environments. Because neural processors lack any architectural separation between supervisory instructions and untrusted data, the neural policy is permanently vulnerable to co-optation via prompt injection. Consequently, security, multi-tenant safety, and state hermeticity cannot be delegated to probabilistic guardrails or system prompts; they must be enforced at the runtime virtualization layer. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+- Explain the architectural violation of the W XOR X invariant inherent in transformer self-attention and its consequence for prompt injection.
+- Calculate the per-call boot budget for interactive agent trajectories to ensure isolation overhead remains below five percent of wall-clock time.
+- Compare the isolation strength, boot latency, and attack surface of Linux containers, WebAssembly, and hardware-assisted microVMs.
+- Architect an ephemeral storage layer using Copy-on-Write overlays to guarantee sub-millisecond teardown and zero cross-tenant contamination.
+- Design a zero-trust network egress perimeter utilizing Information Flow Control lattices and multi-layer taint tracking.
 :::
 
 
@@ -100,7 +116,7 @@ Table @tbl-vol3-wx-transformer-comparison formalizes this structural duality, co
 | **Privilege Abuse Pathology**      | Confused deputy via ambient OS credentials (setuid binary misled by user input) [@hardy1988confused]   | Confused deputy via ambient tool capabilities (agent executes `bash_exec` with developer credentials)       |
 | **Enforcement Substrate**          | Hardware MMU page-fault interrupt (`SIGSEGV`) halting execution in $0\text{ cycles}$                   | Out-of-model runtime virtualization: hardware microVM sandboxes and Information Flow Control                |
 
-: **Table 10.1: Classical Memory Protection ($W \oplus X$) vs. Stochastic Neural Processor Execution**: Structural comparison between deterministic Von Neumann / Harvard memory isolation and autoregressive transformer attention spaces across memory segmentation, permission enforcement, control-flow dispatch, privilege hierarchy, and architectural failure modes. {#tbl-vol3-wx-transformer-comparison}
+: **Table 10.1: Classical Memory Protection ($W \oplus X$) vs. Stochastic Neural Processor Execution**: Structural comparison between deterministic Von Neumann / Harvard memory isolation and autoregressive transformer attention spaces across memory segmentation, permission enforcement, control-flow dispatch, privilege hierarchy, and architectural failure modes. {#tbl-vol3-wx-transformer-comparison tbl-colwidths="[20,40,40]"}
 
 Just as a buffer overflow causes a CPU to interpret user-supplied bytes as machine instructions, an **Indirect Prompt Injection (IPI)**\index{Indirect Prompt Injection} [@greshake2023not] causes the transformer's attention mechanism to interpret untrusted retrieved data as high-priority control instructions.
 
@@ -176,7 +192,7 @@ MicroVMs combine the security boundary of hardware-assisted virtualization with 
 | **MicroVM (Firecracker/KVM)** | Hardware VT-x / EPT + minimal VirtIO   | $5\text{--}45\text{ ms}$      | $\sim 5\text{ MB}$              | Minimal KVM ioctls ($<40$ syscalls)      | $<3\%$ (native guest kernel)             | Full POSIX (Linux kernel)   | **Maximum (Golden Standard)**           |
 | **Legacy VM (QEMU/KVM)**      | Full PC motherboard & device emulation | $15\text{--}45\text{ s}$      | $512\text{--}2048\text{ MB}$    | Full hypervisor + PC device emulation    | $<5\%$ (paravirtualized)                 | Full POSIX                  | High (large TCB in legacy QEMU)         |
 
-: **Table 10.2: Operating Systems Isolation Spectrum for Autonomous Agent Execution**: Quantitative comparison of isolation mechanisms across startup latency, baseline memory footprint, exposed host syscall attack surface, steady-state I/O penalty, POSIX fidelity, and boundary containment strength. {#tbl-vol3-isolation-comparison}
+: **Table 10.2: Operating Systems Isolation Spectrum for Autonomous Agent Execution**: Quantitative comparison of isolation mechanisms across startup latency, baseline memory footprint, exposed host syscall attack surface, steady-state I/O penalty, POSIX fidelity, and boundary containment strength. {#tbl-vol3-isolation-comparison tbl-colwidths="[15,15,10,10,20,15,15]"}
 
 ### The Per-Call Boot Budget
 
@@ -200,7 +216,7 @@ As formalized in @tbl-vol3-sandbox-budget-feasibility, provisioning latency dete
 | **Firecracker MicroVM**       | $25\text{ ms}$                   | $1.0\text{ s}$                         | $0.7\%$ of wall clock                                         | $1.9\%$ of wall clock                                  | **Satisfied ($4\times\text{--}7\times$ margin)** | **Production Standard (hardware isolated)**      |
 | **WebAssembly (WASI)**        | $2\text{ ms}$                    | $0.08\text{ s}$                        | $0.06\%$ of wall clock                                        | $0.15\%$ of wall clock                                 | **Satisfied ($33\times\text{ margin}$)**         | Ultra-fast; limited to recompiled binaries       |
 
-: **Table 10.3: Per-Turn Isolation Overhead and Feasibility across Serving Regimes**: Quantitative evaluation of per-call sandboxing overhead across a 40-step trajectory for interactive coding ($t_{\text{prod}} = 3.5\,\text{s}$) and high-throughput execution ($t_{\text{prod}} = 1.3\,\text{s}$). Technologies must satisfy the $5\%$ latency overhead ceiling ($T_{\text{boot}} \le \frac{s \cdot t_{\text{prod}}}{1-s}$) without introducing prohibitive steady-state I/O penalties. {#tbl-vol3-sandbox-budget-feasibility}
+: **Table 10.3: Per-Turn Isolation Overhead and Feasibility across Serving Regimes**: Quantitative evaluation of per-call sandboxing overhead across a 40-step trajectory for interactive coding ($t_{\text{prod}} = 3.5\,\text{s}$) and high-throughput execution ($t_{\text{prod}} = 1.3\,\text{s}$). Technologies must satisfy the $5\%$ latency overhead ceiling ($T_{\text{boot}} \le \frac{s \cdot t_{\text{prod}}}{1-s}$) without introducing prohibitive steady-state I/O penalties. {#tbl-vol3-sandbox-budget-feasibility tbl-colwidths="[15,15,15,15,15,15,10]"}
 
 ### MicroVM Hypervisor Architecture
 
@@ -289,7 +305,7 @@ Table @tbl-vol3-storage-isolation-comparison evaluates candidate storage backend
 | **Sparse LVM / DM-Snapshot**  | Device-mapper copy-on-write chunk table  | $20\text{--}60\text{ ms}$                | $10\text{--}30\text{ ms}$                  | $0\%$ (block layer)                     | Moderate ($4\,\text{KB}$ chunk granularity) | Zero (block-level isolation)               | Medium ($\sim 150$ per host)  |
 | **Ephemeral tmpfs OverlayFS** | `LowerDir` (NVMe) + `UpperDir` (`tmpfs`) | **$1\text{--}3\text{ ms}$**              | **$<2\text{ ms}$** (`umount` + `rm`)       | **$100\%$ (identical page-cache hits)** | **Zero disk I/O (in-RAM diff only)**        | **Zero (instant RAM discard)**             | **Maximum ($>500$ VMs/host)** |
 
-: **Table 10.4: Workspace Filesystem Isolation and Storage Backend Trade-Offs**: Comparative analysis of storage architectures for stateful agent execution environments across provisioning latency, teardown duration, host memory amplification, and multi-tenant containment fidelity. {#tbl-vol3-storage-isolation-comparison}
+: **Table 10.4: Workspace Filesystem Isolation and Storage Backend Trade-Offs**: Comparative analysis of storage architectures for stateful agent execution environments across provisioning latency, teardown duration, host memory amplification, and multi-tenant containment fidelity. {#tbl-vol3-storage-isolation-comparison tbl-colwidths="[15,20,15,15,15,10,10]"}
 
 ### Storage Quota Defense
 
@@ -412,7 +428,7 @@ Table @tbl-vol3-network-egress-defense outlines the multi-layer network egress d
 | **Layer 3: DNS Tunneling Mitigator**    | Internal recursive caching DNS proxy               | DNS (UDP/TCP Port 53)                   | Drop labels $>50$ chars; drop labels with Shannon entropy $H(X) > 4.2$; sinkhole Newly Registered Domains (NRDs) | Covert DNS tunneling exfiltration via subdomain encoding (e.g., `base64(secret).attacker.com`) | $<1\text{ ms}$ per query                   |
 | **Perimeter: Cloud Host Protection**    | Host `iptables` / eBPF filter on link-local subnet | HTTP (Port 80 to `169.254.169.254`)     | Drop packets destined for AWS/GCP/Azure link-local Instance Metadata Service; enforce IMDSv2 hop limit 1         | Cloud IAM instance credential harvesting, metadata enumeration, SSRF privilege escalation      | $0\,\mu\text{s}$ (hardware line rate)      |
 
-: **Table 10.5: Multi-Layer Zero-Trust Network Egress Defense Architecture**: Defense-in-depth inspection layers, enforcement primitives, filtering criteria, mitigated threat classes, and measured latency overheads across the network egress boundary. {#tbl-vol3-network-egress-defense}
+: **Table 10.5: Multi-Layer Zero-Trust Network Egress Defense Architecture**: Defense-in-depth inspection layers, enforcement primitives, filtering criteria, mitigated threat classes, and measured latency overheads across the network egress boundary. {#tbl-vol3-network-egress-defense tbl-colwidths="[15,15,15,25,20,10]"}
 
 ::: {.callout-warning title="War story: EchoLeak in Microsoft 365 Copilot (CVE-2025-32711)"}
 In June 2025, security researchers at Aim Labs disclosed **EchoLeak** (CVE-2025-32711), a critical prompt injection and data exfiltration vulnerability in Microsoft 365 Copilot [@aimlabs2025echoleak; @msrc2025echoleak].
@@ -438,26 +454,52 @@ Once outside the sandbox, a swarm of over 1,000 autonomous agents compromised Hu
 
 ## Fallacies and Pitfalls {#sec-vol3-virtualization-fallacies}
 
-**Fallacy: System prompts and constitutional alignment can reliably prevent autonomous agents from running destructive commands or leaking data.**
+**Fallacy**: *System prompts and constitutional alignment can reliably prevent autonomous agents from running destructive commands or leaking data.*
 System prompts and constitutional principles are soft, probabilistic priors within a continuous self-attention space, not deterministic access controls. Universal adversarial suffixes, delimiter collisions, Base64 encodings, and context dilution reliably cause foundation models to ignore system instructions. Relying on a model to police its own actions violates the core systems principle of complete mediation. Security guarantees must be enforced externally by hardware-assisted virtualization and operating system isolation primitives.
 
-**Fallacy: Standard Docker containers provide sufficient isolation for executing untrusted agent-generated code.**
+**Fallacy**: *Standard Docker containers provide sufficient isolation for executing untrusted agent-generated code.*
 Docker containers share the monolithic host Linux kernel across all tenants. A single unpatched local privilege escalation vulnerability, kernel race condition, or misconfigured `/proc` mount allows an attacker to break out of the container and obtain root privileges on the physical host. For executing untrusted, arbitrary code synthesized by language models, hardware-assisted microVMs (such as Firecracker) with dedicated guest kernels are mandatory.
 
-**Pitfall: Permitting access to the cloud Instance Metadata Service (IMDS) from agent execution environments.**
+**Pitfall**: *Permitting access to the cloud Instance Metadata Service (IMDS) from agent execution environments.*
 Running agent execution workers on cloud infrastructure (AWS, GCP, Azure) without blocking access to the link-local metadata address (`169.254.169.254`) allows an injected agent to steal host IAM credentials within seconds. An injected agent simply executes `curl http://169.254.169.254/latest/meta-data/iam/security-credentials/` to harvest long-term administrative tokens. Runtimes must permanently disable IMDS access via eBPF filters or iptables, and enforce IMDSv2 with a maximum hop limit of 1.
 
-**Pitfall: Leaving outbound DNS resolution unmonitored on port 53.**
+**Pitfall**: *Leaving outbound DNS resolution unmonitored on port 53.*
 Platform engineers frequently configure egress firewalls that strictly restrict outbound HTTP and HTTPS ports, but leave DNS port 53 completely open. Attackers routinely bypass these perimeter firewalls by using DNS covert tunneling: Base64-encoding stolen files into subdomain queries against an attacker-controlled nameserver. Egress protection must include DNS Shannon entropy filtering, label length enforcement, and internal DNS sinkholing.
 
-**Pitfall: Ignoring the steady-state I/O overhead of userspace syscall interception in developer workflows.**
+**Pitfall**: *Ignoring the steady-state I/O overhead of userspace syscall interception in developer workflows.*
 While userspace kernels (such as gVisor) offer fast startup and improved host security compared to containers, their userspace VFS implementation imposes a 15% to 35% I/O overhead on workloads that perform heavy file access (such as `git status`, `git checkout`, `npm install`, and compiler invocations). For interactive developer agents, this steady-state penalty often exceeds the cold-boot cost of microVMs. Runtimes must evaluate the total per-turn wall-clock cost rather than cold-boot latency in isolation.
 
 ## Summary {#sec-vol3-virtualization-summary}
 
+::: {.callout-takeaways title="The Virtualization and Sandboxing Contract"}
 * **The $W \oplus X$ Violation:** Transformer architectures map all tokens into a shared continuous embedding space $\mathbb{R}^d$, allowing untrusted data to directly modulate control flow representations via self-attention. Because models cannot distinguish data from code, security must be enforced outside the model at the runtime layer.
 * **The Isolation Spectrum:** Standard Linux containers are unsafe for executing untrusted code due to the shared 450+ syscall host kernel attack surface. MicroVMs (such as AWS Firecracker) represent the production standard, combining sub-50 ms cold boots and 5 MB footprints with hardware-enforced KVM hypervisor containment.
 * **The Per-Call Boot Budget:** To prevent cross-turn contamination in interactive trajectories, sandboxes must boot within a strict fraction of the productive turn time. MicroVMs easily satisfy this sub-180 ms budget, whereas legacy VMs (QEMU) overrun it by an order of magnitude.
 * **Copy-on-Write Filesystem Overlays:** OverlayFS combines an immutable, read-only base layer shared across hundreds of VMs with an ephemeral in-memory read-write layer. Tearing down this layer purges all session modifications in under 2 ms with zero cross-session residual contamination.
 * **Information Flow Control (IFC):** By modeling context integrity within a security lattice, the runtime tracks untrusted tokens dynamically and automatically attenuates high-privilege tool capabilities the moment external data enters the context window.
 * **Multi-Layer Egress Defense:** Preventing data exfiltration mandates kernel eBPF packet drops on raw IP destinations, transparent TLS SNI allowlisting, outbound secret scanning, and DNS tunneling mitigation via Shannon entropy thresholds.
+:::
+
+::: {.callout-chapter-connection title="From Sandboxing to Trajectory Mining"}
+With the execution substrate mathematically and deterministically secured via hardware microVMs, CoW overlays, and strict Information Flow Control, we have established a safe environment where arbitrary model actuations cannot harm the host infrastructure. However, the true value of these environments is not merely containing one agent—it is scaling to millions of concurrent, ephemeral sandboxes to generate synthetic execution trajectories. In Chapter 11, we will explore how this secure virtualization substrate becomes the foundation for Trajectory Mining, executing massive data-generation flywheels to fine-tune the next generation of policy models.
+:::
+
+## Quantitative Problems {#sec-vol3-virtualization-problems}
+
+1. **MicroVM Boot Latency vs. Legacy Virtualization (Amdahl's Law of Sandboxing)**
+   An agent trajectory completes a complex reasoning task using $N = 10,000$ ephemeral tool executions over the course of a large-scale data generation job. Each tool execution requires $t_{	ext{prod}} = 1.2\,\text{s}$ of productive wall-clock execution time. 
+   **a.** Calculate the total wall-clock time required for the trajectory if the agent provisions a legacy Docker container ($T_{	ext{boot}} = 250\,\text{ms}$) per tool execution.
+   **b.** Calculate the total wall-clock time using an AWS Firecracker microVM ($T_{	ext{boot}} = 25\,\text{ms}$).
+   **c.** Determine the percentage of total wall-clock time wasted on virtualization overhead in both cases.
+
+2. **Copy-on-Write Storage Overhead for Trajectory Swarms**
+   A cluster of physical host nodes is running a swarm of $M = 2,500$ concurrent agentic microVMs. Each microVM shares a common Ubuntu 24.04 base rootfs of size $S_{	ext{base}} = 2.4\,\text{GB}$. During a single session, each agent generates exactly $S_{	ext{mut}} = 45\,\text{MB}$ of file mutations (log files, compilation artifacts, and temporary scripts).
+   **a.** Calculate the total host physical storage required to support this swarm if using full disk image copies (raw block copies).
+   **b.** Calculate the total host physical storage required using an OverlayFS Copy-on-Write (CoW) tmpfs setup.
+   **c.** What is the storage amplification factor (Raw vs. CoW)?
+
+3. **Network Egress Taint Tracking Inspection Latency**
+   An agent execution pipeline requires outbound HTTPS connections to fetch external dependencies. A transparent TLS proxy inspects all egress traffic, introducing an SNI allowlist latency of $1.5\,\text{ms}$ per connection. Additionally, a payload secret scanner adds a variable latency of $3.5\,\text{ms}$ per HTTP request. The agent makes an average of $k = 15$ network requests per turn.
+   **a.** Calculate the total network inspection latency overhead per agent turn.
+   **b.** If the system SLA strictly mandates that the total network inspection overhead per turn must remain below $20\,\text{ms}$, what is the maximum number of network requests the agent can safely make per turn?
+
