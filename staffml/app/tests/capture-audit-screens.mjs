@@ -16,7 +16,6 @@ const PAGES = [
   { id: "06-interview", path: "/interview" },
   { id: "07-progress", path: "/progress" },
   { id: "08-explore", path: "/explore" },
-  { id: "09-framework", path: "/framework" },
   { id: "10-plans", path: "/plans" },
   { id: "11-about", path: "/about" },
 ];

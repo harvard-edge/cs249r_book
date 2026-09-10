@@ -38,7 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 REPO = HERE.parents[3]  # binder/tools/audit/<file> -> repo root
 sys.path.insert(0, str(HERE.parent / "fmt"))
-sys.path.insert(0, str(REPO / "packages" / "mlsysim"))
+sys.path.insert(0, str(REPO / "mlsysim"))
 sys.path.insert(0, str(REPO))
 
 import cell_exec  # noqa: E402

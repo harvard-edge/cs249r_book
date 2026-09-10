@@ -33,7 +33,7 @@ def make_exec_namespace() -> dict[str, Any]:
     repo_str = str(repo)
     if repo_str not in sys.path:
         sys.path.insert(0, repo_str)
-    mlsysim = repo / "packages" / "mlsysim"
+    mlsysim = repo / "mlsysim"
     if mlsysim.is_dir() and str(mlsysim) not in sys.path:
         sys.path.insert(0, str(mlsysim))
     return {"__builtins__": __builtins__}

@@ -133,7 +133,7 @@ VALID_TOPICS: frozenset[str] = frozenset({
 
 ZONE_LEVEL_AFFINITY: dict[str, set[str]] = {
     # Widened 2026-04-25 per expert consensus
-    # (tools/lint_calibration/consensus.yaml + user arbitration).
+    # (staffml/vault/docs/lint_calibration/consensus.yaml + user arbitration).
     # Each zone admits the levels that experts agreed are pedagogically
     # meaningful for that zone × level pairing.
     #

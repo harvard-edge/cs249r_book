@@ -51,18 +51,13 @@ SCOPES = [
     },
     {
         "name": "tinytorch",
-        "paths": ["packages/tinytorch/"],
-        "bibs": ["packages/tinytorch/paper/references.bib"],
+        "paths": ["tinytorch/"],
+        "bibs": ["tinytorch/paper/references.bib"],
     },
     {
         "name": "mlsysim",
-        "paths": ["packages/mlsysim/"],
-        "bibs": ["packages/mlsysim/paper/references.bib", "packages/mlsysim/docs/references.bib"],
-    },
-    {
-        "name": "design-grammar",
-        "paths": ["design-grammar/"],
-        "bibs": ["design-grammar/paper/references.bib"],
+        "paths": ["mlsysim/"],
+        "bibs": ["mlsysim/paper/references.bib", "mlsysim/docs/references.bib"],
     },
 ]
 
@@ -71,7 +66,6 @@ QMD_ROOTS = [
     "staffml",
     "tinytorch",
     "mlsysim",
-    "design-grammar",
 ]
 
 EXCLUDE_PARTS = {
