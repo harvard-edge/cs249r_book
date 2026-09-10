@@ -12,9 +12,9 @@ Execution scheduling in agentic machine learning systems represents the architec
 
 ## Introduction {#sec-vol3-scheduling-intro}
 
-In Part III of this text, we examined agent state as data at rest. In @sec-vol3-episodic-memory, we designed vector indices and knowledge graph topologies for non-volatile episodic retrieval; in @sec-vol3-checkpointing, we formalized distributed Sagas and write-ahead logs to guarantee transactional recovery across node crashes. Yet, when an agent's execution state is restored to active hardware, it ceases to be a static record on disk. It becomes an active, mutating, stochastic process that must contend with hundreds of peer trajectories for physical compute, memory bandwidth, and network I/O.
+Consider an autonomous agent tasked with bisecting an upstream repository regression. It checks out multiple commits, compiles native binaries, runs full integration test suites, and evaluates compiler errors. When this agent's execution state is active on hardware, it is not a static record on disk. It is an active, mutating, stochastic process that must contend with hundreds of peer trajectories for physical compute, memory bandwidth, and network I/O.
 
-In classical machine learning systems (Volumes I and II), the serving runtime operates under the **Request-Response Paradigm**\index{Request-Response Paradigm}. An incoming client request carries a prompt, the serving engine batches it with concurrent queries via continuous iteration batching (e.g., vLLM [@kwon2023vllm], TensorRT-LLM), executes prompt prefill, autoregressively decodes tokens until an end-of-sequence delimiter is reached, and returns the generated payload. The transaction is atomic, isolated, and brief. Once the final token leaves the GPU, all execution state is destroyed or relegated to passive prefix caches.
+In classical machine learning systems, the serving runtime operates under the **Request-Response Paradigm**\index{Request-Response Paradigm}. An incoming client request carries a prompt, the serving engine batches it with concurrent queries via continuous iteration batching (e.g., vLLM [@kwon2023vllm], TensorRT-LLM), executes prompt prefill, autoregressively decodes tokens until an end-of-sequence delimiter is reached, and returns the generated payload. The transaction is atomic, isolated, and brief. Once the final token leaves the GPU, all execution state is destroyed or relegated to passive prefix caches.
 
 Agentic systems shatter this operational paradigm by introducing **trajectory-level statefulness**\index{Trajectory-level statefulness}:
 
@@ -27,9 +27,9 @@ To manage these operational realities, the machine learning runtime must evolve 
 
 ## The Agent Control Block (ACB) {#sec-vol3-scheduling-acb}
 
-A computer operating system does not execute raw machine code in a vacuum; it schedules *processes*. In classical systems theory, as established by Ritchie and Thompson in the design of UNIX [@ritchie1974], a process is defined by its authoritative execution descriptor: the **Process Control Block (PCB)**\index{Process Control Block}. The PCB encapsulates the processor registers, memory page table pointers, open file descriptors, signal handlers, and security credentials of an executing program.
+Consider a rogue script executing within an agent's sandbox that unexpectedly attempts to open hundreds of network connections or consume an infinite loop of tokens. If the runtime treats an agent simply as an open conversational prompt buffer, it lacks the mechanisms to enforce security isolation, track financial expenditures, preempt the execution, or recover from divergent reasoning paths.
 
-In an agentic architecture, scheduling naked prompts or raw API sessions directly against foundation models is an anti-pattern. If the runtime treats an agent simply as an open conversational prompt buffer, it lacks the mechanisms to enforce security isolation, track financial expenditures, preempt execution, or recover from divergent reasoning paths.
+A computer operating system does not execute raw machine code in a vacuum; it schedules *processes*. In classical systems theory, as established by Ritchie and Thompson in the design of UNIX [@ritchie1974], a process is defined by its authoritative execution descriptor: the **Process Control Block (PCB)**\index{Process Control Block}. The PCB encapsulates the processor registers, memory page table pointers, open file descriptors, signal handlers, and security credentials of an executing program.
 
 The fundamental unit of execution in an agentic runtime is the **Agent Control Block (ACB)**\index{Agent Control Block}.
 
@@ -81,8 +81,8 @@ The runtime kernel manages nine operational lifecycle states:
 
 1. **`INITIALIZED`:** The ACB data structure is allocated in host memory. The principal's credentials are authenticated, the goal specification $\mathcal{G}$ is validated, root capability leases $\mathcal{K}_{\text{leases}}$ are signed, and initial token/cost reserves are escrowed. The session is queued in the admission gate.
 2. **`ACTIVE_PREFILL`:** The scheduler assigns the agent to an accelerator prefill worker. The foundation model processes system instructions, tool schemas, and multi-turn history. This phase is compute-bound, maximizing Tensor Core operational intensity to establish the Time-To-First-Token (TTFT).
-3. **`ACTIVE_DECODE`:** The model autoregressively generates reasoning thought tokens and tool-call schemas. This phase is memory-bandwidth bound, reading the entire model weight matrix for every generated token.
-4. **`SUSPENDED_TOOL_WAIT`:** The model emits an actionable tool invocation. The runtime traps the call, validates arguments against capability lease schemas, and dispatches the request to an isolated sandbox (see @sec-vol3-virtualization). The agent relinquishes its active decode slot on the accelerator.
+3. **`ACTIVE_DECODE`:** The foundation model autoregressively generates reasoning thought tokens and tool-call schemas. This phase is memory-bandwidth bound, reading the entire model weight matrix for every generated token.
+4. **`SUSPENDED_TOOL_WAIT`:** The foundation model emits an actionable tool invocation. The runtime traps the call, validates arguments against capability lease schemas, and dispatches the request to an isolated sandbox (see @sec-vol3-virtualization). The agent relinquishes its active decode slot on the accelerator.
 5. **`SUSPENDED_HUMAN_GATE`:** The agent attempts a sensitive or irreversible action (e.g., executing a database write or committing financial payments) that requires explicit human consent. The execution state is serialized to cold storage, and the ACB enters an asynchronous sleep state.
 6. **`MEMORY_SWAPPING`:** If cluster HBM pressure exceeds critical thresholds, or if a tool execution is anticipated to block beyond a mathematically derived breakeven duration, the memory manager swaps physical KV blocks from accelerator HBM to host DDR5 DRAM or local NVMe storage.
 7. **`ROLLBACK_COMPENSATING`:** A verification failure, invariant violation, or runtime fault is detected. The kernel executes backward compensating transactions ($A^{-1}$) defined in the ACB's undo ledger to restore the environment to a consistent state.
@@ -260,7 +260,11 @@ class StateTransitionError(RuntimeError):
     pass
 ```
 
+With the Agent Control Block establishing the fundamental unit of execution and state, the kernel has the mechanisms to isolate and manage individual agent trajectories. However, tracking individual processes is only half of the scheduling problem. The runtime must determine the order in which these trajectories are dispatched to the physical hardware, a challenge complicated by the statistical properties of agent execution times.
+
 ## Heavy-Tailed Workloads {#sec-vol3-scheduling-heavy-tails}
+
+Imagine a cluster handling hundreds of concurrent agent trajectories. One agent is tasked with correcting a single syntax typo, completing in two steps. Another is bisecting a multi-repository regression, expanding into hundreds of steps and monopolizing an accelerator for tens of minutes. This extreme variability destroys traditional scheduling assumptions.
 
 In traditional web search, database querying, and stateless LLM serving, job service times typically follow light-tailed distributions—such as exponential, Gaussian, or Poisson models—characterized by finite, well-behaved means and bounded variances [@kleinrock1975queueing]. Schedulers operating over such workloads exploit this low variance to construct tight tail-latency Service Level Objectives (SLOs) through classical $M/M/k$ or $M/G/k$ queueing models.
 
@@ -352,7 +356,11 @@ Table 7.4 (@tbl-vol3-scheduling-discipline-comparison) contrasts classical reque
 
 : Table 7.4: **Comparison of Scheduling Disciplines for Agent Workloads**: Theoretical properties, information requirements, tail-latency vulnerabilities, and implementation trade-offs across classical and agent-centric queueing disciplines. {#tbl-vol3-scheduling-discipline-comparison}
 
+While Least Attained Service scheduling mitigates head-of-line blocking by aggressively preempting long-running tasks, it assumes that execution itself is continuously compute-bound. In practice, agent workloads spend the vast majority of their lifetimes waiting for external events, necessitating a fundamentally different approach to physical memory management during these prolonged stalls.
+
 ## Bimodal Execution {#sec-vol3-scheduling-bimodal}
+
+Consider an agent executing a web scraping task. The GPU evaluates the prompt and generates a tool call to fetch a URL in $45	ext{ ms}$. The agent then waits $15	ext{ s}$ for the remote server to respond and the headless browser to render the Document Object Model (DOM).
 
 Stateless inference workloads are compute-and-memory bound within the accelerator. In contrast, autonomous agent trajectories are characterized by **extreme bimodal execution dynamics**\index{Bimodal execution dynamics}: they alternate between lightning-fast GPU forward passes and protracted, blocking external I/O operations.
 
@@ -362,7 +370,7 @@ As demonstrated in Table 7.3 (@tbl-vol3-scheduling-workload-comparison), an agen
 
 The timeline of a single agentic reasoning step decomposes into three radically disparate regimes:
 
-1. **Neural Inference Phase ($20\text{ to }500\,\text{ms}$):** The model consumes context tokens and autoregressively generates thought sequences and tool-call arguments.
+1. **Neural Inference Phase ($20\text{ to }500\,\text{ms}$):** The foundation model consumes context tokens and autoregressively generates thought sequences and tool-call arguments.
 2. **Deterministic Sandbox Execution ($1\text{ to }60\,\text{s}$):** The agent blocks while an external container compiles C++ code, executes pytest suites, or fetches remote DOM trees.
 3. **Human Authorization Gate ($5\text{ minutes to }24\text{ hours}$):** If the agent requires supervisory consent for a high-privilege action, execution pauses indefinitely in an external mailbox queue.
 
@@ -426,7 +434,7 @@ To prevent context swapping from blocking the scheduler control loop, the runtim
 
 <!-- ERADICATED MERMAID PNG -->
 
-1. **Phase 1: Yield and Mark Inactive:** The model emits the closing token of a tool-call schema. The parser traps the token, transitions the ACB to `SUSPENDED_TOOL_WAIT`, removes its active slot from the continuous batching iteration, and dispatches the execution payload to the sandbox daemon.
+1. **Phase 1: Yield and Mark Inactive:** The foundation model emits the closing token of a tool-call schema. The parser traps the token, transitions the ACB to `SUSPENDED_TOOL_WAIT`, removes its active slot from the continuous batching iteration, and dispatches the execution payload to the sandbox daemon.
 2. **Phase 2: Asynchronous Evacuation:** If cluster HBM allocation pressure exceeds safety thresholds ($M_{\text{used}} > 75\%$), the memory manager triggers asynchronous DMA transfer over PCIe, writing the agent's PagedAttention frames directly into pre-pinned Host DRAM pages. The freed HBM page frames are immediately recycled into the global allocator.
 3. **Phase 3: Event-Driven Prefetch:** The tool process terminates in the sandbox container, posting its stdout payload to the scheduler's completion queue. The completion handler allocates fresh HBM frames, issues an asynchronous DMA read command to stream the KV blocks back from host DRAM, and places the ACB into the high-priority ready queue. By overlapping DMA prefetch with prompt assembly, swap-in latency is completely masked.
 
@@ -498,7 +506,11 @@ When memory shortages occur, the scheduler enforces a strict invariant:
 - **Zone 3 (Reversible Writes):** Preemption requires triggering compensating Saga transactions (e.g., executing `git reset --hard` or rolling back database savepoints) to restore environmental consistency.
 - **Zone 4 (Irreversible Actions):** Preemption is strictly prohibited. The scheduler must elevate the agent to **Pinned Real-Time Status**\index{Pinned Real-Time Status}, allocating emergency memory headroom until the physical action reaches terminal completion.
 
+Bimodal context swapping efficiently reclaims accelerator memory during long external stalls, but it does not address the interference that occurs when agents are actively computing. When massive prompt evaluations collide with interactive token generation on the same accelerator, the runtime must decouple the architectural phases entirely.
+
 ## Chunked Prefill Disaggregation {#sec-vol3-scheduling-disaggregation}
+
+An autonomous agent working on a large codebase submits a $64	ext{k}$-token prompt containing a massive repository dump. If the cluster attempts to process this massive prefill on the same GPU that is actively decoding tokens for twenty other interactive agents, the decoding iterations freeze, inducing severe latency jitter.
 
 In classical inference serving, prompt prefill and autoregressive token decoding are co-located on the same physical GPUs. In multi-turn agent workloads, this architectural co-location induces severe phase interference that destroys serving predictability and causes cluster deadlocks.
 
@@ -615,6 +627,8 @@ To prevent Coffman deadlocks, the scheduler must enforce strict **Capacity-Aware
 $$\sum_{i \in \mathcal{A}_{\text{active}}} M_{\text{reserve}}^{(i)} \le M_{\text{total}} - M_{\text{headroom}}$$
 where $M_{\text{reserve}}^{(i)}$ represents the maximum guaranteed memory envelope reserved for agent $i$'s current step. If an active session attempts an allocation that violates this invariant, the kernel immediately triggers preemptive context swapping, demoting lower-priority sessions to host DRAM before a hardware lockup can materialize.
 :::
+
+By structurally isolating prefill from decoding and enforcing rigorous capacity invariants, the runtime prevents architectural phase collisions and distributed deadlocks. Yet, even with these robust mechanisms in place, reasoning about agent scheduling remains prone to classical intuition errors.
 
 ## Fallacies and Pitfalls {#sec-vol3-scheduling-fallacies}
 
