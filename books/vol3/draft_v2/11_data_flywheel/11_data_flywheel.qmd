@@ -22,11 +22,11 @@ engine: jupyter
 
 ## Purpose {.unnumbered .unlisted}
 
-_How do we synthesize, verify, and scale multi-turn agent execution data to train autonomous policies when human demonstration data is economically and combinatorial exhausted?_
+_How do we synthesize, verify, and scale multi-turn agent execution data to train autonomous policies when human demonstration data is economically and combinatorially exhausted?_
 
-In Parts I through IV, we treated the foundation model as a static, frozen stochastic processor. We designed elaborate external operating systems around it: context working sets to conserve high-bandwidth memory (HBM), virtual memory paging for multi-tenant KV caches, episodic vector storage for non-volatile recall, execution schedulers to manage heavy-tailed workloads, system calls to enforce capability boundaries, and microVM sandboxes to isolate untrusted execution. While this runtime scaffolding is indispensable for system stability and security, relying exclusively on inference-time prompting imposes severe economic and physical penalties: quadratic attention prefill overhead, KV-cache saturation, token recall degradation across extended horizons, and brittle adherence to complex API schemas.
+Treating the foundation model as a static, frozen stochastic processor requires designing elaborate external operating systems around it: context working sets to conserve high-bandwidth memory (HBM), virtual memory paging for multi-tenant KV caches, episodic vector storage for non-volatile recall, execution schedulers to manage heavy-tailed workloads, system calls to enforce capability boundaries, and microVM sandboxes to isolate untrusted execution. While this runtime scaffolding is indispensable for system stability and security, relying exclusively on inference-time prompting imposes severe economic and physical penalties: quadratic attention prefill overhead, KV-cache saturation, token recall degradation across extended horizons, and brittle adherence to complex API schemas.
 
-To overcome these constraints, agent systems engineering must transition from pure runtime containment to **Policy Adaptation**\index{Policy Adaptation} (Part V). This transition begins with the **Synthetic Data Flywheel**\index{Synthetic Data Flywheel}. Human trajectory demonstrations are too slow, prohibitively expensive, and fundamentally unscalable for the combinatorial state spaces of multi-turn tool interaction. Furthermore, human annotators emit almost exclusively happy-path traces, starving the policy of essential error-recovery signals. The synthetic data flywheel bypasses human annotation through automated task generation, stochastic teacher exploration, execution-based rejection sampling against deterministic oracles (compilers, linters, test harnesses), and search distillation from high-compute deliberation trees into compact, single-pass policy weights. This chapter formalizes the end-to-end systems architecture required to run this closed-loop flywheel at data-center scale.
+To overcome these constraints, agent systems engineering must transition from pure runtime containment to **Policy Adaptation**\index{Policy Adaptation}. This transition begins with the **Synthetic Data Flywheel**\index{Synthetic Data Flywheel}. Human trajectory demonstrations are too slow, prohibitively expensive, and fundamentally unscalable for the combinatorial state spaces of multi-turn tool interaction. Furthermore, human annotators emit almost exclusively happy-path traces, starving the policy of essential error-recovery signals. The synthetic data flywheel bypasses human annotation through automated task generation, stochastic teacher exploration, execution-based rejection sampling against deterministic oracles (compilers, linters, test harnesses), and search distillation from high-compute deliberation trees into compact, single-pass policy weights. This chapter formalizes the end-to-end systems architecture required to run this closed-loop flywheel at data-center scale.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -48,11 +48,11 @@ To overcome these constraints, agent systems engineering must transition from pu
 
 ## Introduction {#sec-vol3-flywheel-intro}
 
-In classical computer architecture, software systems do not modify the physical silicon of the central processing unit; the CPU's instruction decoder and arithmetic logic units remain fixed, while software compilers translate high-level logic into sequences of machine instructions that respect the hardware's static interface. In the early phases of agentic system design (Parts I–IV), machine learning engineers adopted an identical mental model. The underlying foundation model was treated as an immutable neural processor. To coax complex multi-step reasoning and tool invocation from this processor, engineers built extensive runtime scaffolding: system prompts stuffed with dozens of JSON schemas, few-shot demonstration exemplars, dynamic in-context retrieval, and deterministic statecharts.
+Consider an autonomous agent tasked with debugging a critical database regression. To coax the agent to retrieve logs, execute SQL queries, and patch the faulty logic without altering the model's weights, engineers must build extensive runtime scaffolding: system prompts stuffed with dozens of JSON schemas, few-shot demonstration exemplars, dynamic in-context retrieval, and deterministic statecharts. This mirrors classical computer architecture, where compilers translate high-level logic to respect a fixed CPU interface. The underlying foundation model is treated as an immutable neural processor.
 
 While this runtime-centric approach enables rapid prototyping, it introduces three crippling systems bottlenecks:
 
-1. **Quadratic Prefill and KV-Cache Memory Bloat:** Stuffer prompts that encode complete API specifications, domain rules, and multi-turn exemplars routinely consume $8{,}000$ to $32{,}000$ tokens of the active context window. As established in @sec-vol3-context-working-sets and @sec-vol3-prefix-caching-paging, attention prefill compute scales quadratically with sequence length, and KV-cache allocation scales linearly. Serving an agent that must ingest a $32\text{K}$-token prefix on every interaction turn rapidly exhausts GPU HBM, throttling batch sizes and driving inference costs to unsustainable levels.
+1. **Quadratic Prefill and KV-Cache Memory Bloat:** Stuffer prompts that encode complete API specifications, domain rules, and multi-turn exemplars routinely consume $8{,}000$ to $32{,}000$ tokens of the active context window. As established in earlier chapters, attention prefill compute scales quadratically with sequence length, and KV-cache allocation scales linearly. Serving an agent that must ingest a $32\text{K}$-token prefix on every interaction turn rapidly exhausts GPU HBM, throttling batch sizes and driving inference costs to unsustainable levels.
 2. **Attention Dispersion and Contextual Amnesia:** As sequence length grows, transformer attention distributions suffer from contextual degradation. The "lost in the middle" phenomenon demonstrates that models recall information at the extremes of their context far more reliably than information embedded within deep conversational histories [@liu2024lost]. When an agent relies on lengthy system prompts to remember tool constraints during a 40-step interaction, parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
 3. **The Brittleness of Prompted Coordination:** Prompt-based instructions are fundamentally advisory. A stochastic processor conditioned via natural language instructions possesses no formal mathematical guarantee of schema compliance or termination. Under distributional drift or unexpected tool exceptions, prompted agents frequently enter infinite semantic loops or emit malformed execution payloads.
 
@@ -66,13 +66,11 @@ The closed-loop architecture of the synthetic data flywheel is illustrated in @f
 
 :::
 
-However, compiling execution capability into weights requires massive volumes of high-fidelity trajectory data. This requirement triggers the core problem of Part V: **Where does the training data come from?**
-
-This chapter introduces the **Synthetic Data Flywheel**. Rather than relying on manual human labeling, modern agent post-training leverages the execution environment itself as a tireless, automated supervisor. By coupling generative task creation, stochastic candidate rollouts, deterministic execution-based verification, and search distillation, engineering teams create a self-reinforcing flywheel: improved policies resolve more complex environment states, generating richer execution traces that fuel subsequent training generations.
+Compiling execution capability into weights requires massive volumes of high-fidelity trajectory data. Rather than relying on manual human labeling, modern agent post-training leverages the execution environment itself as a tireless, automated supervisor. By coupling generative task creation, stochastic candidate rollouts, deterministic execution-based verification, and search distillation, engineering teams create a self-reinforcing flywheel: improved policies resolve more complex environment states, generating richer execution traces that fuel subsequent training generations. The first barrier to spinning up this flywheel is the physical limit of generating those initial trajectories.
 
 ## The Post-Training Data Bottleneck {#sec-vol3-flywheel-bottleneck}
 
-In standard language model pretraining, data abundance is the defining paradigm: models ingest trillions of tokens of unstructured web text, books, and code repositories. In contrast, the post-training regime for autonomous agents faces a severe **Data Bottleneck**\index{Data Bottleneck}.
+To train an agent to resolve a real-world software issue, an engineering team might consider hiring human engineers to record their debugging steps. But an agent trajectory is not a single text completion; it is an ordered sequence of state-action-observation tuples. At commercial billing rates, collecting a modest dataset of $50{,}000$ human trajectories costs between $3.75\text{M}$ and $20\text{M}$ dollars and requires months of calendar time. In contrast to standard language model pretraining where data is abundant, the post-training regime for autonomous agents faces a severe **Data Bottleneck**\index{Data Bottleneck}.
 
 ### The Arithmetic of Human Demonstration Failure
 
@@ -116,11 +114,11 @@ The seminal formalization of this principle for language models was demonstrated
 
 Intuitively, the model proposes candidate API calls during text generation. These calls are executed in a sandbox, and the returned information is injected back into the context. If the API invocation returns irrelevant data or a runtime error, the model's uncertainty about future tokens remains unchanged or increases, and the trace is discarded. However, if the tool returns precise, grounded facts (e.g., an exact mathematical calculation), the model's prediction of future tokens becomes highly certain. The system accepts trajectories into the training corpus only when the environment feedback acts as a massive \"entropy reducer,\" filtering out useless tool use and rewarding factual grounding.
 
-The synthetic data flywheel generalizes this primitive across entire multi-turn trajectories: candidate action sequences are rolled out in parallel, evaluated against environment invariants, and filtered to construct massive, pristine post-training corpora.
+The synthetic data flywheel generalizes this primitive across entire multi-turn trajectories: candidate action sequences are rolled out in parallel, evaluated against environment invariants, and filtered to construct massive, pristine post-training corpora. The mathematical engine that filters these candidates is execution-based rejection sampling.
 
 ## Execution-Based Rejection Sampling {#sec-vol3-flywheel-rejection-sampling}
 
-The core algorithmic mechanism driving data generation in the flywheel is **Execution-Based Rejection Sampling**\index{Execution-Based Rejection Sampling}.
+Consider generating a trajectory to resolve a compilation error. We could sample hundreds of candidate bash commands from a language model, but how do we know which one works without human review? The core algorithmic mechanism driving data generation in the flywheel is **Execution-Based Rejection Sampling**\index{Execution-Based Rejection Sampling}.
 
 ### Mathematical Formulation
 
@@ -199,11 +197,11 @@ To instill operational efficiency, the curation pipeline applies **Trajectory Ec
 
 <!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
-By algorithmically selecting the minimal-step trajectory that achieves the goal (based on length or token count), the fine-tuning process teaches the model the shortest, most direct computational path to goal satisfaction, actively penalizing operational meandering.
+By algorithmically selecting the minimal-step trajectory that achieves the goal (based on length or token count), the fine-tuning process teaches the model the shortest, most direct computational path to goal satisfaction, actively penalizing operational meandering. Evaluating thousands of these candidate paths requires executing actual code, which reveals a glaring systems mismatch between GPU generation and CPU verification.
 
 ## Scaling Deterministic Oracles {#sec-vol3-flywheel-scaling-oracles}
 
-While generating candidate trajectories requires massive GPU clusters, verifying them introduces a distributed systems challenge that is frequently overlooked: **Deterministic Oracle Scalability**\index{Deterministic Oracle Scalability}.
+Imagine provisioning a thousand-node GPU cluster to generate agent trajectories, only to find the entire fleet sitting idle because it is waiting for a Docker container to finish running `cargo build`. While generating candidate trajectories requires massive GPU capacity, verifying them introduces a distributed systems challenge: **Deterministic Oracle Scalability**\index{Deterministic Oracle Scalability}.
 
 ### The Heterogeneous Compute Mismatch
 
@@ -235,7 +233,7 @@ The disaggregated compute topology is detailed in @fig-vol3-flywheel-disaggregat
 
 When executing millions of untrusted agent-generated code snippets per day, container security and launch overhead become binding constraints.
 
-Standard Linux containers (Docker) share the host kernel. Hallucinated agent actions (such as fork-bombs, malicious kernel module insertions, or memory exhaustion) can crash host worker nodes or escape container boundaries (detailed in @sec-vol3-sandboxing-isolation). Conversely, traditional hardware-assisted virtual machines (QEMU/KVM) provide strict hardware-enforced Ring 0 isolation, but their cold-boot latencies (5 to 30 seconds) and high memory footprints make high-throughput verification impossible.
+Standard Linux containers (Docker) share the host kernel. Hallucinated agent actions (such as fork-bombs, malicious kernel module insertions, or memory exhaustion) can crash host worker nodes or escape container boundaries (detailed in earlier architecture chapters). Conversely, traditional hardware-assisted virtual machines (QEMU/KVM) provide strict hardware-enforced Ring 0 isolation, but their cold-boot latencies (5 to 30 seconds) and high memory footprints make high-throughput verification impossible.
 
 Modern verification infrastructure resolves this tension through **MicroVM Sandboxes**\index{MicroVM Sandboxes} (such as AWS Firecracker [@agache2020firecracker]) combined with **Copy-on-Write (CoW) Storage Overlays**\index{Copy-on-Write (CoW) Storage Overlays}:
 
@@ -269,11 +267,11 @@ The balance between GPU rollout compute and CPU verification compute is governed
 
 <!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
 
-If the verification fleet is under-provisioned relative to the fast GPU inference workers, the system enters an **Oracle-Bound Stall**\index{Oracle-Bound Stall}: CPU verification queues fill to capacity, backpressure propagates upstream, and the GPU inference fleet halts. Because GPU time is orders of magnitude more expensive than CPU time, any bottleneck that forces tensor cores to idle waiting for compiler feedback represents a catastrophic collapse in cluster cost efficiency. In enterprise code-synthesis pipelines, maintaining balanced throughput requires provisioning between 32 and 64 dedicated CPU verification cores for every single 8-way H100 GPU rollout node.
+If the verification fleet is under-provisioned relative to the fast GPU inference workers, the system enters an **Oracle-Bound Stall**\index{Oracle-Bound Stall}: CPU verification queues fill to capacity, backpressure propagates upstream, and the GPU inference fleet halts. Because GPU time is orders of magnitude more expensive than CPU time, any bottleneck that forces tensor cores to idle waiting for compiler feedback represents a catastrophic collapse in cluster cost efficiency. In enterprise code-synthesis pipelines, maintaining balanced throughput requires provisioning between 32 and 64 dedicated CPU verification cores for every single 8-way H100 GPU rollout node. Even with perfectly balanced CPU-GPU clusters, generating thousands of rollouts per query at inference time is impossible for production customer traffic. The solution is to move this deliberation offline.
 
 ## Search Distillation {#sec-vol3-flywheel-search-distillation}
 
-While execution-based rejection sampling filters independent stochastic paths, complex multi-step reasoning tasks frequently require exploring combinatorial decision trees. In @sec-vol3-deliberation, we established that **Test-Time Deliberation**\index{Test-Time Deliberation}—using Monte Carlo Tree Search (MCTS), beam search, and verifier-guided tree rollouts—allows language models to solve problems far beyond the reach of single-pass greedy decoding.
+Suppose an agent encounters a broken database dependency that requires exploring several incompatible package versions, backtracking from failures, and branching into new debugging paths. While execution-based rejection sampling filters independent stochastic paths, complex multi-step reasoning tasks frequently require exploring combinatorial decision trees. In @sec-vol3-deliberation, we established that **Test-Time Deliberation**\index{Test-Time Deliberation}—using Monte Carlo Tree Search (MCTS), beam search, and verifier-guided tree rollouts—allows language models to solve problems far beyond the reach of single-pass greedy decoding.
 
 However, deploying test-time search directly into production customer runtimes is economically and operationally prohibitive. Running an MCTS search that explores 120 candidate actions across 15 tree levels can require generating over $100{,}000$ tokens per task, introducing latencies of two to five minutes and compute costs exceeding ten dollars per query.
 
@@ -334,9 +332,11 @@ Through cross-branch rationale distillation, the student model inherits both the
 
 : **Trajectory Synthesis Methodologies**: Systems characteristics, verification mechanisms, primary operational bottlenecks, and financial cost structures across synthetic data generation approaches. {#tbl-vol3-synthesis-comparison tbl-colwidths="[18,20,20,18,12,12]"}
 
+While these mechanisms theoretically align into a pristine learning loop, operating them at scale exposes the system to counterintuitive failure modes. The architecture is only as robust as its mitigations against these pitfalls.
+
 ## Fallacies and Pitfalls {#sec-vol3-flywheel-fallacies}
 
-Engineering a production-scale synthetic data flywheel is fraught with counterintuitive failure modes. Below are the major architectural pitfalls documented in frontier agent laboratories.
+When an engineering team first spins up a synthetic data flywheel, they invariably encounter situations where supposedly verified trajectories lead to degraded model performance in production. Engineering a production-scale synthetic data flywheel is fraught with counterintuitive failure modes. Below are the major architectural pitfalls documented in frontier agent laboratories.
 
 **Fallacy: LLM-as-a-Judge is a sufficient verifier for agent trajectories.**
 Relying on a frontier LLM prompted as an evaluator to score candidate synthetic trajectories as "Correct" or "Incorrect" avoids the engineering complexity of deploying microVM sandboxes, but introduces fatal flaws. LLMs exhibit severe length bias (favoring verbose, rambling code) and circular hallucination (certifying non-existent API parameters). Trajectory verification must be grounded in non-differentiable execution oracles like compilers, linters, and unit test suites.
@@ -365,7 +365,11 @@ Prompting an unconstrained LLM to iteratively generate synthetic programming tas
 
 : **Architectural Pitfalls and Mitigations in Synthetic Data Flywheels**: Structural summary of root failure mechanisms, manifested operational symptoms, and engineering mitigations across the data flywheel lifecycle. {#tbl-vol3-flywheel-failure-modes tbl-colwidths="[18,26,28,28]"}
 
+Recognizing these pitfalls allows engineers to build reliable synthetic data pipelines. These lessons distill into a core set of architectural principles.
+
 ## Summary {#sec-vol3-flywheel-summary}
+
+A working synthetic data flywheel transforms the problem of agent capabilities from a human-labor bottleneck into a scalable compute problem.
 
 * **The Post-Training Data Bottleneck:** Human trajectory demonstrations are too expensive, slow, and constrained by golden-path bias to effectively train multi-turn autonomous agents. Scaling agent capabilities requires replacing human annotation with self-supervised environment bootstrapping.
 * **Execution-Based Rejection Sampling:** Trajectory validity must be gated by hard, non-differentiable deterministic oracles (compilers, linters, state assertions) rather than subjective LLM-as-a-judge evaluators to prevent length bias and circular hallucinations.
@@ -388,3 +392,5 @@ The systemic connection between the synthetic data flywheel and the trajectory f
 ::: {#fig-vol3-flywheel-ch11-ch12-bridge fig-env="figure" fig-pos="htb" fig-cap="**The Synthesis-to-Training Pipeline and Loss Masking Bridge**: Coordinated architectural progression from seed task generation, teacher rollouts, and deterministic rejection sampling to bifurcated trajectory curation. Curated traces flow directly into the selective loss masking engine of @sec-vol3-sft, where backpropagation updates weights exclusively on agent control actions while strictly masking external environment observations." fig-alt="System architecture diagram detailing the five-stage pipeline from task seed corpus generation to teacher rollouts, execution verification, golden path extraction, error recovery synthesis, and selective loss masking for fine-tuning."}
 ![](images/svg/trajectory_sft_pipeline.svg){width=100%}
 :::
+
+This hardware-to-training bridge sets the stage for formalizing these policy updates in the next chapter.
