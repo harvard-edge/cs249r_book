@@ -181,41 +181,6 @@ When an interrupt vector fires, the runtime invokes the **Agent Interrupt Servic
 5. **Supervisor Notification Emission:** The runtime dispatches an out-of-band notification event (via Webhook, Slack API, or Message Queue) containing a structured, cryptographically signed escalation payload.
 6. **Execution Thread Release:** The runtime worker thread returns to the global scheduler pool to execute unrelated agent trajectories. The suspended agent consumes zero CPU cycles and zero GPU memory.
 
-<!-- MERMAID SOURCE PRESERVATION
-stateDiagram-v2
-    [*] -- > ACTIVE_DECODE: Scheduler Dispatches Trajectory
-
-    ACTIVE_DECODE -- > INTERRUPT_DETECTED: IRQ / Trap / Exception / NMI
-
-    state INTERRUPT_DETECTED {
-        [*] -- > CheckNMI
-        CheckNMI -- > EMERGENCY_HALT: Is NMI? (Yes: Hard Stop)
-        CheckNMI -- > DRAIN_STEP: Is NMI? (No: Soft Interrupt)
-        DRAIN_STEP -- > SNAPSHOT_ACB: Drain In-Flight Token / Tool Step
-    }
-
-    EMERGENCY_HALT -- > TERMINATED_ABORTED: Force Kill Sandbox & Revoke Leases
-
-    SNAPSHOT_ACB -- > DEHYDRATE_MEMORY: Append Snapshot to WAL
-    DEHYDRATE_MEMORY -- > SUSPENDED_HUMAN_GATE: Evacuate KV Cache (HBM -> DRAM/NVMe)
-
-    SUSPENDED_HUMAN_GATE -- > SUSPENDED_HUMAN_GATE: Idle Awaiting Webhook (0 GB GPU HBM)
-
-    SUSPENDED_HUMAN_GATE -- > WATCHDOG_EXPIRED: Timer >= Tau_Watchdog
-    WATCHDOG_EXPIRED -- > SAGAS_COMPENSATION: Preempt Locks & Execute Rollback
-    SAGAS_COMPENSATION -- > TERMINATED_ABORTED: Trajectory Aborted Cleanly
-
-    SUSPENDED_HUMAN_GATE -- > REHYDRATION: Human Resolves Gate (Approve / Modify)
-
-    state REHYDRATION {
-        [*] -- > VERIFY_SIGNATURE: Validate Ed25519 Capability Lease
-        VERIFY_SIGNATURE -- > RESTORE_ACB: Rehydrate Ledger & Context
-        RESTORE_ACB -- > ALLOCATE_HBM: Re-allocate Paged KV Cache / DMA Host-to-Device
-    }
-
-    REHYDRATION -- > ACTIVE_DECODE: Resume Autonomous Trajectory
-
--->
 ![Diagram](/assets/images/diagrams/vol3/fig-mermaid-09_interrupts-2.png){width="100%"}
 
 : **Figure 9.3: Agent Control Block (ACB) Interrupt Lifecycle and State Transitions**. Finite state machine governing an agent trajectory during interrupt handling. When an interrupt vector is raised, the scheduler either halts execution immediately (for unmaskable NMIs) or allows the active token generation step to drain before capturing an atomic ACB snapshot. Volatile KV cache memory is dehydrated to non-volatile storage, transitioning the agent into `SUSPENDED_HUMAN_GATE` with zero resident GPU allocation. Receipt of a valid cryptographic lease triggers signature verification, state rehydration, and resumption of active decode. If the supervisory watchdog expires, the runtime preempts held locks and triggers backward Sagas compensation. Source: Author analysis. {#fig-vol3-interrupts-lifecycle}
@@ -242,55 +207,6 @@ When an agent triggers `SYS_ESCALATE`, the runtime kernel does not halt the enti
 
 Production agent runtimes adopt the **Reactor Pattern**\index{Reactor Pattern} [@schmidt1995reactor]. The core runtime thread never performs neural inference or executes external tools directly. Instead, it runs an event loop that dispatches work to decoupled worker pools (@fig-vol3-interrupts-async-reactor):
 
-<!-- MERMAID SOURCE PRESERVATION
-flowchart TD
-    subgraph ControlPlane["Deterministic Kernel / Event Loop (Reactor Core)"]
-        direction TB
-        EventLoop["Reactor Event Demultiplexer\n(Non-Blocking epoll / kqueue Core)"]
-        PromiseTable["Promise Registry\n(id, state, timeout, callback)"]
-        WatchdogQueue["Hierarchical Watchdog Timer Wheel\n(tau_watchdog Countdown)"]
-        EventLoop <-- > PromiseTable
-        EventLoop <-- > WatchdogQueue
-    end
-
-    subgraph InferencePool["Inference Worker Pool (Ring 3 Acceleration)"]
-        direction TB
-        GPU1["GPU Worker 0\n(Active Decode Batch)"]
-        GPU2["GPU Worker 1\n(Chunked Prefill)"]
-    end
-
-    subgraph ActuationPlane["Sandboxed Actuation Boundary"]
-        direction TB
-        Sandbox["MicroVM / Ephemeral CoW\n(Tool Execution Engine)"]
-    end
-
-    subgraph HumanPlane["Supervisory Plane (Ring 0 Oversight)"]
-        direction TB
-        WebhookAPI["Webhook Ingress Gateway"]
-        HumanUI["Human Supervisor Console\n(Slack, Web UI, PagerDuty)"]
-        WebhookAPI <-- > HumanUI
-    end
-
-    subgraph DurableStorage["Durable State & Memory Tiers"]
-        direction TB
-        WAL["Append-Only WAL\n(Event Ledger & Snapshots)"]
-        HostDRAM["Host DRAM / NVMe Pool\n(Swapped KV Caches)"]
-    end
-
-    %% Interactions
-    GPU1 -- "1. SYS_ESCALATE Trap" -- > EventLoop
-    EventLoop -- "2. Register Promise" -- > PromiseTable
-    EventLoop -- "3. DMA Stream KV Cache" -- > HostDRAM
-    EventLoop -- "4. Append Snapshot" -- > WAL
-    EventLoop -- "5. Dispatch Out-of-Band Audit" -- > WebhookAPI
-    EventLoop -. "6. Free GPU Allocation" .-> GPU1
-
-    HumanUI -- "7. Sign Lease & Approve" -- > WebhookAPI
-    WebhookAPI -- "8. Callback Event (Promise ID, Nonce)" -- > EventLoop
-    EventLoop -- "9. Restore Cache & Lease" -- > GPU2
-    GPU2 -- "10. Actuate Privileged Tool" -- > Sandbox
-
--->
 ![Diagram](/assets/images/diagrams/vol3/fig-mermaid-09_interrupts-3.png){width="100%"}
 
 : **Figure 9.4: Asynchronous Event Reactor and Non-Blocking Promise Architecture**. Decoupled control-plane topology of the non-blocking agentic operating system kernel. The single-threaded deterministic event reactor multiplexes events across asynchronous GPU inference workers, sandboxed tool execution containers, durable write-ahead logging (WAL), and out-of-band human supervisory channels. Escalation traps yield an immediate `AgentPromise` handle, releasing the inference execution thread and allowing the cluster to serve other trajectories while waiting for human resolution. Source: Adapted from Liskov & Shrira (1988). {#fig-vol3-interrupts-async-reactor}
@@ -528,47 +444,6 @@ In classical transaction processing, operations are designed to satisfy ACID gua
 
 $$\mathcal{D}_{\text{reversible}} \quad \Big\Vert \quad \mathcal{D}_{\text{irreversible}}$$
 
-<!-- MERMAID SOURCE PRESERVATION
-flowchart LR
-    subgraph ReversibleDomain["REVERSIBLE DOMAIN (Invertible: Exists a⁻¹)"]
-        direction TB
-        R1["Attention KV Cache & Context\n• Rollback: Trim Radix Branch\n• Latency: < 1 ms"]
-        R2["Git Worktrees & Detached HEAD\n• Rollback: git reset --hard ; git clean -fd\n• Latency: 2–5 ms"]
-        R3["MicroVM CoW Filesystem\n• Rollback: Discard UpperDir overlay\n• Latency: < 2 ms"]
-        R4["Read-Only External Actions\n• SELECT queries, curl, cat\n• Latency: Deterministic"]
-        R_Policy["AUTONOMOUS EXECUTION ZONE\n• Unprivileged Token Sampling (Ring 3)\n• Speculative Tree Search Permitted"]
-        R1 --- R_Policy
-        R2 --- R_Policy
-        R3 --- R_Policy
-        R4 --- R_Policy
-    end
-
-    subgraph Boundary["THE REVERSIBILITY BOUNDARY"]
-        direction TB
-        Gate["Architectural Firewall\n& Capability Gate"]
-        TrapAction["SYS_ESCALATE Trap\n• Kernel Intercepts Tool Call\n• Verifies Capability Set K_agent"]
-        AuditPayload["Audit Payload Synthesis\n• Argument Digest H(Args)\n• Structured Diff & Blast Radius"]
-        Gate --- TrapAction
-        TrapAction --- AuditPayload
-    end
-
-    subgraph IrreversibleDomain["IRREVERSIBLE DOMAIN (Non-Invertible: No a⁻¹)"]
-        direction TB
-        I1["Production Database Mutations\n• DROP TABLE, DELETE, UPDATE\n• Blast Radius: Catastrophic"]
-        I2["Remote Code & Cloud Deployment\n• git push origin main, kubectl apply\n• Blast Radius: Infrastructure Outage"]
-        I3["External Outbound Communications\n• SMTP Email, Public API Webhook, Slack\n• Blast Radius: Information Exfiltration"]
-        I4["Financial & Commercial Transactions\n• Credit card capture, Wire transfer\n• Blast Radius: Direct Balance Loss"]
-        I_Policy["SUPERVISED MANDATORY GATE\n• Ed25519-Signed Capability Lease\n• Single-Use Nonce & Ephemeral TTL"]
-        I1 --- I_Policy
-        I2 --- I_Policy
-        I3 --- I_Policy
-        I4 --- I_Policy
-    end
-
-    ReversibleDomain -- > Boundary
-    Boundary -- > IrreversibleDomain
-
--->
 ![Diagram](/assets/images/diagrams/vol3/fig-mermaid-09_interrupts-4.png){width="100%"}
 
 : **Figure 9.5: The Reversibility Boundary and Capability Escalation Gateway**. Architectural demarcation separating invertible internal software states from non-invertible external actuation. Within the reversible domain, operations possess deterministic mathematical inverses ($a^{-1}$) and can execute autonomously with low-latency local rollbacks. Crossing into the irreversible domain requires an explicit `SYS_ESCALATE` trap to obtain an unforgeable, cryptographically signed capability lease from an authorized human supervisor. Source: Adapted from Saltzer & Schroeder (1975) and Dennis & Van Horn (1966). {#fig-vol3-interrupts-reversibility-boundary}
@@ -622,34 +497,6 @@ $$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}} \subseteq \ma
 An agent possesses zero mathematical or architectural mechanisms to expand its own authority ($\mathcal{K}_{\text{agent}}^{(t+1)} \not\supset \mathcal{K}_{\text{agent}}^{(t)}$). Any privilege escalation demands an out-of-band `SYS_ESCALATE` trap into the deterministic supervisor kernel, which validates caller identity and requires explicit cryptographic co-signing by an authorized human principal.
 :::
 
-<!-- MERMAID SOURCE PRESERVATION
-sequenceDiagram
-    autonumber
-    participant Agent as Stochastic Agent (Ring 3)
-    participant Runtime as Deterministic Kernel (Ring 1)
-    participant Supervisor as Human Supervisor (Ring 0)
-    participant Gateway as Protected Actuation Gateway
-
-    Agent->>Runtime: Tool Call: drop_database(target="prod_db")
-    Note over Runtime: Kernel inspects Capability Lease:<br/>κ_write_prod NOT IN K_agent
-    Runtime-- >>Agent: TRAP: PrivilegeFault (SYS_ESCALATE required)
-
-    Runtime->>Runtime: Evacuate KV Cache (HBM -> Host DRAM/NVMe)<br/>Transition ACB to SUSPENDED_HUMAN_GATE
-    Runtime->>Runtime: Register Watchdog Timer (tau_watchdog = 3600s)
-
-    Runtime->>Supervisor: Emit Escalation Payload:<br/>[AgentID, Intent, H(Args), Structured Diffs, Blast Radius]
-    Note over Supervisor: Human inspects proposed diffs,<br/>evaluates blast radius & audit trail
-
-    Supervisor->>Runtime: Authorize: Ed25519_Sign(AgentID, Action, H(Args), TTL, Nonce)
-
-    Runtime->>Runtime: Validate Signature & Argument Hash H(Args)<br/>Verify TTL: tau_now < tau_expire
-    Runtime->>Runtime: Hydrate ACB from WAL & Host DRAM<br/>Inject Single-Use Capability Lease
-    Runtime->>Gateway: Execute: drop_database(prod_db, lease_token)
-    Gateway-- >>Runtime: Execution Output (200 OK, rows_affected=0)
-    Note over Runtime: Burn Cryptographic Nonce (Prevent Replay)
-    Runtime->>Agent: Resume Trajectory with Tool Observation
-
--->
 ![Diagram](/assets/images/diagrams/vol3/fig-mermaid-09_interrupts-5.png){width="100%"}
 
 : **Figure 9.6: Cryptographic Capability Lease Escalation Sequence**. Protocol interaction for capability verification, state dehydration, out-of-band human authorization, and atomic single-use lease execution. The unprivileged agent (Ring 3) traps into the deterministic runtime kernel (Ring 1) when attempting a privileged mutation. The kernel evacuates accelerator memory, registers a non-blocking watchdog timer, and dispatches an audit payload to the human supervisor (Ring 0). Upon receiving an Ed25519-signed lease, the kernel verifies the argument digest $\mathcal{H}(\text{Args})$, dispatches the mutation, burns the nonce, and restores the trajectory. Source: Adapted from Dennis & Van Horn (1966). {#fig-vol3-interrupts-lease-escalation-sequence}
@@ -704,28 +551,6 @@ If the runtime does not proactively break the Coffman conditions:
 - Concurrent automated rollback agents, emergency hotfix scripts, and human engineers are blocked from deploying critical fixes because the deployment mutex is locked.
 - The entire continuous delivery pipeline experiences a catastrophic distributed deadlock.
 
-<!-- MERMAID SOURCE PRESERVATION
-flowchart TD
-    subgraph PanelA["A. The 'Gone for the Weekend' Deadlock (Coffman Conditions)"]
-        direction TB
-        A1["Agent A1 (SRE Agent)\nState: SUSPENDED_HUMAN_GATE"] -- "Holds Exclusive Lock" -- > R1["Resource R1:\nDeployment Mutex"]
-        A1 -- "Blocks on Approval" -- > Human["Human Supervisor\n(Offline / Weekend Latency)"]
-        A2["Agent A2 (Hotfix Agent)\nState: BLOCKED"] -- "Requests Lock" -- > R1
-        A2 -- "Holds Lock" -- > R2["Resource R2:\nDatabase Migration Pool"]
-        A1 -. "Circular Dependency\n(Requires Migration Result)" .-> R2
-        A_Crisis["PERMANENT DISTRIBUTED DEADLOCK\n• Mutual Exclusion: R1 & R2 exclusive\n• Hold-and-Wait: A1 holds R1 while waiting on human\n• No Preemption: Mutex held indefinitely\n• Circular Wait: A1 -> Human -> A2 -> R1 -> A1"]
-    end
-
-    subgraph PanelB["B. Runtime Deadlock Resolution (Watchdog Preemption & Sagas Rollback)"]
-        direction TB
-        Timer["Authoritative Watchdog Timer\n(tau_watchdog Countdown)"] -- >|Fires Timeout| Preempt["Kernel Preemption Engine\n1. Atomically Transition Promise to TIMED_OUT\n2. Forcibly Confiscate Deployment Mutex R1\n3. Invalidate Ephemeral Capability Leases"]
-        Preempt -- > Sagas["Sagas Compensating Recovery Engine\nExecute Backward Actions: A⁻¹ = (C_k ∘ ... ∘ C_1)\n• C_1: Unmount Ephemeral MicroVM Overlays\n• C_0: Restore Staged Deployment Config to HEAD"]
-        Sagas -- > Release["Resource R1 Granted to Agent A2\nPipeline Unblocked & Escalation Re-routed to Secondary On-Call"]
-    end
-
-    PanelA ==>|Watchdog Invariant Enforced| PanelB
-
--->
 ![Diagram](/assets/images/diagrams/vol3/fig-mermaid-09_interrupts-6.png){width="100%"}
 
 : **Figure 9.7: Distributed Coffman Deadlock and Watchdog Preemption with Sagas Recovery**. Structural resolution of multi-agent deadlocks. Top: A **circular wait**\index{circular wait} condition arises when Agent $A_1$ holds exclusive system lock $R_1$ while in `SUSPENDED_HUMAN_GATE`, while Agent $A_2$ holds resource $R_2$ and blocks on $R_1$. Bottom: Attaching an authoritative watchdog timer enforces preemption. Upon timeout expiry, the runtime revokes $A_1$'s resource leases, executes a backward compensating Saga ($C_1, C_0$) to restore consistency, and reallocates resources to prevent system-wide livelock. Source: Adapted from @coffman1971 and @garciamolina1987sagas. {#fig-vol3-interrupts-deadlock-watchdog}
