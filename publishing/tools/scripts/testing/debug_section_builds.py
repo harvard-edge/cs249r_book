@@ -12,7 +12,7 @@ Usage:
     python3 debug_section_builds.py --chapter nn_computation --vol1 --format html
     python3 debug_section_builds.py --chapter nn_computation --vol1 -v
 
-Log files are written to: book/tools/scripts/testing/logs/<volume>/<chapter>/section_debug/
+Log files are written to: publishing/tools/scripts/testing/logs/<volume>/<chapter>/section_debug/
 """
 
 import subprocess
@@ -34,8 +34,8 @@ from section_splitter import split_chapter, ChapterStructure
 
 def find_chapter_qmd(chapter: str, volume: str) -> Path:
     """Locate the .qmd file for a chapter."""
-    contents_dir = SCRIPT_DIR.parents[2] / "quarto" / "contents" / volume
-    # Try direct match: contents/vol1/chapter/chapter.qmd
+    contents_dir = SCRIPT_DIR.parents[2]  / "books" / volume
+    # Try direct match: vol1/chapter/chapter.qmd
     for subdir in contents_dir.iterdir():
         if subdir.is_dir():
             qmd = subdir / f"{chapter}.qmd"
@@ -82,7 +82,7 @@ def build_and_check(
     """
     Run a build and return (success, duration, error_snippet).
     """
-    book_dir = SCRIPT_DIR.parents[2] / "quarto"
+    book_dir = SCRIPT_DIR.parents[2]  / "books"
 
     cmd = [
         "./binder",

@@ -8,12 +8,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ONE_QMD = "book/quarto/contents/vol1/index.qmd"
+ONE_QMD = "books/vol1/index.qmd"
 
 
 def _binder_json(*args: str) -> dict:
     proc = subprocess.run(
-        ["./book/binder", *args, "--json"],
+        ["./binder", *args, "--json"],
         cwd=ROOT,
         text=True,
         capture_output=True,

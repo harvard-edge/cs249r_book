@@ -20,7 +20,7 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-CONTENT_ROOT = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENT_ROOT = REPO_ROOT  / "books"
 OUTPUT_ROOT = REPO_ROOT / ".mlsysbook" / "glossary-pass" / "latest"
 
 PRIMARY_CATEGORIES = (

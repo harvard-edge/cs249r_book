@@ -7,8 +7,8 @@ Handles three contexts:
   3. Leaves alone: tables, code fences, LaTeX math, YAML, Python cells, fig-cap, fig-alt
 
 Usage:
-    python3 fix_percent.py --dry-run book/quarto/contents/vol1/
-    python3 fix_percent.py book/quarto/contents/vol1/
+    python3 fix_percent.py --dry-run books/vol1/
+    python3 fix_percent.py books/vol1/
 """
 import argparse
 import re

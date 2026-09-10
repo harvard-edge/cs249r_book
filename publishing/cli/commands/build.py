@@ -66,7 +66,7 @@ class BuildCommand:
             console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
             return True
 
-        # book_dir is `book/quarto/`; repo root is two levels up.
+        # book_dir is `books/`; repo root is two levels up.
         repo_root = self.config_manager.book_dir.parent.parent
         issues, files_checked = find_hygiene_issues(repo_root)
 
@@ -222,7 +222,7 @@ class BuildCommand:
             console.print(
                 "    [dim]If this is an accepted increase, rerun with "
                 "`./binder check epub --scope epubcheck --baseline "
-                "book/tools/audit/epubcheck-baseline.json --update-baseline` "
+                "publishing/tools/audit/epubcheck-baseline.json --update-baseline` "
                 "and commit the updated JSON.[/dim]"
             )
             overall_ok = False
@@ -1108,7 +1108,7 @@ class BuildCommand:
                         files_to_render.append(str(rel_path))
                     except ValueError:
                         # If relative path fails, try to construct it
-                        files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
+                        files_to_render.append(f"vol1/{chapter_name}/{chapter_name}.qmd")
 
             # Show files that will be built
             console.print("[dim]📄 Files to be rendered:[/dim]")
@@ -1249,8 +1249,8 @@ class BuildCommand:
         build was interrupted and left the config in a partially-commented state.
 
         Handles patterns like:
-            # - contents/vol1/chapter/chapter.qmd  →  - contents/vol1/chapter/chapter.qmd
-            #- contents/vol1/chapter/chapter.qmd   →  - contents/vol1/chapter/chapter.qmd
+            # - vol1/chapter/chapter.qmd  →  - vol1/chapter/chapter.qmd
+            #- vol1/chapter/chapter.qmd   →  - vol1/chapter/chapter.qmd
 
         Also uncomments structural lines (part declarations, chapters: keys)
         that may have been commented out by a previous fast build.
@@ -1345,7 +1345,7 @@ class BuildCommand:
             except ValueError:
                 # Try to construct the path
                 chapter_name = chapter_file.stem
-                files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
+                files_to_render.append(f"vol1/{chapter_name}/{chapter_name}.qmd")
 
         console.print(f"[dim]📋 Files to render: {len(files_to_render)} files[/dim]")
 
@@ -1399,9 +1399,9 @@ class BuildCommand:
         but comment out files not in the selected list.
 
         Handles multiple path patterns:
-        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
-        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
-        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
+        - Regular chapters: vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: vol1/backmatter/appendix_name.qmd
+        - Glossary: vol1/backmatter/glossary/glossary.qmd
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
@@ -1646,9 +1646,9 @@ class BuildCommand:
         - Uses same commenting approach as PDF but with stricter part preservation
 
         Handles multiple path patterns:
-        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
-        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
-        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
+        - Regular chapters: vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: vol1/backmatter/appendix_name.qmd
+        - Glossary: vol1/backmatter/glossary/glossary.qmd
         - Handles "Appendices" part wrapper for backmatter in EPUB
         """
         # Get list of chapter names to keep

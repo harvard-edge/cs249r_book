@@ -22,7 +22,7 @@ Usage:
   python prettify_pipe_tables.py file1.qmd file2.qmd
 
   # Process entire directory:
-  python prettify_pipe_tables.py book/quarto/contents/
+  python prettify_pipe_tables.py books/
 """
 
 import re
@@ -321,13 +321,13 @@ def main():
         epilog="""
 Examples:
   # Check for unprettified tables (CI/pre-commit):
-  python prettify_pipe_tables.py --check book/quarto/contents/
+  python prettify_pipe_tables.py --check books/
 
   # Prettify all tables in a file:
-  python prettify_pipe_tables.py book/quarto/contents/vol1/ml_systems/ml_systems.qmd
+  python prettify_pipe_tables.py books/vol1/ml_systems/ml_systems.qmd
 
   # Prettify all tables in a directory:
-  python prettify_pipe_tables.py book/quarto/contents/
+  python prettify_pipe_tables.py books/
 """
     )
     parser.add_argument('paths', nargs='*', default=[],

@@ -30,8 +30,8 @@ from render_margin_reader_link_audit import (
 )
 
 
-DEFAULT_OUTPUT = ROOT / "book/tools/audit/margin_figure_reader_alignment.html"
-DEFAULT_VERDICTS = ROOT / "book/tools/audit/margin_figure_reader_alignment_verdicts.md"
+DEFAULT_OUTPUT = ROOT / "publishing/tools/audit/margin_figure_reader_alignment.html"
+DEFAULT_VERDICTS = ROOT / "publishing/tools/audit/margin_figure_reader_alignment_verdicts.md"
 
 
 @dataclass(frozen=True)

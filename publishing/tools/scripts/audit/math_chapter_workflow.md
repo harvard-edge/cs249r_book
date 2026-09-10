@@ -15,7 +15,7 @@ Build only Volume I introduction and package its PDF, TeX, source QMD, manifest,
 math locator, and agent prompt together:
 
 ```bash
-python3 book/tools/scripts/audit/math_chapter_workflow.py build \
+python3 publishing/tools/scripts/audit/math_chapter_workflow.py build \
   --only vol1:introduction \
   --run-id round-01-introduction \
   --force
@@ -34,7 +34,7 @@ excludes frontmatter, part divider pages, and glossaries unless explicitly
 requested.
 
 ```bash
-python3 book/tools/scripts/audit/math_chapter_workflow.py build \
+python3 publishing/tools/scripts/audit/math_chapter_workflow.py build \
   --volumes vol1,vol2 \
   --run-id round-01 \
   --batch-size 3 \
@@ -45,7 +45,7 @@ python3 book/tools/scripts/audit/math_chapter_workflow.py build \
 To also build the full Volume I and Volume II PDFs before chapter packets:
 
 ```bash
-python3 book/tools/scripts/audit/math_chapter_workflow.py build \
+python3 publishing/tools/scripts/audit/math_chapter_workflow.py build \
   --mode both \
   --volumes vol1,vol2 \
   --run-id round-01 \
@@ -57,7 +57,7 @@ python3 book/tools/scripts/audit/math_chapter_workflow.py build \
 Useful listing command:
 
 ```bash
-python3 book/tools/scripts/audit/math_chapter_workflow.py list --volumes vol1,vol2
+python3 publishing/tools/scripts/audit/math_chapter_workflow.py list --volumes vol1,vol2
 ```
 
 ## Agent Batches
@@ -86,7 +86,7 @@ observed result, recomputed expected result, derivation, and proposed correction
 After all agent YAML files are present:
 
 ```bash
-python3 book/tools/scripts/audit/math_chapter_workflow.py summarize \
+python3 publishing/tools/scripts/audit/math_chapter_workflow.py summarize \
   review/math-audit/runs/round-01
 ```
 

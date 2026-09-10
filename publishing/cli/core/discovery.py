@@ -58,7 +58,7 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     are skipped, as they cannot be rendered standalone.
 
     Args:
-        book_dir: Path to the ``book/quarto`` directory.
+        book_dir: Path to the ``books/`` directory.
         volume: ``"vol1"`` or ``"vol2"``.
 
     Returns:
@@ -149,7 +149,7 @@ class ChapterDiscovery:
             book_dir: Path to the book directory (usually 'quarto')
         """
         self.book_dir = Path(book_dir)
-        self.contents_dir = self.book_dir / "contents"
+        self.contents_dir = self.book_dir
 
     def get_chapters_from_config(self, volume: str) -> List[str]:
         """Return the ordered list of testable chapter stems for a volume.

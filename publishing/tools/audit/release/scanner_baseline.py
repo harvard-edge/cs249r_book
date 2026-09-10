@@ -3,9 +3,9 @@
 
 Captures three measurements that together constitute the audit baseline:
 
-1. ``book/tools/audit/scan.py --scope vol1|vol2`` ledger counts
+1. ``publishing/tools/audit/scan.py --scope vol1|vol2`` ledger counts
 2. The 6 detector self-tests (123/123 expected)
-3. ``./book/binder check bib --json`` (curated bibliography publication gate)
+3. ``./binder check bib --json`` (curated bibliography publication gate)
 
 Compares to the post-Pass 16 expected end state recorded in
 ``PASS_16_COMPLETION_REPORT.md`` §3 and reports any deviation as a
@@ -131,7 +131,7 @@ def main() -> None:
     for scope in ("vol1", "vol2"):
         log = LOG_DIR / f"scan-{scope}.log"
         rc, out = run(
-            ["python3", "book/tools/audit/scan.py", "--scope", scope, "-v",
+            ["python3", "publishing/tools/audit/scan.py", "--scope", scope, "-v",
              "--output", str(LOG_DIR / f"scan-{scope}-ledger.json")],
             log,
         )
@@ -162,9 +162,9 @@ def main() -> None:
     for module in EXPECTED_SELF_TESTS:
         log = LOG_DIR / f"selftest-{module}.log"
         rc, out = run(
-            ["python3", f"book/tools/audit/checks/{module}.py"],
+            ["python3", f"publishing/tools/audit/checks/{module}.py"],
             log,
-            env={"PYTHONPATH": str(REPO / "book/tools")},
+            env={"PYTHONPATH": str(REPO / "publishing/tools")},
         )
         parsed = parse_selftest(out)
         parsed["return_code"] = rc
@@ -179,7 +179,7 @@ def main() -> None:
 
     # 3. Binder bibliography gate.
     log = LOG_DIR / "bib-check.log"
-    rc, out = run(["python3", "book/binder", "check", "bib", "--json"], log)
+    rc, out = run(["python3", "binder", "check", "bib", "--json"], log)
     try:
         parsed = json.loads(out)
     except json.JSONDecodeError:

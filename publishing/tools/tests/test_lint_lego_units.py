@@ -28,7 +28,7 @@ def test_l019_blocks_m_as():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 x = latency.to(millisecond).m_as('ms')
 ```""",
@@ -43,7 +43,7 @@ def test_l004_carbon_thousand_division():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 carbon_tonnes = energy_kwh * grid_kg_co2_per_kwh / THOUSAND
 ```""",
@@ -57,7 +57,7 @@ def test_l006_allowed_unit_label():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="GB")
 ```""",
@@ -71,7 +71,7 @@ def test_l006_disallowed_unit_label():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="gigabytes")
 ```""",
@@ -83,7 +83,7 @@ mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="gigabytes")
 def test_baseline_suppresses_known_warning():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        rel = "book/quarto/contents/vol1/foo/foo.qmd"
+        rel = "books/vol1/foo/foo.qmd"
         qmd = _write_qmd(
             root,
             rel,
@@ -123,7 +123,7 @@ def test_l014_closed_name_uses_fmt():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 class X:
     energy_kwh_str = fmt(1.0, precision=0)
@@ -142,7 +142,7 @@ def test_l011_rate_dimension_loss():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 ef_str = fmt_qty((peak.to(TFLOPs/second).magnitude/tdp.to(watt).magnitude) * TFLOP / second, TFLOP / second)
 ```""",
@@ -156,7 +156,7 @@ def test_l011_allows_quantity_division():
         root = Path(tmp)
         qmd = _write_qmd(
             root,
-            "book/quarto/contents/vol1/foo/foo.qmd",
+            "books/vol1/foo/foo.qmd",
             """```{python}
 ef_str = fmt_qty(peak_flops / tdp, TFLOPs / second / watt, unit_label="TFLOP/s")
 ```""",
@@ -167,7 +167,7 @@ ef_str = fmt_qty(peak_flops / tdp, TFLOPs / second / watt, unit_label="TFLOP/s")
 
 def test_full_book_lint_with_baseline():
     """Production corpus: warnings allowed only via baseline (Phase 8½-A)."""
-    baseline = ROOT / "book/tools/audit/lego_units_baseline.json"
+    baseline = ROOT / "publishing/tools/audit/lego_units_baseline.json"
     assert baseline.exists(), "lego_units_baseline.json required after 8½-A3"
     rc = main(["--fail-on", "warning", "--baseline", str(baseline)])
     assert rc == 0

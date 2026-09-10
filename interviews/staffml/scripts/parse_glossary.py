@@ -3,8 +3,8 @@
 for the StaffML interview platform's acronym hover tooltip feature.
 
 Source files:
-  - vol1: book/quarto/contents/vol1/backmatter/glossary/glossary.qmd
-  - vol2: book/quarto/contents/vol2/backmatter/glossary/glossary.qmd
+  - vol1: books/vol1/backmatter/glossary/glossary.qmd
+  - vol2: books/vol2/backmatter/glossary/glossary.qmd
 
 Output:
   interviews/staffml/src/data/glossary.json
@@ -17,8 +17,8 @@ from pathlib import Path
 
 # Resolve paths relative to repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-VOL1_GLOSSARY = REPO_ROOT / "book/quarto/contents/vol1/backmatter/glossary/glossary.qmd"
-VOL2_GLOSSARY = REPO_ROOT / "book/quarto/contents/vol2/backmatter/glossary/glossary.qmd"
+VOL1_GLOSSARY = REPO_ROOT / "books/vol1/backmatter/glossary/glossary.qmd"
+VOL2_GLOSSARY = REPO_ROOT / "books/vol2/backmatter/glossary/glossary.qmd"
 OUTPUT_PATH = REPO_ROOT / "interviews/staffml/src/data/glossary.json"
 
 

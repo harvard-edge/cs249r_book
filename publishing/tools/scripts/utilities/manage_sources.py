@@ -33,7 +33,7 @@ class SourceChecker:
     """Main class for checking and cleaning source citations"""
 
     def __init__(self, target_directories=None, target_files=None):
-        self.content_dir = Path("contents")
+        self.content_dir = Path(".")
         self.target_directories = target_directories or []
         self.target_files = target_files or []
         self.stats = {
@@ -476,9 +476,9 @@ def main():
         epilog="""
 Examples:
   python check_sources.py --analyze                    # Analyze all files
-  python check_sources.py --clean -d contents/vol1     # Clean specific directory
+  python check_sources.py --clean -d vol1     # Clean specific directory
   python check_sources.py --full -f chapter.qmd       # Full analysis on one file
-  python check_sources.py --analyze -d contents/vol1/ml_systems  # Analyze one chapter
+  python check_sources.py --analyze -d vol1/ml_systems  # Analyze one chapter
         """
     )
 
@@ -493,7 +493,7 @@ Examples:
     parser.add_argument('-f', '--full', action='store_true',
                         help='Run full analysis (all options)')
     parser.add_argument('-d', '--directories', nargs='+', metavar='DIR',
-                        help='Target specific directories (e.g., contents/vol1/ml_systems)')
+                        help='Target specific directories (e.g., vol1/ml_systems)')
     parser.add_argument('--files', nargs='+', metavar='FILE',
                         help='Target specific files (e.g., chapter.qmd)')
     parser.add_argument('--output', default='source_analysis_report.json',

@@ -92,7 +92,7 @@ def run_case(repo_root: Path, case: Case) -> Result:
 
 def first_vol1_chapter(repo_root: Path) -> str:
     proc = subprocess.run(
-        "./book/binder list --vol1",
+        "./binder list --vol1",
         cwd=repo_root,
         shell=True,
         stdout=subprocess.PIPE,
@@ -116,39 +116,39 @@ def precommit_hook_ids(constants_file: Path) -> list[str]:
 
 def build_cases(repo_root: Path) -> list[Case]:
     chapter = first_vol1_chapter(repo_root)
-    sample_file = "book/quarto/contents/vol1/introduction/introduction.qmd"
+    sample_file = "books/vol1/introduction/introduction.qmd"
     constants_file = repo_root / "book/vscode-ext/src/constants.ts"
     hook_ids = precommit_hook_ids(constants_file)
 
     cases: list[Case] = [
-        Case("binder help", "./book/binder help", 30),
-        Case("binder list vol1", "./book/binder list --vol1", 60),
-        Case("binder list vol2", "./book/binder list --vol2", 60),
-        Case("binder status", "./book/binder status", 30),
-        Case("binder doctor", "./book/binder doctor", 120, allow_nonzero_exit=True),
-        Case("binder clean", "./book/binder clean", 60),
-        Case("binder check all", "./book/binder check all --vol1", 120, allow_nonzero_exit=True),
-        Case("binder check inline-python", f"./book/binder check refs --scope inline-python --path {shlex.quote(sample_file)}", 120, allow_nonzero_exit=True),
-        Case("binder check refs", f"./book/binder check refs --path {shlex.quote(sample_file)}", 120),
-        Case("binder check citations", f"./book/binder check refs --scope citations --path {shlex.quote(sample_file)}", 120),
-        Case("binder check duplicate-labels", "./book/binder check labels --scope duplicates --vol1 --all-types", 120),
-        Case("binder check unreferenced-labels", "./book/binder check labels --scope orphans --vol1 --all-types", 120, allow_nonzero_exit=True),
-        Case("binder check inline-refs", f"./book/binder check refs --scope inline --path {shlex.quote(sample_file)} --check-patterns", 120, allow_nonzero_exit=True),
-        Case("binder reset pdf", "./book/binder reset pdf --vol1", 60),
-        Case("binder reset html", "./book/binder reset html --vol1", 60),
-        Case("binder reset epub", "./book/binder reset epub --vol1", 60),
-        Case("build chapter html", f"./book/binder build html {chapter} --vol1 -v", 180),
-        Case("build chapter pdf", f"./book/binder build pdf {chapter} --vol1 -v", 180, allow_timeout_as_started=True),
-        Case("build chapter epub", f"./book/binder build epub {chapter} --vol1 -v", 180),
-        Case("preview chapter", f"./book/binder preview vol1/{chapter}", 20, allow_timeout_as_started=True),
-        Case("debug chapter pdf", f"./book/binder debug pdf --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
-        Case("debug chapter html", f"./book/binder debug html --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
-        Case("debug chapter epub", f"./book/binder debug epub --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
-        Case("fix glossary paths", "./book/binder fix glossary paths", 120),
-        Case("fix images compress", "./book/binder fix images compress --all --smart-compression", 120),
-        Case("fix repo-health", "./book/binder fix repo-health", 120),
-        Case("publish script help vol1", "bash book/tools/scripts/publish/mit-press-release.sh --help", 30, allow_nonzero_exit=True),
-        Case("extract figures help", "python3 book/tools/scripts/publish/extract_figures.py --help", 30),
+        Case("binder help", "./binder help", 30),
+        Case("binder list vol1", "./binder list --vol1", 60),
+        Case("binder list vol2", "./binder list --vol2", 60),
+        Case("binder status", "./binder status", 30),
+        Case("binder doctor", "./binder doctor", 120, allow_nonzero_exit=True),
+        Case("binder clean", "./binder clean", 60),
+        Case("binder check all", "./binder check all --vol1", 120, allow_nonzero_exit=True),
+        Case("binder check inline-python", f"./binder check refs --scope inline-python --path {shlex.quote(sample_file)}", 120, allow_nonzero_exit=True),
+        Case("binder check refs", f"./binder check refs --path {shlex.quote(sample_file)}", 120),
+        Case("binder check citations", f"./binder check refs --scope citations --path {shlex.quote(sample_file)}", 120),
+        Case("binder check duplicate-labels", "./binder check labels --scope duplicates --vol1 --all-types", 120),
+        Case("binder check unreferenced-labels", "./binder check labels --scope orphans --vol1 --all-types", 120, allow_nonzero_exit=True),
+        Case("binder check inline-refs", f"./binder check refs --scope inline --path {shlex.quote(sample_file)} --check-patterns", 120, allow_nonzero_exit=True),
+        Case("binder reset pdf", "./binder reset pdf --vol1", 60),
+        Case("binder reset html", "./binder reset html --vol1", 60),
+        Case("binder reset epub", "./binder reset epub --vol1", 60),
+        Case("build chapter html", f"./binder build html {chapter} --vol1 -v", 180),
+        Case("build chapter pdf", f"./binder build pdf {chapter} --vol1 -v", 180, allow_timeout_as_started=True),
+        Case("build chapter epub", f"./binder build epub {chapter} --vol1 -v", 180),
+        Case("preview chapter", f"./binder preview vol1/{chapter}", 20, allow_timeout_as_started=True),
+        Case("debug chapter pdf", f"./binder debug pdf --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
+        Case("debug chapter html", f"./binder debug html --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
+        Case("debug chapter epub", f"./binder debug epub --vol1 --chapter {chapter}", 180, allow_timeout_as_started=True),
+        Case("fix glossary paths", "./binder fix glossary paths", 120),
+        Case("fix images compress", "./binder fix images compress --all --smart-compression", 120),
+        Case("fix repo-health", "./binder fix repo-health", 120),
+        Case("publish script help vol1", "bash publishing/tools/scripts/publish/mit-press-release.sh --help", 30, allow_nonzero_exit=True),
+        Case("extract figures help", "python3 publishing/tools/scripts/publish/extract_figures.py --help", 30),
     ]
 
     for hook_id in hook_ids:

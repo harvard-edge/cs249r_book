@@ -114,7 +114,7 @@ class FormatCommand:
                     result.append(p)
             return result
         # Default: all content files
-        base = self.config_manager.book_dir / "contents"
+        base = self.config_manager.book_dir
         return sorted(base.rglob("*.qmd"))
 
     # ------------------------------------------------------------------
@@ -534,7 +534,7 @@ class FormatCommand:
             for f in file_args:
                 cmd.extend(["-f", f])
         else:
-            content_dir = self.config_manager.book_dir / "contents"
+            content_dir = self.config_manager.book_dir
             cmd = [sys.executable, str(script), mode, "-d", str(content_dir)]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -562,7 +562,7 @@ class FormatCommand:
         if file_args:
             cmd.extend(file_args)
         else:
-            content_dir = self.config_manager.book_dir / "contents"
+            content_dir = self.config_manager.book_dir
             cmd.append(str(content_dir))
 
         result = subprocess.run(cmd, capture_output=True, text=True)

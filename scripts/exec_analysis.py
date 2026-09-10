@@ -2,7 +2,7 @@ import glob
 import traceback
 import sys
 
-qmd_files = sorted(glob.glob('book/quarto/contents/**/*.qmd', recursive=True))
+qmd_files = sorted(glob.glob('books/**/*.qmd', recursive=True))
 
 failed = False
 for qmd in qmd_files:

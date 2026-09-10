@@ -1,12 +1,12 @@
 # Takeaways ART: Optimize Deploy
 
-## book/quarto/contents/vol1/data_selection/data_selection.qmd
+## books/vol1/data_selection/data_selection.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose; full heading outline from Data Selection Fundamentals through Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby Chinchilla diagnostic, diminishing-returns figure, and fallacies/pitfalls calculation cells.
 - Issues: None
 - Proposed callout: Existing title `Curate, do not accumulate`; no replacement needed.
 
-## book/quarto/contents/vol1/model_compression/model_compression.qmd
+## books/vol1/model_compression/model_compression.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose; full heading outline from Optimization Framework through Implementation Tools and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby BERT compression, Amdahl ceiling, and ResNet-50 INT8 measurement cells.
 - Issues:
@@ -27,13 +27,13 @@
 :::
 ```
 
-## book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd
+## books/vol1/hw_acceleration/hw_acceleration.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose; full heading outline from Acceleration Fundamentals through Compiler Support, Runtime Support, and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby summary roofline recap and hardware feasibility/fallacies calculation cells.
 - Issues: None
 - Proposed callout: Existing title `Moving data costs more than computing it`; no replacement needed.
 
-## book/quarto/contents/vol1/benchmarking/benchmarking.qmd
+## books/vol1/benchmarking/benchmarking.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose; full heading outline from ML Benchmarking Framework through Production Considerations and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby precision-energy summary anchor and fallacies/pitfalls setup cells.
 - Issues:
@@ -55,7 +55,7 @@
 :::
 ```
 
-## book/quarto/contents/vol1/model_serving/model_serving.qmd
+## books/vol1/model_serving/model_serving.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose; full heading outline from Serving Paradigm through Economics and Planning and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby Llama 3 serving economics and serving fallacy/pitfall calculation cells.
 - Issues:
@@ -78,13 +78,13 @@
 :::
 ```
 
-## book/quarto/contents/vol1/ml_ops/ml_ops.qmd
+## books/vol1/ml_ops/ml_ops.qmd
 - Recommendation: Keep
 - Evidence reviewed: Purpose; full heading outline from MLOps Overview through Case Studies and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby Oura recap, single-model ROI, validation-gap, and operational accuracy calculation cells.
 - Issues: None
 - Proposed callout: Existing title `Perfectly available, perfectly wrong`; no replacement needed.
 
-## book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd
+## books/vol1/responsible_engr/responsible_engr.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose; full heading outline from Responsibility as Systems Engineering through Data Governance and Compliance and Fallacies and Pitfalls; Summary; existing `callout-takeaways`; nearby fairness pitfall and TCO recap cells.
 - Issues:
@@ -105,7 +105,7 @@
 :::
 ```
 
-## book/quarto/contents/vol1/conclusion/conclusion.qmd
+## books/vol1/conclusion/conclusion.qmd
 - Recommendation: Modify
 - Evidence reviewed: Purpose; full heading outline from Synthesizing ML Systems through Thirteen Quantitative Invariants, Principles in Practice, Future Directions, Journey Forward, Fallacies and Pitfalls, and Summary; existing `callout-takeaways`; nearby roofline, tail-latency, edge-vs-H100, fleet-failure, and Amdahl calculation cells.
 - Issues:

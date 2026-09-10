@@ -13,14 +13,14 @@ five conditions in Pass 15 plan section 2.5 is met:
 
 Usage:
     # Scout mode - scan only, no fixes
-    python3 book/tools/audit/loop.py --scope vol2 --dry-run
+    python3 publishing/tools/audit/loop.py --scope vol2 --dry-run
 
     # Fix + verify, one category at a time
-    python3 book/tools/audit/loop.py --scope vol2 \\
+    python3 publishing/tools/audit/loop.py --scope vol2 \\
         --categories vs-period --apply --verbose
 
     # Fix + verify + commit, multiple categories
-    python3 book/tools/audit/loop.py --scope vol2 \\
+    python3 publishing/tools/audit/loop.py --scope vol2 \\
         --categories vs-period,compound-prefix-closeup \\
         --apply --commit-each-iteration --verbose
 

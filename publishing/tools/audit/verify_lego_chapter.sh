@@ -9,7 +9,7 @@
 #   4. LLM prose-coherence review passes (no fail verdicts on substituted prose)
 #
 # Usage (repo root):
-#   ./book/tools/audit/verify_lego_chapter.sh vol1 introduction
+#   ./publishing/tools/audit/verify_lego_chapter.sh vol1 introduction
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -35,18 +35,18 @@ export LEGO_VERIFY_PROSE_SNAP="$PROSE_SNAP"
 
 echo "=== LEGO verify $VOL/$CH $(date -Iseconds) ===" | tee "$LOG"
 
-./book/binder reset html 2>&1 | tee -a "$LOG"
-python3 book/tools/audit/chapter_html_verify.py "--$VOL" "$CH" 2>&1 | tee -a "$LOG"
-./book/binder reset html 2>&1 | tee -a "$LOG"
+./binder reset html 2>&1 | tee -a "$LOG"
+python3 publishing/tools/audit/chapter_html_verify.py "--$VOL" "$CH" 2>&1 | tee -a "$LOG"
+./binder reset html 2>&1 | tee -a "$LOG"
 
-python3 book/tools/audit/fmt/audit_lego_cells.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
+python3 publishing/tools/audit/fmt/audit_lego_cells.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
 cp "$REPO/book/tools/audit/artifacts/lego_cells_verify_report.json" "$CELLS_SNAP"
-python3 book/tools/audit/fmt/audit_lego_rendered_prose.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
+python3 publishing/tools/audit/fmt/audit_lego_rendered_prose.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
 cp "$REPO/book/tools/audit/artifacts/lego_rendered_prose_audit.json" "$PROSE_SNAP"
 
 COHERENCE_RC=0
 if command -v gemini >/dev/null 2>&1; then
-  python3 book/tools/audit/lego_prose_coherence.py --chapter "$VOL/$CH" \
+  python3 publishing/tools/audit/lego_prose_coherence.py --chapter "$VOL/$CH" \
     --report "$REPO/book/tools/audit/artifacts/lego_prose_coherence_${VOL}_${CH}.json" \
     2>&1 | tee -a "$LOG" || COHERENCE_RC=$?
 else
@@ -70,16 +70,16 @@ ch = os.environ["LEGO_VERIFY_CH"]
 coh_rc = int(os.environ.get("LEGO_VERIFY_COHERENCE_RC", "0"))
 
 cells_path = Path(os.environ.get("LEGO_VERIFY_CELLS_SNAP", "")) or (
-    repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_cells.json"
+    repo / f"publishing/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_cells.json"
 )
 prose_path = Path(os.environ.get("LEGO_VERIFY_PROSE_SNAP", "")) or (
-    repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_prose.json"
+    repo / f"publishing/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_prose.json"
 )
-ledger_path = repo / "book/tools/audit/artifacts/chapter_html_audit.json"
-coh_path = repo / f"book/tools/audit/artifacts/lego_prose_coherence_{vol}_{ch}.json"
-report_md = repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_rendered_prose.md"
-cert_path = repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_certificate.md"
-progress = repo / "book/tools/audit/artifacts/lego_chapter_progress.md"
+ledger_path = repo / "publishing/tools/audit/artifacts/chapter_html_audit.json"
+coh_path = repo / f"publishing/tools/audit/artifacts/lego_prose_coherence_{vol}_{ch}.json"
+report_md = repo / f"publishing/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_rendered_prose.md"
+cert_path = repo / f"publishing/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_certificate.md"
+progress = repo / "publishing/tools/audit/artifacts/lego_chapter_progress.md"
 
 cells_raw = json.loads(cells_path.read_text()) if cells_path.is_file() else []
 cells_list = cells_raw if isinstance(cells_raw, list) else [cells_raw]

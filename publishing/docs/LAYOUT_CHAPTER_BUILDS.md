@@ -40,19 +40,19 @@ or refresh the numbering map from the candidate chapter build itself.
 From the repository root or `book/` directory:
 
 ```sh
-./book/binder layout chapter ml_workflow \
+./binder layout chapter ml_workflow \
   --vol1 \
   --aux /absolute/path/to/Machine-Learning-Systems-Vol1.aux
 ```
 
 The chapter argument can be a unique QMD stem such as `ml_workflow` or a path
-relative to `book/quarto`, such as
-`contents/vol1/ml_workflow/ml_workflow.qmd`.
+relative to `books/`, such as
+`vol1/ml_workflow/ml_workflow.qmd`.
 
 Outputs are written under:
 
 ```text
-book/quarto/tmp/layout-harness/<chapter>/
+books/_build/tmp/layout-harness/<chapter>/
 ├── manifest.json
 ├── Mapped-<chapter>.tex
 ├── _quarto.yml
@@ -86,7 +86,7 @@ inspection and treat a failed restoration check as a hard stop.
 ## Safety and concurrency
 
 The renderer takes a non-blocking worktree lock because it temporarily redirects
-`book/quarto/_quarto.yml` and `index.qmd`. Two mapped builds must not run in the
+`books/_quarto.yml` and `index.qmd`. Two mapped builds must not run in the
 same worktree. For parallel rendering, use one dedicated worktree per running
 build. A build in another worktree is safe because its symlinks and generated
 files are independent.

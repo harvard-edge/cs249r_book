@@ -103,9 +103,9 @@ def _line_of(text: str, offset: int) -> int:
 
 def _iter_svgs(contents_dir: Path) -> Iterator[Path]:
     # Skip Quarto's per-chapter render output under `<chapter>_files/`.
-    # Those SVGs are gitignored (.gitignore: `book/quarto/**/*_files/`),
+    # Those SVGs are gitignored (.gitignore: `books/**/*_files/`),
     # regenerated on every render, and already sanitized in the final
-    # EPUB by book/quarto/scripts/epub_postprocess.py. The source-level
+    # EPUB by books/shared/scripts/epub_postprocess.py. The source-level
     # check should only inspect authored SVGs.
     if not contents_dir.is_dir():
         return
@@ -240,7 +240,7 @@ def check_bibtex_url_escapes(bib_file: Path, repo_root: Path) -> list[EpubIssue]
 
 # ---------------------------------------------------------------------------
 # Hygiene auto-repair. Mirrors the rewriters in
-# `book/quarto/scripts/epub_postprocess.py` but applied to SOURCE files,
+# `books/shared/scripts/epub_postprocess.py` but applied to SOURCE files,
 # not to the extracted EPUB. Running the fixer once against a stale
 # checkout removes every legacy occurrence of the four invariant
 # classes at source; future regressions are caught at commit time by
@@ -356,8 +356,8 @@ def fix_hygiene_issues(repo_root: Path) -> dict[str, int]:
     work was done on this invocation, not the total number of remaining
     legacy occurrences (running a second time yields zeros).
     """
-    contents_dir = repo_root / "book" / "quarto" / "contents"
-    quarto_dir = repo_root / "book" / "quarto"
+    contents_dir = repo_root  / "books"
+    quarto_dir = repo_root  / "books"
 
     counts = {
         "svg_c0_chars_removed": 0,
@@ -393,8 +393,8 @@ def find_hygiene_issues(repo_root: Path) -> tuple[list[EpubIssue], int]:
     issues: list[EpubIssue] = []
     files_checked = 0
 
-    contents_dir = repo_root / "book" / "quarto" / "contents"
-    quarto_dir = repo_root / "book" / "quarto"
+    contents_dir = repo_root  / "books"
+    quarto_dir = repo_root  / "books"
 
     for svg in _iter_svgs(contents_dir):
         files_checked += 1
@@ -453,7 +453,7 @@ def _find_epubcheck_executable() -> list[str] | None:
 
 def _discover_built_epubs(repo_root: Path) -> list[Path]:
     """Return the most recent EPUB per-volume under `_build/epub-vol*/`."""
-    build_root = repo_root / "book" / "quarto" / "_build"
+    build_root = repo_root  / "books" / "_build"
     if not build_root.is_dir():
         return []
     results: list[Path] = []

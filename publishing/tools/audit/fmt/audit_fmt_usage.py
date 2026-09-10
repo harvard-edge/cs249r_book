@@ -10,8 +10,8 @@ it formats and by any
 This is read-only. It writes a JSON inventory + prints a Markdown summary.
 
 Usage:
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_fmt_usage.py \
-        [--root book/quarto/contents] [--json /tmp/fmt_audit.json]
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_fmt_usage.py \
+        [--root books] [--json /tmp/fmt_audit.json]
 """
 from __future__ import annotations
 
@@ -285,7 +285,7 @@ def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="book/quarto/contents")
+    ap.add_argument("--root", default="books")
     ap.add_argument("--json", default="/tmp/fmt_audit.json")
     args = ap.parse_args()
 

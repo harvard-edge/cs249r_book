@@ -101,12 +101,12 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
-COPY book/tools/dependencies/requirements.txt C:/temp/requirements.txt
-COPY book/tools/dependencies/install_packages.R C:/temp/install_packages.R
+COPY publishing/tools/dependencies/requirements.txt C:/temp/requirements.txt
+COPY publishing/tools/dependencies/install_packages.R C:/temp/install_packages.R
 # install_packages.R reads the package list from its own directory, so the
 # list has to travel with it or every R install silently resolves to nothing.
-COPY book/tools/dependencies/required_r_packages.R C:/temp/required_r_packages.R
-COPY book/tools/dependencies/tl_packages C:/temp/tl_packages
+COPY publishing/tools/dependencies/required_r_packages.R C:/temp/required_r_packages.R
+COPY publishing/tools/dependencies/tl_packages C:/temp/tl_packages
 COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 COPY book/docker/windows/install_texlive.ps1 C:/temp/install_texlive.ps1
 RUN Write-Host '✅ Dependency file copy complete'

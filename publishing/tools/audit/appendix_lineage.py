@@ -10,8 +10,8 @@ from mlsysim.core.provenance import Provenance, Sourced
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 APPENDIX_ASSUMPTIONS_QMD = (
-    _REPO_ROOT / "book/quarto/contents/vol1/backmatter/appendix_assumptions.qmd",
-    _REPO_ROOT / "book/quarto/contents/vol2/backmatter/appendix_assumptions.qmd",
+    _REPO_ROOT / "books/vol1/backmatter/appendix_assumptions.qmd",
+    _REPO_ROOT / "books/vol2/backmatter/appendix_assumptions.qmd",
 )
 
 # Legacy pattern — should be empty after migration.

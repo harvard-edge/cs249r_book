@@ -56,7 +56,7 @@ def normalize_content(text: str) -> tuple[str, int]:
 
 def main(argv: list[str]) -> int:
     paths = [Path(p) for p in argv[1:]] if len(argv) > 1 else list(
-        Path("book/quarto/contents").rglob("*.qmd")
+        Path("books").rglob("*.qmd")
     )
     total = 0
     for path in paths:

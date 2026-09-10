@@ -23,7 +23,7 @@ candidates <- c(
 )
 candidates <- candidates[file.exists(candidates)]
 rpf <- if (length(candidates)) candidates[1] else {
-  stop("required_r_packages.R not found (checked /tmp, script dir, book/tools/dependencies).", call. = FALSE)
+  stop("required_r_packages.R not found (checked /tmp, script dir, publishing/tools/dependencies).", call. = FALSE)
 }
 source(rpf, local = FALSE)
 

@@ -26,7 +26,7 @@ This is a **two-volume textbook** built with [Quarto](https://quarto.org/docs/ge
 The key directories are:
 
 ```
-book/quarto/contents/
+books/
 ├── vol1/          # Volume I chapters (introduction, training, hw_acceleration, etc.)
 ├── vol2/          # Volume II chapters (distributed_training, inference, etc.)
 ├── core/          # Shared content (dl_primer, frameworks)
@@ -38,7 +38,7 @@ Each chapter directory contains:
 - A `.qmd` file (the chapter source)
 - An `images/` folder with `png/` and `svg/` subdirectories
 
-Quarto configuration files are in `book/quarto/config/` with volume-specific variants (e.g., `_quarto-html-vol1.yml`, `_quarto-pdf-vol1.yml`).
+Quarto configuration files are in `books/config/` with volume-specific variants (e.g., `_quarto-html-vol1.yml`, `_quarto-pdf-vol1.yml`).
 
 ## How to Contribute
 
@@ -63,12 +63,12 @@ The upstream remote is read-only. You will push to your fork and open a Pull Req
 Run the one-time setup command:
 
 ```bash
-./book/binder setup
+./binder setup
 ```
 
 This installs the pre-commit hooks declared in `.pre-commit-config.yaml` (EPUB source hygiene, vault corpus-guard, BibTeX validation, figure-div syntax, and ~60 other checks) and runs `./binder doctor` to report the state of your tooling (Python, Quarto, Java, epubcheck, and so on).
 
-Every `book-check-*` hook calls `./book/binder check <group>` — the same commands you can run locally. See [BINDER.md](BINDER.md) for the full check/fix reference and pre-commit mapping.
+Every `book-check-*` hook calls `./binder check <group>` — the same commands you can run locally. See [BINDER.md](BINDER.md) for the full check/fix reference and pre-commit mapping.
 
 Without this step, the config file ships with the repo but the framework is never actually invoked on your commits — so bugs that the hooks would have blocked can slip through to CI and waste the maintainers' review time. Run it once per fresh clone.
 
@@ -90,18 +90,18 @@ Examples: `iss5-add-new-example`, `iss42-fix-figure-caption`, `iss100-improve-tr
 
 Please make sure that your changes are consistent with the style of the existing content.
 
-- **Chapter content** lives in `book/quarto/contents/vol1/` or `vol2/`. Each chapter has its own directory.
+- **Chapter content** lives in `books/vol1/` or `vol2/`. Each chapter has its own directory.
 - **Images** go in the chapter's `images/png/` (raster) or `images/svg/` (vector) subdirectory.
 - **Editorial standards**: For prose contributions, please review the style conventions in the repository. We follow an academic textbook register (active voice, quantitative claims, no blog-post informality).
-- **Inline Python (LEGO cells)**: Quantitative examples use `{python}` cells with small scenario classes. See [LEGO cell contract](LEGO_CELLS.md) for placement, naming, and fmt conventions. Fmt/notation audits use [book/tools/audit/fmt/README.md](../tools/audit/fmt/README.md).
+- **Inline Python (LEGO cells)**: Quantitative examples use `{python}` cells with small scenario classes. See [LEGO cell contract](LEGO_CELLS.md) for placement, naming, and fmt conventions. Fmt/notation audits use [publishing/tools/audit/fmt/README.md](../tools/audit/fmt/README.md).
 
 ### 6. Commit Your Changes
 
 Stage files explicitly (do not use `git add .`):
 
 ```bash
-git add book/quarto/contents/vol1/introduction/introduction.qmd
-git add book/quarto/contents/vol1/introduction/images/svg/new-figure.svg
+git add books/vol1/introduction/introduction.qmd
+git add books/vol1/introduction/images/svg/new-figure.svg
 git commit -m "Fix caption formatting in introduction chapter (issue #14)"
 ```
 

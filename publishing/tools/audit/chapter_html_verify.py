@@ -3,13 +3,13 @@
 
 Usage (repo root)::
 
-    python3 book/tools/audit/chapter_html_verify.py --list
-    python3 book/tools/audit/chapter_html_verify.py --vol1 introduction
-    python3 book/tools/audit/chapter_html_verify.py --vol1 --all
-    python3 book/tools/audit/chapter_html_verify.py --report
+    python3 publishing/tools/audit/chapter_html_verify.py --list
+    python3 publishing/tools/audit/chapter_html_verify.py --vol1 introduction
+    python3 publishing/tools/audit/chapter_html_verify.py --vol1 --all
+    python3 publishing/tools/audit/chapter_html_verify.py --report
 
-Ledger: book/tools/audit/artifacts/chapter_html_audit.json
-Table:   book/tools/audit/artifacts/chapter_html_audit.md
+Ledger: publishing/tools/audit/artifacts/chapter_html_audit.json
+Table:   publishing/tools/audit/artifacts/chapter_html_audit.md
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-AUDIT_HTML = REPO_ROOT / "book/tools/audit/fmt/audit_html.py"
-LEDGER_JSON = REPO_ROOT / "book/tools/audit/artifacts/chapter_html_audit.json"
-LEDGER_MD = REPO_ROOT / "book/tools/audit/artifacts/chapter_html_audit.md"
+AUDIT_HTML = REPO_ROOT / "publishing/tools/audit/fmt/audit_html.py"
+LEDGER_JSON = REPO_ROOT / "publishing/tools/audit/artifacts/chapter_html_audit.json"
+LEDGER_MD = REPO_ROOT / "publishing/tools/audit/artifacts/chapter_html_audit.md"
 
 CHAPTERS: dict[str, list[str]] = {
     "vol1": [
@@ -147,7 +147,7 @@ def _chapter_id(vol: str, ch_path: str) -> str:
 
 
 def _qmd_path(vol: str, ch_path: str) -> Path:
-    return REPO_ROOT / "book/quarto/contents" / vol / f"{ch_path}.qmd"
+    return REPO_ROOT / "books" / vol / f"{ch_path}.qmd"
 
 
 def _prepare_single_chapter_build(vol: str) -> None:
@@ -157,8 +157,8 @@ def _prepare_single_chapter_build(vol: str) -> None:
     HTML from prior full or partial builds remains under ``html-{vol}/`` and
     ``verify_rendered_xrefs.py`` scans the whole output tree.
     """
-    build_dir = REPO_ROOT / "book/quarto/_build" / f"html-{vol}"
-    contents = build_dir / "contents" / vol
+    build_dir = REPO_ROOT / "books/_build" / f"html-{vol}"
+    contents = build_dir / vol
     if contents.is_dir():
         for html in contents.rglob("*.html"):
             html.unlink()
@@ -175,7 +175,7 @@ def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
     _prepare_single_chapter_build(vol)
     t0 = time.monotonic()
     proc = subprocess.run(
-        ["./book/binder", "build", "html", binder_vol, binder_ch,
+        ["./binder", "build", "html", binder_vol, binder_ch,
          "--skip-hygiene", "--skip-validate"],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -187,13 +187,13 @@ def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
 
 
 def _live_html(vol: str, ch_path: str) -> Path:
-    build_dir = REPO_ROOT / "book/quarto/_build" / f"html-{vol}" / "contents" / vol
+    build_dir = REPO_ROOT / "books/_build" / f"html-{vol}" / vol
     return build_dir / f"{ch_path}.html"
 
 
 def _archive_html(vol: str, ch_path: str, live: Path) -> Path:
     name = ch_path.split("/")[-1]
-    archive_dir = REPO_ROOT / "book/quarto/_build/html-audit" / vol
+    archive_dir = REPO_ROOT / "books/_build/html-audit" / vol
     archive_dir.mkdir(parents=True, exist_ok=True)
     dest = archive_dir / f"{name}.html"
     dest.write_bytes(live.read_bytes())
@@ -270,7 +270,7 @@ def _scan_math_render_artifacts(html: Path) -> list[str]:
 
 def _lego_focal(qmd: Path) -> tuple[bool, str]:
     proc = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "book/tools/audit/lego_focal_verify.py"), str(qmd)],
+        [sys.executable, str(REPO_ROOT / "publishing/tools/audit/lego_focal_verify.py"), str(qmd)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -287,7 +287,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             [sys.executable, "-W", "ignore::UserWarning",
-             str(REPO_ROOT / "book/tools/audit/fmt/audit_prose.py"), str(qmd)],
+             str(REPO_ROOT / "publishing/tools/audit/fmt/audit_prose.py"), str(qmd)],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
@@ -304,7 +304,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
 
 def _registry_scan(qmd: Path) -> tuple[bool, str]:
     proc = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "book/tools/audit/book_check_registry_sources.py"), str(qmd)],
+        [sys.executable, str(REPO_ROOT / "publishing/tools/audit/book_check_registry_sources.py"), str(qmd)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -345,7 +345,7 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
         res.notes += f"prose: {prose_msg}; "
 
     if skip_build:
-        archive = REPO_ROOT / "book/quarto/_build/html-audit" / vol / f"{name}.html"
+        archive = REPO_ROOT / "books/_build/html-audit" / vol / f"{name}.html"
         if not archive.is_file():
             res.status = "pending"
             res.notes += "no archived HTML (--skip-build)"
@@ -454,7 +454,7 @@ def _write_markdown_table(ledger: dict) -> None:
         "",
         f"**Summary:** {pass_n} pass / {fail_n} fail / {pending_n} pending / {len(rows)} total",
         "",
-        "Re-run one chapter: `python3 book/tools/audit/chapter_html_verify.py --vol1 training`",
+        "Re-run one chapter: `python3 publishing/tools/audit/chapter_html_verify.py --vol1 training`",
         "",
     ])
     LEDGER_MD.write_text("\n".join(lines), encoding="utf-8")

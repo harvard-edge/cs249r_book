@@ -40,8 +40,8 @@ REPO = Path(__file__).resolve().parents[2]
 # Volumes and the bibliography each is resolved against.
 BIBS = [
     (REPO / "books/vol4", REPO / "books/vol4/references.bib"),
-    (REPO / "publishing/quarto/contents/vol4",
-     REPO / "publishing/quarto/contents/references-vol4.bib"),
+    (REPO / "books/vol4",
+     REPO / "books/references-vol4.bib"),
 ]
 
 # Prose that claims an authority. Harmless with a citation; a fabrication risk

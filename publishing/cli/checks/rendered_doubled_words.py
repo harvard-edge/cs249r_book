@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS = REPO_ROOT  / "books"
 
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "mlsysim"))

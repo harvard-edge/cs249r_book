@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Insert curated margin-figure SVG references into MLSysBook QMD files.
 
-The source of truth is ``book/tools/audit/margin_figure_decisions.yml`` joined
+The source of truth is ``publishing/tools/audit/margin_figure_decisions.yml`` joined
 with ``margin_figure_opportunities.yml``. The script is idempotent: if a QMD
 already references the generated SVG filename, it leaves that candidate alone.
 """
@@ -15,7 +15,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[4]
 
-AUDIT_DIR = ROOT / "book/tools/audit"
+AUDIT_DIR = ROOT / "publishing/tools/audit"
 OPPORTUNITIES = AUDIT_DIR / "margin_figure_opportunities.yml"
 DECISIONS = AUDIT_DIR / "margin_figure_decisions.yml"
 

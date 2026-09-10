@@ -1,6 +1,6 @@
 # Repository-level tooling (`tools/`)
 
-Scripts and audit artifacts at the **monorepo root** (not `book/tools/`, which is textbook-specific).
+Scripts and audit artifacts at the **monorepo root** (not `publishing/tools/`, which is textbook-specific).
 
 ## Layout
 
@@ -11,6 +11,6 @@ Scripts and audit artifacts at the **monorepo root** (not `book/tools/`, which i
 | `phase_b/` … `phase_g/`, `lint_calibration/` | One-off **cleanup and lint calibration manifests** from past passes (JSON/Markdown). Kept for traceability; not imported by CI or application code. Remove or archive only when maintainers agree the history is no longer needed. |
 | `validate_playbook.py` | Standalone validation helper; see file docstring for usage. |
 
-## Relationship to `book/tools/`
+## Relationship to `publishing/tools/`
 
-Use `book/tools/` for BibTeX, git hooks wiring, quarto scripts, and book prose validators. Use **`tools/` here** for cross-cutting audits, release smoke tests, and historical phase outputs.
+Use `publishing/tools/` for BibTeX, git hooks wiring, quarto scripts, and book prose validators. Use **`tools/` here** for cross-cutting audits, release smoke tests, and historical phase outputs.

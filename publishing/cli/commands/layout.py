@@ -211,9 +211,9 @@ class LayoutCommand:
                 "      Build Volume I PDF, then emit the auto-layout plan.\n"
                 "  binder layout --vol1 --no-build --json /tmp/layout-plan.json\n"
                 "      Reuse the existing PDF and write the machine-readable plan.\n"
-                "  binder layout check book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
+                "  binder layout check books/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
                 "      Low-level main-flow whitespace diagnostics.\n"
-                "  binder layout margins book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
+                "  binder layout margins books/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
                 "      Low-level native margin-geometry diagnostics.\n\n"
                 "Layout repair contract:\n"
                 "  1. Prefer the high-level planner (`layout --volN` or build `--layout`).\n"
@@ -301,7 +301,7 @@ class LayoutCommand:
         )
         chapter.add_argument(
             "chapter",
-            help="Configured PDF QMD stem or path relative to book/quarto.",
+            help="Configured PDF QMD stem or path relative to books/.",
         )
         cvol = chapter.add_mutually_exclusive_group(required=True)
         cvol.add_argument("--vol1", dest="volume", action="store_const", const="vol1")
@@ -851,9 +851,9 @@ class LayoutCommand:
 
     def _repo_root(self) -> Path:
         root = Path(self.config_manager.root_dir).resolve()
-        if (root / "book" / "quarto").is_dir():
+        if (root  / "books").is_dir():
             return root
-        if (root / "quarto").is_dir():
+        if (root  / "books").is_dir():
             return root.parent
         return root
 
@@ -905,7 +905,7 @@ class LayoutCommand:
 
         # Include any source file under the volume that is not listed in the
         # PDF config, so audit coverage remains complete during chapter moves.
-        volume_dir = self.config_manager.book_dir / "contents" / volume
+        volume_dir = self.config_manager.book_dir / volume
         if volume_dir.exists():
             ordered.extend(sorted(volume_dir.rglob("*.qmd")))
         return self._dedupe_paths(ordered)
@@ -1078,7 +1078,6 @@ class LayoutCommand:
         header = (self.config_manager.book_dir / "tex" / "header-includes.tex").resolve()
         bib = (
             self.config_manager.book_dir
-            / "contents"
             / "references.bib"
         ).resolve()
 
@@ -1402,7 +1401,7 @@ class LayoutCommand:
         if not pdf_path.exists():
             console.print(
                 f"[red]PDF not found:[/red] {pdf_path}\n"
-                f"[yellow]Run `./book/binder build pdf --{volume}` or omit "
+                f"[yellow]Run `./binder build pdf --{volume}` or omit "
                 "`--no-build`.[/yellow]"
             )
             return False
@@ -3005,16 +3004,16 @@ class LayoutCommand:
 
         Vol I and Vol II intentionally share chapter titles such as
         "Introduction". Source localization must therefore scan only the
-        matching ``contents/volN`` tree when the PDF path/name identifies a
+        matching ``volN`` tree when the PDF path/name identifies a
         volume.
         """
         # Find repo root by walking up from pdf_path until we hit a dir
-        # containing book/quarto/contents.
+        # containing books.
         repo_root = self._repo_root_for(pdf_path)
         if repo_root is None:
             return {}
 
-        contents = repo_root / "book" / "quarto" / "contents"
+        contents = repo_root  / "books"
         volume = self._volume_from_pdf_path(pdf_path)
         if volume and (contents / volume).is_dir():
             vol_dirs = [contents / volume]
@@ -3049,7 +3048,7 @@ class LayoutCommand:
     def _repo_root_for(pdf_path: Path) -> Optional[Path]:
         cur = Path(pdf_path).resolve().parent
         for _ in range(8):
-            if (cur / "book" / "quarto" / "contents").is_dir():
+            if (cur  / "books").is_dir():
                 return cur
             if cur.parent == cur:
                 break

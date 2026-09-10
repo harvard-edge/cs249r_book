@@ -2,19 +2,19 @@
 # flatten-vol-urls.sh — Flatten Quarto's nested vol URL structure at deploy time.
 #
 # Quarto renders chapters at:
-#   html-vol{N}/contents/vol{N}/{chapter}/{chapter}.html   (depth 3)
+#   html-vol{N}/vol{N}/{chapter}/{chapter}.html   (depth 3)
 # which deploys to:
-#   mlsysbook.ai/vol{N}/contents/vol{N}/{chapter}/{chapter}.html
+#   mlsysbook.ai/vol{N}/vol{N}/{chapter}/{chapter}.html
 #
-# This script moves all content under contents/vol{N}/ up to the site root so
+# This script moves all content under vol{N}/ up to the site root so
 # deployed URLs become the clean form:
 #   mlsysbook.ai/vol{N}/{chapter}/{chapter}.html
 #
 # Why relative paths need fixing:
-#   Quarto generates ../../../site_libs/ (3 levels up from contents/vol{N}/chapter/).
+#   Quarto generates ../../../site_libs/ (3 levels up from vol{N}/chapter/).
 #   After the move to {chapter}/ (depth 1), those same assets are at ../site_libs/.
 #   The generated sidebar, breadcrumbs, and next/prev links also point at the
-#   pre-flatten contents/vol{N}/ paths, so after moving files we rewrite links
+#   pre-flatten vol{N}/ paths, so after moving files we rewrite links
 #   across the full prepared volume site.
 #
 # Usage:
@@ -37,7 +37,7 @@ fi
 echo "🔧 Flattening $VOL: contents/$VOL/* → site root..."
 
 # Step 1: Fix 3-level relative asset paths → 1-level in files being moved.
-# Chapters are at depth 3 (contents/vol{N}/chapter/); after the move they're
+# Chapters are at depth 3 (vol{N}/chapter/); after the move they're
 # at depth 1 ({chapter}/). All Quarto-generated relative refs use exactly 3
 # levels of ../../../  since every rendered file is at the same depth.
 echo "  Fixing relative paths (../../../ → ../) in moved files..."
@@ -75,14 +75,14 @@ for path in root.rglob("*.html"):
         path.write_text(updated, encoding="utf-8")
 PY
 
-# Step 3: Move all content from contents/vol{N}/ up to the site root.
+# Step 3: Move all content from vol{N}/ up to the site root.
 # --ignore-existing: the real homepage is at root index.html; any
-# contents/vol{N}/index.html (the sidebar "Homepage" entry) is skipped.
+# vol{N}/index.html (the sidebar "Homepage" entry) is skipped.
 echo "  Moving contents/$VOL/* → site root..."
 rsync -a --ignore-existing "$NESTED_DIR/" "$SITE_DIR/"
 
 # Step 4: Fix search.json hrefs (root-relative, no leading slash).
-# Before: "contents/vol{N}/chapter/chapter.html"
+# Before: "vol{N}/chapter/chapter.html"
 # After:  "chapter/chapter.html"
 if [ -f "$SITE_DIR/search.json" ]; then
   echo "  Fixing search.json hrefs..."
@@ -100,7 +100,7 @@ PY
 fi
 
 # Step 5: Fix sitemap.xml (full absolute URLs).
-# Before: https://mlsysbook.ai/vol{N}/contents/vol{N}/...
+# Before: https://mlsysbook.ai/vol{N}/vol{N}/...
 # After:  https://mlsysbook.ai/vol{N}/...
 if [ -f "$SITE_DIR/sitemap.xml" ]; then
   echo "  Fixing sitemap.xml..."
@@ -119,7 +119,7 @@ fi
 
 # Step 6: Replace the old nested tree with compatibility redirects.
 # Cached pages, old bookmarks, and search results may still point at
-# /vol{N}/contents/vol{N}/... after a release. Keep those paths alive as
+# /vol{N}/vol{N}/... after a release. Keep those paths alive as
 # lightweight static redirects to the clean canonical chapter URLs.
 echo "  Creating compatibility redirects for old contents/$VOL paths..."
 python3 - "$SITE_DIR" "$NESTED_DIR" "$VOL" <<'PY'
@@ -227,7 +227,7 @@ for path in site_dir.rglob("*.html"):
 PY
 
 # Step 8: Fail before deployment if any generated link still targets the
-# removed contents/vol{N}/ tree.
+# removed vol{N}/ tree.
 echo "  Checking for stale contents/$VOL links..."
 python3 - "$SITE_DIR" "$VOL" <<'PY'
 from __future__ import annotations

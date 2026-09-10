@@ -190,7 +190,7 @@ def read_vol2_chapters() -> dict[str, int]:
     """Map a Vol II chapter slug to its printed chapter number.
 
     Parsed from the PDF config, which is the canonical chapter order. Part
-    openers (contents/vol2/parts/*) and frontmatter do not take chapter
+    openers (vol2/parts/*) and frontmatter do not take chapter
     numbers, so they are skipped rather than counted.
     """
     config = REPO_ROOT / "book" / "quarto" / "config" / "_quarto-pdf-vol2.yml"
@@ -209,7 +209,7 @@ def read_vol2_chapters() -> dict[str, int]:
         if not in_chapters:
             continue
 
-        match = re.search(r"contents/vol2/([^/]+)/([^/\s]+)\.qmd", line)
+        match = re.search(r"vol2/([^/]+)/([^/\s]+)\.qmd", line)
         if not match:
             continue
         directory, _ = match.groups()
@@ -251,7 +251,7 @@ def read_last_updated() -> str:
     """Month and year of the newest commit touching book content."""
     try:
         stamp = subprocess.run(
-            ["git", "log", "-1", "--format=%cI", "--", "book/quarto/contents"],
+            ["git", "log", "-1", "--format=%cI", "--", "books"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,

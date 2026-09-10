@@ -26,15 +26,15 @@ any of those rules.
 # Prerequisite: ANTHROPIC_API_KEY in your environment.
 
 # Regenerate one chapter:
-python3 book/tools/scripts/quizzes/generate_quizzes.py \
+python3 publishing/tools/scripts/quizzes/generate_quizzes.py \
     --chapter vol1/training
 
 # Regenerate all 33 in parallel (4 workers):
-python3 book/tools/scripts/quizzes/generate_quizzes.py \
+python3 publishing/tools/scripts/quizzes/generate_quizzes.py \
     --all --workers 4
 
 # Dry-run (no API calls; prints prompt assembly status):
-python3 book/tools/scripts/quizzes/generate_quizzes.py \
+python3 publishing/tools/scripts/quizzes/generate_quizzes.py \
     --all --dry-run
 ```
 
@@ -42,9 +42,9 @@ python3 book/tools/scripts/quizzes/generate_quizzes.py \
 
 For each chapter the generator writes two artifacts:
 
-1. `book/quarto/contents/{vol}/{chapter}/{chapter}_quizzes.json.new` —
+1. `books/{vol}/{chapter}/{chapter}_quizzes.json.new` —
    the regenerated JSON. Rename (drop `.new`) after human review.
-2. `book/tools/scripts/quizzes/_reviews/{chapter}_memo.md` —
+2. `publishing/tools/scripts/quizzes/_reviews/{chapter}_memo.md` —
    short summary of coverage, question counts, type mix, and any
    `quiz_needed: false` entries with their rationale.
 
@@ -54,7 +54,7 @@ overwrites without the staging suffix.
 
 ## Legacy reference
 
-`book/tools/scripts/quizzes/_legacy/quizzes_reference.py` is a
+`publishing/tools/scripts/quizzes/_legacy/quizzes_reference.py` is a
 read-only snapshot of the legacy `quizzes.py` (removed in `2bc58dba3d`).
 Kept as a reference for the SYSTEM_PROMPT, per-type criteria, and the
 known-buggy post-shuffle logic that this new pipeline deliberately does
@@ -68,7 +68,7 @@ human gate**. When you need to regenerate glossaries, concepts, index
 entries, or similar derived content from prose, follow the same shape:
 
 - Put the canonical rules in the project generation rules.
-- Write a lean runner in `book/tools/scripts/{artifact}/generate.py`.
+- Write a lean runner in `publishing/tools/scripts/{artifact}/generate.py`.
 - Put the validator beside it.
 - Optionally add an interactive persona at
   the project refresh-agent doc.

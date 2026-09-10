@@ -3,7 +3,7 @@
 
 Implementation lives in ``cli.checks.math_canonical``. Prefer::
 
-    ./book/binder check math --scope canonical
+    ./binder check math --scope canonical
 
 This script remains for ad-hoc use and backward-compatible docs links.
 """

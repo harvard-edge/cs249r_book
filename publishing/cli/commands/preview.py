@@ -86,7 +86,7 @@ class PreviewCommand:
             return False
 
         target_path = str(chapter_file.relative_to(self.config_manager.book_dir))
-        chapter_display_name = str(chapter_file.relative_to(self.config_manager.book_dir / "contents")).replace(".qmd", "")
+        chapter_display_name = str(chapter_file.relative_to(self.config_manager.book_dir)).replace(".qmd", "")
 
         console.print(f"[blue]🌐 Starting preview for[/blue] [bold]{chapter_display_name}[/bold]")
 

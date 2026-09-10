@@ -19,9 +19,9 @@ import yaml
 
 def find_repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        if (parent / "book" / "quarto" / "contents").exists():
+        if (parent  / "books").exists():
             return parent
-    raise RuntimeError("Could not locate repository root containing book/quarto/contents")
+    raise RuntimeError("Could not locate repository root containing books")
 
 
 ROOT = find_repo_root()

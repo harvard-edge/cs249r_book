@@ -1314,7 +1314,7 @@ with track-specific buckets and consequence values.
             ),
             source_trace(
                 {
-                    "chapter": "book/quarto/contents/vol2/robust_ai/robust_ai.qmd",
+                    "chapter": "books/vol2/robust_ai/robust_ai.qmd",
                     "formula": "PSI = sum_i (p_i - q_i) * ln(p_i / q_i)",
                     "helper": "v2_14_shift_exposure",
                     "track_id": v2_14_track_id,
@@ -2159,7 +2159,7 @@ def _(
             "scenario_id": v2_14_variant.scenario_id,
             "hardware_ref": v2_14_variant.hardware_ref,
             "model_ref": v2_14_variant.model_ref,
-            "chapter_source": "book/quarto/contents/vol2/robust_ai/robust_ai.qmd",
+            "chapter_source": "books/vol2/robust_ai/robust_ai.qmd",
             "notebook_local_helpers": (
                 "v2_14_shift_exposure",
                 "v2_14_budget_result",

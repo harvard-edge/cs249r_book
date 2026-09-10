@@ -5,8 +5,8 @@ This is a conservative, high-signal scanner intended for CI:
 - Emits DEFERRED issues for context-dependent collisions (review-only).
 
 Ground truth definitions live in:
-  - book/quarto/contents/vol1/frontmatter/_notation_body.qmd (shared)
-  - book/quarto/contents/vol2/frontmatter/_notation_distributed.qmd (vol2-only)
+  - books/vol1/frontmatter/_notation_body.qmd (shared)
+  - books/vol2/frontmatter/_notation_distributed.qmd (vol2-only)
 
 Rule: "Notation conventions" (see the Notations chapter in each volume).
 """
@@ -31,8 +31,8 @@ RULE_TEXT = (
 # ── Definition parsing (from the Notations chapter tables) ────────────────────
 
 _NOTATION_PATHS = (
-    Path("book/quarto/contents/vol1/frontmatter/_notation_body.qmd"),
-    Path("book/quarto/contents/vol2/frontmatter/_notation_distributed.qmd"),
+    Path("books/vol1/frontmatter/_notation_body.qmd"),
+    Path("books/vol2/frontmatter/_notation_distributed.qmd"),
 )
 
 

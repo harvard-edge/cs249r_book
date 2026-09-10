@@ -74,7 +74,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parents[3] / "book" / "quarto" / "contents"
+    root = Path(__file__).resolve().parents[3]  / "books"
     paths = sorted(root.rglob("*.qmd"))
     if len(sys.argv) > 1:
         paths = [Path(p) for p in sys.argv[1:]]

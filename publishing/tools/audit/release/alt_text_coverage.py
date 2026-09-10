@@ -3,7 +3,7 @@
 
 Reads ``07_alt_text/data/alt_text_edits_fixed.json`` (212 entries with a
 ``label`` like ``fig-ai-timeline`` and the editor-approved ``alt_text``
-string), then walks ``book/quarto/contents/vol1/**/*.qmd`` looking for
+string), then walks ``books/vol1/**/*.qmd`` looking for
 ``fig-alt="..."`` (or ``fig-alt: "..."``) attributes attached to a figure
 with ``#fig-<label>`` or matching label in a ``label:`` block. Compares
 the current alt text to the expected one (whitespace-normalised) and
@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
 
 INPUT = DATA_ROOT / "07_alt_text/data/alt_text_edits_fixed.json"
-QUARTO_ROOT = REPO_ROOT / "book/quarto/contents/vol1"
+QUARTO_ROOT = REPO_ROOT / "books/vol1"
 OUT_DIR = LEDGER_DIR
 
 # Match fig-alt attribute in a Pandoc-style figure attribute block.

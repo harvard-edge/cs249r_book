@@ -282,7 +282,7 @@ async function preserveBuildLog(
   chapter: string,
   reportsDir: string,
 ): Promise<string | undefined> {
-  // Quarto places index.log in the book/quarto directory during PDF builds
+  // Quarto places index.log in the books/ directory during PDF builds
   const logSource = path.join(worktreePath, 'book', 'quarto', 'index.log');
   if (!fs.existsSync(logSource)) {
     return undefined;
@@ -452,7 +452,7 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<{ result
         continue;
       }
 
-      const buildCommand = `./book/binder build ${job.format} ${job.chapter} --${job.volume} -v`;
+      const buildCommand = `./binder build ${job.format} ${job.chapter} --${job.volume} -v`;
       const jobLogLines: string[] = [];
       channel.appendLine(`[${tag}] running ${buildCommand}`);
       const exitCode = await runShellCommand(

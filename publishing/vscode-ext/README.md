@@ -21,13 +21,13 @@ The editor runs **one** copy of the extension. Reload only reloads that copy. If
 
 ## Binder-first integration
 
-This extension treats `./book/binder` as the operational backend.
+This extension treats `./binder` as the operational backend.
 
 - Build and debug commands execute Binder subcommands.
 - Validation actions execute `binder check <group> [--scope …]`.
 - Maintenance actions execute `binder fix <topic> <action>` (`maintain` is an alias).
 
-See [`book/docs/BINDER.md`](../docs/BINDER.md) for the check/fix reference and pre-commit mapping.
+See [`publishing/docs/BINDER.md`](../docs/BINDER.md) for the check/fix reference and pre-commit mapping.
 
 ## Work vs Configuration
 
@@ -46,10 +46,10 @@ This keeps daily actions focused while preserving easy access to tuning controls
 
 ## Core Workflows
 
-- Build chapter: `./book/binder build html <chapter>` / `./book/binder build pdf <chapter>`
-- Debug failures: `./book/binder debug <pdf|html|epub> --vol1|--vol2`
-- Validate content: `./book/binder check all` or `./book/binder check refs`
-- Maintenance: `./book/binder fix repo-health`
+- Build chapter: `./binder build html <chapter>` / `./binder build pdf <chapter>`
+- Debug failures: `./binder debug <pdf|html|epub> --vol1|--vol2`
+- Validate content: `./binder check all` or `./binder check refs`
+- Maintenance: `./binder fix repo-health`
 
 ## Parallel builds (Test All Chapters)
 
@@ -57,7 +57,7 @@ This keeps daily actions focused while preserving easy access to tuning controls
 
 **Requirements:**
 
-1. **Open the repo root** — Open the folder that contains `book/` (e.g. `mlsysbook-vols`), not a subfolder like `book/` or `book/quarto/`. The extension needs `book/binder` to be present to register commands and run parallel jobs.
+1. **Open the repo root** — Open the folder that contains `book/` (e.g. `mlsysbook-vols`), not a subfolder like `book/` or `books/`. The extension needs `binder` to be present to register commands and run parallel jobs.
 2. **Git in PATH** — Parallel mode uses `git worktree add --detach`; ensure `git` is available in the environment where the extension runs.
 3. **Optional settings** (VS Code/Cursor → Settings → MLSysBook):
    - `mlsysbook.parallelDebugWorkers` — number of concurrent builds (default: 4).

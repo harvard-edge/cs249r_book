@@ -6,8 +6,8 @@ skipping code fences, YAML frontmatter, LaTeX math blocks, Python cells,
 and table separator lines.
 
 Usage:
-    python3 fix_emdash.py --dry-run book/quarto/contents/vol1/
-    python3 fix_emdash.py book/quarto/contents/vol1/
+    python3 fix_emdash.py --dry-run books/vol1/
+    python3 fix_emdash.py books/vol1/
 """
 import argparse
 import re

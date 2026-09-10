@@ -11,7 +11,7 @@ false-positive filters as ``audit_prose.py`` (via ``spurious_zero``).
 
 Usage::
 
-    python3 book/tools/audit/fmt/audit_html.py path/to/chapter.html
+    python3 publishing/tools/audit/fmt/audit_html.py path/to/chapter.html
 
 Exit code 0 prints ``CLEAN``; exit code 1 lists findings.
 """

@@ -3,8 +3,8 @@
 
 Reads ``10_front_matter/data/front_matter_changes.json`` (53 entries: 26
 insertions, 25 deletions, 2 comments) and verifies each against the
-current QMD source under ``book/quarto/contents/vol1/frontmatter/`` (and
-shared ``book/quarto/contents/frontmatter/``).
+current QMD source under ``books/vol1/frontmatter/`` (and
+shared ``books/shared/frontmatter/``).
 
 **Important caveat about the input data**: docx tracked-change extraction
 splits edits at every contiguous run boundary, so most ``text`` values are

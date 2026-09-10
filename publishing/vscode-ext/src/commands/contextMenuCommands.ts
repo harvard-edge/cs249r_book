@@ -16,7 +16,7 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      const buildCmd = `./book/binder build ${format} ${ctx.chapter} --${ctx.volume} -v`;
+      const buildCmd = `./binder build ${format} ${ctx.chapter} --${ctx.volume} -v`;
       void runBookCommand(withQuartoResetPrefix(format, ctx.volume, buildCmd), root, {
         label: `Build ${format.toUpperCase()} (${ctx.volume}/${ctx.chapter})`,
       });
@@ -34,7 +34,7 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      void runBookCommand(`./book/binder preview ${ctx.volume}/${ctx.chapter}`, root, {
+      void runBookCommand(`./binder preview ${ctx.volume}/${ctx.chapter}`, root, {
         label: `Preview (${ctx.volume}/${ctx.chapter})`,
       });
     }),
@@ -47,7 +47,7 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
       }
       void runIsolatedDebugCommand({
         repoRoot: root,
-        command: `./book/binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`,
+        command: `./binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`,
         label: `Debug Sections (${ctx.volume}/${ctx.chapter})`,
       });
     }),

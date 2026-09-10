@@ -240,7 +240,7 @@ def inventory(root: Path, *, include_context: bool = False) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("book/quarto/contents"))
+    parser.add_argument("--root", type=Path, default=Path("books"))
     parser.add_argument("--json", type=Path)
     parser.add_argument(
         "--include-context",

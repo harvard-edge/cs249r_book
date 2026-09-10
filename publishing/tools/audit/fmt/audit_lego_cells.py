@@ -11,10 +11,10 @@ For each ``{python}`` cell marked by a LEGO header or output section:
 
 Usage (repo root)::
 
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_cells.py
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_cells.py \\
-        --report book/tools/audit/artifacts/lego_cells_verify_report.json
-    PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_cells.py \\
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_cells.py
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_cells.py \\
+        --report publishing/tools/audit/artifacts/lego_cells_verify_report.json
+    PYTHONPATH=mlsysim python3 publishing/tools/audit/fmt/audit_lego_cells.py \\
         --chapter vol2/network_fabrics
 """
 
@@ -281,7 +281,7 @@ def main() -> int:
     report = [audit_chapter(vol, name, qmd, html) for vol, name, qmd, html in paths]
 
     out_path = args.report or (
-        root / "book/tools/audit/artifacts/lego_cells_verify_report.json"
+        root / "publishing/tools/audit/artifacts/lego_cells_verify_report.json"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

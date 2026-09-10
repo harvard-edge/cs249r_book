@@ -184,5 +184,5 @@ def generate_svg():
     
     return svg_header + bio_soma + dendrites + axon + bio_labels + art_inputs + art_proc + connections + svg_footer
 
-with open('book/quarto/contents/vol1/nn_computation/images/svg/bio_nn2ai_nn_improved.svg', 'w') as f:
+with open('books/vol1/nn_computation/images/svg/bio_nn2ai_nn_improved.svg', 'w') as f:
     f.write(generate_svg())

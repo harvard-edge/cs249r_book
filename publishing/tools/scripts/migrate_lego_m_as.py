@@ -181,7 +181,7 @@ def migrate_file(path: Path) -> int:
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parents[2] / "quarto" / "contents"
+    root = Path(__file__).resolve().parents[2]  / "books"
     paths = sorted(root.rglob("*.qmd"))
     total_fixed = 0
     remaining: list[tuple[str, int]] = []

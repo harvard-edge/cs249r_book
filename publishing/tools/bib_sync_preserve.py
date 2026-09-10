@@ -17,7 +17,7 @@ The helper is deliberately reviewed:
     - radical record swaps are rejected and the original entry is kept
     - only exact citekey tokens are rewritten in companion prose files
 
-The command is intended to be driven by ``./book/binder bib update`` and
+The command is intended to be driven by ``./binder bib update`` and
 should not be run unattended.
 """
 
@@ -49,7 +49,7 @@ TEXT_EXTS = {".qmd", ".tex", ".md", ".markdown", ".mkd"}
 CITE_KEY_CHARS = r"A-Za-z0-9_.:\-"
 VOLUME_CHUNK_SIZE = 40
 CHUNKED_BIBS = {
-    "book/quarto/contents/references.bib",
+    "books/references.bib",
 }
 
 
