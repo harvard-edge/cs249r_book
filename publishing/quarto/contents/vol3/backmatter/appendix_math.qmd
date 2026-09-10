@@ -1,3 +1,7 @@
+---
+engine: jupyter
+---
+
 # Formal Derivations and Systems Invariants {#sec-vol3-appendix-math}
 
 This appendix provides the rigorous mathematical formalisms and theoretical derivations that underpin the agentic systems principles discussed in the main text. By migrating these algebraic formulations here, the core chapters remain focused on high-level systems architecture and physical engineering constraints, while still providing the necessary theoretical depth for advanced readers and researchers.
@@ -135,9 +139,13 @@ where:
 
 The optimal checkpoint cadence $K^*$ balances the marginal cost of verification against the expected cost of discarded forward progress:
 
-$$K^* = \sqrt{\frac{N \cdot \lambda_{\text{error}} \cdot C_{\text{gen}}}{C_{\text{ver}}}}$$
+$$K^* = N \sqrt{\frac{\lambda_{\text{error}} \cdot C_{\text{gen}}}{2 \cdot C_{\text{ver}}}}$$
 
-where $\lambda_{\text{error}}$ is the per-step error arrival rate. This derivation formally demonstrates why verification frequency must scale dynamically with the relative cost of verification and the environment's error rate, as explored in @sec-vol3-recovery-the-verification-tax-c.
+where $\lambda_{\text{error}}$ is the per-step error arrival rate. The checkpoint count grows linearly with trajectory length, which is another way of saying that the optimal checkpoint *interval* does not depend on how long the trajectory runs:
+
+$$\frac{N}{K^*} = \sqrt{\frac{2 \cdot C_{\text{ver}}}{\lambda_{\text{error}} \cdot C_{\text{gen}}}}$$
+
+A runtime therefore sets its cadence from the verification tax and the environment's error rate alone, and does not need to know the trajectory length in advance. This derivation formally demonstrates why verification frequency must scale dynamically with the relative cost of verification and the environment's error rate, as explored in @sec-vol3-recovery-the-verification-tax-c.
 
 ## PageRank Symbol Graphing for Repository Maps {#sec-vol3-appendix-math-pagerank}
 
@@ -159,7 +167,49 @@ $$N \ge \frac{\left( z_{1 - \alpha/2} \sqrt{2 \bar{p}(1 - \bar{p})} + z_{1 - \be
 
 where $\bar{p} = (p_1 + p_2) / 2$, $z_{1 - \alpha/2}$ is the standard normal critical value, and $z_{1 - \beta}$ is the power critical value.
 
-For an agent baseline success rate of $p_1 = 0.30$ and a targeted improvement to $p_2 = 0.35$ with $\alpha = 0.05$ and $\beta = 0.20$, the required $N$ is approximately $1,\!380$ tasks.
+```{python}
+#| label: vol3-appendix-sample-size
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | WORKED SAMPLE SIZE FOR THE TWO-PROPORTION TEST
+# +-----------------------------------------------------------------------------
+# | Context: The worked example below the displayed equation, and the matching
+# |          claim in @sec-vol3-telemetry-evaluation.
+# |
+# | Goal:    Evaluate the equation above for the rates the appendix quotes, so
+# |          the appendix and the chapter that cites it cannot disagree.
+# | Show:    The required sample size per arm.
+# | How:     calc_two_proportion_sample_size in its pooled form, which is the
+# |          equation displayed directly above.
+# +-----------------------------------------------------------------------------
+import math
+
+from mlsysim import *
+
+class BootstrapSampleSize:
+    # +-- 1. LOAD (Constants) --------------------
+    p1 = 0.30  # scenario assumption: baseline agent success rate
+    p2 = 0.35  # scenario assumption: targeted success rate
+    z_alpha = 1.96  # two-sided significance level of 0.05
+    z_beta = 0.84  # power of 0.80
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    required = math.ceil(calc_two_proportion_sample_size(p1, p2 - p1, z_alpha=z_alpha, z_beta=z_beta, pooled=True))
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(required > 1_000, f"A five-point delta at this power should demand more than a thousand tasks, got {required}")
+    check(
+        math.ceil(calc_two_proportion_sample_size(p1, 2 * (p2 - p1), z_alpha=z_alpha, z_beta=z_beta, pooled=True)) < required,
+        "A larger detectable delta must need fewer tasks",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    p1_str = fmt(p1, precision=2, commas=False)
+    p2_str = fmt(p2, precision=2, commas=False)
+    required_str = fmt_int(required)
+```
+
+For an agent baseline success rate $p_1$ of `{python} BootstrapSampleSize.p1_str` and a targeted improvement to a $p_2$ of `{python} BootstrapSampleSize.p2_str` with $\alpha = 0.05$ and $\beta = 0.20$, the required $N$ is `{python} BootstrapSampleSize.required_str` tasks per arm.
 
 Furthermore, because trajectory metrics follow heavy-tailed non-Gaussian distributions, classical parametric distributions fail. Runtimes employ non-parametric **Monte Carlo Bootstrapping** (@efron1994bootstrap) by drawing $B$ bootstrap resamples with replacement and computing the empirical percentile confidence interval:
 

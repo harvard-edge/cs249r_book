@@ -189,7 +189,7 @@ Each component will follow the pattern: **Explanation → Implementation → Tes
 
 # %% [markdown]
 """
-### 🏗️ Learning Rate Scheduling: Adaptive Training Speed
+### Learning Rate Scheduling: Adaptive Training Speed
 
 Learning rate scheduling is like adjusting your driving speed based on road conditions. You start fast on the highway (high learning rate for quick progress), then slow down in neighborhoods (low learning rate for fine-tuning).
 
@@ -309,7 +309,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Gradient Clipping: Preventing Training Explosions
+### Gradient Clipping: Preventing Training Explosions
 
 Gradient clipping is like having a speed governor on your car - it prevents dangerous situations where gradients become so large they destroy training progress.
 
@@ -471,7 +471,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ The Trainer Class: Orchestrating Complete Training
+### The Trainer Class: Orchestrating Complete Training
 
 The Trainer class coordinates all the components you've built (model, optimizer, loss
 function, scheduler) into a unified training system. You will implement each method
@@ -567,7 +567,7 @@ class Trainer:
         """Run the model, passing the training flag to a forward() that accepts one.
 
         Module 03's Sequential takes training= so that Dropout knows which path
-        to run; a bare layer or a GPT (Module 13) takes only the inputs.
+        to run; a bare layer or a GPT (which Module 13 will build) takes only the inputs.
         """
         try:
             takes_flag = 'training' in inspect.signature(self.model.forward).parameters
@@ -579,7 +579,7 @@ class Trainer:
 
 # %% [markdown]
 """
-### 🏗️ Trainer.__init__ - Setting Up the Training System
+### Trainer.__init__: Setting Up the Training System
 
 The constructor stores all training components and initializes tracking state.
 Think of it as assembling the instruments before the orchestra plays.
@@ -727,7 +727,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Trainer.train_epoch - The Core Learning Loop
+### Trainer.train_epoch: The Core Learning Loop
 
 This is the heart of training. Each epoch iterates through the dataset, performing
 the forward-backward-update cycle that drives learning.
@@ -1085,7 +1085,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Trainer.evaluate - Measuring Model Performance
+### Trainer.evaluate: Measuring Model Performance
 
 Evaluation runs the model in inference mode: forward pass only, no gradient
 updates. This tells you how well the model generalizes to data it hasn't
@@ -1259,7 +1259,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Trainer.save_checkpoint - Persisting Training State
+### Trainer.save_checkpoint: Persisting Training State
 
 Checkpointing saves everything needed to resume training later: model weights,
 optimizer state, scheduler state, epoch count, and training history. This is
@@ -1408,7 +1408,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🏗️ Trainer.load_checkpoint - Resuming Training
+### Trainer.load_checkpoint: Resuming Training
 
 Loading a checkpoint restores the exact training state so you can continue
 where you left off. This means restoring epoch count, optimizer state
@@ -1824,7 +1824,6 @@ def analyze_checkpoint_overhead():
     print("- Adam's two moment buffers triple the parameter bytes; the Trainer saves them via get_momentum_state()")
     print("- Use checkpoint frequency wisely in production (memory vs fault tolerance)")
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_training_memory()
     analyze_checkpoint_overhead()
@@ -1952,16 +1951,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 08")
 
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of training systems and their implications:
 
-### 1. Memory Trade-offs
+### Question 1: Memory Trade-offs
 **Question**: If you have a model with 1 million parameters and use Adam optimizer, what's the total training memory required?
 
 **Consider**:
@@ -1972,7 +1968,7 @@ Answer these to deepen your understanding of training systems and their implicat
 
 ---
 
-### 2. Gradient Clipping
+### Question 2: Gradient Clipping
 **Question**: Why do we clip gradients by *global norm* rather than clipping each gradient independently?
 
 **Consider**:
@@ -1982,7 +1978,7 @@ Answer these to deepen your understanding of training systems and their implicat
 
 ---
 
-### 3. Learning Rate Scheduling
+### Question 3: Learning Rate Scheduling
 **Question**: Why does cosine annealing start with high learning rate and end with low learning rate?
 
 **Consider**:
@@ -1992,7 +1988,7 @@ Answer these to deepen your understanding of training systems and their implicat
 
 ---
 
-### 4. Checkpointing Strategy
+### Question 4: Checkpointing Strategy
 **Question**: You're training for 100 epochs with 1GB checkpoints. How often should you save?
 
 **Consider**:
@@ -2002,7 +1998,7 @@ Answer these to deepen your understanding of training systems and their implicat
 
 ---
 
-### 5. Train vs Eval Modes
+### Question 5: Train vs Eval Modes
 **Question**: Why is it crucial to set model.training = False during evaluation?
 
 **Consider**:

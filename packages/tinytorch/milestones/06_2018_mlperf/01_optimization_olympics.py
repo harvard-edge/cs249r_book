@@ -187,7 +187,12 @@ def load_tinydigits_arrays(project_root=None):
 
 CONFIG = {
     'batch_size': 32,
-    'train_epochs': 10,
+    # 40 epochs over the full training set reaches roughly 87% on TinyDigits in
+    # about a second. The previous 10 epochs over the first 500 samples reached
+    # 36%, which made every accuracy delta in this script indistinguishable from
+    # noise: the whole point of the Olympics is what optimization costs a model
+    # that actually works.
+    'train_epochs': 40,
     'learning_rate': 0.01,
     'prune_sparsity': 0.5,
 }
@@ -271,7 +276,7 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
 # STEP 2: QUANTIZE
 # =============================================================================
 
-def step_2_quantize(model, param_bytes, Quantizer):
+def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer, DigitMLP):
     """
     Step 2: Quantize the model with YOUR Quantizer.
 
@@ -298,6 +303,23 @@ def step_2_quantize(model, param_bytes, Quantizer):
     quant_result = Quantizer.quantize_model(model)
     quant_size = int(param_bytes / quant_result['compression_ratio'])
 
+    # Measure what INT8 actually costs in accuracy. Quantizer.quantize_model
+    # returns the INT8 tensors and their scales but leaves the model untouched,
+    # so rebuild a copy from the dequantized weights and run the same test set
+    # through it. Reporting the baseline accuracy here instead, as this script
+    # used to, prints a number that was never measured.
+    quant_model = DigitMLP()
+    quant_params = [prm for lyr in quant_model.layers for prm in lyr.parameters()]
+    for idx, prm in enumerate(quant_params):
+        entry = quant_result['quantized_layers'][f'param_{idx}']
+        restored = Quantizer.dequantize_tensor(
+            entry['quantized'], entry['scale'], entry['zero_point']
+        )
+        prm.data = restored.data.reshape(entry['original_shape'])
+
+    outputs_quant = quant_model(X_test)
+    quant_acc = np.mean(np.argmax(outputs_quant.data, axis=1) == y_test) * 100
+
     # Display results
     table = Table(title="🗜️ After Quantization (YOUR Implementation)", box=box.ROUNDED)
     table.add_column("Metric", style="cyan")
@@ -317,12 +339,20 @@ def step_2_quantize(model, param_bytes, Quantizer):
         "INT8 (8-bit)",
         "[green]4× memory reduction[/green]"
     )
+    quant_acc_delta = quant_acc - baseline_acc
+    table.add_row(
+        "Accuracy",
+        f"{baseline_acc:.1f}%",
+        f"{quant_acc:.1f}%",
+        f"[{'green' if quant_acc_delta >= 0 else 'red'}]{quant_acc_delta:+.1f}%[/]"
+    )
 
     console.print(table)
 
     return {
         'quant_result': quant_result,
         'quant_size': quant_size,
+        'quant_acc': quant_acc,
     }
 
 
@@ -632,6 +662,7 @@ def print_final_results(baseline, quant, prune, profile_results):
     baseline_acc = baseline['baseline_acc']
     quant_size = quant['quant_size']
     quant_result = quant['quant_result']
+    quant_acc = quant['quant_acc']
     pruned_acc = prune['pruned_acc']
     sparsity_after = prune['sparsity_after']
 
@@ -643,9 +674,12 @@ def print_final_results(baseline, quant, prune, profile_results):
     table.add_column("Δ Accuracy", style="bold", justify="right")
     table.add_column("YOUR Module", style="magenta")
 
-    quant_acc = baseline_acc
     quant_delta = quant_acc - baseline_acc
     prune_delta = pruned_acc - baseline_acc
+
+    # Surviving weights at the sparsity Compressor actually measured. A real
+    # sparse format also stores indices, so this is a floor, not a file size.
+    pruned_size = int(round(param_bytes * (1 - sparsity_after)))
 
     table.add_row(
         "📊 Baseline",
@@ -665,7 +699,7 @@ def print_final_results(baseline, quant, prune, profile_results):
     )
     table.add_row(
         "✂️ + Pruning",
-        f"~{param_bytes//2:,} B**",
+        f"{pruned_size:,} B**",
         f"{baseline_acc:.1f}%",
         f"{pruned_acc:.1f}%",
         f"[green]{prune_delta:+.1f}%[/green]" if prune_delta >= 0 else f"[red]{prune_delta:+.1f}%[/red]",
@@ -673,7 +707,7 @@ def print_final_results(baseline, quant, prune, profile_results):
     )
 
     console.print(table)
-    console.print("[dim]** With sparse storage[/dim]")
+    console.print("[dim]** Surviving weights at the measured sparsity, before the index overhead a real sparse format pays[/dim]")
     console.print()
 
     # Key insights
@@ -888,7 +922,7 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # QUICK TRAINING
     # ─────────────────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]🏋️ Quick training (10 epochs)...[/bold cyan]")
+    console.print(f"\n[bold cyan]🏋️ Quick training ({CONFIG['train_epochs']} epochs)...[/bold cyan]")
 
     from tinytorch.core.optimizers import SGD
     from tinytorch.core.losses import CrossEntropyLoss
@@ -901,7 +935,7 @@ def main():
 
         for epoch in range(CONFIG['train_epochs']):
             batch_size = CONFIG['batch_size']
-            for i in range(0, min(500, len(y_train)), batch_size):
+            for i in range(0, len(y_train), batch_size):
                 batch_x = Tensor(X_train.data[i:i+batch_size])
                 batch_y = y_train[i:i+batch_size]
 
@@ -926,7 +960,8 @@ def main():
     press_enter_to_continue()
 
     # Step 2: Quantize
-    quant = step_2_quantize(model, baseline['param_bytes'], Quantizer)
+    quant = step_2_quantize(model, baseline['param_bytes'], baseline['baseline_acc'],
+                            X_test, y_test, Quantizer, DigitMLP)
     press_enter_to_continue()
 
     # Step 3: Prune

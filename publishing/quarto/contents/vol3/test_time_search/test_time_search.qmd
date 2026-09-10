@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Test-Time Search {#sec-vol3-test-time-search}
@@ -74,12 +74,12 @@ Test-time compute scaling fundamentally decouples task difficulty from model par
 
 :::
 
-As illustrated in @fig-test-time-compute-scaling, scaling test-time compute shifts the system's performance envelope along a new scaling axis:
+@Fig-test-time-compute-scaling shifts the performance envelope onto a new scaling axis:
 
 - **Parameter Scaling vs. Search Scaling:** On complex reasoning benchmarks, allocating $10\times$ to $100\times$ more inference tokens through structured search on a compact model (e.g., 7B or 14B) yields accuracy improvements equivalent to scaling pretraining parameters by an order of magnitude, at a fraction of pretraining capital expenditure.
 - **The Test-Time Trade-off Space:** The system operates over four interconnected dimensions: task success probability $P(\text{success})$, wall-clock latency deadline $L_{\max}$, token generation expenditure $T_{\text{gen}}$, and verification compute $C_{\text{ver}}$.
 
-::: {#pri-vol3-inference-scaling .callout-principle title="The Inference Scaling Invariant"}
+::: {#pri-vol3-inference-scaling .callout-principle title="The inference scaling invariant"}
 
 **Invariant**: The reasoning fidelity of an autoregressive model on compositional tasks is fundamentally bounded by its search horizon.
 
@@ -172,7 +172,7 @@ To overcome the myopic pruning of beam search while avoiding the exponential exp
 
 :::
 
-As illustrated in @fig-search-topologies-comparison, MCTS iteratively constructs an asymmetric search tree through four cyclical phases:
+@Fig-search-topologies-comparison follows MCTS as it constructs an asymmetric search tree through four cyclical phases:
 
 ### Phase 1: Selection
 Beginning at root state $s_0$, the search traversal policy navigates down existing tree nodes by selecting the action that maximizes the Upper Confidence Bounds applied to Trees (UCT / PUCT) criterion:
@@ -256,11 +256,56 @@ The economic rationale for the Verification Tax is search space collapse:
   |\mathcal{V}_{\text{unverified}}| = \frac{b^{d+1} - 1}{b - 1} \approx b^d
   $$
 
+```{python}
+#| label: vol3-search-pruning-arithmetic
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | WHAT VERIFIER PRUNING REMOVES FROM THE TREE
+# +-----------------------------------------------------------------------------
+# | Context: The pruning bullet immediately below.
+# |
+# | Goal:    Price the effect of an intermediate verifier on the size of the
+# |          explored search tree.
+# | Show:    Effective branching factor, node counts with and without pruning,
+# |          and the reduction between them.
+# | How:     An unpruned tree of branching factor b over h plies explores b**h
+# |          nodes; a verifier that survives a fraction alpha of branches gives
+# |          an effective factor of alpha * b and the same power law.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+class VerifierPruning:
+    # +-- 1. LOAD (Constants) --------------------
+    branching = 5  # scenario assumption: candidate continuations per ply
+    survival = 0.3  # scenario assumption: fraction the verifier lets through
+    horizon = 5  # scenario assumption: plies of search
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    effective_branching = survival * branching
+    unpruned_nodes = branching**horizon
+    pruned_nodes = effective_branching**horizon
+    reduction = 1 - pruned_nodes / unpruned_nodes
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(effective_branching < branching, "Pruning must lower the branching factor or it is not pruning")
+    check(reduction > 0.99, f"Pruning at this rate should remove more than 99 percent of the tree, got {reduction}")
+    check(pruned_nodes < unpruned_nodes, "The pruned tree must be smaller than the unpruned one")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    branching_str = fmt_int(branching)
+    survival_str = fmt(survival, precision=1, commas=False)
+    horizon_str = fmt_int(horizon)
+    effective_branching_str = fmt(effective_branching, precision=1, commas=False)
+    unpruned_nodes_str = fmt_int(unpruned_nodes)
+    pruned_nodes_str = fmt(pruned_nodes, precision=1, commas=False)
+    reduction_str = fmt_percent(reduction, precision=1, style="prose")
+```
+
 - When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply, the effective branching factor drops to:
   $$
   b_{\text{eff}} = \alpha \cdot b
   $$
-  If $\alpha = 0.3$ and $b = 5$, $b_{\text{eff}} = 1.5$. Over a 5-step horizon, total explored nodes drop from $5^5 = 3,125$ to $1.5^5 \approx 7.6$ nodes—a **99.7 percent reduction** in total trajectory rollouts. As long as $C_{\text{ver}} < (b - b_{\text{eff}}) \cdot C_{\text{gen}}$, investing in verification drastically reduces net compute while boosting task accuracy.
+  At a survival fraction $\alpha$ of `{python} VerifierPruning.survival_str` and a branching factor $b$ of `{python} VerifierPruning.branching_str`, $b_{\text{eff}}$ is `{python} VerifierPruning.effective_branching_str`. Over a `{python} VerifierPruning.horizon_str`-step horizon, total explored nodes drop from `{python} VerifierPruning.unpruned_nodes_str` to `{python} VerifierPruning.pruned_nodes_str`, a **`{python} VerifierPruning.reduction_str` reduction** in total trajectory rollouts. As long as $C_{\text{ver}} < (b - b_{\text{eff}}) \cdot C_{\text{gen}}$, investing in verification drastically reduces net compute while boosting task accuracy.
 
 ### Verifier taxonomy
 
@@ -295,10 +340,57 @@ In tree search topologies, speculative decoding can be generalized to **Tree Spe
 
 When serving tree search algorithms in production, the primary hardware bottleneck is not compute—it is GPU HBM capacity.
 
-In naive large language model serving engines, each concurrent sequence maintains an independent linear Key-Value (KV) cache buffer. Consider serving an MCTS tree with branch factor $b=4$ over an 8,000-token prompt context:
+```{python}
+#| label: vol3-search-branch-kv-duplication
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | REDUNDANT KV ACROSS SEARCH BRANCHES
+# +-----------------------------------------------------------------------------
+# | Context: The naive-allocation bullets immediately below.
+# |
+# | Goal:    Size the cost of replicating one shared prompt prefix across every
+# |          leaf of a search tree.
+# | Show:    Per-branch prefix cache, the total under naive allocation, and how
+# |          much of that total is redundant.
+# | How:     Model shape from MLSysIM; every leaf but the first holds a copy of
+# |          the same prefix, so the redundancy is (leaves - 1) copies.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
 
-- Under naive independent allocation, 16 candidate leaf trajectories replicate the 8,000-token prompt prefix 16 times in HBM.
-- For a 70B model using 16-bit FP16 precision across 80 layers, a single 8,000-token prompt KV-cache consumes approximately 2.5 GB of HBM. Replicating this 16 times wastes **40 GB of HBM** on identical prefix data!
+class BranchDuplication:
+    # +-- 1. LOAD (Constants) --------------------
+    model = Models.Language.Llama3_70B
+    prompt_tokens = 8_000  # scenario assumption: shared prompt context
+    leaves = 16  # scenario assumption: candidate leaf trajectories
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    per_branch = model.get_kv_cache_size(seq_len=prompt_tokens, batch_size=1, precision=BYTES_FP16)
+    naive_total = leaves * per_branch
+    redundant_copies = leaves - 1
+    redundant = redundant_copies * per_branch
+    redundant_fraction = (redundant / naive_total).to("").magnitude
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(redundant < naive_total, "The redundant share cannot exceed the total it is drawn from")
+    check(abs(redundant_fraction - redundant_copies / leaves) < 1e-9, "Redundancy must be exactly the copies beyond the first")
+    check(
+        naive_total > model.get_kv_cache_size(seq_len=prompt_tokens, batch_size=1, precision=BYTES_FP16),
+        "Replication must cost more than a single resident copy",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    prompt_tokens_str = fmt_int(prompt_tokens)
+    leaves_str = fmt_int(leaves)
+    per_branch_str = fmt_memory(per_branch, unit=GB, precision=1)
+    naive_total_str = fmt_memory(naive_total, unit=GB, precision=1)
+    redundant_copies_str = fmt_int(redundant_copies)
+    redundant_str = fmt_memory(redundant, unit=GB, precision=1)
+```
+
+In naive large language model serving engines, each concurrent sequence maintains an independent linear Key-Value (KV) cache buffer. Consider serving an MCTS tree with branch factor $b=4$ over an `{python} BranchDuplication.prompt_tokens_str`-token prompt context:
+
+- Under naive independent allocation, `{python} BranchDuplication.leaves_str` candidate leaf trajectories replicate the `{python} BranchDuplication.prompt_tokens_str`-token prompt prefix once each in HBM.
+- For a 70B model using 16-bit FP16 precision, a single prompt KV-cache consumes `{python} BranchDuplication.per_branch_str` of HBM. Replicating it across every leaf occupies **`{python} BranchDuplication.naive_total_str` of HBM**, of which the `{python} BranchDuplication.redundant_copies_str` redundant copies, **`{python} BranchDuplication.redundant_str`**, carry no information the first copy does not already hold.
 - The GPU runs out of memory (OOM) after exploring only a few plies, crippling search width.
 
 ::: {#fig-tree-kv-cache-radix fig-env="figure" fig-pos="htb" fig-cap="**Tree-Structured KV-Cache Allocation and Radix Prefix Sharing**: Panel A illustrates naive independent branch serving, where identical system prompt and execution trace prefixes are duplicated across all candidate branches, causing rapid HBM exhaustion. Panel B demonstrates RadixAttention with Copy-on-Write page allocation, where shared prefixes are retained once in memory and child branches store only incremental delta tokens." fig-alt="Two-panel memory diagram. Panel A shows four branches laid out as parallel bars, each holding a 2,000-token system prompt, a 1,500-token step trace, and a 500-token divergent suffix; the prompt and trace segments of branches two through four are marked as duplicates, giving 16,000 tokens allocated of which 10,500 are redundant. Panel B shows the same branches as a radix tree with one shared prompt node and one shared trace node, each carrying a reference count of four, feeding four leaf nodes of 500 delta tokens each, for 5,500 tokens allocated."}
@@ -437,15 +529,23 @@ Allowing concurrent search branches to execute mutating tool calls (e.g., file w
 
 The Verification Tax is what keeps principle \ref{pri-vol3-test-time-scaling} from being a promise of free capability. Search buys accuracy with inference compute, and the bound on that trade is set by what it costs to check each candidate, which is why a domain with a cheap oracle scales and a domain without one does not.
 
-## Chapter Summary {#sec-vol3-search-summary}
+## Summary {#sec-vol3-search-summary}
 
-- **The Test-Time Paradigm Shift:** Test-time compute scaling decouples reasoning accuracy from static model parameter capacity, allowing runtimes to allocate variable inference FLOPs dynamically to match problem complexity.
-- **The Search Topology Spectrum:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search enforces linear memory bounds through synchronous per-ply pruning; MCTS provides asymptotically optimal lookahead balancing exploration and exploitation; Graph of Thoughts enables multi-path synthesis and aggregation.
-- **The Verification Tax:** Allocating compute to intermediate verification ($C_{\text{ver}}$) collapses the combinatorial branching explosion ($b^d \to b_{\text{eff}}^d$), drastically reducing total net compute while eliminating error propagation.
-- **Tree-Structured Memory Management:** Naive independent branch allocation causes catastrophic HBM exhaustion. RadixAttention and PagedAttention provide Copy-on-Write page sharing and reference counting, slashing search memory footprints by up to 85 percent.
-- **Environment State Forking:** Multi-branch search over tool actions requires isolating external state. Runtimes must employ CoW filesystems or microVM snapshots to prevent state corruption across diverging candidate trajectories.
-- **Macro-Economic Pareto Inversion:** On compositional reasoning tasks, scaling test-time search on compact foundation models systematically outperforms order-of-magnitude larger models running greedy decode, establishing a superior dollar-cost-per-resolved-task frontier.
+Test-time compute scaling shifts the capability frontier from static parameter pretraining to dynamic inference execution. By exploring candidate trajectories, evaluating intermediate states with verifier oracles, and pruning search trees, systems trade inference FLOPs for verifiable task resolution.
 
-```{=latex}
+::: {.callout-takeaways title="Test-time search and the verification tax"}
+* **The Test-Time Paradigm Shift:** Test-time compute scaling decouples reasoning accuracy from static model parameter capacity, allowing runtimes to allocate variable inference FLOPs dynamically to match problem complexity.
+* **The Search Topology Spectrum:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search enforces linear memory bounds through synchronous per-ply pruning; MCTS provides asymptotically optimal lookahead balancing exploration and exploitation; Graph of Thoughts enables multi-path synthesis and aggregation.
+* **The Verification Tax:** Allocating compute to intermediate verification ($C_{\text{ver}}$) collapses the combinatorial branching explosion ($b^d \to b_{\text{eff}}^d$), drastically reducing total net compute while eliminating error propagation.
+* **Tree-Structured Memory Management:** Naive independent branch allocation causes catastrophic HBM exhaustion. RadixAttention and PagedAttention provide Copy-on-Write page sharing and reference counting, slashing search memory footprints by up to 85 percent.
+* **Environment State Forking:** Multi-branch search over tool actions requires isolating external state. Runtimes must employ CoW filesystems or microVM snapshots to prevent state corruption across diverging candidate trajectories.
+* **Macro-Economic Pareto Inversion:** On compositional reasoning tasks, scaling test-time search on compact foundation models systematically outperforms order-of-magnitude larger models running greedy decode, establishing a superior dollar-cost-per-resolved-task frontier.
+:::
+
+Scaling inference compute rewrites the economics of neural reasoning, proving that a compact, well-guided model with a rigorous verification loop can outperform massive models running open-loop greedy decode. Yet scaling multi-turn search trees exposes a severe physical bottleneck: accelerator memory is bounded, and maintaining expanding KV-cache branches across dozens of candidate trajectories rapidly exhausts available high-bandwidth memory.
+
+::: {.callout-chapter-connection title="From deliberation search to serving runtimes"}
+Test-time search expands reasoning trajectories into branching computational trees, but executing long-horizon inference requires specialized memory and serving runtimes. Concluding **Part II (Agent Training and Test-Time Compute)**, we turn to **Part III (Serving Runtimes and Memory Systems)**: beginning in @sec-vol3-context-working-sets with the memory hierarchy of context working sets, dynamic KV eviction, and attentional compression.
+:::
+
 \part{key:vol3_serving}
-```

@@ -1,5 +1,5 @@
 ---
-engine: markdown
+engine: jupyter
 ---
 
 # Trajectory Scheduling {#sec-vol3-trajectory-scheduling}
@@ -88,15 +88,72 @@ When variance is unbounded, classical queueing models completely collapse. In st
 
 Under heavy-tailed Pareto workloads, this variance approaches infinity. In practical clusters, this mathematical reality manifests as catastrophic Head-of-Line (HoL) blocking: when a standard First-In-First-Out (FIFO) queue schedules a 200-step agent, it monopolizes accelerator resources for tens of minutes, causing queue backpressure that delays hundreds of quick 2-step tasks.
 
-| Workload Domain          |   Benchmark / Trace    | Mean Steps $\mathbb{E}[N]$ | P99 Steps | Step Variance $\sigma^2$ | Mean Tool Wait Fraction | Mean Context Growth / Step | Peak KV Memory (70B GQA) |
-|:-------------------------|:----------------------:|:--------------------------:|:---------:|:------------------------:|:-----------------------:|:--------------------------:|:------------------------:|
-| **Stateless Serving**    |  LMSYS Chatbot Arena   |            1.0             |    1.0    |           0.0            |           0.0%          |          0 tokens          |          0.8 GB          |
-| **Multi-Turn Chat**      |        MT-Bench        |            2.0             |    2.0    |           0.0            |           0.0%          |         450 tokens         |          1.4 GB          |
-| **Web Navigation**       |  WebArena / VisualWeb  |            7.4             |    35.0   |           48.2           |          72.4%          |        1,850 tokens        |         14.2 GB          |
-| **Software Engineering** |   SWE-bench Verified   |            24.8            |   142.0   |          812.6           |          84.1%          |         820 tokens         |         22.4 GB          |
-| **Deep Research**        | GAIA / Research Fleets |            38.2            |   260.0   |         1,440.0          |          88.6%          |        1,400 tokens        |         34.8 GB          |
+```{python}
+#| label: vol3-scheduling-idle-fraction
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | IDLE FRACTION AND THE UTILIZATION IT IMPLIES
+# +-----------------------------------------------------------------------------
+# | Context: @tbl-vol3-scheduling-workload-comparison and the paragraph that
+# |          reads its tool-wait column.
+# |
+# | Goal:    Hold the tool-wait fractions once, so the table and the utilization
+# |          claim drawn from it cannot drift apart.
+# | Show:    The wait fraction per agentic workload, the span across them, and
+# |          the utilization a scheduler that holds the accelerator through the
+# |          wait would achieve.
+# | How:     A scheduler that pins the accelerator across a tool wait achieves
+# |          utilization equal to one minus the wait fraction, so the two ranges
+# |          are complements of each other.
+# |
+# | Note:    The wait fractions are the chapter's trace figures. They are
+# |          declared here rather than given registry provenance; the traces are
+# |          not published, so a registry entry would imply a source that does
+# |          not exist.
+# +-----------------------------------------------------------------------------
+from mlsysim import *
+
+class IdleFraction:
+    # +-- 1. LOAD (Constants) --------------------
+    # trace figures, agentic rows only: web navigation, software engineering,
+    # deep research. The two non-agentic rows wait on no tool at all.
+    wait_fractions = (0.724, 0.841, 0.886)
+    stateless_wait = 0.0
+    chat_wait = 0.0
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    wait_low = min(wait_fractions)
+    wait_high = max(wait_fractions)
+    utilization_low = 1 - wait_high
+    utilization_high = 1 - wait_low
+    worst_wait = wait_high
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(0.70 < wait_low and wait_high < 0.90, f"Agentic waits should sit between 70 and 90 percent, got {wait_low} to {wait_high}")
+    check(abs((utilization_low + wait_high) - 1.0) < 1e-9, "Utilization and wait fraction must be complements")
+    check(utilization_low < utilization_high, "The utilization range must run from its worst case to its best")
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    wait_range_str = fmt_percent_range(wait_low, wait_high, precision=1, style="prose")
+    utilization_range_str = fmt_percent_range(utilization_low, utilization_high, precision=1, style="prose")
+    stateless_wait_str = fmt_percent(stateless_wait, precision=0, style="symbol")
+    chat_wait_str = fmt_percent(chat_wait, precision=0, style="symbol")
+    web_wait_str = fmt_percent(wait_fractions[0], precision=1, style="symbol")
+    swe_wait_str = fmt_percent(wait_fractions[1], precision=1, style="symbol")
+    research_wait_str = fmt_percent(wait_fractions[2], precision=1, style="symbol")
+```
+
+| Workload Domain          |   Benchmark / Trace    | Mean Steps $\mathbb{E}[N]$ | P99 Steps | Sample Step Variance $s^2$ |          Mean Tool Wait Fraction           | Mean Context Growth / Step | Peak KV Memory (70B GQA) |
+|:-------------------------|:----------------------:|:--------------------------:|:---------:|:--------------------------:|:------------------------------------------:|:--------------------------:|:------------------------:|
+| **Stateless Serving**    |  LMSYS Chatbot Arena   |            1.0             |    1.0    |            0.0             | `{python} IdleFraction.stateless_wait_str` |          0 tokens          |          0.8 GB          |
+| **Multi-Turn Chat**      |        MT-Bench        |            2.0             |    2.0    |            0.0             |   `{python} IdleFraction.chat_wait_str`    |         450 tokens         |          1.4 GB          |
+| **Web Navigation**       |  WebArena / VisualWeb  |            7.4             |    35.0   |            48.2            |    `{python} IdleFraction.web_wait_str`    |        1,850 tokens        |         14.2 GB          |
+| **Software Engineering** |   SWE-bench Verified   |            24.8            |   142.0   |           812.6            |    `{python} IdleFraction.swe_wait_str`    |         820 tokens         |         22.4 GB          |
+| **Deep Research**        | GAIA / Research Fleets |            38.2            |   260.0   |          1,440.0           | `{python} IdleFraction.research_wait_str`  |        1,400 tokens        |         34.8 GB          |
 
 : **Empirical Workload Characteristics across Serving Regimes**: Mean and tail step counts, step variance, tool wait fraction, context growth, and peak KV memory across stateless text generation, multi-turn chat, and autonomous agent trajectories. {#tbl-vol3-scheduling-workload-comparison}
+
+The variance column is a sample statistic, and every trace produces a finite one: a measured set of trajectories has a largest element, so its variance is bounded by construction. That is the trap. Each row's sample standard deviation sits within about 15 percent of its own mean, which is the signature of a light-tailed distribution and not of the power law the traces are drawn from. The sample moment understates the population moment precisely because the trace is truncated, and it will jump on the next trace that happens to catch one more long trajectory. A scheduler sized from this column is sized from an artifact of the measurement window rather than from the workload.
 
 ### Bimodal temporal execution dynamics
 
@@ -106,7 +163,7 @@ Beyond step-count variance, the temporal profile of each individual step is inte
 2. **Tool I/O Wait Phase ($1\text{ s -- } 60\text{ s}$):** The agent halts token generation while an external sandbox executes bash commands, runs test suites, queries databases, or scrapes web pages.
 3. **Human Approval Wait Phase ($1\text{ minute -- } 24\text{ hours}$):** If the agent requires supervisory consent for a privileged action, execution pauses indefinitely in an external mailbox queue.
 
-As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend between 70 and 90 percent of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization plummets to single-digit percentages.
+As demonstrated in @tbl-vol3-scheduling-workload-comparison, autonomous agents spend `{python} IdleFraction.wait_range_str` of their end-to-end trajectory duration completely idle with respect to GPU compute. If a scheduler naively holds GPU resources during these extended tool-wait gaps, cluster utilization falls to `{python} IdleFraction.utilization_range_str` across these workloads, with the deep-research fleet the worst of them.
 
 ### Human-in-the-loop (HITL) suspend and resume
 
@@ -230,7 +287,7 @@ If this condition is violated, the scheduler refuses to admit trajectory $k$ to 
 
 The ordering of these stages is itself a design decision. Horizon prediction has to run ahead of the admission gate because the gate needs a predicted size to test, and the cache-affinity router that @fig-vol3-scheduling-architecture places after the gate has to run last, because routing a trajectory that will later be evicted for memory wastes the warm prefix it was sent to.
 
-::: {#fig-vol3-scheduling-architecture fig-env="figure" fig-pos="htb" fig-cap="**Trajectory-Aware Serving and Scheduling Architecture**: Incoming heavy-tailed agent tasks undergo horizon prediction and capacity-aware admission control before being dispatched via cache-affinity routing to GPU workers maintaining warm Radix tree prefixes." fig-alt="Diagram of a trajectory-aware serving and scheduling architecture in three stacked bands. The top band lists three agent workload properties: heavy-tailed Pareto service times, bimodal compute versus tool I/O, and multi-turn prefix redundancy. The middle band shows the trajectory scheduling controller with four numbered stages: predictive horizon and memory sizing, capacity-aware admission gate, cache-affinity session routing, and preemption and suspension coordination. The bottom band shows three GPU workers, one running an active session against a warm radix tree cache, one with its key-value cache swapped to host memory while it waits on a tool, and one balanced by dominant resource fairness."}
+::: {#fig-vol3-scheduling-architecture fig-env="figure" fig-pos="htb" fig-cap="**Trajectory-Aware Serving and Scheduling Architecture**: Incoming heavy-tailed agent tasks undergo horizon prediction and capacity-aware admission control before being dispatched via cache-affinity routing to GPU workers maintaining warm Radix tree prefixes. Admission control and affinity routing solve different halves of the same problem. The first keeps a heavy-tailed arrival from committing capacity the cluster does not have, and the second keeps an admitted trajectory from paying its prefill twice." fig-alt="Diagram of a trajectory-aware serving and scheduling architecture in three stacked bands. The top band lists three agent workload properties: heavy-tailed Pareto service times, bimodal compute versus tool I/O, and multi-turn prefix redundancy. The middle band shows the trajectory scheduling controller with four numbered stages: predictive horizon and memory sizing, capacity-aware admission gate, cache-affinity session routing, and preemption and suspension coordination. The bottom band shows three GPU workers, one running an active session against a warm radix tree cache, one with its key-value cache swapped to host memory while it waits on a tool, and one balanced by dominant resource fairness."}
 ![](images/svg/trajectory_scheduling_architecture.svg)
 :::
 
@@ -265,29 +322,96 @@ $$\mathbb{P}(N > x + \delta \mid N > x) \text{ increases with } x$$
 
 In an exponential distribution, a job that has run for 10 minutes is no more likely to finish in the next minute than a brand new job (memorylessness). In contrast, in a heavy-tailed Pareto distribution with $\alpha \approx 1.1$, elapsed service carries information about the work that remains, and the tail index together with the trajectory statistics in @tbl-vol3-scheduling-workload-comparison is enough to size that remainder.
 
+```{python}
+#| label: vol3-scheduling-attained-service
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | REMAINING WORK UNDER A HEAVY-TAILED SERVICE TIME
+# +-----------------------------------------------------------------------------
+# | Context: Notebook \ref{nbk-scheduling-attained-service-residual}.
+# |
+# | Goal:    Size the work remaining for a trajectory that has already run,
+# |          and contrast it with the memoryless model a scheduler would
+# |          otherwise assume.
+# | Show:    The fitted Pareto scale, a fit check against the measured P99,
+# |          conditional survival, mean residual life, and both ratios against
+# |          the exponential baseline.
+# | How:     mlsysim's Pareto trajectory helpers. The mean and P99 are the
+# |          SWE-bench Verified row of @tbl-vol3-scheduling-workload-comparison;
+# |          the tail index is this section's working value.
+# +-----------------------------------------------------------------------------
+import math
+
+from mlsysim import *
+
+class AttainedService:
+    # +-- 1. LOAD (Constants) --------------------
+    mean_steps = 24.8  # measured: SWE-bench Verified row, mean trajectory length
+    p99_steps = 142  # measured: SWE-bench Verified row, 99th percentile
+    alpha = 1.1  # scenario assumption: working tail index from the 1.0-1.4 range
+    attained = 50  # scenario assumption: steps the trajectory has already run
+    target = 100  # scenario assumption: steps it is asked to survive to
+
+    # +-- 2. EXECUTE (The Compute) ---------------
+    scale = calc_pareto_scale(mean_steps, alpha)
+    tail_at_p99 = calc_pareto_survival(p99_steps, scale, alpha)
+    conditional = calc_pareto_conditional_survival(attained, target, alpha)
+    residual = calc_pareto_mean_residual_life(attained, alpha)
+    memoryless = math.exp(-attained / mean_steps)
+    residual_ratio = residual / mean_steps
+    survival_ratio = conditional / memoryless
+
+    # +-- 3. GUARD (Invariants) ------------------
+    check(abs(tail_at_p99 - 0.01) < 0.002, f"The fit must reproduce the measured P99, got {tail_at_p99} beyond {p99_steps} steps")
+    check(conditional > memoryless, "A heavy tail must make an aged trajectory likelier to continue than the memoryless model")
+    check(residual > mean_steps, f"Remaining work must exceed a fresh draw, got {residual} against {mean_steps}")
+    check(
+        calc_pareto_mean_residual_life(2 * attained, alpha) > residual,
+        "Mean residual life must grow with attained service, which is the decreasing hazard rate",
+    )
+
+    # +-- 4. OUTPUT (Formatting) -----------------
+    mean_steps_str = fmt(mean_steps, precision=1, commas=False)
+    p99_steps_str = fmt_int(p99_steps)
+    alpha_str = fmt(alpha, precision=1, commas=False)
+    attained_str = fmt_int(attained)
+    target_str = fmt_int(target)
+    scale_str = fmt(scale, precision=2, commas=False)
+    tail_at_p99_pct_str = fmt_percent(tail_at_p99, precision=1, style="prose")
+    conditional_str = fmt(conditional, precision=3, commas=False)
+    memoryless_str = fmt(memoryless, precision=3, commas=False)
+    residual_str = fmt_int(int(round(residual)))
+    residual_ratio_mult_str = fmt_multiple(residual_ratio, precision=1)
+    survival_ratio_mult_str = fmt_multiple(survival_ratio, precision=1)
+```
+
 ::: {#nbk-scheduling-attained-service-residual .callout-notebook title="Remaining work after 50 attained steps"}
 
-**Problem**: Under the Pareto service-time model, how many further steps should a scheduler expect from an agent that has already executed 50 steps, and how does that expectation compare with the one for a task drawn fresh from the same queue?
+**Problem**: Under the Pareto service-time model, how many further steps should a scheduler expect from an agent that has already executed `{python} AttainedService.attained_str` steps, and how does that expectation compare with the one for a task drawn fresh from the same queue?
 
-**Variables**: The SWE-bench Verified row of @tbl-vol3-scheduling-workload-comparison supplies two measured quantities, a mean of $\mathbb{E}[N] = 24.8$ steps and a 99th percentile of $142$ steps. The tail index $\alpha = 1.1$ is this section's working value from the empirical range $1.0 < \alpha < 1.4$, and it is the one input not read off the table. Step counts are treated as continuous, and the survival function is the Pareto form of @sec-vol3-appendix-math-pareto, $\mathbb{P}(N > x) = (x_{\min}/x)^{\alpha}$. The memoryless baseline is an exponential distribution fitted to the same mean.
+**Variables**: The SWE-bench Verified row of @tbl-vol3-scheduling-workload-comparison supplies two measured quantities, a mean $\mathbb{E}[N]$ of `{python} AttainedService.mean_steps_str` steps and a 99th percentile of `{python} AttainedService.p99_steps_str` steps. The tail index $\alpha$ is `{python} AttainedService.alpha_str`, this section's working value from the empirical range $1.0 < \alpha < 1.4$, and it is the one input not read off the table. Step counts are treated as continuous, and the survival function is the Pareto form of @sec-vol3-appendix-math-pareto, $\mathbb{P}(N > x) = (x_{\min}/x)^{\alpha}$. The memoryless baseline is an exponential distribution fitted to the same mean.
 
 **Math**: The Pareto mean $\mathbb{E}[N] = \alpha x_{\min} / (\alpha - 1)$ pins the scale parameter to the measured mean:
 
-$$x_{\min} = \frac{24.8 \times 0.1}{1.1} = 2.25\text{ steps}$$
+$$x_{\min} = \frac{\mathbb{E}[N] \cdot (\alpha - 1)}{\alpha}$$
+
+which gives `{python} AttainedService.scale_str` steps.
 
 The fit is checkable, because those same two parameters must also reproduce the measured tail:
 
-$$\mathbb{P}(N > 142) = \left( \frac{2.25}{142} \right)^{1.1} = (0.01585)^{1.1} = 0.010$$
+$$\mathbb{P}(N > x) = \left( \frac{x_{\min}}{x} \right)^{\alpha}$$
 
-The fitted distribution places 1.0 percent of tasks beyond 142 steps, which is exactly what a P99 of $142$ asserts, so the tail index and the table agree. Conditioning on 50 attained steps is then a ratio of survival probabilities, and the scale parameter cancels:
+Evaluated at the measured 99th percentile, the fitted distribution places `{python} AttainedService.tail_at_p99_pct_str` of tasks beyond `{python} AttainedService.p99_steps_str` steps, which is what a P99 asserts, so the tail index and the table agree. Conditioning on 50 attained steps is then a ratio of survival probabilities, and the scale parameter cancels:
 
-$$\mathbb{P}(N > 100 \mid N > 50) = \frac{(x_{\min}/100)^{1.1}}{(x_{\min}/50)^{1.1}} = \left( \frac{50}{100} \right)^{1.1} = 0.467$$
+$$\mathbb{P}(N > x_2 \mid N > x_1) = \frac{(x_{\min}/x_2)^{\alpha}}{(x_{\min}/x_1)^{\alpha}} = \left( \frac{x_1}{x_2} \right)^{\alpha}$$
 
-The exponential baseline answers the same question with $e^{-50/24.8} = 0.133$. Integrating the conditional survival curve gives the mean residual life, $\mathbb{E}[N - x \mid N > x] = x/(\alpha - 1)$, which for an agent 50 steps in is:
+For `{python} AttainedService.attained_str` attained steps and a target of `{python} AttainedService.target_str` that is `{python} AttainedService.conditional_str`. The exponential baseline fitted to the same mean answers `{python} AttainedService.memoryless_str`. Integrating the conditional survival curve gives the mean residual life, $\mathbb{E}[N - x \mid N > x] = x/(\alpha - 1)$, which for an agent 50 steps in is:
 
-$$\frac{50}{1.1 - 1} = \frac{50}{0.1} = 500\text{ steps}$$
+$$\mathbb{E}[N - x \mid N > x] = \frac{x}{\alpha - 1}$$
 
-**Result**: The 50-step trajectory is expected to run 500 more steps, against 24.8 for a task pulled fresh from the same queue, a factor of $500 / 24.8 = 20.2$. It is also $0.467 / 0.133 = 3.5$ times likelier to survive another 50 steps than the memoryless model predicts.
+which is `{python} AttainedService.residual_str` steps.
+
+**Result**: The `{python} AttainedService.attained_str`-step trajectory is expected to run `{python} AttainedService.residual_str` more steps, against `{python} AttainedService.mean_steps_str` for a task pulled fresh from the same queue, a factor of `{python} AttainedService.residual_ratio_mult_str`. It is also `{python} AttainedService.survival_ratio_mult_str` likelier to survive another `{python} AttainedService.attained_str` steps than the memoryless model predicts.
 
 **Systems insight**: Attained service is the strongest remaining-work estimator available to a non-clairvoyant scheduler, and under a decreasing hazard rate it points the opposite way from operator intuition, since the session closest to finishing is the one that has barely started. Demoting the aged session is therefore not a fairness compromise imposed on top of LAS but the closest feasible approximation of SRPT when the horizon is unknown.
 
@@ -367,7 +491,7 @@ As proven by @ghodsi2011, DRF satisfies four vital properties essential for mult
 
 By packing complementary agent workloads together—co-locating compute-heavy MCTS agents with memory-heavy coding agents and tool-heavy research agents—DRF increases aggregate cluster utilization by **40 to 65 percent** compared to static partitioning [@grandl2014]. That gain comes from the equalization itself. Because each of the three tenant personas in @fig-vol3-scheduling-drf is dominated by a different resource, holding their dominant shares equal leaves each tenant's non-dominant resources free for the others to consume, which is exactly the slack that static partitioning strands.
 
-::: {#fig-vol3-scheduling-drf fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation balancing GPU Compute FLOPs, HBM KV blocks, and external tool API leases across heterogeneous agent personas to maximize cluster packing efficiency." fig-alt="Diagram of dominant resource fairness across three cluster resource pools: GPU compute, device memory holding key-value blocks, and external tool API leases. Three agent tenant profiles are shown with their resource share vectors, a speculative search agent dominated by compute, a software engineering agent dominated by memory, and a web research orchestrator dominated by tool leases, each reaching the same dominant share. A final panel lists the sharing incentive, strategy-proofness, envy-freeness, and Pareto efficiency properties."}
+::: {#fig-vol3-scheduling-drf fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation balancing GPU Compute FLOPs, HBM KV blocks, and external tool API leases across heterogeneous agent personas to maximize cluster packing efficiency. The packing gain comes from the personas being dominated by different resources. Equalizing dominant shares leaves each tenant's non-dominant resources free for the others, which is exactly the slack that static partitioning strands." fig-alt="Diagram of dominant resource fairness across three cluster resource pools: GPU compute, device memory holding key-value blocks, and external tool API leases. Three agent tenant profiles are shown with their resource share vectors, a speculative search agent dominated by compute, a software engineering agent dominated by memory, and a web research orchestrator dominated by tool leases, each reaching the same dominant share. A final panel lists the sharing incentive, strategy-proofness, envy-freeness, and Pareto efficiency properties."}
 ![](images/svg/drf_multi_resource_agent_allocation.svg)
 :::
 
@@ -462,7 +586,7 @@ If an agent trajectory enters Zone 4, the scheduling controller must elevate the
 
 If cluster-wide memory pressure reaches emergency thresholds while a Zone 4 action is in flight, the scheduler must shed load exclusively from Zone 1 and Zone 2 tasks, whose entries in the shortage column of @tbl-vol3-scheduling-policy-matrix permit outright eviction or a re-issued call, preserving the integrity of irreversible physical world operations.
 
-::: {#fig-vol3-scheduling-preemption-matrix fig-env="figure" fig-pos="htb" fig-cap="**The Preemption Decision Matrix**: Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated, or must remain strictly pinned to completion." fig-alt="Diagram of four execution zones arranged along a reversibility spectrum, running from pure compute through idempotent reads, then across a marked boundary to reversible writes and irreversible actions. Each zone panel gives its state residency, its degree of reversibility, and its preemption policy, which moves from instant preemption to safe suspend, then to conditional preemption with a compensating action, and finally to strictly non-preemptible pinned execution."}
+::: {#fig-vol3-scheduling-preemption-matrix fig-env="figure" fig-pos="htb" fig-cap="**The Preemption Decision Matrix**: Categorization of agent execution into four zones governing whether an in-flight trajectory can be safely preempted, conditionally compensated, or must remain strictly pinned to completion. The axis that decides the zone is external side effects, not elapsed cost. A long trajectory that has touched nothing outside its sandbox is cheaper to preempt than a short one that has already sent a message." fig-alt="Diagram of four execution zones arranged along a reversibility spectrum, running from pure compute through idempotent reads, then across a marked boundary to reversible writes and irreversible actions. Each zone panel gives its state residency, its degree of reversibility, and its preemption policy, which moves from instant preemption to safe suspend, then to conditional preemption with a compensating action, and finally to strictly non-preemptible pinned execution."}
 ![](images/svg/reversibility_boundary_preemption_matrix.svg)
 :::
 
@@ -543,12 +667,24 @@ In stateless web serving, if a request fails, the client simply retries. If an a
 
 Principle \ref{pri-vol3-heavy-tailed-scheduling} is the reason the classical scheduling results in this chapter arrive with caveats attached. Heavy-tailed service times invalidate the assumption most request-level policies rest on, that a job's age tells you little about its remaining work, and under a decreasing hazard rate that assumption inverts entirely.
 
-## Chapter Summary {#sec-vol3-scheduling-summary}
+## Summary {#sec-vol3-scheduling-summary}
 
-- **Heavy-Tailed Pareto Service Times:** Agent workloads exhibit power-law service times with infinite variance ($\alpha \le 2$), rendering classical FIFO and Poisson queueing models obsolete due to severe Head-of-Line blocking.
-- **Predictive Admission Control:** Multi-turn agent contexts expand by $10\times$ to $20\times$ over their lifetimes. Capacity-aware admission control predicts trajectory horizons and peak memory demand, mathematically preventing Coffman deadlocks and cluster OOM crashes.
-- **Least Attained Service (LAS) Scheduling:** By prioritizing sessions with the least cumulative service, LAS provides an instantaneous fast-path for short tasks while automatically throttling runaway reasoning loops.
-- **Preemption Across Bimodal I/O Gaps:** Decoupling active compute from tool waits allows schedulers to asynchronously swap idle KV caches to Host DRAM over PCIe Gen5, freeing scarce HBM page frames during multi-second tool stalls.
-- **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65 percent.
-- **Irreversible Side Effects:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating workflows, and irreversible actions must remain pinned to completion.
-- **Fault Tolerance via WAL:** Schedulers treat agent contexts as append-only event ledgers. Using Write-Ahead Logging ensures that if a worker crashes, the trajectory can be deterministically rehydrated via a single chunked prefill without re-executing non-idempotent side effects.
+Scheduling agentic trajectories requires abandoning the memoryless assumptions of classical request queues. Because service times exhibit heavy-tailed Pareto distributions, multi-turn contexts expand dynamically, and external tool calls create multi-second idle stalls, schedulers must combine predictive admission control, Least Attained Service priorities, and multi-tier memory swapping.
+
+::: {.callout-takeaways title="Predictive admission and heavy-tailed scheduling"}
+* **Heavy-Tailed Pareto Service Times:** Agent workloads exhibit power-law service times with infinite variance ($\alpha \le 2$), rendering classical FIFO and Poisson queueing models obsolete due to severe Head-of-Line blocking.
+* **Predictive Admission Control:** Multi-turn agent contexts expand by $10\times$ to $20\times$ over their lifetimes. Capacity-aware admission control predicts trajectory horizons and peak memory demand, mathematically preventing Coffman deadlocks and cluster OOM crashes.
+* **Least Attained Service (LAS) Scheduling:** By prioritizing sessions with the least cumulative service, LAS provides an instantaneous fast-path for short tasks while automatically throttling runaway reasoning loops.
+* **Preemption Across Bimodal I/O Gaps:** Decoupling active compute from tool waits allows schedulers to asynchronously swap idle KV caches to Host DRAM over PCIe Gen5, freeing scarce HBM page frames during multi-second tool stalls.
+* **Dominant Resource Fairness (DRF):** Equalizing dominant shares across coupled, orthogonal resources (GPU FLOPs, HBM KV blocks, and external API leases) guarantees sharing incentives and envy-freeness while boosting cluster utilization by up to 65 percent.
+* **Irreversible Side Effects:** Agent preemption is strictly constrained by external real-world side effects. While pure compute and idempotent reads can be preempted freely, mutating actions require compensating workflows, and irreversible actions must remain pinned to completion.
+* **Fault Tolerance via WAL:** Schedulers treat agent contexts as append-only event ledgers. Using Write-Ahead Logging ensures that if a worker crashes, the trajectory can be deterministically rehydrated via a single chunked prefill without re-executing non-idempotent side effects.
+:::
+
+Trajectory scheduling exposes the fundamental trade-off of stateful systems: accelerator compute cannot be managed independently of memory residency and external tool latency. By replacing memoryless request dispatch with lifetime-aware admission and preemption policies, schedulers preserve cluster throughput without starving long-horizon deliberative workloads.
+
+::: {.callout-chapter-connection title="From memory scheduling to tool interfaces"}
+Optimizing the memory and compute pipeline keeps inference clusters operational, but the real power of an agentic system lies in its ability to interact with the external world through external APIs and system tools. Concluding **Part III (Serving Runtimes and Memory Systems)**, we enter **Part IV (Security, Isolation, and Red Teaming)**: beginning in @sec-vol3-tool-interfaces with the design of typed Application Binary Interfaces (ABIs), structured schema generation, and the Model Context Protocol (MCP).
+:::
+
+\part{key:vol3_security}

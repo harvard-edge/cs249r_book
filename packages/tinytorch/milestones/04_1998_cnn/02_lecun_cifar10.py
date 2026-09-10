@@ -93,6 +93,7 @@ from tinytorch.core.tensor import Tensor              # Module 02: YOU built thi
 from tinytorch.core.layers import Linear             # Module 04: YOU built this!
 from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
 from tinytorch.core.spatial import Conv2d, MaxPool2d, BatchNorm2d  # Module 09: YOU built this!
+from tinytorch.core.losses import CrossEntropyLoss    # Module 04: YOU built this!
 from tinytorch.core.optimizers import Adam            # Module 07: YOUR optimizer!
 from tinytorch.core.dataloader import DataLoader, Dataset  # Module 05: YOU built this!
 from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose  # Module 05: Data Augmentation!
@@ -210,9 +211,15 @@ train_transforms = Compose([
 # local connectivity + weight sharing to detect patterns with 100x fewer params.
 
 def flatten(x):
-    """Flatten spatial features for dense layers - YOUR implementation!"""
+    """Flatten spatial features for dense layers - YOUR implementation!
+
+    Uses Tensor.reshape, not Tensor(x.data.reshape(...)). Reading .data and
+    re-wrapping it builds a brand new leaf tensor, which cuts everything before
+    this point out of the graph: the forward pass looks identical, but no
+    gradient ever reaches conv1, bn1, conv2 or bn2 and those layers never learn.
+    """
     batch_size = x.data.shape[0]
-    return Tensor(x.data.reshape(batch_size, -1))
+    return x.reshape(batch_size, -1)
 
 class CIFARCNN:
     """
@@ -307,8 +314,8 @@ class CIFARCNN:
             self.bn1.gamma, self.bn1.beta,
             self.conv2.weight, self.conv2.bias,
             self.bn2.gamma, self.bn2.beta,
-            self.fc1.weights, self.fc1.bias,
-            self.fc2.weights, self.fc2.bias
+            self.fc1.weight, self.fc1.bias,
+            self.fc2.weight, self.fc2.bias
         ]
 
 # =============================================================================
@@ -423,7 +430,8 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
     model.train()
 
     # YOUR optimizer
-    optimizer = Adam(model.parameters(), learning_rate=learning_rate)
+    optimizer = Adam(model.parameters(), lr=learning_rate)
+    criterion = CrossEntropyLoss()  # Module 04
 
     for epoch in range(epochs):
         print(f"\n   Epoch {epoch+1}/{epochs}:")
@@ -440,27 +448,20 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
             # Forward pass with YOUR CNN
             outputs = model(batch_data)  # YOUR spatial features!
 
-            # Manual cross-entropy loss
-            batch_size = len(batch_labels.data)
-            num_classes = 10
-            targets_one_hot = np.zeros((batch_size, num_classes))
-            for i in range(batch_size):
-                targets_one_hot[i, int(batch_labels.data[i])] = 1.0
-
-            # Cross-entropy: -sum(y * log(softmax(x)))
-            # Apply softmax first - handle nested data access
-            outputs_np = np.array(outputs.data.data if hasattr(outputs.data, 'data') else outputs.data)
-            exp_outputs = np.exp(outputs_np - np.max(outputs_np, axis=1, keepdims=True))
-            softmax_outputs = exp_outputs / np.sum(exp_outputs, axis=1, keepdims=True)
-
-            eps = 1e-8
-            loss_value = -np.mean(np.sum(targets_one_hot * np.log(softmax_outputs + eps), axis=1))
-            loss = Tensor([loss_value])
+            # YOUR loss from Module 04. It has to be this and not a NumPy
+            # calculation: a number computed outside the graph and re-wrapped in a
+            # fresh Tensor has no history, so backward() would reach nothing and
+            # the model would never learn while still printing a loss.
+            targets = Tensor(np.asarray(batch_labels.data, dtype=np.int64).flatten())
+            loss = criterion(outputs, targets)
+            loss_value = float(loss.data)
 
             # Backward pass with YOUR autograd
             optimizer.zero_grad()  # Module 07!
             loss.backward()        # Module 06: YOUR autodiff!
             optimizer.step()       # Module 07!
+
+            outputs_np = np.asarray(outputs.data)
 
             # Track accuracy
             predictions = np.argmax(outputs_np, axis=1)

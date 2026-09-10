@@ -16,7 +16,7 @@
 """
 # Module 12: Attention - Learning to Focus
 
-Welcome to Module 12! You're about to build the attention mechanism that revolutionized deep learning and powers GPT, BERT, and modern transformers.
+Welcome to Module 12! You're about to build the attention mechanism at the heart of GPT, BERT, and modern transformers.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor, activations, layers, losses, autograd, optimizers, training, dataloaders, spatial layers, tokenization, and embeddings
@@ -66,12 +66,10 @@ import math
 import time
 from typing import Optional, Tuple, List
 
-# Import dependencies from previous modules - following TinyTorch dependency chain
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import Softmax
 
-# Constants for attention computation
 MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
 
 # %% [markdown]
@@ -130,7 +128,7 @@ Before attention, RNNs processed sequences step-by-step, creating an information
 RNN Processing (Sequential):
 Token 1 → Hidden → Token 2 → Hidden → ... → Final Hidden
          ↓              ↓                      ↓
-    Limited Info   Compressed State    All Information Lost
+    Limited Info   Compressed State    Heavily Compressed
 ```
 
 Attention allows direct connections between any two positions:
@@ -249,7 +247,7 @@ Each row sums to 1.0 (probability distribution)
 """
 ## 🏗️ Implementation: Building Scaled Dot-Product Attention
 
-Now let's implement the core attention mechanism that powers all transformer models. We'll use explicit loops first to make the O(n²) complexity visible and educational.
+Now let's implement the core attention mechanism that powers all transformer models. We'll build it from three small vectorized helpers (scores, scaling, masking) and then compose them, so each step of the O(n²) computation stays visible.
 
 ### Understanding the Algorithm Visually
 
@@ -265,11 +263,13 @@ Step-by-Step Attention Computation:
 
 2. Scaling (÷ √d_k):
    scaled_scores = scores / √d_k
-   (d_k is the per-head dimension: embed_dim // num_heads in multi-head attention)
+   (d_k is the length of each key vector; later in this module, when we
+    split attention into heads, it becomes embed_dim // num_heads)
    (Prevents softmax saturation for large dimensions)
 
 3. Masking (optional):
    For causal attention: scores[i,j] = -∞ if j > i
+   (in code, a large negative number such as -1e9 stands in for -∞)
 
    Causal Mask (lower triangular):
    [  OK  -∞  -∞  -∞ ]
@@ -371,7 +371,7 @@ def _scale_scores(scores: Tensor, d_k: int) -> Tensor:
     attention that equals d_model; for multi-head attention it is the
     per-head dimension (embed_dim // num_heads).
 
-    TODO: Divide scores by the square root of the model dimension
+    TODO: Divide scores by the square root of d_k
 
     APPROACH:
     1. Compute scale factor: 1.0 / math.sqrt(d_k)
@@ -415,9 +415,9 @@ if __name__ == "__main__":
 ### Applying the Causal Mask
 
 In autoregressive models (like GPT), each token can only attend to tokens
-that came before it -- not future tokens. We enforce this by setting future
-positions to -infinity before softmax, which makes their attention weight
-exactly zero.
+that came before it -- not future tokens. We enforce this by adding a very
+large negative number (MASK_VALUE = -1e9, standing in for -infinity) to future
+positions before softmax, which drives their attention weight to zero.
 
 ```
 Causal Mask (4 tokens):       After masking:
@@ -433,13 +433,14 @@ Causal Mask (4 tokens):       After masking:
 # %% nbgrader={"grade": false, "grade_id": "attn-apply-mask", "solution": true}
 #| export
 def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
-    """Apply causal mask by setting masked positions to -infinity.
+    """Apply causal mask by pushing masked positions toward -infinity.
 
     TODO: Add large negative values to positions where mask is 0
 
     APPROACH:
     1. Compute additive mask: (1 - mask) * MASK_VALUE
-    2. Add to scores (masked positions become -inf, unmasked unchanged)
+    2. Add to scores (masked positions drop to ~MASK_VALUE = -1e9, which
+       softmax treats as -inf; unmasked positions are unchanged)
 
     EXAMPLE:
     >>> scores = Tensor(np.ones((1, 3, 3)))
@@ -499,18 +500,20 @@ loops. While easier to read, this is NOT the implementation because:
 Conceptually, this is what the vectorized helpers above are doing:
 
 ```
-batch_size, n_heads, seq_len, d_k = Q.shape
-scores = np.zeros((batch_size, n_heads, seq_len, seq_len))
+batch_size, seq_len, d_k = Q.shape
+scores = np.zeros((batch_size, seq_len, seq_len))
 
 for b in range(batch_size):
-    for h in range(n_heads):
-        for i in range(seq_len):          # Each query
-            for j in range(seq_len):      # Attends to each key
-                dot_product = 0.0
-                for k in range(d_k):
-                    dot_product += Q[b, h, i, k] * K[b, h, j, k]
-                scores[b, h, i, j] = dot_product / math.sqrt(d_k)
+    for i in range(seq_len):          # Each query
+        for j in range(seq_len):      # Attends to each key
+            dot_product = 0.0
+            for k in range(d_k):
+                dot_product += Q[b, i, k] * K[b, j, k]
+            scores[b, i, j] = dot_product / math.sqrt(d_k)
 ```
+
+Count the loops: i and j each run over seq_len, so the score computation
+alone is seq_len² dot products. That is the O(n²) you will measure later.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-scaled-dot-product", "solution": true}
@@ -529,18 +532,24 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
 
     SUB-PROBLEMS (you already implemented these):
     - _compute_attention_scores: Q @ K^T similarity matrix
-    - _scale_scores: divide by sqrt(d) for stable softmax
-    - _apply_mask: block future positions with -inf
+    - _scale_scores: divide by sqrt(d_k) for stable softmax
+    - _apply_mask: block future positions with MASK_VALUE (~ -inf)
 
     Args:
-        Q: Query tensor of shape (batch_size, seq_len, d_model)
-        K: Key tensor of shape (batch_size, seq_len, d_model)
-        V: Value tensor of shape (batch_size, seq_len, d_model)
-        mask: Optional causal mask, 1=allow, 0=mask (batch_size, seq_len, seq_len)
+        Q: Query tensor of shape (..., seq_len, d_k)
+        K: Key tensor of shape (..., seq_len, d_k)
+        V: Value tensor of shape (..., seq_len, d_k)
+        mask: Optional causal mask, 1=allow, 0=mask, shape (..., seq_len, seq_len)
+              or any shape that broadcasts against the scores
+
+        The leading "..." is any number of batch-like dimensions. Called
+        directly it is (batch_size,) and d_k = d_model; from
+        MultiHeadAttention it is (batch_size, num_heads) and d_k = head_dim.
+        The helpers only touch the last two axes, so the same code serves both.
 
     Returns:
-        output: Attended values (batch_size, seq_len, d_model)
-        attention_weights: Attention matrix (batch_size, seq_len, seq_len)
+        output: Attended values (..., seq_len, d_k)
+        attention_weights: Attention matrix (..., seq_len, seq_len)
 
     EXAMPLE:
     >>> Q = Tensor(rng.standard_normal((2, 4, 64)))
@@ -613,7 +622,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Multi-Head Attention
+## 🏗️ Multi-Head Attention
 
 Multi-head attention runs multiple attention "heads" in parallel, each learning to focus on different types of relationships. Think of it as having multiple specialists: one for syntax, one for semantics, one for long-range dependencies, etc.
 
@@ -683,7 +692,7 @@ Step 4: Concatenate and Mix
 [output₁ ∥ output₂ ∥ ... ∥ output₈] (512) → Linear → Final(512)
 ```
 
-### Why Multiple Heads Are Powerful
+### Why Multiple Heads Help
 
 Each head can specialize in different patterns:
 - **Head 1**: Short-range syntax ("the cat" → subject-article relationship)
@@ -1048,186 +1057,6 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis: Memory Layout and Performance
-
-Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
-
-This single analysis reveals why attention becomes the bottleneck in modern transformers and drives research into efficient attention variants.
-
-### Memory Complexity Visualization
-
-```
-Attention Memory Scaling (per layer):
-
-Sequence Length = 128:
-┌────────────────────────────────┐
-│ Attention Matrix: 128x128      │ = 16K values
-│ Memory: 64 KB (float32)        │
-└────────────────────────────────┘
-
-Sequence Length = 512:
-┌────────────────────────────────┐
-│ Attention Matrix: 512x512      │ = 262K values
-│ Memory: 1 MB (float32)         │ <- 16x larger!
-└────────────────────────────────┘
-
-Sequence Length = 2048 (GPT-3):
-┌────────────────────────────────┐
-│ Attention Matrix: 2048x2048    │ = 4.2M values
-│ Memory: 16 MB (float32)        │ <- 256x larger than 128!
-└────────────────────────────────┘
-
-That is one head. For GPT-3 (96 layers x 96 heads):
-Total Attention Memory = 96 x 96 x 16 MB ≈ 144 GB
-Just for attention matrices, for a single sequence!
-```
-"""
-
-# %%
-def analyze_attention_complexity():
-    """📊 Analyze attention computational complexity and memory scaling."""
-    print("📊 Analyzing Attention Complexity...")
-
-    # Test different sequence lengths to show O(n²) scaling
-    embed_dim = 64
-    sequence_lengths = [16, 32, 64, 128, 256]
-
-    print("\nSequence Length vs Attention Matrix Size:")
-    print("Seq Len | Attention Matrix | Memory (KB) | Complexity")
-    print("-" * 55)
-
-    for seq_len in sequence_lengths:
-        # Calculate attention matrix size
-        attention_matrix_size = seq_len * seq_len
-
-        # Memory for attention weights (float32 = 4 bytes)
-        attention_memory_kb = (attention_matrix_size * 4) / 1024
-
-        # Total complexity (Q@K + softmax + weights@V)
-        complexity = 2 * seq_len * seq_len * embed_dim + seq_len * seq_len
-
-        print(f"{seq_len:7d} | {attention_matrix_size:14d} | {attention_memory_kb:10.2f} | {complexity:10.0f}")
-
-    print(f"\n💡 KEY INSIGHT: Attention memory scales as O(n^2) with sequence length")
-    print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1024/1024:.1f} MB")
-
-# Run the analysis
-if __name__ == "__main__":
-    analyze_attention_complexity()
-
-# %%
-def analyze_attention_timing():
-    """📊 Measure attention computation time vs sequence length."""
-    print("\n📊 Analyzing Attention Timing...")
-
-    embed_dim, num_heads = 64, 8
-    sequence_lengths = [32, 64, 128, 256]
-
-    print("\nSequence Length vs Computation Time:")
-    print("Seq Len | Time (ms) | Ops/sec | Scaling")
-    print("-" * 40)
-
-    prev_time = None
-    for seq_len in sequence_lengths:
-        # Create test input
-        x = Tensor(rng.standard_normal((1, seq_len, embed_dim)))
-        mha = MultiHeadAttention(embed_dim, num_heads)
-
-        # Time multiple runs for stability
-        times = []
-        for _ in range(5):
-            start_time = time.perf_counter()
-            _ = mha.forward(x)
-            end_time = time.perf_counter()
-            times.append((end_time - start_time) * 1000)  # Convert to ms
-
-        avg_time = np.mean(times)
-        ops_per_sec = 1000 / avg_time if avg_time > 0 else 0
-
-        # Calculate scaling factor vs previous
-        scaling = avg_time / prev_time if prev_time else 1.0
-
-        print(f"{seq_len:7d} | {avg_time:8.2f} | {ops_per_sec:7.0f} | {scaling:6.2f}x")
-        prev_time = avg_time
-
-    print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
-    print(f"🚀 This is why attention efficiency techniques are an active area of research")
-
-# Run the analysis
-if __name__ == "__main__":
-    analyze_attention_timing()
-
-# %%
-def analyze_attention_memory_overhead():
-    """📊 Analyze memory overhead during training (forward + backward passes)."""
-    print("\n📊 Analyzing Attention Memory Overhead During Training...")
-
-    sequence_lengths = [128, 256, 512, 1024]
-
-    print("\nAttention Activation Memory per Head (Training vs Inference):")
-    print("Seq Len | Inference | Saved for backward | Gradient | Training total")
-    print("-" * 70)
-
-    for seq_len in sequence_lengths:
-        # Inference: the attention matrix lives only while the layer runs
-        attention_matrix_mb = (seq_len * seq_len * 4) / (1024 * 1024)
-
-        # Training: the softmax weights are saved for backward, and backward
-        # materializes a gradient of the same shape
-        saved_mb = attention_matrix_mb
-        gradient_mb = attention_matrix_mb
-        training_total_mb = saved_mb + gradient_mb
-
-        print(f"{seq_len:7d} | {attention_matrix_mb:7.2f}MB | {saved_mb:16.2f}MB | {gradient_mb:6.2f}MB | {training_total_mb:12.2f}MB")
-
-    print("\n💡 KEY INSIGHT: Training roughly doubles attention's activation memory: the softmax")
-    print("   weights are saved for backward and their gradient is the same size.")
-    print("   Optimizer state (Adam's two moments) scales with parameters, not sequence length.")
-    print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16MB per head becomes ~144GB of saved weights per sequence!")
-
-# Run the analysis
-if __name__ == "__main__":
-    analyze_attention_memory_overhead()
-
-# %% [markdown]
-"""
-### Systems Insights: The O(n^2) Reality
-
-Our analysis reveals the fundamental challenge that drives modern attention research:
-
-**Memory Scaling Crisis:**
-- Attention matrix grows as n^2 with sequence length
-- For GPT-3 context (2048 tokens): 16MB of attention weights per head per layer
-- With 96 layers x 96 heads: ~144GB of attention matrices per sequence!
-- This excludes activations, gradients, and other tensors
-
-**Time Complexity Validation:**
-- Each sequence length doubling roughly quadruples computation time
-- This matches the theoretical O(n^2) complexity we implemented
-- Real bottleneck shifts from computation to memory at scale
-
-**The Production Reality:**
-```
-Model Scale Impact:
-
-Small Model (6 layers, 8 heads, 512 context):
-Attention Memory = 6 x 8 x 1MB = 48MB - Manageable
-
-GPT-3 Scale (96 layers, 96 heads, 2048 context):
-Attention Memory = 96 x 96 x 16MB ≈ 144GB - Far beyond one GPU
-
-32K context (hypothetical: 120 layers, 128 heads):
-Attention Memory = 120 x 128 x 4GB ≈ 60TB - Impossible without a different algorithm
-```
-
-**Why This Matters:**
-This quadratic wall motivates active research into more efficient attention mechanisms (linear attention, sparse attention, Flash Attention).
-
-The quadratic wall is why long-context AI is an active research frontier, not a solved problem.
-"""
-
-# %% [markdown]
-"""
 ## 🔧 Integration: Attention Patterns in Action
 
 Let's test our complete attention system with realistic scenarios and visualize actual attention patterns.
@@ -1346,6 +1175,183 @@ def run_attention_scenarios():
 
 # %% [markdown]
 """
+## 📊 Systems Analysis: Memory Layout and Performance
+
+Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
+
+This single analysis reveals why attention becomes the bottleneck in modern transformers and drives research into efficient attention variants.
+
+### Memory Complexity Visualization
+
+```
+Attention Memory Scaling (per layer):
+
+Sequence Length = 128:
+┌────────────────────────────────┐
+│ Attention Matrix: 128x128      │ = 16K values
+│ Memory: 64 KB (float32)        │
+└────────────────────────────────┘
+
+Sequence Length = 512:
+┌────────────────────────────────┐
+│ Attention Matrix: 512x512      │ = 262K values
+│ Memory: 1 MB (float32)         │ <- 16x larger!
+└────────────────────────────────┘
+
+Sequence Length = 2048 (GPT-3):
+┌────────────────────────────────┐
+│ Attention Matrix: 2048x2048    │ = 4.2M values
+│ Memory: 16 MB (float32)        │ <- 256x larger than 128!
+└────────────────────────────────┘
+
+That is one head. For GPT-3 (96 layers x 96 heads):
+Total Attention Memory = 96 x 96 x 16 MB ≈ 144 GB
+Just for attention matrices, for a single sequence!
+```
+"""
+
+# %%
+def analyze_attention_complexity():
+    """📊 Analyze attention computational complexity and memory scaling."""
+    print("📊 Analyzing Attention Complexity...")
+
+    # Test different sequence lengths to show O(n²) scaling
+    embed_dim = 64
+    sequence_lengths = [16, 32, 64, 128, 256]
+
+    print("\nSequence Length vs Attention Matrix Size:")
+    print("Seq Len | Attention Matrix | Memory (KB) | Complexity")
+    print("-" * 55)
+
+    for seq_len in sequence_lengths:
+        # Calculate attention matrix size
+        attention_matrix_size = seq_len * seq_len
+
+        # Memory for attention weights (float32 = 4 bytes)
+        attention_memory_kb = (attention_matrix_size * 4) / 1024
+
+        # Total complexity (Q@K + softmax + weights@V)
+        complexity = 2 * seq_len * seq_len * embed_dim + seq_len * seq_len
+
+        print(f"{seq_len:7d} | {attention_matrix_size:14d} | {attention_memory_kb:10.2f} | {complexity:10.0f}")
+
+    print(f"\n💡 KEY INSIGHT: Attention memory scales as O(n^2) with sequence length")
+    print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1024/1024:.1f} MB")
+
+if __name__ == "__main__":
+    analyze_attention_complexity()
+
+# %%
+def analyze_attention_timing():
+    """📊 Measure attention computation time vs sequence length."""
+    print("\n📊 Analyzing Attention Timing...")
+
+    embed_dim, num_heads = 64, 8
+    sequence_lengths = [32, 64, 128, 256]
+
+    print("\nSequence Length vs Computation Time:")
+    print("Seq Len | Time (ms) | Ops/sec | Scaling")
+    print("-" * 40)
+
+    prev_time = None
+    for seq_len in sequence_lengths:
+        # Create test input
+        x = Tensor(rng.standard_normal((1, seq_len, embed_dim)))
+        mha = MultiHeadAttention(embed_dim, num_heads)
+
+        # Time multiple runs for stability
+        times = []
+        for _ in range(5):
+            start_time = time.perf_counter()
+            _ = mha.forward(x)
+            end_time = time.perf_counter()
+            times.append((end_time - start_time) * 1000)  # Convert to ms
+
+        avg_time = np.mean(times)
+        ops_per_sec = 1000 / avg_time if avg_time > 0 else 0
+
+        # Calculate scaling factor vs previous
+        scaling = avg_time / prev_time if prev_time else 1.0
+
+        print(f"{seq_len:7d} | {avg_time:8.2f} | {ops_per_sec:7.0f} | {scaling:6.2f}x")
+        prev_time = avg_time
+
+    print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
+    print(f"🚀 This is why attention efficiency techniques are an active area of research")
+
+if __name__ == "__main__":
+    analyze_attention_timing()
+
+# %%
+def analyze_attention_memory_overhead():
+    """📊 Analyze memory overhead during training (forward + backward passes)."""
+    print("\n📊 Analyzing Attention Memory Overhead During Training...")
+
+    sequence_lengths = [128, 256, 512, 1024]
+
+    print("\nAttention Activation Memory per Head (Training vs Inference):")
+    print("Seq Len | Inference | Saved for backward | Gradient | Training total")
+    print("-" * 70)
+
+    for seq_len in sequence_lengths:
+        # Inference: the attention matrix lives only while the layer runs
+        attention_matrix_mb = (seq_len * seq_len * 4) / (1024 * 1024)
+
+        # Training: the softmax weights are saved for backward, and backward
+        # materializes a gradient of the same shape
+        saved_mb = attention_matrix_mb
+        gradient_mb = attention_matrix_mb
+        training_total_mb = saved_mb + gradient_mb
+
+        print(f"{seq_len:7d} | {attention_matrix_mb:7.2f}MB | {saved_mb:16.2f}MB | {gradient_mb:6.2f}MB | {training_total_mb:12.2f}MB")
+
+    print("\n💡 KEY INSIGHT: Training roughly doubles attention's activation memory: the softmax")
+    print("   weights are saved for backward and their gradient is the same size.")
+    print("   Optimizer state (Adam's two moments) scales with parameters, not sequence length.")
+    print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16MB per head becomes ~144GB of saved weights per sequence!")
+
+if __name__ == "__main__":
+    analyze_attention_memory_overhead()
+
+# %% [markdown]
+"""
+### Systems Insights: The O(n^2) Reality
+
+Our analysis reveals the fundamental challenge that drives modern attention research:
+
+**Memory Scaling Crisis:**
+- Attention matrix grows as n^2 with sequence length
+- For GPT-3 context (2048 tokens): 16MB of attention weights per head per layer
+- With 96 layers x 96 heads: ~144GB of attention matrices per sequence!
+- This excludes activations, gradients, and other tensors
+
+**Time Complexity Validation:**
+- Each sequence length doubling roughly quadruples computation time
+- This matches the theoretical O(n^2) complexity we implemented
+- Real bottleneck shifts from computation to memory at scale
+
+**The Production Reality:**
+```
+Model Scale Impact:
+
+Small Model (6 layers, 8 heads, 512 context):
+Attention Memory = 6 x 8 x 1MB = 48MB - Manageable
+
+GPT-3 Scale (96 layers, 96 heads, 2048 context):
+Attention Memory = 96 x 96 x 16MB ≈ 144GB - Far beyond one GPU
+
+32K context (hypothetical: 120 layers, 128 heads):
+Attention Memory = 120 x 128 x 4GB ≈ 60TB - Impossible without a different algorithm
+```
+
+**Why This Matters:**
+This quadratic wall motivates active research into more efficient attention mechanisms (linear attention, sparse attention, Flash Attention).
+
+The quadratic wall is why long-context AI is an active research frontier, not a solved problem.
+"""
+
+# %% [markdown]
+"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -1393,7 +1399,7 @@ def test_module():
 
 Answer these to deepen your understanding of attention operations and their systems implications:
 
-### 1. Quadratic Complexity and Memory
+### Question 1: Quadratic Complexity and Memory
 **Question**: For sequence length 1024, how much memory does attention's O(n^2) use? What about length 2048?
 
 **Consider**:
@@ -1407,7 +1413,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 2. Attention vs FFN Bottleneck
+### Question 2: Attention vs FFN Bottleneck
 **Question**: In production transformers, attention is often the memory bottleneck, not the FFN (feed-forward network). Why?
 
 **Consider**:
@@ -1424,7 +1430,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 3. Multi-Head Trade-offs
+### Question 3: Multi-Head Trade-offs
 **Question**: 8 attention heads vs 1 head with 8x dimensions - same parameters, different performance. What's the systems difference?
 
 **Consider**:
@@ -1441,7 +1447,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 4. Masking Costs
+### Question 4: Masking Costs
 **Question**: Causal masking (for autoregressive models) zeros out half the attention matrix. Do we save computation or just correctness?
 
 **Consider**:
@@ -1457,7 +1463,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 5. The Quadratic Memory Challenge
+### Question 5: The Quadratic Memory Challenge
 **Question**: Your implementation computes the full (seq_len x seq_len) attention matrix. Why is this the primary memory bottleneck?
 
 **Calculate**:
@@ -1472,7 +1478,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### Bonus: Training Memory Overhead
+### Bonus Question: Training Memory Overhead
 **Question**: Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
 
 **Calculate**:

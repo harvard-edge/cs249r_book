@@ -59,16 +59,10 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 #| default_exp core.tokenization
 #| export
 
-import string
-import time
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
-rng = np.random.default_rng(7)
-
-# Constants for memory calculations
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 
 # %% [markdown]
 """
@@ -83,7 +77,7 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 **TinyTorch Dependencies**:
 - Module 01 (Tensor): Optional - only needed if converting tokens to Tensor format
 
-**Important**: This module focuses on text processing fundamentals that work independently.
+This module focuses on text processing fundamentals that work independently.
 The tokenization algorithms use only standard Python and NumPy.
 
 **Dependency Flow**:
@@ -118,7 +112,9 @@ Consider the sentence: "Hello, world!" - how do we turn this into numbers a neur
 │           │         ['H','e','l','l','o',',', ...']             │
 │           │                                                     │
 │           ├─ Step 2: Map to vocabulary IDs                      │
-│           │         [72, 101, 108, 108, 111, ...]               │
+│           │         [4, 6, 7, 7, 8, ...]                        │
+│           │         (vocab built from this sentence, sorted,    │
+│           │          with <UNK> at 0: ' '=1 '!'=2 ','=3 'H'=4)  │
 │           │                                                     │
 │           ├─ Step 3: Handle unknowns                            │
 │           │         Unknown chars → special <UNK> token         │
@@ -126,7 +122,7 @@ Consider the sentence: "Hello, world!" - how do we turn this into numbers a neur
 │           └─ Step 4: Enable decoding                            │
 │                     IDs → original text                         │
 │                                                                 │
-│  Output (Token IDs):  [72, 101, 108, 108, 111, 44, 32, ...]     │
+│  Output (Token IDs):  [4, 6, 7, 7, 8, 3, 1, 10, 8, 9, 7, 5, 2]  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -204,8 +200,8 @@ Different tokenization approaches make different trade-offs between vocabulary s
 
 **Pros**:
 - Small vocabulary (~100 chars)
-- Handles any text perfectly
-- No unknown tokens (every character can be mapped)
+- Handles any text built from characters it has seen
+- `<UNK>` is rare (a whole character has to be absent from the corpus, not just a word)
 - Simple implementation
 
 **Cons**:
@@ -235,9 +231,9 @@ Text: "tokenization"
        ↓ Character level
 Initial: ['t', 'o', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'i', 'o', 'n']
        ↓ Learn frequent pairs
-Merged: ['to', 'ken', 'ization']
+Merged: ['token', 'ization']
        ↓
-IDs:    [142, 1847, 2341]
+IDs:    [142, 1847]   (illustrative ids from a learned vocabulary)
 ```
 
 **Pros**: Balance between vocabulary size and sequence length
@@ -325,15 +321,17 @@ class Tokenizer:
         """
         Convert text to a list of token IDs.
 
-        TODO: Implement encoding logic in subclasses
+        TODO: Define the interface; the real encoders live in the subclasses
 
         APPROACH:
-        1. Subclasses will override this method
-        2. Return list of integer token IDs
+        1. This base method only states the contract, so raise NotImplementedError
+           with a message that points the caller at CharTokenizer or BPETokenizer
+        2. Each subclass overrides encode() to return a list of integer token IDs
 
         EXAMPLE:
-        >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
-        >>> tokenizer.encode("abc")
+        >>> Tokenizer().encode("abc")
+        NotImplementedError: encode() not implemented in base Tokenizer class ...
+        >>> CharTokenizer(['a', 'b', 'c']).encode("abc")
         [1, 2, 3]
         """
         ### BEGIN SOLUTION
@@ -349,15 +347,17 @@ class Tokenizer:
         """
         Convert list of token IDs back to text.
 
-        TODO: Implement decoding logic in subclasses
+        TODO: Define the interface; the real decoders live in the subclasses
 
         APPROACH:
-        1. Subclasses will override this method
-        2. Return reconstructed text string
+        1. This base method only states the contract, so raise NotImplementedError
+           with a message that points the caller at CharTokenizer or BPETokenizer
+        2. Each subclass overrides decode() to return the reconstructed text
 
         EXAMPLE:
-        >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
-        >>> tokenizer.decode([1, 2, 3])
+        >>> Tokenizer().decode([1, 2, 3])
+        NotImplementedError: decode() not implemented in base Tokenizer class ...
+        >>> CharTokenizer(['a', 'b', 'c']).decode([1, 2, 3])
         "abc"
         """
         ### BEGIN SOLUTION
@@ -620,10 +620,10 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-Character tokenization provides a simple, robust foundation for text processing. The key insight is that with a small vocabulary (typically <100 characters), we can represent any text without unknown tokens.
+Character tokenization provides a simple, robust foundation for text processing. The key insight is that with a small vocabulary (typically <100 characters), we can represent any text drawn from the characters the corpus contained; only a character the corpus never showed falls back to `<UNK>`, which the test above exercised with `'!'`.
 
 **Trade-offs**:
-- **Pro**: No out-of-vocabulary issues, handles any language
+- **Pro**: Out-of-vocabulary is rare (a character has to be unseen, not a word), and any language works once its characters are in the corpus
 - **Con**: Long sequences (1 char = 1 token), limited semantic understanding
 - **Use case**: When robustness is more important than efficiency
 """
@@ -632,7 +632,7 @@ Character tokenization provides a simple, robust foundation for text processing.
 """
 ## 🏗️ Byte Pair Encoding (BPE) Tokenizer
 
-BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
+BPE is the tokenizer behind the GPT family and Llama (BERT uses WordPiece, a close cousin that picks merges by a different score). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
@@ -648,8 +648,8 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │   ['h','e','l','l','o</w>']    (hello, seen twice)                │ │
 │ │   ['h','e','l','p</w>']        (help)                             │ │
 │ │                                                                   │ │
-│ │ Starting Vocab: ['e', 'h', 'l', 'o</w>', 'p</w>']                 │ │
-│ │                   ↑ every distinct starting token                 │ │
+│ │ Starting Vocab: ['<UNK>', 'e', 'h', 'l', 'o</w>', 'p</w>']        │ │
+│ │                     ↑ id 0, then every distinct starting token    │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 2: Count All Adjacent Pairs                                      │
@@ -673,8 +673,8 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
 │ │   ['h','e','l','p</w>']      →  ['he','l','p</w>']                │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['e','h','l','o</w>','p</w>', 'he']                │ │
-│ │                                             ↑ NEW TOKEN!          │ │
+│ │ Updated Vocab: ['<UNK>','e','h','l','o</w>','p</w>', 'he']        │ │
+│ │                                                     ↑ NEW TOKEN   │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 4: Repeat Until Target Vocab Size Reached                        │
@@ -769,7 +769,8 @@ def _count_byte_pairs(word_tokens: Dict[str, List[str]], word_freq: Counter) -> 
     >>> counts[('h', 'e')]
     3
 
-    HINT: For each word, get pairs with a zip-based loop, then add freq to each pair count
+    HINT: For each word, walk i from 0 to len(tokens) - 2 and add freq to the count
+    of (tokens[i], tokens[i + 1])
     """
     ### BEGIN SOLUTION
     pair_counts = Counter()
@@ -854,11 +855,13 @@ Algorithm (linear scan per word):
 #| export
 def _merge_pair(word_tokens: Dict[str, List[str]], pair: Tuple[str, str]) -> str:
     """
-    Merge the most frequent pair in all word token lists.
+    Merge one pair everywhere it occurs in all word token lists.
 
-    Scans through every word's tokens and replaces adjacent occurrences
-    of the pair with a single concatenated token. Modifies word_tokens
-    in place and returns the new merged token string.
+    The caller decides which pair (during training, the most frequent one;
+    during encoding, each learned merge in order). This function scans every
+    word's tokens and replaces adjacent occurrences of the pair with a single
+    concatenated token. Modifies word_tokens in place and returns the new
+    merged token string.
 
     TODO: Merge the given pair in all word token sequences
 
@@ -1592,7 +1595,6 @@ def analyze_tokenization_strategies():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_tokenization_strategies()
 
@@ -1607,6 +1609,8 @@ Let's measure the real memory footprint of different tokenization strategies. Th
 def analyze_tokenization_memory():
     """📊 Measure actual memory usage of different tokenizers."""
     import tracemalloc
+
+    KB_TO_BYTES = 1024
 
     print("📊 Analyzing Tokenization Memory Usage...")
     print("=" * 70)
@@ -1672,6 +1676,7 @@ This helps understand computational bottlenecks in NLP pipelines.
 # %%
 def benchmark_tokenization_speed():
     """📊 Measure encoding/decoding speed for different strategies."""
+    import time
 
     print("📊 Benchmarking Tokenization Speed...")
     print("=" * 70)
@@ -1732,9 +1737,17 @@ Let's measure how BPE training time scales with corpus size.
 # %%
 def analyze_bpe_scaling():
     """📊 Analyze how BPE training scales with corpus size."""
+    import string
+    import time
+
+    KB_TO_BYTES = 1024
 
     print("📊 Analyzing BPE Training Scaling...")
     print("=" * 70)
+
+    # Seeded locally so the table is reproducible without the package shipping a
+    # module-level generator.
+    rng = np.random.default_rng(7)
 
     # Generate random text helper
     def generate_random_text(length=10):
@@ -1778,7 +1791,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 📊 Performance Analysis: Vocabulary Size vs Sequence Length
+### Performance Analysis: Vocabulary Size vs Sequence Length
 
 The fundamental trade-off in tokenization creates a classic systems engineering challenge:
 
@@ -1908,17 +1921,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 10")
 
-# Call the comprehensive test only when running directly
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of tokenization and its systems implications:
 
-### 1. Vocabulary Size and Storage
+### Question 1: Vocabulary Size and Storage
 **Question**: You implemented tokenizers with different vocabulary sizes.
 
 **Calculate**:
@@ -1933,7 +1942,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 2. Sequence Length Trade-offs
+### Question 2: Sequence Length Trade-offs
 **Question**: Your character tokenizer produces longer sequences than BPE. For the text "machine learning" (16 characters):
 
 **Compare**:
@@ -1950,7 +1959,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 3. Tokenization Coverage and Robustness
+### Question 3: Tokenization Coverage and Robustness
 **Question**: Your BPE tokenizer handles unknown words by decomposing into subwords.
 
 **Consider**:
@@ -1963,7 +1972,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 4. Production Scale Considerations
+### Question 4: Production Scale Considerations
 **Question**: A production language model serves 1 million requests per day, each with average 500 tokens.
 
 **Calculate**:

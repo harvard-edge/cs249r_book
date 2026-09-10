@@ -76,49 +76,6 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-### The Causal Mask
-
-GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
-below encodes that rule in the binary convention Module 12's `_apply_mask`
-expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "causal-mask", "solution": false}
-#| export
-def create_causal_mask(seq_len: int) -> Tensor:
-    """
-    Create a causal (autoregressive) attention mask.
-
-    This mask ensures that position i can only attend to positions j where j ≤ i.
-    Essential for autoregressive language models like GPT.
-
-    Args:
-        seq_len: Length of the sequence
-
-    Returns:
-        Tensor of shape (1, seq_len, seq_len) with:
-        - 1.0 for positions that CAN be attended to (lower triangle)
-        - 0.0 for positions that CANNOT be attended to (upper triangle)
-
-    Example:
-        For seq_len=4, creates:
-        [[1, 0, 0, 0],
-         [1, 1, 0, 0],
-         [1, 1, 1, 0],
-         [1, 1, 1, 1]]
-
-    Usage:
-        >>> from tinytorch.core.transformers import create_causal_mask
-        >>> mask = create_causal_mask(seq_len=10)
-        >>> output = attention(x, mask=mask)
-    """
-    # Lower triangular matrix: 1 = can attend, 0 = cannot attend
-    mask = np.tril(np.ones((seq_len, seq_len), dtype=np.float32))
-    return Tensor(mask[np.newaxis, :, :])  # Add batch dimension
-
-
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01-12 must be complete
@@ -607,7 +564,6 @@ def test_unit_layer_norm():
 
     print("✅ LayerNorm works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_layer_norm()
 
@@ -815,7 +771,6 @@ def test_unit_mlp():
 
     print("✅ MLP works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_mlp()
 
@@ -1022,6 +977,49 @@ class TransformerBlock:
 
 # %% [markdown]
 """
+### The Causal Mask
+
+GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
+below encodes that rule in the binary convention Module 12's `_apply_mask`
+expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "causal-mask", "solution": false}
+#| export
+def create_causal_mask(seq_len: int) -> Tensor:
+    """
+    Create a causal (autoregressive) attention mask.
+
+    This mask ensures that position i can only attend to positions j where j ≤ i.
+    Essential for autoregressive language models like GPT.
+
+    Args:
+        seq_len: Length of the sequence
+
+    Returns:
+        Tensor of shape (1, seq_len, seq_len) with:
+        - 1.0 for positions that CAN be attended to (lower triangle)
+        - 0.0 for positions that CANNOT be attended to (upper triangle)
+
+    Example:
+        For seq_len=4, creates:
+        [[1, 0, 0, 0],
+         [1, 1, 0, 0],
+         [1, 1, 1, 0],
+         [1, 1, 1, 1]]
+
+    Usage:
+        >>> from tinytorch.core.transformers import create_causal_mask
+        >>> mask = create_causal_mask(seq_len=10)
+        >>> output = attention(x, mask=mask)
+    """
+    # Lower triangular matrix: 1 = can attend, 0 = cannot attend
+    mask = np.tril(np.ones((seq_len, seq_len), dtype=np.float32))
+    return Tensor(mask[np.newaxis, :, :])  # Add batch dimension
+
+
+# %% [markdown]
+"""
 ### 🧪 Unit Test: Transformer Block
 
 This test validates our complete TransformerBlock implementation.
@@ -1083,7 +1081,6 @@ def test_unit_transformer_block():
 
     print("✅ TransformerBlock works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_transformer_block()
 
@@ -1306,7 +1303,7 @@ class GPT:
         Forward pass through GPT model.
 
         start_pos is the position of the first token (0 for a whole sequence).
-        Module 18's KV cache feeds one token at a time and passes the number of
+        Module 18's KV cache will feed one token at a time and pass the number of
         tokens already cached, so the embedding layer gives it the right position.
 
         TODO: Implement the complete GPT forward pass
@@ -1446,6 +1443,9 @@ class GPT:
 
         return params
 
+# Alias kept for tests written before the rename
+TinyGPT = GPT
+
 # %% [markdown]
 """
 ### 🧪 Unit Test: GPT Model
@@ -1498,7 +1498,6 @@ def test_unit_gpt():
 
     print("✅ GPT model works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_gpt()
 
@@ -1565,7 +1564,6 @@ def test_unit_sample_next_token():
 
     print("✅ Token sampling works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_sample_next_token()
 
@@ -2004,11 +2002,6 @@ if __name__ == "__main__":
     demonstrate_transformer_integration()
     print("\n")
     demo_transformers()
-
-# %%
-#| export
-# Alias for backward compatibility with tests
-TinyGPT = GPT
 
 # %% [markdown]
 """

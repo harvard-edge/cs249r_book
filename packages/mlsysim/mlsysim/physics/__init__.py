@@ -25,6 +25,7 @@ from .memory import (
     calc_activation_memory,
     calc_checkpoint_size,
     calc_kv_cache_size,
+    calc_mla_cache_size,
     calc_paged_kv_cache_size,
 )
 from .communication import (
@@ -62,6 +63,10 @@ from .statistics import (
 from .agents import (
     calc_trajectory_step_time,
     calc_trajectory_reliability,
+    calc_pareto_scale,
+    calc_pareto_survival,
+    calc_pareto_conditional_survival,
+    calc_pareto_mean_residual_life,
     calc_radix_cache_effective_latency,
     calc_test_time_compute_cost,
     calc_multi_agent_coordination_overhead,
@@ -102,6 +107,7 @@ __all__ = [
     "calc_activation_memory",
     "calc_checkpoint_size",
     "calc_kv_cache_size",
+    "calc_mla_cache_size",
     "calc_paged_kv_cache_size",
     "calc_ring_allreduce_time",
     "calc_point_to_point_time",
@@ -132,6 +138,10 @@ __all__ = [
     "calc_constraint_propagation_factor",
     "calc_trajectory_step_time",
     "calc_trajectory_reliability",
+    "calc_pareto_scale",
+    "calc_pareto_survival",
+    "calc_pareto_conditional_survival",
+    "calc_pareto_mean_residual_life",
     "calc_radix_cache_effective_latency",
     "calc_test_time_compute_cost",
     "calc_multi_agent_coordination_overhead",

@@ -21,6 +21,21 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     std_latency = np.std(latencies)
     median_latency = np.median(latencies)
 
+    # Throughput: time the WHOLE batch through one forward call, num_runs times,
+    # after its own untimed warmup. This is a separate measurement, not
+    # 1000 / latency: batching raises samples/second without making any one
+    # sample faster (Foundations, "Latency vs. Throughput")
+    batch_size = X_test.shape[0]
+    for _ in range(min(5, num_runs)):
+        _ = model.forward(X_test)
+    batch_seconds = []
+    for _ in range(num_runs):
+        with precise_timer() as timer:
+            _ = model.forward(X_test)
+        batch_seconds.append(timer.elapsed)
+    # Median batch time, floored so a batch that measures 0.0 s cannot divide by zero
+    throughput = batch_size / max(np.median(batch_seconds), 1e-9)
+
     # Store metrics (all as Python native types for JSON serialization)
     self.metrics = {
         'parameter_count': int(param_count),
@@ -29,9 +44,7 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
         'latency_ms_mean': float(avg_latency),
         'latency_ms_std': float(std_latency),
         'latency_ms_median': float(median_latency),
-        # Floor the denominator so an empty model that measures 0.0 ms
-        # cannot divide by zero
-        'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
+        'throughput_samples_per_sec': float(throughput)
     }
 
     print(f"\n📊 Benchmark Results for {self.model_name}:")
@@ -39,6 +52,7 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     print(f"  Size: {model_size_mb:.2f} MB")
     print(f"  Accuracy: {accuracy*100:.1f}%")
     print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
+    print(f"  Throughput: {throughput:,.0f} samples/sec (batch of {batch_size})")
 
     return self.metrics
 ```
