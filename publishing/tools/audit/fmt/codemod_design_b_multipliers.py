@@ -157,7 +157,7 @@ def main() -> int:
     parser.add_argument(
         "--inventory",
         type=Path,
-        default=Path("book/tools/audit/artifacts/fmt_design_b_inventory.json"),
+        default=Path("publishing/tools/audit/artifacts/fmt_design_b_inventory.json"),
     )
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()

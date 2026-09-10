@@ -5,9 +5,9 @@ For each chapter QMD file, finds the first occurrence of each abbreviation
 in body prose and ensures it's expanded. Subsequent uses stay abbreviated.
 
 Usage:
-    python3 fix_abbreviations.py --check book/quarto/contents/vol1/
-    python3 fix_abbreviations.py --dry-run book/quarto/contents/vol1/
-    python3 fix_abbreviations.py book/quarto/contents/vol1/
+    python3 fix_abbreviations.py --check books/vol1/
+    python3 fix_abbreviations.py --dry-run books/vol1/
+    python3 fix_abbreviations.py books/vol1/
 """
 import argparse
 import re

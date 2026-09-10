@@ -14,9 +14,9 @@ Five safety checks (per Pass 15 plan section 2 stage 4 + section 10.17):
   5. No new occurrences of any issue category in the changed file
 
 Usage:
-    python3 book/tools/audit/fix_script_lane.py --ledger audit-ledger.json --dry-run
-    python3 book/tools/audit/fix_script_lane.py --ledger audit-ledger.json --apply
-    python3 book/tools/audit/fix_script_lane.py --ledger audit-ledger.json \\
+    python3 publishing/tools/audit/fix_script_lane.py --ledger audit-ledger.json --dry-run
+    python3 publishing/tools/audit/fix_script_lane.py --ledger audit-ledger.json --apply
+    python3 publishing/tools/audit/fix_script_lane.py --ledger audit-ledger.json \\
         --categories vs-period,compound-prefix-closeup --apply
 
 The fixer is the FIX stage of the five-stage cycle. Verification is

@@ -13,9 +13,9 @@ Enforces the canonical math-rendering convention (see the project math rules):
 
 Invoked by::
 
-    ./book/binder check math --scope canonical
+    ./binder check math --scope canonical
 
-The standalone CLI ``book/tools/audit/audit_math_canonical.py`` is a thin
+The standalone CLI ``publishing/tools/audit/audit_math_canonical.py`` is a thin
 wrapper around this module for ad-hoc runs.
 """
 
@@ -852,7 +852,7 @@ def main() -> int:
         "paths",
         nargs="*",
         type=Path,
-        help="QMD files or directories. Defaults to book/quarto/contents/.",
+        help="QMD files or directories. Defaults to books/.",
     )
     parser.add_argument(
         "--json",
@@ -866,7 +866,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    targets = args.paths or [Path("book/quarto/contents")]
+    targets = args.paths or [Path("books")]
     violations = audit(targets)
 
     if args.json:

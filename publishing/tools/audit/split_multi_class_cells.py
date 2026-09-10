@@ -139,38 +139,38 @@ def remove_class_from_cell(path: Path, cell_line: int, remove_class: str) -> boo
 JOBS = [
     # (path, cell_start_lines, {class: insert_before_line})
     (
-        "book/quarto/contents/vol1/ml_ops/ml_ops.qmd",
+        "books/vol1/ml_ops/ml_ops.qmd",
         [187],
         {"RetrainingAnchor": 1318},
     ),
     (
-        "book/quarto/contents/vol1/training/training.qmd",
+        "books/vol1/training/training.qmd",
         [269, 3548],
         {"TrainingHardware": 563},
     ),
     (
-        "book/quarto/contents/vol1/ml_systems/ml_systems.qmd",
+        "books/vol1/ml_systems/ml_systems.qmd",
         [2046],
         {"DataLocalityInvariant": 2403},
     ),
     (
-        "book/quarto/contents/vol2/security_privacy/security_privacy.qmd",
+        "books/vol2/security_privacy/security_privacy.qmd",
         [1261],
         {"TEEMemoryFootprint": 2566},
     ),
     (
-        "book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd",
+        "books/vol1/hw_acceleration/hw_acceleration.qmd",
         [1972],
         {},
     ),
-    ("book/quarto/contents/vol1/model_serving/model_serving.qmd", [2156], {}),
-    ("book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd", [2958], {}),
-    ("book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd", [324], {}),
-    ("book/quarto/contents/vol2/data_storage/data_storage.qmd", [476, 1844, 1922, 1991, 2470], {}),
-    ("book/quarto/contents/vol2/distributed_training/distributed_training.qmd", [1459, 2078], {}),
-    ("book/quarto/contents/vol2/inference/inference.qmd", [1118], {}),
+    ("books/vol1/model_serving/model_serving.qmd", [2156], {}),
+    ("books/vol1/nn_architectures/nn_architectures.qmd", [2958], {}),
+    ("books/vol1/responsible_engr/responsible_engr.qmd", [324], {}),
+    ("books/vol2/data_storage/data_storage.qmd", [476, 1844, 1922, 1991, 2470], {}),
+    ("books/vol2/distributed_training/distributed_training.qmd", [1459, 2078], {}),
+    ("books/vol2/inference/inference.qmd", [1118], {}),
     (
-        "book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd",
+        "books/vol2/performance_engineering/performance_engineering.qmd",
         [1806, 2281],
         {},
     ),
@@ -179,7 +179,7 @@ JOBS = [
 
 def main() -> None:
     root = Path(__file__).resolve().parents[3]
-    frameworks = root / "book/quarto/contents/vol1/frameworks/frameworks.qmd"
+    frameworks = root / "books/vol1/frameworks/frameworks.qmd"
     if remove_class_from_cell(frameworks, 48, "GraphOptimizationStats"):
         print(f"removed duplicate GraphOptimizationStats from {frameworks}")
 
@@ -190,7 +190,7 @@ def main() -> None:
 
     # Verify no multi-class cells remain
     remaining = []
-    for qmd in sorted((root / "book/quarto/contents").rglob("*.qmd")):
+    for qmd in sorted((root / "books").rglob("*.qmd")):
         content = qmd.read_text(encoding="utf-8")
         if "`{python}" not in content:
             continue

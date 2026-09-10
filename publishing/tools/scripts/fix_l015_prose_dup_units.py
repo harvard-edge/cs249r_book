@@ -24,7 +24,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parents[3] / "book" / "quarto" / "contents"
+    root = Path(__file__).resolve().parents[3]  / "books"
     grand = 0
     for path in sorted(root.rglob("*.qmd")):
         n = fix_file(path)

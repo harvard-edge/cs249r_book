@@ -158,7 +158,7 @@ The report must contain:
 Notebook-local helpers are prefixed `v2_14_` because shared MLSysIM support does
 not yet expose typed robustness-budget result objects. The source trace records:
 
-- `book/quarto/contents/vol2/robust_ai/robust_ai.qmd`
+- `books/vol2/robust_ai/robust_ai.qmd`
 - `v2_14_shift_exposure`
 - `v2_14_budget_result`
 - `v2_14_defense_result`

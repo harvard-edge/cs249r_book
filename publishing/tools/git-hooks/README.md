@@ -7,10 +7,10 @@ Custom hooks that run pre-commit on **all files** before each commit, matching C
 From the repo root:
 
 ```bash
-./book/tools/git-hooks/setup.sh
+./publishing/tools/git-hooks/setup.sh
 ```
 
-Or manually: `git config core.hooksPath book/tools/git-hooks`
+Or manually: `git config core.hooksPath publishing/tools/git-hooks`
 
 ## What it does
 

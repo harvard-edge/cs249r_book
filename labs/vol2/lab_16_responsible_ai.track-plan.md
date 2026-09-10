@@ -7,10 +7,10 @@ Responsible AI at fleet scale is an amount system. Stakeholder harms become meas
 ## Reading Map
 
 Primary source:
-- `book/quarto/contents/vol2/responsible_ai/responsible_ai.qmd`
+- `books/vol2/responsible_ai/responsible_ai.qmd`
 
 Supporting framing:
-- `book/quarto/contents/vol2/parts/responsible_fleet_principles.qmd`
+- `books/vol2/parts/responsible_fleet_principles.qmd`
 
 Chapter anchors used by the lab:
 - Purpose and Governance Imperative: responsibility is a deployment gate, not a post-hoc checklist.

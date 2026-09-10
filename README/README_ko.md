@@ -261,7 +261,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | I want to… | Go here |
 |--------------|---------|
-| 오타 수정·챕터 개선 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| 오타 수정·챕터 개선 | [publishing/docs/CONTRIBUTING.md](../publishing/docs/CONTRIBUTING.md) |
 | TinyTorch 모듈 추가·버그 수정 | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
 | 하드웨어 실험 개선 | [kits/README.md](../kits/README.md) |
 | 이슈 보고 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |

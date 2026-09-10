@@ -7,8 +7,8 @@ of a volume IN CANONICAL ORDER (derived from the PDF config YAML), collects ever
 body-prose bold span, and reports any term bolded in >=2 distinct chapters -- the
 only way an AP2 duplicate first-definition can occur. Earlier chapter = owner.
 
-Usage:  python3 book/tools/audit/emphasis_ap2map.py vol1
-        python3 book/tools/audit/emphasis_ap2map.py vol2 --watch inference,arithmetic\\ intensity
+Usage:  python3 publishing/tools/audit/emphasis_ap2map.py vol1
+        python3 publishing/tools/audit/emphasis_ap2map.py vol2 --watch inference,arithmetic\\ intensity
 
 READ-ONLY. Flags candidates; ruling (P1 owner vs P3-ext/P4 vs real AP2) is a human read.
 """
@@ -46,7 +46,7 @@ if not order:
 occ = defaultdict(list)   # norm_term -> [(chap_idx, chap, line)]
 extractor = os.path.join(HERE, 'emphasis_extract.py')
 for ci, ch in enumerate(order):
-    path = os.path.join(ROOT, 'book', 'quarto', 'contents', VOL, ch, f'{ch}.qmd')
+    path = os.path.join(ROOT, 'books', VOL, ch, f'{ch}.qmd')
     out = subprocess.run(['python3', extractor, path], capture_output=True, text=True).stdout
     for ln in out.splitlines():
         s = json.loads(ln)

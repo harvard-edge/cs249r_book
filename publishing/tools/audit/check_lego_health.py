@@ -36,7 +36,7 @@ import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
-REPO = HERE.parents[3]  # book/tools/audit/<file> -> repo root
+REPO = HERE.parents[3]  # publishing/tools/audit/<file> -> repo root
 sys.path.insert(0, str(HERE.parent / "fmt"))
 sys.path.insert(0, str(REPO / "mlsysim"))
 sys.path.insert(0, str(REPO))
@@ -97,7 +97,7 @@ def main() -> int:
     if hasattr(PKG, "check"):
         PKG.check = soft_check
 
-    roots = [Path(p) for p in args.paths] or [REPO / "book/quarto/contents"]
+    roots = [Path(p) for p in args.paths] or [REPO / "books"]
     files: list[Path] = []
     for r in roots:
         files.extend(sorted(r.rglob("*.qmd")) if r.is_dir() else [r])

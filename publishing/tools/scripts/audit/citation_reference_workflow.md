@@ -8,7 +8,7 @@ Quarto source actually support the local claim where they appear.
 Generate one packet per chapter-sized audit unit:
 
 ```bash
-python3 book/tools/scripts/build_citation_reference_packets.py \
+python3 publishing/tools/scripts/build_citation_reference_packets.py \
   --out-dir review/citation-reference-validation
 ```
 
@@ -18,7 +18,7 @@ Quarto cross-references, CSS at-rules, and other non-citation `@` syntax, and
 embeds the scoped BibTeX entry for every cited key.
 
 By default, normal book packets are grouped by chapter directory, such as
-`book/quarto/contents/vol2/inference/`, so one subagent can audit the chapter as
+`books/vol2/inference/`, so one subagent can audit the chapter as
 a coherent unit. Frontmatter pages, part openers, appendices, and glossary pages
 are separate chapter-like packets. `_shelved*.qmd` files are skipped unless a
 future audit intentionally opts into dormant material. For narrow rechecks, use
@@ -71,7 +71,7 @@ Recommended finding shape:
 ```json
 {
   "key": "citekey",
-  "source_file": "book/quarto/contents/vol2/inference/inference.qmd",
+  "source_file": "books/vol2/inference/inference.qmd",
   "line": 123,
   "status": "unsupported",
   "claim": "short paraphrase of the local claim",

@@ -261,7 +261,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | 我想… | 前往 |
 |--------------|---------|
-| 修正错别字或改进章节 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| 修正错别字或改进章节 | [publishing/docs/CONTRIBUTING.md](../publishing/docs/CONTRIBUTING.md) |
 | 添加 TinyTorch 模块或修复 bug | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
 | 改进硬件实验 | [kits/README.md](../kits/README.md) |
 | 报告问题 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |

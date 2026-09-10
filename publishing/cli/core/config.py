@@ -52,7 +52,7 @@ def get_chapter_output_file(
     if not output_dir.exists():
         return None
     if format_type == "html":
-        contents = output_dir / "contents" / volume
+        contents = output_dir / volume
         if contents.is_dir():
             hits = sorted(contents.rglob(f"{chapter_name}.html"))
             if hits:
@@ -83,17 +83,23 @@ class ConfigManager:
         """
         self.root_dir = Path(root_dir)
 
-        # Determine book directory
-        # Expected to run from book/ folder where quarto/ is a subdirectory
-        if (self.root_dir / "quarto").exists():
-            # Running from book/: quarto/
-            self.book_dir = self.root_dir / "quarto"
-        elif (self.root_dir / "book" / "quarto").exists():
-            # Running from repo root: book/quarto/
-            self.book_dir = self.root_dir / "book" / "quarto"
-        elif (self.root_dir / "contents").exists():
-            # We're in quarto directory itself
+        # Determine the book directory, which is the Quarto project root.
+        #
+        # Book sources live in books/ at the repository root: one directory per
+        # volume, plus shared/ for anything cross-volume, plus the config/ and
+        # _extensions/ that Quarto needs at its project root. Before 2026-09
+        # this lived at books/ with the volumes under contents/,
+        # and books/ held a second, drifting copy that fed nothing. See
+        # docs/REPO_LAYOUT.md.
+        if (self.root_dir / "books" / "config").exists():
+            # Running from the repository root
+            self.book_dir = self.root_dir / "books"
+        elif (self.root_dir / "config").exists() and (self.root_dir / "vol1").exists():
+            # Already inside books/
             self.book_dir = self.root_dir
+        elif (self.root_dir.parent / "books" / "config").exists():
+            # Running from a sibling directory such as publishing/
+            self.book_dir = self.root_dir.parent / "books"
         else:
             # Fallback
             self.book_dir = self.root_dir

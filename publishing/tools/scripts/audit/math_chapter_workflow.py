@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build MLSysBook chapter packets for math-accuracy audit rounds.
 
-The script uses the existing `book/binder` PDF build path. For each selected
+The script uses the existing `binder` PDF build path. For each selected
 unit it builds a standalone PDF, copies the generated PDF and keep-tex output
 into a stable packet directory, and writes small-batch prompts for Codex agents.
 """
@@ -26,7 +26,7 @@ except ImportError as exc:  # pragma: no cover - dependency is declared by repo
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-BOOK_DIR = REPO_ROOT / "book" / "quarto"
+BOOK_DIR = REPO_ROOT  / "books"
 BINDER = REPO_ROOT / "book" / "binder"
 RUNS_DIR = REPO_ROOT / "review" / "math-audit" / "runs"
 

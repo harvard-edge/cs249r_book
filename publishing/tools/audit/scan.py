@@ -5,9 +5,9 @@ Walks a configurable content tree, runs every registered check function
 against every .qmd file, and writes an audit-ledger.json.
 
 Usage:
-    python3 book/tools/audit/scan.py --scope vol1
-    python3 book/tools/audit/scan.py --scope vol2 --categories vs-period,percent-symbol
-    python3 book/tools/audit/scan.py --scope vol2 --output my-ledger.json
+    python3 publishing/tools/audit/scan.py --scope vol1
+    python3 publishing/tools/audit/scan.py --scope vol2 --categories vs-period,percent-symbol
+    python3 publishing/tools/audit/scan.py --scope vol2 --output my-ledger.json
 
 The scanner is READ-ONLY. It never modifies files. It is the SCAN stage
 of the five-stage cycle (see Pass 15 plan section 2).
@@ -58,7 +58,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
     ("audit.checks.notation_consistency", "notation-consistency"),
     ("audit.checks.index_placement", "index-placement"),
-    # Wave 7 — release-gate defect catalog (run via book/tools/audit/scan.py)
+    # Wave 7 — release-gate defect catalog (run via publishing/tools/audit/scan.py)
     ("audit.checks.bare_attribution", "bare-attribution"),
     ("audit.checks.duplicate_citation", "duplicate-citation"),
     ("audit.checks.math_notation_render", "math-notation-render"),
@@ -88,7 +88,7 @@ def load_checks(categories: list[str] | None = None):
 # ── Scope resolution ────────────────────────────────────────────────────────
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONTENTS_ROOT = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS_ROOT = REPO_ROOT  / "books"
 
 
 # File extensions the scanner walks. Per-check modules may declare a
@@ -104,8 +104,8 @@ def resolve_scope(scope: str) -> list[Path]:
     """Return the content files for the requested scope.
 
     Supported scopes:
-      vol1          -> book/quarto/contents/vol1/**/*.{qmd,bib}
-      vol2          -> book/quarto/contents/vol2/**/*.{qmd,bib}
+      vol1          -> books/vol1/**/*.{qmd,bib}
+      vol2          -> books/vol2/**/*.{qmd,bib}
       both          -> both volumes
       <path>        -> treat as a file or directory path
     """
@@ -184,10 +184,10 @@ def scan(
 
     If `use_accept_list` is True (the default), after all checks run the
     persistent accept-list at `accept_list_path` (default:
-    book/tools/audit/accepted_fps.json) is applied: any issue whose
+    publishing/tools/audit/accepted_fps.json) is applied: any issue whose
     (category, repo-relative-file, raw-line) triple matches an entry is
     flipped from `open` to `accepted` and tagged with the reviewed rule or
-    layout exception that justifies it. See book/tools/audit/accept_list.py.
+    layout exception that justifies it. See publishing/tools/audit/accept_list.py.
     """
     files = resolve_scope(scope)
     if verbose:
@@ -348,7 +348,7 @@ def main() -> int:
         default=None,
         help=(
             "Path to the persistent accept-list JSON (default: "
-            "book/tools/audit/accepted_fps.json). Accept-list entries "
+            "publishing/tools/audit/accepted_fps.json). Accept-list entries "
             "flip matching issues from `open` to `accepted`."
         ),
     )

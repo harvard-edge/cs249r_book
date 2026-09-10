@@ -4,9 +4,9 @@ import subprocess
 import concurrent.futures
 from pathlib import Path
 
-BASE_DIR = Path("/Users/VJ/GitHub/MLSysBook/book/quarto")
-VOL1_DIR = BASE_DIR / "contents" / "vol1"
-VOL2_DIR = BASE_DIR / "contents" / "vol2"
+BASE_DIR = Path("/Users/VJ/GitHub/MLSysBook/books/")
+VOL1_DIR = BASE_DIR / "vol1"
+VOL2_DIR = BASE_DIR / "vol2"
 AUDIT_DIR = BASE_DIR / "audits" / "ml_tie_ins"
 
 # Find chapters, skip frontmatter, backmatter, parts

@@ -69,7 +69,7 @@ async function runTestAllChapters(
 
   const allChapters = volume.chapters.map(ch => ch.name);
 
-  const parallelCmd = `./book/binder ${format} reset --${volumeId} && [parallel: ${workers} workers × ./book/binder build ${format} <chapter> --${volumeId} -v]`;
+  const parallelCmd = `./binder ${format} reset --${volumeId} && [parallel: ${workers} workers × ./binder build ${format} <chapter> --${volumeId} -v]`;
   showBuildManifest({
     repoRoot,
     vol: volumeId,
@@ -93,7 +93,7 @@ async function runTestAllChapters(
 }
 
 /**
- * Debug All Chapters (Sequential) — runs `./book/binder debug pdf --vol1` in a
+ * Debug All Chapters (Sequential) — runs `./binder debug pdf --vol1` in a
  * visible terminal from repo root.  This builds each chapter one-by-one inside
  * the current repo (no worktrees), reports pass/fail, and binary-searches any failures.
  */
@@ -113,7 +113,7 @@ async function runDebugAllChapters(
 
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, selection.id);
 
-  const cmd = `./book/binder debug pdf --${selection.id} -v`;
+  const cmd = `./binder debug pdf --${selection.id} -v`;
   showBuildManifest({
     repoRoot: root,
     vol: selection.id,

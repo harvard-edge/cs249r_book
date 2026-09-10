@@ -44,7 +44,7 @@ OUTPUT_DIR = SCRIPT_DIR / "locator-output"
 # not contain the evidence may have been mis-attributed during PDF
 # extraction (e.g. ``ch14_end`` rolled into Ch15). We confirm by
 # searching across all Vol I QMDs before declaring "missed".
-VOL1_GLOBAL = "book/quarto/contents/vol1"
+VOL1_GLOBAL = "books/vol1"
 
 # Evidence shorter than this is too noisy to count as a meaningful match.
 MIN_EVIDENCE_LEN = 6

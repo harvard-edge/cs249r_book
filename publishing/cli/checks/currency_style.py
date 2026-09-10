@@ -44,7 +44,7 @@ CURRENCY_MATH_SPAN_PATTERN = re.compile(
 )
 # The notation body is shared by all volumes and lives outside any one of them.
 # (It also carried the dead "book/" prefix, which is a symlink git never reports.)
-NOTATION_REL_PATH = Path("publishing/quarto/contents/_shared/_notation_body.qmd")
+NOTATION_REL_PATH = Path("books/shared/partials/_notation_body.qmd")
 NOTATION_DEFINITION = (
     "*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise "
     "noted, dollar-denominated costs are U.S. dollars (USD)."
@@ -303,7 +303,7 @@ def audit(paths: Iterable[Path]) -> list[Violation]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", nargs="*", type=Path, default=[Path("book/quarto/contents")])
+    parser.add_argument("paths", nargs="*", type=Path, default=[Path("books")])
     parser.add_argument(
         "--rendered-html",
         action="store_true",
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.rendered_html:
         violations = audit_rendered_html(args.paths)
     else:
-        violations = audit(args.paths or [Path("book/quarto/contents")])
+        violations = audit(args.paths or [Path("books")])
     if args.json:
         print(json.dumps([v.__dict__ for v in violations], indent=2, ensure_ascii=False))
         return 1 if violations else 0

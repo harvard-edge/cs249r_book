@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
-QUARTO = REPO / "publishing" / "quarto"
-CONTENTS = QUARTO / "contents"
+QUARTO = REPO / "publishing"  / "books"
+CONTENTS = QUARTO
 OUT = CONTENTS / "STRUCTURE.md"
 
 VOLUMES = {
@@ -69,7 +69,7 @@ def render() -> str:
         "<!-- Regenerate: python3 publishing/tools/scripts/structure/gen_structure.py -->",
         "",
         "Chapter order is derived from each volume's Quarto PDF config",
-        "(`publishing/quarto/config/_quarto-pdf-<vol>.yml`), which is the canonical",
+        "(`books/config/_quarto-pdf-<vol>.yml`), which is the canonical",
         "reading order. This file is the human- and agent-readable view of that order.",
         "",
         "## Shared skeleton",

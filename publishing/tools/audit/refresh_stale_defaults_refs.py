@@ -69,8 +69,8 @@ _REPLACEMENTS: list[tuple[str, str]] = [
 ]
 
 _GLOB_DIRS = [
-    _REPO / "book/tools/audits/mlsysim_constants",
-    _REPO / "book/tools/audit",
+    _REPO / "publishing/tools/audits/mlsysim_constants",
+    _REPO / "publishing/tools/audit",
 ]
 
 

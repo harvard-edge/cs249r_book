@@ -14,7 +14,7 @@ from typing import Any
 
 IN = 72.0
 
-# Production PDF geometry from book/quarto/tex/header-includes.tex.
+# Production PDF geometry from books/shared/tex/header-includes.tex.
 # The rendered sheet includes a 0.25-inch printer-mark border around the
 # 8 x 10 inch trim. PyMuPDF reports sheet coordinates, so every trim-relative
 # coordinate must include that offset.

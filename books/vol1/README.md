@@ -3,14 +3,6 @@
 *Foundations for single-machine ML systems.*
 
 [![Read Online](https://img.shields.io/badge/Read_Online-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/vol1/)
-[![Give Feedback](https://img.shields.io/badge/Feedback-Open_an_Issue-0969da?logo=github)](https://github.com/harvard-edge/cs249r_book/issues/new?template=book-vol1.yml)
-
-<div align="center" style="background: #fdf2f2; border: 1px solid #f87171; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
-  <span style="font-size: 1.1em; font-weight: bold; color: #991b1b;">📗 Release Edition &bull; Official Curriculum</span><br>
-  <span style="color: #7f1d1d; font-size: 0.95em;">
-    Volume I is complete, finalized, and ready for classroom adoption and academic citation. Hardcopy edition coming with MIT Press.
-  </span>
-</div>
 
 ---
 
@@ -22,7 +14,7 @@ This is the foundational volume. It establishes the quantitative frameworks (the
 
 ## Status
 
-Volume I content is **complete and published.** It is ready for classroom use. Chapters are continuously maintained for cross-reference accuracy, but the core technical curriculum is stable.
+Volume I content is **complete and undergoing final editorial polish.** It is ready for classroom use. Chapters are being reviewed for prose quality, figure consistency, and cross-reference accuracy, but the technical content is stable.
 
 ## What You Will Learn
 
@@ -195,7 +187,7 @@ If you spot an error, find an explanation that could be clearer, or have a sugge
     </tr>
     <tr>
       <td><b>Volume II</b></td>
-      <td><a href="../vol2/">book/quarto/contents/vol2/</a></td>
+      <td><a href="../vol2/">books/vol2/</a></td>
     </tr>
     <tr>
       <td><b>Main README</b></td>

@@ -1,4 +1,4 @@
-# book/tools/audit — Pass 15 Audit-Fix-Verify Loop
+# publishing/tools/audit — Pass 15 Audit-Fix-Verify Loop
 
 Automated editorial audit pipeline that scans textbook content against the
 MIT Press round 1 style rules, applies safe fixes under strict safety
@@ -16,7 +16,7 @@ The editorial rules this pipeline enforces are maintained outside this repositor
 End-to-end gate for the completed `mlsysim` registry migration:
 
 ```bash
-python3 book/tools/audit/check_registry_migration_build.py
+python3 publishing/tools/audit/check_registry_migration_build.py
 ```
 
 Individual tools:
@@ -50,7 +50,7 @@ verification stages.
 ## File layout
 
 ```
-book/tools/audit/
+publishing/tools/audit/
 ├── README.md                      — this file
 ├── __init__.py
 ├── protected_contexts.py          — LineWalker + inline span detection
@@ -87,13 +87,13 @@ re-review.
 
 ```bash
 # Default: accept-list applied, summary shows matched + stale counts
-python3 book/tools/audit/scan.py --scope vol1 -v
+python3 publishing/tools/audit/scan.py --scope vol1 -v
 
 # Reproduce pre-Pass-16 behavior (all 75 FPs report as open)
-python3 book/tools/audit/scan.py --scope vol1 --no-accept-list -v
+python3 publishing/tools/audit/scan.py --scope vol1 --no-accept-list -v
 
 # Use a different accept-list file (e.g. a draft to iterate on)
-python3 book/tools/audit/scan.py --scope vol1 --accept-list /tmp/draft.json
+python3 publishing/tools/audit/scan.py --scope vol1 --accept-list /tmp/draft.json
 ```
 
 ---
@@ -105,8 +105,8 @@ All commands are from the repo root.
 ### Scan only (dry run)
 
 ```bash
-python3 book/tools/audit/scan.py --scope vol2 --verbose
-python3 book/tools/audit/scan.py --scope vol1 --output vol1-ledger.json --verbose
+python3 publishing/tools/audit/scan.py --scope vol2 --verbose
+python3 publishing/tools/audit/scan.py --scope vol1 --output vol1-ledger.json --verbose
 ```
 
 Produces `audit-ledger.json` (or the path given by `--output`).
@@ -114,7 +114,7 @@ Produces `audit-ledger.json` (or the path given by `--output`).
 ### Fix one category (dry run)
 
 ```bash
-python3 book/tools/audit/fix_script_lane.py \
+python3 publishing/tools/audit/fix_script_lane.py \
     --ledger audit-ledger.json \
     --categories vs-period \
     --dry-run --verbose
@@ -124,20 +124,20 @@ python3 book/tools/audit/fix_script_lane.py \
 
 ```bash
 # Dry run (scan + plan + report, no file changes)
-python3 book/tools/audit/loop.py --scope vol2 --dry-run --verbose
+python3 publishing/tools/audit/loop.py --scope vol2 --dry-run --verbose
 
 # Apply, verify, but don't commit
-python3 book/tools/audit/loop.py --scope vol2 \
+python3 publishing/tools/audit/loop.py --scope vol2 \
     --categories vs-period,compound-prefix-closeup \
     --apply --verbose
 
 # Apply, verify, and commit each iteration
-python3 book/tools/audit/loop.py --scope vol2 \
+python3 publishing/tools/audit/loop.py --scope vol2 \
     --categories vs-period,compound-prefix-closeup \
     --apply --commit-each-iteration --verbose
 
 # Add quarto check (expensive) to verify stage
-python3 book/tools/audit/loop.py --scope vol2 \
+python3 publishing/tools/audit/loop.py --scope vol2 \
     --categories vs-period --apply --quarto-check --verbose
 ```
 
@@ -165,10 +165,10 @@ parallel subagent dispatch for `h3-titlecase`.
 Scan times on a cold run from the repo root:
 
 ```
-$ python3 book/tools/audit/scan.py --scope vol1 -v
+$ python3 publishing/tools/audit/scan.py --scope vol1 -v
 Total: 629 issues across 34 files (0.4s)
 
-$ python3 book/tools/audit/scan.py --scope vol2 -v
+$ python3 publishing/tools/audit/scan.py --scope vol2 -v
 Total: 969 issues across 39 files (0.4s)
 ```
 
@@ -240,13 +240,13 @@ categories. Item D uses file-level exclusions for `glossary.qmd`
 (glossaries are definitions, not first uses) and excludes the
 `SIFT` homonym (CV meaning vs fault-tolerance meaning).
 
-Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`.
+Reproduce with `python3 publishing/tools/audit/scan.py --scope vol1 -v`.
 Run the detector self-tests with:
 
 ```bash
-PYTHONPATH=book/tools python3 book/tools/audit/checks/h3_titlecase.py
-PYTHONPATH=book/tools python3 book/tools/audit/checks/concept_term_capitalization.py
-PYTHONPATH=book/tools python3 book/tools/audit/checks/abbreviation_first_use.py
+PYTHONPATH=publishing/tools python3 publishing/tools/audit/checks/h3_titlecase.py
+PYTHONPATH=publishing/tools python3 publishing/tools/audit/checks/concept_term_capitalization.py
+PYTHONPATH=publishing/tools python3 publishing/tools/audit/checks/abbreviation_first_use.py
 ```
 
 Expect `41/41 passed`, `32/32 passed`, and `17/17 passed`.

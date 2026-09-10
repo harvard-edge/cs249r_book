@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh target_source fields in book/tools/audits/mlsysim_constants/*.yaml."""
+"""Refresh target_source fields in publishing/tools/audits/mlsysim_constants/*.yaml."""
 
 from __future__ import annotations
 

@@ -20,10 +20,10 @@ ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/us
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 # Copy dependency files early for better cache efficiency
-COPY book/tools/dependencies/requirements.txt /tmp/requirements.txt
-COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
-COPY book/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
-COPY book/tools/dependencies/tl_packages /tmp/tl_packages
+COPY publishing/tools/dependencies/requirements.txt /tmp/requirements.txt
+COPY publishing/tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY publishing/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
+COPY publishing/tools/dependencies/tl_packages /tmp/tl_packages
 COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
 COPY book/docker/linux/install-texlive-base.sh /opt/install-texlive-base.sh
 COPY book/docker/linux/install-tl-collections.sh /opt/install-tl-collections.sh
@@ -346,8 +346,8 @@ RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config, libuv)…" && \
 RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "⏰ Cold build: this step compiles many CRAN packages; expect 20–60+ min (cache shortens reruns)" && \
     echo "Running R setup script with the following files:" && \
-    echo "  - /tmp/install_packages.R (from book/tools/dependencies/install_packages.R)" && \
-    echo "  - /tmp/required_r_packages.R (from book/tools/dependencies/required_r_packages.R)" && \
+    echo "  - /tmp/install_packages.R (from publishing/tools/dependencies/install_packages.R)" && \
+    echo "  - /tmp/required_r_packages.R (from publishing/tools/dependencies/required_r_packages.R)" && \
     echo "  - /tmp/verify_r_packages.R (from book/docker/linux/verify_r_packages.R)" && \
     \
     echo "📦 Installing R packages..." && \

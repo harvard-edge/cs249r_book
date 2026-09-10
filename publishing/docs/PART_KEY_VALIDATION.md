@@ -90,7 +90,7 @@ When the validation script finds issues:
 
 ```
 ❌ ISSUES FOUND:
-   📄 quarto/contents/vol1/introduction/introduction.qmd:15
+   📄 quarto/vol1/introduction/introduction.qmd:15
       - Key: 'invalid_key' (normalized: 'invalidkey')
       - Status: NOT FOUND in summaries.yml
 

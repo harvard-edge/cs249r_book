@@ -245,7 +245,7 @@ def check(
 # ── Adversarial self-test ───────────────────────────────────────────────────
 #
 # Run with:
-#     python3 book/tools/audit/checks/sec_slug_placement.py
+#     python3 publishing/tools/audit/checks/sec_slug_placement.py
 #
 # Each case is a (corpus, expected_hits) tuple. The detector is exercised
 # against a small in-memory document; hits are counted and compared.

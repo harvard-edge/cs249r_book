@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS = REPO_ROOT  / "books"
 
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")

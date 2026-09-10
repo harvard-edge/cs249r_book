@@ -12,7 +12,7 @@ single self-contained Markdown document containing:
   for that section, and any audit issues gpt-5.4 flagged against them
 
 The output is written to
-``book/tools/scripts/quizzes/_audit/contexts/{vol}_{chapter}.md``
+``publishing/tools/scripts/quizzes/_audit/contexts/{vol}_{chapter}.md``
 and is the single input a sub-agent needs to do an audit + improve pass
 targeting A-grade output per §16 of the quiz-generation spec.
 
@@ -42,7 +42,7 @@ REPO_ROOT = Path(
         ["git", "rev-parse", "--show-toplevel"], cwd=HERE
     ).decode().strip()
 )
-CONTENTS_DIR = REPO_ROOT / "book" / "quarto" / "contents"
+CONTENTS_DIR = REPO_ROOT  / "books"
 OUTPUT_DIR = HERE / "_audit" / "contexts"
 
 

@@ -18,10 +18,10 @@ Subcommands:
 
 This module owns the full implementation — no subprocess, no external
 script. Invoked from:
-    - ``./book/binder headings {check,dry-run,apply}`` (CLI)
+    - ``./binder headings {check,dry-run,apply}`` (CLI)
     - ``validate.py:_run_heading_case`` (imports ``find_violations``
       and emits ``ValidationIssue`` objects for the rich check table)
-    - Pre-commit: ``./book/binder check headers`` (includes ``ids`` + ``case`` scopes)
+    - Pre-commit: ``./binder check headers`` (includes ``ids`` + ``case`` scopes)
 """
 
 from __future__ import annotations
@@ -577,11 +577,11 @@ class HeadingsCommand:
                 return sorted(str(f) for f in p.rglob("*.qmd"))
         roots = []
         if vol1:
-            roots.append("book/quarto/contents/vol1/**/*.qmd")
+            roots.append("books/vol1/**/*.qmd")
         if vol2:
-            roots.append("book/quarto/contents/vol2/**/*.qmd")
+            roots.append("books/vol2/**/*.qmd")
         if not roots:
-            roots = ["book/quarto/contents/**/*.qmd"]
+            roots = ["books/**/*.qmd"]
         out: List[str] = []
         for pattern in roots:
             out.extend(glob.glob(pattern, recursive=True))
@@ -611,13 +611,13 @@ class HeadingsCommand:
             "   See [cyan]the project prose style guide §10.3.1[/cyan] for the rule + exceptions.\n"
         )
         for fpath, viols in by_file.items():
-            short = fpath.replace("book/quarto/contents/", "")
+            short = fpath.replace("books/", "")
             console.print(f"  [bold]{short}[/bold]")
             for v in viols:
                 console.print(f"    L{v.line}")
                 console.print(f"      [dim]current:[/dim]  {v.current[:140]}")
                 console.print(f"      [dim]expected:[/dim] {v.expected[:140]}")
-        console.print(f"\n   [cyan]Fix:[/cyan] ./book/binder headings apply")
+        console.print(f"\n   [cyan]Fix:[/cyan] ./binder headings apply")
         console.print(f"   Or manually edit the headings to match the expected form.\n")
         return False
 
@@ -634,7 +634,7 @@ class HeadingsCommand:
             f"across {len(by_file)} file(s).[/yellow]\n"
         )
         for fpath, viols in by_file.items():
-            short = fpath.replace("book/quarto/contents/", "")
+            short = fpath.replace("books/", "")
             console.print(f"\n[bold]== {short} ({len(viols)} changes) ==[/bold]")
             for v in viols:
                 console.print(f"  L{v.line}")

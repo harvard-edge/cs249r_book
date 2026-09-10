@@ -17,8 +17,8 @@ else per-edit bisect keeping only the provably safe sites.
 
 Usage::
 
-    python3 book/tools/audit/fmt/run_scale_lane.py --write <qmd> ...
-    python3 book/tools/audit/fmt/run_scale_lane.py --write --all
+    python3 publishing/tools/audit/fmt/run_scale_lane.py --write <qmd> ...
+    python3 publishing/tools/audit/fmt/run_scale_lane.py --write --all
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def main() -> int:
 
     files = [Path(p) for p in args.qmd]
     if args.all:
-        files = sorted(Path("book/quarto/contents").rglob("*.qmd"))
+        files = sorted(Path("books").rglob("*.qmd"))
     if not files:
         ap.error("pass qmd file(s) or --all")
 

@@ -3,7 +3,7 @@
 Transform flat PICO Python cells in QMD files to class-based namespace isolation.
 
 Usage:
-    python3 book/tools/scripts/transform_pico_cells.py <path_to_qmd>
+    python3 publishing/tools/scripts/transform_pico_cells.py <path_to_qmd>
 """
 
 import re

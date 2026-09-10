@@ -45,7 +45,7 @@ def _skip_file(path: Path, root: Path) -> bool:
 
 
 def _iter_qmd_files(root: Path) -> list[Path]:
-    contents = root / "quarto" / "contents"
+    contents = root  / "books"
     if not contents.is_dir():
         return []
     return sorted(

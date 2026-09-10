@@ -27,7 +27,7 @@ def main() -> int:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path("book/quarto/contents"),
+        default=Path("books"),
         help="Root directory of QMD files",
     )
     parser.add_argument("--dry-run", action="store_true")

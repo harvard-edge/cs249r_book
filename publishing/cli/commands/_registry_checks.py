@@ -52,7 +52,7 @@ def check_registry_sources(root: Path, paths: list[Path] | None = None) -> list[
     mod = _load_script_module("book_check_registry_sources", root / "book" / "tools" / "audit" / "book_check_registry_sources.py")
 
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
 
     issues: list[RegistryIssue] = []
     for path in paths:
@@ -73,7 +73,7 @@ def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> li
     from cli.checks import lego_prose_literals
 
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
 
     issues: list[RegistryIssue] = []
     for path in paths:
@@ -100,7 +100,7 @@ def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[
     from cli.checks import lego_prose_units
 
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
     issues: list[RegistryIssue] = []
     for path in paths:
         p = path if path.is_absolute() else root / path
@@ -130,7 +130,7 @@ def check_rendered_doubled_words(
     from cli.checks import rendered_doubled_words
 
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
     issues: list[RegistryIssue] = []
     for path in paths:
         p = path if path.is_absolute() else root / path
@@ -152,7 +152,7 @@ def check_lego_load_pint(root: Path, paths: list[Path] | None = None) -> list[Re
     """Static lint: physical *_value must use ureg/registry."""
     mod = _load_check_module("book_check_lego_load_pint", root)
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
     issues: list[RegistryIssue] = []
     for path in paths:
         p = path if path.is_absolute() else root / path
@@ -173,7 +173,7 @@ def check_lego_equations(root: Path, paths: list[Path] | None = None) -> list[Re
     """Verify A/B=C prose lines numerically."""
     mod = _load_check_module("book_check_lego_equations", root)
     if paths is None:
-        paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
+        paths = sorted((root  / "books").rglob("*.qmd"))
     issues: list[RegistryIssue] = []
     for path in paths:
         p = path if path.is_absolute() else root / path
@@ -265,6 +265,6 @@ def check_yaml_pending(root: Path) -> list[RegistryIssue]:
         code="yaml_should_change",
         message=(
             f"{pending} audit YAML constant(s) still marked should_change=true — "
-            "run: python3 book/tools/audit/refresh_mlsysim_constants_yamls.py --finalize"
+            "run: python3 publishing/tools/audit/refresh_mlsysim_constants_yamls.py --finalize"
         ),
     )]

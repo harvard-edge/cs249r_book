@@ -54,4 +54,4 @@ Registry migration chapter verification: build HTML → raw HTML scan → LEGO/p
 
 **Summary:** 45 pass / 0 fail / 0 pending / 45 total
 
-Re-run one chapter: `python3 book/tools/audit/chapter_html_verify.py --vol1 training`
+Re-run one chapter: `python3 publishing/tools/audit/chapter_html_verify.py --vol1 training`

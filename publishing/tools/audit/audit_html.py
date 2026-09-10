@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backward-compat wrapper — use ``book/tools/audit/fmt/audit_html.py``."""
+"""Backward-compat wrapper — use ``publishing/tools/audit/fmt/audit_html.py``."""
 
 from __future__ import annotations
 

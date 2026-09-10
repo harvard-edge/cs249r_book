@@ -3,7 +3,7 @@
 
 This powers::
 
-    ./book/binder check code --scope lego-dead-code
+    ./binder check code --scope lego-dead-code
 
 Binder owns the implementation; pre-commit reaches it through ``binder check``.
 """
@@ -169,7 +169,7 @@ def audit_paths(paths: Iterable[Path]) -> list[Violation]:
 
 
 def _default_paths() -> list[Path]:
-    base = Path("book/quarto/contents")
+    base = Path("books")
     if base.exists():
         return [base]
     return [Path(".")]

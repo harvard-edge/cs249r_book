@@ -35,18 +35,18 @@ HTML/PDF verification remains the final gate. Author: fmt-convention pass.
 
 | Lvl | What | Command | When |
 |-----|------|---------|------|
-| **L0** | static gates | `./book/binder check math --scope canonical` · `--scope suffix-consistency` · `--scope suffix-semantics` · `--scope multiplier-style` ; `fmt_prose_contract.py` ; `pytest test_fmt_prose_contract.py` | after every edit batch |
+| **L0** | static gates | `./binder check math --scope canonical` · `--scope suffix-consistency` · `--scope suffix-semantics` · `--scope multiplier-style` ; `fmt_prose_contract.py` ; `pytest test_fmt_prose_contract.py` | after every edit batch |
 | **L1** | render-identical (no build) | `assess_equiv.py baseline --qmd <f> --ref HEAD --out /tmp/<f>.before` → edit → `assess_equiv.py snapshot --qmd <f> --json … --prose …` → `assess_equiv.py diff --before … --after …` → **visible-prose diff MUST be empty** | per touched chapter, each phase |
-| **L2** | spot HTML render | `./book/binder build html <2–3 rep chapters>` then scan rendered HTML (below) | end of each phase |
-| **L3** | FULL HTML render (ultimate) | `./book/binder build html --all` + `audit_lego_html.py` + scans | end of each migration |
-| **L4** | FULL PDF (final gatekeeper) | `./book/binder build pdf --all` (runs pdftotext cross-ref scan) | once, after both migrations |
+| **L2** | spot HTML render | `./binder build html <2–3 rep chapters>` then scan rendered HTML (below) | end of each phase |
+| **L3** | FULL HTML render (ultimate) | `./binder build html --all` + `audit_lego_html.py` + scans | end of each migration |
+| **L4** | FULL PDF (final gatekeeper) | `./binder build pdf --all` (runs pdftotext cross-ref scan) | once, after both migrations |
 
 **Rendered-HTML scan (L2/L3)** — every one of these must return ZERO on the built HTML:
 ```bash
 grep -rn '{python}'  <built-html>      # literal unrendered inline-python
 grep -rn 'Traceback\|NameError\|raise ' <built-html>
 grep -rn '××\|\$\\times\$'  <built-html>   # double-glyph (B bug) or leaked literal $\times$
-python3 book/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html.json
+python3 publishing/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html.json
 ```
 For direct `quarto render` spot checks, set `PYTHONPATH` with absolute worktree
 paths, not relative paths. Jupyter may execute from the chapter directory, so a
@@ -71,9 +71,9 @@ gate is the fresh render plus raw HTML scans above.
 
 0.1 Freeze the exact work-lists to files (so coverage is provable):
 ```bash
-python3 book/tools/audit/fmt/inventory_design_b_rates.py \
-  --root book/quarto/contents \
-  --json book/tools/audit/artifacts/fmt_design_b_inventory.json
+python3 publishing/tools/audit/fmt/inventory_design_b_rates.py \
+  --root books \
+  --json publishing/tools/audit/artifacts/fmt_design_b_inventory.json
 ```
 Current frozen scope after removing equation-only ROI values and arithmetic
 coefficient uses from the multiplier lane: 433 multiplier exports, 503
@@ -141,7 +141,7 @@ approved final suffix; document `_mult_str` as the semantic multiplier token),
 - L1: `assess_equiv diff` per touched chapter → **visible-prose identical** (the rendered
   "4×" is unchanged; only source moved the glyph). Value snapshot will differ (export now
   holds "4×") — that's expected; the *visible* diff is the gate.
-- **L2 spot render:** `./book/binder build html training network_fabrics` → run the
+- **L2 spot render:** `./binder build html training network_fabrics` → run the
   rendered-HTML scan. Confirm e.g. "achieving only 4–6× speedup" renders, no "4–6××", no
   literal `{python}`, no leaked `$\times$`.
 
@@ -165,7 +165,7 @@ Dry-run counts must match the frozen inventory after applying the chosen exclusi
 - L0 gates green.
 - L1: `assess_equiv diff` per touched chapter → **both value AND visible-prose identical**
   (only variable names moved).
-- **L2 spot render:** `./book/binder build html network_fabrics compute_infrastructure` →
+- **L2 spot render:** `./binder build html network_fabrics compute_infrastructure` →
   rendered-HTML scan; confirm bandwidths still read "3.35 TB/s" etc.
 
 **2.3 Docs.** `fmt.md` / rule docs state `_per_s`, the bits/bytes distinction,
@@ -179,8 +179,8 @@ and the qps/rps/tps carve-out.
 
 3.1 **L3 — FULL HTML render, both volumes:**
 ```bash
-./book/binder build html --all
-python3 book/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html_all.json
+./binder build html --all
+python3 publishing/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html_all.json
 # + the rendered-HTML scan greps over the entire built site (zero hits required)
 ```
 Inspect: every multiplier renders "N×" (no `××`, no bare "N" where × expected), every
@@ -188,7 +188,7 @@ rate renders its unit, zero literal `{python}`, zero tracebacks, zero leaked `$\
 
 3.2 **L4 — FULL PDF render, both volumes (final gatekeeper):**
 ```bash
-./book/binder build pdf --all        # runs pdftotext cross-ref scan after render
+./binder build pdf --all        # runs pdftotext cross-ref scan after render
 ```
 Scan the PDF text for `××`, literal `\times`, `{python}`, missing-ref markers.
 

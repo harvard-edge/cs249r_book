@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate book/tools/audit/baselines/captions_baseline.json.
+"""Regenerate publishing/tools/audit/baselines/captions_baseline.json.
 
 Snapshots the current per-file counts of captionless-float violations
 flagged by the `tables.caption-required`, `figures.label-required`, and
@@ -8,7 +8,7 @@ budget will fail the corresponding `book-check-*` pre-commit hook;
 shrinking a count is always safe.
 
 Run from the repo root:
-    python3 book/tools/scripts/maintenance/regen_captions_baseline.py
+    python3 publishing/tools/scripts/maintenance/regen_captions_baseline.py
 """
 import datetime as _dt
 import json
@@ -27,13 +27,13 @@ from cli.commands.validate import (  # noqa: E402
 
 
 class _Config:
-    book_dir = BOOK_DIR / "quarto"
+    book_dir = BOOK_DIR  / "books"
 
 
 def main() -> int:
     vc = ValidateCommand(config_manager=_Config(), chapter_discovery=None)
     vc._load_captions_baseline = lambda: {}
-    root = _Config.book_dir / "contents"
+    root = _Config.book_dir
 
     counts = {}
     for code, method in [
@@ -55,7 +55,7 @@ def main() -> int:
             "Per-file allow-list of pre-existing captionless-float "
             "violations grandfathered at baseline time. New violations "
             "beyond these counts block the commit. Regenerate via "
-            "book/tools/scripts/maintenance/regen_captions_baseline.py."
+            "publishing/tools/scripts/maintenance/regen_captions_baseline.py."
         ),
         "generated": _dt.date.today().isoformat(),
         "counts": counts,

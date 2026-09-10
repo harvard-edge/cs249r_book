@@ -155,4 +155,4 @@ Both volumes; P0–P2 fixes applied; **P6 arithmetic intensity + P5 length/speed
 
 Full vol1+vol2 PDF builds not run in this pass (multi-hour). Recommend `/precheck` before push to origin.
 
-Gate-only pipeline: `./book/tools/audit/verify_lego_pipeline.sh --skip-render --skip-pdf --skip-llm` — fails on focal-verify P3 chapters only.
+Gate-only pipeline: `./publishing/tools/audit/verify_lego_pipeline.sh --skip-render --skip-pdf --skip-llm` — fails on focal-verify P3 chapters only.

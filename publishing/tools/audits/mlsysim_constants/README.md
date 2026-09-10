@@ -18,26 +18,26 @@ should source values after migration.
 | Solver/engine defaults | `mlsysim/core/calibration.py` → `mlsysim.engine.calibration.*` |
 | Economics | `mlsysim/infra/pricing.py` → `Infrastructure.Pricing.*` |
 | Physics / units only | `mlsysim/core/units.py`, `mlsysim/physics/` |
-| Symbol → replacement map | `book/tools/audit/migrate_constants_to_registry.py` |
-| Live manifest | `book/tools/audit/artifacts/registry_migration_manifest.json` |
+| Symbol → replacement map | `publishing/tools/audit/migrate_constants_to_registry.py` |
+| Live manifest | `publishing/tools/audit/artifacts/registry_migration_manifest.json` |
 
 Regenerate `target_source` fields after map changes:
 
 ```bash
-python3 book/tools/audit/refresh_mlsysim_constants_yamls.py
-python3 book/tools/audit/refresh_mlsysim_constants_yamls.py --finalize
+python3 publishing/tools/audit/refresh_mlsysim_constants_yamls.py
+python3 publishing/tools/audit/refresh_mlsysim_constants_yamls.py --finalize
 ```
 
 Verify appendix assumption-table LEGO cells against live registries:
 
 ```bash
-python3 book/tools/audit/generate_appendix_constants.py --verify
+python3 publishing/tools/audit/generate_appendix_constants.py --verify
 ```
 
 End-to-end migration build check:
 
 ```bash
-python3 book/tools/audit/check_registry_migration_build.py
+python3 publishing/tools/audit/check_registry_migration_build.py
 ```
 
 Pre-commit gates: `mlsysim-check-registry-gates`, `book-check-registry-sources`.

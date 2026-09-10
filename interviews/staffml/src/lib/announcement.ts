@@ -2,7 +2,7 @@
  * Announcement-bar content for StaffML.
  *
  * Mirrors the 4-line unified template used across the nine Quarto sites
- * (see book/quarto/config/shared/html/announcement-vol2.yml and siblings,
+ * (see books/config/shared/html/announcement-vol2.yml and siblings,
  * merged in PR #1505). StaffML is Next.js + React 19 rather than Quarto,
  * so the content lives in TypeScript instead of YAML — but the rendered
  * DOM produced by AnnouncementBar.tsx is byte-identical to what Quarto

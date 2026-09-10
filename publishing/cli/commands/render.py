@@ -167,7 +167,7 @@ class RenderCommand:
 
     def _resolve_qmd_files(self, ns: argparse.Namespace) -> List[Path]:
         """Resolve which QMD files to scan based on CLI arguments."""
-        contents_dir = self.book_dir / "contents"
+        contents_dir = self.book_dir
 
         # Specific chapters requested
         if ns.chapters:

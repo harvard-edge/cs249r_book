@@ -53,6 +53,6 @@ Per-chapter PDF build → keep-tex scan (math env balance + error patterns) → 
 
 **Summary:** 44 pass / 0 fail / 0 pending / 44 total
 
-Re-run one chapter: `python3 book/tools/audit/chapter_pdf_verify.py --vol1 training`
+Re-run one chapter: `python3 publishing/tools/audit/chapter_pdf_verify.py --vol1 training`
 
-Archived artifacts: `book/quarto/_build/pdf-audit/<vol>/<chapter>.{pdf,tex}`
+Archived artifacts: `books/_build/pdf-audit/<vol>/<chapter>.{pdf,tex}`

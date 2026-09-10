@@ -104,7 +104,38 @@ The physical network fabric exists to carry three fundamental collective communi
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
 
-In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **gradient bus**\index{Gradient!bus} that moves parameter updates between workers. As the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth determines multi-device throughput (the **communication wall**\index{Communication wall!definition}). Protocols, topologies, congestion control, and collective-routing choices all determine how close that bus comes to its physical limits.
+In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **gradient bus**\index{Gradient!bus} that moves parameter updates between workers. As the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth determines multi-device throughput (the **communication wall**\index{Communication wall!definition}). Protocols, topologies, congestion control, and collective-routing choices all determine how close that bus comes to its physical limits. That physical asymmetry is what the fabric layer contributes to the cost model: a gradient that stays on NVLink moves an order of magnitude faster than the same gradient crossing InfiniBand, and @fig-network-bandwidth-scaling shows that gap widening rather than closing over the last decade.
+::: {#fig-network-bandwidth-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical network bandwidth scaling**: Intra-node NVLink, inter-node InfiniBand and Ethernet, and the PCIe host bus, plotted on a common log scale from 2010 to 2024. NVLink pulls roughly an order of magnitude clear of the others, so the same collective costs far more when it crosses a machine boundary than when it stays inside one." fig-alt="Log-scale chart of interconnect bandwidth from 2010 to 2024 for Ethernet, InfiniBand, NVLink, and PCIe. All four rise steadily, with NVLink roughly an order of magnitude above the others by 2024."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from mlsysim import viz
+
+data = pd.read_csv("vol2/network_fabrics/data/bandwidth_trends.csv")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+_groups = list(dict.fromkeys(data["Technology"]))
+_cmap = plt.get_cmap('viridis', max(len(_groups), 2))
+for _i, _g in enumerate(_groups):
+    _sub = data[data["Technology"] == _g]
+    ax.plot(_sub["Year"], _sub["Bandwidth_Gbps"], color=_cmap(_i), label=str(_g), marker="o", linewidth=2)
+ax.set_yscale("log")
+ax.legend(title="Interconnect", frameon=False, fontsize=9)
+ax.set_ylabel("Bandwidth (Gbps)")
+ax.set_title("Network and interconnect bandwidth over time")
+ax.grid(True, which="both", ls="--", alpha=0.5)
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: f"{int(y):,}"))
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
 
 :::
 
@@ -168,7 +199,7 @@ The concrete bandwidth cliff that separates intra-node from inter-node communica
 ![](images/svg/bandwidth-hierarchy.svg)
 :::
 
-@Fig-bandwidth-hierarchy reveals that this cliff is not an artifact of one accelerator generation. Its annotations compare NVLink's bidirectional-total bandwidth against one InfiniBand port, so they read larger (about 19$\times$ for the H100 generation) than the like-with-like cliff. On a per-direction basis, crossing from the local NVLink domain to one InfiniBand port reduces bandwidth by roughly 9$\times$, despite absolute bandwidth improvements at every tier. The persistent cliff reflects fundamental physics: on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient (see @sec-appdx-fleet-system-assumptions for the physical specification sheet detailing directional vs. aggregate bandwidth, latency, framing, and energy cost per bit across host buses, accelerator interconnects, and network fabrics). Tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
+@Fig-bandwidth-hierarchy reveals that this cliff is not an artifact of one accelerator generation. Its annotations compare NVLink's bidirectional-total bandwidth against one InfiniBand port, so they read larger (about 18$\times$ for the H100 generation) than the like-with-like cliff. On a per-direction basis, crossing from the local NVLink domain to one InfiniBand port reduces bandwidth by roughly 9$\times$, despite absolute bandwidth improvements at every tier. The persistent cliff reflects fundamental physics: on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient (see @sec-appdx-fleet-system-assumptions for the physical specification sheet detailing directional vs. aggregate bandwidth, latency, framing, and energy cost per bit across host buses, accelerator interconnects, and network fabrics). Tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
 
 The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-gantt uses a normalized timeline: the compute phases are held fixed at 100 ms, and the AllReduce block represents a small gradient shard chosen to make the intra-node and inter-node contrast visible. It is not the full 175B-parameter gradient exchange; it isolates how crossing the node boundary changes utilization.
 
@@ -360,7 +391,7 @@ Achieving `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and higher line rates 
 
 However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of three compared to NRZ, making the link highly susceptible to noise. Consequently, high-speed links operate near the physical limits of reliable detection and require **forward error correction (FEC)**\index{Forward Error Correction!definition}\index{FEC!definition} at the physical layer, commonly using Reed-Solomon RS(544,514)-family codes in high-speed Ethernet designs [@anslow2016rsFec; @ethernetAlliance2025roadmap]. FEC processing is an implementation-dependent latency term; IEEE 802.3df operator material treats roughly 100 ns of host KP4 FEC and hundreds of nanoseconds of end-to-end module latency as meaningful at AI/HPC fabric timescales [@yin2022fecRequirements]. For the 175B model training, which generates `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient traffic per step across `{python} NetworkWireClusterRecap.n_gpus_str`, this latency floor is nonnegotiable. A packet crossing three switch hops in a fat-tree incurs a scenario budget of `{python} FECLatency.three_hop_low_ns_str`--`{python} FECLatency.three_hop_high_ns_str` of one-way FEC decoding and encoding latency, or `{python} FECLatency.round_trip_low_ns_str`--`{python} FECLatency.round_trip_high_ns_str` over a three-hop path in each direction. This "physics tax" sets a hard floor on the fabric's fixed startup latency, formalized in @sec-network-fabrics-performance-model as the $\alpha$ term, limiting the speed of latency-sensitive collectives like AllReduce regardless of software optimizations. @Fig-pam4-vs-nrz shows the signaling trade-off directly: PAM4 doubles the bits per symbol relative to NRZ, but the smaller voltage gaps reduce noise margin and make FEC part of the link's latency floor.
 
-::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**Signaling evolution: NRZ vs. PAM4**: To increase bandwidth without doubling clock frequency, high-speed interconnects moved from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating forward error correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
+::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**From NRZ to PAM4 signaling**: To increase bandwidth without doubling clock frequency, high-speed interconnects moved from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating forward error correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
 ![](images/svg/pam4-vs-nrz.svg)
 :::
 
@@ -533,7 +564,7 @@ RDMA bypasses the kernel data path. Offloading transport logic to the NIC allows
 
 [^fn-gpudirect-rdma-bypass]: **GPUDirect RDMA**\index{GPUDirect RDMA!zero-copy}: Introduced by NVIDIA for Kepler-class GPUs and CUDA 5.0, GPUDirect RDMA enables a direct PCIe path between GPU memory and third-party peer devices such as network interfaces [@nvidia2026gpudirectRdma]. Before GPUDirect, every gradient transfer had to stage through host memory, consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is one reason overlapping communication with backward-pass computation is feasible at scale.
 
-::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA data path**: RDMA without GPU peer-memory access (top) stages an accelerator payload in registered host memory before the NIC reads it. GPUDirect RDMA (bottom) lets the NIC DMA directly to or from GPU memory over PCIe, eliminating the host-memory bounce path." fig-alt="Two-panel diagram. Top: RDMA without GPUDirect follows GPU to host RAM to NIC. Bottom: GPUDirect RDMA lets the NIC access GPU memory over PCIe."}
+::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA data path**: The red traditional path stages an accelerator payload in registered host memory before the NIC reads it. The green GPUDirect path lets the NIC access GPU memory over PCIe, eliminating the host-memory bounce." fig-alt="Single diagram with a red path from GPU memory through registered host memory to the network interface and a green direct path between GPU memory and the network interface."}
 ![](images/svg/gpudirect-data-path.svg)
 :::
 
@@ -550,7 +581,7 @@ GPU clusters commonly choose between two RDMA transport stacks, and the decision
 
 The InfiniBand\index{IB|see{InfiniBand}}[^fn-infiniband-protocol-origin] row reflects a protocol heritage that favors hardware-managed losslessness over Ethernet compatibility.
 
-[^fn-infiniband-protocol-origin]: [offset=-32mm] **InfiniBand**\index{InfiniBand!origin}: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded; this heritage is precisely why InfiniBand provides native losslessness without the PFC fragility that plagues Ethernet-based RDMA fabrics.
+[^fn-infiniband-protocol-origin]: [offset=-32mm] **InfiniBand**\index{InfiniBand!origin}: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded---and this heritage is precisely why InfiniBand provides native losslessness without the PFC fragility that plagues Ethernet-based RDMA fabrics.
 
 This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compares the two stacks, showing how RDMA-based protocols expose a user-space **verbs API**\index{Verbs API!definition} that bypasses the kernel's traditional TCP/IP stack.
 
@@ -913,7 +944,7 @@ class AllReduceBottleneck:
     grad_70b_gb_str = fmt_qty(grad_70b, GB, precision=0, commas=False)
 ```
 
-Beyond classifying individual transfers, the same model identifies when communication overtakes computation. Our earlier point-to-point $\alpha$-$\beta$ model focused on the transfer time of individual messages across a single link. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
+Beyond classifying individual transfers, the same model identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis in this section focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
 
 ::: {#nbk-allreduce-bottleneck .callout-notebook title="AllReduce bottleneck threshold"}
 
@@ -1229,7 +1260,7 @@ For a bandwidth-optimal ring, ReduceScatter plus AllGather contributes a traffic
 2. **Oversubscribed (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by `{python} BisectionScaling.bbs_oversubscription_ratio_str` = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_s_str`.
 
-**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching our bisection-bottleneck model. For training, network oversubscription is a false economy.
+**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in this section. For training, network oversubscription is a false economy.
 
 :::
 
@@ -1365,7 +1396,7 @@ The trade-offs between these topologies become stark when quantified for a large
 
 @Fig-network-topologies gives one illustrative comparison using the stated bandwidth and cost assumptions. Quantitative results depend on radix, endpoint count, link speed, routing, and equipment cost; the topology name alone does not determine either bisection bandwidth or cost per Gb/s.
 
-::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network topologies for ML: An illustrative bandwidth-cost scenario**: Assumed $\\text{BW}_{\\text{bisect}}$ (TB/s, left axis) and cost per Gb/s (right axis) for five topology configurations on a 1,024-GPU cluster: Fat-tree (25.6 TB/s, \\$3.0/Gb/s), Dragonfly (20.0, \\$4.0), Torus 3D (8.0, \\$1.5), Rail-opt (12.8, \\$2.0), and Butterfly (6.4, \\$5.0). These scenario values illustrate the comparison method rather than universal properties of each topology family." fig-alt="Illustrative bar chart of five topology configurations with assumed bisection bandwidth in TB/s and cost per Gb/s; fat-tree has the highest assumed bandwidth and Torus 3D the lowest assumed cost per Gb/s."}
+::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**An illustrative bandwidth-cost scenario for ML network topologies**: Assumed $\\text{BW}_{\\text{bisect}}$ (TB/s, left axis) and cost per Gb/s (right axis) for five topology configurations on a 1,024-GPU cluster: Fat-tree (25.6 TB/s, \\$3.0/Gb/s), Dragonfly (20.0, \\$4.0), Torus 3D (8.0, \\$1.5), Rail-opt (12.8, \\$2.0), and Butterfly (6.4, \\$5.0). These scenario values illustrate the comparison method rather than universal properties of each topology family." fig-alt="Illustrative bar chart of five topology configurations with assumed bisection bandwidth in TB/s and cost per Gb/s; fat-tree has the highest assumed bandwidth and Torus 3D the lowest assumed cost per Gb/s."}
 ![](images/svg/topology-bandwidth.svg)
 :::
 
@@ -1408,7 +1439,7 @@ Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to co
 
 ::: {#dfn-network-fabrics-bulk-synchronous-parallel-bsp .callout-definition title="Bulk synchronous parallel (BSP)"}
 
-***bulk synchronous parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel execution model in which every worker completes a local computation phase, exchanges data with all other workers, and then waits at a global barrier before any worker begins the next phase, which makes the slowest participant the pacing constraint for the entire cluster.
+***bulk synchronous parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel execution model in which every worker completes a local computation phase, exchanges data with all other workers, and then waits at a global barrier before any worker begins the next phase—making the slowest participant the pacing constraint for the entire cluster.
 
 1.  **Significance**: BSP makes system efficiency $\eta_{\text{scaling}}$ directly proportional to the slowest worker: if one GPU in a 1,024-GPU cluster runs 10 percent slower due to thermal throttling or network jitter, the barrier stalls the remaining 1,023 GPUs for that fraction of the step, wasting effectively 102 GPU-steps of compute per iteration. At \$3/GPU-hour, a 5 percent straggler gap across a \$50M training run wastes roughly \$2.5M in idle accelerator time.
 2.  **Distinction**: Unlike asynchronous parallelism, which allows workers to proceed with stale weights from previous steps, BSP enforces a global state update at every barrier, providing mathematical equivalence to single-device training and predictable convergence behavior.
@@ -1440,7 +1471,7 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 *One paused receiver can freeze unrelated flows.*
 :::
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A true incast burst**: This deliberately worst-case fan-in scenario sends 256 sources at 50 GB/s toward one 400 Gb/s (50 GB/s) egress with a 32 MB buffer. The 12.8 TB/s offered load oversubscribes the destination egress by 256$\times$. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Eight labeled GPU nodes, with 248 more implied, each at 50 GB/s converge on one switch egress with 400 Gb/s capacity and a 32 MB buffer. The diagram is a hypothetical true fan-in burst, not a ring AllReduce topology."}
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A true incast burst**: This deliberately worst-case fan-in scenario sends 256 sources at 50 GB/s toward one 400 Gb/s (50 GB/s) egress with a 32 MB buffer. The 12.8 TB/s offered load oversubscribes the destination egress by 256$\times$. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Eight labeled GPU nodes, with 248 more implied, converge at 50 GB/s each on one switch egress with 400 Gb/s capacity and a 32 MB buffer."}
 ![](images/svg/incast-flow.svg)
 :::
 
@@ -1500,7 +1531,7 @@ class TransceiverDegradationRisk:
 
 ::: {#ws-network-fabrics-microsoft-pfc-deadlock .callout-war-story title="Microsoft's PFC deadlock (2016)"}
 
-**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers (a fleet operating at the scale of tens of thousands of servers) to support latency-sensitive services. Their design provided a lossless fabric with PFC, and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma].
+**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers---a fleet operating at the scale of tens of thousands of servers---to support latency-sensitive services. Their design provided a lossless fabric with PFC, and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma].
 
 **Mechanism**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. A dead server with an incomplete mapping between an IP address and a media-access-control address caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, forming a closed loop of paused buffers.
 

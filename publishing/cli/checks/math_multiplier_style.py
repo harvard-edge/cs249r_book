@@ -297,12 +297,12 @@ def audit(paths: Iterable[Path]) -> list[Violation]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", nargs="*", type=Path, default=[Path("book/quarto/contents")])
+    parser.add_argument("paths", nargs="*", type=Path, default=[Path("books")])
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     parser.add_argument("--by-file", action="store_true", help="Summarize by file")
     args = parser.parse_args(argv)
 
-    violations = audit(args.paths or [Path("book/quarto/contents")])
+    violations = audit(args.paths or [Path("books")])
     if args.json:
         print(json.dumps([v.__dict__ for v in violations], indent=2, ensure_ascii=False))
         return 1 if violations else 0

@@ -2,10 +2,10 @@
 
 This powers::
 
-    ./book/binder check cli --scope binder-canonical
+    ./binder check cli --scope binder-canonical
 
 The rule it enforces, in one sentence: **every pre-commit hook that targets
-book content must dispatch through ``./book/binder``, not call a raw script.**
+book content must dispatch through ``./binder``, not call a raw script.**
 
 Why this exists
 ---------------
@@ -20,7 +20,7 @@ already ran the same linter as ``code/lego-units`` (retired 2026-06-10).
 What counts as a "book-content hook"
 ------------------------------------
 A *local* hook (``repo: local``) with an explicit ``entry:`` whose ``files:``
-pattern is scoped to ``book/quarto/contents/``. Repo-wide guards (link checks,
+pattern is scoped to ``books/``. Repo-wide guards (link checks,
 mirror sync), CI hygiene, third-party hooks (mdformat, codespell — no local
 ``entry:``), and separate subprojects (vault-cli) are intentionally NOT book
 content and are not inspected.
@@ -28,7 +28,7 @@ content and are not inspected.
 How to satisfy it
 -----------------
 Route the hook through Binder: add a ``Scope(...)`` to the relevant
-``binder check <group>`` and set the hook ``entry`` to ``./book/binder check
+``binder check <group>`` and set the hook ``entry`` to ``./binder check
 <group>``. If a book-content hook genuinely cannot be a Binder scope, add its
 id to ``ALLOWLIST`` below with a one-line justification so the exception is
 explicit and reviewed.
@@ -44,10 +44,10 @@ from typing import List
 import yaml
 
 # Marker that a hook's `files:` pattern is scoped to book chapter content.
-BOOK_CONTENT_MARKER = "book/quarto/contents"
+BOOK_CONTENT_MARKER = "books"
 
 # Prefix that marks an entry as dispatching through the Binder front door.
-BINDER_ENTRY_RE = re.compile(r"^\.?/?book/binder\b")
+BINDER_ENTRY_RE = re.compile(r"^\.?/?binder\b")
 
 # Book-content hooks that are deliberately allowed to bypass Binder.
 # Format: hook-id -> justification. Empty by design: every book-content hook
@@ -132,7 +132,7 @@ def run_canonical(repo_root: Path) -> List[Violation]:
                     suggestion=(
                         f"Route '{hook_id}' through Binder: add a scope to the "
                         f"relevant `binder check <group>` and set entry to "
-                        f"`./book/binder check <group>`. If it genuinely cannot "
+                        f"`./binder check <group>`. If it genuinely cannot "
                         f"be a Binder scope, add '{hook_id}' to ALLOWLIST in "
                         f"book/cli/checks/binder_canonical.py with a justification."
                     ),

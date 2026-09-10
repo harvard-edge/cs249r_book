@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-QMD = Path(__file__).resolve().parents[3] / "book/quarto/contents/vol1/training/training.qmd"
+QMD = Path(__file__).resolve().parents[3] / "books/vol1/training/training.qmd"
 
 # `{python} Class.field_str <word — missing closing backtick before prose word
 BROKEN_REF = re.compile(

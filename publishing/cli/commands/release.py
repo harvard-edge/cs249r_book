@@ -310,7 +310,7 @@ class ReleaseCommand:
         )
         parser.add_argument(
             "--output",
-            help="Write JSON report to this path. Defaults under book/quarto/_build/release/.",
+            help="Write JSON report to this path. Defaults under books/_build/release/.",
         )
         parser.add_argument(
             "--source-only",
@@ -537,7 +537,7 @@ class ReleaseCommand:
         *,
         status: str,
     ) -> dict[str, Any]:
-        binder_label = "book/binder"
+        binder_label = "binder"
         counts: dict[str, int] = {}
         for result in results:
             counts[result.status] = counts.get(result.status, 0) + 1

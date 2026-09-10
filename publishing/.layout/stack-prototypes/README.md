@@ -13,7 +13,7 @@ candidate forms can be compared before anything lands in the book.
 
 `_proto-preamble.tex` mirrors the production geometry: 2.6 cm rung width, the
 0.3 cm cross-cutting spine at x = 2.85–3.15, `\rmfamily` labels, and the four
-volume accent colors read from `publishing/quarto/tex/theme-colors-vol*.tex`.
+volume accent colors read from `books/shared/tex/theme-colors-vol*.tex`.
 The vol3-scale rung helper uses the same 4.8 pt label size as the real
 `tex/agent-stack-vol3.tex`, which is why six rungs fit a column that only holds
 four at vol1/vol2 scale.
@@ -48,4 +48,4 @@ lualatex vol4-stack-variants.tex
 
 These are design artifacts, not book content. Nothing here is wired into any
 Quarto config. When a form is chosen, it becomes a macro in
-`publishing/quarto/tex/` and this directory can be retired.
+`books/shared/tex/` and this directory can be retired.

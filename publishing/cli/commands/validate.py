@@ -1,7 +1,7 @@
 """
 Native validation commands for MLSysBook Binder CLI.
 
-Every `book-*` pre-commit hook dispatches through `./book/binder check <group>`
+Every `book-*` pre-commit hook dispatches through `./binder check <group>`
 so there is one entry point, one error format, and one place to add new
 checks. See the `ValidateCommand` class docstring below for the contract:
 
@@ -14,9 +14,9 @@ checks. See the `ValidateCommand` class docstring below for the contract:
 Pre-commit picks the new scope up automatically once `default=True` —
 no YAML edit needed. Ad-hoc audits use `--all-scopes` or `--scope <name>`.
 
-Some checks still delegate to scripts under book/tools/scripts/ (tables,
+Some checks still delegate to scripts under publishing/tools/scripts/ (tables,
 spelling, epub, sources, grid-tables, images) and to standalone audit
-scripts under book/tools/audit/index/. Prefer new logic in cli/checks/
+scripts under publishing/tools/audit/index/. Prefer new logic in cli/checks/
 with normal imports; see book/cli/README.md "Check implementation layout".
 Legacy `_delegate_script` / importlib paths are being phased out.
 """
@@ -49,8 +49,29 @@ SELF_XREF_SPAN_RE = re.compile(
     r"@[Ss]ec(-[a-zA-Z0-9_-]+)\s+(?:through|to)\s+@[Ss]ec(-[a-zA-Z0-9_-]+)"
 )
 
+# Files that live at the Quarto project root but are not chapter content: the
+# per-volume landing pages, the swapped index, and the 404 page. Before the
+# 2026-09 layout change these sat outside contents/ and so were never scanned;
+# now that the project root and the content root are the same directory they
+# have to be excluded explicitly. Directories whose name starts with "_" are
+# Quarto partials and are skipped for the same reason.
+_NON_CHAPTER_STEMS = {"index", "404"}
+
+
+def _is_chapter_qmd(path) -> bool:
+    """True when a .qmd is real chapter content rather than scaffolding."""
+    name = path.name
+    if name.startswith("index-vol") or path.stem in _NON_CHAPTER_STEMS:
+        return False
+    if any(part.startswith("_") for part in path.parts[:-1]):
+        return False
+    return "_shelved" not in name
+
+
 
 @dataclass
+
+
 class ValidationIssue:
     file: str
     line: int
@@ -239,7 +260,7 @@ EXCLUDED_CITATION_PREFIXES = (
 # grandfathered when the caption-required / label-required scopes landed.
 # A commit that increases any per-file count fails the check; a commit that
 # *decreases* a count is fine (debt going down). Regenerate with:
-#   ./book/binder check tables --scope caption-required --update-baseline
+#   ./binder check tables --scope caption-required --update-baseline
 CAPTIONS_BASELINE_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "tools" / "audit" / "baselines" / "captions_baseline.json"
@@ -355,7 +376,7 @@ class ValidateCommand:
             Scope("contract", "_run_cli_contract",
                   note="public Binder command contract"),
             Scope("binder-canonical", "_run_binder_canonical",
-                  note="book-content pre-commit hooks must dispatch through ./book/binder",
+                  note="book-content pre-commit hooks must dispatch through ./binder",
                   default=True),
         ],
         "refs": [
@@ -702,13 +723,13 @@ class ValidateCommand:
         "index": [
             Scope("placement", "_run_indexes",
                   note='\\index{} not inline with headings/callouts'),
-            # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
+            # Migrated 2026-05-06: was publishing/tools/audit/index/check_anti_patterns.py
             Scope("anti-patterns", "_run_index_anti_patterns",
                   note="anti-patterns from the project index rules §9"),
-            # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
+            # Migrated 2026-05-06: was publishing/tools/audit/index/check_tag_placement.py
             Scope("tag-placement", "_run_index_tag_placement",
                   note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
-            # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
+            # Migrated 2026-05-06: was publishing/tools/audit/index/check_xref_resolves.py
             Scope("xref-resolves", "_run_index_xref_resolves",
                   note="every |see / |seealso target resolves to a real main entry"),
             # Added 2026-05-17: catches \index{} inside Python code fences,
@@ -1244,7 +1265,7 @@ class ValidateCommand:
             if not path.is_absolute():
                 path = (Path.cwd() / path).resolve()
             return path
-        base = self.config_manager.book_dir / "contents"
+        base = self.config_manager.book_dir
         if vol1:
             return base / "vol1"
         if vol2:
@@ -1279,7 +1300,7 @@ class ValidateCommand:
         if root.is_file():
             return [root] if root.suffix == ".qmd" else []
         return sorted(
-            p for p in root.rglob("*.qmd") if "_shelved" not in p.name
+            p for p in root.rglob("*.qmd") if _is_chapter_qmd(p)
         )
 
     def _bib_files(self, root: Path) -> List[Path]:
@@ -1327,7 +1348,7 @@ class ValidateCommand:
         )
 
     def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
-        """Assert book-content pre-commit hooks dispatch through ./book/binder."""
+        """Assert book-content pre-commit hooks dispatch through ./binder."""
         start = time.time()
         from cli.checks import binder_canonical
 
@@ -1693,7 +1714,7 @@ class ValidateCommand:
         except ValueError:
             return None
         parts = set(rel.parts)
-        contents = self.config_manager.book_dir / "contents"
+        contents = self.config_manager.book_dir
         for vol in ("vol3", "vol4"):
             if vol in parts:
                 bib_file = contents / f"references-{vol}.bib"
@@ -3590,7 +3611,7 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Captionless floats: pipe tables, markdown-image figures, and #lst-
     # listings that lack the required caption/label/lst-cap. Baseline
-    # at book/tools/audit/baselines/captions_baseline.json grandfathers
+    # at publishing/tools/audit/baselines/captions_baseline.json grandfathers
     # pre-existing violations; new ones block the commit.
     # ------------------------------------------------------------------
 
@@ -4978,11 +4999,11 @@ class ValidateCommand:
         # Load summaries
         summaries_keys: Set[str] = set()
         possible_paths = [
-            self.config_manager.book_dir / "contents" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "contents" / "vol1" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "contents" / "vol2" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "contents" / "vol3" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "contents" / "vol4" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "vol1" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "vol2" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "vol3" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "vol4" / "parts" / "summaries.yml",
         ]
 
         try:
@@ -5056,7 +5077,7 @@ class ValidateCommand:
             from book.cli.checks.concept_maps import check_concept_maps
 
         repo_root = self.config_manager.root_dir
-        contents_dir = root if "contents" in str(root) else repo_root / "book" / "quarto" / "contents"
+        contents_dir = root if "contents" in str(root) else repo_root  / "books"
         findings = check_concept_maps(contents_dir, repo_root)
         for finding in findings:
             issues.append(
@@ -5739,7 +5760,7 @@ class ValidateCommand:
         'percentage points / pp' are never flagged; captions (prose) keep the
         spelled-out word.
 
-        Auto-fixable: ``./book/binder format percent-tables``.
+        Auto-fixable: ``./binder format percent-tables``.
         """
         from cli.checks.percent_tables import find_in_text
 
@@ -5757,7 +5778,7 @@ class ValidateCommand:
                         message=(
                             "Use the % symbol, not the word 'percent', inside "
                             f"tables: '{hit.match}' → '{hit.replacement}'. Run "
-                            "'./book/binder format percent-tables' to auto-fix."
+                            "'./binder format percent-tables' to auto-fix."
                         ),
                         severity="error",
                         context=hit.context,
@@ -6054,7 +6075,7 @@ class ValidateCommand:
         repo_root = self.config_manager.root_dir
         html_root = root
         if not root.is_file() and not list(iter_html_files([root])):
-            html_root = repo_root / "book" / "quarto" / "_build" / "html-audit"
+            html_root = repo_root  / "books" / "_build" / "html-audit"
 
         issues: List[ValidationIssue] = []
         if not html_root.exists():
@@ -6182,7 +6203,7 @@ class ValidateCommand:
         cross-references, footnotes, and attributes, and skips glossary files
         (their keys follow the §10.14 lowercase convention). Context-sensitive
         adj/predicate pairs (compute-bound, open-source, real-time) are out of
-        scope. Auto-fix: ``./book/binder format mitpress-terms``.
+        scope. Auto-fix: ``./binder format mitpress-terms``.
         """
         from cli.checks.mitpress_terms import find_in_text, should_skip_file
 
@@ -6201,7 +6222,7 @@ class ValidateCommand:
                         message=(
                             f"Canonical spelling (§10.7): '{hit.match}' → "
                             f"'{hit.replacement}'. Auto-fix with "
-                            "'./book/binder format mitpress-terms'."
+                            "'./binder format mitpress-terms'."
                         ),
                         severity="error",
                         context=hit.context,
@@ -6793,7 +6814,7 @@ class ValidateCommand:
         from cli.checks.math_canonical import audit
 
         start = time.time()
-        qmd_files = sorted(root.rglob("*.qmd")) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f)) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
         violations = audit([root] if root.is_dir() else qmd_files or [root])
 
         issues: List[ValidationIssue] = []
@@ -7861,7 +7882,7 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         # Classify by path rather than by a constructed directory. The previous
-        # form built `root / "quarto" / "contents" / "vol1"`, which never
+        # form built `root  / "books" / "vol1"`, which never
         # resolved for the roots this command is actually invoked with, so the
         # early return below fired every time and the check reported success
         # having scanned 0 files. Two cross-volume table refs reached the EPUB
@@ -8583,7 +8604,7 @@ class ValidateCommand:
     # check catches regressions. Intentional lowercase prefixes
     # (brand names like cuDNN/gRPC/vLLM, math variables like k-Center,
     # SI units like pJ/MAC) are declared in
-    # book/tools/scripts/mit_press/footnote_caps_allowlist.txt.
+    # publishing/tools/scripts/mit_press/footnote_caps_allowlist.txt.
     # The standalone script (with a --fix flag) remains the single
     # source of truth; this method imports and reuses its core
     # logic so the check and the fixer cannot drift apart.
@@ -8964,7 +8985,7 @@ class ValidateCommand:
             from book.cli.checks.table_content import validate_file
 
         t0 = time.time()
-        qmd_files = sorted(root.rglob("*.qmd"))
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             try:
@@ -9004,7 +9025,7 @@ class ValidateCommand:
         except ImportError:
             from book.cli.checks.spelling_prose import check_file
 
-        qmd_files = sorted(root.rglob("*.qmd"))
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             for err in check_file(qmd):
@@ -9035,7 +9056,7 @@ class ValidateCommand:
         except ImportError:
             from book.cli.checks.spelling_tikz import check_file
 
-        qmd_files = sorted(root.rglob("*.qmd"))
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             for err in check_file(qmd):
@@ -9073,7 +9094,7 @@ class ValidateCommand:
     def _run_epub_hygiene(self, root: Path, *, fix: bool = False) -> ValidationRunResult:
         """Run the pre-commit-grade EPUB source hygiene checks.
 
-        Walks `book/quarto/contents/**/*.svg` and `book/quarto/**/*.bib`
+        Walks `books/**/*.svg` and `books/**/*.bib`
         looking for the four source-level patterns that produced FATAL
         or ERROR-level epubcheck failures in April 2026:
 
@@ -9319,7 +9340,7 @@ class ValidateCommand:
     ) -> ValidationRunResult:
         """Run the W3C `epubcheck` validator against the built EPUBs.
 
-        Discovers every `book/quarto/_build/epub-vol*/*.epub` (most recent
+        Discovers every `books/_build/epub-vol*/*.epub` (most recent
         per volume), invokes `epubcheck --json -` on each, parses the
         JSON message array, and converts each message to a
         `ValidationIssue`. Also emits GitHub Actions `::error` annotations
@@ -9472,7 +9493,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root / "book" / "quarto"
+        quarto_dir = repo_root  / "books"
         # An explicit --log wins; otherwise fall back to the log the build left
         # beside the .tex, so log-based gates run without extra ceremony.
         log = Path(log_path) if log_path else None
@@ -9533,7 +9554,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root / "book" / "quarto"
+        quarto_dir = repo_root  / "books"
 
         volumes: List[str] = []
         if vol1:
@@ -9588,7 +9609,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root / "book" / "quarto"
+        quarto_dir = repo_root  / "books"
 
         volumes: List[str] = []
         if vol1:
@@ -9641,7 +9662,7 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root / "book" / "quarto"
+        quarto_dir = repo_root  / "books"
 
         volumes: List[str] = []
         if vol1:
@@ -9796,7 +9817,7 @@ class ValidateCommand:
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
         """Ensure contents/ has the expected release-time volume structure."""
         t0 = time.time()
-        # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
+        # Resolve to contents dir: root may be contents, or vol1, or vol2
         if root.name in ("vol1", "vol2") and root.parent.name == "contents":
             contents_dir = root.parent
         else:
@@ -10111,7 +10132,7 @@ class ValidateCommand:
             from book.cli.checks.grid_tables import check_grid_tables
 
         t0 = time.time()
-        qmd_files = sorted(root.rglob("*.qmd"))
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             try:
@@ -10147,7 +10168,7 @@ class ValidateCommand:
         """
         from cli.commands.headings import find_violations
         t0 = time.time()
-        qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
+        qmd_files = [str(f) for f in sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))]
         violations = find_violations(qmd_files)
         issues: List[ValidationIssue] = []
         for v in violations:
@@ -10203,11 +10224,11 @@ class ValidateCommand:
     }
 
     def _book_bib_scopes(self) -> List[_BibScope]:
-        contents = self.config_manager.book_dir / "contents"
+        contents = self.config_manager.book_dir
         shared_bib = contents / "references.bib"
         return [
-            self._BibScope("vol1", ("contents/vol1/",), (shared_bib,)),
-            self._BibScope("vol2", ("contents/vol2/",), (shared_bib,)),
+            self._BibScope("vol1", ("vol1/",), (shared_bib,)),
+            self._BibScope("vol2", ("vol2/",), (shared_bib,)),
             self._BibScope(
                 "book-shared",
                 ("contents/frontmatter/", "contents/backmatter/"),
@@ -10234,7 +10255,7 @@ class ValidateCommand:
 
     def _book_qmd_files_for_bib_root(self, root: Path) -> List[Path]:
         """Return book QMD files relevant to a bibliography check."""
-        contents = self.config_manager.book_dir / "contents"
+        contents = self.config_manager.book_dir
         if root.is_file() and root.suffix == ".qmd":
             return [root] if self._book_bib_scope_for_qmd(root) is not None else []
 
@@ -10543,7 +10564,7 @@ class ValidateCommand:
         }
         return suggestions.get(
             rule,
-            f"Fix @{key} per .claude/rules/bib-check.md, then rerun ./book/binder check bib --json.",
+            f"Fix @{key} per .claude/rules/bib-check.md, then rerun ./binder check bib --json.",
         )
 
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
@@ -10551,7 +10572,7 @@ class ValidateCommand:
 
         Native import of cli.checks.bib_lint — no subprocess. Mirrors the
         original `bib_lint --check` semantics:
-        only NEW errors (not in book/tools/bib_lint_baseline.json) block;
+        only NEW errors (not in publishing/tools/bib_lint_baseline.json) block;
         baseline-grandfathered errors are silenced. The compatibility script
         remains callable as a standalone CLI for its --fix / --baseline
         modes.
@@ -10679,7 +10700,7 @@ class ValidateCommand:
                         message=(
                             f"New bibliography style issue: @{entry.entry_type}{{{v.entry_key}}} "
                             f"— {v.message}. Current debt is grandfathered in "
-                            "book/tools/bib_lint_style_baseline.json; new issues must be fixed "
+                            "publishing/tools/bib_lint_style_baseline.json; new issues must be fixed "
                             "or explicitly accepted by updating that baseline after review."
                         ),
                         severity="error",
@@ -11048,7 +11069,7 @@ class ValidateCommand:
 
         # collect (key, line, kind, target_url) for the shared book bib only
         targets = []
-        shared = root / "book" / "quarto" / "contents" / "references.bib"
+        shared = root  / "books" / "references.bib"
         bib_files = [shared] if shared.exists() else self._bib_files(root)
         for bib_path in bib_files:
             try:
@@ -11117,7 +11138,7 @@ class ValidateCommand:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Native audit-check adapters (book/tools/audit/checks/*).
+    # Native audit-check adapters (publishing/tools/audit/checks/*).
     #
     # Each of these imports the matching check module from the audit
     # package and invokes its `check(path, text, scope, counter)` entry
@@ -11150,14 +11171,14 @@ class ValidateCommand:
     ) -> ValidationRunResult:
         """Import an audit.checks.* module and run its `check()` per QMD file.
 
-        The audit package lives at `book/tools/audit/`. It uses relative
+        The audit package lives at `publishing/tools/audit/`. It uses relative
         imports against its own `audit.*` top-level package, so the parent
-        directory (`book/tools`) must be on sys.path for the import to
+        directory (`publishing/tools`) must be on sys.path for the import to
         resolve. This method does the path-prepend once per call.
         """
         import importlib
         import sys as _sys
-        # Prefer native book/cli/audit, fallback to book/tools
+        # Prefer native book/cli/audit, fallback to publishing/tools
         cli_root = Path(__file__).resolve().parent.parent
         tools_root = cli_root.parent / "tools"
         for p in (cli_root, tools_root):
@@ -11167,7 +11188,7 @@ class ValidateCommand:
         mod = importlib.import_module(module_path)
 
         t0 = time.time()
-        qmd_files = sorted(root.rglob("*.qmd"))
+        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
         issues: List[ValidationIssue] = []
         counter = 0
         for qmd in qmd_files:
@@ -11307,7 +11328,7 @@ class ValidateCommand:
                 _sys.path.insert(0, path_str)
         scan_mod = importlib.import_module("audit.scan")
 
-        contents_root = cli_root.parent / "quarto" / "contents"
+        contents_root = cli_root.parent  / "books"
         resolved_root = root.resolve()
         if resolved_root == (contents_root / "vol1").resolve():
             scope = "vol1"
@@ -11360,12 +11381,12 @@ class ValidateCommand:
         """Notation conventions vs the Notations chapter (BW, R_peak, L_lat, D_vol).
 
         Routes through audit.scan.scan() so the persistent notation
-        accept-list at book/tools/audit/accepted_fps_notation.json is
+        accept-list at publishing/tools/audit/accepted_fps_notation.json is
         applied (covers Little's Law L=concurrency, LogP model L=network
         latency, subscripted L_{net}/L_{queue}, P=probability function,
         etc.). The detection rules live in audit.checks.notation_consistency;
         this method is the binder front door — pure Python imports, no
-        subprocess. Replaces the standalone book/tools/audit/run_notation_consistency.py.
+        subprocess. Replaces the standalone publishing/tools/audit/run_notation_consistency.py.
         """
         import importlib
         import sys as _sys
@@ -11713,7 +11734,7 @@ class ValidateCommand:
         return ValidationRunResult(
             name="index-anti-patterns",
             description="\\index{} anti-patterns (corpus-level)",
-            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11735,7 +11756,7 @@ class ValidateCommand:
         return ValidationRunResult(
             name="index-tag-placement",
             description="\\index{} forbidden placement (bold/code/headings)",
-            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11757,7 +11778,7 @@ class ValidateCommand:
         return ValidationRunResult(
             name="index-xref-resolves",
             description="\\index{} see/seealso target resolution",
-            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11779,7 +11800,7 @@ class ValidateCommand:
         return ValidationRunResult(
             name="index-encap-conflicts",
             description="\\index{} makeindex encap conflict check",
-            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11798,7 +11819,7 @@ class ValidateCommand:
             text for HTML tooltips / PDF bookmarks / EPUB metadata; leaks
             as literal text).
 
-        Wraps the native audit check at book/tools/audit/checks/index_placement.py.
+        Wraps the native audit check at publishing/tools/audit/checks/index_placement.py.
         """
         return self._run_audit_check(
             root, "audit.checks.index_placement",
@@ -11988,19 +12009,19 @@ class ValidateCommand:
     # fires again, which is the intent.
     BINARY_UNIT_ALLOWLIST = {
         (
-            "contents/vol1/backmatter/appendix_machine.qmd",
+            "vol1/backmatter/appendix_machine.qmd",
             "fmt_qty(tpuv5_cap, GiB, precision=0, commas=False)",
         ),
         (
-            "contents/vol1/backmatter/appendix_machine.qmd",
+            "vol1/backmatter/appendix_machine.qmd",
             "fmt_qty(tpuv5_sram, MiB, precision=0, commas=False)",
         ),
         (
-            "contents/vol1/frameworks/frameworks.qmd",
+            "vol1/frameworks/frameworks.qmd",
             "fmt_memory(fp16, unit=GiB, commas=False)",
         ),
         (
-            "contents/vol1/frameworks/frameworks.qmd",
+            "vol1/frameworks/frameworks.qmd",
             "fmt_memory(remaining, unit=GiB, commas=False)",
         ),
     }
@@ -12361,9 +12382,9 @@ class ValidateCommand:
         # the full 1,010-page visual baseline verifies the resulting layout.
         # Keep the exceptions exact so other non-100 vectors still fail.
         approved_layout_vectors = {
-            ("contents/vol1/frontmatter/_conventions.qmd", (17, 85)),
-            ("contents/vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("contents/vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/frontmatter/_conventions.qmd", (17, 85)),
+            ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
+            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
         }
 
         for file in files:
@@ -12721,7 +12742,7 @@ class ValidateCommand:
         """Scan PDF text for UserWarning strings (post-build audit)."""
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root / "book" / "quarto"
+        quarto_dir = repo_root  / "books"
         issues: List[ValidationIssue] = []
 
         volumes: List[str] = []
@@ -12809,7 +12830,7 @@ class ValidateCommand:
         """Scan built HTML for literal {python} that leaked through Quarto."""
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        html_audit_dir = repo_root / "book" / "quarto" / "_build" / "html-audit"
+        html_audit_dir = repo_root  / "books" / "_build" / "html-audit"
         issues: List[ValidationIssue] = []
 
         if not html_audit_dir.is_dir():

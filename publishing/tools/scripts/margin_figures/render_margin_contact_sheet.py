@@ -25,7 +25,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment guard
 
 
 ROOT = Path(__file__).resolve().parents[4]
-CONTENTS = ROOT / "book/quarto/contents"
+CONTENTS = ROOT / "books"
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\((images/svg/[^)]+\.svg)\)")
 
 

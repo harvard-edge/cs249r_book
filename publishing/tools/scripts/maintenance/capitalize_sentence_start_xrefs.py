@@ -13,13 +13,13 @@ the capitalization.
 
 Usage:
     # Dry run (report only):
-    python3 capitalize_sentence_start_xrefs.py --dry-run book/quarto/contents/vol1/
+    python3 capitalize_sentence_start_xrefs.py --dry-run books/vol1/
 
     # Apply changes:
-    python3 capitalize_sentence_start_xrefs.py book/quarto/contents/vol1/
+    python3 capitalize_sentence_start_xrefs.py books/vol1/
 
     # Single file:
-    python3 capitalize_sentence_start_xrefs.py book/quarto/contents/vol1/conclusion/conclusion.qmd
+    python3 capitalize_sentence_start_xrefs.py books/vol1/conclusion/conclusion.qmd
 """
 
 import argparse

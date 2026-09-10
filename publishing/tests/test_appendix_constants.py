@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GENERATOR = REPO_ROOT / "book/tools/audit/generate_appendix_constants.py"
+GENERATOR = REPO_ROOT / "publishing/tools/audit/generate_appendix_constants.py"
 
 def _load_generator():
     spec = importlib.util.spec_from_file_location("generate_appendix_constants", GENERATOR)
