@@ -89,7 +89,7 @@ def create_svg():
     
     svg += f'<rect x="380" y="195" width="220" height="60" rx="2" fill="{c_light_grey}" stroke="{c_dark_grey}" />\n'
     svg += f'<text x="395" y="215" class="sub-title">Bootloader Verification</text>\n'
-    svg += f'<text x="395" y="235" class="box-text">Validates hashes & signatures</text>\n'
+    svg += f'<text x="395" y="235" class="box-text">Validates hashes &amp; signatures</text>\n'
     svg += f'<text x="395" y="250" class="box-text">against eFuse public keys</text>\n'
     
     svg += path(490, 255, 490, 285)
