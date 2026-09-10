@@ -118,8 +118,7 @@ reusable workflow never assumes a particular build tool.
 - One-shot scripts or internal tools that don't get cited or deployed.
 - Documentation that lives inside another project's repo (use the
   outer project's release identity).
-- Anything that doesn't run through a publish workflow at all
-  (Periodic-Table, currently — needs a publish workflow first).
+- Anything that doesn't run through a publish workflow at all.
 
 ## Validating an existing release
 

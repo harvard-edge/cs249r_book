@@ -365,7 +365,7 @@ Canonical namespace for repairs and housekeeping. `maintain` is an alias for `fi
 - `./binder/binder headings check|dry-run|apply` — headline-case enforcement (also runs as `check headers --scope case`)
 - `./binder/binder check epub --scope hygiene --fix` — auto-repair SVG/BibTeX EPUB source issues
 - `./binder/binder bib mechanical|normalize|sync|clean|update` — bibliography tooling
-- `./binder/binder layout tables --vol1|--vol2` — render a table-only PDF audit plus contact sheets under `book/.layout/tables/`
+- `./binder/binder layout tables --vol1|--vol2` — render a table-only PDF audit plus contact sheets under `binder/.layout/tables/`
 
 ### Layout diagnostics
 

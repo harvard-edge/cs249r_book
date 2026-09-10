@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTENTS = REPO_ROOT  / "books"
 
 sys.path.insert(0, str(REPO_ROOT))
-sys.path.insert(0, str(REPO_ROOT / "packages" / "mlsysim"))
+sys.path.insert(0, str(REPO_ROOT / "mlsysim"))
 
 # Repeats that are legitimate English or table/markup artefacts.
 ALLOW = {"had", "that", "no", "very", "long", "many", "s", "d", "t", "the"}

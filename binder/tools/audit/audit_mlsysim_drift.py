@@ -91,7 +91,7 @@ CANONICAL = [
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
     ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
     # GPT-2 Small (2026-06-10 audit add — Radford 2019; guarded in
-    # packages/mlsysim/tests/test_physics_bounds.py::test_transformer_curated_specs)
+    # mlsysim/tests/test_physics_bounds.py::test_transformer_curated_specs)
     ("gpt2_small_params_m", 124, 0.02, "Models.Language.GPT2_Small.parameters (in M)"),
     ("gpt2_small_params",   124000000, 0.001, "Models.Language.GPT2_Small.parameters"),
     ("gpt2_small_layers",   12,  0.001, "Models.Language.GPT2_Small.layers"),

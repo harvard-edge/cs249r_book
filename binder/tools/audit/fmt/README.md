@@ -12,7 +12,7 @@ This is separate from the MIT Press editorial audit loop documented in
 | Layer | What | Tool / code |
 |-------|------|-------------|
 | **Source** | Explicit author intent | `fmt(x, precision=N)`, `fmt_int(x)` in QMD cells |
-| **Runtime** | Fail on bad precision at exec | `packages/mlsysim/mlsysim/fmt.py` `_check_fmt_precision` |
+| **Runtime** | Fail on bad precision at exec | `mlsysim/mlsysim/fmt.py` `_check_fmt_precision` |
 | **Static + preview + HTML** | Catch what still slips through | Scripts in this directory |
 
 ## When to use what in QMD
@@ -25,20 +25,20 @@ This is separate from the MIT Press editorial audit loop documented in
 
 ## Per-chapter workflow
 
-Run from **repo root**. Set `PYTHONPATH=packages/mlsysim` for any script that execs
+Run from **repo root**. Set `PYTHONPATH=mlsysim` for any script that execs
 chapter cells.
 
 ```bash
 CH=books/vol1/training/training.qmd   # example
 
 # 1. Auto-fix fmt() guard failures (traceback line numbers)
-PYTHONPATH=packages/mlsysim python3 binder/tools/audit/fmt/fix_precision.py "$CH"
+PYTHONPATH=mlsysim python3 binder/tools/audit/fmt/fix_precision.py "$CH"
 
 # 2. Fix assignments that still render as *.0 in prose preview
-PYTHONPATH=packages/mlsysim python3 binder/tools/audit/fmt/fix_spurious_prose.py "$CH"
+PYTHONPATH=mlsysim python3 binder/tools/audit/fmt/fix_spurious_prose.py "$CH"
 
 # 3. Prose preview (fast; no Quarto build)
-PYTHONPATH=packages/mlsysim python3 binder/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
+PYTHONPATH=mlsysim python3 binder/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
 
 # 4. Static fmt-family checks (suffix discipline, prefer_fmt_int, etc.)
 python3 binder/tools/audit/audit_math_canonical.py "$CH"
@@ -99,7 +99,7 @@ committed. Use the tools above for repeatable audits.
 
 ## Related
 
-- `packages/mlsysim/mlsysim/fmt.py` — `fmt()`, `fmt_int()`, precision guards
+- `mlsysim/mlsysim/fmt.py` — `fmt()`, `fmt_int()`, precision guards
 - [`binder/docs/LEGO_CELLS.md`](../../../docs/LEGO_CELLS.md) — inline `{python}` cell placement and review contract
 - Pre-commit: `book-check-math` (includes `canonical` scope), `book-check-code` (echo, LEGO)
 

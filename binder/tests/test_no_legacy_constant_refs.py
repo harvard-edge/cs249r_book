@@ -9,15 +9,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "binder" / "tools" / "audit" / "artifacts" / "registry_migration_manifest.json"
-CONSTANTS_PATH = REPO_ROOT / "packages" / "mlsysim" / "mlsysim" / "core" / "constants.py"
+CONSTANTS_PATH = REPO_ROOT / "mlsysim" / "mlsysim" / "core" / "constants.py"
 
 SCAN_ROOTS = (
     REPO_ROOT  / "books",
-    REPO_ROOT / "packages" / "mlsysim" / "mlsysim",
+    REPO_ROOT / "mlsysim" / "mlsysim",
     REPO_ROOT / "labs",
-    REPO_ROOT / "packages" / "mlsysim" / "examples",
-    REPO_ROOT / "packages" / "mlsysim" / "docs",
-    REPO_ROOT / "packages" / "mlsysim" / "tutorial",
+    REPO_ROOT / "mlsysim" / "examples",
+    REPO_ROOT / "mlsysim" / "docs",
+    REPO_ROOT / "mlsysim" / "tutorial",
 )
 
 SKIP_PATH_SUBSTRINGS = (

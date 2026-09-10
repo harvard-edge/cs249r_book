@@ -30,7 +30,7 @@ PROJECTS = {
     "book": "binder/",
     "kits": "kits/",
     "labs": "labs/",
-    "tinytorch": "packages/tinytorch/",
+    "tinytorch": "tinytorch/",
     "staffml": "staffml/",
 }
 

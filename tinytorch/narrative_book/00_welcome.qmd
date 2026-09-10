@@ -1,0 +1,148 @@
+# Introduction: The Reference Machine Learning System {.unnumbered}
+
+> Harvard's TinyTorch is to machine learning systems as MIT's xv6 is to operating systems.
+
+Systems courses have long taught complex software through a complete reference implementation. Operating systems students have MIT's xv6, a reimplementation of Sixth Edition Unix in a few thousand lines of C, small enough to read in a single semester and real enough to boot on physical hardware. Database students have SQLite. Compiler students have Wirth's PL/0 and Appel's Tiger.
+
+Machine learning systems have had no equivalent. A student who wants to understand what `loss.backward()` actually does is left with two unsatisfactory choices. One is to treat the framework as an oracle and trust the API (`import torch`). The other is to open industrial PyTorch, which spans millions of lines of C++, CUDA, and Python, and drown in layers of template metaprogramming and dispatch tables long before finding the twenty lines that compute a gradient.
+
+Harvard's TinyTorch provides the missing reference foundation. It contains every core mechanism of a modern deep learning runtime, from strided tensors and reverse-mode automatic differentiation through multi-head attention to 8-bit quantization and the KV cache, in twenty clean Python modules you can read and run end to end. This book is the reading guide.
+
+---
+
+## How a Framework Engineer Thinks
+
+Most people meet machine learning through its mathematics. There is a loss $\mathcal{L}$, a weight matrix $W$, an activation $\sigma(z)$, and an update rule $\theta \leftarrow \theta - \eta \nabla \mathcal{L}$. A framework engineer sees the same objects and asks a different set of questions. Not what the equation says, but how a computer carries it out. Where do the numbers live, what does it cost to move them, and what has to be true for the answer to come out right?
+
+Four of those questions recur so often in this book that they deserve names before the first chapter.
+
+::: {.callout-important title="Four Questions a Framework Engineer Asks"}
+1. **Why does this abstraction exist?** What goes wrong without it? Every mechanism in a framework is there because something simpler failed.
+2. **How is it laid out in memory?** Where are the bytes, are they next to each other, and what bookkeeping (a shape, a set of strides, a pointer) tells the code how to find them?
+3. **Why this representation and not another?** What does the design make cheap, and what does it make expensive?
+4. **Where does the time go?** Is the operation limited by arithmetic, or by waiting for data to arrive, and how would you tell the difference?
+:::
+
+Take the tensor, the first thing we build. To a practitioner, a tensor is a multi-dimensional array. To the hardware, there is no such thing. Memory is one long row of bytes, and every "row" and "column" of a matrix is a fiction that software maintains. The tensor exists (question 1) to give that flat buffer a coordinate system. It is represented (question 2) as a buffer plus a shape and a set of strides that convert a coordinate into an offset. That representation was chosen (question 3) because it makes transposes, reshapes, and slices free. Changing the strides changes the view without touching a single byte. And the cost of an operation (question 4) then depends on whether the elements it touches sit next to each other in the buffer or are scattered through it.
+
+Every chapter applies the same four questions to a new mechanism. By the end you will have built the framework, and you will have practiced the habit of interrogating one.
+
+### Systemic Contracts and the Forward-Backward Invariant
+
+Abstractions in a framework do not live in isolation. A design decision made to optimize forward execution sets up an invariant that another part of the runtime must fulfill.
+
+Broadcasting is the canonical example. When a linear layer adds a bias vector of shape $(D,)$ to an activation batch of shape $(B, D)$, copying the vector $B$ times across memory would waste memory bandwidth and pollute cache lines. A framework avoids that copy through stride manipulation, assigning the broadcast dimension a stride of zero so every row reads the same buffer addresses without allocating new memory.
+
+That forward efficiency creates an obligation during backward propagation. When gradients flow in reverse during automatic differentiation, the incoming gradient $\nabla \mathbf{Y}$ has shape $(B, D)$, but the bias parameter $\mathbf{b}$ has shape $(D,)$. Passing the gradient backward directly would crash on shape mismatches and lose per-sample contributions. The runtime must therefore reduce the gradient, summing incoming values across every dimension stretched during the forward pass.
+
+Broadcasting is never treated as mere syntax convenience. Wherever an abstraction appears, this text traces its physical lifecycle: how it sits in memory, how it executes without redundant copies on the forward pass, and how automatic differentiation balances the books on the backward pass.
+
+---
+
+## Progressive Disclosure
+
+An operating systems course does not open with page tables and spinlocks. It starts with a flat address space and a single process, and adds each mechanism only after the one beneath it is understood. This book follows the same discipline. Each chapter uses only what earlier chapters built, and each mechanism arrives with the problem that forces it. There are no forward references beyond an occasional sentence pointing at where an idea returns.
+
+The roadmap in @tbl-pedagogical-roadmap names, in plain terms, what each chapter builds and the question it answers.
+
+| Chapter | Module | What you build | The question it answers |
+| :--- | :--- | :--- | :--- |
+| **01. Tensors** | `src/01_tensor/` | A multi-dimensional array over a flat buffer, with a shape and strides | How can a matrix live in one-dimensional memory, and why is a transpose free? |
+| **02. Activations** | `src/02_activations/` | The nonlinear functions (ReLU, sigmoid, GELU) applied between layers | Why does a stack of linear layers collapse into one, and what prevents the collapse? |
+| **03. Layers** | `src/03_layers/` | Linear layers with weights and biases, plus dropout | How are parameters organized and initialized, and what changes between training and inference? |
+| **04. Losses** | `src/04_losses/` | Cross-entropy and its relatives, computed without overflow | How do predictions become one number to minimize, without floating point blowing up? |
+| **05. DataLoader** | `src/05_dataloader/` | Datasets, per-epoch shuffling, and collating samples into batches | How do separate samples become a stream of batches, and why does the order matter? |
+| **06. Autograd** | `src/06_autograd/` | Reverse-mode automatic differentiation on a recorded tape | What does `loss.backward()` actually do? |
+| **07. Optimizers** | `src/07_optimizers/` | Gradient descent with momentum, and AdamW | Why is plain gradient descent slow, and what do adaptive optimizers change? |
+| **08. Training Loop** | `src/08_training/` | The zero, forward, loss, backward, step loop, with clipping and schedules | Why must those five steps run in exactly that order? |
+| **Milestone I** | Modules 01 to 08 | XOR and handwritten digits, learned by a two-layer network | Can the engine you built reproduce the 1986 result that ended the first AI winter? |
+| **09. Convolutions** | `src/09_convolutions/` | Two-dimensional convolution, rewritten as a matrix multiply | How does a network see images, and why is convolution implemented as matmul? |
+| **10. Tokenization** | `src/10_tokenization/` | Byte-pair encoding, which turns text into integer tokens | How does text become numbers, and why subwords rather than characters or words? |
+| **11. Embeddings** | `src/11_embeddings/` | Lookup tables from token IDs to vectors, plus position encodings | How does an integer token become something a network can learn from, and how does the model know word order? |
+| **12. Attention** | `src/12_attention/` | Scaled dot-product attention with a causal mask | How does each token decide which earlier tokens to look at? |
+| **13. Transformers** | `src/13_transformers/` | The GPT-2 style block, stacked into a model | How do attention, feed-forward layers, normalization, and residual connections fit together? |
+| **Milestone II** | Modules 09 to 13 | A small language model, trained and then sampled from | Can the architecture you built learn to write? |
+| **14. Profiling** | `src/14_profiling/` | Timing and counting tools, and the roofline model | Where does the time go, and is an operation limited by arithmetic or by memory? |
+| **15. Quantization** | `src/15_quantization/` | Converting 32-bit floats to 8-bit integers | How much precision can you discard, and what do you gain for it? |
+| **16. Compression** | `src/16_compression/` | Pruning, low-rank factorization, and distillation | How do you shrink a model, and what accuracy does each method cost? |
+| **17. Acceleration** | `src/17_acceleration/` | Fusing operations so intermediate results never round-trip through memory | Why is a chain of small operations slower than one combined operation? |
+| **18. The KV Cache** | `src/18_memoization/` | Caching attention keys and values during generation | Why does each generated token get slower than the last, and how do you stop that? |
+| **19. Benchmarking** | `src/19_benchmarking/` | Measurement discipline: warmup, repetition, and percentiles | How do you measure a speedup you can trust? |
+| **20. The Capstone** | `src/20_capstone/` | Quantization, pruning, fusion, and caching, combined | Do the individual speedups multiply when stacked? |
+| **Milestone III** | Modules 14 to 19 | A benchmark of the optimized model against the baseline on accuracy, memory, and latency | Did the optimizations pay off on all three axes at once? |
+| **21. Modern Stack** | No new module | A tour of Triton, compilers, and custom silicon | What do production systems do that TinyTorch does not, and why? |
+
+: The TinyTorch roadmap. Each chapter maps to one source module under `tinytorch/src/`; milestones integrate the modules that precede them. {#tbl-pedagogical-roadmap tbl-colwidths="[14,18,32,36]"}
+
+The order is the argument. When you reach operator fusion in Chapter 17, you will already have measured, in Chapter 14, what it costs to write an intermediate result to memory and read it back. When you build the cache in Chapter 18, you will have counted, in Milestone II, how much every generated token recomputes. Nothing is introduced before the reader has felt the problem it solves.
+
+---
+
+## What TinyTorch Is
+
+TinyTorch is twenty Python modules under `tinytorch/src/`, one per chapter from 01 to 20. Counted as executable Python, with the notebook prose, comments, and docstrings set aside, the modules total about 12,000 lines. Roughly 7,500 of those are the framework itself; the rest are the unit tests and demonstrations that sit beside the code in each file. A separate `tests/` tree holds about a hundred more test files.
+
+The modules are NumPy-backed. A TinyTorch `Tensor` wraps a NumPy array, and elementwise arithmetic, matrix multiplication, and reductions call into NumPy. TinyTorch does not depend on PyTorch, TensorFlow, or JAX, but it is not a from-the-bytes-up implementation either, and this book does not pretend otherwise. NumPy handles the inner loops. TinyTorch is where the framework mechanisms live: the tape that records operations for backpropagation, the optimizer state, the training loop, the attention block, the quantizer, the cache.
+
+The listings in this book are extracted directly from the core functions and classes you implement in TinyTorch (`tinytorch/src/`). In the tradition of the xv6 commentary, we do not present synthetic toy models or sweep edge cases under the rug. When we explain tensor mechanics, we walk through the real `Tensor` methods. When we explain autograd, we walk through the exact `_reduce_broadcast_grad` helper and backward functions that build and traverse the graph. By setting aside peripheral scaffolding, such as test assertions, grading tags, and diagnostic logging, each listing isolates the essential algorithmic and systems logic. What you study in this commentary is the exact code that boots and runs your framework in the lab.
+
+The modules and the book are organized in four parts, summarized in @tbl-architectural-tiers.
+
+| Part | Chapters | What it covers |
+| :--- | :--- | :--- |
+| **Part I: The Core Engine** | 1 to 8, Milestone I | Tensors, activations, layers, losses, data loading, automatic differentiation, optimizers, and the training loop. Everything needed to train a small network from scratch. |
+| **Part II: Deep Architectures** | 9 to 13, Milestone II | Convolutions for images. Tokenization, embeddings, attention, and the transformer block for text, ending in a small GPT-style language model. |
+| **Part III: Systems and Acceleration** | 14 to 20, Milestone III | Measuring where time goes, then recovering it: quantization, compression, operator fusion, the KV cache, and honest benchmarking, combined in a capstone. |
+| **Part IV: Extensions** | 21 | What production frameworks, compilers, and accelerators do beyond TinyTorch, and why. |
+
+: The four parts of TinyTorch and of this book. {#tbl-architectural-tiers tbl-colwidths="[26,20,54]"}
+
+![TinyTorch Systems Architecture: 4-Tier Learning Arc and Vertical Execution Hierarchy](assets/images/diagrams/00_journey-diag-1.svg){#fig-framework-roadmap}
+
+---
+
+## How Each Chapter Is Organized
+
+Every chapter, and each milestone, follows the same shape, so you always know where you are. It opens by stating where you stand after the previous chapter and the question this one answers. **The Problem** shows the concrete failure that forces the mechanism, usually a few lines of code that go wrong or a napkin calculation. **The Idea** teaches the mental model and whatever mathematics carries weight. **The Code** walks the TinyTorch implementation in short listings with commentary between them. **A Worked Trace** runs one small example through that code with the intermediate values written out, so you can check them by hand. **From TinyTorch to Production** is the bridge: what PyTorch, the CUDA libraries, or a compiler does differently, what forces the difference, and what carries over unchanged. **Summary** states what you built and what the next chapter takes for granted. **Exercises** close the chapter. Hardware detail lives in the production bridge, after the mechanism is understood, not woven through the teaching.
+
+The listings in each chapter present the core functions of the corresponding TinyTorch module, sequenced so you can follow the architectural decisions one step at a time. Each mechanism is motivated by a concrete failure mode, explained through first-principles systems intuition, and walked through line by line in the real source code. When you complete a chapter, the code you just studied is the code powering your framework.
+
+---
+
+## What You Need to Know Coming In
+
+The book assumes four things. Working Python, including classes, methods, and special methods such as `__getitem__` and `__call__`. Basic linear algebra: vectors, matrices, dot products, and the rule that an $(M, K)$ matrix times a $(K, N)$ matrix gives an $(M, N)$ result. Basic calculus: partial derivatives such as $\partial L / \partial w$ and the chain rule for one variable. And one piece of systems intuition, that a program's memory is a flat array of bytes and that reading bytes in order is faster than jumping around.
+
+If any of these four feel rusty or unfamiliar, do not let that turn you back. Whenever a mathematical step, a Python special method, or a hardware memory property governs a design decision, the text includes explanatory footnotes that break the concept down from first principles. You do not need to pause and consult an external reference before continuing; the footnotes provide the immediate intuition right on the page.
+
+No prior experience with deep learning internals, GPU programming, C++, or compilers is required. When a chapter introduces a systems term beyond this baseline, it defines the term where it first appears.
+
+---
+
+## Two Tracks: Reading the Architecture, Building the Code
+
+TinyTorch exists in two complementary forms, designed to support two distinct ways of learning.
+
+The first is the **interactive lab track** in Google Colab and Jupyter notebooks under `modules/`. This is the builder's workshop. You inspect unit tests, complete implementation milestones, debug edge cases, and run training loops to see loss curves drop and transformers generate text.
+
+The second is the **narrative monograph** you are reading right now. A codebase alone cannot explain the design dilemmas that shaped it. In the lab, you are focused on making individual functions pass their tests. Here in the narrative commentary, you see the entire machine assembled into a coherent architectural story. You can read it cover to cover on a commute, on a plane, or at a desk without needing an active development environment, a terminal, or GPU access.
+
+Together, the two tracks give you both halves of mastery: the narrative book builds the architectural mental model, and the lab notebooks turn that model into working muscle memory.
+
+---
+
+## Running and Testing the Code
+
+The framework lives under `src/`, with one directory per module, and the test suite lives under `tests/`. The source files are notebook-style Python (each is also a Jupyter notebook via jupytext) because they double as the assignments in the TinyTorch course, so you will see solution markers and inline tests alongside the framework code. To run the full suite:
+
+```bash
+# From the TinyTorch package root
+cd tinytorch
+
+# Run the test suite across all 20 modules
+pytest tests/
+```
+
+You do not need to run anything to read this book. The tests are simply the fastest way to confirm that the framework behaves as the chapters say it does, and to check your own changes once you start making them.
+
+Chapter 1 takes nothing for granted beyond Python and the picture of memory as a flat row of bytes, and asks how a multi-dimensional array can live in a one-dimensional buffer.

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-MLSYSIM = (REPO / "packages" / "mlsysim").resolve()
+MLSYSIM = (REPO / "mlsysim").resolve()
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> int:

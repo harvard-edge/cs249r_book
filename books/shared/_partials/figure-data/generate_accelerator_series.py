@@ -22,7 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONTENTS = os.path.abspath(os.path.join(HERE, "..", ".."))
 REPO = os.path.abspath(os.path.join(CONTENTS, "..", "..", ".."))
-sys.path.insert(0, os.path.join(REPO, "packages", "mlsysim"))
+sys.path.insert(0, os.path.join(REPO, "mlsysim"))
 
 from mlsysim.hardware.registry import CloudHardware  # noqa: E402
 
