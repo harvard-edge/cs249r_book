@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600">
+import os
+
+def generate_svg():
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600">
     <defs>
         <!-- Textbook palette: dark blue #1F407A, crisp greys #E2E8F0, #2D3748, deep red #A51C30 -->
         <style>
@@ -158,3 +161,9 @@
     </g>
 
 </svg>
+"""
+    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/planning/images/svg/fig11_action_chunk_seam_continuity.svg', 'w') as f:
+        f.write(svg_content)
+
+if __name__ == "__main__":
+    generate_svg()
