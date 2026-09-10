@@ -1,0 +1,85 @@
+# The Post-Request Paradigm {#sec-vol3-intro}
+
+Agentic machine learning systems represent a fundamental shift in computing infrastructure: the transition from stateless, request-scoped token generation to stateful, autonomous trajectory execution. When a foundation model is given memory, tools, and a delegated goal, the system ceases to be an oracle and becomes an actor. This chapter establishes the architectural transition from classical machine learning to agentic autonomy, mapping the stochastic nature of neural models onto the timeless rigor of classical systems engineering.
+
+## The Transition to Stateful Autonomy {#sec-vol3-intro-stateful}
+
+To understand the architecture of an agentic system, one must first define the boundary that separates it from traditional machine learning. Classical machine learning pipelines—even those serving massive foundation models—are fundamentally **stateless and request-scoped**.
+
+In classical serving systems (Volumes I and II), the lifecycle of a request is deterministic in its flow, if not its output. A user submits a query, the system performs a forward pass (or multiple autoregressive passes), and an output is returned. The transaction ends. If the output is flawed, the system has no endogenous mechanism to detect the failure, let alone correct it. The model is an *oracle*; it answers queries but cannot mutate the world.
+
+Agentic systems shatter this request-response boundary by introducing **stateful, closed-loop autonomy**. An agent is not invoked to answer a question; it is delegated a goal. To achieve this goal, the agent must execute a multi-step *trajectory* over an extended time horizon.
+
+This transition demands a completely different systems architecture:
+
+1.  **Environment Mutation:** Unlike classical models that passively ingest static datasets, agents generate actions that actively alter their environment (e.g., executing a bash script, querying a database, sending an email).
+2.  **Endogenous State:** An agent must maintain a continuous, evolving belief state over long time horizons, tracking what it has tried, what has failed, and what it must do next.
+3.  **Non-Determinism in the Loop:** Because the agent's actions mutate the environment, future inputs to the agent are dynamic and impossible to pre-compute. The system must operate under uncertainty, gracefully handling API timeouts, contradictory observations, and its own logical errors.
+
+We are no longer serving a model; we are managing a stochastic process.
+
+## The Agentic Control Loop {#sec-vol3-intro-loop}
+
+![**Figure 1.1: The Agentic Control Loop**](/assets/images/svg/vol3/agent_control_loop.svg){#fig-agent-control-loop}
+
+The heartbeat of an agentic system is the closed-loop feedback cycle. Formally, this is modeled as a Partially Observable Markov Decision Process (POMDP), but in systems engineering terms, it is the $s_t, a_t, o_t$ loop.
+
+At any time step $t$, the system operates according to the following control loop:
+
+1.  **State ($s_t$):** The agent's current internal context, representing its accumulated belief about the goal and the environment up to this moment.
+2.  **Action ($a_t$):** The stochastic policy (the foundation model) generates an action vector (e.g., a tool call schema) based on $s_t$.
+3.  **Observation ($o_t$):** The deterministic runtime executes the action within the environment and captures the resulting observation (e.g., a compiler error, a JSON payload).
+4.  **Transition ($s_{t+1}$):** The observation is appended to the agent's memory, forming the new state $s_{t+1}$, and the loop repeats.
+
+This loop appears deceptively simple. However, writing a naive `while True` loop around an LLM API call is not a system architecture. A naked loop provides zero protection against infinite cycles, memory exhaustion, or irreversible environmental destruction. Production systems require a hardened runtime to enforce limits on this loop.
+
+## The Von Neumann Metaphor {#sec-vol3-intro-von-neumann}
+
+![**Figure 1.2: Stochastic Von Neumann Architecture**](/assets/images/svg/vol3/stochastic_von_neumann.svg){#fig-stochastic-von-neumann}
+
+To engineer these hardened runtimes, we map the chaotic, stochastic nature of LLMs onto the rigid, timeless framework of classical computer science: **The Von Neumann Architecture**.
+
+Throughout this textbook, we will treat the agentic system not as a novel AI framework, but as a biological computer operating under standard systems principles:
+
+*   **The Processor (Compute):** The LLM weights are the ALU. They do not store long-term facts; they calculate the next probabilistic action. Just as a CPU relies on branch prediction, the stochastic processor relies on *search algorithms* (MCTS, Best-of-N) to navigate execution trees.
+*   **The Memory (Volatile):** The Key-Value (KV) cache and the context window act as the L1/L2 RAM. It is incredibly fast but strictly limited by physical GPU High-Bandwidth Memory (HBM). We must use OS-level virtual memory techniques (PagedAttention, Working Sets) to prevent Out-Of-Memory (OOM) crashes.
+*   **The Storage (Persistent):** Because volatile memory is constrained, agents must persist their state to "disk." Vector databases and knowledge graphs serve as the non-volatile *Episodic Memory*, requiring strict check-pointing and rollback mechanisms (Sagas) when actions fail.
+*   **The Runtime (The OS):** The agent cannot be trusted to manage its own resources. An external operating system—the *Agent Control Block (ACB)*—must handle scheduling, tool execution (System Calls), and sandboxing (MicroVMs).
+
+**The Fatal Anomaly: The $W \oplus X$ Violation**
+While this analogy is powerful, we must immediately identify where it breaks. In classical systems, instructions (code) and data (user input) are strictly isolated in memory. If a program attempts to execute data as code, the OS halts it.
+
+LLMs suffer from a fundamental architectural flaw: they process instructions (system prompts) and data (web page text) in the exact same unified token stream. The processor cannot physically distinguish them. This is the root cause of *Prompt Injection*—the modern equivalent of a buffer overflow attack. Because the stochastic processor is structurally vulnerable, the deterministic runtime must enforce security via sandboxing.
+
+## The Physical Limits of Autonomy {#sec-vol3-intro-limits}
+
+When engineering long-horizon agents, software architects frequently fall victim to the fallacy that "a smarter model will solve the problem." However, autonomous systems are bound by inescapable mathematical and physical walls.
+
+### The Reliability Wall (Compounding Error)
+Agentic execution suffers from the physics of compounding probability. If a model has a remarkable 95% success rate for any single action ($p = 0.95$), its probability of completing a 10-step trajectory ($N = 10$) without a fatal divergence is $0.95^{10} \approx 59.8\%$. For a 100-step trajectory, the success rate plummets to $0.5\%$.
+
+$$P_{\text{success}} \le p^N$$
+
+You cannot scale your way out of compounding error. Long-horizon autonomy is impossible without building systems for runtime verification, state check-pointing, and autonomous backtracking.
+
+### The Context Accumulation Wall
+As the $s, a, o$ loop iterates, the state $s_t$ grows linearly. However, the compute required to process attention over that state grows quadratically, and the physical memory footprint of the KV cache grows linearly. An agent trapped in a long horizon will eventually hit the "Memory Wall," where the GPU spends 90% of its time moving memory rather than calculating tokens.
+
+## Quantitative Metrics of Agency {#sec-vol3-intro-metrics}
+
+To engineer systems that respect these physical limits, we must abandon traditional ML metrics (like perplexity or static MMLU scores) and adopt rigorous, quantitative systems metrics.
+
+1.  **Trajectory Goodput:** In networking, goodput is the rate of useful data delivered. In agentic systems, it is the rate of *verified, successful actions* per minute, excluding tokens wasted on hallucinations, syntax errors, or rolled-back branches.
+2.  **Cost-per-Verified-Goal (CPVG):** The total compute cost (prefill + decode + search + tool execution) required to reach a verified terminal state.
+3.  **The Verification Tax:** The ratio of compute spent generating candidate actions versus the compute spent running deterministic test oracles to verify them. As inference scales, the Verification Tax dominates system overhead.
+
+By focusing on these metrics, we treat the agent not as a statistical curiosity, but as a distributed systems workload that can be scheduled, optimized, and mathematically constrained.
+
+### War Story from the Frontier
+::: {.callout-warning title="War Story: The $10,000 Infinite Loop"}
+A Y-Combinator startup deployed a SWE-agent to refactor an older codebase. They wrapped a frontier LLM in a basic Python `while not done:` loop, assuming the model was smart enough to eventually exit.
+
+During execution, the agent encountered a missing dependency. It called a `pip install` tool, but a network proxy blocked the download. The tool returned: `Connection timed out`. The agent, determined to fulfill its goal, analyzed the error and logically deduced it should retry. It called the tool again. And again. And again.
+
+Because the agent possessed no cycle-detection runtime, and the tool had no idempotency limits, the agent generated over 150 million tokens in a tight semantic livelock over 48 hours, racking up a $10,000 API bill before hitting a hard account limit. **The Lesson:** Unconstrained stochastic processors will always find a way to fail infinitely.
+:::

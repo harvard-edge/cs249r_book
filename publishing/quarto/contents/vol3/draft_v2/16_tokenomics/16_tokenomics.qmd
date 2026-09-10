@@ -1,0 +1,69 @@
+*How do we map stochastic, variable-length reasoning into predictable computational economics?*
+
+::: {.callout-note title="Meta paragraph"}
+This chapter bridges the gap between hardware utilization and application-level unit economics. We explore how variable-length generation and the non-linear scaling of KV cache fundamentally change the economic models of compute, shifting away from static instance pricing toward fine-grained token-based abstractions.
+:::
+
+## 16.1 Introduction
+
+The commercialization of large language models has driven a shift in how we price computational resources. Unlike traditional software services, where costs are closely tied to active connection time or predictable request payloads, autoregressive generation introduces stochastic resource utilization. The fundamental unit of value and cost is the token, yet the hardware cost to process a token varies drastically based on its position in the context window, the model's architecture, and the concurrency of the system. This chapter dissects the microeconomics of token generation.
+
+## 16.2 Token Pricing Models: Inputs, Outputs, and Caching
+
+Pricing an LLM API requires modeling the underlying hardware constraints, primarily memory bandwidth and compute utilization.
+
+Input tokens are typically processed in parallel during the prefill phase, leveraging the high utilization of Matrix-Matrix multiplications (GEMMs). Because this phase is highly compute-bound and can saturate modern GPUs efficiently, input tokens are structurally cheaper to process.
+
+Output tokens, conversely, are generated sequentially during the decode phase. This process is memory bandwidth-bound; for each generated token, the model's entire weight matrix must be loaded from HBM to SRAM, resulting in low arithmetic intensity. Consequently, output tokens are priced significantly higher than input tokens.
+
+::: {.callout-note title="Checkpoint"}
+Why does increasing the batch size improve the unit economics of output tokens, and what hardware constraint ultimately limits the maximum batch size?
+:::
+
+Recently, providers have introduced context caching. By persisting the KV cache of a frequently used prompt in GPU memory or fast storage, the provider bypasses the prefill compute for subsequent requests. The economics then shift from a compute-cost model to a memory-renting model, where users pay for the time the KV cache occupies high-bandwidth memory.
+
+## 16.3 Context Working Set Costs and the KV Cache
+
+The KV cache is the state maintained during generation to prevent recomputing past tokens. Its size scales linearly with the sequence length and batch size, but the cost to read it scales quadratically as sequences grow (prior to optimizations like FlashAttention).
+
+::: {.callout-note title="Napkin Math"}
+**Estimating KV Cache Size**
+
+For a model with $L = 80$ layers, $H = 64$ heads, and a head dimension $D = 128$, stored in FP16 (2 bytes):
+
+Size per token = $2 \text{ (K and V)} \times 2 \text{ bytes} \times L \times H \times D$
+
+Size per token = $2 \times 2 \times 80 \times 64 \times 128 = 2,621,440$ bytes $\approx 2.6$ MB.
+
+For a context window of 100,000 tokens, the KV cache requires $\approx 260$ GB of memory. This exceeds the capacity of a single 80GB H100 GPU, necessitating tensor parallelism or sequence parallelism just to store the context state.
+:::
+
+Managing this massive working set is the primary driver of inference costs. Systems use techniques like PagedAttention to reduce memory fragmentation, but the fundamental economic reality remains: long contexts are expensive not just in compute time, but in the opportunity cost of memory footprint that could otherwise hold concurrent requests.
+
+## 16.4 Multi-Agent Quotas and Compounding Inference
+
+As systems evolve from single-turn chat interfaces to autonomous, multi-agent frameworks, token consumption scales exponentially. In a multi-agent system, agents prompt each other, summarize context, and iteratively refine outputs.
+
+::: {.callout-note title="Checkpoint"}
+In a multi-agent architecture where agents recursively summarize prior steps, how does the ratio of input tokens to output tokens shift compared to a standard conversational interface?
+:::
+
+To prevent cost overruns, systems must implement strict quota management and token budgets. Budgeting algorithms dynamically allocate tokens based on the priority of the sub-task. Furthermore, the economics favor "flash" or distilled models for intermediate reasoning steps, reserving expensive "pro" models only for final synthesis or highly complex bottlenecks.
+
+## 16.5 Fallacies and Pitfalls
+
+::: {.callout-warning title="Fallacies and pitfalls"}
+**Fallacy: Token count is a perfect proxy for compute cost.**
+*While highly correlated, token count ignores the impact of batching and sequence length. A 1,000-token output generated during a low-traffic period with a batch size of 1 utilizes hardware very differently than the same output generated at peak concurrency.*
+
+**Pitfall: Ignoring the asymmetric cost of prompt caching.**
+*Persisting KV caches saves compute but consumes memory. If the cache hit rate is low, the cost of evicting and loading the cache from NVMe or CPU RAM can exceed the cost of simply recomputing the prefill.*
+:::
+
+## 16.6 Summary
+
+::: {.callout-tip title="Summary"}
+- The transition to token-based economics reflects the underlying hardware realities of autoregressive models: compute-bound prefill (input) vs. memory-bandwidth-bound decode (output).
+- The KV cache dictates the working set size of a request. Its linear scaling with sequence length imposes strict limits on concurrency and drives up the cost of long-context queries.
+- Multi-agent systems introduce exponential token consumption, requiring sophisticated quota management and model routing to remain economically viable.
+:::
