@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "quarto" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "books" / "shared" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from epub_postprocess import (  # noqa: E402

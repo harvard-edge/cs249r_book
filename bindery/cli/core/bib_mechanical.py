@@ -29,14 +29,14 @@ class MechanicalFileResult:
 
 
 def _project_root(start: Path) -> Path:
-    """Resolve repo root from either the repository, book, or quarto directory."""
+    """Resolve the repository root from the repository, the toolchain, or books/."""
     path = Path(start).resolve()
-    if (path / "book" / "binder").exists():
+    if (path / "bindery" / "binder").is_file():
         return path
-    if (path / "binder").exists() and path.name == "book":
+    if (path / "binder").is_file() and path.name == "bindery":
         return path.parent
-    if (path / "contents").exists() and path.parent.name == "book":
-        return path.parent.parent
+    if (path / "config").is_dir() and path.name == "books":
+        return path.parent
     try:
         raw = subprocess.check_output(
             ["git", "rev-parse", "--show-toplevel"],

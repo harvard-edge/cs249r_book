@@ -5,7 +5,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
+sys.path.insert(0, str(ROOT / "bindery" / "tools" / "audit"))
 
 from check_rendered_html import CHECKS, visible_text  # noqa: E402
 

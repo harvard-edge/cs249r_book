@@ -31,7 +31,7 @@ class AuditCommand:
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.repo_root = _repo_root()
-        self.audit_dir = self.repo_root / "book" / "tools" / "audit"
+        self.audit_dir = self.repo_root / "bindery" / "tools" / "audit"
 
     def run(self, args: list[str]) -> bool:
         if not args or args[0] in ("-h", "--help", "help"):

@@ -32,12 +32,12 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # script lives at bindery/tools/scripts/<this>.py
-BOOK_DIR = REPO_ROOT / "book"
+BOOK_DIR = REPO_ROOT / "bindery"
 if str(BOOK_DIR) not in sys.path:
     sys.path.insert(0, str(BOOK_DIR))
 
 DEFAULT_MODEL = "gpt-5.4-mini"
-DEFAULT_REPORT_DIR = REPO_ROOT / "book" / "tools" / "audit" / "out"
+DEFAULT_REPORT_DIR = REPO_ROOT / "bindery" / "tools" / "audit" / "out"
 
 EXCLUDE_PARTS = {
     ".git",

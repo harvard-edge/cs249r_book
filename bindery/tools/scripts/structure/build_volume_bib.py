@@ -25,7 +25,7 @@ from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
-CONTENTS = REPO / "publishing"  / "books"
+CONTENTS = REPO / "books"
 
 # Volumes with a dedicated bibliography. vol1/vol2 deliberately share the
 # main references.bib and are not built by this script.

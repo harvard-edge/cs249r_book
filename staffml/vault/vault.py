@@ -2083,7 +2083,7 @@ def _improve_toc_validate(taxonomy, corpus, model, count):
         chapters = chapters[:count]
 
     # Try to find textbook QMD files for section headings
-    book_dir = BASE.parent / "book" / "quarto" / "contents"
+    book_dir = BASE.parent / "books"
     all_proposals = []
 
     for ch in chapters:

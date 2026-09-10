@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def main() -> int:
-    binder = REPO_ROOT / "book" / "binder"
+    binder = REPO_ROOT / "bindery" / "binder"
     proc = subprocess.run([str(binder), "check", "registry"], cwd=REPO_ROOT)
     return proc.returncode
 

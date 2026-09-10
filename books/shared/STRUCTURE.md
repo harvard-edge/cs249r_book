@@ -12,7 +12,7 @@ reading order. This file is the human- and agent-readable view of that order.
 Every volume uses the same layout:
 
 ```
-contents/<vol>/
+books/<vol>/
 ├── index.qmd            volume home
 ├── README.md            volume readme
 ├── frontmatter/         *.qmd
@@ -114,8 +114,12 @@ and `bindery/tests/test_content_structure.py` enforces it.
 
 | # | Kind | Path |
 |---:|---|---|
+|  | frontmatter | `frontmatter/dedication.qmd` |
 |  | frontmatter | `frontmatter/author_note.qmd` |
 |  | frontmatter | `frontmatter/about.qmd` |
+|  | frontmatter | `frontmatter/acknowledgements.qmd` |
+|  | frontmatter | `frontmatter/ai_use.qmd` |
+|  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `introduction/introduction.qmd` |
 |  | part | `parts/foundations_principles.qmd` |
 | 2 | chapter | `execution_descriptors/execution_descriptors.qmd` |
@@ -144,11 +148,15 @@ and `bindery/tests/test_content_structure.py` enforces it.
 
 | # | Kind | Path |
 |---:|---|---|
+|  | frontmatter | `frontmatter/dedication.qmd` |
+|  | frontmatter | `frontmatter/author_note.qmd` |
+|  | frontmatter | `frontmatter/about.qmd` |
 |  | frontmatter | `frontmatter/about_author.qmd` |
 |  | frontmatter | `frontmatter/prerequisites.qmd` |
 |  | frontmatter | `frontmatter/syllabus.qmd` |
+|  | frontmatter | `frontmatter/acknowledgements.qmd` |
+|  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
-|  | frontmatter | `frontmatter/author_note.qmd` |
 | 1 | chapter | `boundary/boundary.qmd` |
 |  | part | `parts/anatomy_principles.qmd` |
 | 2 | chapter | `body/body.qmd` |

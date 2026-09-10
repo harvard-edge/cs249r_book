@@ -21,8 +21,8 @@ ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 VOL  = sys.argv[1] if len(sys.argv) > 1 else 'vol1'
 
 def chapter_order(vol):
-    cfg = os.path.join(ROOT, 'book', 'quarto', 'config', f'_quarto-pdf-{vol}.yml')
-    pat = re.compile(rf'contents/{vol}/([a-z0-9_]+)/\1\.qmd')
+    cfg = os.path.join(ROOT, 'books', 'config', f'_quarto-pdf-{vol}.yml')
+    pat = re.compile(rf'(?<![\w/]){vol}/([a-z0-9_]+)/\1\.qmd')
     order, seen = [], set()
     for line in open(cfg, encoding='utf-8'):
         m = pat.search(line)

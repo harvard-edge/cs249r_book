@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "book" / "tools" / "audit" / "fmt"))
+sys.path.insert(0, str(ROOT / "bindery" / "tools" / "audit" / "fmt"))
 
 import audit_prose_semantics as A  # noqa: E402
 import audit_prose as P  # noqa: E402

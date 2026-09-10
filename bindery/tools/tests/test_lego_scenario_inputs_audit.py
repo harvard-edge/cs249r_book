@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
+sys.path.insert(0, str(ROOT / "bindery" / "tools" / "audit"))
 
 from book_check_lego_scenario_inputs import _classify, check_file  # noqa: E402
 

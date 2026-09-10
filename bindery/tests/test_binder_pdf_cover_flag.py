@@ -76,7 +76,7 @@ def test_set_pdf_print_marks_changes_false_switch_to_true(tmp_path: Path):
 
 
 def test_all_volume_pdf_configs_include_cover_by_default():
-    config_dir = Path(__file__).resolve().parents[1] / "quarto" / "config"
+    config_dir = Path(__file__).resolve().parents[2] / "books" / "config"
 
     for volume in range(1, 5):
         config = config_dir / f"_quarto-pdf-vol{volume}.yml"
@@ -85,8 +85,9 @@ def test_all_volume_pdf_configs_include_cover_by_default():
 
 def test_shared_header_omits_print_marks_by_default():
     header = (
-        Path(__file__).resolve().parents[1]
-        / "quarto"
+        Path(__file__).resolve().parents[2]
+        / "books"
+        / "shared"
         / "tex"
         / "header-includes.tex"
     )

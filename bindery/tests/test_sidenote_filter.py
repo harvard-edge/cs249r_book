@@ -5,7 +5,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FILTER = ROOT  / "books" / "filters" / "sidenote.lua"
+FILTER = ROOT / "books" / "shared" / "filters" / "sidenote.lua"
 
 
 def _render(markdown: str, target: str) -> str:

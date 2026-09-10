@@ -283,7 +283,7 @@ async function preserveBuildLog(
   reportsDir: string,
 ): Promise<string | undefined> {
   // Quarto places index.log in the books/ directory during PDF builds
-  const logSource = path.join(worktreePath, 'book', 'quarto', 'index.log');
+  const logSource = path.join(worktreePath, 'books', 'index.log');
   if (!fs.existsSync(logSource)) {
     return undefined;
   }

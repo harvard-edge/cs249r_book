@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-BOOK_ROOT = Path(__file__).parent.parent / "book" / "quarto" / "contents"
+BOOK_ROOT = Path(__file__).resolve().parents[3] / "books"
 PROSE_DIR = Path(__file__).parent / "_prose"
 
 SKIP_DIRS = {"frontmatter", "backmatter", "parts"}

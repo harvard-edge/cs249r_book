@@ -173,7 +173,7 @@ def offset_to_line(line_starts: List[int], offset: int) -> int:
 def scan_quarto_root(root: Path) -> int:
     # Collect global styles from header-includes.tex if present
     global_styles: Set[str] = set()
-    header_includes = root / "quarto" / "tex" / "header-includes.tex"
+    header_includes = root / "books" / "shared" / "tex" / "header-includes.tex"
     if header_includes.exists():
         global_styles |= collect_defined_styles(read_text(header_includes))
 
@@ -214,7 +214,7 @@ def scan_quarto_root(root: Path) -> int:
 
 
 def main(argv: List[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[3]
+    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[4]
     if not root.exists():
         print(f"Root path does not exist: {root}", file=sys.stderr)
         return 2

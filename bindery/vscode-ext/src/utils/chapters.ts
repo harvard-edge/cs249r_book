@@ -46,10 +46,10 @@ function readBuildablePathsFromConfig(
   vol: VolumeId,
   source: ChapterOrderSource,
 ): ConfigEntry[] {
-  const configDir = path.join(repoRoot, 'book', 'quarto', 'config');
+  const configDir = path.join(repoRoot, 'books', 'config');
   const entries: ConfigEntry[] = [];
   const seen = new Set<string>();
-  const chapterPathRegex = new RegExp(`contents/${vol}/([^\\s]+\\.qmd)`, 'g');
+  const chapterPathRegex = new RegExp(`(?<![\\w/])${vol}/([^\\s]+\\.qmd)`, 'g');
 
   for (const fileName of getConfigCandidates(vol, source)) {
     const configPath = path.join(configDir, fileName);
@@ -63,7 +63,7 @@ function readBuildablePathsFromConfig(
     const indexRelPath = `index.qmd`;
     if (!seen.has(indexRelPath) && /^\s+-\s+index\.qmd\s*$/m.test(text)) {
       const volIndexPath = `index.qmd`;
-      const volIndexFull = path.join(repoRoot, 'book', 'quarto', 'contents', vol, 'index.qmd');
+      const volIndexFull = path.join(repoRoot, 'books', vol, 'index.qmd');
       if (fs.existsSync(volIndexFull)) {
         seen.add(volIndexPath);
         entries.push({ relPath: volIndexPath, order: entries.length });
@@ -97,7 +97,7 @@ function pathToChapterInfo(
   vol: VolumeId,
   relPath: string,
 ): ChapterInfo | null {
-  const contentsDir = path.join(repoRoot, 'book', 'quarto', 'contents', vol);
+  const contentsDir = path.join(repoRoot, 'books', vol);
   const fullPath = path.join(contentsDir, relPath);
   if (!fs.existsSync(fullPath)) {
     return null;
@@ -133,7 +133,7 @@ export function getBuildEntriesForFormat(
 ): { configFile: string; relPaths: string[] } {
   const source = format as ChapterOrderSource;
   const entries = readBuildablePathsFromConfig(repoRoot, vol, source);
-  const configFile = path.join('book', 'quarto', 'config', `_quarto-${format}-${vol}.yml`);
+  const configFile = path.join('books', 'config', `_quarto-${format}-${vol}.yml`);
   return {
     configFile,
     relPaths: entries.map(e => e.relPath),
@@ -147,7 +147,7 @@ export function discoverChapters(repoRoot: string): VolumeInfo[] {
     .get<ChapterOrderSource>('chapterOrderSource', 'auto');
 
   for (const vol of ['vol1', 'vol2'] as VolumeId[]) {
-    const contentsDir = path.join(repoRoot, 'book', 'quarto', 'contents', vol);
+    const contentsDir = path.join(repoRoot, 'books', vol);
     if (!fs.existsSync(contentsDir)) {
       continue;
     }

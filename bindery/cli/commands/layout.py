@@ -758,7 +758,7 @@ class LayoutCommand:
     ) -> bool:
         """Build a table-only PDF audit using the production PDF geometry."""
         repo_root = self._repo_root()
-        out_dir = repo_root / "book" / ".layout" / "tables" / volume
+        out_dir = repo_root / "bindery" / ".layout" / "tables" / volume
         out_dir.mkdir(parents=True, exist_ok=True)
 
         qmd_files = self._table_source_files(volume, chapter_filter)
@@ -1446,9 +1446,7 @@ class LayoutCommand:
         return (not plan["items"]) and purpose_ok
 
     def _build_volume_pdf(self, volume: str) -> bool:
-        binder = self._repo_root() / "book" / "binder"
-        if not binder.exists():
-            binder = self._repo_root() / "binder"
+        binder = self._repo_root() / "bindery" / "binder"
         cmd = [str(binder), "build", "pdf", f"--{volume}"]
         console.print(f"[blue]💻 Command: {' '.join(cmd)}[/blue]")
         try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate contents/STRUCTURE.md from the per-volume Quarto PDF configs.
+"""Generate books/shared/STRUCTURE.md from the per-volume Quarto PDF configs.
 
 The PDF config is the canonical chapter order (see CLAUDE.md, "Chapter order is
 canonical"). This script derives the reading order from it so the manifest can
@@ -15,9 +15,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
-QUARTO = REPO / "publishing"  / "books"
+QUARTO = REPO / "books"
 CONTENTS = QUARTO
-OUT = CONTENTS / "STRUCTURE.md"
+OUT = CONTENTS / "shared" / "STRUCTURE.md"
 
 VOLUMES = {
     "vol1": "Volume I: Introduction to Machine Learning Systems",
@@ -26,7 +26,7 @@ VOLUMES = {
     "vol4": "Volume IV: Physical AI Systems",
 }
 
-QMD_RE = re.compile(r"contents/(vol[0-9])/([A-Za-z0-9_./-]+\.qmd)")
+QMD_RE = re.compile(r"(?<![\w/.-])(vol[0-9])/([A-Za-z0-9_./-]+\.qmd)")
 
 
 def entries_for(vol: str) -> list[str]:
@@ -77,7 +77,7 @@ def render() -> str:
         "Every volume uses the same layout:",
         "",
         "```",
-        "contents/<vol>/",
+        "books/<vol>/",
         "├── index.qmd            volume home",
         "├── README.md            volume readme",
         "├── frontmatter/         *.qmd",

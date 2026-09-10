@@ -40,7 +40,7 @@ CELL_RE = re.compile(r"^```\{python\}\n(.*?)^```$", re.S | re.M)
 
 def contents_dir(start: Path) -> Path:
     for base in (start, *start.parents):
-        candidate = base / "publishing"  / "books"
+        candidate = base / "books"
         if candidate.is_dir():
             return candidate
     sys.exit("could not locate books from %s" % start)

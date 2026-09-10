@@ -2,8 +2,8 @@
 
 The book uses Tufte-style margin notes and citations on the desktop layout
 (`reference-location: margin`, `sidenote: true` in
-[`config/_quarto-html-vol1.yml`](../quarto/config/_quarto-html-vol1.yml) and
-[`_quarto-html-vol2.yml`](../quarto/config/_quarto-html-vol2.yml)). Quarto's
+[`books/config/_quarto-html-vol1.yml`](../../books/config/_quarto-html-vol1.yml) and
+[`_quarto-html-vol2.yml`](../../books/config/_quarto-html-vol2.yml)). Quarto's
 default behaviour is to collapse the margin column on narrow viewports and
 re-flow margin notes inline, but this needs periodic verification on real
 devices.

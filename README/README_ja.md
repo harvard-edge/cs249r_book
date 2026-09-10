@@ -133,7 +133,7 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [book/](../book/README.md) |
+| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [books/](../books/) |
 | **EXPLORE** | 🔮 Software Co‑Labs | レイテンシ・メモリ・エネルギー・コストの実験 | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | フレームワーク実装を体験 | [tinytorch/](../tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | メモリ・電力・時間・安全性の制約下でハードウェアをエンジニアリング | [kits/](../kits/README.md) |

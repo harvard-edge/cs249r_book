@@ -119,7 +119,7 @@ def test_pdf_text_scan_flags_bare_crossrefs(monkeypatch, tmp_path):
     pdf = tmp_path / "artifact.pdf"
     pdf.write_bytes(b"%PDF placeholder")
     monkeypatch.setattr(
-        "book.cli.commands._pdf_checks._pdftotext",
+        "bindery.cli.commands._pdf_checks._pdftotext",
         lambda _: (
             "Adversarial training is covered in @sec-robust-ai. "
             "Decorators like @staticmethod, emails like a@b.com, and "
@@ -139,7 +139,7 @@ def test_pdf_text_scan_flags_question_mark_crossrefs_once(monkeypatch, tmp_path)
     pdf = tmp_path / "artifact.pdf"
     pdf.write_bytes(b"%PDF placeholder")
     monkeypatch.setattr(
-        "book.cli.commands._pdf_checks._pdftotext",
+        "bindery.cli.commands._pdf_checks._pdftotext",
         lambda _: "Broken output shows ?@tbl-defense-selection-framework.",
     )
 
@@ -153,7 +153,7 @@ def test_pdf_text_scan_flags_layout_offset_leaks(monkeypatch, tmp_path):
     pdf = tmp_path / "artifact.pdf"
     pdf.write_bytes(b"%PDF placeholder")
     monkeypatch.setattr(
-        "book.cli.commands._pdf_checks._pdftotext",
+        "bindery.cli.commands._pdf_checks._pdftotext",
         lambda _: "Roofline position10[-25mm] depends on the workload.",
     )
 
@@ -168,7 +168,7 @@ def test_pdf_text_scan_flags_numeric_appendix_callout_prefix(monkeypatch, tmp_pa
     pdf = tmp_path / "Machine-Learning-Systems-Vol1.pdf"
     pdf.write_bytes(b"%PDF placeholder")
     monkeypatch.setattr(
-        "book.cli.commands._pdf_checks._pdftotext",
+        "bindery.cli.commands._pdf_checks._pdftotext",
         lambda _: (
             "napkin math 16.1: valid final chapter\n"
             "Systems Perspective 18.1: invalid appendix prefix\n"

@@ -730,8 +730,8 @@ main() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Change to book directory if not already there
-if [ ! -f "_quarto.yml" ] && [ -d "book" ]; then
-    cd book
+if [ ! -f "_quarto.yml" ] && [ -d "books" ]; then
+    cd books
 fi
 
 # Verify we're in the right directory

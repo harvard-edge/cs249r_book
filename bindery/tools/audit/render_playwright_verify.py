@@ -16,7 +16,7 @@ BOOK = Path(__file__).resolve().parents[2]  # book/
 sys.path.insert(0, str(REPO_ROOT / "tools" / "audit"))
 from audit_math_rendering import LEAK_PATTERNS  # noqa: E402
 
-_FMT = REPO_ROOT / "book" / "tools" / "audit" / "fmt"
+_FMT = REPO_ROOT / "bindery" / "tools" / "audit" / "fmt"
 sys.path.insert(0, str(_FMT))
 from audit_prose import INLINE_PY, _exec_python_cells, _resolve_ref
 from cell_exec import setup_headless_matplotlib

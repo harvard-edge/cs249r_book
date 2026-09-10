@@ -1,16 +1,15 @@
-# SocratiQ bundle (mirror)
+# SocratiQ bundle
 
-This directory contains a single file, `bundle.js`, which is a **symlink** to
-the canonical bundle that is actually served from the rendered book site:
+`bundle.js` is the production build of the SocratiQ reading widget. Its source
+lives in [`socratiq/`](../../../../socratiq/); `npm run build:vite` there
+regenerates this file.
 
-    bundle.js -> ../../../quarto/tools/scripts/socratiQ/bundle.js
+The book site loads it from `/tools/scripts/socratiQ/bundle.js`, through the
+`<script>` tag in [`books/config/_quarto-html-vol1.yml`](../../../../books/config/_quarto-html-vol1.yml)
+and [`_quarto-html-vol2.yml`](../../../../books/config/_quarto-html-vol2.yml).
 
-The served path on the deployed book is `/tools/scripts/socratiQ/bundle.js`,
-which is included from [`books/config/_quarto-html-vol1.yml`](../../../quarto/config/_quarto-html-vol1.yml)
-and [`_quarto-html-vol2.yml`](../../../quarto/config/_quarto-html-vol2.yml).
+The bundle is committed. The `socratiq-bundle-drift` workflow rebuilds it on any
+pull request that changes the SocratiQ sources, and fails if the committed file
+no longer matches.
 
-When a new SocratiQ widget bundle is published, replace
-`books/tools/scripts/socratiQ/bundle.js`. This mirror updates
-automatically via the symlink.
-
-The SocratiQ widget itself is documented in [`book/socratiQ/README.md`](../../../socratiQ/README.md).
+The widget itself is documented in [`bindery/socratiQ/README.md`](../../../socratiQ/README.md).

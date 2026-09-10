@@ -26,7 +26,7 @@ def _vault_with_map(tmp_path: Path, mapping: str) -> Path:
 
 
 def _write_chapter(vault_dir: Path, vol: int, chapter: str, h1: str) -> None:
-    root = vault_dir.parent.parent / "book" / "quarto" / "contents" / f"vol{vol}" / chapter
+    root = vault_dir.parent.parent / "books" / f"vol{vol}" / chapter
     root.mkdir(parents=True, exist_ok=True)
     (root / f"{chapter}.qmd").write_text(f"{h1}\n\nbody\n", encoding="utf-8")
 
@@ -79,7 +79,7 @@ def test_link_check_fails_on_missing_chapter(tmp_path: Path) -> None:
         "attention-scaling:\n  primary: { vol: 1, chapter: nonexistent_chapter }\n",
     )
     # Create the book tree (so link-check is active) but NOT the chapter.
-    (vault_dir.parent.parent / "book" / "quarto" / "contents").mkdir(parents=True)
+    (vault_dir.parent.parent / "books").mkdir(parents=True)
 
     with pytest.raises(BookRefError, match="nonexistent_chapter"):
         BookRefResolver(vault_dir)

@@ -319,7 +319,7 @@ export class QmdPythonValueResolver implements vscode.Disposable {
       return new Map();
     }
 
-    const quartoDir = path.join(root, 'book', 'quarto');
+    const quartoDir = path.join(root, 'books');
 
     try {
       if (!this.python3Path) {

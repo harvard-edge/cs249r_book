@@ -66,8 +66,7 @@ class BuildCommand:
             console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
             return True
 
-        # book_dir is `books/`; repo root is two levels up.
-        repo_root = self.config_manager.book_dir.parent.parent
+        repo_root = self.config_manager.root_dir
         issues, files_checked = find_hygiene_issues(repo_root)
 
         if not issues:
@@ -134,7 +133,7 @@ class BuildCommand:
             console.print("[dim]ⓘ Post-build validation unavailable in this checkout; skipping.[/dim]")
             return True
 
-        repo_root = self.config_manager.book_dir.parent.parent
+        repo_root = self.config_manager.root_dir
         epubs = _discover_built_epubs(repo_root)
         if not epubs:
             console.print("[dim]ⓘ No EPUB artifacts found under _build/epub-vol*/; skipping post-build validation.[/dim]")
@@ -165,7 +164,7 @@ class BuildCommand:
 
         # --- Epubcheck (W3C, needs Java) -------------------------------
         # Use the same baseline file CI uses so local behaviour matches.
-        baseline_path = repo_root / "book" / "tools" / "audit" / "epubcheck-baseline.json"
+        baseline_path = repo_root / "bindery" / "tools" / "audit" / "epubcheck-baseline.json"
         baseline_counts: Dict[str, Dict[str, int]] = {}
         if baseline_path.exists():
             try:

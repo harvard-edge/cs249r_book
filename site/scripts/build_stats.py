@@ -193,7 +193,7 @@ def read_vol2_chapters() -> dict[str, int]:
     openers (vol2/parts/*) and frontmatter do not take chapter
     numbers, so they are skipped rather than counted.
     """
-    config = REPO_ROOT / "book" / "quarto" / "config" / "_quarto-pdf-vol2.yml"
+    config = REPO_ROOT / "books" / "config" / "_quarto-pdf-vol2.yml"
     if not config.is_file():
         return {}
 
