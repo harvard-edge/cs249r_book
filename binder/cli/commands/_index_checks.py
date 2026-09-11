@@ -180,11 +180,37 @@ def check_tag_placement(root: Path) -> list[IndexIssue]:
     return issues
 
 
+def _find_volume_root(path: Path) -> Optional[Path]:
+    """Find the containing volume directory for a path, if any."""
+    curr = path.resolve() if path.is_file() else path
+    if curr.is_file():
+        curr = curr.parent
+    while curr and curr != curr.parent:
+        if (curr.name.startswith("vol") and curr.name[3:].isdigit()) or curr.name == "tinytorch":
+            return curr
+        curr = curr.parent
+    return None
+
+
 def check_xref_resolves(root: Path) -> list[IndexIssue]:
     """Every |see / |seealso target resolves to a main entry."""
     main_heads: set[str] = set()
     see_refs: list[tuple[str, int, str, str]] = []
 
+    target_root = _find_volume_root(root) or root
+
+    # Build target set across containing volume (or requested root)
+    for f in _iter_qmd_files(target_root):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for m in INDEX_RE.finditer(text):
+            k = m.group(1)
+            if not SEEREF_RE.match(k):
+                h = k.split("!", 1)[0]
+                if "@" in h:
+                    h = h.split("@", 1)[1]
+                main_heads.add(h)
+
+    # Inspect see / seealso references within requested root
     for f in _iter_qmd_files(root):
         rel = _rel_path(f, root)
         text = f.read_text(encoding="utf-8", errors="replace")
@@ -194,11 +220,6 @@ def check_xref_resolves(root: Path) -> list[IndexIssue]:
             if sm:
                 line = text.count("\n", 0, m.start()) + 1
                 see_refs.append((rel, line, sm.group(1).strip(), sm.group(2).strip()))
-            else:
-                h = k.split("!", 1)[0]
-                if "@" in h:
-                    h = h.split("@", 1)[1]
-                main_heads.add(h)
 
     issues: list[IndexIssue] = []
     for rel, line, src, tgt in see_refs:

@@ -421,40 +421,44 @@ class MLSysBookCLI:
         t0 = time.time()
         ok = False
 
-        if build_all:
-            if format_type == "html":
-                status_console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
-                ok = self.build_command.build_html_only()
+        from contextlib import redirect_stdout, nullcontext
+        stdout_redirect = redirect_stdout(sys.stderr) if json_output else nullcontext()
+
+        with stdout_redirect:
+            if build_all:
+                if format_type == "html":
+                    status_console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
+                    ok = self.build_command.build_html_only()
+                else:
+                    status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+                    ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+            elif volume and not chapters_arg:
+                volume_name = format_volume_display_name(volume)
+                status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
+                ok = self.build_command.build_volume(
+                    volume,
+                    format_type,
+                    skip_hygiene=skip_hygiene,
+                    skip_validate=skip_validate,
+                    no_cover=no_cover,
+                    print_marks=print_marks,
+                )
+                if ok and layout_after:
+                    ok = self.layout_command.run([f"--{volume}", "--no-build"])
+            elif volume and chapters_arg:
+                chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+                status_console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
+                ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+            elif chapters_arg:
+                chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+                status_console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
+                ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
             else:
                 status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-                ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-        elif volume and not chapters_arg:
-            volume_name = format_volume_display_name(volume)
-            status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
-            ok = self.build_command.build_volume(
-                volume,
-                format_type,
-                skip_hygiene=skip_hygiene,
-                skip_validate=skip_validate,
-                no_cover=no_cover,
-                print_marks=print_marks,
-            )
-            if ok and layout_after:
-                ok = self.layout_command.run([f"--{volume}", "--no-build"])
-        elif volume and chapters_arg:
-            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            status_console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
-            ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-        elif chapters_arg:
-            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            status_console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
-            ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-        else:
-            status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-            if format_type == "html":
-                ok = self.build_command.build_full("html")
-            else:
-                ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                if format_type == "html":
+                    ok = self.build_command.build_full("html")
+                else:
+                    ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if json_output:
             import json as _json
@@ -467,7 +471,12 @@ class MLSysBookCLI:
                 "elapsed_seconds": round(time.time() - t0, 2),
                 "log_path": str(getattr(self.build_command, "_last_build_log", "")) or None,
             }
-            console.print(_json.dumps(result_payload, indent=2), soft_wrap=True, highlight=False)
+            json_text = _json.dumps(result_payload, indent=2)
+            if console.file not in (sys.stdout, sys.__stdout__, sys.stderr, sys.__stderr__):
+                console.print(json_text, soft_wrap=True, highlight=False)
+            else:
+                sys.stdout.write(json_text + "\n")
+                sys.stdout.flush()
 
         return ok
 

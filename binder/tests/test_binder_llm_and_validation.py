@@ -20,17 +20,21 @@ def test_build_json_output_parseable_and_unwrapped():
         _last_build_log="/a/" + "x" * 100 + ".log",
     )
     f = io.StringIO()
-    m.console = Console(file=f, width=80, color_system=None)
-    ok = cli.handle_build_command(["html", "--vol1", "--json"])
-    assert ok is True
+    orig_console = m.console
+    try:
+        m.console = Console(file=f, width=80, color_system=None)
+        ok = cli.handle_build_command(["html", "--vol1", "--json"])
+        assert ok is True
 
-    raw = f.getvalue()
-    # The output in console must be directly parseable as JSON without errors
-    data = json.loads(raw)
-    assert data["success"] is True
-    assert data["volume"] == "vol1"
-    assert data["log_path"] == "/a/" + "x" * 100 + ".log"
-    assert "\n" not in data["log_path"]
+        raw = f.getvalue()
+        # The output in console must be directly parseable as JSON without errors
+        data = json.loads(raw)
+        assert data["success"] is True
+        assert data["volume"] == "vol1"
+        assert data["log_path"] == "/a/" + "x" * 100 + ".log"
+        assert "\n" not in data["log_path"]
+    finally:
+        m.console = orig_console
 
 
 def test_resolve_pdf_volumes_preserves_multiple_flags():
@@ -76,3 +80,37 @@ def test_content_tree_skips_outside_volume_collection():
     r_vol = cmd._run_content_tree(Path("books/vol1"))
     assert len(r_vol.issues) == 0
     assert r_vol.files_checked == 2
+
+
+def test_build_json_redirects_nested_output_to_stderr():
+    """Ensure real BuildCommand output is directed to stderr leaving stdout clean JSON."""
+    from contextlib import redirect_stdout
+    from unittest.mock import patch
+
+    buf = io.StringIO()
+    cli = m.MLSysBookCLI()
+    with patch.object(cli.build_command, "_preflight_epub_hygiene", return_value=False):
+        with redirect_stdout(buf):
+            cli.handle_build_command(["epub", "--vol1", "--json"])
+
+    data = json.loads(buf.getvalue())
+    assert data["success"] is False
+    assert data["format"] == "epub"
+    assert data["volume"] == "vol1"
+
+
+def test_check_xref_resolves_across_containing_volume():
+    """Ensure xrefs resolve against containing volume when scanning a single file."""
+    from binder.cli.commands._index_checks import check_xref_resolves
+    p = Path("books/vol1/introduction/introduction.qmd")
+    if p.is_file():
+        issues = check_xref_resolves(p)
+        assert len(issues) == 0
+
+
+def test_maintain_volume_bib_rejects_unsupported_volumes():
+    """Ensure binder fix bib rejects vol1/vol2 with explanatory message."""
+    from binder.cli.commands.maintenance import MaintenanceCommand
+    cmd = object.__new__(MaintenanceCommand)
+    assert cmd._maintain_volume_bib("vol1") is False
+    assert cmd._maintain_volume_bib("vol2") is False

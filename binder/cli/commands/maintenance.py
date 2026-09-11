@@ -444,6 +444,15 @@ class MaintenanceCommand:
 
     def _maintain_volume_bib(self, volume: str, check_only: bool = False) -> bool:
         """Build or check volume bibliography via build_volume_bib.py."""
+        supported_vols = ("vol3", "vol4")
+        if volume not in supported_vols:
+            disp_name = format_volume_display_name(volume)
+            console.print(
+                f"[yellow]ℹ️  {disp_name} ({volume}) uses the shared bibliography (books/shared/references.bib).\n"
+                f"Dedicated bibliography maintenance applies only to volumes with isolated bibliographies ({', '.join(supported_vols)}).[/yellow]"
+            )
+            return False
+
         import sys as _sys
         script = self.config_manager.root_dir / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
         if not script.exists():
