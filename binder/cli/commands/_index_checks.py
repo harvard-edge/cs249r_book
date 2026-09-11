@@ -26,7 +26,7 @@ LOWERCASE_ALLOWLIST = {
 PARENTHETICAL_ALLOWLIST = {"Precision (Metric)"}
 
 _SKIP_PATH_PARTS = (
-    "frontmatter/", "backmatter/", "/parts/", "/glossary/", "/appendix", "_shelved",
+    "frontmatter/", "backmatter/", "/parts/", "/glossary/", "/appendix", "_shelved", "_build/",
 )
 
 

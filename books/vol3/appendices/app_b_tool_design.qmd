@@ -1,4 +1,4 @@
-# Appendix B: Tool Design & Typed ABIs {#sec-vol3-app-b-tool-design}
+# Tool Design & Typed ABIs {#sec-vol3-app-b-tool-design}
 
 The actuation boundary bridges stochastic neural deliberation and deterministic external software execution. While @sec-vol3-actuation establishes the theoretical underpinnings of this boundary—formalizing hardware-style protection rings, typed Application Binary Interfaces (ABIs), capability-based access control, and mathematical idempotency—engineers implementing autonomous systems require practical, reusable specifications. This appendix serves as an engineering cheat sheet and reference guide for constructing robust, deterministic tool interfaces. It provides production-grade JSON Schema templates, formalizes grammar-constrained logit decoding mechanics at the GPU tensor layer, details distributed cryptographic nonce and capability lease implementations, and contrasts the token economics of deep execution primitives against shallow micro-tool architectures.
 
@@ -22,7 +22,7 @@ In an agentic architecture, tool schemas are not mere passive documentation; the
 4. **Semantically bounded descriptions with units**: Parameter descriptions must declare units of measure (for example, `timeout_ms` rather than `timeout`), indexing conventions (such as `1-indexed line numbers`), and expected nullability or default behavior.
 5. **No ambiguous polymorphic unions**: Avoid unconstrained `anyOf` or `oneOf` blocks lacking a discriminator tag. Autoregressive sampling degrades when navigating overlapping schemas without an explicit dispatch key.
 
-### Golden Tool Schema Definition
+### Golden tool schema definition
 
 Listing @lst-vol3-app-b-golden-schema illustrates a production-grade JSON Schema (Draft 2020-12) for an atomic file modification tool (`FileEdit`). The schema enforces strict property closure, explicit string boundaries, and semantic constraints.
 
@@ -62,7 +62,7 @@ Listing @lst-vol3-app-b-golden-schema illustrates a production-grade JSON Schema
 ```
 :::
 
-### Type-Safe Schema Generation in Python
+### Type-safe schema generation in python
 
 Manually crafting JSON Schema dictionaries is error-prone. Modern agent frameworks generate schemas directly from strongly typed data models. Listing @lst-vol3-app-b-pydantic-schema demonstrates how to construct a deterministic, type-safe ABI using Pydantic v2, enforcing property restrictions and generating compliant wire schemas.
 
@@ -71,77 +71,40 @@ Manually crafting JSON Schema dictionaries is error-prone. Modern agent framewor
 from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-
 class FileEditInput(BaseModel):
     """Input parameters for atomic file editing tool."""
-
-    model_config = ConfigDict(
-        extra="forbid",  # Enforces additionalProperties: false
-        frozen=True,
-        populate_by_name=True,
-    )
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
     path: Annotated[
         str,
-        StringConstraints(
-            strip_whitespace=True,
-            pattern=r"^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$",
-        ),
-        Field(
-            description=(
-                "Absolute filesystem path to target file. Must resolve "
-                "within authorized workspace directory."
-            )
-        ),
+        StringConstraints(strip_whitespace=True, pattern=r"^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$"),
+        Field(description="Absolute filesystem path within authorized workspace."),
     ]
-
     old_str: Annotated[
         str,
         StringConstraints(min_length=1),
-        Field(
-            description=(
-                "Exact contiguous string block to replace, including "
-                "whitespace and newlines."
-            )
-        ),
+        Field(description="Exact contiguous string block to replace."),
     ]
-
     new_str: Annotated[
         str,
-        Field(
-            description=(
-                "Replacement string to insert in place of old_str. "
-                "Pass an empty string to delete old_str."
-            )
-        ),
+        Field(description="Replacement string to insert in place of old_str."),
     ]
-
     allow_multiple: Annotated[
         bool,
-        Field(
-            default=False,
-            description=(
-                "When true, replaces all matches of old_str. When false, "
-                "aborts if match count is not exactly 1."
-            ),
-        ),
+        Field(default=False, description="When true, replaces all matches; otherwise aborts if count != 1."),
     ]
-
 
 def export_tool_manifest() -> dict:
     """Exports tool manifest compliant with Model Context Protocol (MCP)."""
     return {
         "name": "file_edit",
-        "description": (
-            "Performs atomic string replacement in a file. Enforces unique "
-            "match invariants before committing modifications."
-        ),
+        "description": "Performs atomic string replacement enforcing unique match invariants.",
         "inputSchema": FileEditInput.model_json_schema(),
     }
 ```
 :::
 
-### Schema Anti-Patterns and Hardened Alternatives
+### Schema anti-patterns and hardened alternatives
 
 Engineers migrating REST or internal RPC APIs to agent tool boundaries often introduce patterns that degrade model reasoning. Table @tbl-vol3-app-b-anti-patterns categorizes common anti-patterns and their systems-level remedies.
 
@@ -167,7 +130,7 @@ This post-hoc re-prompting approach imposes severe systems costs:
 
 Grammar-constrained logit decoding eliminates syntax errors by enforcing structural invariants directly at the GPU tensor layer during generation [@willard2023outlines].
 
-### The Tensor Masking Mechanism
+### The tensor masking mechanism
 
 Let $V$ denote the model's vocabulary, with token indices $v \in \{0, 1, \dots, |V|-1\}$. At generation step $t$, the transformer backbone produces an unnormalized logit vector $z_t \in \mathbb{R}^{|V|}$.
 
@@ -193,7 +156,7 @@ $$\mathbb{P}(y_t = v \mid x_{<t}) = \frac{\exp(\tilde{z}_{t, v})}{\sum_{j \in V}
 
 the probability of every illegal token evaluates to exactly zero ($\exp(-\infty) = 0$). Consequently, the sampler cannot select a token that violates the schema grammar.
 
-### Python Reference Implementation: Grammar Logit Processor
+### Python reference implementation: Grammar logit processor
 
 Listing @lst-vol3-app-b-grammar-masking provides a reference implementation of a grammar-constrained logit processor. It maintains DFA parser states, evaluates vocabulary bitmasks, and applies tensor-level masking to suppress illegal token emissions.
 
@@ -202,79 +165,34 @@ Listing @lst-vol3-app-b-grammar-masking provides a reference implementation of a
 from typing import Dict, List, Set
 import torch
 
-
-class MockDFA:
-    """Mock Deterministic Finite Automaton tracking JSON Schema states."""
-
-    def __init__(self, vocab_size: int):
-        self.vocab_size = vocab_size
-        # Map state ID -> set of allowed token IDs in that state
-        self.transitions: Dict[int, Set[int]] = {}
-        self.current_state = 0
-
-    def get_valid_tokens(self, state: int) -> Set[int]:
-        """Returns set of token IDs permitted in current state."""
-        return self.transitions.get(state, set(range(self.vocab_size)))
-
-    def advance(self, token_id: int) -> int:
-        """Transitions DFA state given observed token; returns new state."""
-        # State machine transition logic compiled from schema
-        self.current_state = (self.current_state + 1) % 5
-        return self.current_state
-
-
 class GrammarConstrainedLogitProcessor:
     """Enforces grammar constraints via tensor-level logit masking."""
 
-    def __init__(self, dfa: MockDFA, vocab_size: int, device: str = "cuda"):
-        self.dfa = dfa
+    def __init__(self, dfa_matcher: Any, vocab_size: int, device: str = "cuda"):
+        self.dfa = dfa_matcher
         self.vocab_size = vocab_size
         self.device = device
         self.neg_inf = float("-inf")
 
-    def __call__(
-        self, input_ids: torch.LongTensor, logits: torch.FloatTensor
-    ) -> torch.FloatTensor:
-        """Masks logits in-place before sampling.
-
-        Args:
-            input_ids: (batch_size, sequence_length) historical tokens.
-            logits: (batch_size, vocab_size) raw model logits for next step.
-
-        Returns:
-            torch.FloatTensor: Masked logits where invalid tokens are -inf.
-        """
+    def __call__(self, input_ids: torch.LongTensor, logits: torch.FloatTensor) -> torch.FloatTensor:
+        """Masks unnormalized logits in-place before softmax sampling."""
         batch_size = logits.shape[0]
-
         for b in range(batch_size):
             valid_tokens = self.dfa.get_valid_tokens(self.dfa.current_state)
-
-            # Construct binary mask: 0 for allowed, -inf for forbidden
-            mask = torch.full(
-                (self.vocab_size,),
-                fill_value=self.neg_inf,
-                dtype=logits.dtype,
-                device=self.device,
-            )
-
+            mask = torch.full((self.vocab_size,), self.neg_inf, dtype=logits.dtype, device=self.device)
             if valid_tokens:
-                valid_indices = torch.tensor(
-                    list(valid_tokens), dtype=torch.long, device=self.device
-                )
-                mask[valid_indices] = 0.0
-
-            # Elementwise addition applies the -inf mask
-            logits[b] = logits[b] + mask
-
+                valid_idx = torch.tensor(list(valid_tokens), dtype=torch.long, device=self.device)
+                mask[valid_idx] = 0.0
+            logits[b] += mask
         return logits
 
     def step(self, sampled_token_id: int) -> None:
-        """Updates internal automaton state after token is sampled."""
+        """Advances internal automaton state after token selection."""
         self.dfa.advance(sampled_token_id)
 ```
 :::
 
-### Performance and Latency Trade-Off Analysis
+### Performance and latency trade-off analysis
 
 Grammar masking introduces a small per-token computational overhead during decoding, but it avoids multi-turn error correction loops. We quantify the trade-off by comparing trajectory latency under unconstrained decoding versus grammar-constrained decoding.
 
@@ -311,7 +229,7 @@ To ensure safe execution, tool boundaries must enforce two operational guarantee
 1. **Mathematical Idempotency**: Repeated execution of an identical mutating action yields the same state as a single execution ($f(f(s)) = f(s)$).
 2. **Capability Leases**: Every action must be authorized by an explicit, unforgeable, and temporally bounded capability token, abolishing ambient authority [@saltzer1975; @dennis1966].
 
-### The Distributed Idempotency Pipeline
+### The distributed idempotency pipeline
 
 As established in @sec-vol3-actuation, guaranteeing idempotency across stochastic control loops requires binding every mutating tool invocation to a deterministic **Trajectory Nonce** $\eta$:
 
@@ -329,7 +247,7 @@ When an invocation carrying nonce $\eta$ reaches the execution gateway, the runt
 2. **Completed Execution Replay**: If the key exists with status `COMPLETED`, the gateway bypasses tool execution entirely and returns the cached observation payload.
 3. **Execution and Commit**: If the lock is successfully acquired (`NX` succeeded), the gateway dispatches the tool to the sandbox. Upon completion, it updates the state key to `COMPLETED` with an expiration time-to-live (TTL) and records the serialized observation.
 
-### Capability Leases and Monotonic Attenuation
+### Capability leases and monotonic attenuation
 
 Ambient authority—where any authenticated component inherits all permissions of the system—is a critical vulnerability in agentic architectures. If an untrusted web-browsing agent parses a prompt-injected document, it must not possess ambient credentials to execute shell commands or read private files.
 
@@ -352,143 +270,54 @@ $$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}}$$
 
 A child cannot be granted a resource scope wider than its parent, an operation the parent lacks, a longer expiration time, or a larger compute quota.
 
-### Python Reference Implementation: Idempotent Capability Gateway
+### Python reference implementation: Idempotent capability gateway
 
 Listing @lst-vol3-app-b-gateway implements an execution gateway that verifies capability leases, enforces canonical JSON hashing for trajectory nonces, and manages distributed idempotency locks.
 
 ::: {#lst-vol3-app-b-gateway lst-cap="**Idempotent Capability Gateway**: Python implementation enforcing cryptographic capability verification, canonical argument hashing, and atomic execution deduplication."}
 ```python
-import hashlib
-import hmac
-import json
-import time
-from typing import Any, Dict, Optional, Set, Tuple
-
+import hashlib, hmac, json, time
+from typing import Any, Dict, Set, Tuple
 
 class CapabilityLease:
     """Cryptographic capability lease governing tool execution rights."""
 
-    def __init__(
-        self,
-        cid: str,
-        resource_scope: str,
-        permitted_ops: Set[str],
-        expires_at: float,
-        signature: str,
-    ):
-        self.cid = cid
-        self.resource_scope = resource_scope
-        self.permitted_ops = permitted_ops
-        self.expires_at = expires_at
-        self.signature = signature
+    def __init__(self, cid: str, resource_scope: str, permitted_ops: Set[str], expires_at: float):
+        self.cid, self.resource_scope = cid, resource_scope
+        self.permitted_ops, self.expires_at = permitted_ops, expires_at
 
     def is_valid(self, op: str, resource: str, current_time: float) -> bool:
-        """Verifies lease validity, temporal expiration, and operation rights."""
-        if current_time > self.expires_at:
-            return False
-        if op not in self.permitted_ops:
-            return False
-        # Verify resource is within authorized prefix scope
-        if not resource.startswith(self.resource_scope):
-            return False
-        return True
-
+        return current_time <= self.expires_at and op in self.permitted_ops and resource.startswith(self.resource_scope)
 
 class IdempotentToolGateway:
     """Coordinates tool execution with idempotency locks and capability checks."""
 
-    def __init__(self, hmac_secret: bytes):
-        self.hmac_secret = hmac_secret
-        # Simulated distributed state store (e.g., Redis cluster)
-        self._state_store: Dict[str, Dict[str, Any]] = {}
+    def __init__(self, hmac_secret: bytes, store: Dict[str, Any]):
+        self.hmac_secret, self.store = hmac_secret, store
 
-    def compute_trajectory_nonce(
-        self,
-        trajectory_id: str,
-        step_idx: int,
-        tool_name: str,
-        arguments: Dict[str, Any],
-    ) -> str:
-        """Computes deterministic nonce using canonical RFC 8785 JSON formatting."""
-        # Sort keys lexicographically to eliminate JSON serialization jitter
-        canonical_args = json.dumps(
-            arguments,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-        )
-
-        message = (
-            f"{trajectory_id}:{step_idx}:{tool_name}:{canonical_args}".encode(
-                "utf-8"
-            )
-        )
-        nonce = hmac.new(self.hmac_secret, message, hashlib.sha256).hexdigest()
-        return nonce
+    def compute_nonce(self, trajectory_id: str, step: int, tool: str, args: Dict[str, Any]) -> str:
+        canonical = json.dumps(args, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        msg = f"{trajectory_id}:{step}:{tool}:{canonical}".encode("utf-8")
+        return hmac.new(self.hmac_secret, msg, hashlib.sha256).hexdigest()
 
     def execute_tool(
-        self,
-        lease: CapabilityLease,
-        trajectory_id: str,
-        step_idx: int,
-        tool_name: str,
-        arguments: Dict[str, Any],
-        target_resource: str,
-        operation: str,
-        executor_fn: Any,
+        self, lease: CapabilityLease, traj_id: str, step: int, tool: str,
+        args: Dict[str, Any], res: str, op: str, executor: Any,
     ) -> Tuple[Dict[str, Any], bool]:
-        """Executes tool action within capability and idempotency boundaries.
-
-        Returns:
-            Tuple[Dict[str, Any], bool]: (Observation payload, from_cache flag)
-        """
-        now = time.time()
-
-        # Step 1: Enforce complete mediation via capability lease
-        if not lease.is_valid(operation, target_resource, now):
-            return {
-                "status": "ERROR_CAPABILITY_DENIED",
-                "error": "Operation violates capability lease constraints",
-                "cid": lease.cid,
-            }, False
-
-        # Step 2: Compute deterministic trajectory nonce
-        nonce = self.compute_trajectory_nonce(
-            trajectory_id, step_idx, tool_name, arguments
-        )
-        lock_key = f"idempotency:{nonce}"
-
-        # Step 3: Check distributed state store
-        record = self._state_store.get(lock_key)
-        if record:
+        if not lease.is_valid(op, res, time.time()):
+            return {"status": "ERROR_CAPABILITY_DENIED", "cid": lease.cid}, False
+        lock_key = f"idempotency:{self.compute_nonce(traj_id, step, tool, args)}"
+        if record := self.store.get(lock_key):
             if record["status"] == "COMPLETED":
-                # Replay cached observation payload
                 return record["result"], True
-            elif record["status"] == "IN_FLIGHT":
-                return {
-                    "status": "IN_FLIGHT",
-                    "message": "Mutation currently executing under lock",
-                }, False
-
-        # Step 4: Acquire atomic lock (simulated SET NX)
-        self._state_store[lock_key] = {
-            "status": "IN_FLIGHT",
-            "acquired_at": now,
-        }
-
-        # Step 5: Execute physical mutation in sandbox
+            return {"status": "IN_FLIGHT"}, False
+        self.store[lock_key] = {"status": "IN_FLIGHT", "acquired_at": time.time()}
         try:
-            result_payload = executor_fn(**arguments)
-            # Step 6: Commit state and cache result
-            self._state_store[lock_key] = {
-                "status": "COMPLETED",
-                "result": result_payload,
-                "committed_at": time.time(),
-            }
-            return result_payload, False
+            res_payload = executor(**args)
+            self.store[lock_key] = {"status": "COMPLETED", "result": res_payload}
+            return res_payload, False
         except Exception as exc:
-            # Release lock on operational failure to permit explicit retry
-            del self._state_store[lock_key]
+            self.store.pop(lock_key, None)
             return {"status": "EXECUTION_ERROR", "error": str(exc)}, False
 ```
 :::
@@ -499,7 +328,7 @@ When integrating agents with enterprise infrastructure, a common design instinct
 
 In *A Philosophy of Software Design*, John Ousterhout defines a shallow module as one whose interface surface area is large relative to the functionality it provides [@ousterhout2018philosophy]. For autonomous agents, shallow interfaces impose a dual tax: they consume substantial prompt context bandwidth and disperse attention during tool selection. In contrast, **deep modules** present simple, compact interfaces that encapsulate expressive execution power within a sandboxed runtime.
 
-### The Prompt Token Tax and Attention Dispersion
+### The prompt token tax and attention dispersion
 
 To expose a tool to a model, its complete JSON Schema must be serialized into the system prompt context. Let $K$ denote the number of tools registered in the active catalog, and let $S_i$ be the token length of tool schema $i$. Across an autonomous deliberation trajectory spanning $N$ execution steps, the cumulative prefill token spend $T_{\text{prefill}}$ consumed purely by re-ingesting tool definitions is:
 
@@ -530,7 +359,7 @@ Table @tbl-vol3-app-b-deep-vs-shallow contrasts the systems characteristics of s
 
 : **Table B.2: Quantitative Systems Comparison Between Shallow Micro-Tools and Deep Modules**: Trade-off analysis across schema footprint, context consumption, attention dissipation, and sandboxing complexity. {#tbl-vol3-app-b-deep-vs-shallow tbl-colwidths="[20,24,24,32]"}
 
-### The Four Canonical Deep Tool Modules
+### The four canonical deep tool modules
 
 Frontier software engineering agents converge on four canonical deep execution primitives. Rather than wrapping individual shell commands or file operations into dozens of micro-tools, the runtime exposes four robust interfaces:
 
@@ -547,94 +376,53 @@ Listing @lst-vol3-app-b-canonical-schemas details the schema specifications for 
   "tools": [
     {
       "name": "bash_execute",
-      "description": "Executes an arbitrary shell command within an isolated POSIX container sandbox. Streams stdout and stderr and captures process exit code.",
+      "description": "Executes shell command in isolated container sandbox.",
       "parameters": {
         "type": "object",
         "properties": {
-          "command": {
-            "type": "string",
-            "description": "The exact shell command line to execute."
-          },
-          "timeout_ms": {
-            "type": "integer",
-            "description": "Maximum execution time in milliseconds before SIGKILL.",
-            "default": 30000,
-            "maximum": 300000
-          }
+          "command": {"type": "string", "description": "Shell command line to execute."},
+          "timeout_ms": {"type": "integer", "default": 30000, "maximum": 300000}
         },
-        "required": ["command"],
-        "additionalProperties": false
+        "required": ["command"], "additionalProperties": false
       }
     },
     {
       "name": "file_view",
-      "description": "Reads a slice of lines from a text file. Enforces windowed reading to prevent context buffer overflow.",
+      "description": "Reads windowed line slice from text file.",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": {
-            "type": "string",
-            "description": "Absolute path to the file."
-          },
-          "offset": {
-            "type": "integer",
-            "description": "1-indexed starting line number.",
-            "minimum": 1
-          },
-          "limit": {
-            "type": "integer",
-            "description": "Maximum number of lines to return.",
-            "maximum": 500
-          }
+          "path": {"type": "string", "description": "Absolute path to file."},
+          "offset": {"type": "integer", "minimum": 1, "description": "1-indexed start line."},
+          "limit": {"type": "integer", "maximum": 500, "description": "Maximum lines to return."}
         },
-        "required": ["path", "offset", "limit"],
-        "additionalProperties": false
+        "required": ["path", "offset", "limit"], "additionalProperties": false
       }
     },
     {
       "name": "file_edit",
-      "description": "Applies an exact atomic string replacement to a file. Fails if old_str is not found or matches multiple locations.",
+      "description": "Atomic unique string replacement in file.",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": {
-            "type": "string",
-            "description": "Absolute path to the target file."
-          },
-          "old_str": {
-            "type": "string",
-            "description": "The exact string block to replace."
-          },
-          "new_str": {
-            "type": "string",
-            "description": "The replacement string to insert."
-          }
+          "path": {"type": "string", "description": "Absolute target file path."},
+          "old_str": {"type": "string", "description": "Exact unique string block to replace."},
+          "new_str": {"type": "string", "description": "Replacement string."}
         },
-        "required": ["path", "old_str", "new_str"],
-        "additionalProperties": false
+        "required": ["path", "old_str", "new_str"], "additionalProperties": false
       }
     },
     {
       "name": "grep_search",
-      "description": "Executes a fast regex pattern search across files in a directory tree, returning matching lines and line numbers.",
+      "description": "Fast regex pattern search across directory files.",
       "parameters": {
         "type": "object",
         "properties": {
-          "pattern": {
-            "type": "string",
-            "description": "Regular expression pattern to search for."
-          },
-          "path": {
-            "type": "string",
-            "description": "Directory or file path to search within."
-          },
-          "glob": {
-            "type": "string",
-            "description": "Optional file pattern filter (e.g., '*.py')."
-          }
+          "pattern": {"type": "string", "description": "Regex pattern to match."},
+          "path": {"type": "string", "description": "Directory or file to search within."},
+          "glob": {"type": "string", "description": "Optional glob filter (e.g., '*.py')."}
         },
-        "required": ["pattern", "path"],
-        "additionalProperties": false
+        "required": ["pattern", "path"], "additionalProperties": false
       }
     }
   ]

@@ -1,163 +1,734 @@
-# Systems Tokenomics {#sec-vol3-tokenomics}
+# System Tokenomics, Capacity Sizing & Cost Modeling {#sec-vol3-tokenomics}
+
+Autonomous agent architectures transform foundation models from passive, query-response text generators into stateful, long-horizon decision engines executing dozens or hundreds of sequential forward passes. While classical software systems incur compute costs proportional to deterministic CPU cycles and network bytes transferred, agentic systems introduce an economic regime governed by stochastic token consumption, non-linear key-value (KV) cache accumulation, and severe accelerator memory-bandwidth saturation. When an unmonitored agent enters an infinite retry loop or expands its prompt context across fifty tool-calling iterations, the financial expenditure does not scale linearly with task complexity—it explodes superlinearly. Sizing infrastructure fleets and governing operating costs for autonomous workloads requires abandoning simplistic "cost per million tokens" metrics in favor of hardware-grounded tokenomics: modeling the physical roofline limits of accelerator memory hierarchies, quantifying the asymmetric economics of prefill and decode phases, sizing server clusters against heavy-tailed arrival distributions, and establishing formal decision boundaries where autonomous delegation must yield to deterministic software or human intervention.
 
 ## Purpose {.unnumbered .unlisted}
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{95}{20}{30}{10}{20}{10}
+\mlagentstack{95}{10}{10}{10}{10}{10}
+\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
-_Why does an agent designed to save human labor consume ten times its salary in API tokens?_
+_Why does an autonomous software agent designed to eliminate human labor costs consume ten times its equivalent wage in unmonitored inference tokens?_
 
-This chapter bridges the gap between hardware utilization and application-level unit economics, exploring how variable-length generation and the non-linear scaling of KV cache fundamentally change the economic models of compute. By shifting away from static instance pricing toward fine-grained, state-aware token-based abstractions, we understand why autonomous loops create exponential cost scaling. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+This chapter bridges the gap between accelerator silicon microarchitecture and organizational unit economics, establishing the analytical models required to size, provision, and govern distributed agent fleets. We analyze the physical roofline constraints that separate compute-bound prompt ingestion from memory-bandwidth-bound token generation, derive the true infrastructure cost of key-value cache memory allocation under dynamic context expansion, and formulate capacity planning models using queueing theory under bursty, heavy-tailed agentic demand. Furthermore, we develop multi-tier speculative cascading policies that combine lightweight specialized models with guarded frontier reasoning engines, establishing the mathematical frontiers where autonomous agent execution yields provable economic return over traditional deterministic software and human labor.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
 :::
 
 ::: {.callout-learning-objectives}
-- Explain the physical hardware constraints that cause asymmetric pricing between prefill and decode tokens.
-- Calculate the memory footprint of the KV cache for a given sequence length and batch size.
-- Diagnose runaway token consumption in multi-agent recursive loops.
-- Compare memory management techniques like PagedAttention against static contiguous allocation for KV caches.
-- Evaluate the economic viability of speculative decoding based on draft model acceptance rates and arithmetic intensity.
-- Architect dynamic model routing policies to optimize Cost-per-Verified-Goal (CPVG).
+- Derive the tokenomic roofline model parameterizing arithmetic intensity ($I$), memory bandwidth ($B_{\text{mem}}$), and compute ceiling ($P_{\text{peak}}$) across prefill and decode execution regimes.
+- Quantify the unit economics of prompt prefill versus autoregressive decode, calculating the Cost-per-Verified-Goal (CPVG) and KV cache memory footprint across multi-turn agent horizons.
+- Size accelerator serving clusters using queueing theory ($M/M/k$ and $M/G/k$ approximations, Little's Law) to guarantee tail-latency service-level agreements under heavy-tailed agent request arrivals.
+- Architect multi-tier model cascades and speculative routers that optimize the Pareto frontier between task completion accuracy, end-to-end latency, and inference expenditure.
+- Formulate cost-optimal autonomy boundaries using decision-theoretic utility models to identify when to employ autonomous agents versus deterministic heuristics or human-in-the-loop escalation.
+- Implement enterprise economic governance frameworks, including cryptographic capability token budgets, monotonic quota attenuation, and automated financial circuit breakers.
 :::
 
-## Introduction
+## 17.1 The Tokenomic Roofline Model {#sec-vol3-tokenomics-roofline}
 
-When a user asks a language model to summarize a 50-page document, the system does not consume compute uniformly. Processing the input document requires a massive, parallel matrix multiplication, while generating the two-paragraph summary relies on a slow, sequential process constrained entirely by how fast memory can be read. The commercialization of large language models has driven a structural shift in how we price these computational resources. Unlike traditional microservices, where costs are closely tied to active connection time or predictable request payloads (e.g., bytes transferred), autoregressive generation introduces stochastic resource utilization tied intricately to hardware roofline limits. The fundamental unit of value and cost is the token, yet the hardware footprint required to process a token varies drastically based on its phase (prefill vs. decode), its position in the context window, the model's architecture (dense vs. mixture of experts), and the temporal concurrency of the serving system.
+In late 2025, an enterprise engineering organization deployed an internal autonomous coding assistant across 1,200 software developers. The platform engineering team selected an open-weight 70-billion-parameter dense model, hosting it on private 8-way NVIDIA H100 SXM5 nodes. Each node provided 640 GB of high-bandwidth memory (HBM3) running at 3.35 TB/s per GPU, with aggregate peak compute exceeding 7.9 PFLOP/s in 16-bit half-precision floating-point arithmetic. Within hours of deployment, developer pull-request automation crawled to an intolerable 12 tokens per second per stream, and the cluster began rejecting incoming requests.
 
-The microeconomics of token generation trace directly back to these physical hardware constraints. Understanding why a generated word costs more than an input word requires looking at the arithmetic intensity of the underlying operations.
+Yet cluster telemetry revealed a bewildering anomaly: GPU Tensor Core utilization across the cluster hovered below $6\%$, while total server power consumption remained far below rated thermal design limits. Suspecting a software configuration defect, systems operators doubled the provisioned GPU count. The token generation latency did not improve by a single millisecond. The cluster was not constrained by floating-point execution units, PCIe transfer overhead, or network contention. It had collided head-on with the physical boundaries of the **Tokenomic Roofline Model**.
 
-| Metric                       | Definition                                     | Primary Driver                 | Optimization Target                     |
-|------------------------------|------------------------------------------------|--------------------------------|-----------------------------------------|
-| Cost-per-Token               | Price to generate or process one token.        | Hardware arithmetic intensity. | Maximize batch size, PagedAttention.    |
-| Cost-per-Turn                | Total cost of a single user-agent interaction. | Prompt length, KV cache size.  | KV cache tiering, prompt compression.   |
-| Cost-per-Verified-Goal       | Cost to autonomously complete a task.          | Agent loop efficiency.         | Model routing, early exit conditions.   |
-| Opportunity Cost of Idle HBM | Lost revenue from unused memory capacity.      | External fragmentation.        | Dynamic batching, speculative decoding. |
+### The classical Roofline model in accelerator silicon
 
-: Economic Metrics in Agentic Systems {#tbl-economic-metrics tbl-colwidths="[25,30,20,25]"}
+To diagnose why massive compute capacity sits idle during agentic execution, we must ground our analysis in the classical Roofline model formulated by Williams, Waterman, and Patterson [@williams2009]. The roofline establishes an upper bound on the attainable floating-point performance $P$ (in FLOP/s) of a hardware accelerator as a function of the operational **arithmetic intensity** $I$ (in FLOPs per byte of memory traffic transferred across the memory bus):
 
-## Token Pricing Models: Inputs, Outputs, and Arithmetic Intensity
+$$P = \min\left(P_{\text{peak}},\, I \cdot B_{\text{mem}}\right)$$
 
-Consider an API pricing tier that charges $0.50 per million input tokens but $1.50 per million output tokens. This 3:1 asymmetry is not an arbitrary business decision; it is a direct reflection of the **Roofline model**\index{Roofline model} [@williams2009roofline]. Pricing an LLM API requires modeling the underlying hardware constraints, primarily **high-bandwidth memory (HBM)**\index{high-bandwidth memory (HBM)} bandwidth and ALU utilization.
+where $P_{\text{peak}}$ represents the hardware's theoretical peak floating-point throughput (FLOP/s), $B_{\text{mem}}$ represents the memory bandwidth between high-bandwidth memory (HBM) and on-chip SRAM/registers (bytes/s), and $I$ denotes the arithmetic intensity:
 
-Input tokens are processed in parallel during the **prefill**\index{prefill} phase. By processing a sequence of tokens simultaneously, the system casts the workload as large Matrix-Matrix multiplications (GEMMs). This achieves high **arithmetic intensity**\index{arithmetic intensity} (FLOPs per byte of memory read), allowing the system to operate in the **compute-bound**\index{compute-bound} regime and saturate modern GPU Tensor Cores. Because prefill effectively amortizes the cost of loading the model weights across the entire input sequence, input tokens are structurally cheaper to process.
+$$I = \frac{\text{Total Floating-Point Operations (FLOPs)}}{\text{Total Memory Traffic Transferred from HBM (Bytes)}}$$ {#eq-vol3-tokenomics-arithmetic-intensity}
 
-Output tokens, conversely, are generated sequentially during the **autoregressive decode**\index{autoregressive decode} phase. This process relies on Matrix-Vector multiplications (GEMVs). For each generated token, the model's entire weight matrix must be streamed from HBM to SRAM. The arithmetic intensity is fundamentally low; the system operates deep in the **memory bandwidth-bound**\index{memory bandwidth-bound} regime, severely underutilizing the ALUs. Consequently, output tokens are priced significantly higher than input tokens, reflecting the scarce resource: memory bandwidth.
+The intersection of the slanted memory-bandwidth ceiling and the horizontal compute ceiling defines the **roofline knee** or hardware balance point $I^*$:
 
-::: {#fig-tokenomics-roofline}
+$$I^* = \frac{P_{\text{peak}}}{B_{\text{mem}}}$$ {#eq-vol3-tokenomics-roofline-knee}
+
+Any computational kernel whose operational arithmetic intensity satisfies $I < I^*$ is strictly **memory-bandwidth bound**. Its performance is throttled by how rapidly bytes can be streamed from HBM into on-chip registers, leaving arithmetic logic units (ALUs) and Tensor Cores starved for operands. Conversely, when $I \ge I^*$, the kernel enters the **compute-bound** plateau, where the memory bus can supply operands faster than the ALUs can retire instructions, allowing the hardware to achieve near-$100\%$ operational efficiency.
+
+For an NVIDIA H100 SXM5 GPU executing 16-bit half-precision (FP16/BF16) tensor operations without structured sparsity:
+
+$$P_{\text{peak}} \approx 989.4 \times 10^{12} \text{ FLOP/s}, \quad B_{\text{mem}} \approx 3.35 \times 10^{12} \text{ Bytes/s}$$
+
+Evaluating @eq-vol3-tokenomics-roofline-knee yields the hardware balance knee:
+
+$$I^* = \frac{989.4 \times 10^{12} \text{ FLOP/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 295.3 \text{ FLOP/Byte}$$
+
+To saturate the H100 Tensor Cores, an algorithm must execute at least 295 floating-point calculations for every single byte loaded from or stored to HBM.
+
+### Autoregressive decode in silicon: The memory wall
+
+During the autoregressive decode phase of an agent trajectory, the language model generates output tokens sequentially, one token per step. Let $P_{\text{params}}$ denote the total number of active model parameters. In standard FP16 or BF16 representation, each parameter occupies 2 bytes of storage in HBM:
+
+$$M_{\text{weights}} = 2 \cdot P_{\text{params}} \text{ Bytes}$$
+
+To emit a single token for a single sequence (batch size $B = 1$), the model must multiply the single incoming token activation vector $\mathbf{x} \in \mathbb{R}^{1 \times d_{\text{model}}}$ across every weight matrix in all $L$ Transformer layers. For a standard dense Transformer, multiplying a 1-token vector by weight matrices requires exactly 2 FLOPs per parameter (one multiply and one accumulate per weight):
+
+$$\text{FLOPs}_{\text{decode}}(B=1) \approx 2 \cdot P_{\text{params}} \text{ FLOPs}$$ {#eq-vol3-tokenomics-decode-flops-b1}
+
+Because the on-chip SRAM register file (typically tens of megabytes per GPU) cannot hold the tens or hundreds of gigabytes of model weights, **every single weight tensor must be read from HBM into SRAM for every single generated token**. Neglecting for a moment the read traffic of the key-value cache, the memory traffic required to generate one token is:
+
+$$\text{Traffic}_{\text{decode}}(B=1) \approx M_{\text{weights}} = 2 \cdot P_{\text{params}} \text{ Bytes}$$ {#eq-vol3-tokenomics-decode-traffic-b1}
+
+Substituting @eq-vol3-tokenomics-decode-flops-b1 and @eq-vol3-tokenomics-decode-traffic-b1 into @eq-vol3-tokenomics-arithmetic-intensity reveals the fundamental physical barrier of autoregressive decoding:
+
+$$I_{\text{decode}}(B=1) = \frac{2 \cdot P_{\text{params}} \text{ FLOPs}}{2 \cdot P_{\text{params}} \text{ Bytes}} = 1.0 \text{ FLOP/Byte}$$
+
+Comparing this operational intensity to the H100 hardware knee ($I^* \approx 295.3$ FLOP/Byte) demonstrates that single-stream decoding operates at:
+
+$$\frac{I_{\text{decode}}(B=1)}{I^*} = \frac{1.0}{295.3} \approx 0.339\%$$
+
+The attained execution throughput on an H100 GPU running single-sequence decode is bounded strictly by memory bandwidth:
+
+$$P_{\text{attained}}(B=1) = I_{\text{decode}} \cdot B_{\text{mem}} = 1.0 \cdot 3.35 \times 10^{12} = 3.35 \text{ TFLOP/s}$$
+
+While the GPU is physically capable of delivering 989.4 TFLOP/s, single-stream autoregressive decoding utilizes less than $0.34\%$ of that compute capacity. The remaining $99.66\%$ of the silicon sits entirely idle, stalled on the memory bus. This microarchitectural phenomenon is the **memory wall** of generative machine learning [@hennessy2011computer; @hennessy2019golden].
+
+### Amortizing memory traffic via batching
+
+The systems mechanism to escape this memory-bandwidth starvation is **concurrent batching**. When the serving system batches $B$ independent agent requests together into a single forward pass, the model weight matrices are fetched from HBM exactly once and multiplied simultaneously against $B$ token activation vectors (converting Matrix-Vector GEMV operations into Matrix-Matrix GEMM operations).
+
+For a batch of size $B$, the floating-point operations scale linearly with $B$, while the weight traffic from HBM remains invariant:
+
+$$\text{FLOPs}_{\text{decode}}(B) \approx 2 \cdot B \cdot P_{\text{params}}$$
+
+$$\text{Traffic}_{\text{weights}}(B) \approx 2 \cdot P_{\text{params}}$$
+
+The arithmetic intensity of batched decoding (prior to accounting for KV cache memory traffic) becomes:
+
+$$I_{\text{decode}}(B) \approx \frac{2 \cdot B \cdot P_{\text{params}} \text{ FLOPs}}{2 \cdot P_{\text{params}} \text{ Bytes}} \approx B \text{ FLOP/Byte}$$
+
+To shift an H100 GPU from the memory-bandwidth-bound regime to the compute-bound plateau, the serving system must sustain an active concurrent batch size of:
+
+$$B \ge I^* \approx 295 \text{ concurrent streams}$$
+
+@Fig-tokenomics-roofline visualizes the Tokenomics Roofline model across operating regimes, illustrating the dramatic divergence between prefill and decode execution.
+
+::: {#fig-tokenomics-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Tokenomics Roofline: Hardware Limits of Prefill vs. Decode**: Operational intensity dictates inference economics. Single-sequence autoregressive decode ($B=1$) operates deep in the memory-bandwidth-bound regime at $I \approx 1\text{ FLOP/Byte}$, utilizing less than $1\%$ of H100 Tensor Cores. Batching ($B=64$) and speculative decoding shift operational intensity toward the roofline knee ($I^* \approx 295\text{ FLOP/Byte}$), while input prefill operates deep in the compute-bound plateau ($I > 1500\text{ FLOP/Byte}$), fully saturating the accelerator." fig-alt="Roofline model diagram plotting attained TFLOPs per second against arithmetic intensity in FLOPs per byte, illustrating memory-bandwidth bound decode operations at the bottom-left and compute-bound prefill operations at the top-right."}
 ![](images/svg/tokenomics_roofline_prefill_decode.svg)
-
-The Tokenomics Roofline: Hardware Limits of Prefill vs. Decode. Input prefill operations operate as high-intensity GEMMs saturating Tensor Core compute, whereas autoregressive decode operations are bound by memory bandwidth as weights must be re-read from HBM for every sequential token. Speculative decoding trades surplus compute to amortize weight reading, shifting operational intensity toward the roofline knee.
 :::
 
-::: {.callout-note title="Checkpoint"}
-Why does increasing the batch size improve the unit economics of output tokens, and what hardware constraint ultimately limits the maximum batch size?
-:::
+### Comparative accelerator Roofline topologies
 
-To improve decode economics, serving systems maximize batch size to share the weight-loading cost across multiple concurrent requests, shifting the operation back toward a GEMM. However, this is bounded by memory capacity—the KV cache for large batches will eventually exhaust HBM.
+The physical trade-offs governing token generation vary across hardware generations and accelerator architectures. @Tbl-vol3-accelerator-roofline details the roofline parameters across industry-standard AI accelerators, calculating the critical batch size $B^*$ required to reach the compute-bound knee.
 
-### Speculative Decoding and Economics
+| Accelerator Architecture      | Peak Compute $P_{\text{peak}}$ (FP16/BF16 TFLOP/s) | Memory Bandwidth $B_{\text{mem}}$ (TB/s) | Memory Capacity $M_{\text{HBM}}$ (GB) | Roofline Knee $I^*$ (FLOP/Byte) | Critical Batch Size $B^*$ | Single-Stream ALU Utilization $\eta_{\text{ALU}}(B=1)$ |
+|:------------------------------|:--------------------------------------------------:|:----------------------------------------:|:-------------------------------------:|:-------------------------------:|:-------------------------:|:------------------------------------------------------:|
+| **NVIDIA A100 SXM4**          |                        312                         |                   2.04                   |                   80                  |              152.9              |            153            |                         0.65%                          |
+| **NVIDIA H100 SXM5**          |                        989                         |                   3.35                   |                   80                  |              295.3              |            295            |                         0.34%                          |
+| **NVIDIA H200 SXM5**          |                        989                         |                   4.80                   |                  141                  |              206.0              |            206            |                         0.49%                          |
+| **NVIDIA B200 (Blackwell)**   |                       2,250                        |                   8.00                   |                  192                  |              281.3              |            281            |                         0.36%                          |
+| **Google TPU v5e**            |                        197                         |                   0.82                   |                   16                  |              240.2              |            240            |                         0.42%                          |
+| **NVIDIA GH200 Grace Hopper** |                        989                         |       4.00 (HBM3) + 0.50 (LPDDR5X)       |                96 + 480               |              219.8              |            220            |                         0.45%                          |
 
-**Speculative decoding**\index{Speculative decoding} [@leviathan2023fast; @chen2023accelerating] alters this economic equation by trading cheap, surplus ALU cycles for expensive, scarce memory bandwidth. By using a small "draft" model to guess future tokens and verifying them in parallel with the large model, the system increases the effective batch size of the verification step. If the acceptance rate is high enough, this reduces the total HBM round-trips per generated token, structurally lowering the cost to serve output tokens.
+: **Accelerator Roofline Topologies and Architectural Knee Thresholds**: Comparison across industry silicon for dense FP16/BF16 operations without structured sparsity. {#tbl-vol3-accelerator-roofline tbl-colwidths="[24,14,14,12,12,12,12]"}
 
-While speculative decoding optimizes the arithmetic intensity of generation, it does not solve the memory capacity problem. Every generated token adds to the context window, creating a dynamically growing state that threatens to exhaust hardware limits before compute limits are reached.
+Notice from @tbl-vol3-accelerator-roofline that across successive hardware generations, compute throughput $P_{\text{peak}}$ has outpaced memory bandwidth $B_{\text{mem}}$. From A100 to H100, compute increased by $3.17\times$, while memory bandwidth increased by only $1.64\times$. Consequently, the roofline knee $I^*$ shifted upward from 153 to 295 FLOP/Byte. Sizing fleets for modern accelerators requires even larger batch sizes or aggressive architectural optimizations to prevent silicon starvation.
 
-## Context Working Set Costs and the KV Cache
+### The economic corollary of the Roofline
 
-A single request with a 100,000-token prompt and a large batch size can consume over 100 GB of memory—exceeding the capacity of a single high-end GPU. This massive footprint is driven entirely by the **KV cache**\index{KV cache}, the state maintained during generation to prevent recomputing past tokens. Its capacity scaling is linear with sequence length, batch size, number of layers, and head dimensions.
+Because cloud accelerators are leased and amortized by wall-clock time (e.g., $\$3.50$ to $\$4.50$ per H100 GPU-hour), when an autonomous agent runs decode at batch size $B=1$, the infrastructure buyer is paying for 989 TFLOP/s of compute capacity but receiving only 3.35 TFLOP/s of actual operational work.
 
-::: {.callout-note title="Napkin Math"}
-**Estimating KV Cache Size**
+Let $C_{\text{GPU}}$ denote the amortized hourly cost of an accelerator node. The hardware cost to generate $N_{\text{out}}$ decode tokens at batch size $B$ is:
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+$$\text{Cost}_{\text{decode}}(B) = \frac{C_{\text{GPU}}}{3600} \cdot \frac{N_{\text{out}}}{\text{TokensPerSec}(B)}$$ {#eq-vol3-tokenomics-cost-decode-general}
 
-For modern long-context models (e.g., 100k+ tokens), the KV cache footprint quickly balloons to hundreds of gigabytes per request—exceeding the high-bandwidth memory (HBM) capacity of a single GPU. This memory bottleneck dictates serving economics: systems are forced to employ tensor or sequence parallelism purely to hold the working set, partitioning memory that could otherwise serve concurrent users.
-:::
+Because decode throughput is bounded by memory bandwidth:
 
-Managing this massive, dynamically growing working set is the primary driver of inference infrastructure costs. Prior to optimized memory managers, contiguous memory allocation led to severe fragmentation, wasting expensive HBM. Systems now use techniques like **PagedAttention**\index{PagedAttention} [@kwon2023efficient] to page KV caches into non-contiguous blocks, effectively eliminating **external fragmentation**\index{external fragmentation} and dramatically increasing maximum batch size.
+$$\text{TokensPerSec}(B) \approx \frac{B \cdot B_{\text{mem}}}{2 \cdot P_{\text{params}} + \text{KV}_{\text{bytes}}(B)}$$
 
-Recently, providers have introduced **KV Cache Tiering**\index{KV Cache Tiering}. By persisting the KV cache of a frequently used prompt in GPU memory, CPU RAM, or fast NVMe storage, the provider bypasses the prefill compute for subsequent requests. The economics shift from a compute-cost model to a memory-renting model, where users pay for the time and hierarchy level the KV cache occupies.
+Substituting this relation into @eq-vol3-tokenomics-cost-decode-general reveals that the infrastructure cost per generated token is **inversely proportional to batch size $B$**:
 
-Managing the KV cache becomes even more critical when models do not just respond to human prompts, but interact with other models. As AI systems evolve into multi-agent architectures, the volume of context generated and cached expands exponentially, demanding new strategies for tracking and limiting token usage.
+$$c_{\text{token}}(B) \propto \frac{1}{B}$$
 
-## Multi-Agent Quotas, Model Routing, and Compounding Inference
+When an agent operates in isolation with $B=1$, the cost per output token is up to two orders of magnitude higher than when running in a saturated continuous-batching serving system. Memory bandwidth, not floating-point compute, is the governing economic currency of the decoding engine.
 
-When a single query triggers an agent to spawn five subagents, each reading the same codebase and exchanging intermediate conclusions, a user's original 50-token request can balloon into a 50,000-token cascade. As systems evolve from single-turn chat interfaces to autonomous, multi-agent frameworks, token consumption scales exponentially. In a multi-agent system, agents prompt each other, summarize context, and iteratively refine outputs, leading to a massive expansion in internal "hidden" tokens generated before a user-facing response is produced.
+## 17.2 Prefill vs Decode Unit Economics {#sec-vol3-tokenomics-prefill-decode}
 
-::: {.callout-note title="Checkpoint"}
-In a multi-agent architecture where agents recursively summarize prior steps, how does the ratio of input tokens to output tokens shift compared to a standard conversational interface?
-:::
+Every commercial foundation model API exhibits a stark pricing asymmetry: input tokens are priced between $3\times$ and $6\times$ cheaper than output tokens. For instance, frontier model APIs frequently bill input tokens at $\$2.50$ per million tokens, while billing output tokens at $\$10.00$ or $\$15.00$ per million tokens. Many software architects view this price spread as an arbitrary business markup designed to extract consumer surplus from conversational chat users who submit long prompts and receive short responses.
 
-To prevent cost overruns and latency spikes, systems must implement strict quota management and dynamic token budgets. The economics heavily favor intelligent **model routing**\index{model routing}: deploying "flash" or distilled models for intermediate reasoning steps, state transitions, or standard queries, while reserving expensive "pro" models only for final synthesis or complex planning bottlenecks.
+In autonomous agentic workloads, this assumption is catastrophically invalid. The pricing spread is rooted in the distinct physical mechanics of prompt prefill versus token decode. Furthermore, when agents execute multi-turn workflows, this price asymmetry creates an unexpected economic inversion: **input prefill costs end up dominating the total bill**, routinely accounting for $80\%$ to $90\%$ of total invoice expenditure, despite the lower nominal price per input token.
 
-::: {#fig-multi-agent-token-routing}
+### Prefill arithmetic: Saturation and model FLOPs utilization
+
+During the **prefill** phase, an agent runtime submits a prompt consisting of $S_{\text{in}}$ tokens to the model. Unlike autoregressive decode, the attention mechanism and feedforward networks process all $S_{\text{in}}$ tokens concurrently within a single massive forward pass.
+
+For an input sequence of length $S_{\text{in}}$, the floating-point operations performed across a dense Transformer with $P_{\text{params}}$ parameters and $L$ layers are:
+
+$$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P_{\text{params}} \cdot S_{\text{in}} + 4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{in}}^2$$
+
+where $2 \cdot P_{\text{params}} \cdot S_{\text{in}}$ accounts for the linear feedforward and projection weight multiplications, and $4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{in}}^2$ accounts for the quadratic self-attention matrix multiplications ($\mathbf{Q}\mathbf{K}^T$ and $\mathbf{A}\mathbf{V}$).
+
+To execute this prefill pass, the model weights $M_{\text{weights}} = 2 \cdot P_{\text{params}}$ are read from HBM once. The operational arithmetic intensity of prefill is:
+
+$$I_{\text{prefill}} \approx \frac{2 \cdot P_{\text{params}} \cdot S_{\text{in}} + 4 L d_{\text{model}} S_{\text{in}}^2}{2 \cdot P_{\text{params}} + \text{KV}_{\text{write}}(S_{\text{in}})} \approx S_{\text{in}} \text{ FLOP/Byte}$$
+
+For a modest prompt length of $S_{\text{in}} = 2,048$ tokens, the operational intensity is:
+
+$$I_{\text{prefill}} \approx 2,048 \text{ FLOP/Byte} \gg I^* \approx 295.3 \text{ FLOP/Byte}$$
+
+Because $I_{\text{prefill}}$ sits deep within the compute-bound plateau of @fig-tokenomics-roofline, prefill kernels achieve exceptional **model FLOPs utilization** (MFU, typically $45\%$ to $60\%$ in production runtimes utilizing FlashAttention [@dao2022]). Consequently, accelerators produce prefill tokens at maximum efficiency, driving the cost per input token down to the physical limit of silicon power and silicon depreciation.
+
+### Latency dissection: Time-to-first-token vs. time-between-tokens
+
+The physical divergence between prefill and decode produces two fundamentally distinct latency metrics:
+
+1. **Time-to-First-Token (TTFT):** The wall-clock duration from request submission to the emission of the very first generated token. TTFT is dominated by prefill compute and queueing delay:
+
+$$\text{TTFT} = \frac{\text{FLOPs}_{\text{prefill}}(S_{\text{in}})}{\text{MFU}_{\text{prefill}} \cdot P_{\text{peak}}} + T_{\text{queue}}$$
+
+2. **Time-Between-Tokens (TBT) or Inter-Token Latency (ITL):** The wall-clock duration between each successive autoregressive token. TBT is bounded by memory bandwidth:
+
+$$\text{TBT} = \frac{2 \cdot P_{\text{params}} + \text{KV}_{\text{read}}(S_{\text{ctx}})}{B_{\text{mem}}}$$
+
+In agentic systems, TTFT dictates how fast an agent can ingest tool observations, compile stack traces, or read codebases. TBT dictates the speed at which the agent emits thoughts, plans, and tool call syntax. Because prefill is compute-bound and decode is memory-bound, co-locating both phases on the same physical accelerator causes severe phase interference, where a massive prefill burst freezes active decode streams, spiking p99 TBT [@kwon2023].
+
+### The key-value cache memory footprint
+
+While model weights remain fixed in HBM throughout serving, the **Key-Value (KV) cache** expands dynamically with every single token ingested and generated. The KV cache stores the key and value activation vectors across all prior context tokens to prevent redundant self-attention recomputation.
+
+For a Transformer with $L$ layers, hidden dimension $d_{\text{model}}$, and Multi-Head Attention (MHA) with $n_{\text{heads}}$ query heads and $n_{\text{heads}}$ key-value heads, each token requires storing two vectors (Key and Value) per layer in 16-bit precision (2 bytes per element):
+
+$$\text{Bytes per Token}_{\text{MHA}} = 2 \cdot 2 \cdot L \cdot d_{\text{model}} = 4 \cdot L \cdot d_{\text{model}} \text{ Bytes}$$
+
+To mitigate this massive memory expansion, modern architectures deploy **Grouped-Query Attention (GQA)** [@shazeer2019fast], where $n_{\text{heads}}$ query heads share $n_{\text{kv}}$ key-value heads, yielding a compression ratio $g = n_{\text{heads}} / n_{\text{kv}}$:
+
+$$\text{Bytes per Token}_{\text{GQA}} = \frac{4 \cdot L \cdot d_{\text{model}}}{g} \text{ Bytes}$$
+
+Consider the open-weight Llama-3-70B model, configured with $L = 80$ layers, $d_{\text{model}} = 8,192$, and GQA grouping ratio $g = 64 / 8 = 8$:
+
+$$\text{Bytes per Token} = \frac{4 \cdot 80 \cdot 8,192}{8} = 327,680 \text{ Bytes} \approx 320 \text{ KB/token}$$
+
+Every single token retained in context consumes 320 KB of scarce GPU HBM. For an agent executing an extended coding task with a context window of $S = 64,000$ tokens, the KV cache footprint for a single active trajectory is:
+
+$$\text{Footprint}_{\text{KV}}(1 \text{ agent}) = 64,000 \cdot 327,680 \text{ Bytes} \approx 20.97 \text{ GB}$$
+
+If the serving cluster hosts $B = 16$ concurrent developer agents, the KV cache alone demands:
+
+$$16 \cdot 20.97 \text{ GB} = 335.5 \text{ GB of HBM}$$
+
+This memory footprint exceeds the capacity of four 80 GB H100 GPUs purely to store activation history, completely independent of the model parameters.
+
+### The compounding turn tax in multi-turn agents
+
+In a standard single-turn conversational interface, the user submits prompt $S_{\text{in}}$ and receives completion $S_{\text{out}}$. The total token billing is simply $c_{\text{in}} S_{\text{in}} + c_{\text{out}} S_{\text{out}}$.
+
+In an autonomous agent system, execution is an iterative loop. At turn $n \in \{1, \dots, N\}$, the agent receives its initial system prompt $S_0$, the cumulative history of all prior thoughts and actions $\Delta_{\text{act}}(j)$, and all environment tool returns $\Delta_{\text{obs}}(j)$:
+
+$$S_{\text{in}}(n) = S_0 + \sum_{j=1}^{n-1} \left( \Delta_{\text{act}}(j) + \Delta_{\text{obs}}(j) \right)$$
+
+If the inference engine does not support stateful prompt caching across turns, the serving system must re-prefill the entire accumulated context from scratch on every single turn $n$.
+
+The cumulative input tokens processed across an $N$-turn trajectory is:
+
+$$S_{\text{total\_in}} = \sum_{n=1}^N S_{\text{in}}(n) = N \cdot S_0 + \sum_{n=1}^N \sum_{j=1}^{n-1} \left( \Delta_{\text{act}}(j) + \Delta_{\text{obs}}(j) \right)$$
+
+Assuming an average incremental addition of $\bar{\Delta} = \bar{\Delta}_{\text{act}} + \bar{\Delta}_{\text{obs}}$ tokens per turn:
+
+$$S_{\text{total\_in}} = N \cdot S_0 + \bar{\Delta} \cdot \frac{N(N - 1)}{2} = \mathcal{O}\left(N \cdot S_0 + N^2 \cdot \bar{\Delta}\right)$$ {#eq-vol3-tokenomics-quadratic-prefill}
+
+Notice the quadratic explosion $\mathcal{O}(N^2 \bar{\Delta})$! Meanwhile, the cumulative output tokens generated across the trajectory scale strictly linearly with $N$:
+
+$$S_{\text{total\_out}} = \sum_{n=1}^N \Delta_{\text{act}}(n) = \mathcal{O}(N \cdot \bar{\Delta}_{\text{act}})$$ {#eq-vol3-tokenomics-linear-decode}
+
+Because input tokens grow quadratically while output tokens grow linearly, **input prefill costs inevitably overtake output decode costs in extended agent workflows**.
+
+Consider a concrete production scenario: An autonomous coding agent operates over $N = 30$ turns. The initial repository prompt is $S_0 = 15,000$ tokens. On each turn, the agent emits an action of $\bar{\Delta}_{\text{act}} = 400$ tokens, and the environment returns tool execution output (compiler errors, git diffs, test logs) averaging $\bar{\Delta}_{\text{obs}} = 2,500$ tokens ($\bar{\Delta} = 2,900$ tokens/turn).
+
+Evaluating @eq-vol3-tokenomics-quadratic-prefill:
+
+$$S_{\text{total\_in}} = 30 \cdot 15,000 + 2,900 \cdot \frac{30 \cdot 29}{2} = 450,000 + 1,261,500 = 1,711,500 \text{ Input Tokens}$$
+
+Evaluating @eq-vol3-tokenomics-linear-decode:
+
+$$S_{\text{total\_out}} = 30 \cdot 400 = 12,000 \text{ Output Tokens}$$
+
+Under a standard commercial pricing tier of $\$3.00$ per million input tokens and $\$15.00$ per million output tokens:
+
+$$\text{Cost}_{\text{in}} = 1.7115 \times \$3.00 = \$5.1345$$
+
+$$\text{Cost}_{\text{out}} = 0.0120 \times \$15.00 = \$0.1800$$
+
+$$\text{Total Invoice Cost} = \$5.1345 + \$0.1800 = \$5.3145$$
+
+Input prefill accounts for:
+
+$$\frac{\$5.1345}{\$5.3145} = 96.6\% \text{ of the total invoice!}$$
+
+Even though output tokens cost $5\times$ more per unit, the quadratic recomputation of context history renders decode expenditure negligible.
+
+### Radix prefix caching economics
+
+To eliminate this quadratic prefill tax, state-of-the-art serving runtimes employ **Radix Tree Prefix Caching** [@kwon2023]. The serving runtime maintains a radix tree indexing the physical KV cache blocks stored in GPU memory. When Turn $n$ arrives, the engine matches the prefix tokens against cached blocks, skipping the prefill forward pass for all shared history and computing prefill exclusively for the incremental delta $\Delta_{\text{obs}}(n-1)$.
+
+With prefix caching, input token processing collapses from quadratic to linear:
+
+$$S_{\text{cached\_in}} = S_0 + \sum_{n=1}^N \Delta_{\text{obs}}(n-1) = \mathcal{O}(N \cdot \bar{\Delta})$$
+
+In our 30-turn coding scenario, prefix caching slashes input token processing from 1,711,500 tokens down to 99,100 tokens, reducing the input bill from $\$5.13$ to $\$0.30$—a **$94.2\%$ cost reduction**.
+
+However, prefix caching is not an unconstrained free lunch. It alters the fundamental economic model: **it trades compute cost for memory capacity holding cost**.
+
+To retain cached KV blocks, the serving system must "rent" scarce GPU HBM, holding memory pages that could otherwise serve concurrent requests. Let $C_{\text{HBM}}$ denote the amortized capital cost per gigabyte-second of GPU memory, and let $\tau_{\text{idle}}$ denote the idle wall-clock time between agent turns (while the agent waits for external tool execution). The holding cost to persist the KV cache is:
+
+$$C_{\text{rent}} = C_{\text{HBM}} \cdot \text{Footprint}_{\text{KV}} \cdot \tau_{\text{idle}}$$
+
+The cache break-even duration $T_{\text{break-even}}$ is the maximum idle time an agent can wait before the cost of holding the KV cache in HBM exceeds the cost of recomputing the prefill:
+
+$$T_{\text{break-even}} = \frac{c_{\text{prefill}} \cdot S_{\text{prefix}}}{C_{\text{HBM}} \cdot \text{Footprint}_{\text{KV}}(S_{\text{prefix}})}$$
+
+If an agent waits on a slow, human-in-the-loop approval or a 10-minute container compilation where $\tau_{\text{idle}} > T_{\text{break-even}}$, retaining the KV cache in HBM degrades cluster economics. High-performance runtimes resolve this by asynchronously swapping idle KV blocks to host system RAM (via PCIe Gen5) or fast NVMe storage, preserving prefix state without stranding accelerator HBM.
+
+### Cost-per-verified-goal (CPVG)
+
+The disconnect between token pricing and business value necessitates a new economic north star: **Cost-per-Verified-Goal (CPVG)**. In autonomous systems, raw cost per token is irrelevant if the agent fails to achieve the objective.
+
+Let an agent task require up to $K_{\text{attempts}}$ independent trajectory attempts, where trajectory attempt $k$ consumes dollar cost $C_{\text{trajectory}}(k)$. Let $P_{\text{success}}$ denote the probability that an autonomous trajectory successfully satisfies a deterministic verification oracle (such as passing a software test suite or compiler validation). The expected Cost-per-Verified-Goal is:
+
+$$\text{CPVG} = \frac{\mathbb{E}\left[\sum_{k=1}^{K_{\text{attempts}}} C_{\text{trajectory}}(k)\right]}{P_{\text{success}}}$$ {#eq-vol3-tokenomics-cpvg}
+
+Assuming independent identically distributed attempts terminated upon the first success, the expected number of attempts required is $\mathbb{E}[K] = 1 / P_{\text{success}}$, simplifying @eq-vol3-tokenomics-cpvg to:
+
+$$\text{CPVG} = \frac{\bar{C}_{\text{trajectory}}}{P_{\text{success}}}$$ {#eq-vol3-tokenomics-cpvg-simple}
+
+If a trajectory consists of $N$ sequential interaction steps, each with per-step correctness probability $p$, open-loop success decays exponentially with horizon length:
+
+$$P_{\text{success}} \approx p^N$$ {#eq-vol3-tokenomics-exponential-decay}
+
+Substituting @eq-vol3-tokenomics-exponential-decay into @eq-vol3-tokenomics-cpvg-simple exposes the economic fragility of autonomous agency:
+
+$$\text{CPVG} = \frac{\bar{C}_{\text{trajectory}}}{p^N}$$
+
+@Tbl-vol3-cpvg-comparison demonstrates how small differences in per-step reliability cause radical divergences in fleet economics across a 20-step software engineering task.
+
+| Model Tier                     | Cost per 1M In / Out Tokens | Average Trajectory Cost $\bar{C}_{\text{traj}}$ | Per-Step Reliability $p$ | 20-Step Success Rate $P_{\text{success}} = p^{20}$ | Expected Attempts $1 / P_{\text{success}}$ | Cost-per-Verified-Goal (CPVG) | Economic Outcome             |
+|:-------------------------------|:---------------------------:|:-----------------------------------------------:|:------------------------:|:--------------------------------------------------:|:------------------------------------------:|:-----------------------------:|:-----------------------------|
+| **Small Open SLM (8B)**        |     $\$0.15$ / $\$0.60$     |                     $\$0.12$                    |          88.0%           |                        7.8%                        |                    12.8                    |          **$\$1.54$**         | Severe attempt multiplier    |
+| **Mid-Tier MoE (8x7B)**        |     $\$0.60$ / $\$1.80$     |                     $\$0.45$                    |          94.0%           |                       29.0%                        |                    3.45                    |          **$\$1.55$**         | Balanced cost and retries    |
+| **Dense High-Tier (70B)**      |     $\$2.00$ / $\$6.00$     |                     $\$1.50$                    |          97.0%           |                       54.4%                        |                    1.84                    |          **$\$2.76$**         | Moderate cost penalty        |
+| **Frontier Reasoning (400B+)** |    $\$10.00$ / $\$30.00$    |                     $\$7.50$                    |          99.0%           |                       81.8%                        |                    1.22                    |          **$\$9.15$**         | High single-pass reliability |
+
+: **Unit Economics and Cost-per-Verified-Goal (CPVG)**: Comparison across model tiers for a 20-step task with prefix caching enabled across turns. {#tbl-vol3-cpvg-comparison tbl-colwidths="[20,18,12,12,14,12,12]" }
+
+Notice the non-linear relationship revealed by @tbl-vol3-cpvg-comparison: While the 8B model is $62.5\times$ cheaper per trajectory than the Frontier model ($\$0.12$ vs. $\$7.50$), its CPVG ($\$1.54$) is virtually identical to the 8x7B MoE model ($\$1.55$), because its low per-step reliability requires nearly 13 repeated attempts to deliver a single verified solution. Sizing fleets based solely on nominal token pricing is an economic trap; operational economics are dictated by the product of token cost and trajectory reliability.
+
+## 17.3 Fleet Sizing and Accelerator Capacity Provisioning {#sec-vol3-tokenomics-fleet-sizing}
+
+In the third quarter of 2025, a financial software enterprise deployed an autonomous tax-audit agent fleet. During standard operating conditions, the service handled an average arrival rate of $\lambda = 50$ client requests per second across a cluster of 64 NVIDIA H100 GPUs, maintaining median response latencies under 4.5 seconds. On the final day of the fiscal quarter, arrival traffic surged by $2.2\times$ to $\lambda = 110$ requests per second.
+
+In traditional stateless web microservices, such a traffic spike produces linear queue buildup managed by horizontal autoscaling. In the agentic cluster, the spike triggered a systemic queue collapse: p99 Time-to-First-Token surged from 250 milliseconds to 192 seconds, GPU memory allocation suffered cascading Out-Of-Memory (OOM) aborts, and client connections timed out en masse. SRE teams discovered that the cluster's effective goodput dropped to near zero, even though every GPU was pinned at $100\%$ memory occupancy.
+
+The failure stemmed from applying classical stateless capacity models to a **stateful, heavy-tailed queueing network with positive feedback loops**.
+
+### The stochastic profile of agent workloads
+
+Unlike traditional web requests, which exhibit low variance in service time ($T_{\text{service}} \approx 50\text{--}200\text{ ms}$) and carry zero persistent accelerator state, autonomous agent workloads exhibit three pathological systems properties:
+
+1. **Heavy-Tailed, High-Variance Service Times:** A single agent request may require a 2-step retrieval (taking 1.5 seconds) or an 80-step iterative debugging loop across multiple compiler environments (taking 400 seconds). Service times follow log-normal or Pareto distributions where the variance $\sigma^2$ dwarfs the squared mean $\mu^{-2}$. The **coefficient of variation** $C_v = \sigma / \mu$ routinely exceeds $2.5$ to $4.0$ (compared to $C_v \approx 1.0$ for Poisson web traffic).
+2. **Stateful Memory Stranding:** Throughout an agent's multi-minute execution, its growing KV cache remains pinned in GPU HBM. An agent waiting on a 15-second external database query holds gigabytes of accelerator memory completely hostage, preventing waiting requests from acquiring memory pages.
+3. **Compounding Arrival Cascades:** When an autonomous task fails midway due to a timeout or rate-limit error, upstream client orchestrators immediately retry the entire trajectory. A cluster operating near capacity experiences an endogenous burst of retry traffic, multiplying effective arrival rate $\lambda_{\text{eff}} = \lambda / P_{\text{success}}$ and driving the cluster into a permanent unrecoverable livelock.
+
+### Queueing theory for agent cluster provisioning
+
+To size accelerator clusters rigorously, we model the serving fleet using classical queueing theory [@kleinrock1975queueing]. Let $\lambda$ denote the mean arrival rate of agent tasks (tasks per second), and let $\mu = 1 / \mathbb{E}[S]$ denote the mean service rate of a single processing instance, where $\mathbb{E}[S]$ is the average wall-clock duration of a complete trajectory.
+
+By **Little's Law**, the average number of active trajectories $N_{\text{active}}$ in a stable system is:
+
+$$N_{\text{active}} = \lambda \cdot \mathbb{E}[T_{\text{trajectory}}]$$
+
+where $\mathbb{E}[T_{\text{trajectory}}] = W_q + \mathbb{E}[S]$, with $W_q$ representing the mean queue waiting time prior to execution.
+
+For a single-server queue with general service time distribution ($M/G/1$), the mean waiting time in queue is governed by the **Pollaczek-Khinchine (P-K) formula**:
+
+$$W_q = \frac{\rho \cdot \mathbb{E}[S]}{1 - \rho} \cdot \left( \frac{1 + C_v^2}{2} \right)$$ {#eq-vol3-tokenomics-pk-formula}
+
+where $\rho = \lambda / \mu < 1$ represents server utilization, and $C_v = \sigma / \mathbb{E}[S]$ is the coefficient of variation.
+
+Examining @eq-vol3-tokenomics-pk-formula reveals why agent workloads break traditional sizing heuristics. The term $\left(\frac{1 + C_v^2}{2}\right)$ acts as a **variance multiplier**:
+
+- For an idealized exponential service distribution ($C_v = 1.0$), the multiplier is $(1 + 1)/2 = 1.0$.
+- For a typical heavy-tailed agent workload ($C_v = 3.0$), the multiplier is:
+
+$$\frac{1 + 3^2}{2} = \frac{1 + 9}{2} = 5.0$$
+
+At the exact same utilization $\rho = 0.80$, an autonomous agent cluster suffers **five times longer queue delays** than a standard Poisson service! If operators attempt to run the cluster at $\rho = 0.90$ to maximize expensive GPU utilization, the term $\frac{\rho}{1-\rho} = 9.0$ combines with the variance multiplier to inflate queue delays by $45\times$, causing immediate client timeouts.
+
+For a multi-server cluster with $k$ parallel GPU serving instances ($M/G/k$), queue waiting time can be modeled using **Kingman's Heavy-Traffic Approximation**:
+
+$$W_q \approx \left( \frac{C_a^2 + C_s^2}{2} \right) \cdot \left( \frac{\rho^{\sqrt{2(k+1)} - 1}}{k(1 - \rho)} \right) \cdot \mathbb{E}[S]$$ {#eq-vol3-tokenomics-kingman-multiserver}
+
+where $C_a$ is the arrival coefficient of variation, $C_s$ is the service coefficient of variation, and $\rho = \frac{\lambda}{k \mu}$ is the aggregate cluster utilization.
+
+To guarantee a tail-latency service-level agreement (e.g., $P(W_q \le t_{\text{max}}) \ge 0.99$), the cluster utilization $\rho$ must be strictly clamped below a critical stability ceiling $\rho_{\text{crit}} \approx 0.65\text{--}0.70$. Attempting to achieve $90\%$ hardware utilization on heavy-tailed agent fleets is a mathematical impossibility without violating latency SLAs.
+
+### Provisioned throughput units (ptus) vs. serverless on-demand pay-per-token
+
+When architecting agent infrastructure, platform engineering teams must choose between two financial procurement models:
+
+1. **Provisioned Capacity (Reserved Instances / PTUs):** Reserving dedicated accelerator hardware (e.g., 8-way H100 nodes leased by the month). The cost is strictly fixed, independent of token traffic:
+
+$$\text{Cost}_{\text{reserved}}(k) = k \cdot C_{\text{instance/hr}} \cdot 730 \text{ Hours/Month}$$ {#eq-vol3-tokenomics-cost-reserved}
+
+2. **Serverless Pay-per-Token APIs:** Consuming model APIs billed on demand per million input and output tokens:
+
+$$\text{Cost}_{\text{serverless}}(\lambda) = \lambda \cdot \left( \bar{S}_{\text{in}} \cdot c_{\text{in}} + \bar{S}_{\text{out}} \cdot c_{\text{out}} \right) \cdot 2.628 \times 10^6 \text{ Seconds/Month}$$ {#eq-vol3-tokenomics-cost-serverless}
+
+To evaluate the procurement tipping point, we equate @eq-vol3-tokenomics-cost-reserved and @eq-vol3-tokenomics-cost-serverless, solving for the **break-even duty cycle** $\rho^*$:
+
+$$\rho^* = \frac{k \cdot C_{\text{instance/hr}} \cdot 730}{\lambda_{\text{peak}} \cdot \left( \bar{S}_{\text{in}} c_{\text{in}} + \bar{S}_{\text{out}} c_{\text{out}} \right) \cdot 2.628 \times 10^6}$$
+
+If the organization's average baseline workload utilization satisfies $\bar{\rho} \ge \rho^*$, provisioned dedicated silicon strictly dominates serverless APIs. For sustained enterprise agent workloads (e.g., automated overnight regression testing or continuous customer ticket processing), provisioned instances routinely achieve a $3\times$ to $5\times$ cost reduction over commercial pay-per-token APIs, provided the cluster is sized to avoid memory thrashing.
+
+### Prefill-decode (PD) disaggregated cluster provisioning
+
+Because prefill is compute-bound ($I \gg I^*$) and decode is memory-bound ($I \ll I^*$), hosting both phases on identical homogeneous GPU nodes creates severe operational inefficiency. State-of-the-art inference fleets employ **Prefill-Decode (PD) Disaggregation** [@qin2024mooncake; @kwon2023], partitioning the accelerator cluster into two specialized pools:
+
+1. **Prefill Nodes ($k_P$ instances):** Engineered for dense GEMM throughput. Configured with maximum Tensor Core compute density, utilizing high-power accelerators (such as liquid-cooled H100/B200 SXM) running large chunked prefills.
+2. **Decode Nodes ($k_D$ instances):** Engineered for memory bandwidth and capacity. Configured with maximum aggregated HBM capacity and fast inter-GPU communication (e.g., H200 nodes with 141 GB HBM3e per GPU) to maximize continuous batch sizes.
+
+The optimal capacity balance ratio between prefill and decode instances is governed by the aggregate token ratio and respective hardware throughputs:
+
+$$\frac{k_P}{k_D} = \frac{\lambda \cdot \mathbb{E}[S_{\text{in}}] / \text{Throughput}_P}{\lambda \cdot \mathbb{E}[S_{\text{out}}] / \text{Throughput}_D} = \frac{\mathbb{E}[S_{\text{in}}]}{\mathbb{E}[S_{\text{out}}]} \cdot \frac{\text{Throughput}_D}{\text{Throughput}_P}$$
+
+When a Prefill node completes the prompt forward pass, it transfers the generated KV cache directly to the assigned Decode node over high-speed RDMA fabrics (InfiniBand or RoCEv2) or NVLink:
+
+$$t_{\text{transfer}} = \frac{\text{Footprint}_{\text{KV}}}{B_{\text{network}}}$$
+
+On an 800 Gbps (100 GB/s) RoCEv2 network fabric, transferring a 2 GB KV cache block takes exactly 20 milliseconds—substantially less than a single decode token generation step. Disaggregation eliminates phase interference, stabilizes inter-token latency (ITL), and allows independent autoscaling of prefill compute and decode memory pools.
+
+@Tbl-vol3-fleet-sizing-scenarios illustrates sizing configurations and monthly cost trajectories across four operational demand profiles.
+
+| Workload Demand Profile | Mean Arrival $\lambda$ (tasks/s) | Context Profile $S_{\text{in}} / S_{\text{out}}$ | Service Variance $C_v$ | Target SLA (p95 Wait $W_q$) | Optimal Sizing Architecture      | Monthly Cost (Serverless API) | Monthly Cost (Provisioned Clust.) |            Cost Advantage           |
+|:------------------------|:--------------------------------:|:------------------------------------------------:|:----------------------:|:---------------------------:|:---------------------------------|:-----------------------------:|:---------------------------------:|:-----------------------------------:|
+| **Low-Volume Ad-Hoc**   |               1.5                |                     4k / 500                     |          1.2           |       $< 2.0\text{ s}$      | Serverless On-Demand             |         **$\$4,860$**         |             $\$12,200$            |   Serverless ($2.5\times$ cheaper)  |
+| **Steady Interactive**  |               25.0               |                    12k / 800                     |          1.8           |       $< 1.5\text{ s}$      | 16x H100 SXM5 (PagedAttn)        |           $\$94,500$          |           **$\$48,800$**          |    Reserved ($1.9\times$ cheaper)   |
+| **Heavy Coding Swarm**  |              120.0               |                    45k / 2.5k                    |          3.2           |       $< 3.0\text{ s}$      | Disaggregated: 32 P + 64 D Nodes |         $\$1,417,500$         |          **$\$292,800$**          | Disaggregated ($4.8\times$ cheaper) |
+| **Batch Nightly Audit** |              250.0               |                    32k / 1.2k                    |          2.5           |       $< 30\text{ s}$       | 96x H200 (Prefix Cached)         |         $\$2,362,000$         |          **$\$365,000$**          |    Reserved ($6.5\times$ cheaper)   |
+
+: **Fleet Capacity Sizing and Financial Tipping Points**: Provisioning requirements and cost equilibria evaluated across scale profiles. {#tbl-vol3-fleet-sizing-scenarios tbl-colwidths="[15,9,9,7,9,16,13,13,9]"}
+
+## 17.4 Multi-Tier Model Cascades and Speculative Routing {#sec-vol3-tokenomics-cascades}
+
+A pervasive architectural failure in enterprise agent deployments is the **Monolithic Frontier Anti-Pattern**: configuring an agent runtime to route every single interaction step—from parsing a trivial JSON timestamp to analyzing complex architectural trade-offs—to an expensive frontier reasoning model.
+
+An empirical audit of 500,000 production agent execution traces revealed that $68\%$ of all LLM forward passes were purely mechanical operations: extracting a key from a dictionary, formatting a shell command argument, checking a file path existence, or validating an HTTP status code. Executing these deterministic, low-entropy operations on a $\$15.00/\text{M}$-token frontier model represents an extreme waste of capital.
+
+Conversely, attempting to build an autonomous agent entirely out of a cheap 8-billion-parameter model triggers the **Hallucination Cascading Trap**. When an 8B model misinterprets a complex multi-file dependency or emits invalid tool call syntax, the agent enters an unrecoverable repair loop, consuming dozens of retries and ultimately failing the task while burning more cumulative tokens than a single deliberate forward pass from a frontier model.
+
+The systems solution is **Multi-Tier Model Cascading and Speculative Routing**.
+
+### Three-tier model hierarchy
+
+High-efficiency agent architectures organize heterogeneous models into three distinct operational tiers:
+
+- **Tier 1: Ultra-Fast Distilled Small Language Models (SLMs, 1B–8B parameters).** Hosted locally on lightweight accelerators (e.g., L4 or TPU v5e), priced under $\$ 0.20/\text{M}$ tokens with median latency $< 80\text{ ms}$. Tier 1 models handle intent classification, JSON argument formatting, tool parameter extraction, and fast schema validation.
+- **Tier 2: Domain-Specialized Mixture of Experts (MoE, 8x7B–70B parameters).** Hosted on standard mid-tier GPU clusters, priced around $\$ 0.60\text{--}\$ 1.50/\text{M}$ tokens with median latency $< 400\text{ ms}$. Tier 2 models execute primary tool-use trajectories, code editing, local bug fixing, and test execution analysis.
+- **Tier 3: Frontier Deliberation and Planning Engines (400B+ / Extended Test-Time Search).** Consumed via high-end provisioned clusters or premium APIs, priced at $\$ 10.00\text{--}\$ 30.00/\text{M}$ tokens with latency spanning $2\text{--}15\text{ seconds}$. Tier 3 models are invoked strictly for initial global planning, multi-repository architectural synthesis, and root-cause recovery when lower tiers fail.
+
+@Fig-multi-agent-token-routing illustrates the radical economic contrast between an unconstrained, monolithic agent swarm and a cost-aware tiered routing architecture.
+
+::: {#fig-multi-agent-token-routing fig-env="figure" fig-pos="htb" fig-cap="**Compounding Token Cascades vs. Cost-Aware Model Routing**: Left: An unconstrained conversational swarm executing without quotas suffers exponential token inflation ($153,600\times$ cost blowup) from recursive subagent invocations, KV-cache thrashing, and unthrottled retries. Right: A three-tier routing architecture amortizes prefill via prefix caching, routes routine tool interactions to lightweight Tier 1/2 models, and gates expensive Tier 3 frontier deliberation behind deterministic test oracles, delivering a $98.4\%$ cost reduction." fig-alt="Two-panel architectural comparison showing unconstrained swarm cascade on the left failing with massive cost inflation, and tiered model routing on the right achieving high reliability and low cost."}
 ![](images/svg/multi_agent_token_cascade_routing.svg)
-
-Compounding Token Cascades vs. Cost-Aware Model Routing. Left: An unconstrained conversational swarm executing without quotas suffers exponential token growth from recursive subagent invocations, KV-cache thrashing, and unthrottled retries. Right: A three-tier routing architecture amortizes prefill via prefix caching and bounds Cost-per-Verified-Goal by gating expensive frontier reasoning behind deterministic test oracles.
 :::
 
-| Strategy            | Mechanism                                | Pros                       | Cons                                 |
-|---------------------|------------------------------------------|----------------------------|--------------------------------------|
-| Static Quotas       | Fixed token limit per agent.             | Predictable cost.          | Fails on complex edge cases.         |
-| Reactive Throttling | Slows generation when limits near.       | Prevents runaway spending. | Increases latency unpredictably.     |
-| Dynamic Auctions    | Agents bid for tokens based on priority. | Optimal allocation of HBM. | High implementation complexity.      |
-| Priority Leases     | Reserved capacity for critical agents.   | Guaranteed SLAs.           | Low utilization during idle periods. |
+### Mathematical formulation of cascade economics
 
-: Token Allocation Strategies {#tbl-token-allocation tbl-colwidths="[20,30,25,25]"}
+Consider a two-model cascade serving an autonomous task distribution $\mathcal{X}$. Let $M_1$ denote a fast, inexpensive model with per-task inference cost $c_1$ and success probability $P_1$. Let $M_2$ denote an expensive frontier model with cost $c_2$ ($c_2 \gg c_1$) and success probability $P_2$ ($P_2 > P_1$).
 
-**Mixture of Experts (MoE)**\index{Mixture of Experts (MoE)} architectures [@shazeer2017outrageously] further complicate these economics. While MoE models possess a massive total parameter count (requiring vast VRAM capacity), they have a much smaller "active" parameter count per token. This **sparsity**\index{sparsity} allows for faster decode speeds and cheaper token economics relative to dense models of equivalent total size, provided the serving cluster can distribute the experts efficiently across GPUs.
+The runtime routes incoming task $x \in \mathcal{X}$ to $M_1$. The candidate output $y_1 = M_1(x)$ is evaluated by an automated verification oracle $\mathcal{V}(y_1) \in \{0, 1\}$ (such as a unit test suite, a syntax parser, or a lightweight verifier model) incurring evaluation cost $c_v$. If $\mathcal{V}(y_1) = 1$, the solution is accepted and execution terminates. If $\mathcal{V}(y_1) = 0$, the task is escalated to $M_2$, producing output $y_2 = M_2(x)$.
 
-::: {.callout-caution title="War Story: The Automated Cloud Burn"}
-In early 2026, Uber's engineering organization famously exhausted its entire annual AI cloud budget within just four months. The runaway costs were directly traced to the unmonitored rollout of autonomous coding agents (Claude Code and similar tools) embedded deeply into their CI/CD and developer workflows. Without strict global token limits, cascading agentic loops—where one agent recursively spawned multiple subagents to solve trivial test failures—triggered exponential token consumption against expensive frontier models. The incident forced an emergency shutdown of internal AI tools and catalyzed the industry-wide adoption of hard token limits, cost-aware model routing (defaulting to cheaper models for intermediate steps), and strict Cost-per-Verified-Goal (CPVG) quotas.
-:::
+The expected cost of the cascade $\mathbb{E}[C_{\text{cascade}}]$ is:
 
-These agentic consumption patterns magnify the impact of hardware constraints. An inefficient inference strategy does not just delay a single response; it compounds across every agent in the loop, turning theoretical inefficiencies into massive operational costs.
+$$\mathbb{E}[C_{\text{cascade}}] = c_1 + c_v + (1 - P_1) \cdot c_2$$
 
-## Fallacies and Pitfalls
+The overall success probability of the cascade $P_{\text{cascade}}$ is:
 
-The complexity of tokenomics leads to persistent misconceptions about how inference costs are incurred and optimized. Several common fallacies arise from confusing hardware capacity with compute utilization.
+$$P_{\text{cascade}} = P_1 + (1 - P_1) \cdot P_{2 \mid \bar{1}}$$
 
-**Pitfall**: *Ignoring the asymmetric cost of prompt caching.*
-Persisting KV caches saves prefill compute but permanently locks up memory capacity. If the cache hit rate is low, the latency and bandwidth cost of evicting and paging the cache from NVMe or CPU RAM to GPU HBM can exceed the cost of simply recomputing the prefill from scratch. Over-caching reduces the batch size available for other requests, lowering overall cluster throughput.
+where $P_{2 \mid \bar{1}}$ denotes the conditional probability that $M_2$ succeeds given that $M_1$ failed.
 
-**Fallacy**: *Token count is a perfect proxy for hardware compute cost.*
-While highly correlated for billing, token count ignores the impact of batching, sequence length, and model architecture (dense vs. MoE). A 1,000-token output generated during a low-traffic period with a batch size of 1 utilizes hardware very differently—and less efficiently—than the same output generated at peak concurrency where weight-loading costs are amortized.
+For the cascade to strictly dominate routing $100\%$ of requests directly to the frontier model $M_2$ on cost while maintaining comparable reliability ($P_{\text{cascade}} \approx P_2$), the expected cascade expenditure must be strictly less than $c_2$:
 
-**Pitfall**: *Treating all generation latency as uniform.*
-Assuming linear generation time fails to account for **Time to First Token (TTFT)**\index{Time to First Token (TTFT)} being compute-bound (prefill) and **Time Between Tokens (TBT)**\index{Time Between Tokens (TBT)} being memory-bandwidth-bound (decode). Optimizing a system for TTFT requires different hardware topologies and parallelism strategies (e.g., sequence parallelism) than optimizing for high-throughput TBT (e.g., tensor parallelism and large batch sizes).
+$$\mathbb{E}[C_{\text{cascade}}] < c_2 \iff c_1 + c_v + (1 - P_1) c_2 < c_2$$
 
-**Fallacy**: *Speculative decoding always reduces serving costs.*
-Speculative decoding [@leviathan2023fast; @chen2023accelerating] burns surplus ALU cycles to save memory bandwidth. However, if the draft model's acceptance rate is too low (due to complex reasoning tasks or domain shifts), the system wastes compute and actually degrades overall throughput and latency, making the cost per token higher than standard autoregressive decoding.
+Rearranging terms yields the **Cascade Viability Invariant**:
 
-These pitfalls underscore the necessity of aligning the economic model of token generation with the physical constraints of the hardware executing it. A system that scales autonomously will bankrupt its operators if it does not treat memory capacity and arithmetic intensity as strict design boundaries.
+$$P_1 > \frac{c_1 + c_v}{c_2}$$ {#eq-vol3-tokenomics-cascade-dominance}
+
+Consider an enterprise deployment where the frontier model costs $c_2 = \$ 2.00$ per task, the lightweight model costs $c_1 = \$ 0.05$, and verification costs $c_v = \$ 0.01$. Substituting these values into @eq-vol3-tokenomics-cascade-dominance:
+
+$$P_1 > \frac{\$0.05 + \$0.01}{\$2.00} = \frac{\$0.06}{\$2.00} = 0.03 \text{ or } 3\%$$
+
+The lightweight model $M_1$ needs to succeed on **only $3\%$ of tasks** for the cascade to break even economically! If $M_1$ successfully resolves $60\%$ of incoming tasks ($P_1 = 0.60$):
+
+$$\mathbb{E}[C_{\text{cascade}}] = \$0.05 + \$0.01 + (1 - 0.60) \cdot \$2.00 = \$0.06 + \$0.80 = \$0.86$$
+
+The cascade delivers frontier-level accuracy ($P_{\text{cascade}} \ge 98\%$) at an average cost of $\$0.86$ per task—a **$57\%$ reduction in infrastructure expenditure** compared to routing directly to $M_2$.
+
+### Speculative routing in agentic loops
+
+Traditional cascading evaluates models sequentially: $M_1$ runs to completion, its output is verified, and only upon failure is $M_2$ invoked. While cost-optimal, this sequential escalation incurs an additive latency penalty:
+
+$$T_{\text{cascade}} = T_1 + T_v + (1 - P_1) T_2$$
+
+In interactive environments where latency SLAs are strict, sequential fallback may violate deadlines. The systems remedy is **Speculative Agent Routing**.
+
+In speculative routing, the runtime issues task $x$ to $M_1$ while simultaneously initializing the context block for $M_2$. In parallel, a fast speculative confidence estimator $\kappa(x) \in [0, 1]$ scores the probability that $M_1$ can handle the task without escalation.
+
+1. **High Confidence ($\kappa(x) \ge \theta_{\text{high}}$):** Dispatch exclusively to $M_1$. Cancel $M_2$ initialization.
+2. **Ambiguous Confidence ($\theta_{\text{low}} \le \kappa(x) < \theta_{\text{high}}$):** Speculatively dispatch to $M_1$. Concurrently stream the prefill pass of $M_2$ on a background prefill node. If $M_1$'s generated tool call passes immediate deterministic syntax parsing, commit $M_1$'s action and abort $M_2$ decode before expensive token generation begins.
+3. **Low Confidence ($\kappa(x) < \theta_{\text{low}}$):** Bypass $M_1$ entirely and execute directly on $M_2$.
+
+Speculative routing collapses the tail latency of cascaded systems, capturing the low cost of small models on simple steps without incurring serial delay on complex reasoning steps.
+
+### The tri-objective Pareto frontier: Accuracy, latency, and cost
+
+Systems tokenomics is fundamentally a multi-objective optimization problem. An agent architecture cannot be evaluated along a single axis; it operates on a three-dimensional **Pareto surface** trading off Task Accuracy ($P_{\text{success}}$), End-to-End Latency ($\bar{T}$), and Financial Expenditure ($\bar{C}$):
+
+$$\min_{\boldsymbol{\pi} \in \Pi} \Big( -P_{\text{success}}(\boldsymbol{\pi}), \, \bar{T}_{\text{latency}}(\boldsymbol{\pi}), \, \bar{C}_{\text{cost}}(\boldsymbol{\pi}) \Big)$$
+
+@Tbl-vol3-routing-pareto maps candidate architectural configurations along this Pareto frontier for an automated repository refactoring benchmark.
+
+| Routing Policy Configuration                      | Verification Mechanism         | Success Rate (Pass@1) | Mean Latency $\bar{T}$ (p50 / p95) | Mean Cost per 1k Tasks | Cost-per-Verified-Goal (CPVG) | Pareto Status                        |
+|:--------------------------------------------------|:-------------------------------|:---------------------:|:----------------------------------:|:----------------------:|:-----------------------------:|:-------------------------------------|
+| **Monolithic Small (8B)**                         | None (Open-loop)               |         18.2%         |         **1.2 s / 2.8 s**          |     **$\$12.40$**      |           $\$68.13$           | Dominated (Low Accuracy)             |
+| **Monolithic Mid (70B)**                          | None (Open-loop)               |         52.4%         |           4.8 s / 11.2 s           |       $\$125.00$       |           $\$238.55$          | Dominated (Sub-optimal CPVG)         |
+| **Monolithic Frontier**                           | None (Open-loop)               |         78.6%         |          14.5 s / 38.0 s           |      $\$1,850.00$      |          $\$2,353.69$         | Frontier (High Acc., High Cost)      |
+| **Sequential Cascade (8B $\to$ Frontier)**        | Deterministic Unit Test Oracle |         84.2%         |           5.2 s / 42.0 s           |       $\$482.00$       |         **$\$572.45$**        | **Pareto-Optimal (Lowest CPVG)**     |
+| **Speculative Cascade (8B $\parallel$ Frontier)** | Test Oracle + KV Prefetch      |       **85.1%**       |         3.1 s / **18.5 s**         |       $\$610.00$       |           $\$716.80$          | **Pareto-Optimal (Fast & Accurate)** |
+| **Self-Reflective Frontier ($k=3$)**              | LLM-as-a-Judge Loop            |         82.0%         |          48.0 s / 120.0 s          |      $\$5,550.00$      |          $\$6,768.29$         | Anti-Pattern (Runaway Burn)          |
+
+: **Tri-Objective Pareto Frontier Evaluation**: Routing policies on an enterprise refactoring workload balancing cost, latency, and accuracy. {#tbl-vol3-routing-pareto tbl-colwidths="[20,18,10,14,12,14,12]"}
+
+Examining @tbl-vol3-routing-pareto reveals that the **Sequential Cascade backed by a deterministic test oracle** achieves the absolute lowest Cost-per-Verified-Goal ($\$572.45$ per 1,000 verified tasks)—outperforming the monolithic frontier model by over $4\times$ on cost while delivering higher overall success ($84.2\%$ vs. $78.6\%$). When tail latency is critical, the **Speculative Cascade** reduces p95 latency from 42.0 seconds to 18.5 seconds at a modest $\$144$ cost premium. Meanwhile, the unconstrained self-reflective loop represents an engineering anti-pattern: it consumes $9\times$ more capital to achieve lower reliability than an oracle-gated cascade.
+
+## 17.5 Cost-Optimal Autonomy Boundaries: When Not to Use Agents {#sec-vol3-tokenomics-boundaries}
+
+In early 2026, an enterprise retail organization deployed an autonomous customer-support agent to automate product return authorizations. An audit of production billing revealed that the agent was consuming an average of $\$3.40$ in foundation model API tokens per customer return. The agent ingested email text, parsed order dates, executed an SQL query via a database tool, evaluated corporate return policy rules, and composed a confirmation email.
+
+Prior to this deployment, an automated 40-line Python microservice had executed the exact same return authorization workflow for five years at an average compute cost of $\$0.00004$ per transaction. The autonomous agent had introduced an **$85,000\times$ cost inflation**, increased transaction latency from 12 milliseconds to 8.5 seconds, and caused an increase in edge-case errors due to stochastic formatting hallucinations.
+
+This incident illustrates the most critical architectural determination in systems tokenomics: **establishing the formal boundary where autonomous agency must be explicitly rejected in favor of deterministic software or human labor**.
+
+### The autonomy decision framework
+
+An autonomous agent is a non-deterministic, high-entropy, computationally expensive execution unit. Deploying an agent is mathematically justified if and only if the problem space possesses high input entropy, dynamic combinatorial tool compositions, and unstructured perceptual ambiguity that cannot be modeled by deterministic software (Software 1.0) or classical machine learning classifiers (Software 2.0).
+
+To formalize this boundary, we establish a **Decision-Theoretic Utility Model**. Let a business task have gross economic value $V_{\text{task}}$ upon successful completion. We evaluate three competing execution modalities:
+
+1. **Deterministic Software ($\mathcal{M}_{\text{code}}$):** Hardcoded rules, finite-state machines (FSMs), or microservice scripts. Characterized by near-zero marginal compute cost $C_{\text{code}} \approx 0$, negligible latency $T_{\text{code}} \approx 0$, and fixed deterministic reliability $R_{\text{code}} \in \{0, 1\}$.
+2. **Autonomous Agent System ($\mathcal{M}_{\text{agent}}$):** Stochastic multi-turn foundation model policy interacting with tools. Characterized by significant token cost $C_{\text{agent}}$, substantial latency $T_{\text{agent}}$, stochastic reliability $R_{\text{agent}} \in [0, 1]$, and nonzero catastrophic blast-radius risk $B_{\text{agent}}$.
+3. **Human Specialist ($\mathcal{M}_{\text{human}}$):** Manual human labor. Characterized by wage cost $C_{\text{human}}$, human latency $T_{\text{human}}$, human reliability $R_{\text{human}}$, and near-zero blast radius.
+
+The expected net utility $U(\mathcal{M})$ of execution modality $\mathcal{M}$ is:
+
+$$U(\mathcal{M}) = R_{\mathcal{M}} \cdot V_{\text{task}} - C_{\mathcal{M}} - (1 - R_{\mathcal{M}}) \cdot B_{\mathcal{M}} - \gamma \cdot T_{\mathcal{M}}$$
+
+where $B_{\mathcal{M}}$ represents the financial blast-radius penalty of an unhandled task failure (e.g., corrupted database, customer churn, or security breach), and $\gamma$ is the organizational cost of latency (dollars per second of delay).
+
+An autonomous agent is cost-optimal if and only if its expected utility strictly exceeds both deterministic code and human labor:
+
+$$U(\mathcal{M}_{\text{agent}}) > \max\left( U(\mathcal{M}_{\text{code}}), \, U(\mathcal{M}_{\text{human}}) \right)$$ {#eq-vol3-tokenomics-autonomy-condition}
+
+### The five forbidden regimes of autonomous agency
+
+Evaluating @eq-vol3-tokenomics-autonomy-condition establishes five operational regimes where autonomous agents must be strictly forbidden in production systems architecture:
+
+#### Regime 1: Deterministic structured workflows
+
+When the input data conforms to a known schema, the business logic follows well-defined decision trees, and the outputs are standard API mutations (e.g., ETL pipelines, user authentication, invoice calculation, and relational CRUD operations), $R_{\text{code}} \approx 1.0$.
+
+Because $C_{\text{code}} \le 10^{-4} \cdot C_{\text{agent}}$ and $T_{\text{code}} \le 10^{-3} \cdot T_{\text{agent}}$, deterministic software dominates autonomous agents by four to six orders of magnitude across every utility dimension. Employing an LLM to parse structured JSON or execute SQL queries over known schemas is an architectural anti-pattern.
+
+#### Regime 2: Hard real-time systems ($< 200\text{ ms}$)
+
+Because autoregressive decoding is bound by memory bandwidth ($I \approx 1$ FLOP/Byte), generating a modest 100-token thought sequence on a 70B parameter model requires a physical minimum execution time:
+
+$$T_{\text{decode}} = 100 \cdot \frac{2 \cdot P_{\text{params}}}{B_{\text{mem}}} = 100 \cdot \frac{140 \times 10^9}{3.35 \times 10^{12}} \approx 4.18 \text{ seconds}$$
+
+Even with speculative decoding and small models, multi-turn agent loops cannot cross the sub-200 ms latency barrier. Systems requiring real-time reactivity (such as high-frequency trading, real-time robotics control loops, and interactive UI typing autocompletion) must deploy deterministic compiled code or single-pass distilled embedding classifiers.
+
+#### Regime 3: Irreversible, high blast-radius mutations with weak verifiability
+
+When an agent executes actions with severe, non-compensating external side effects (such as dropping production database partitions, wiring bank funds, submitting legally binding filings, or reconfiguring core BGP routing tables), the failure penalty $B_{\mathcal{M}}$ dwarfs the task value:
+
+$$B_{\mathcal{M}} \gg V_{\text{task}}$$
+
+If the runtime lacks a 100 percent deterministic software verification oracle capable of trapping catastrophic mistakes prior to physical execution, the expected failure penalty $(1 - R_{\text{agent}}) B_{\text{agent}}$ completely annihilates the net utility:
+
+$$U(\mathcal{M}_{\text{agent}}) \ll 0$$
+
+These operations mandate **Human-in-the-Loop Escrow**, where the agent acts solely as a proposal engine, requiring cryptographic out-of-band human sign-off before mutating external state.
+
+#### Regime 4: Unbounded horizon trajectories without intermediate oracles
+
+As established in @eq-vol3-tokenomics-exponential-decay, trajectory reliability decays geometrically with step count: $P_{\text{success}} \le p^N$. If a proposed autonomous task requires $N = 100$ sequential reasoning turns, and the runtime lacks intermediate unit tests or environmental oracles to verify progress every 3 to 5 steps, even an exceptional per-step accuracy of $p = 0.98$ results in a catastrophic completion rate:
+
+$$P_{\text{success}} = (0.98)^{100} \approx 0.133$$
+
+Executing open-loop agents over long horizons burns massive token budgets to produce garbage state. Tasks lacking intermediate verification boundaries must be decomposed into human-managed sub-tasks.
+
+#### Regime 5: Low-economic-surplus micro-tasks ($V_{\text{task}} < C_{\text{agent}}$)
+
+When the business value of an automated outcome is negligible (e.g., auto-categorizing internal bug tracker tags worth $\$0.02$ in engineering time), spending $\$0.15$ in multi-turn agent tokens to autonomously read comments and inspect historical tickets produces a negative return on investment. Tasks must be triaged by economic surplus:
+
+$$V_{\text{task}} - C_{\mathcal{M}} > 0$$
+
+Micro-tasks with low economic surplus must be routed to static heuristics or lightweight zero-shot embedding classifiers.
+
+### Enterprise economic governance and circuit breakers
+
+To prevent autonomous agent swarms from exhausting corporate cloud budgets during production edge-case loops, platforms must implement runtime **Economic Governance**:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│               ENTERPRISE AGENT ECONOMIC GOVERNANCE BUS                 │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│   Incoming Task ────────► [ Cryptographic Capability Lease ]           │
+│                                │  Budget: Max $2.00                    │
+│                                │  Attenuate: α = 0.5                   │
+│                                ▼                                       │
+│                       [ Agent Execution Loop ]                         │
+│                                │                                       │
+│        ┌───────────────────────┴───────────────────────┐               │
+│        ▼                                               ▼               │
+│  [ Spend Rate Monitor ]                     [ Progress Tripwire ]      │
+│  dC/dt > $10/min?                           ΔS_env == 0 for 3 turns?   │
+│  (Trigger Tripwire)                         (Detect Cycle Flapping)    │
+│        │                                               │               │
+│        └───────────────────────┬───────────────────────┘               │
+│                                ▼                                       │
+│                 [ HARD FINANCIAL CIRCUIT BREAKER ]                     │
+│                  - Revoke Tool Capability Leases                       │
+│                  - Flush KV Cache to NVMe                              │
+│                  - Escalate Trajectory to Human Queue                  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Monotonic capability quota attenuation
+
+When an autonomous agent spawns subagents to parallelize work, it must not grant children unconstrained spending authority. Subagent capability tokens must enforce **monotonic quota attenuation**:
+
+$$\mathcal{B}_{\text{child}} \le \alpha \cdot \mathcal{B}_{\text{parent}}, \quad \alpha \in (0, 1)$$
+
+A root supervisor with a $\$2.00$ task budget and attenuation factor $\alpha = 0.5$ can lease at most $\$1.00$ to a child agent, which in turn can lease at most $\$0.50$ to a grandchild. This geometric decay guarantees that the cumulative expenditure of an arbitrarily deep subagent tree is bounded by a finite geometric series:
+
+$$\text{Total Spend} \le \mathcal{B}_{\text{root}} \sum_{d=0}^\infty \alpha^d = \frac{\mathcal{B}_{\text{root}}}{1 - \alpha}$$
+
+For $\alpha = 0.5$, the total financial blast radius of the entire subagent swarm can never exceed $2 \cdot \mathcal{B}_{\text{root}}$, completely eliminating infinite subagent recursion bombs.
+
+#### Derivative spend-rate tripwires
+
+Runtimes must monitor the temporal spending derivative:
+
+$$\dot{C}(t) = \frac{dC}{dt}$$
+
+If an agent enters a tight retry loop against an external API returning HTTP 429 or compilation errors, $\dot{C}(t)$ surges. If the instantaneous burn rate exceeds a configured threshold (e.g., $\dot{C}(t) > \$10.00/\text{minute}$ for an individual task), the financial circuit breaker trips, terminating execution and alerting operators.
+
+#### Environmental state progress tripwires
+
+An agent trapped in a semantic dead-end often generates novel thoughts while repeating identical actions, burning tokens without mutating the environment. The runtime computes the environmental state delta between turns:
+
+$$\Delta \mathcal{S}_n = \mathcal{H}\left(s_n\right) \oplus \mathcal{H}\left(s_{n-1}\right)$$
+
+where $\mathcal{H}$ represents a cryptographic hash of the workspace filesystem, database state, or git diff. If $\Delta \mathcal{S}_n = \emptyset$ across 3 consecutive turns, the runtime detects **conversational flapping**, forcibly terminating the trajectory to preserve budget.
+
+## Fallacies and Pitfalls {#sec-vol3-tokenomics-fallacies}
+
+Engineering enterprise agent fleets requires dispelling persistent misconceptions that confuse token accounting with physical hardware execution costs.
+
+**Fallacy**: *Token count is a faithful, linear proxy for infrastructure serving costs.*
+
+Software architects frequently design cost models assuming that generating 10,000 tokens always incurs the same infrastructure expense regardless of execution conditions. In hardware reality, token count is completely decoupled from silicon resource consumption unless batch size, context length, and operational intensity are held constant. Emitting 1,000 decode tokens at batch size $B = 1$ requires reading the entire 140 GB weight tensor of a 70B model 1,000 times (140 terabytes of HBM memory traffic). Generating the exact same 1,000 tokens within a continuous batch of $B = 64$ streams requires reading model weights only $1000 / 64 \approx 16$ times (2.2 terabytes of memory traffic). The physical memory bandwidth consumed per token differs by more than $60\times$. Sizing fleets or billing customers based strictly on raw token counts without accounting for concurrency and hardware memory intensity leads to severe financial miscalculations.
+
+**Pitfall**: *Ignoring KV cache memory holding taxes during asynchronous external tool execution.*
+
+When an agent invokes an external compiler, runs a browser automation script, or queries a slow enterprise database, the tool execution frequently takes between 5 and 30 seconds. If the serving runtime does not actively unbind or swap the agent's KV cache during this idle I/O window, tens of gigabytes of accelerator HBM remain locked. Holding 24 GB of HBM on an H100 GPU for 20 seconds of idle tool wait incurs a memory opportunity cost that routinely exceeds the cost of the model forward passes themselves. Across a fleet of 5,000 concurrent agents, this "tool-wait tax" strands terabytes of accelerator memory, artificially starving the serving engine and forcing premature cluster scaling. Runtimes must implement immediate asynchronous KV swapping to host RAM or NVMe when invoking tools whose latency exceeds the cache break-even threshold $T_{\text{break-even}}$.
+
+**Fallacy**: *Speculative decoding always reduces serving costs and latency.*
+
+Because speculative decoding trades surplus ALU compute to verify multiple draft tokens in a single forward pass, developers often assume it is a universal optimization. However, speculative decoding is economically viable if and only if the draft acceptance rate $\alpha$ exceeds the critical break-even threshold $\alpha^* \approx 1 / (K + 1)$. In complex agentic tasks—such as mathematical theorem proving, highly indented syntax trees, or dense code generation—small draft models exhibit poor acceptance rates ($\alpha < 0.35$). When $\alpha$ drops below $\alpha^*$, the target model wastes Tensor Core cycles verifying rejected tokens while still reading model weights from HBM, increasing end-to-end latency by $15\%$ to $30\%$ and driving up the cost per token compared to standard autoregressive decode. Speculative decoding must be dynamically disabled when empirical acceptance rates fall below the mathematical break-even point.
+
+**Pitfall**: *Deploying unconstrained subagent swarms without financial circuit breakers.*
+
+Engineering teams building multi-agent architectures frequently allow planner agents to autonomously spawn worker subagents, which in turn spawn specialists to resolve sub-tasks. In unconstrained swarms, an edge-case error (such as a minor package dependency conflict) can cause subagents to recursively instantiate sibling agents to investigate the problem. With a branching factor of $b = 4$ across depth $D = 3$, an unthrottled swarm spawns 85 active agents, consuming millions of tokens within minutes. In several high-profile enterprise cloud incidents, runaway recursive agent swarms exhausted annual department AI budgets over a single weekend. Production runtimes mandate strict monotonic quota attenuation ($\mathcal{B}_{\text{child}} \le \alpha \mathcal{B}_{\text{parent}}$), depth limits, and derivative spend-rate tripwires.
+
+**Fallacy**: *A 98 percent accurate frontier model is always economically superior to a 90 percent accurate small model.*
+
+Engineers often justify using frontier models exclusively because "failure is too expensive." However, when intermediate task verification is deterministic and computationally cheap (e.g., running `cargo check`, a unit test suite, or a schema validator), running a smaller model with multiple attempts strictly dominates the frontier model. Consider a task where verification costs $\$0.005$. A small model costing $\$0.20/\text{M}$ tokens achieves $90\%$ single-pass accuracy; with up to 3 retries, its effective success rate is $1 - (0.10)^3 = 99.9\%$ at an average cost of $\$0.22/\text{M}$. A frontier model costing $\$15.00/\text{M}$ tokens achieves $98\%$ accuracy on a single pass. The small model cascade delivers **higher end-to-end reliability ($99.9\%$ vs. $98.0\%$) at less than $2\%$ of the frontier model's cost**. The economic viability of an agent architecture depends on verification cost, not raw foundation model perfection.
+
+**Pitfall**: *Treating Prompt Prefix Caching as a zero-cost performance optimization.*
+
+Prompt prefix caching dramatically slashes TTFT and prefill compute by reusing previously computed KV cache blocks for shared prompt prefixes. However, caching is an architectural trade-off: it consumes permanent physical HBM pages to store activation state. If an agent system caches hundreds of diverse system prompts, repository outlines, and tool schemas with low query reuse, the cache hit rate collapses while the cached blocks occupy memory that could otherwise serve active decoding batches. The resulting reduction in effective batch size forces the serving engine to operate at lower arithmetic intensity, depressing overall cluster goodput. Runtimes must implement aggressive Least Recently Used (LRU) cache eviction policies and monitor the cache hit-to-rent ratio.
 
 ## Summary {#sec-vol3-tokenomics-summary}
 
-::: {.callout-takeaways title="The Systems Tokenomics Invariant"}
-* The transition to token-based economics is a direct mapping of hardware roofline constraints: compute-bound prefill operations (input) yield cheaper tokens, while memory-bandwidth-bound decode operations (output) yield expensive tokens.
-* The KV cache dictates the working set size of an inference request; its linear scaling with sequence length imposes strict limits on concurrency, making long-context queries disproportionately expensive in memory opportunity cost.
-* Memory management techniques like PagedAttention [@kwon2023efficient] are critical for inference economics because they eliminate external fragmentation, allowing the system to maximize batch sizes and amortize memory bandwidth costs during decoding.
-* Speculative decoding [@leviathan2023fast; @chen2023accelerating] alters tokenomics by trading surplus compute (ALU cycles) for a reduction in expensive memory round-trips, structurally lowering decode costs provided the draft model maintains a high acceptance rate.
-* Caching KV states shifts the economic model from paying for compute to renting memory capacity across a hierarchy (HBM, CPU RAM, NVMe), requiring high cache hit rates to be economically viable.
-* Mixture of Experts (MoE) architectures [@shazeer2017outrageously] decouple active parameter count from total parameter capacity, resulting in lower inference costs per token compared to dense models, at the expense of higher total VRAM requirements.
-* Multi-agent architectures trigger compounding token consumption and necessitate dynamic model routing, where cheap, specialized models handle intermediate reasoning and expensive, capable models are reserved for complex bottlenecks.
+Governing the economics and capacity of autonomous agent systems requires an uncompromising grounding in hardware physics and queueing theory. Because autoregressive decoding is bound by memory bandwidth ($I \approx 1\text{ FLOP/Byte}$) while prefill is bound by compute ($I \gg I^*$), raw token counts fail to reflect hardware expenditure. Sizing clusters for heavy-tailed agent workloads requires managing high service variance ($C_v > 2.5$) and preventing memory thrashing through disaggregated prefill-decode architectures and prefix caching. By deploying multi-tier speculative cascades, engineering teams capture frontier reasoning capabilities at a fraction of monolithic costs, while rigorous autonomy decision boundaries protect enterprise organizations from automated cloud burn.
+
+::: {.callout-takeaways title="The system tokenomics contract"}
+1. **The Roofline Operational Invariant:** Single-sequence autoregressive decode is fundamentally memory-bandwidth bound ($I \approx 1.0\text{ FLOP/Byte}$), utilizing less than $1\%$ of modern GPU Tensor Cores. Accelerator cost per token is inversely proportional to batch size. Saturated continuous batching ($B \ge I^* \approx 295$) is the primary hardware mechanism to achieve economic viability.
+2. **The Quadratic Prefill Turn Tax:** In multi-turn agent loops, context accumulation causes total input token processing to explode quadratically ($\mathcal{O}(N^2 \bar{\Delta})$), causing prefill to dominate $80\text{--}90\%$ of total invoice dollars. Radix prefix caching collapses prefill complexity to linear ($\mathcal{O}(N \bar{\Delta})$), trading compute cost for memory holding rent.
+3. **The Sovereign Metric of Agency (CPVG):** Evaluating agents by nominal token price is an engineering fallacy. Systems economics are governed by Cost-per-Verified-Goal ($\text{CPVG} = \bar{C}_{\text{trajectory}} / p^N$). A cheap model with low per-step reliability exhibits astronomical CPVG due to compounding failure retries, whereas tiered verification cascades optimize both cost and success.
+4. **Heavy-Tailed Capacity Provisioning:** Agent service times exhibit extreme variance ($C_v > 2.5$). Under the Pollaczek-Khinchine relation, heavy-tailed agent workloads incur $5\times$ higher queue waiting times than Poisson web traffic at identical utilization. Sizing clusters requires clamping utilization below $\rho \le 0.70$ and adopting Prefill-Decode (PD) disaggregation over RDMA fabrics.
+5. **The Autonomy Decision Boundary:** Autonomous agents must be strictly rejected for deterministic workflows, hard real-time deadlines ($< 200\text{ ms}$), unverified irreversible mutations, and unbounded open-loop horizons. Enterprise economic governance mandates cryptographic capability leases, monotonic quota attenuation ($\mathcal{B}_{\text{child}} \le \alpha \mathcal{B}_{\text{parent}}$), and derivative spend-rate tripwires.
 :::
 
-::: {.callout-chapter-connection title="From Operational Tokenomics to Distributed Agent Architecture"}
-Having mapped the economic cost of stochastic, variable-length reasoning to physical memory bandwidth and capacity constraints, we now understand why an unconstrained agent can exhaust a cluster's resources. In the next volume, we will zoom out from the single-node tokenomics of the runtime to the distributed systems orchestration required to manage entire fleets of these agents concurrently.
+::: {.callout-chapter-connection title="From fleet tokenomics to trajectory synthesis"}
+Having established the hardware rooflines, queueing dynamics, and capacity models required to govern distributed agent fleets, we have assembled the complete operational infrastructure of autonomous machine learning systems. In @sec-vol3-conclusion, we synthesize the volume's five-part architecture—Processor, Memory, Actuation, Compiler, and Fleet—into the permanent architectural invariants of agentic computing and bridge forward to the physical frontier of embodied artificial intelligence.
 :::
 
 ## Quantitative Problems {#sec-vol3-tokenomics-problems}
 
-1. **KV Cache Memory Capacity Bound:** A serving system uses an 8x H100 GPU node (each with 80 GB HBM). The OS and model weights consume 320 GB total. Assume each token in the KV cache requires $2 \times N_{\text{layers}} \times D_{\text{model}} \times 2$ bytes (FP16). For a 70B parameter model with $N_{\text{layers}}=80$ and $D_{\text{model}}=8192$, calculate the maximum concurrent batch size the system can sustain if every request has a uniform context length of 128,000 tokens.
-2. **Break-Even Speculative Decoding:** An autoregressive decode step takes $t_{\text{AR}} = 20$ ms/token. A speculative draft model can generate 4 draft tokens in $15$ ms total, and the target model verification step for those 4 tokens takes $25$ ms. Let $\alpha$ be the average number of accepted draft tokens per speculative step (where $1 \le \alpha \le 4$). Calculate the minimum acceptance rate $\alpha$ required for speculative decoding to achieve a lower latency-per-token than standard autoregressive decoding.
-3. **Dynamic Auction Clearing Price:** A multi-agent framework allocates 10,000 tokens per second across three agent pools. Pool A (Data Ingestion) values throughput at $\$0.50$ per 1k tokens, Pool B (Code Generation) at $\$1.50$ per 1k tokens, and Pool C (Critical Planning) at $\$5.00$ per 1k tokens. If Pool A demands 8,000 tok/s, Pool B demands 5,000 tok/s, and Pool C demands 2,000 tok/s, calculate the market-clearing price of a token in a first-price auction, and determine how much bandwidth each pool receives.
-4. **Agent Break-Even Economics:** An enterprise replaces a junior software engineer (costing $\$50$/hour, producing 1 verified pull request per 8 hours) with an autonomous coding agent. The agent uses a model priced at $\$10$ per 1M input tokens and $\$30$ per 1M output tokens. A typical agent loop for a pull request requires 50 iterations. Each iteration consumes an average of 40,000 input tokens (reading codebase state and previous steps) and 1,000 output tokens. Calculate the Cost-per-Verified-Goal (CPVG) of the agent and determine if it is economically viable compared to the human engineer.
+Apply the tokenomic Roofline models, capacity sizing equations, and multi-tier cascade formulations established in this chapter to solve the following quantitative problems.
 
-```{=latex}
-\part{key:synthesis}
-```
+### Problem 1: Roofline analysis, batch amortization, and speculative decoding break-even
+
+An enterprise serving cluster deploys a 70-billion-parameter dense model ($P_{\text{params}} = 70 \times 10^9$) in FP16 precision (2 bytes per parameter) on an NVIDIA H100 SXM5 GPU node ($P_{\text{peak}} = 989.4\text{ TFLOP/s}$, $B_{\text{mem}} = 3.35\text{ TB/s}$). Neglect KV cache read traffic for parts (a) through (c).
+
+1. **Calculate the single-stream arithmetic intensity:** Compute the operational arithmetic intensity $I_{\text{decode}}(B=1)$ and determine the attained compute throughput $P_{\text{attained}}$ in TFLOP/s. What percentage of the H100's peak Tensor Core capability is utilized?
+2. **Compute the critical batch size:** Calculate the exact hardware balance knee $I^*$ for the H100 GPU. What is the minimum concurrent batch size $B^*$ required to reach the compute-bound plateau?
+3. **Speculative Decoding Break-Even Analysis:** To accelerate decode, systems engineers deploy a 7-billion-parameter draft model ($P_{\text{draft}} = 7 \times 10^9$). In each speculative iteration, the draft model generates $K = 5$ speculative tokens sequentially, and the target model verifies all 5 tokens concurrently in a single batched verification pass.
+   - The draft model executes sequential decode steps with per-token latency $t_{\text{draft}} = \frac{2 \cdot P_{\text{draft}}}{B_{\text{mem}}}$.
+   - The target model executes a single verification pass for $K$ tokens with latency $t_{\text{verify}} = \frac{2 \cdot P_{\text{params}}}{B_{\text{mem}}} + \frac{2 \cdot K \cdot P_{\text{params}}}{P_{\text{peak}}}$.
+   - Let $\alpha \in [0, 1]$ denote the average token acceptance rate, such that the expected number of accepted tokens per speculative iteration is $\mathbb{E}[M] = 1 + \alpha K$.
+   - Formulate the effective latency per generated token $T_{\text{token}}(\alpha)$ under speculative decoding.
+   - Calculate the critical acceptance rate $\alpha^*$ required for speculative decoding to achieve a lower latency per token than standard autoregressive target decoding ($t_{\text{target}} = \frac{2 \cdot P_{\text{params}}}{B_{\text{mem}}}$).
+
+### Problem 2: Heavy-tailed queueing and multi-server accelerator provisioning
+
+An autonomous code-review agent fleet receives incoming pull request review tasks at a mean arrival rate of $\lambda = 12$ tasks per minute ($\lambda = 0.20$ tasks/second) according to a Poisson arrival process. Empirical measurement reveals that task execution duration follows a heavy-tailed log-normal distribution with mean $\mathbb{E}[S] = 45$ seconds and standard deviation $\sigma = 135$ seconds.
+
+1. **Calculate service distribution parameters:** Compute the service rate $\mu$ per instance, the coefficient of variation $C_s = \sigma / \mathbb{E}[S]$, and the variance penalty factor $\frac{1 + C_s^2}{2}$ under the Pollaczek-Khinchine formulation.
+2. **Single-server queue wait:** If the organization attempts to process all traffic on a single consolidated high-throughput serving cluster with aggregate mean service time $\mathbb{E}[S_{\text{agg}}] = 4.0\text{ seconds}$ operating at utilization $\rho = 0.80$, calculate the mean queue waiting time $W_q$. Compare this waiting time to an idealized workload with deterministic service time ($C_s = 0$).
+3. **Multi-Server Fleet Capacity Sizing:** Model the fleet as an $M/G/k$ queue using Kingman's multi-server approximation (@eq-vol3-tokenomics-kingman-multiserver) with arrival coefficient of variation $C_a = 1.0$. Each server instance handles individual tasks with mean service duration $\mathbb{E}[S] = 45\text{ seconds}$.
+   - Calculate the minimum server count $k_{\text{min}}$ required strictly for system stability ($\rho < 1.0$).
+   - Compute the traffic intensity $a = \lambda / \mu$ in Erlangs.
+   - Calculate the mean queue waiting time $W_q$ when the cluster is provisioned with $k = 12$ servers ($\rho = 0.75$), $k = 15$ servers ($\rho = 0.60$), and $k = 20$ servers ($\rho = 0.45$).
+   - If the corporate SLA mandates that mean queue waiting time must not exceed $W_q \le 5.0\text{ seconds}$, what is the minimum number of accelerator servers $k^*$ that must be provisioned?
+
+### Problem 3: Multi-tier cascade optimization and CPVG minimization
+
+An enterprise software engineering agent workload evaluates three candidate models for a 25-step code refactoring benchmark:
+
+- **Model A (Small Distilled 8B):** Input price $c_{\text{in}}^{(A)} = \$0.15$ per 1M tokens; Output price $c_{\text{out}}^{(A)} = \$0.60$ per 1M tokens. Single-step correctness probability $p_A = 0.82$. Average trajectory token footprint: $S_{\text{in}} = 20,000$ input tokens (with prefix caching enabled across turns) and $S_{\text{out}} = 1,200$ output tokens.
+- **Model B (Domain MoE 8x7B):** Input price $c_{\text{in}}^{(B)} = \$0.80$ per 1M tokens; Output price $c_{\text{out}}^{(B)} = \$2.40$ per 1M tokens. Single-step correctness probability $p_B = 0.92$. Average trajectory token footprint: $S_{\text{in}} = 22,000$ input tokens and $S_{\text{out}} = 1,500$ output tokens.
+- **Model C (Frontier Reasoning 400B+):** Input price $c_{\text{in}}^{(C)} = \$5.00$ per 1M tokens; Output price $c_{\text{out}}^{(C)} = \$15.00$ per 1M tokens. Single-step correctness probability $p_C = 0.985$. Average trajectory token footprint: $S_{\text{in}} = 25,000$ input tokens and $S_{\text{out}} = 2,000$ output tokens.
+
+Each trajectory attempt is evaluated by an automated compiler and sandbox test oracle costing $c_{\text{oracle}} = \$0.01$ per execution.
+
+1. **Standalone Model Evaluation:**
+   - For each model operating in isolation, compute the single-trajectory token cost $C_{\text{traj}} = C_{\text{in}} + C_{\text{out}} + c_{\text{oracle}}$.
+   - Calculate the end-to-end 25-step trajectory success probability $P_{\text{success}} = p^{25}$ for each model under open-loop execution.
+   - Calculate the expected Cost-per-Verified-Goal ($\text{CPVG} = C_{\text{traj}} / P_{\text{success}}$) for Model A, Model B, and Model C. Which model is economically optimal in isolation?
+2. **Two-Tier Sequential Cascade Design:**
+   Architect a cascade where tasks are first attempted by Model A. If Model A passes the verification oracle ($P_{\text{success}}^{(A)}$), the task terminates. If Model A fails, the task escalates to Model C. Assume that when Model C is invoked following a Model A failure, its conditional 25-step success probability is $P_{C \mid \bar{A}} = 0.70$.
+   - Calculate the expected cost $\mathbb{E}[C_{\text{cascade}}]$ of this two-tier system per task.
+   - Calculate the overall success probability $P_{\text{cascade}}$ of the two-tier cascade.
+   - Compute the Cost-per-Verified-Goal ($\text{CPVG}_{\text{cascade}}$) of the two-tier cascade.
+   - What percentage cost savings does the cascade achieve compared to executing Model C alone?

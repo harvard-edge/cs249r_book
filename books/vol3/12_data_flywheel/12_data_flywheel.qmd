@@ -2,19 +2,22 @@
 engine: jupyter
 ---
 
-# The Synthetic Data Flywheel {#sec-vol3-data-flywheel}
+# Trajectory Data Flywheels & Synthesis {#sec-vol3-data-flywheel}
+
+Pretraining on trillions of tokens of static web text endows language models with general semantic knowledge and natural language fluency, but leaves them unequipped to function as autonomous decision-making agents. Operating within complex digital environments—executing terminal commands, querying distributed databases, manipulating filesystems, and orchestrating external APIs—demands multi-turn causal credit assignment, rigid schema adherence, and systematic error recovery across extended horizons. While early agent runtimes attempt to coax this behavior through prompt stuffing and extensive runtime scaffolding, the resulting quadratic attention prefill overhead, key-value (KV) cache bloat, and context degradation impose crippling physical and economic ceilings. Compiling operational capabilities directly into neural policy parameters requires vast corpora of multi-turn execution trajectories. Because human expert demonstrations are economically prohibitive, slow, and inherently biased toward error-free golden paths, post-training systems must transition to closed-loop synthetic data flywheels. By coupling automated task synthesis, stochastic rollout exploration, deterministic non-differentiable verification oracles, and negative trajectory mining, the autonomous data flywheel transforms the agent data bottleneck into a scalable compute compilation pipeline.
 
 ## Purpose {.unnumbered .unlisted}
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{10}{95}{20}{10}{20}{20}
+\mlagentstack{10}{95}{10}{10}{10}{10}
+\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
-_Why does pretraining scaling hit an insurmountable ceiling that only execution oracles can breach?_
+_How do we generate, filter, and curate high-quality multi-turn trajectories to train agentic policies?_
 
-Treating the foundation model as a static, frozen stochastic processor requires designing elaborate external operating systems around it: context working sets to conserve high-bandwidth memory, virtual memory paging for multi-tenant KV caches, episodic vector storage for non-volatile recall, execution schedulers to manage heavy-tailed workloads, system calls to enforce capability boundaries, and microVM sandboxes to isolate untrusted execution. While this runtime scaffolding is indispensable for system stability and security, relying exclusively on inference-time prompting imposes severe economic and physical penalties: quadratic attention prefill overhead, KV-cache saturation, token recall degradation across extended horizons, and brittle adherence to complex API schemas. To overcome these constraints, agent systems engineering must transition from pure runtime containment to policy adaptation, which begins with the synthetic data flywheel. Human trajectory demonstrations are too slow, prohibitively expensive, and fundamentally unscalable for the combinatorial state spaces of multi-turn tool interaction. The synthetic data flywheel bypasses human annotation through automated task generation, stochastic teacher exploration, execution-based rejection sampling against deterministic oracles, and search distillation from high-compute deliberation trees into compact, single-pass policy weights. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+Treating the foundation model as an immutable neural processor forces systems architects to build massive runtime scaffolding—paged attention memories, execution schedulers, capability sandboxes, and monolithic system prompts—around a stochastic core that remains fundamentally brittle to distributional drift. The synthetic data flywheel bridges runtime containment and model optimization, shifting the burden of multi-step tool execution and error recovery from dynamic in-context prompting to static parameter weights. Rather than relying on scarce, fatigue-prone human demonstrations, the flywheel exploits deterministic operating system invariants—compiler exit codes, abstract syntax tree (AST) parsers, schema validators, and hermetic unit test suites—to filter millions of stochastic model rollouts. By synthesizing task distributions, extracting minimal golden paths via rejection sampling, mining negative recovery traces, and collapsing test-time deliberation trees into student policy weights, the system establishes a self-reinforcing post-training pipeline where execution oracles provide the non-differentiable ground truth that foundation models cannot generate in isolation.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -22,378 +25,681 @@ Treating the foundation model as a static, frozen stochastic processor requires 
 
 ::: {.callout-learning-objectives}
 
-- Explain the physical and economic boundaries of the post-training data bottleneck in multi-turn agent domains
-- Formulate execution-based rejection sampling as a hard deterministic indicator gate over stochastic proposals
-- Quantify the mathematical relationship between exploration temperature, candidate yield ($\text{pass@k}$), and sample purity
-- Architect distributed, disaggregated systems that decouple GPU trajectory rollouts from CPU-bound deterministic verification oracles
-- Implement high-density microVM and container recycling to achieve sub-50 ms sandbox resets during rejection sampling
-- Formalize search distillation to compress multi-branch Monte Carlo Tree Search (MCTS) trajectories into single-pass student policies
-- Identify and mitigate the primary failure modes of synthetic data generation: LLM-as-a-judge bias, golden-path brittleness, oracle starvation, and student entropy collapse
+1. Analyze the economic, temporal, and mathematical limits of human trajectory annotation, quantifying why golden-path demonstration bias induces quadratic autoregressive covariate shift.
+2. Architect a disaggregated synthetic data pipeline that decouples GPU-bound autoregressive rollout generation from CPU-bound deterministic verification to prevent oracle starvation and maximize cluster throughput.
+3. Formulate execution-based rejection sampling as a hard deterministic indicator gate, modeling the trade-off between softmax temperature, trajectory diversity, and verifier yield ($\text{pass@k}$).
+4. Design high-density microVM verification sandboxes utilizing Copy-on-Write (CoW) memory overlays to achieve sub-5 millisecond environment resets during continuous rollout validation.
+5. Formulate majority voting and consensus filtering across parallel stochastic rollouts to mitigate under-specified unit test suites and eliminate false-positive trajectory acceptance.
+6. Implement negative trajectory mining and synthetic fault injection to curate bifurcated training corpora (70 percent golden paths, 30 percent error-recovery traces) that teach policies self-diagnosis and autonomous error recovery.
 
 :::
 
-## Introduction {#sec-vol3-flywheel-intro}
+## 12.1 The Autonomous Data Flywheel Architecture {#sec-vol3-flywheel-architecture}
 
-Consider an autonomous agent tasked with debugging a critical database regression. To coax the agent to retrieve logs, execute SQL queries, and patch the faulty logic without altering the model's weights, engineers must build extensive runtime scaffolding: system prompts stuffed with dozens of JSON schemas, few-shot demonstration exemplars, dynamic in-context retrieval, and deterministic statecharts. This mirrors classical computer architecture, where compilers translate high-level logic to respect a fixed CPU interface. The underlying foundation model is treated as an immutable neural processor.
+An enterprise engineering organization deploying an autonomous software repair agent across thousands of internal code repositories discovers that human-annotated debugging demonstrations cost between \$75 and \$200 per trajectory. Collecting a modest corpus of 50,000 multi-turn traces requires over \$4.5 million in direct engineering labor and nine months of calendar time. Yet, when the resulting supervised policy is deployed into production CI/CD pipelines, it fails on 68 percent of real-world pull requests. A forensic post-mortem reveals that human software engineers instinctively edit out their intermediate typos, dead ends, and syntax errors before committing their logged traces. The fine-tuning corpus consisted exclusively of pristine "golden paths." Upon encountering its first unexpected transient network timeout or missing compiler header in production, the deployed policy enters an unrecoverable hallucination loop: unable to parse the nonzero exit code, it emits non-existent CLI flags repeatedly until the context window exhausts the accelerator's high-bandwidth memory.
 
-While this runtime-centric approach enables rapid prototyping, it introduces three crippling systems bottlenecks:
+### The demonstration scarcity bottleneck
 
-1. **Quadratic Prefill and KV-Cache Memory Bloat:** Stuffer prompts that encode complete API specifications, domain rules, and multi-turn exemplars routinely consume $8{,}000$ to $32{,}000$ tokens of the active context window. As established in earlier chapters, attention prefill compute scales quadratically with sequence length, and KV-cache allocation scales linearly. Serving an agent that must ingest a $32\text{K}$-token prefix on every interaction turn rapidly exhausts GPU HBM, throttling batch sizes and driving inference costs to unsustainable levels.
-2. **Attention Dispersion and Contextual Amnesia:** As sequence length grows, transformer attention distributions suffer from contextual degradation. The "lost in the middle" phenomenon demonstrates that models recall information at the extremes of their context far more reliably than information embedded within deep conversational histories [@liu2024lost]. When an agent relies on lengthy system prompts to remember tool constraints during a 40-step interaction, parameter recall plummets, resulting in hallucinated arguments and invalid schema structures.
-3. **The Brittleness of Prompted Coordination:** Prompt-based instructions are fundamentally advisory. A stochastic processor conditioned via natural language instructions possesses no formal mathematical guarantee of schema compliance or termination. Under distributional drift or unexpected tool exceptions, prompted agents frequently enter infinite semantic loops or emit malformed execution payloads.
+Supervised fine-tuning (SFT) for standard conversational assistants relies on single-turn crowdsourced prompts and target completions ($x \to y$). In sharp contrast, an autonomous agent trajectory is an interleaved, stateful sequence of environmental states $s_t$, endogenous thoughts $z_t$, emitted actions $a_t$, and exogenous observations $o_t$ spanning an interaction horizon $H$:
 
-The solution to these operational bottlenecks is **Context Compilation**\index{Context Compilation}: compiling recurring runtime context, tool schemas, and multi-step decision patterns directly into the static parameter weights of the neural network. By fine-tuning the model on high-quality agent trajectories, the system internalizes operational protocols into its weights, shrinking prompt prefixes by over 80 percent, eliminating redundant prefill computation, and radically improving tool invocation reliability.
+$$
+\tau = \left( s_0, z_0, a_0, o_0, s_1, z_1, a_1, o_1, \dots, s_H, z_H, a_H, o_H \right)
+$$
 
-The closed-loop architecture of the synthetic data flywheel is illustrated in @fig-vol3-flywheel-lifecycle.
+Resolving a substantive software engineering defect (such as an issue in SWE-bench [@jimenez2024swebench]), migrating a distributed cloud database, or diagnosing a production infrastructure regression requires between 15 and 80 discrete tool interactions. The total cost of manually curating an expert demonstration corpus $\mathcal{D}_{\text{human}}$ scales with trajectory depth, per-step cognitive deliberation time, and professional engineering billing rates:
 
-::: {#fig-vol3-flywheel-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Closed-Loop Synthetic Data Flywheel**: Systems architecture of the automated trajectory generation and policy adaptation lifecycle. Generative task creation feeds a high-throughput GPU rollout engine. Candidate traces are verified by deterministic CPU oracles. Accepted golden paths and mined error recovery trajectories form a curated training corpus that updates policy weights via distillation, deploying an improved policy $\pi_{k+1}$ to drive subsequent data generation iterations." fig-alt="Flowchart showing closed-loop synthetic data flywheel with task generation, rollout engine, verification oracles, bifurcated curation into golden paths and error recovery, and policy distillation closing the loop."}
+$$
+C_{\text{corpus}} = N_{\tau} \cdot \bar{H} \cdot \bar{t}_{\text{step}} \cdot R_{\text{labor}}
+$$
 
-![**Figure 11.1: The Closed-Loop Synthetic Data Flywheel**](/assets/images/svg/vol3/synthetic_data_flywheel.svg){#fig-synthetic_data_flywheel}
+where $N_{\tau}$ is the target dataset size, $\bar{H}$ is the mean trajectory step count, $\bar{t}_{\text{step}}$ is the human cognitive latency per turn, and $R_{\text{labor}}$ is the hourly labor rate. For $N_{\tau} = 50{,}000$, $\bar{H} = 30$ turns, $\bar{t}_{\text{step}} = 90$ seconds (yielding 45 minutes of sustained focus per trace), and $R_{\text{labor}} = \$120.00/\text{hour}$, the corpus cost evaluates to:
 
-:::
+$$
+C_{\text{corpus}} = 50{,}000 \times 0.75 \;\text{hours} \times \$120.00/\text{hour} = \$4{,}500{,}000
+$$
 
-Compiling execution capability into weights requires massive volumes of high-fidelity trajectory data. Rather than relying on manual human labeling, modern agent post-training leverages the execution environment itself as a tireless, automated supervisor. By coupling generative task creation, stochastic candidate rollouts, deterministic execution-based verification, and search distillation, engineering teams create a self-reinforcing flywheel: improved policies resolve more complex environment states, generating richer execution traces that fuel subsequent training generations. The first barrier to spinning up this flywheel is the physical limit of generating those initial trajectories.
+Beyond financial expense, human demonstration collection is fundamentally bottlenecked by the combinatorial explosion of the underlying state space. At each step $t$, an agent selects an action from a continuous or vast discrete space (arbitrary bash commands, SQL mutations, Python scripts, AST edits) and transitions into an updated environment state $s_{t+1}$ determined by the external operating system. For an effective branching factor $b \approx 8$ across a horizon of $H = 20$, the underlying execution graph encompasses $8^{20} \approx 1.15 \times 10^{18}$ reachable paths. A fleet of human annotators collecting $10^4$ traces explores less than $10^{-14}$ of the reachable topology, leaving the vast majority of edge cases, error states, and environmental boundary conditions completely unmapped.
 
-## The Post-Training Data Bottleneck {#sec-vol3-flywheel-bottleneck}
+Crucially, human demonstrations suffer from severe survivorship bias. Human engineers perform hypothesis testing and error recovery mentally, typing only the commands that advance the solution. When unexpected tool errors occur, annotators routinely abort or clean the recording to produce clean, legible data. Training an autoregressive policy $\pi_\theta(a_t \mid s_t)$ exclusively on these golden paths induces severe autoregressive covariate shift [@ross2011reduction]. Formally, let $d_{\pi^*}(s)$ denote the state distribution induced by expert golden paths, and let $d_{\pi_\theta}(s)$ denote the distribution induced by the deployed policy. If the policy has a 1-step error probability of $\epsilon$ relative to the expert:
 
-To train an agent to resolve a real-world software issue, an engineering team might consider hiring human engineers to record their debugging steps. But an agent trajectory is not a single text completion; it is an ordered sequence of state-action-observation tuples. At commercial billing rates, collecting a modest dataset of $50{,}000$ human trajectories costs between $3.75\text{M}$ and $20\text{M}$ dollars and requires months of calendar time. In contrast to standard language model pretraining where data is abundant, the post-training regime for autonomous agents faces a severe **Data Bottleneck**\index{Data Bottleneck}.
+$$
+\pi_\theta(a \neq \pi^*(s) \mid s) \le \epsilon
+$$
 
-### The Arithmetic of Human Demonstration Failure
+the probability that the agent remains on the expert distribution $d_{\pi^*}$ decays exponentially with trajectory length $H$. Under standard imitation learning assumptions, the expected error rate compounds quadratically:
 
-Supervised Fine-Tuning (SFT) for basic conversational assistants (such as standard instruction-following models) relies on crowdsourced human demonstrations. A human worker is given a prompt (e.g., *"Summarize this article"*) and writes a single-turn target completion. This pipeline fails catastrophically when applied to agentic systems:
+$$
+\mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=1}^H \mathbb{I}(a_t \neq a_t^*) \right] \le \epsilon \cdot H + \epsilon \cdot (1 - \epsilon) \cdot \frac{H(H-1)}{2} \approx \mathcal{O}(\epsilon^2 H^2)
+$$ {#eq-quadratic-error-compounding}
 
-1. **Extreme Temporal and Financial Cost:** An agent trajectory is not a single text completion; it is an ordered sequence of state-action-observation tuples:
-   $$\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_H, a_H, o_H)$$
-   Resolving a real-world software engineering task (such as a GitHub issue in SWE-bench [@jimenez2024swebench]), a cloud infrastructure failure, or an intricate financial audit requires between 20 and 100 interaction steps. A human software engineer typically requires between 30 and 120 minutes of deep cognitive effort to navigate the codebase, formulate hypotheses, edit files, execute test suites, and verify the patch. At commercial engineering billing rates ($75 to $200 per hour), collecting a modest dataset of $50{,}000$ human trajectories costs between $3.75\text{M}$ and $20\text{M}$ dollars and requires months of calendar time.
-2. **Combinatorial Explosion of State Spaces:** In classical single-turn NLP, the input space is static. In an agentic environment, the state space is combinatorially explosive. At each time step $t$, the agent selects an action from a continuous or vast discrete action space (arbitrary bash commands, SQL queries, code edits) and transitions into a new environment state $s_{t+1}$ based on non-deterministic external responses. A 15-step trajectory with an effective branching factor of $b \approx 8$ encompasses $8^{15} \approx 3.5 \times 10^{10}$ possible paths. Human annotators can only ever sample an infinitesimal fraction of this graph, leaving the vast majority of the environment topology unexplored.
-3. **The "Golden Path" Bias and Covariate Shift:** Human engineers naturally exhibit survivorship bias in their logged demonstrations: they explore mentally, make corrections internally, and write out clean, direct solutions. When human demonstrations are recorded, annotators rarely document their intermediate mistakes, dead ends, or recoveries from obscure shell errors. Consequently, human trajectory corpora consist almost exclusively of "golden paths"—traces where every command succeeds on the first attempt. Training a model exclusively on golden paths produces severe **Autoregressive Covariate Shift**\index{Autoregressive Covariate Shift} [@ross2011reduction]: the moment the deployed agent encounters an unexpected runtime error (e.g., an HTTP 503 gateway timeout or a missing compiler dependency), the context enters an out-of-distribution state that never appeared in the training data. The model panics, hallucinates non-existent flags, and cascades into fatal failure loops.
+The instant the policy emits a suboptimal action or encounters an unprompted environment exception (e.g., an HTTP 504 gateway timeout or a missing dynamic library), the state $s_t$ exits the support of $d_{\pi^*}$. Because the model has never observed an error token in its training data, its conditional next-token distribution becomes high-entropy and uncalibrated, cascading into catastrophic failure loops.
 
-@Tbl-vol3-human-vs-synthetic-data quantifies the physical, temporal, and economic boundaries separating human trajectory logging from closed-loop synthetic generation.
+@Tbl-vol3-human-vs-synthetic-data quantifies the physical, economic, and systems boundaries separating manual human trajectory logging from closed-loop synthetic generation.
 
-| **Dimension**              | **Human Expert Trajectories**                            | **Synthetic Flywheel Rollouts**                                     | **Systems Implication**                                               |
-|:---------------------------|:---------------------------------------------------------|:--------------------------------------------------------------------|:----------------------------------------------------------------------|
-| **Generation Cost**        | $75.00 – $200.00 / hour ($37.50 – $400.00 / trace)       | $0.10 – $1.50 / verified trace                                      | 100× to 1,000× cost reduction enables $10^5 – 10^7$ training scale    |
-| **Collection Latency**     | 30 – 120 minutes per trajectory                          | 5 – 60 seconds per trajectory                                       | Enables continuous closed-loop retraining and rapid policy iteration  |
-| **State Space Coverage**   | Sparse; infinitesimal fraction ($<10^{-8}$) of path tree | Dense; systematic branch exploration via Best-of-$N$ and MCTS       | Exposes policy to broad state graph and rare boundary conditions      |
-| **Trajectory Traversal**   | Golden paths only; errors edited out mentally            | Bifurcated; 70% golden paths, 30% injected error-recovery traces    | Mitigates autoregressive covariate shift during runtime tool failures |
-| **Verification Authority** | Subjective human inspection; noisy, fatigue-prone        | Deterministic non-differentiable oracles (compilers, tests, ASTs)   | Eliminates length and style bias; zero circular hallucinations        |
-| **Scalability Bottleneck** | Human engineering headcount and recruiting velocity      | Elastic GPU rollout inference and CPU microVM verification clusters | Governed by Amdahl's law and data-center cluster economics            |
+| **Dimension**              | **Human Expert Demonstrations**                             | **Synthetic Flywheel Rollouts**                                   | **Systems Implication**                                                               |
+|:---------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------------------|
+| **Unit Trace Cost**        | \$75.00 – \$250.00 per verified trajectory                  | \$0.08 – \$1.20 per verified trajectory                           | $100\times$ to $1{,}000\times$ cost reduction enables $10^5$ to $10^7$ training scale |
+| **Collection Latency**     | 30 – 120 minutes per trajectory                             | 5 – 45 seconds per trajectory                                     | Enables continuous online retraining and rapid policy iteration                       |
+| **State Space Coverage**   | Sparse; infinitesimal fraction ($<10^{-12}$) of state graph | Dense; systematic exploration via Best-of-$N$ and MCTS            | Exposes policy to broad state graph and rare boundary conditions                      |
+| **Trajectory Traversal**   | Golden paths only; errors edited out mentally               | Bifurcated; 70% golden paths, 30% error-recovery traces           | Mitigates autoregressive covariate shift during runtime tool failures                 |
+| **Verification Authority** | Subjective human review; fatigue-prone, noisy               | Non-differentiable deterministic oracles (compilers, tests, ASTs) | Eliminates length and style bias; zero circular hallucinations                        |
+| **Scalability Bottleneck** | Engineering recruiting velocity and payroll                 | GPU rollout inference and CPU microVM execution clusters          | Governed by Amdahl's law and data center cluster economics                            |
 
-: **Human Demonstrations vs. Automated Synthetic Trajectory Generation**: Quantitative and architectural comparison across generation cost, collection latency, state space coverage, trajectory traversal, verification authority, and scalability boundaries. {#tbl-vol3-human-vs-synthetic-data tbl-colwidths="[20,26,26,28]"}
+: **Human Demonstrations vs. Synthetic Trajectories**: Quantitative and architectural comparison between expert demonstrations and automated synthetic trajectory generation. {#tbl-vol3-human-vs-synthetic-data tbl-colwidths="[18,26,26,30]"}
 
-### Self-Play and Environment Bootstrapping
+### From in-context prompting to context compilation
 
-To escape the human data bottleneck, agent architectures adopt the core breakthrough that enabled reinforcement learning systems to surpass human performance in games like Go, Chess, and Shogi [@silver2017mastering]: **Self-Play in Simulated Environments**\index{Self-Play in Simulated Environments}.
+To circumvent the lack of fine-tuned agent policies, early system designs rely entirely on **in-context learning (ICL)**: prepending massive system prompts containing dozens of OpenAPI tool definitions, JSON schema rules, and multi-turn execution exemplars to every model invocation. While in-context prompting enables rapid prototyping without updating weights, it imposes crippling systems taxes on serving infrastructure:
 
-In board games, the environment is defined by rigid mathematical rules: piece moves, turn alternation, and terminal win/loss states. In agentic software engineering and tool execution, the external environment serves as an identical ground-truth referee:
+1. **Quadratic Prefill Saturation:** The attention prefill computation for an input sequence of length $S$ scales quadratically with sequence length:
+   $$
+   \text{FLOPs}_{\text{prefill}} = 4 \cdot L \cdot d_{\text{model}} \cdot S^2 + 24 \cdot L \cdot d_{\text{model}}^2 \cdot S
+   $$
+   where $L$ is the number of transformer layers and $d_{\text{model}}$ is the hidden activation dimension. When an agent prepends 16,384 tokens of API schemas and behavioral guardrails to every turn of a 40-step interaction, prefill computation dominates the total latency budget, turning an interactive agent into an unresponsive batch pipeline.
+2. **Key-Value Cache Exhaustion:** The high-bandwidth memory (HBM) consumed by the Key-Value (KV) cache grows linearly with context length $S$:
+   $$
+   M_{\text{KV}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_h \cdot S \cdot b_{\text{bytes}}
+   $$
+   where $H_{\text{kv}}$ is the count of key-value heads (in Grouped-Query Attention), $d_h$ is the head dimension, and $b_{\text{bytes}}$ is the precision byte width (e.g., 2 bytes for BF16). For a 70B parameter model ($L = 80$, $H_{\text{kv}} = 8$, $d_h = 128$), an uncompiled 32K-token prompt prefix consumes:
+   $$
+   M_{\text{KV}} = 2 \times 80 \times 8 \times 128 \times 32{,}768 \times 2 \approx 10.74 \;\text{GB}
+   $$
+   Maintaining 10.74 GB of static prompt KV cache per active session strands accelerator HBM, severely capping maximum serving concurrency and inflating inference costs.
+3. **Attention Dispersion and Contextual Degradation:** As established by @liu2024lost, retrieval accuracy across long transformer contexts follows a pronounced U-shaped curve: information situated in the middle of long prompts suffers dramatic recall degradation compared to tokens at the boundaries. Submerging tool schemas and argument constraints inside expansive prompt prefixes leads to parameter extraction errors, hallucinated function signatures, and malformed JSON payloads.
 
-- A compiler (`rustc`, `gcc`, `javac`) deterministically accepts or rejects syntax.
-- A test harness (`pytest`, `jest`, `cargo test`) deterministically evaluates functional correctness.
-- An operating system kernel deterministically enforces permissions, file paths, and return codes.
-- An API gateway deterministically validates JSON schema contracts.
+The operational solution is **Context Compilation**\index{Context Compilation}: compiling dynamic runtime prompts, tool schemas, and multi-turn execution heuristics directly into the static parameter weights $\theta$ of the neural network via supervised fine-tuning. Context compilation shrinks prompt prefixes by up to 85 percent, eliminates redundant prefill FLOPs, and restores attention focus to live environment observations.
 
-Because the execution environment provides unambiguous, non-differentiable ground-truth feedback, we can replace human annotators with automated **Self-Supervised Environment Bootstrapping**\index{Self-Supervised Environment Bootstrapping}.
+@Fig-vol3-flywheel-lifecycle illustrates the closed-loop architecture of the synthetic data flywheel that powers this compilation.
 
-The seminal formalization of this principle for language models was demonstrated by the **Toolformer** architecture [@schick2023toolformer]. Toolformer established that a model can autonomously discover when and how to invoke external APIs without manual supervision by optimizing for self-supervised perplexity reduction.
+::: {#fig-vol3-flywheel-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Closed-Loop Synthetic Data Flywheel Architecture**: Closed-loop systems lifecycle of automated trajectory synthesis and policy compilation. Generative task synthesizers seed a high-throughput GPU rollout fleet. Stochastic candidate rollouts are streamed to an asynchronous message broker and evaluated by dense CPU microVM verification clusters. Passing traces are bifurcated into minimal-step golden paths and mined error-recovery traces. These traces update policy weights via Supervised Trajectory Fine-Tuning (SFT) and Reinforcement Learning with Verifiable Rewards (RLVR), deploying an improved policy $\pi_{k+1}$ to autonomously drive subsequent generation cycles." fig-alt="System architecture diagram of the synthetic data flywheel showing task synthesis, GPU rollout fleet, asynchronous queue, CPU verification cluster, bifurcated trajectory curation, and policy training closing the loop."}
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
-
-Intuitively, the model proposes candidate API calls during text generation. These calls are executed in a sandbox, and the returned information is injected back into the context. If the API invocation returns irrelevant data or a runtime error, the model's uncertainty about future tokens remains unchanged or increases, and the trace is discarded. However, if the tool returns precise, grounded facts (e.g., an exact mathematical calculation), the model's prediction of future tokens becomes highly certain. The system accepts trajectories into the training corpus only when the environment feedback acts as a massive \"entropy reducer,\" filtering out useless tool use and rewarding factual grounding.
-
-The synthetic data flywheel generalizes this primitive across entire multi-turn trajectories: candidate action sequences are rolled out in parallel, evaluated against environment invariants, and filtered to construct massive, pristine post-training corpora. The mathematical engine that filters these candidates is execution-based rejection sampling.
-
-## Execution-Based Rejection Sampling {#sec-vol3-flywheel-rejection-sampling}
-
-Consider generating a trajectory to resolve a compilation error. We could sample hundreds of candidate bash commands from a language model, but how do we know which one works without human review? The core algorithmic mechanism driving data generation in the flywheel is **Execution-Based Rejection Sampling**\index{Execution-Based Rejection Sampling}.
-
-### Mathematical Formulation
-
-Rejection sampling relies on generating candidates from a readily available proposal model and filtering them against a target distribution of verified solutions.
-
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
-
-In the context of agentic post-training, the proposal generator is the model's stochastic rollout policy. The system evaluates each candidate trajectory against a strict, execution-based verification indicator $R(\tau, x) \in \{0, 1\}$. Because the execution oracle provides a deterministic binary outcome, the sampling probability collapses into a hard gate:
-
-- If the trajectory passes all deterministic execution checks ($R(\tau, x) = 1$), it is accepted into the fine-tuning dataset.
-- If the trajectory fails any assertion, triggers a fatal exception, or violates an environment invariant ($R(\tau, x) = 0$), it is rejected with probability 1.
-
-This multi-stage gating mechanism is diagrammed in @fig-vol3-flywheel-rejection-gate.
-
-::: {#fig-vol3-flywheel-rejection-gate fig-env="figure" fig-pos="htb" fig-cap="**Execution-Based Rejection Sampling Gate**: Architectural flow of candidate trajectories through a cascading multi-stage verification oracle. Proposed trajectories $\tau \sim \pi_\theta$ are evaluated through AST syntax parsing, schema validation, environment invariant verification, and unit test suites. Only candidates satisfying all conjunctive checks ($R=1$) enter the golden training pool; failing traces ($R=0$) route to the error-recovery mining tier." fig-alt="Flowchart showing proposed trajectories passing through syntax verification, schema validation, state invariant checks, and unit test execution into acceptance or rejection."}
-
-![**Figure 11.2: Execution-Based Rejection Sampling Gate**](/assets/images/svg/vol3/rejection_sampling_gate.svg){#fig-rejection_sampling_gate}
+![**Figure 12.1: The Closed-Loop Synthetic Data Flywheel Architecture**](/assets/images/svg/vol3/synthetic_data_flywheel.svg)
 
 :::
 
-### The Structure of Deterministic Verification Oracles
+### The four subsystems of the flywheel
 
-The reliability of rejection sampling depends entirely on the design of the verification reward function $R(\tau, x)$. In production agent architectures, $R(\tau, x)$ decomposes into a conjunctive series of hard deterministic checks:
+Operating an autonomous data flywheel requires orchestrating four tightly coupled distributed subsystems:
 
-$$R(\tau, x) = \mathbb{I}_{\text{syntax}}(\tau) \times \mathbb{I}_{\text{schema}}(\tau) \times \mathbb{I}_{\text{state}}(\tau) \times \prod_{k=1}^K \mathbb{I}(\text{Test}_k(\mathcal{E}_{\text{final}}) == \text{PASS})$$
+1. **The Generative Task Synthesizer:** An automated problem generation engine that synthesizes programming tasks, infrastructure failure scenarios, database migration targets, and complex workflow DAGs. The synthesizer seeds the environment with reproducible test harnesses, initial file states, and clear operational objectives.
+2. **The Stochastic Rollout Fleet:** A high-throughput GPU inference cluster running continuous batching engines (such as vLLM [@kwon2023vllm] or SGLang [@zheng2023sglang]). The rollout fleet generates parallel candidate trajectories $\tau \sim \pi_\theta(\cdot \mid x)$ across diverse sampling temperatures and decoding strategies.
+3. **The Multi-Tier Verification Oracle:** A distributed pool of CPU worker nodes executing isolated sandboxes. The verification fleet evaluates proposed actions against hard deterministic checks: AST syntax validity, JSON Schema conformance, OS invariant diffs, and unit test pass assertions.
+4. **The Policy Curation and Distillation Stage:** An ingestion pipeline that deduplicates passing traces, extracts minimal golden paths, mines informative error-recovery branches, computes token loss masks, and formats standardized training records for post-training compilation.
 
-where:
+The flywheel operates iteratively. An initial base policy $\pi_0$ (a pretrained foundation model) explores synthetic task environments, yielding a baseline pass rate of $\text{pass@1} = 15\%$. Execution-based rejection sampling filters out the 85 percent failing traces, curating a pristine training set $\mathcal{D}_0$. Fine-tuning the base model on $\mathcal{D}_0$ produces policy $\pi_1$. Policy $\pi_1$ achieves higher baseline competence ($\text{pass@1} = 38\%$), enabling it to explore deeper into complex state trees and resolve multi-step tasks that $\pi_0$ could never solve. This self-reinforcing dynamic continues across successive generations, progressively expanding the autonomous operating envelope of the model.
 
-1. **$\mathbb{I}_{\text{syntax}}(\tau)$:** Enforces that every intermediate tool call, code block, or query generated by the agent is syntactically valid according to the target language grammar (e.g., parses into a valid Abstract Syntax Tree via Tree-Sitter).
-2. **$\mathbb{I}_{\text{schema}}(\tau)$:** Verifies that all emitted API parameters conform strictly to the formal JSON Schema or OpenAPI specification, ensuring correct typing and required argument presence.
-3. **$\mathbb{I}_{\text{state}}(\tau)$:** Validates environmental state invariants (e.g., no unauthorized file deletions outside the workspace sandbox, no memory leaks, database foreign key constraints remain intact).
-4. **$\prod_{k=1}^K \mathbb{I}(\text{Test}_k(\mathcal{E}_{\text{final}}) == \text{PASS})$:** Evaluates the terminal state of the environment $\mathcal{E}_{\text{final}}$ against a suite of $K$ independent, deterministic unit and integration test assertions.
+### Distributed compute disaggregation
 
-The execution latency, evaluation substrate, and failure modes across these verification tiers are formalized in @tbl-vol3-verification-oracles.
+Achieving line-rate throughput across the flywheel requires resolving a profound hardware architectural mismatch. Modern LLM inference engines saturate GPU tensor cores by processing thousands of tokens per second per node under continuous batching. In contrast, verifying an agent's tool actions requires executing real-world software workflows on conventional CPU hardware:
 
-| **Verification Tier**                                   | **Target Invariant**                               | **Evaluation Mechanism**                                  | **Typical Latency** | **Execution Substrate**                      | **Failure Signature**                                     |
-|:--------------------------------------------------------|:---------------------------------------------------|:----------------------------------------------------------|:-------------------:|:---------------------------------------------|:----------------------------------------------------------|
-| **Syntax AST Gate ($\mathbb{I}_{\text{syntax}}$)**      | Grammar validity of code, bash, and queries        | Tree-sitter AST parser, language lexers                   |        <1 ms        | In-process worker thread                     | `SyntaxError`, `ParseError`, nonzero lexer exit           |
-| **Schema Contract Gate ($\mathbb{I}_{\text{schema}}$)** | Typing, parameter arity, OpenAPI specifications    | JSON Schema validator, Pydantic type validator            |        <5 ms        | In-process worker thread                     | `ValidationError`, missing required fields, type mismatch |
-| **State Invariant Gate ($\mathbb{I}_{\text{state}}$)**  | Sandbox containment, zero data leaks, DB integrity | Kernel filesystem diffs, memory leaks, foreign key checks |      10 – 50 ms     | Ephemeral OS cgroup / host diff engine       | `StateLeakError`, orphan processes, permission faults     |
-| **Unit Test Gate ($\prod \mathbb{I}(\text{Test}_k)$)**  | Functional logic and regression assertions         | Test runners (`pytest`, `cargo test`, `jest`)             |       1 – 30 s      | Isolated microVM / container sandbox         | `AssertionError`, test timeout, nonzero test suite exit   |
-| **End-to-End Integration Gate**                         | Multi-service API responses, visual DOM mutations  | Integration harness, Playwright browser snapshots         |       2 – 15 s      | Sandboxed virtual network & headless browser | `HTTP 5xx`, DOM assertion timeout, visual regression      |
+- Compiling a Rust or C++ workspace (`cargo build`, `cmake`) requires 10 to 90 seconds of multi-threaded CPU compute.
+- Running a comprehensive integration test suite (`pytest`, `mvn test`) consumes 5 to 60 seconds.
+- Spawning a headless browser (Playwright/Puppeteer) to verify DOM mutations requires 2 to 5 seconds.
 
-: **Deterministic Verification Oracle Cascade**: Systems characteristics, evaluation mechanisms, latency budgets, and failure signatures across the multi-stage trajectory verification pipeline. {#tbl-vol3-verification-oracles tbl-colwidths="[18,20,22,12,14,14]"}
+If trajectory generation and verification are coupled synchronously—where a GPU worker process generates a tool call, blocks waiting for a local container to execute the command, and resumes generation—the GPU's memory-bandwidth and tensor cores sit completely idle. Accelerator compute utilization collapses from $>85\%$ to $<8\%$, wasting massive capital expenditure.
 
-::: {.callout-note title="Execution oracle vs. LLM-as-a-judge"}
-Rejection sampling in agent systems must never be confused with subjective "LLM-as-a-Judge" evaluation [@zheng2023judging]. In conversational tuning, a secondary large language model (LLM) is frequently prompted to score candidate answers for politeness, helpfulness, or fluency. In agentic execution, LLM judges are catastrophic: they exhibit extreme length bias (favoring verbose, rambling code over concise solutions), style bias, and severe circular hallucination (approving syntactically plausible code that fails silently at runtime). A compiler or unit test suite possesses zero style bias; an exit code of `0` is an objective, mathematical truth.
+To maximize hardware efficiency, the flywheel architecture enforces **Strict Compute Disaggregation**\index{Strict Compute Disaggregation}. The GPU rollout fleet and the CPU verification fleet are physically separated and decoupled via high-throughput, asynchronous message queues (e.g., Apache Kafka or Redis Streams), as illustrated in @fig-vol3-flywheel-disaggregated-fleet.
+
+::: {#fig-vol3-flywheel-disaggregated-fleet fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Compute Architecture for Trajectory Synthesis**: Heterogeneous compute separation between the GPU rollout inference cluster and the CPU verification oracle fleet. GPU nodes run continuous batching (vLLM) to maximize tensor core saturation without blocking on external tool latency. Incomplete candidate rollouts are enqueued into an asynchronous message broker, which distributes verification workloads across dense pools of Firecracker microVMs on CPU hosts. Passing traces are staged to hot memory-mapped storage for immediate policy updates, while analytical failure logs stream to cold object storage." fig-alt="Systems architecture diagram showing GPU rollout fleet streaming candidate trajectories into an asynchronous queue, distributed to a dense CPU microVM verification cluster, outputting to hot memory-mapped NVMe storage and cold Parquet object stores."}
+
+![**Figure 12.2: Disaggregated Compute Architecture for Trajectory Synthesis**](/assets/images/svg/vol3/disaggregated_compute_architecture.svg)
+
 :::
 
-### Sampling Dynamics and the Temperature-Yield Trade-Off
+The balance between GPU rollout compute and CPU verification compute is governed by a distributed systems formulation of Amdahl's Law. Let $T_{\text{GPU}}$ denote the aggregate trajectory generation throughput of the GPU cluster (in trajectories per second), and let $T_{\text{CPU}}$ denote the aggregate verification throughput of the CPU cluster:
 
-The efficiency of execution-based rejection sampling is governed by the model's sampling hyperparameters, particularly the softmax temperature $T$.
+$$
+T_{\text{GPU}} = \frac{N_{\text{GPU}} \cdot B_{\text{rollout}} \cdot \mu_{\text{tokens}}}{\bar{L}_{\tau}}
+$$
 
-To quantify the yield of verified trajectories, systems evaluate the $\text{pass@k}$ metric [@chen2021codex]. If we draw $n$ independent trajectory candidates for a task prompt $x$ and $c$ of those candidates satisfy the execution oracle ($R=1$), the unbiased estimator for the probability that at least one of $k$ randomly chosen samples succeeds is:
+$$
+T_{\text{CPU}} = \frac{N_{\text{CPU\_cores}} \cdot \mu_{\text{core}}}{\bar{t}_{\text{verify}}}
+$$
 
-$$\text{pass}@k = \mathbb{E}_{x \sim \mathcal{D}} \left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]$$
+where $N_{\text{GPU}}$ is the number of active GPUs, $B_{\text{rollout}}$ is the average concurrent batch size per GPU, $\mu_{\text{tokens}}$ is the decode throughput per GPU (tokens/sec), $\bar{L}_{\tau}$ is the mean token length of a complete trajectory, $N_{\text{CPU\_cores}}$ is the number of CPU verification cores, $\mu_{\text{core}}$ is the core utilization efficiency, and $\bar{t}_{\text{verify}}$ is the average wall-clock verification time per trajectory.
 
-The choice of temperature $T$ navigates a fundamental systems trade-off:
+To prevent an **Oracle-Bound Stall**\index{Oracle-Bound Stall}—where CPU verification queues saturate, backpressure halts the message broker, and GPU workers idle—the system architect must size the CPU verification fleet to satisfy the inequality:
 
-- **Low Temperature ($T \to 0$):** The policy samples near the greedy argmax. Trajectory diversity collapses: all $n$ samples follow identical reasoning branches. If the greedy path is flawed, $c = 0$, and the entire generation batch is wasted. While the per-sample success rate on easy tasks is high, the pipeline fails to explore alternative solution topologies for difficult problems.
-- **High Temperature ($T \ge 1.0$):** Semantic entropy increases, encouraging broad exploratory branching across tool combinations. However, the probability of emitting invalid tool arguments, syntax errors, or hallucinated paths compounds exponentially over trajectory length $H$. Consequently, the acceptance probability $\alpha(\tau)$ plummets, requiring thousands of GPU rollouts to yield a single passing trace ($c/n \to 0$).
+$$
+T_{\text{CPU}} \ge T_{\text{GPU}} \implies N_{\text{CPU\_cores}} \ge N_{\text{GPU}} \cdot \left( \frac{B_{\text{rollout}} \cdot \mu_{\text{tokens}}}{\bar{L}_{\tau}} \right) \cdot \left( \frac{\bar{t}_{\text{verify}}}{\mu_{\text{core}}} \right)
+$$
 
-This dynamic is captured in @fig-vol3-flywheel-temperature-yield.
+In production code-synthesis clusters running 8-way NVIDIA H100 nodes, maintaining full GPU saturation requires provisioning between 32 and 64 dedicated CPU verification cores for every individual GPU accelerator. Sizing below this threshold immediately induces catastrophic GPU under-utilization.
+
+---
+
+## 12.2 Synthetic Trajectory Generation and Rollout Filtering {#sec-vol3-flywheel-synthetic-gen}
+
+In a large-scale enterprise project aiming to synthesize 100,000 multi-turn bash and Python trajectories, an infrastructure team relies on an unconstrained frontier LLM to generate both the task prompts and the corresponding validation unit tests. When the post-training team inspects the resulting dataset, they uncover a crippling systems failure: **Evaluator Collusion**\index{Evaluator Collusion}. In 41 percent of the generated verification suites, the task generator had synthesized tautological or malformed test assertions (such as `assert True if result else True`, empty test functions, or wrapping shell commands in `|| true`). Consequently, tens of thousands of broken, hallucinated agent trajectories were certified as passing and ingested into the training corpus. When fine-tuned on this corrupted data, the production agent learned that emitting arbitrary syntax errors was fully acceptable, causing real-world task completion rates to plummet from 32 percent to 4 percent.
+
+### Grounded task synthesis and problem space exploration
+
+Generating synthetic training data requires seeding the rollout engine with substantive, diverse, and verifiable task specifications $x \sim \mathcal{D}_{\text{tasks}}$. Relying on an unconstrained LLM prompted with *"Generate a complex software bug"* leads invariably to **Synthesizer Mode Collapse**\index{Synthesizer Mode Collapse}: the generator falls into semantic attractor basins, generating thousands of superficial variants of palindrome checkers, basic REST wrappers, or off-by-one list indexing errors.
+
+To achieve enterprise-grade data diversity, modern synthesis pipelines employ three grounded engineering mechanisms:
+
+1. **Repository-Grounded Commit Inversion:** Mining historical version control histories from open-source and enterprise repositories [@jimenez2024swebench]. A Git commit that resolves an issue provides three ground-truth artifacts: the base repository state $C_{\text{base}}$, the solution patch $P_{\text{sol}}$, and the developer-authored test patch $P_{\text{test}}$. By checking out the codebase at $C_{\text{base}}$ and applying $P_{\text{test}}$, the flywheel creates a hermetic, grounded environment where the test suite deterministically fails (reproducing the bug). The agent's goal is to synthesize a patch $\hat{P}$ such that all tests in $P_{\text{test}}$ pass without breaking existing regression suites.
+2. **Programmatic AST Mutation Testing:** Rather than relying on LLM-generated bugs, synthesis engines apply deterministic Abstract Syntax Tree (AST) mutation operators directly to verified production codebases. Operators systematically inject faults: mutating relational operators (`<` to `<=`), inverting boolean predicates, dropping error-handling blocks, or modifying boundary conditions. Because the original codebase had passing test coverage, the injected mutation is guaranteed to flip specific test assertions from green to red, creating a pristine, mathematically verifiable repair task.
+3. **Property-Based Specification Synthesis:** Generating formal property-based test contracts using frameworks like Hypothesis or QuickCheck. Rather than testing fixed input-output pairs, the synthesizer specifies mathematical invariants (e.g., idempotency $f(f(x)) = f(x)$, round-trip serialization $\text{deserialize}(\text{serialize}(x)) = x$, or conservation laws in financial ledgers). The agent must navigate the environment to satisfy these parameterized properties across arbitrary inputs.
+
+To guarantee semantic diversity across the generated task set $\mathcal{D}_{\text{tasks}}$, synthesis pipelines enforce an **Embedding Distance Diversity Filter**\index{Embedding Distance Diversity Filter}. Candidate task specifications $x_i$ are embedded into a dense semantic space using a code-retrieval model $e(x) \in \mathbb{R}^{d_{\text{embed}}}$. A candidate task is accepted into the active rollout pool only if its minimum cosine distance to all previously accepted tasks exceeds a strict diversity threshold $\delta_{\text{div}}$:
+
+$$
+\min_{x_j \in \mathcal{D}_{\text{accepted}}} \left( 1 - \frac{e(x_i) \cdot e(x_j)}{\|e(x_i)\|_2 \|e(x_j)\|_2} \right) \ge \delta_{\text{div}}
+$$
+
+Candidate tasks violating this constraint are rejected prior to GPU rollout allocation, preserving accelerator capacity for unmapped regions of the problem space.
+
+### Stochastic rollout policies and sampling dynamics
+
+Given a verified task specification $x$, the proposal generator—a high-capacity teacher policy $\pi_\theta$ or an exploratory checkpoint—samples candidate trajectories. Autoregressive token generation emits tokens according to the softmax probability distribution modulated by temperature $T$:
+
+$$
+P(y_t = v \mid y_{<t}, x) = \frac{\exp(z_v / T)}{\sum_{v' \in \mathcal{V}} \exp(z_{v'} / T)}
+$$
+
+where $z_v$ denotes the unnormalized logit for token $v$ in vocabulary $\mathcal{V}$.
+
+The selection of temperature $T$ navigates a fundamental systems tension between exploratory diversity and verifier yield, as illustrated in @fig-vol3-flywheel-temperature-yield.
 
 ::: {#fig-vol3-flywheel-temperature-yield fig-env="figure" fig-pos="htb" fig-cap="**Sampling Temperature Dynamics in Trajectory Synthesis**: Interaction between softmax temperature $T$, usable trajectory yield, exploration diversity, and execution error rates. At low temperatures ($T < 0.4$), the policy suffers mode collapse, producing deterministic but uncreative traces. At elevated temperatures ($T > 1.0$), entropy explosion drives syntax and schema failures, collapsing net verifier yield. The optimal synthesis regime ($T \in [0.6, 0.8]$) balances exploratory diversity with high verification success, peaking near $T \approx 0.7$." fig-alt="Plot showing usable trajectory yield, exploration diversity, and syntax error rate curves across temperature range from 0.0 to 1.2, highlighting mode collapse, optimal synthesis regime, and entropy explosion."}
 ![](images/svg/temperature_yield_tradeoff.svg){width=100%}
 :::
 
-In production generation pipelines, engineering teams employ **Adaptive Temperature Annealing**\index{Adaptive Temperature Annealing}: sampling the first $k_1$ rollouts at $T = 0.2$ to capture high-probability solutions, and conditionally escalating to $T = 0.7$ and $T = 0.9$ with Best-of-$N$ search only when low-temperature rollouts fail the execution verifier.
+- **Low Temperature Regime ($T < 0.4$):** The sampling distribution concentrates aggressively around the argmax tokens. Trajectory diversity collapses: drawing $N$ independent rollouts produces identical or near-identical action sequences. If the greedy path contains an early planning error, every candidate fails ($c = 0$), and all allocated GPU FLOPs are wasted.
+- **High Temperature Regime ($T > 1.0$):** High sampling entropy encourages radical exploratory branching across tool spaces. However, the probability of emitting malformed JSON arguments, syntax errors, or hallucinated file paths compounds exponentially across trajectory depth $H$. The probability of surviving to the final step without fatal syntax corruption approaches zero, collapsing the acceptance yield.
+- **Optimal Synthesis Regime ($T \in [0.6, 0.8]$):** The sampling distribution maintains sufficient entropy to explore alternative algorithmic strategies while preserving high token-level syntax and schema fidelity.
 
-### Trajectory Economy: Minimal Golden Path Extraction
+To evaluate synthesis efficiency across temperatures, pipelines compute the unbiased $\text{pass@k}$ estimator [@chen2021evaluating]. When drawing $n$ candidate rollouts for a task ($n \ge k$) and observing $c$ passing completions, the probability that at least one of $k$ randomly chosen candidates succeeds is:
 
-When generating $n$ candidates for a task, multiple trajectories may satisfy the execution verifier ($\mathcal{T}_{\text{pass}} = \{\tau \mid R(\tau) = 1\}$). Naively adding all passing trajectories into the SFT dataset degrades policy efficiency, because stochastic search rollouts often stumble upon the correct solution after executing redundant commands, exploratory loops, or unnecessary status checks.
+$$
+\text{pass}@k = \mathbb{E}_{x \sim \mathcal{D}} \left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]
+$$ {#eq-pass-at-k-eval}
 
-To instill operational efficiency, the curation pipeline applies **Trajectory Economy Filtering**\index{Trajectory Economy Filtering}.
+In production synthesis infrastructure, engineering teams employ **Adaptive Temperature Escalation**\index{Adaptive Temperature Escalation}: initial rollouts are sampled at $T = 0.2$ to capture low-cost greedy solutions; if the verifier rejects all initial candidates ($c = 0$), the scheduler dynamically escalates subsequent batches to $T = 0.7$ and $T = 0.9$ with Best-of-$N$ search to break out of deterministic local optima.
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+### The deterministic verification cascade
 
-By algorithmically selecting the minimal-step trajectory that achieves the goal (based on length or token count), the fine-tuning process teaches the model the shortest, most direct computational path to goal satisfaction, actively penalizing operational meandering. Evaluating thousands of these candidate paths requires executing actual code, which reveals a glaring systems mismatch between GPU generation and CPU verification.
+To prevent evaluator collusion and hallucinated approvals, synthetic trajectory validity must be governed by hard, non-differentiable execution oracles. The verification reward $R(\tau, x) \in \{0, 1\}$ decomposes into a conjunctive cascade of deterministic validation gates:
 
-## Scaling Deterministic Oracles {#sec-vol3-flywheel-scaling-oracles}
+$$
+R(\tau, x) = \mathbb{I}_{\text{syntax}}(\tau) \times \mathbb{I}_{\text{schema}}(\tau) \times \mathbb{I}_{\text{state}}(\tau) \times \prod_{m=1}^M \mathbb{I}(\text{Test}_m(\mathcal{E}_{\text{final}}) == \text{PASS})
+$$
 
-Imagine provisioning a thousand-node GPU cluster to generate agent trajectories, only to find the entire fleet sitting idle because it is waiting for a Docker container to finish running `cargo build`. While generating candidate trajectories requires massive GPU capacity, verifying them introduces a distributed systems challenge: **Deterministic Oracle Scalability**\index{Deterministic Oracle Scalability}.
+This multi-stage gating pipeline is diagrammed in @fig-vol3-flywheel-rejection-gate.
 
-### The Heterogeneous Compute Mismatch
+::: {#fig-vol3-flywheel-rejection-gate fig-env="figure" fig-pos="htb" fig-cap="**Execution-Based Rejection Sampling Gate**: Multi-stage filtering pipeline evaluating proposed candidate trajectories against deterministic execution boundaries. Rollouts $\tau \sim \pi_\theta$ pass through AST grammar parsers, JSON schema validators, sandbox state invariant diff engines, and hermetic unit test suites. A failure at any stage terminates evaluation immediately ($R=0$), routing the failed trace to the negative trajectory mining tier. Only rollouts satisfying all conjunctive gates ($R=1$) are accepted into the golden training pool." fig-alt="Flowchart showing proposed trajectories passing through syntax verification, schema validation, state invariant checks, and unit test execution into acceptance or rejection."}
 
-Modern LLM inference engines (such as vLLM [@kwon2023vllm], TensorRT-LLM, and SGLang [@zheng2023sglang]) leverage tensor parallelism, continuous batching [@yu2022orca], and PagedAttention to process thousands of tokens per second per GPU node. In contrast, verifying an agent trajectory requires running real-world software workflows on conventional CPU hardware:
-
-- Compiling a C++ or Rust repository (`cmake`, `cargo build`) takes 10 to 90 seconds of multi-threaded CPU compute.
-- Running an end-to-end integration test suite (`pytest`, `mvn test`) takes 5 to 60 seconds.
-- Starting a headless browser session (Playwright/Puppeteer) to verify web agent DOM mutations requires 2 to 5 seconds.
-
-If trajectory generation and verification are coupled synchronously—where the GPU worker process generates a tool call, blocks waiting for a local Docker container to execute the command, and resumes generation—the system encounters a catastrophic compute mismatch. GPU tensor cores sit completely idle in high-bandwidth memory residency, waiting on slow disk I/O, compilation locks, and process forks. GPU compute utilization drops from $>85\%$ to $<8\%$, wasting millions of dollars in accelerator capacity.
-
-### Architectural Disaggregation: Decoupling Rollout and Verification
-
-To achieve line-rate GPU throughput during synthetic data generation, system architectures must enforce **Strict Compute Disaggregation**\index{Strict Compute Disaggregation}. The generation cluster and the verification cluster are decoupled into independent distributed subsystems connected via asynchronous, durable message queues.
-
-The disaggregated compute topology is detailed in @fig-vol3-flywheel-disaggregated-fleet.
-
-::: {#fig-vol3-flywheel-disaggregated-fleet fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Compute Architecture for Trajectory Synthesis**: Heterogeneous separation between the GPU rollout inference fleet and the CPU verification oracle fleet. GPU nodes run continuous batching (vLLM) to maximize tensor core utilization without blocking on external tool latency. Asynchronous message queues (Kafka / Redis Streams) buffer candidate traces for dense pools of Firecracker microVMs on CPU hosts, streaming verified datasets directly to columnar Parquet storage." fig-alt="Architecture diagram showing GPU inference nodes streaming candidate rollouts into a distributed message queue, which feeds CPU oracle hosts running Firecracker microVM pools, outputting verified traces to distributed Parquet storage."}
-
-![**Figure 11.3: Disaggregated Compute Architecture for Trajectory Synthesis**](/assets/images/svg/vol3/disaggregated_compute_architecture.svg){#fig-disaggregated_compute_architecture}
+![**Figure 12.3: Execution-Based Rejection Sampling Gate**](/assets/images/svg/vol3/rejection_sampling_gate.svg)
 
 :::
 
-1. **The GPU Rollout Fleet:** High-throughput GPU nodes run uninterrupted continuous batching inference. Their sole responsibility is autoregressive token generation: proposing actions $a_t$ conditioned on state prefixes $s_t$. When an environment interaction is required, the incomplete trajectory state is enqueued to a message broker (e.g., Apache Kafka or Redis Streams), and the GPU worker immediately swaps in another active trajectory, maintaining near-100 percent tensor core saturation.
-2. **The CPU Verification Fleet:** A dynamically scaled pool of commodity CPU nodes consumes candidate rollouts from the queue. Each CPU worker manages a dense cluster of lightweight execution sandboxes. The CPU worker executes the agent's tool invocations, captures stdout/stderr, evaluates assertions, computes environment state diffs, and assigns the binary reward $R(\tau)$.
-3. **The Data Staging Tier and Active Telemetry:** Trajectories are routed through a bifurcated storage path. High-value error-recovery traces and golden paths ($R=1$) bypass cold storage and are streamed directly into hot memory-mapped file systems for continuous online policy updates (e.g., online DPO [@rafailov2023direct] / PPO [@schulman2017proximal]). Bulk analytical logs ($R=0$ unrecoverable failures) are serialized into columnar formats (Apache Parquet), indexed by AST failure types, and flushed to cold distributed object storage (Amazon S3, Google Cloud Storage). This telemetry tier actively monitors verifier yield rates, triggering automated alerting if the oracle rejection rate spikes, indicating environment drift or a degraded base model checkpoint.
+1. **AST Syntax Gate ($\mathbb{I}_{\text{syntax}}$):** Enforces that every emitted command, script, or query compiles into a valid Abstract Syntax Tree via language-specific parsers (e.g., Tree-Sitter). Any trace containing unparsable syntax is rejected in $<1$ ms without invoking expensive runtime sandboxes.
+2. **Schema Contract Gate ($\mathbb{I}_{\text{schema}}$):** Validates all structured tool arguments against rigid OpenAPI or JSON Schema specifications via in-process validators (e.g., Pydantic). Type mismatches, missing required keys, or illegal enum values fail the gate instantly ($<5$ ms).
+3. **State Invariant Gate ($\mathbb{I}_{\text{state}}$):** Evaluates environmental safety and integrity invariants. The gate checks for memory leaks, orphaned processes, and unauthorized mutations outside the sandbox workspace boundary ($10$ to $50$ ms).
+4. **Unit and Integration Test Gate ($\prod \mathbb{I}(\text{Test}_m)$):** Executes $M$ independent, pre-existing unit and regression assertions within an isolated sandbox ($1$ to $30$ seconds). The final environment state $\mathcal{E}_{\text{final}}$ must satisfy 100 percent of assertions with return code 0.
 
-### Sandbox Lifecycle Optimization: MicroVMs and CoW Overlays
+@Tbl-vol3-verification-oracles formalizes the systems characteristics, latency budgets, and failure signatures across this verification cascade.
 
-When executing millions of untrusted agent-generated code snippets per day, container security and launch overhead become binding constraints.
+| **Verification Tier**                                   | **Target Invariant**                               | **Evaluation Mechanism**                      | **Latency Budget** | **Execution Substrate**                | **Failure Signature**                                    |
+|:--------------------------------------------------------|:---------------------------------------------------|:----------------------------------------------|:------------------:|:---------------------------------------|:---------------------------------------------------------|
+| **Syntax AST Gate ($\mathbb{I}_{\text{syntax}}$)**      | Grammar validity of code, bash, and queries        | Tree-sitter AST parsers, language lexers      |      $<1$ ms       | In-process worker thread               | `SyntaxError`, `ParseError`, lexer exit $\neq 0$         |
+| **Schema Contract Gate ($\mathbb{I}_{\text{schema}}$)** | Parameter types, arity, OpenAPI compliance         | JSON Schema, Pydantic type validators         |      $<5$ ms       | In-process worker thread               | `ValidationError`, missing keys, type mismatch           |
+| **State Invariant Gate ($\mathbb{I}_{\text{state}}$)**  | Sandbox containment, zero data leaks, DB integrity | Kernel filesystem diffs, memory checks        |   $10$ – $50$ ms   | Ephemeral OS cgroup / host diff engine | `StateLeakError`, orphaned process, inode exhaustion     |
+| **Unit Test Gate ($\prod \mathbb{I}(\text{Test}_m)$)**  | Functional logic and regression assertions         | Test runners (`pytest`, `cargo test`, `jest`) |    $1$ – $30$ s    | Isolated microVM sandbox               | `AssertionError`, test timeout, test suite exit $\neq 0$ |
+| **End-to-End Integration Gate**                         | Multi-service API responses, visual DOM mutations  | Integration harnesses, Playwright snapshots   |    $2$ – $15$ s    | Virtual network & headless browser     | `HTTP 5xx`, DOM assertion timeout, visual regression     |
 
-Standard Linux containers (Docker) share the host kernel. Hallucinated agent actions (such as fork-bombs, malicious kernel module insertions, or memory exhaustion) can crash host worker nodes or escape container boundaries (detailed in earlier architecture chapters). Conversely, traditional hardware-assisted virtual machines (QEMU/KVM) provide strict hardware-enforced Ring 0 isolation, but their cold-boot latencies (5 to 30 seconds) and high memory footprints make high-throughput verification impossible.
+: **Deterministic Verification Oracle Cascade**: Systems characteristics, evaluation mechanisms, latency budgets, and failure signatures across verification tiers. {#tbl-vol3-verification-oracles tbl-colwidths="[18,20,22,12,14,14]"}
 
-Modern verification infrastructure resolves this tension through **MicroVM Sandboxes**\index{MicroVM Sandboxes} (such as AWS Firecracker [@agache2020firecracker]) combined with **Copy-on-Write (CoW) Storage Overlays**\index{Copy-on-Write (CoW) Storage Overlays}:
+### MicroVM sandboxing and copy-on-write storage
 
-- **Sub-50 Millisecond Boot Latencies:** Firecracker strips away legacy PC peripherals, BIOS routines, and PCI buses, providing a minimal virtualized environment that boots a dedicated Linux kernel in under 30 milliseconds.
-- **Copy-on-Write Root Filesystems:** Instead of copying multi-gigabyte disk images for each trajectory rollout, base repository environments (containing the OS, programming language runtimes, compilers, pre-installed package dependencies, and repository source code) are mounted as **immutable, read-only block devices**.
-- **Ephemeral Snapshot Restores:** Each candidate trajectory attaches an ephemeral, in-memory Copy-on-Write overlay (`tmpfs` or device-mapper). When the trajectory completes its execution and verification pass, the overlay is discarded instantly. Resetting the environment to its pristine initial state requires under $5\text{ ms}$, enabling a single 64-core CPU host to execute hundreds of trajectory verifications per minute without persistent disk I/O bottlenecks.
+Executing untrusted, hallucinated model rollouts at cluster scale exposes the host infrastructure to severe security and operational risks: fork-bombs, memory exhaustion, accidental filesystem deletion (`rm -rf /`), and kernel exploitation.
 
-The performance and isolation trade-offs across candidate sandboxing technologies are compared in @tbl-vol3-sandbox-technologies.
+Standard Linux containers (Docker) share the host operating system kernel. A single kernel panic induced by an agent command halts the entire multi-tenant host. Furthermore, standard container lifecycle commands (`docker run`, `docker rm`) introduce prohibitive cold-start latencies ($1.5$ to $3.0$ seconds) and storage I/O bottlenecks. Conversely, traditional hardware virtual machines (QEMU/KVM) provide strict Ring 0 hardware isolation, but their multi-second boot times and gigabyte-scale memory footprints make high-throughput verification impossible.
 
-| **Isolation Primitive**         | **Cold Boot Latency** | **Snapshot Reset Latency** | **Memory Overhead** | **Density per 64-Core Host** | **Kernel Boundary**                | **Production Suitability for Rejection Sampling**                 |
-|:--------------------------------|:---------------------:|:--------------------------:|:-------------------:|:----------------------------:|:-----------------------------------|:------------------------------------------------------------------|
-| **Bare-Metal Process**          |         <1 ms         |   Manual cleanup (>5 s)    |        ~0 MB        |            >2,000            | Shared host kernel (Ring 0)        | **Unsafe**: Malicious or broken agent commands escape into host   |
-| **Linux Container (Docker)**    |      500 ms – 2 s     | 1 – 3 s (`docker rm/run`)  |      20 – 50 MB     |          100 – 250           | Shared host kernel (cgroups v2)    | **Poor**: `dockerd` daemon locks, slow resets, kernel escape risk |
-| **Application Kernel (gVisor)** |      100 – 300 ms     |        100 – 200 ms        |      30 – 80 MB     |          150 – 350           | Intercepted syscalls (Sentry)      | **Viable**: Good security, but system call emulation overhead     |
-| **MicroVM (AWS Firecracker)**   |       15 – 30 ms      | <5 ms (CoW tmpfs overlay)  |        <5 MB        |         500 – 2,000+         | Dedicated guest Linux kernel (KVM) | **Optimal**: Sub-5 ms CoW resets, hardware Ring 0 containment     |
-| **Full VM (QEMU / KVM)**        |        5 – 30 s       |         10 – 30 s          |    512 MB – 2 GB    |           16 – 64            | Emulated PC hardware (KVM Ring 0)  | **Prohibitive**: Extreme memory overhead and cold boot delays     |
+Modern verification fleets resolve this tension through **Hardware-Assisted MicroVM Sandboxes**\index{Hardware-Assisted MicroVM Sandboxes} (e.g., AWS Firecracker [@agache2020firecracker]) coupled with **Copy-on-Write (CoW) In-Memory Storage Overlays**\index{Copy-on-Write (CoW) Storage Overlays}:
 
-: **Virtualization and Sandboxing Primitives for Verification Fleets**: Systems latency, memory footprints, host consolidation density, and security isolation across candidate verification execution technologies. {#tbl-vol3-sandbox-technologies tbl-colwidths="[16,14,14,14,14,14,14]"}
+- **Sub-30 Millisecond Cold Boots:** Firecracker strips out emulated PC devices, legacy BIOS routines, and PCI buses, providing a minimal Linux kernel execution container running directly on KVM hardware virtualization.
+- **Immutable Base Images:** Base repository environments—containing Linux rootfs, compilers, dependencies, and git trees—are mounted as immutable, read-only block devices shared across hundreds of concurrent microVMs.
+- **Sub-5 Millisecond CoW Resets:** Each trajectory attaches an ephemeral Copy-on-Write storage overlay (`tmpfs` or device-mapper). All filesystem writes, temporary files, and compiled binaries mutate only this in-memory overlay. When the trajectory completes its verification pass, the overlay is discarded instantly. Resetting the environment to pristine baseline requires $<5$ ms, enabling a single 64-core CPU host to process hundreds of trajectory verifications per minute without disk wear.
 
-The microVM sandbox lifecycle and CoW storage architecture are illustrated in @fig-vol3-flywheel-microvm-cow.
+@Tbl-vol3-sandbox-technologies compares the performance, density, and isolation boundaries of candidate verification substrates.
 
-::: {#fig-vol3-flywheel-microvm-cow fig-env="figure" fig-pos="htb" fig-cap="**MicroVM Sandbox Lifecycle with Ephemeral Copy-on-Write Overlays**: High-density execution sandboxing on CPU verification nodes. Multiple Firecracker microVMs run isolated Linux guest kernels on a single host. Each guest attaches an ephemeral in-memory Copy-on-Write (`tmpfs`) overlay to capture mutations during test execution, while reading unmodified system binaries, compilers, and repository source code from a shared, immutable read-only base rootfs. Discarding the overlay enables sub-5 millisecond environment resets." fig-alt="Architecture diagram of microVM isolation showing host Linux kernel managing Firecracker microVMs with ephemeral Copy-on-Write overlays reading unmodified blocks from a shared read-only base image."}
+| **Isolation Primitive**         | **Cold Boot Latency** | **Snapshot Reset Latency** | **Memory Footprint** | **Host Density (64-Core Host)** | **Kernel Boundary**                | **Production Rejection Suitability**                              |
+|:--------------------------------|:---------------------:|:--------------------------:|:--------------------:|:-------------------------------:|:-----------------------------------|:------------------------------------------------------------------|
+| **Bare-Metal Process**          |        $<1$ ms        |  Manual cleanup ($>5$ s)   |     $\sim 0$ MB      |            $>2{,}000$           | Shared host kernel (Ring 0)        | **Unsafe**: Malicious or broken agent commands escape into host   |
+| **Linux Container (Docker)**    |    $500$ ms – $2$ s   | $1$ – $3$ s (`docker rm`)  |    $20$ – $50$ MB    |          $100$ – $250$          | Shared host kernel (cgroups v2)    | **Poor**: `dockerd` daemon locks, slow resets, kernel escape risk |
+| **Application Kernel (gVisor)** |    $100$ – $300$ ms   |      $100$ – $200$ ms      |    $30$ – $80$ MB    |          $150$ – $350$          | Intercepted syscalls (Sentry)      | **Viable**: Strong security, but syscall emulation overhead       |
+| **MicroVM (AWS Firecracker)**   |     $15$ – $30$ ms    |   $<5$ ms (CoW overlay)    |       $<5$ MB        |        $500$ – $2{,}000+$       | Dedicated guest Linux kernel (KVM) | **Optimal**: Sub-5 ms CoW resets, hardware Ring 0 containment     |
+| **Full VM (QEMU / KVM)**        |      $5$ – $30$ s     |       $10$ – $30$ s        |  $512$ MB – $2$ GB   |           $16$ – $64$           | Emulated PC hardware (KVM Ring 0)  | **Prohibitive**: Severe memory overhead and boot delays           |
 
-<!-- ERADICATED MERMAID PNG -->
+: **Sandboxing Primitives for Verification Fleets**: Systems latency, memory footprints, host density, and security isolation across container and microVM runtimes. {#tbl-vol3-sandbox-technologies tbl-colwidths="[16,14,14,14,14,14,14]"}
+
+---
+
+## 12.3 Rejection Sampling and Majority Voting {#sec-vol3-flywheel-rejection-sampling}
+
+A cloud operations agent trained on raw accepted rejection sampling rollouts is tasked with mitigating a production outage: an active database partition has reached 98 percent capacity. The deployed agent executes `df -h`, inspects `/var/log`, executes `ls -la` across 14 irrelevant system directories, queries the system date 5 times, ping-tests Google DNS, and finally issues `journalctl --vacuum-size=500M` to truncate the bloated logs. The task was functionally resolved and passed all terminal assertions. However, the trajectory consumed 38 steps, 14,000 tokens, and 4 minutes of execution time for an operational fix that required exactly 2 steps. The policy had internalized the wasteful exploratory meandering of the stochastic proposal model.
+
+### Mathematical formulation of execution-based rejection sampling
+
+Classical rejection sampling draws samples from a proposal distribution $q(x)$ to approximate an intractable target distribution $p(x)$ by accepting candidates with probability $\alpha(x) = p(x) / (M \cdot q(x))$, where $M \ge \sup_x p(x)/q(x)$.
+
+In trajectory synthesis for autonomous agents, the proposal distribution is the autoregressive rollout policy $\pi_\theta(\tau \mid x)$, and the target distribution $p^*(\tau \mid x)$ is the distribution of trajectories conditioned on goal satisfaction and invariant preservation:
+
+$$
+p^*(\tau \mid x) = \frac{\pi_\theta(\tau \mid x) \cdot R(\tau, x)}{\mathcal{Z}(x)}, \quad \text{where } \mathcal{Z}(x) = \sum_{\tau'} \pi_\theta(\tau' \mid x) R(\tau', x)
+$$
+
+Here, $\mathcal{Z}(x) \in [0, 1]$ represents the marginal task success probability under policy $\pi_\theta$. Because the verification oracle evaluates to a hard binary indicator $R(\tau, x) \in \{0, 1\}$, the rejection sampling acceptance probability collapses into an exact deterministic gate:
+
+$$
+\alpha(\tau) = \min\left(1, \frac{p^*(\tau \mid x)}{M \cdot \pi_\theta(\tau \mid x)}\right) = R(\tau, x)
+$$
+
+where $M = 1 / \mathcal{Z}(x)$.
+
+This yields a mathematically rigorous systems property: the accepted dataset $\mathcal{D}_{\text{accepted}} = \{\tau \sim \pi_\theta \mid R(\tau, x) = 1\}$ constitutes an exact, unbiased sample from the true conditional target distribution $p^*(\tau \mid x)$. Trajectories that fail any verification assertion ($R=0$) are rejected with probability 1.
+
+### Trajectory economy and minimal golden path extraction
+
+When sampling $n$ independent candidates for a complex prompt, the proposal generator frequently yields multiple passing trajectories: $\mathcal{T}_{\text{pass}}(x) = \{\tau_1, \tau_2, \dots, \tau_m \mid R(\tau_i, x) = 1\}$. Naively adding all passing trajectories into the supervised fine-tuning corpus severely damages downstream policy efficiency. Stochastic rollouts frequently stumble upon the correct solution after executing redundant directory listings, duplicate status checks, and abandoned exploratory branches.
+
+To instill operational conciseness, the curation tier enforces **Trajectory Economy Filtering**\index{Trajectory Economy Filtering}. The system defines a trajectory cost objective parameterizing step count, token consumption, and wall-clock execution latency:
+
+$$
+J_{\text{cost}}(\tau) = \lambda_{\text{steps}} H(\tau) + \lambda_{\text{tokens}} \sum_{t=0}^{H(\tau)} (|z_t| + |a_t| + |o_t|) + \lambda_{\text{time}} t_{\text{wall}}(\tau)
+$$
+
+where $\lambda_{\text{steps}}, \lambda_{\text{tokens}}, \lambda_{\text{time}} \ge 0$ are weighting hyperparameters. The curation pipeline extracts exclusively the minimal-cost golden path $\tau^*(x)$:
+
+$$
+\tau^*(x) = \arg\min_{\tau \in \mathcal{T}_{\text{pass}}(x)} J_{\text{cost}}(\tau)
+$$
+
+Additionally, passing traces are passed through an algorithmic pruning pass that strips out idempotent loops (e.g., repeating `ls` without intervening filesystem mutations) and dead-end read operations that never inform downstream action arguments. Fine-tuning on $\tau^*(x)$ trains the model to execute the shortest, most computationally efficient trajectory that satisfies the task contract.
+
+### Majority voting and consensus verification
+
+In open-ended agentic domains—such as web data extraction, multi-file code refactoring, or financial report synthesis—unit test suites are frequently incomplete or under-specified. When test assertions are partial, an agent trajectory may pass all programmatic tests ($R=1$) by exploiting an implementation loophole or generating a plausible hallucination that happens to avoid assertion tripwires.
+
+To prevent weak oracles from polluting the training corpus, the flywheel employs **Majority Voting and Self-Consistency as Consensus Verification**\index{Majority Voting} [@wang2022self]. The system samples $n$ parallel rollouts $\tau_1, \dots, \tau_n \sim \pi_\theta(\cdot \mid x)$ across diverse temperatures. Each candidate trajectory that passes the execution oracle produces a candidate terminal artifact $y(\tau_i)$ (e.g., a git diff patch, an extracted JSON object, or a database migration script).
+
+The consensus engine evaluates the plurality vote across verified candidates:
+
+$$
+\hat{y}^*(x) = \arg\max_{y \in \mathcal{Y}} \sum_{i=1}^n \mathbb{I}(y(\tau_i) = y) \cdot R(\tau_i, x)
+$$
+
+The consensus confidence is defined as the empirical agreement ratio:
+
+$$
+\text{Agreement}(x) = \frac{\sum_{i=1}^n \mathbb{I}(y(\tau_i) = \hat{y}^*(x)) \cdot R(\tau_i, x)}{\sum_{i=1}^n R(\tau_i, x)}
+$$
+
+If $\text{Agreement}(x) < \theta_{\text{consensus}}$ (e.g., $\theta_{\text{consensus}} = 0.65$), the prompt is flagged as under-specified or ambiguous. The entire generation batch is quarantined and excluded from the SFT dataset. Only trajectories that achieve terminal state consensus across independent, stochastic rollouts are certified for policy compilation.
+
+### Search distillation: Collapsing deliberation into parameters
+
+As established in earlier chapters, **Test-Time Deliberation**\index{Test-Time Deliberation}—using Monte Carlo Tree Search (MCTS), verifier-guided beam search, or speculative lookahead—enables foundation models to solve complex reasoning problems far beyond the capacity of greedy feedforward decoding. However, deploying multi-branch tree search directly into production serving runtimes introduces unsustainable latencies (2 to 5 minutes per query) and extreme inference costs (\$5.00 to \$25.00 per task).
+
+**Search Distillation**\index{Search Distillation} resolves this operational dilemma by converting expensive, offline test-time search compute into static feedforward model weights [@hinton2015distilling; @zeng2023agenttuning].
+
+During offline data generation, an MCTS search engine explores combinatorial reasoning branches, evaluating intermediate states using learned process reward models (PRMs) and terminal execution oracles. The search tree may evaluate 150 intermediate nodes and generate over 100,000 deliberation tokens across rollbacks and dead ends.
+
+Once the search successfully verifies a winning terminal state, the distillation engine prunes the failed exploratory branches and collapses the tree into the minimal linear winning trajectory:
+
+$$
+\tau^* = \left( s_0, z_0^*, a_0^*, o_0, s_1, z_1^*, a_1^*, o_1, \dots, s_H, z_H^*, a_H^*, o_H \right)
+$$
+
+A compact student policy $\pi_\phi$ (e.g., an 8B parameter dense model) is fine-tuned via behavioral cloning to minimize cross-entropy loss exclusively along the winning path:
+
+$$
+\mathcal{L}_{\text{distill}}(\phi) = - \sum_{t=0}^{H^*} \left[ \sum_{i \in z_t^*} \log \pi_\phi(y_i \mid y_{<i}, s_t) + \sum_{j \in a_t^*} \log \pi_\phi(y_j \mid y_{<j}, s_t) \right]
+$$
+
+Why does distilling the collapsed path $\tau^*$ work when the student policy is never exposed to the full search tree at inference time? This mechanism is grounded in the **Policy Improvement Theorem**\index{Policy Improvement Theorem} of reinforcement learning [@sutton2018reinforcement]. Multi-path search operates as a policy improvement operator:
+
+$$
+\pi_{\text{search}}(\tau \mid x) = \mathcal{I}(\pi_\theta) \ge \pi_\theta(\tau \mid x)
+$$
+
+By training the student policy $\pi_\phi$ on the outputs of the improved policy $\pi_{\text{search}}$, behavioral cloning updates the student's feedforward attention circuits. The student internalizes the pruning and ranking heuristics that originally required hundreds of explicit forward passes, enabling the student to emit the winning sequence greedily at runtime with zero search overhead.
+
+To prevent **Student Entropy Collapse**\index{Student Entropy Collapse}—where the student's next-action logits sharpen into brittle Dirac delta distributions that shatter under minor environmental perturbations—the distillation loss must incorporate an entropy regularization penalty:
+
+$$
+\mathcal{L}_{\text{total}}(\phi) = \mathcal{L}_{\text{distill}}(\phi) - \beta_{\text{ent}} \cdot \mathcal{H}(\pi_\phi(\cdot \mid s_t))
+$$ {#eq-entropy-regularized-distill}
+
+where $\mathcal{H}(\pi) = - \sum_v \pi(v) \log \pi(v)$ and $\beta_{\text{ent}}$ controls the entropy floor.
+
+@Tbl-vol3-synthesis-comparison summarizes the operational trade-offs across the core trajectory synthesis methodologies.
+
+| **Methodology**              | **Proposal Generator**                         | **Verification Mechanism**           | **Primary Systems Bottleneck**        |          **Verification Yield**          | **Unit Cost per Trajectory** |
+|:-----------------------------|:-----------------------------------------------|:-------------------------------------|:--------------------------------------|:----------------------------------------:|:----------------------------:|
+| **Human Expert Traces**      | Senior Software Engineers                      | Peer review, manual inspection       | Human labor, recruiting calendar time |     Extremely Low ($<10$ traces/day)     |     \$100.00 – \$400.00      |
+| **Model Rejection Sampling** | Stochastic LLM ($T \in [0.6, 0.8]$)            | Unit tests, compiler exit codes      | CPU microVM sandboxing throughput     |          Moderate (15% to 35%)           |       \$0.15 – \$1.50        |
+| **STaR Bootstrapping**       | Self-generation with hints [@zelikman2022star] | Ground-truth state equality          | Multi-epoch policy distribution drift |          Moderate (25% to 45%)           |       \$0.10 – \$0.80        |
+| **Search Tree Distillation** | Monte Carlo Tree Search (MCTS)                 | Stepwise verifiers, terminal oracles | GPU deliberation memory and latency   | Low Yield ($<10\%$), Exceptional Quality |       \$5.00 – \$25.00       |
+
+: **Comparison of Trajectory Synthesis Methodologies**: Proposal generators, verification mechanisms, systems bottlenecks, yield rates, and compute costs. {#tbl-vol3-synthesis-comparison tbl-colwidths="[18,20,20,18,12,12]"}
+
+---
+
+## 12.4 Self-Correction and Negative Trajectory Mining {#sec-vol3-flywheel-negative-mining}
+
+A production database migration agent encounters an unexpected `psycopg2.OperationalError: SSL connection has been closed unexpectedly` at step 18 of a 25-step schema migration. Because the agent's fine-tuning dataset consisted 100 percent of pristine golden paths where every database connection opens immediately, the model possesses zero causal priors for connection resets. Rather than issuing a ping, validating network interfaces, or reconnecting with exponential backoff, the agent panics: it interprets the error message as an unrecoverable syntax defect and issues an ungrounded `DROP DATABASE` command in a hallucinated attempt to "reset" the workspace. A recoverable network blip is escalated into a catastrophic data-loss incident.
+
+### The golden path illusion and covariate shift
+
+The root cause of this operational brittleness is the **Golden Path Illusion**\index{Golden Path Illusion}. In classical supervised learning, training data is assumed to be independent and identically distributed ($i.i.d.$). In agentic control, the actions emitted by the policy directly determine future state distributions ($s_{t+1} \sim P(\cdot \mid s_t, a_t)$).
+
+When an agent is trained exclusively on flawless golden paths $\tau^*$, the training distribution $\mathcal{D}_{\text{train}}$ contains only optimal states $s \in \mathcal{S}^*$. The model is never taught what action to take when conditioned on an error state $s_{\text{error}}$ containing a nonzero exit code, a Python traceback, or an HTTP 5xx payload. When deployed into non-deterministic production environments, an unexpected error token instantly pushes the context outside the support of $\mathcal{D}_{\text{train}}$ (@fig-vol3-flywheel-covariate-shift).
+
+Under Ross and Bagnell's reduction [@ross2011reduction], the total variation distance between the expert state distribution $d_{\pi^*}$ and the policy rollout distribution $d_{\pi_\theta}$ grows linearly with time step $t$:
+
+$$
+D_{\text{TV}}(d_{\pi_\theta}^t, d_{\pi^*}^t) \le t \cdot \epsilon
+$$
+
+Consequently, the probability of executing an incorrect action at step $t$ compounds, leading to the quadratic failure bound derived in @eq-quadratic-error-compounding:
+
+$$
+\mathbb{E}_{\tau \sim \pi_\theta} [\text{Errors}] \le \mathcal{O}(\epsilon^2 H^2)
+$$
+
+To break this quadratic error compounding, post-training systems must expose the policy to its own error distribution during training, converting the quadratic error bound into a manageable linear bound $\mathcal{O}(\epsilon H)$. Achieving this requires mining failed trajectories.
+
+::: {#fig-vol3-flywheel-covariate-shift fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Covariate Shift in Multi-Turn Trajectories**: Divergence between the training distribution of golden paths (blue manifold) and live agent deployment rollouts (red path). When an unhandled runtime error occurs at step $t=2$, the context state exits the support of the training data. Without recovery training, the policy's next-action predictions degrade into high-entropy hallucinations, causing catastrophic error compounding across extended horizons." fig-alt="Diagram illustrating state trajectory divergence where a live agent encounters an error, departs from the golden path training manifold, and cascades into failure."}
+
+```
+Golden Path Manifold:   s0 ───> s1* ───> s2* ───> s3* ───> s4* (Success)
+                                 │
+Live Rollout Divergence:        a1 (Suboptimal / Network Fault)
+                                 ▼
+                                s2_err ───> s3_err ───> s4_err (Catastrophic Loop)
+                                (Unseen State Space)
+```
 
 :::
 
-### Amdahl's Law of Synthetic Data Infrastructure
+### Mining failed rollouts and error trajectories
 
-The balance between GPU rollout compute and CPU verification compute is governed by systems scaling laws heavily analogous to Amdahl's Law. Throughput is constrained by whichever stage—generation or verification—has insufficient parallel capacity relative to its work duration.
+In high-throughput rejection sampling, between 65 and 85 percent of generated rollouts are rejected by the verification oracle ($R(\tau) = 0$). In naive pipelines, these failing rollouts are discarded as unrecoverable waste. In advanced flywheels, failing rollouts represent a massive, high-value supervisory signal: **Negative Trajectory Mining**\index{Negative Trajectory Mining}.
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+The negative mining engine parses rejected traces and categorizes them into a structured failure taxonomy:
 
-If the verification fleet is under-provisioned relative to the fast GPU inference workers, the system enters an **Oracle-Bound Stall**\index{Oracle-Bound Stall}: CPU verification queues fill to capacity, backpressure propagates upstream, and the GPU inference fleet halts. Because GPU time is orders of magnitude more expensive than CPU time, any bottleneck that forces tensor cores to idle waiting for compiler feedback represents a catastrophic collapse in cluster cost efficiency. In enterprise code-synthesis pipelines, maintaining balanced throughput requires provisioning between 32 and 64 dedicated CPU verification cores for every single 8-way H100 GPU rollout node. Even with perfectly balanced CPU-GPU clusters, generating thousands of rollouts per query at inference time is impossible for production customer traffic. The solution is to move this deliberation offline.
+1. **Syntactic Failures:** Traces rejected at Tier 1 ($\mathbb{I}_{\text{syntax}} = 0$). Useful for training token-level grammar-masking heads.
+2. **Execution Exceptions:** Traces that passed syntax checks but triggered runtime errors: nonzero process exit codes, compiler panics, or stack trace dumps.
+3. **Semantic Assertion Failures:** Traces that completed execution cleanly (exit code 0) but failed terminal unit test assertions.
+4. **Operational Stalls:** Traces that entered infinite loops, repeated identical commands, or exhausted their step budget without making progress.
 
-## Search Distillation {#sec-vol3-flywheel-search-distillation}
+The mining engine pinpoints the exact **Pivot Step** $t_{\text{pivot}}$: the transition where the trajectory departed from a recoverable state into an unrecoverable failure. Let $V(s)$ denote the learned state-value function (estimating the probability of task completion from state $s$). The pivot step is identified by the maximal drop in value:
 
-Suppose an agent encounters a broken database dependency that requires exploring several incompatible package versions, backtracking from failures, and branching into new debugging paths. While execution-based rejection sampling filters independent stochastic paths, complex multi-step reasoning tasks frequently require exploring combinatorial decision trees. In @sec-vol3-deliberation, we established that **Test-Time Deliberation**\index{Test-Time Deliberation}—using Monte Carlo Tree Search (MCTS), beam search, and verifier-guided tree rollouts—allows language models to solve problems far beyond the reach of single-pass greedy decoding.
+$$
+t_{\text{pivot}} = \arg\max_t \left( V(s_t) - V(s_{t+1}) \right)
+$$
 
-However, deploying test-time search directly into production customer runtimes is economically and operationally prohibitive. Running an MCTS search that explores 120 candidate actions across 15 tree levels can require generating over $100{,}000$ tokens per task, introducing latencies of two to five minutes and compute costs exceeding ten dollars per query.
+The prefix $\tau_{0:t_{\text{pivot}}}$ provides the exact context required to synthesize an error-correction demonstration.
 
-**Search Distillation**\index{Search Distillation} resolves this operational dilemma by converting expensive, runtime search compute into offline post-training parameters [@hinton2015distilling; @zeng2023agenttuning].
+### Synthetic fault injection and error-correction traces
 
-### Search Tree Collapsing
+Rather than waiting for stochastic rollouts to encounter errors naturally, synthesis pipelines actively inject synthetic perturbations to create **Error-Recovery Traces**\index{Error-Recovery Traces}.
 
-During offline synthetic generation, we grant the system massive compute budgets: high-capacity frontier models or MCTS search harnesses explore extensive candidate trees, back-track from dead ends, evaluate intermediate node values with learned value functions, and discover successful trajectory solutions.
+The generation of an error-recovery trace follows a structured three-stage execution tuple:
 
-Once the search terminates with a verified goal state, the complex search graph is collapsed:
+$$
+\tau_{\text{recovery}} = \left( s_0, \dots, s_k, \underbrace{a_k^{\text{fault}}, o_k^{\text{err}}}_{\text{Injected Fault}}, \underbrace{z_{k+1}^{\text{diag}}, a_{k+1}^{\text{repair}}, o_{k+1}}_{\text{Diagnostic \& Repair}}, \dots, s_H, a_H^* \right)
+$$
 
-This process of search tree collapsing and policy distillation is diagrammed in @fig-vol3-flywheel-search-distillation.
+Three primary systems techniques synthesize these recovery behaviors:
 
-::: {#fig-vol3-flywheel-search-distillation fig-env="figure" fig-pos="htb" fig-cap="**Search Tree Deliberation Collapsing and Policy Distillation**: Monte Carlo Tree Search (MCTS) explores extensive combinatorial reasoning branches, generating tens of thousands of intermediate deliberation tokens across dead ends and rollbacks. The distillation pipeline prunes failed branches, collapses the tree into the verified minimal winning path $\tau^*$, and trains a compact student policy $\pi_\phi$ via behavioral cloning to internalize complex search heuristics into feedforward parameters." fig-alt="Diagram showing an exploratory Monte Carlo Tree Search graph pruned of failed exploratory branches and collapsed into a single minimal winning trajectory that trains a compact student policy."}
+1. **Branch Rollback and Teacher Correction (DAgger-Style):** When a rollout encounters an execution exception at step $k$ ($o_k^{\text{err}}$), the environment state $s_k$ is snapshotted using microVM CoW checkpoints. An advanced teacher policy (or MCTS search engine) is prompted with the failure context:
+   ```
+   [ENVIRONMENT OBSERVATION: gcc: error: libssl-dev: No such file or directory]
+   Teacher Thought: <thought> The compilation failed because libssl-dev is missing.
+   I must install it using apt-get before re-running make. </thought>
+   Teacher Action: <call:exec_bash command="apt-get update && apt-get install -y libssl-dev"/>
+   ```
+   The teacher executes the repair action, verifies that the command succeeds ($o_{k+1}$), and continues the trajectory until all unit tests pass ($R=1$).
+2. **Environment Fault Injection:** During the rollout of verified golden paths, the execution sandbox intentionally injects transient faults: simulating network packet loss (`tc qdisc add dev eth0 root netem loss 20%`), modifying file permissions (`chmod 000 config.json`), or killing background services. The agent is forced to detect the failure, inspect stderr, formulate a diagnostic hypothesis, and execute recovery actions.
+3. **Tool Argument Mutation:** The proposal engine stochastically mutates 5 percent of emitted tool arguments (e.g., introducing a typo in a directory path). The environment responds with a deterministic error code (`cd: no such file or directory`), and the teacher demonstrates recovery by inspecting the directory structure (`ls ..`) and correcting the path.
 
-<!-- ERADICATED MERMAID PNG -->
+By training on corpora containing these recovery traces, the policy internalizes causal self-diagnosis. When an error occurs in production, the model's conditional distribution shifts probability mass to diagnostic actions rather than hallucinated loops, bounding error growth linearly: $\mathcal{O}(\epsilon H)$.
 
-:::
+### Bifurcated dataset curation and trajectory standards
 
-The exploratory dead ends and backtracked nodes are pruned, extracting exclusively the minimal winning trajectory path $\tau^*$.
+To maximize policy robustness without sacrificing execution conciseness, the curation tier enforces the **Bifurcated Curation Invariant**\index{Bifurcated Curation Invariant}:
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+$$
+\mathcal{D}_{\text{train}} = 0.70 \cdot \mathcal{D}_{\text{golden}} + 0.30 \cdot \mathcal{D}_{\text{recovery}}
+$$
 
-A compact student policy $\pi_\phi$ (e.g., an 8-billion parameter dense model) is then fine-tuned via behavioral cloning to predict only the successful action sequence.
+- **70 percent Golden Paths ($\mathcal{D}_{\text{golden}}$):** Minimal-step, high-efficiency trajectories that teach the model direct, optimal problem-solving paths.
+- **30 percent Error-Recovery Traces ($\mathcal{D}_{\text{recovery}}$):** Explicit fault-injected and mined traces that teach the model how to diagnose and recover from runtime failures.
 
-### The Policy Improvement Connection
+All curated trajectories are serialized into standardized multi-turn training schemas (such as ChatML or structured JSONL). The standardized schema strictly delineates role boundaries, internal deliberation thoughts, structured tool calls, and external environment observations:
 
-Why does training a model on the collapsed winning path $\tau^*$ work, given that the student model never sees the extensive search tree during inference?
+```json
+{
+  "trajectory_id": "traj_swe_patch_84920",
+  "task_id": "repo_issue_1042",
+  "turns": [
+    {
+      "role": "user",
+      "content": "Fix the ZeroDivisionError in stats/metrics.py during empty batch aggregation."
+    },
+    {
+      "role": "assistant",
+      "thought": "I should inspect the implementation of aggregate_metrics in stats/metrics.py.",
+      "action": {
+        "tool": "exec_bash",
+        "arguments": {"command": "sed -n '40,65p' stats/metrics.py"}
+      }
+    },
+    {
+      "role": "environment",
+      "observation": "45: def aggregate_metrics(batch):\n46:     total = sum(batch)\n47:     return total / len(batch)"
+    },
+    {
+      "role": "assistant",
+      "thought": "Line 47 executes total / len(batch) without checking if len(batch) is zero. I will patch it.",
+      "action": {
+        "tool": "apply_patch",
+        "arguments": {"path": "stats/metrics.py", "diff": "@@ -47,1 +47,3 @@\n-    return total / len(batch)\n+    if not batch:\n+        return 0.0\n+    return total / len(batch)"}
+      }
+    },
+    {
+      "role": "environment",
+      "observation": "Patch applied successfully: 1 hunk modified."
+    },
+    {
+      "role": "assistant",
+      "thought": "I will run pytest to verify the fix.",
+      "action": {
+        "tool": "exec_bash",
+        "arguments": {"command": "pytest tests/test_metrics.py"}
+      }
+    },
+    {
+      "role": "environment",
+      "observation": "==== 14 passed in 1.42s ===="
+    }
+  ]
+}
+```
 
-This mechanism is mathematically grounded in the **Policy Improvement Theorem**\index{Policy Improvement Theorem} of reinforcement learning [@sutton2018reinforcement]. Search algorithms like MCTS act as an iterative policy improvement operator, finding a solution trajectory that exceeds the baseline performance of the underlying proposal model.
+The synthesis pipeline pre-computes binary token loss masks $M_i \in \{0, 1\}$ across the serialized token stream. As detailed in @sec-vol3-sft, backpropagation gradients are evaluated strictly on agent control tokens ($M_i = 1$ for thoughts and tool call actions), while external environment observations and user instructions are masked out ($M_i = 0$). This hardware-to-training bridge guarantees that the model learns to *act* rather than wasting parameter capacity attempting to predict the non-differentiable transition dynamics of the external operating system.
 
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
-
-By applying maximum likelihood estimation (behavioral cloning) on the extracted winning path, the student policy internalizes the complex search heuristics into its static feedforward weights. The multi-layer attention heads and feedforward networks of the student model learn to approximate the pruning and ranking decisions that originally required hundreds of explicit forward passes during tree search.
-
-### Cross-Branch Rationale Distillation
-
-A major failure mode of naive search tree collapsing is that it discards the valuable cognitive information embedded within the failed exploratory branches. If an agent attempted Branch B and failed because a specific library dependency was incompatible, that negative experience contains critical causal reasoning.
-
-Advanced search distillation pipelines employ **Cross-Branch Rationale Distillation**\index{Cross-Branch Rationale Distillation}:
-
-1. **Failure Rationale Extraction:** When the search tree identifies that an exploratory branch collapsed due to an error, a summarization module extracts a concise reflective constraint (e.g., \"Attempting to use `asyncio.run()` directly inside an existing Tornado event loop triggers a RuntimeError; use `asyncio.create_task()` instead.\").
-2. **Scratchpad Prefix Injection:** The extracted reflection is injected into the student model's internal reasoning scratchpad immediately prior to emitting the successful action.
-3. **Conditioned Distillation:** The student policy is trained to first predict the rationale and then output the correct action.
-
-<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
-
-Through cross-branch rationale distillation, the student model inherits both the correct action and the explicit counterfactual awareness required to avoid common failure traps, dramatically boosting zero-shot robustness.
-
-@Tbl-vol3-synthesis-comparison summarizes the structural trade-offs between the primary methodologies in the synthetic data flywheel.
-
-| **Methodology**              | **Proposal Generator**                         | **Verification Mechanism**            | **Systems Bottleneck**            |             **Data Yield**            | **Compute Cost per Trajectory** |
-|:-----------------------------|:-----------------------------------------------|:--------------------------------------|:----------------------------------|:-------------------------------------:|:-------------------------------:|
-| **Human Expert Traces**      | Senior Human Engineers                         | Manual Peer Review                    | Human Labor & Calendar Time       |    Extremely Low ($<10$ traces/day)   |        $150.00 – $500.00        |
-| **Model Rejection Sampling** | Stochastic LLM Policy ($T \in [0.6, 0.8]$)     | Unit Tests & Compiler Exit Codes      | CPU MicroVM Sandboxing Throughput |         Moderate (15% to 35%)         |          $0.20 – $1.50          |
-| **STaR Bootstrapping**       | Self-Generation with Hints [@zelikman2022star] | Ground-Truth Final State Match        | Multi-Epoch Policy Drift          |         Moderate (25% to 45%)         |          $0.10 – $0.80          |
-| **Search Tree Distillation** | Monte Carlo Tree Search (MCTS)                 | Stepwise Verifiers & State Invariants | GPU Deliberation Memory & Latency | Low Yield (<10%), Exceptional Quality |          $5.00 – $25.00         |
-
-: **Trajectory Synthesis Methodologies**: Systems characteristics, verification mechanisms, primary operational bottlenecks, and financial cost structures across synthetic data generation approaches. {#tbl-vol3-synthesis-comparison tbl-colwidths="[18,20,20,18,12,12]"}
-
-While these mechanisms theoretically align into a pristine learning loop, operating them at scale exposes the system to counterintuitive failure modes. The architecture is only as robust as its mitigations against these pitfalls.
+---
 
 ## Fallacies and Pitfalls {#sec-vol3-flywheel-fallacies}
 
-When an engineering team first spins up a synthetic data flywheel, they invariably encounter situations where supposedly verified trajectories lead to degraded model performance in production. Engineering a production-scale synthetic data flywheel is fraught with counterintuitive failure modes. Below are the major architectural pitfalls documented in frontier agent laboratories.
+Engineering a production-scale synthetic data flywheel reveals non-intuitive failure modes at the intersection of stochastic models, distributed runtimes, and execution oracles. Below are documented architectural fallacies and pitfalls.
 
-**Fallacy**: *LLM-as-a-Judge is a sufficient verifier for agent trajectories.*
-Relying on a frontier LLM prompted as an evaluator to score candidate synthetic trajectories as "Correct" or "Incorrect" avoids the engineering complexity of deploying microVM sandboxes, but introduces fatal flaws. LLMs exhibit severe length bias (favoring verbose, rambling code) and circular hallucination (certifying non-existent API parameters). Trajectory verification must be grounded in non-differentiable execution oracles like compilers, linters, and unit test suites.
+---
 
-**Pitfall**: *The "Golden Path" purity illusion.*
-Filtering rejection sampling datasets so rigorously that only flawless trajectories are retained induces catastrophic golden path brittleness. In production, APIs experience network jitter and file systems contain unexpected formats. A model trained exclusively on golden paths enters a repetitive failure loop when encountering runtime errors because the error token induces autoregressive covariate shift. Systems must intentionally curate bifurcated datasets containing both golden paths and error-recovery trajectories.
+::: {.fallacy-pitfall}
 
-**Fallacy**: *Deterministic oracles have zero systems overhead compared to GPUs.*
-Provisioning massive GPU clusters for trajectory rollouts while running verification tests in standard Docker containers on shared CPU nodes leads to immediate queue saturation. Docker daemon contention and disk I/O bottlenecks stall the verification workers, causing GPU utilization to collapse to single digits. Oracle verification must be treated as a first-class distributed computing tier using high-density microVM runtimes (e.g., Firecracker) and rigorous CPU-to-GPU core ratios.
+**Fallacy:** *An LLM-as-a-Judge provides a scalable, cost-effective substitute for deterministic sandbox verification.*
 
-**Pitfall**: *Distilling search trees preserves exploration entropy.*
-Assuming that distilling a winning trajectory from an MCTS search into a student policy grants the student exploratory adaptability is flawed. Search distillation via behavioral cloning sharpens the student's token logits aggressively around the observed winning path, leading to student entropy collapse. The action distribution degenerates into brittle Dirac deltas. Systems must regularize distillation by blending exploratory rollouts and applying entropy penalties.
+Prompting a high-capacity frontier LLM to evaluate candidate agent trajectories as "Pass" or "Fail" eliminates the systems complexity of configuring microVM execution clusters, managing kernel isolation, and maintaining language compilers. However, relying on an LLM evaluator introduces catastrophic statistical biases that pollute post-training corpora.
 
-**Fallacy**: *Synthetic task generators possess infinite diversity for free.*
-Prompting an unconstrained LLM to iteratively generate synthetic programming tasks results in synthesizer mode collapse. The model falls into tight attractor basins, recycling the same narrow semantic templates (e.g., basic REST APIs). Training on this produces overfitted policies. Task generation must be seeded with diverse real-world ASTs, programmatic mutation testing, and semantic embedding distance filtering to ensure broad coverage.
+LLM evaluators exhibit severe **Length Bias** (systematically rating verbose, repetitive code higher than concise, minimal implementations) and **Style Bias** (approving syntactically fluent, aesthetically pleasing code that contains fatal runtime bugs). Crucially, LLMs share pretraining priors with the proposal models they evaluate. When an agent hallucinates a non-existent API parameter (e.g., `git push --atomic-retry`), an LLM evaluator evaluating the text completion frequently hallucinates that the flag is valid, assigning an approval score of $p > 0.85$.
+
+In a benchmark evaluation of 20,000 synthetic Python trajectories, an LLM-as-a-Judge approved 34.2 percent of trajectories that subsequently failed basic execution inside an isolated Python runtime (due to `NameError`, `ImportError`, or assertion failures). Conversely, a non-differentiable execution oracle—a Python interpreter executing unit tests inside a microVM—exhibits zero style bias, zero length bias, and zero circular hallucination. An exit code of `0` is a grounded, mathematical invariant. Trajectory verification must be anchored in deterministic execution boundaries.
+
+:::
+
+---
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *The Golden Path Purity Illusion: Filtering training datasets so strictly that only flawless trajectories are retained.*
+
+A common architectural instinct is to maximize dataset quality by discarding every candidate rollout that encounters an intermediate error, compiling training corpora composed exclusively of pristine, error-free "golden paths."
+
+Training an autonomous agent exclusively on golden paths produces severe **Autoregressive Covariate Shift**. During live inference, external environments are inherently non-deterministic: networks drop packets, databases lock tables, and filesystems return unexpected permission faults. Because a model trained exclusively on golden paths has never observed an error token conditioned on its own actions, the first runtime error forces the context into an out-of-distribution state.
+
+As derived in @eq-quadratic-error-compounding, the model's 1-step error probability compounds quadratically across the horizon: $\mathcal{O}(\epsilon^2 H^2)$. Under live testing, golden-path policies manifest a catastrophic failure signature: upon receiving a nonzero exit code, the policy panics, enters repetitive hallucination loops, and exhausts its context window. Production flywheels must explicitly preserve a bifurcated training distribution containing at least 25 to 35 percent error-recovery traces with verified corrective branches.
+
+:::
+
+---
+
+::: {.fallacy-pitfall}
+
+**Fallacy:** *Deterministic CPU oracles have negligible infrastructure costs compared to GPU rollout clusters.*
+
+Because CPU compute instances are substantially cheaper per hour than high-end GPU accelerators (e.g., an 8-GPU H100 node costs \$24–\$32/hour, while a 64-core CPU host costs \$1.50–\$3.00/hour), system architects frequently treat the verification fleet as a trivial operational afterthought, co-locating standard Docker containers on a handful of shared CPU nodes.
+
+This assumption triggers an immediate **Oracle-Bound Stall**. Modern continuous batching inference engines process thousands of tokens per second per GPU node. In contrast, verifying an agent's patch requires checking out git repositories, running multi-threaded compilers (`cargo build`, `cmake`), and executing extensive integration test suites taking 10 to 60 seconds per trajectory.
+
+When the verification fleet is under-provisioned, the intermediate queue saturates, backpressure halts generation, and GPU workers idle. If an 8-way H100 node sits idle waiting for verification containers to complete, the cluster wastes over \$25.00 per hour per node in stranded capital. Maintaining balanced line-rate throughput across the cluster requires provisioning between 32 and 64 dedicated CPU cores per GPU accelerator, managed by high-density microVM runtimes that execute sub-5 ms CoW environment resets.
+
+:::
+
+---
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *Search distillation preserves the exploratory adaptability of Monte Carlo Tree Search.*
+
+When distilling an MCTS deliberation tree into a compact student policy, architects often assume that training the student on the extracted minimal winning path $\tau^*$ automatically endows the student with the underlying search algorithm's reasoning and adaptability.
+
+Search distillation via standard behavioral cloning sharpens the student's next-action logits aggressively around the observed tokens $a_t^*$. Without explicit regularization, the student's policy distribution degenerates into a collection of brittle Dirac delta distributions ($\pi_\phi(a_t^* \mid s_t) \to 1.0$).
+
+When deployed in production, if the environment injects a minor perturbation at step $k$ that forces the agent off the single trained path, the student possesses zero exploration entropy. It cannot backtrack or explore alternative branches, failing on tasks that the teacher's runtime MCTS solved easily. Mitigating this pitfall requires regularizing distillation via action-entropy penalties (@eq-entropy-regularized-distill), blending distilled paths with stochastic exploratory rollouts, and explicitly injecting cross-branch rationale reflections into the student's training scratchpad.
+
+:::
+
+---
+
+::: {.fallacy-pitfall}
+
+**Fallacy:** *Synthetic task generators have unbounded diversity for free.*
+
+Prompting an unconstrained frontier LLM with *"Generate a novel programming challenge"* across millions of iterations does not produce a uniform distribution over the problem space. Due to the autoregressive sampling dynamics of foundation models, unconstrained generators rapidly fall into semantic **Attractor Basins**.
+
+Over 75 percent of unconstrained synthetic tasks cluster around identical structural paradigms: basic CRUD APIs, algorithmic string manipulations, and textbook graph traversals. Training an agent policy on millions of these repetitive traces leads to severe overfitting: the policy achieves near-100 percent success on standard benchmark distributions but collapses when confronted with real-world enterprise repositories characterized by multi-threading, circular module dependencies, and legacy configuration files.
+
+Task generation must be anchored in grounded, non-generative environments: mining historical git commit logs, applying programmatic AST mutation operators to production codebases, and enforcing embedding cosine distance filtering ($\delta_{\text{div}}$) to discard redundant problem templates.
+
+:::
+
+---
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *Majority voting over unverified rollouts guarantees semantic correctness.*
+
+When programmatic unit tests are absent or difficult to construct, architects frequently rely on majority voting (self-consistency) across stochastic LLM outputs, assuming that if 8 out of 10 independent samples converge on the same answer, the answer must be correct.
+
+While majority voting reduces uncorrelated stochastic noise, it cannot correct for **Systematic Shared Priors**. Large language models pretrained on similar internet corpora share identical blind spots, algorithmic biases, and common misconceptions. In software engineering, models frequently share identical incorrect assumptions regarding edge cases (e.g., assuming `datetime.utcnow()` returns a timezone-aware object in Python, or mishandling regex escapes).
+
+In an empirical audit of majority voting on complex code generation without execution verification, 18.4 percent of unanimous consensus outputs ($\text{Agreement} = 1.0$) contained identical fatal runtime exceptions. Majority voting is a powerful filter *only when coupled with deterministic execution oracles*; consensus over unverified outputs merely yields high-confidence hallucinations.
+
+:::
+
+---
 
 @Tbl-vol3-flywheel-failure-modes synthesizes these core architectural pitfalls, mapping each failure mode to its root cause, runtime symptom, and systems mitigation.
 
-| **Failure Mode**                | **Root Mechanism**                                                                        | **Operational Symptom**                                                                                 | **Systems Mitigation**                                                                                                       |
-|:--------------------------------|:------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|
-| **LLM-as-a-Judge Evaluation**   | Length and style bias; shared priors lead to circular hallucinations of non-existent APIs | Syntactically fluent but broken code accepted into training pool; silent runtime failures               | Enforce non-differentiable deterministic oracles: compiler return codes, AST parsers, test suites                            |
-| **Golden Path Purity Bias**     | Over-filtering candidate traces to include only error-free minimal paths                  | Autoregressive covariate shift; model panics and loops infinitely upon encountering first runtime error | Curate bifurcated datasets: 70% golden paths, 30% error-recovery traces with explicit fault injection                        |
-| **Oracle-Bound GPU Starvation** | Heterogeneous compute mismatch; GPU inference blocks on slow CPU test suites              | GPU compute utilization collapses to single digits (<10%); queue saturation stalls rollout fleet        | Complete architectural disaggregation; async message streaming; Firecracker microVMs with sub-5 ms CoW resets                |
-| **Student Entropy Collapse**    | Behavioral cloning on narrow collapsed winning paths ($a_t^*$) sharpens token logits      | Student loses exploratory adaptability; action distribution degenerates into brittle Dirac deltas       | Blend distilled trajectories with exploratory rollouts; apply entropy penalties; cross-branch rationale distillation         |
-| **Synthesizer Mode Collapse**   | Unconstrained LLM task generator falls into semantic attractor basins                     | Policy overfits to narrow problem templates (e.g., basic REST APIs); fails on enterprise codebases      | Seed task generation with diverse ASTs from public repositories; programmatic mutation testing; embedding distance filtering |
+| **Failure Mode**                  | **Root Mechanism**                                                                        | **Operational Symptom**                                                                                 | **Systems Mitigation**                                                                                                       |
+|:----------------------------------|:------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|
+| **LLM-as-a-Judge Evaluation**     | Length and style bias; shared priors lead to circular hallucinations of non-existent APIs | Syntactically fluent but broken code accepted into training pool; silent runtime failures               | Enforce non-differentiable deterministic oracles: compiler return codes, AST parsers, test suites                            |
+| **Golden Path Purity Bias**       | Over-filtering candidate traces to include only error-free minimal paths                  | Autoregressive covariate shift; model panics and loops infinitely upon encountering first runtime error | Curate bifurcated datasets: 70% golden paths, 30% error-recovery traces with explicit fault injection                        |
+| **Oracle-Bound GPU Starvation**   | Heterogeneous compute mismatch; GPU inference blocks on slow CPU test suites              | GPU compute utilization collapses to single digits ($<10\%$); queue saturation stalls rollout fleet     | Complete architectural disaggregation; async message streaming; Firecracker microVMs with sub-5 ms CoW resets                |
+| **Student Entropy Collapse**      | Behavioral cloning on narrow collapsed winning paths ($a_t^*$) sharpens token logits      | Student loses exploratory adaptability; action distribution degenerates into brittle Dirac deltas       | Blend distilled trajectories with exploratory rollouts; apply entropy penalties; cross-branch rationale distillation         |
+| **Synthesizer Mode Collapse**     | Unconstrained LLM task generator falls into semantic attractor basins                     | Policy overfits to narrow problem templates (e.g., basic REST APIs); fails on enterprise codebases      | Seed task generation with diverse ASTs from public repositories; programmatic mutation testing; embedding distance filtering |
+| **Unverified Majority Consensus** | Shared pretraining priors cause independent rollouts to repeat identical edge-case bugs   | Unanimous consensus ($\text{Agreement} = 1.0$) on fatally broken runtime logic                          | Couple majority voting strictly with deterministic execution oracles; never use voting as standalone truth                   |
 
-: **Architectural Pitfalls and Mitigations in Synthetic Data Flywheels**: Structural summary of root failure mechanisms, manifested operational symptoms, and engineering mitigations across the data flywheel lifecycle. {#tbl-vol3-flywheel-failure-modes tbl-colwidths="[18,26,28,28]"}
+: **Architectural Failure Modes in Trajectory Data Flywheels**: Root mechanisms, operational symptoms, and systems mitigations across generation and filtering pipelines. {#tbl-vol3-flywheel-failure-modes tbl-colwidths="[18,26,28,28]"}
 
-Recognizing these pitfalls allows engineers to build reliable synthetic data pipelines. These lessons distill into a core set of architectural principles.
+---
 
 ## Summary {#sec-vol3-flywheel-summary}
 
-A working synthetic data flywheel transforms the problem of agent capabilities from a human-labor bottleneck into a scalable compute problem.
+The transition from in-context prompt engineering to autonomous agency requires compiling operational capabilities directly into neural policy parameters. Because human expert demonstrations are economically unscalable, excruciatingly slow, and inherently distorted by golden-path bias, the foundation of agent post-training is the autonomous synthetic data flywheel. By pairing stochastic rollout exploration on GPU clusters with high-density deterministic verification oracles on CPU microVM fleets, systems architects convert the human data bottleneck into an elastic compute problem. Execution-based rejection sampling provides an unbiased filter that guarantees data correctness against hard operating system invariants, while search distillation collapses expensive offline deliberation trees into compact, low-latency feedforward student weights. Crucially, mitigating autoregressive covariate shift demands abandoning the illusion of pure golden paths: by systematically mining failed rollouts and synthesizing error-recovery traces, the data flywheel endows the policy with the causal diagnostic capabilities required to survive non-deterministic production environments.
 
-::: {.callout-takeaways title="The Synthetic Data Flywheel Invariant"}
-* **The Post-Training Data Bottleneck:** Human trajectory demonstrations are too expensive, slow, and constrained by golden-path bias to effectively train multi-turn autonomous agents. Scaling agent capabilities requires replacing human annotation with self-supervised environment bootstrapping.
-* **Execution-Based Rejection Sampling:** Trajectory validity must be gated by hard, non-differentiable deterministic oracles (compilers, linters, state assertions) rather than subjective LLM-as-a-judge evaluators to prevent length bias and circular hallucinations.
-* **Disaggregated Compute Architectures:** To prevent GPU tensor core starvation, trajectory rollout generation and CPU-bound oracle verification must be completely decoupled via asynchronous message queues, ensuring both tiers operate at maximum utilization.
-* **High-Density MicroVM Sandboxing:** Standard Linux containers are too slow and insecure for high-throughput verification. Production flywheels rely on hardware-isolated microVMs (e.g., AWS Firecracker) with ephemeral Copy-on-Write (CoW) memory overlays to achieve sub-50 ms environment resets.
-* **Bifurcated Trajectory Curation:** Training exclusively on successful traces creates brittle policies vulnerable to autoregressive covariate shift. Flywheels must explicitly mine and inject error-recovery trajectories to teach the policy self-diagnosis and failure resilience.
-* **Search Distillation:** High-latency, multi-branch deliberation (like MCTS) can be collapsed offline into a single minimal winning path and distilled into a student policy. This transfers complex search heuristics into static feedforward parameters, enabling zero-search inference latencies.
-* **Active Telemetry and Hot Storage Routing:** Modern data staging tiers bifurcate synthetic outputs, streaming high-value verified traces into hot memory-mapped storage for continuous policy updates while flushing unrecoverable failures to cold columnar storage for offline analytics.
+::: {.callout-takeaways title="Core systems principles of trajectory synthesis and data flywheels"}
+
+1. **Context Compilation Transcends the Prompt Wall:** Stuffer prompts that encode schemas and exemplars incur quadratic prefill latency $\mathcal{O}(S^2 \cdot d_{\text{model}})$ and strand gigabytes of accelerator KV cache. Compiling runtime context directly into static model parameters compresses prompt prefixes by over 80 percent, restores attention focus, and maximizes serving concurrency.
+2. **Deterministic Oracles Provide Ground Truth:** Trajectory verification must never be delegated to subjective LLM-as-a-judge evaluators, which suffer from length bias and circular hallucinations. Ground truth emerges exclusively from non-differentiable execution boundaries: AST parsers, schema validators, OS state diffs, and hermetic unit test suites.
+3. **Architectural Disaggregation Prevents Accelerator Starvation:** Coupling GPU token generation synchronously to CPU test execution collapses accelerator utilization to single digits. Production flywheels strictly decouple rollout generation from verification via asynchronous message brokers, balancing clusters with 32 to 64 CPU cores per GPU accelerator.
+4. **MicroVM Sandboxes with CoW Overlays Enable High-Density Verification:** Standard containers suffer from daemon lock contention, slow resets, and shared-kernel vulnerabilities. Hardware-isolated microVMs (AWS Firecracker) utilizing in-memory Copy-on-Write storage overlays achieve sub-5 millisecond environment resets and support thousands of concurrent verifications per host.
+5. **Bifurcated Curation Tames Covariate Shift:** Training exclusively on flawless golden paths induces quadratic error compounding $\mathcal{O}(\epsilon^2 H^2)$ when deployed agents encounter unexpected runtime exceptions. Curating bifurcated corpora (70 percent golden paths, 30 percent error-recovery traces) provides the causal supervision needed to bound error growth linearly $\mathcal{O}(\epsilon H)$.
+
 :::
 
-::: {.callout-chapter-connection title="From Data Flywheels to Trajectory Fine-Tuning"}
-The synthetic data flywheel solves the data supply problem: it produces millions of verified, high-purity, multi-turn trajectories across diverse environment fixtures.
+::: {.callout-chapter-connection title="From trajectory synthesis to policy compilation via SFT"}
 
-However, possessing a massive dataset of execution traces is only half the battle. How do we actually compute parameter updates over a multi-turn trajectory? Standard language model training treats all tokens identically, but an agent trajectory contains a mixture of system prompts, user queries, internal thoughts, tool calls, and external environment outputs.
+The synthetic data flywheel resolves the data supply crisis: it produces millions of verified, high-purity, multi-turn trajectories across diverse software and execution environments.
 
-In @sec-vol3-sft, we turn to the training dynamics of the model itself. We will formalize trajectory-level loss formulations, derive why backpropagation must strictly enforce **Environmental Causality Boundaries**\index{Environmental Causality Boundaries} through action masking, analyze how to mitigate autoregressive covariate shift via **DAgger-style error injection** [@ross2011reduction], and engineer parameter-efficient multi-tenant serving runtimes using dynamic **LoRA adapter swapping** [@hu2021lora].
+However, possessing a massive corpus of structured execution traces is only the prerequisite for policy optimization. How do we compute parameter updates over a multi-turn trajectory that interleaves agent thoughts, structured tool calls, and external system outputs? Standard language model training treats all tokens identically, but backpropagating gradients through unpredictable external environment observations violates environmental causality and induces execution hallucinations.
+
+In @sec-vol3-sft, we turn from data synthesis to the optimization mechanics of the policy compiler. We formulate the trajectory Supervised Fine-Tuning (SFT) loss objective, derive why the **Environmental Causality Boundary**\index{Environmental Causality Boundary} mandates strict token loss masking on external observations, analyze how sequence-length versus active-token normalization impacts optimization stability, and engineer parameter-efficient multi-tenant serving runtimes utilizing dynamically swapped LoRA adapters.
+
 :::
 
-The systemic connection between the synthetic data flywheel and the trajectory fine-tuning pipeline is illustrated in @fig-vol3-flywheel-ch11-ch12-bridge.
-
-::: {#fig-vol3-flywheel-ch11-ch12-bridge fig-env="figure" fig-pos="htb" fig-cap="**The Synthesis-to-Training Pipeline and Loss Masking Bridge**: Coordinated architectural progression from seed task generation, teacher rollouts, and deterministic rejection sampling to bifurcated trajectory curation. Curated traces flow directly into the selective loss masking engine of @sec-vol3-sft, where backpropagation updates weights exclusively on agent control actions while strictly masking external environment observations." fig-alt="System architecture diagram detailing the five-stage pipeline from task seed corpus generation to teacher rollouts, execution verification, golden path extraction, error recovery synthesis, and selective loss masking for fine-tuning."}
-![](images/svg/trajectory_sft_pipeline.svg){width=100%}
-:::
-
-This hardware-to-training bridge sets the stage for formalizing these policy updates in the next chapter.
+---
 
 ## Quantitative Problems {#sec-vol3-data-flywheel-problems}
 
-1. **Execution-Based Rejection Sampling Yield and Cost**
-   An engineering team generates synthetic trajectories using an 8B parameter model deployed on H100 GPUs. Generating a single trajectory candidate takes $t_{\text{gen}} = 3$ seconds and costs $\$0.002$ in GPU inference compute. The deterministic oracle (a Python unit test sandbox) takes $t_{\text{eval}} = 8$ seconds and costs $\$0.0005$ in CPU compute. If the team uses a generation temperature $T = 0.8$, empirical data shows that $12\%$ of generated trajectories pass the oracle.
-   Calculate the expected cost and total compute time (assuming sequential execution on a single worker node) to produce one successfully verified trajectory. What is the break-even acceptance rate if human demonstration costs $\$15.00$ per verified trajectory?
+Apply the trajectory filtering math, fleet balance equations, and majority voting models established in this chapter to solve the following quantitative problems.
 
-2. **Compute Cluster Utilization and Disaggregation**
-   A synthetic data generation cluster consists of $N_{\text{GPU}} = 64$ inference nodes and $N_{\text{CPU}} = X$ verification nodes. A GPU node can generate $40$ trajectories per minute. A CPU verification node running Firecracker microVMs can verify $15$ trajectories per minute.
-   a) To achieve $100\%$ utilization of the GPU nodes (preventing oracle-bound starvation), what is the minimum number of CPU nodes ($X$) required?
-   b) If the orchestration messaging queue overhead adds a constant $200$ ms delay to every trajectory evaluated by the CPU nodes, recalculate the effective throughput of a CPU node and the new required $N_{\text{CPU}}$ to keep the GPUs fully saturated.
+### Problem 1: Disaggregated fleet sizing and Amdahl balance
 
-3. **Student Entropy vs. Diversity Degradation**
-   During search distillation, an MCTS agent explores a state graph with a branching factor $b = 5$ for a trajectory of depth $H = 10$. The search discovers exactly $3$ unique successful paths out of the entire tree. A student policy is trained via behavioral cloning on only the shortest of these $3$ paths.
-   If the test environment injects a single node failure along the shortest path during production inference (forcing a branch alteration), what is the probability the student policy successfully recovers, assuming the student's action distribution collapsed entirely (Dirac delta) to the single training path? How does this change if the student was trained on all $3$ paths with uniform weighting?
+An infrastructure engineering team operates a distributed synthetic trajectory generation cluster. The rollout tier consists of $N_{\text{GPU}} = 32$ NVIDIA H100 SXM5 accelerators running continuous batching inference. Across the target task distribution, an agent trajectory averages $\bar{H} = 25$ interaction turns. At each turn, the model generates an average of $120$ tokens (including internal thoughts and tool calls), resulting in $\bar{L}_{\text{gen}} = 3{,}000$ generated tokens per trajectory. Under continuous batching at an average batch size of $B = 16$, each H100 sustains an aggregate generation throughput of $\mu_{\text{GPU}} = 2{,}400$ tokens/second.
+
+The verification tier consists of commodity dual-socket CPU server nodes (64 physical cores per node, 128 hardware threads). Each verification task requires spinning up an isolated execution sandbox, executing a build toolchain, running a unit test suite, and computing filesystem diffs. Across the task distribution, the mean CPU verification time is $\bar{t}_{\text{verify}} = 18.0$ seconds of single-threaded compute.
+
+1. Calculate the aggregate trajectory generation rate $T_{\text{GPU}}$ (in trajectories per second) produced by the 32-GPU rollout cluster.
+2. Determine the minimum number of dedicated CPU verification cores ($N_{\text{CPU\_cores}}$) and the minimum number of 64-core CPU server nodes required to prevent verification backpressure from stalling the GPU rollout fleet, assuming a CPU core utilization efficiency of $\mu_{\text{core}} = 0.85$.
+3. Suppose the infrastructure uses standard Docker containers where container creation, disk cleanup, and teardown add an overhead of $t_{\text{docker}} = 3.5$ seconds per verification. Recalculate the required number of CPU server nodes. If the team replaces Docker with AWS Firecracker microVMs backed by Copy-on-Write `tmpfs` overlays that reduce lifecycle overhead to $t_{\text{microVM}} = 0.05$ seconds, how many CPU server nodes are saved?
+
+---
+
+### Problem 2: Rejection sampling yield, temperature optimization, and pass@k
+
+A research laboratory is synthesizing training data for a complex repository-level coding benchmark. For each task specification $x$, the system samples $n = 32$ independent candidate trajectories from a 70B parameter teacher policy. The task difficulty follows a bimodal distribution:
+
+- **Tier A (Standard Tasks, 60 percent of corpus):** The per-candidate verification success probability under softmax temperature $T = 0.7$ is $p_A = 0.25$.
+- **Tier B (Hard Tasks, 40 percent of corpus):** The per-candidate verification success probability under temperature $T = 0.7$ is $p_B = 0.04$.
+1. Using the $\text{pass@k}$ formulation (@eq-pass-at-k-eval), calculate the expected $\text{pass@1}$, $\text{pass@8}$, and $\text{pass@32}$ metrics across the entire corpus distribution under temperature $T = 0.7$.
+2. Suppose the team evaluates an elevated temperature $T = 1.1$. Exploratory diversity increases the probability of finding a solution on Hard Tasks to $p_B' = 0.08$. However, increased token entropy causes syntax errors and schema invalidations that degrade the success probability on Standard Tasks to $p_A' = 0.12$. Calculate the new aggregate $\text{pass@1}$ and $\text{pass@32}$. Which temperature regime is optimal if the goal is maximizing $\text{pass@32}$?
+3. Generating an individual candidate rollout costs $\$0.045$ in GPU inference compute, while running the CPU verification sandbox costs $\$0.003$ per candidate. Calculate the expected compute cost required to produce one verified passing trajectory on Tier B tasks under $T = 0.7$ versus $T = 1.1$. At what human labor cost per trajectory does synthetic generation under $T = 1.1$ achieve a $100\times$ cost reduction?
+
+---
+
+### Problem 3: Autoregressive covariate shift and error compounding
+
+An autonomous IT operations agent is deployed to execute multi-step database maintenance workflows with an average horizon of $H = 30$ steps. At each step $t$, the agent receives the current state $s_t$, emits a bash action $a_t$, and receives the system output $o_t$.
+
+During live deployment, external systems exhibit stochastic transient faults (e.g., temporary network disconnects, locked file descriptors) with probability $\delta = 0.05$ per step.
+
+1. **Model A (Trained Exclusively on Golden Paths):** Model A was fine-tuned on a pristine dataset containing zero errors ($100\%$ golden paths). When conditioned on an error-free state, its 1-step action error probability is $\epsilon_0 = 0.02$. However, when conditioned on an error state (such as a nonzero exit code), the model experiences covariate shift: its 1-step error probability spikes to $\epsilon_{\text{err}} = 0.75$. Furthermore, if Model A emits an incorrect action, it has a zero percent chance of recovering ($P(\text{recover}) = 0$). Calculate the probability that Model A successfully completes the entire 30-step trajectory without failing.
+2. **Model B (Trained on Bifurcated Flywheel Data):** Model B was fine-tuned on a curated dataset containing 70 percent golden paths and 30 percent mined error-recovery traces. When conditioned on an error-free state, its baseline error probability is $\epsilon_0' = 0.025$ (slightly higher due to regularization). However, when conditioned on an error state, its 1-step error probability is only $\epsilon_{\text{err}}' = 0.15$, and it successfully executes a diagnostic and recovery action with probability $P(\text{recover}) = 0.85$. Formulate the state transition dynamics as a Markov chain and calculate the probability that Model B successfully completes the 30-step trajectory.
+3. Quantify the relative improvement in end-to-end task completion rate ($\text{Success}_{\text{Model B}} / \text{Success}_{\text{Model A}}$) and explain the systems engineering justification for sacrificing a small amount of golden-path precision to eliminate autoregressive covariate shift.

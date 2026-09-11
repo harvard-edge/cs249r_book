@@ -49,6 +49,8 @@ SELF_XREF_SPAN_RE = re.compile(
     r"@[Ss]ec(-[a-zA-Z0-9_-]+)\s+(?:through|to)\s+@[Ss]ec(-[a-zA-Z0-9_-]+)"
 )
 
+from core.discovery import VOLUME_DIRS
+
 # Files that live at the Quarto project root but are not chapter content: the
 # per-volume landing pages, the swapped index, and the 404 page. Before the
 # 2026-09 layout change these sat outside contents/ and so were never scanned;
@@ -64,6 +66,8 @@ def _is_chapter_qmd(path) -> bool:
     if name.startswith("index-vol") or path.stem in _NON_CHAPTER_STEMS:
         return False
     if any(part.startswith("_") for part in path.parts[:-1]):
+        return False
+    if any(part.startswith("vol") and part not in VOLUME_DIRS for part in path.parts[:-1]):
         return False
     return "_shelved" not in name
 
@@ -5412,6 +5416,7 @@ class ValidateCommand:
 
         img_pat = re.compile(r"!\[[^\]]{0,1000}\]\(([^)]+)\)(?:\{[^}]*\})?")
         valid_exts = {".png", ".jpg", ".jpeg", ".gif", ".svg"}
+        repo_root = self.config_manager.root_dir
 
         for file in files:
             content = self._read_text(file)
@@ -5423,7 +5428,12 @@ class ValidateCommand:
                 if ext not in valid_exts:
                     continue
 
-                resolved = (file.parent / img_path).resolve()
+                if img_path.startswith("/"):
+                    resolved = (repo_root / "books" / img_path.lstrip("/")).resolve()
+                    if not resolved.exists():
+                        resolved = (repo_root / img_path.lstrip("/")).resolve()
+                else:
+                    resolved = (file.parent / img_path).resolve()
                 line_no = content[: m.start()].count("\n") + 1
 
                 if not resolved.exists():
@@ -8196,6 +8206,8 @@ class ValidateCommand:
         md_img_re = re.compile(r"!\[.*?\]\(([^)]+)\)")
         html_img_re = re.compile(r'<img\s+[^>]*src=["\']([^"\']+)["\']')
 
+        repo_root = self.config_manager.root_dir
+
         for file in files:
             text = self._read_text(file)
             lines = text.splitlines()
@@ -8213,7 +8225,12 @@ class ValidateCommand:
                     if src.startswith(("http://", "https://", "data:", "#")):
                         continue
                     src_clean = src.split()[0].strip('"\'')
-                    img_path = (file.parent / src_clean).resolve()
+                    if src_clean.startswith("/"):
+                        img_path = (repo_root / "books" / src_clean.lstrip("/")).resolve()
+                        if not img_path.exists():
+                            img_path = (repo_root / src_clean.lstrip("/")).resolve()
+                    else:
+                        img_path = (file.parent / src_clean).resolve()
                     if not img_path.exists():
                         context = stripped[:100]
                         issues.append(
@@ -8232,7 +8249,12 @@ class ValidateCommand:
                     if src.startswith(("http://", "https://", "data:", "#")):
                         continue
                     src_clean = src.split()[0].strip('"\'')
-                    img_path = (file.parent / src_clean).resolve()
+                    if src_clean.startswith("/"):
+                        img_path = (repo_root / "books" / src_clean.lstrip("/")).resolve()
+                        if not img_path.exists():
+                            img_path = (repo_root / src_clean.lstrip("/")).resolve()
+                    else:
+                        img_path = (file.parent / src_clean).resolve()
                     if not img_path.exists():
                         context = stripped[:100]
                         issues.append(
@@ -11374,7 +11396,7 @@ class ValidateCommand:
                 _sys.path.insert(0, path_str)
         scan_mod = importlib.import_module("audit.scan")
 
-        contents_root = cli_root.parent  / "books"
+        contents_root = self.config_manager.book_dir
         resolved_root = root.resolve()
         if resolved_root == (contents_root / "vol1").resolve():
             scope = "vol1"

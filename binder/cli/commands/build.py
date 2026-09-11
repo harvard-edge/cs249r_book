@@ -529,6 +529,7 @@ class BuildCommand:
 
             # Set up fast build mode for the target chapters
             self._setup_fast_build_mode(config_file, chapter_files)
+            self.config_manager.activate_config_file(config_file)
 
             # Track if config has been restored to avoid double restoration
             self._config_restored = False
@@ -598,7 +599,8 @@ class BuildCommand:
         # Expand patterns like appendix* / re:^appendix_ within the requested volume
         chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
 
-        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        vol_names = {"vol1": "Volume I", "vol2": "Volume II", "vol3": "Volume III", "vol4": "Volume IV"}
+        volume_name = vol_names.get(volume, volume)
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
 
@@ -657,6 +659,7 @@ class BuildCommand:
 
             # Set up fast build mode for the target chapters
             self._setup_fast_build_mode(config_file, chapter_files)
+            self.config_manager.activate_config_file(config_file)
 
             # Track if config has been restored to avoid double restoration
             self._config_restored = False

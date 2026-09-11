@@ -19,7 +19,7 @@ from rich.console import Console
 console = Console()
 
 # Volume directories
-VOLUME_DIRS = ["vol1", "vol2"]
+VOLUME_DIRS = ["vol1", "vol2", "vol3"]
 
 # Shared content directory (sibling to vol1/, vol2/ under contents/)
 SHARED_DIR = "shared"
@@ -366,7 +366,7 @@ class ChapterDiscovery:
         # Determine search directory
         if volume:
             if volume not in VOLUME_DIRS:
-                console.print(f"[red]Invalid volume: {volume}. Use 'vol1' or 'vol2'[/red]")
+                console.print(f"[red]Invalid volume: {volume}. Use 'vol1', 'vol2', or 'vol3'[/red]")
                 return chapters
             search_dir = self.contents_dir / volume
         else:
@@ -451,11 +451,12 @@ class ChapterDiscovery:
         # Show volume summary
         vol1_count = sum(1 for ch in chapters if ch["volume"] == "vol1")
         vol2_count = sum(1 for ch in chapters if ch["volume"] == "vol2")
+        vol3_count = sum(1 for ch in chapters if ch["volume"] == "vol3")
 
         if volume:
             console.print(f"\n[dim]Found {len(chapters)} chapters in {volume}[/dim]")
         else:
-            console.print(f"\n[dim]Found {len(chapters)} chapters (vol1: {vol1_count}, vol2: {vol2_count})[/dim]")
+            console.print(f"\n[dim]Found {len(chapters)} chapters (vol1: {vol1_count}, vol2: {vol2_count}, vol3: {vol3_count})[/dim]")
 
     def validate_chapters(self, chapter_names: List[str]) -> List[Path]:
         """Validate a list of chapter names and return their paths.
