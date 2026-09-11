@@ -94,14 +94,13 @@ class DoctorCommand:
     def _check_system_dependencies(self) -> None:
         """Check required system dependencies."""
         dependencies = [
-            ("Python", [sys.executable, "--version"]),
-            ("Quarto", ["quarto", "--version"]),
-            ("Git", ["git", "--version"]),
-            ("Node.js", ["node", "--version"]),
-            ("R", ["R", "--version"]),
+            ("Python", [sys.executable, "--version"], True),
+            ("Quarto", ["quarto", "--version"], True),
+            ("Git", ["git", "--version"], True),
+            ("Node.js", ["node", "--version"], False),
         ]
 
-        for name, cmd in dependencies:
+        for name, cmd, required in dependencies:
             try:
                 result = subprocess.run(
                     cmd,
@@ -122,16 +121,16 @@ class DoctorCommand:
                     self.checks.append({
                         "category": "Dependencies",
                         "name": name,
-                        "passed": False,
-                        "message": "❌ Not found or error",
+                        "passed": not required,
+                        "message": ("⚠️ Optional tool error" if not required else "❌ Not found or error"),
                         "details": result.stderr.strip() if result.stderr else "Command failed"
                     })
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 self.checks.append({
                     "category": "Dependencies",
                     "name": name,
-                    "passed": False,
-                    "message": "❌ Not installed",
+                    "passed": not required,
+                    "message": ("⚠️ Not installed (optional)" if not required else "❌ Not installed"),
                     "details": f"Command '{' '.join(cmd)}' not found"
                 })
 
@@ -151,8 +150,16 @@ class DoctorCommand:
                     config_data = self.config_manager.read_config(format_type)
 
                     # Check for required sections
-                    required_sections = ["project", "book"]
-                    missing_sections = [s for s in required_sections if s not in config_data]
+                    if format_type == "html":
+                        # HTML can be configured as a website or a book
+                        missing_sections = []
+                        if "project" not in config_data:
+                            missing_sections.append("project")
+                        if "book" not in config_data and "website" not in config_data:
+                            missing_sections.append("book or website")
+                    else:
+                        required_sections = ["project", "book"]
+                        missing_sections = [s for s in required_sections if s not in config_data]
 
                     if missing_sections:
                         self.checks.append({
@@ -241,7 +248,7 @@ class DoctorCommand:
         # Check for missing chapters (common ones).
         # Use discovered chapter names directly so duplicate names across volumes
         # (e.g., vol1/introduction and vol2/introduction) are not treated as errors.
-        expected_chapters = ["introduction", "ml_systems", "training", "ops"]
+        expected_chapters = ["introduction", "ml_systems", "training", "ml_ops"]
         discovered_names = {ch["name"] for ch in chapters}
         missing_chapters = [expected for expected in expected_chapters if expected not in discovered_names]
 
@@ -287,14 +294,24 @@ class DoctorCommand:
                     [java, "-version"],
                     capture_output=True, text=True, timeout=5,
                 )
-                version_line = (out.stderr or out.stdout).strip().splitlines()[0] if (out.stderr or out.stdout) else "unknown"
-                self.checks.append({
-                    "category": "EPUB",
-                    "name": "Java runtime",
-                    "passed": True,
-                    "message": f"✅ {version_line}",
-                    "details": None,
-                })
+                if out.returncode == 0:
+                    version_line = (out.stderr or out.stdout).strip().splitlines()[0] if (out.stderr or out.stdout) else "unknown"
+                    self.checks.append({
+                        "category": "EPUB",
+                        "name": "Java runtime",
+                        "passed": True,
+                        "message": f"✅ {version_line}",
+                        "details": None,
+                    })
+                else:
+                    err_msg = (out.stderr or out.stdout).strip().splitlines()[0] if (out.stderr or out.stdout) else "Command failed"
+                    self.checks.append({
+                        "category": "EPUB",
+                        "name": "Java runtime",
+                        "passed": False,
+                        "message": "⚠️ Java runtime not available",
+                        "details": err_msg,
+                    })
             except Exception as e:
                 self.checks.append({
                     "category": "EPUB",

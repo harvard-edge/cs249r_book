@@ -18,7 +18,25 @@ from rich.console import Console
 
 console = Console()
 
-# Volume directories
+def discover_volumes(book_dir: Path) -> List[str]:
+    """Dynamically discover all volume directories under book_dir."""
+    if not book_dir.exists():
+        return ["vol1", "vol2", "vol3", "vol4"]
+    vols = [
+        d.name for d in book_dir.iterdir()
+        if d.is_dir() and re.match(r"^vol\d+$", d.name)
+    ]
+    if (book_dir / "tinytorch").is_dir():
+        vols.append("tinytorch")
+    if not vols:
+        return ["vol1", "vol2", "vol3", "vol4"]
+    return sorted(
+        vols,
+        key=lambda v: (0, int(v[3:])) if v.startswith("vol") and v[3:].isdigit() else (1, v)
+    )
+
+
+# Default volume directories; dynamic discovery should be preferred via ChapterDiscovery or discover_volumes()
 VOLUME_DIRS = ["vol1", "vol2", "vol3", "vol4"]
 
 # Shared content directory (sibling to vol1/, vol2/ under contents/)
@@ -38,9 +56,9 @@ def _chapters_from_html_sidebar(book_dir: Path, volume: str) -> List[str]:
     content = html_config.read_text(encoding="utf-8")
     chapters: List[str] = []
     seen: set = set()
-    for m in re.finditer(r'href:\s*(contents/[^\s#]+\.qmd)', content):
+    for m in re.finditer(r'href:\s*(?:contents/)?([^\s#]+\.qmd)', content):
         path_str = m.group(1)
-        if f"/{volume}/" not in path_str:
+        if f"/{volume}/" not in path_str and not path_str.startswith(f"{volume}/"):
             continue
         stem = Path(path_str).stem
         if stem in SKIP_STEMS or stem in seen:
@@ -68,6 +86,15 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     """
     config_file = book_dir / "config" / f"_quarto-pdf-{volume}.yml"
     if not config_file.exists():
+        sidebar = _chapters_from_html_sidebar(book_dir, volume)
+        if sidebar:
+            return sidebar
+        vol_dir = book_dir / volume
+        if vol_dir.is_dir():
+            return sorted([
+                p.stem for p in vol_dir.rglob("*.qmd")
+                if p.stem not in SKIP_STEMS and not p.name.startswith("_")
+            ])
         return []
 
     def _is_testable(path_str: str) -> bool:
@@ -109,7 +136,7 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
         for line in block.splitlines():
             if line.lstrip().startswith("#"):
                 continue
-            m = re.search(r'-\s*(contents/[^\s#]+\.qmd)', line)
+            m = re.search(r'-\s*(?:contents/)?([^\s#]+\.qmd)', line)
             if not m:
                 continue
             path_str = m.group(1)
@@ -151,6 +178,10 @@ class ChapterDiscovery:
         self.book_dir = Path(book_dir)
         self.contents_dir = self.book_dir
 
+    def get_available_volumes(self) -> List[str]:
+        """Return list of dynamically discovered volume names."""
+        return discover_volumes(self.contents_dir)
+
     def get_chapters_from_config(self, volume: str) -> List[str]:
         """Return the ordered list of testable chapter stems for a volume.
 
@@ -159,7 +190,7 @@ class ChapterDiscovery:
         of ``get_volume_chapters`` whenever the canonical build order matters.
 
         Args:
-            volume: ``"vol1"`` or ``"vol2"``.
+            volume: Volume name (e.g. ``"vol1"``, ``"vol2"``, etc.).
 
         Returns:
             Ordered list of chapter stems from the PDF config (e.g.
@@ -168,18 +199,18 @@ class ChapterDiscovery:
         return get_chapters_from_config(self.book_dir, volume)
 
     def _get_volume_from_path(self, path: Path) -> Optional[str]:
-        """Extract volume (vol1/vol2) from a file path.
+        """Extract volume from a file path.
 
         Args:
             path: Path to check
 
         Returns:
-            'vol1', 'vol2', or None if not in a volume directory
+            Volume string (e.g. 'vol1'), or None if not in a volume directory
         """
         try:
             rel_path = path.relative_to(self.contents_dir)
             parts = rel_path.parts
-            if parts and parts[0] in VOLUME_DIRS:
+            if parts and (parts[0] in self.get_available_volumes() or re.match(r"^vol\d+$", parts[0])):
                 return parts[0]
         except ValueError:
             pass
@@ -196,7 +227,7 @@ class ChapterDiscovery:
         """
         if "/" in chapter_spec:
             parts = chapter_spec.split("/", 1)
-            if parts[0] in VOLUME_DIRS:
+            if parts[0] in self.get_available_volumes() or re.match(r"^vol\d+$", parts[0]) or parts[0] == "tinytorch":
                 return parts[0], parts[1]
         return None, chapter_spec
 
@@ -298,10 +329,10 @@ class ChapterDiscovery:
 
         # Determine search directory
         if volume:
-            if volume not in VOLUME_DIRS:
-                console.print(f"[red]Invalid volume: {volume}. Use 'vol1', 'vol2', 'vol3', or 'vol4'[/red]")
-                return chapters
             search_dir = self.contents_dir / volume
+            if not search_dir.is_dir():
+                console.print(f"[red]Volume directory not found: {volume}[/red]")
+                return chapters
         else:
             search_dir = self.contents_dir
 
@@ -383,7 +414,7 @@ class ChapterDiscovery:
 
         # Show volume summary
         counts = ", ".join(f"{vol}: {sum(ch['volume'] == vol for ch in chapters)}"
-                           for vol in VOLUME_DIRS)
+                           for vol in self.get_available_volumes())
 
         if volume:
             console.print(f"\n[dim]Found {len(chapters)} chapters in {volume}[/dim]")

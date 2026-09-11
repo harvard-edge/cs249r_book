@@ -738,7 +738,14 @@ class BuildCommand:
             "vol4": "Volume IV: Physical AI",
             "tinytorch": "TinyTorch",
         }
-        volume_name = vol_names.get(volume, volume)
+        volume_name = vol_names.get(volume)
+        if not volume_name:
+            roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
+            if volume.startswith("vol") and volume[3:].isdigit():
+                num = int(volume[3:])
+                volume_name = f"Volume {roman_map.get(num, str(num))}"
+            else:
+                volume_name = volume.capitalize()
         console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
 
         if format_type == "epub":

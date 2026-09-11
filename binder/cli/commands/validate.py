@@ -80,6 +80,8 @@ class ValidationIssue:
     severity: str = "error"
     context: str = ""
     suggestion: str = ""
+    rule_doc: str = ""
+    auto_fix_cmd: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         payload = {
@@ -92,6 +94,10 @@ class ValidationIssue:
         }
         if self.suggestion:
             payload["suggestion"] = self.suggestion
+        if self.rule_doc:
+            payload["rule_doc"] = self.rule_doc
+        if self.auto_fix_cmd:
+            payload["auto_fix_cmd"] = self.auto_fix_cmd
         return payload
 
 
@@ -886,6 +892,7 @@ class ValidateCommand:
         parser.add_argument("--vol4", action="store_true", help="Scope to Volume IV")
         parser.add_argument("--tinytorch", action="store_true", help="Scope to TinyTorch")
         parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
+        parser.add_argument("--plain", action="store_true", help="Emit unstyled, machine-parseable single-line diagnostics")
         parser.add_argument("--verbose", "-v", action="store_true", default=True, help="Show context for each issue (default)")
         parser.add_argument("--quiet", "-q", action="store_true", dest="quiet", help="Suppress verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
@@ -992,7 +999,8 @@ class ValidateCommand:
             print(json.dumps(summary, indent=2, ensure_ascii=False))
         else:
             verbose = not getattr(ns, "quiet", False)
-            self._print_human_summary(summary, verbose=verbose)
+            plain = getattr(ns, "plain", False)
+            self._print_human_summary(summary, verbose=verbose, plain=plain)
 
         return not any_failed
 
@@ -1266,13 +1274,25 @@ class ValidateCommand:
 
     # ------------------------------------------------------------------
 
-    def _resolve_path(self, path_arg: Optional[str], vol1: bool = False, vol2: bool = False, vol3: bool = False, vol4: bool = False, tinytorch: bool = False) -> Path:
+    def _resolve_path(
+        self,
+        path_arg: Optional[str] = None,
+        vol1: bool = False,
+        vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
+        volume: Optional[str] = None,
+        **kwargs,
+    ) -> Path:
         if path_arg:
             path = Path(path_arg)
             if not path.is_absolute():
                 path = (Path.cwd() / path).resolve()
             return path
         base = self.config_manager.book_dir
+        if volume and (base / volume).is_dir():
+            return base / volume
         if vol1:
             return base / "vol1"
         if vol2:
@@ -1281,6 +1301,11 @@ class ValidateCommand:
             return base / "vol3"
         if vol4:
             return base / "vol4"
+        if tinytorch:
+            return base / "tinytorch"
+        for k, v in kwargs.items():
+            if v and (base / k).is_dir():
+                return base / k
         return base
 
     def _selected_label_types(self, ns: argparse.Namespace) -> Dict[str, List[re.Pattern[str]]]:
@@ -1313,7 +1338,10 @@ class ValidateCommand:
     def _bib_files(self, root: Path) -> List[Path]:
         if root.is_file():
             return [root] if root.suffix == ".bib" else []
-        return sorted(root.rglob("*.bib"))
+        bibs = sorted(root.rglob("*.bib"))
+        if bibs:
+            return bibs
+        return self._book_bib_files_for_root(root)
 
     def _read_text(self, path: Path) -> str:
         try:
@@ -9812,35 +9840,32 @@ class ValidateCommand:
     # Content tree: require the canonical two-volume frontmatter shape.
     # ------------------------------------------------------------------
 
-    # Required paths under contents/ so scripts can rely on the volume-local
-    # notation files and the shared top-level frontmatter tree.
-    CONTENT_TREE_REQUIRED: List[tuple] = [
-        ("frontmatter", True),  # (path relative to contents, is_dir)
-        ("vol1/frontmatter", True),
-        ("vol1/frontmatter/notation.qmd", False),
-        ("vol2/frontmatter", True),
-        ("vol2/frontmatter/notation.qmd", False),
-    ]
-
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
-        """Ensure contents/ has the expected release-time volume structure."""
+        """Ensure book volumes have the expected release-time structure."""
         t0 = time.time()
-        # Resolve to contents dir: root may be contents, or vol1, or vol2
-        if root.name in ("vol1", "vol2") and root.parent.name == "contents":
+        if (root.name.startswith("vol") or root.name == "tinytorch") and root.parent.name in ("books", "contents"):
             contents_dir = root.parent
         else:
             contents_dir = root
-        if not (contents_dir / "vol1").is_dir() or not (contents_dir / "vol2").is_dir():
-            # Not the book contents root; skip (e.g. user passed a chapter path)
+
+        from cli.core.discovery import discover_volumes
+        vols = discover_volumes(contents_dir)
+        if not vols:
             return ValidationRunResult(
                 name="content-tree",
-                description="Content tree (shared/frontmatter required)",
+                description="Content tree (volume frontmatter required)",
                 files_checked=0,
                 issues=[],
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
+
+        required_paths = []
+        for vol in vols:
+            required_paths.append((f"{vol}/frontmatter", True))
+            required_paths.append((f"{vol}/frontmatter/notation.qmd", False))
+
         issues: List[ValidationIssue] = []
-        for rel, is_dir in self.CONTENT_TREE_REQUIRED:
+        for rel, is_dir in required_paths:
             path = contents_dir / rel
             if is_dir:
                 if not path.is_dir():
@@ -9849,7 +9874,7 @@ class ValidateCommand:
                             file=str(path),
                             line=0,
                             code="content-tree",
-                            message=f"Required directory missing: contents/{rel}",
+                            message=f"Required directory missing: {rel}",
                             severity="error",
                         )
                     )
@@ -9860,15 +9885,15 @@ class ValidateCommand:
                             file=str(path),
                             line=0,
                             code="content-tree",
-                            message=f"Required file missing: contents/{rel}",
+                            message=f"Required file missing: {rel}",
                             severity="error",
                         )
                     )
         elapsed = int((time.time() - t0) * 1000)
         return ValidationRunResult(
             name="content-tree",
-            description="Content tree (two-volume frontmatter required)",
-            files_checked=len(self.CONTENT_TREE_REQUIRED),
+            description="Content tree (volume frontmatter required)",
+            files_checked=len(required_paths),
             issues=issues,
             elapsed_ms=elapsed,
         )
@@ -10017,14 +10042,33 @@ class ValidateCommand:
             return 1
         return content[:index].count("\n") + 1
 
-    def _print_human_summary(self, summary: Dict[str, Any], verbose: bool = True) -> None:
+    def _print_human_summary(self, summary: Dict[str, Any], verbose: bool = True, plain: bool = False) -> None:
         runs = summary["runs"]
         total = summary["total_issues"]
         status = summary["status"]
 
-        # On success, stay silent — pre-commit shows "Passed" and direct
-        # callers see exit code 0.
-        if total == 0:
+        if plain:
+            for run in runs:
+                for issue in run["issues"]:
+                    line = issue["line"]
+                    file = issue["file"]
+                    msg = issue["message"]
+                    code = issue.get("code", "")
+                    sev = issue["severity"]
+                    code_str = f" [{code}]" if code else ""
+                    print(f"{file}:{line}: {sev.upper()}:{code_str} {msg}")
+                    if verbose:
+                        if issue.get("context"):
+                            print(f"    source: {issue['context']}")
+                        if issue.get("suggestion"):
+                            print(f"    fix: {issue['suggestion']}")
+            return
+
+        # On success with no empty scans, stay silent — pre-commit shows "Passed"
+        # and direct callers see exit code 0. But if any check scanned 0 files,
+        # surface the table so NO-OPs are never silently hidden.
+        has_noop = any(run["passed"] and run["files_checked"] == 0 for run in runs)
+        if total == 0 and not has_noop:
             return
 
         # Show the summary table when there are issues
@@ -10275,15 +10319,20 @@ class ValidateCommand:
     def _book_bib_scopes(self) -> List[_BibScope]:
         contents = self.config_manager.book_dir
         shared_bib = contents / "references.bib"
-        return [
-            self._BibScope("vol1", ("vol1/",), (shared_bib,)),
-            self._BibScope("vol2", ("vol2/",), (shared_bib,)),
+        from cli.core.discovery import discover_volumes
+        scopes: List[ValidateCommand._BibScope] = []
+        for vol in discover_volumes(contents):
+            vol_bib = contents / f"references-{vol}.bib"
+            bibs = (vol_bib,) if vol_bib.exists() else (shared_bib,)
+            scopes.append(self._BibScope(vol, (f"{vol}/",), bibs))
+        scopes.append(
             self._BibScope(
                 "book-shared",
-                ("contents/frontmatter/", "contents/backmatter/"),
+                ("frontmatter/", "backmatter/"),
                 (shared_bib,),
-            ),
-        ]
+            )
+        )
+        return scopes
 
     def _book_bib_scope_for_qmd(self, qmd_path: Path) -> Optional[_BibScope]:
         try:
@@ -11741,7 +11790,7 @@ class ValidateCommand:
                     severity="error",
                 ))
                 continue
-            if not result or mod.FAILURES:
+            if result is False or mod.FAILURES:
                 # Each entry in FAILURES is a pre-formatted "  ✗ ..." string.
                 detail = "; ".join(f.strip() for f in mod.FAILURES) or "test returned False"
                 issues.append(ValidationIssue(
@@ -11771,8 +11820,7 @@ class ValidateCommand:
         from cli.commands._index_checks import check_anti_patterns
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        raw = check_anti_patterns(repo_root)
+        raw = check_anti_patterns(root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11780,10 +11828,11 @@ class ValidateCommand:
             )
             for i in raw
         ]
+        target = root / "books" if (root / "books").is_dir() else root
         return ValidationRunResult(
             name="index-anti-patterns",
             description="\\index{} anti-patterns (corpus-level)",
-            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
+            files_checked=len(list(target.rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11793,8 +11842,7 @@ class ValidateCommand:
         from cli.commands._index_checks import check_tag_placement
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        raw = check_tag_placement(repo_root)
+        raw = check_tag_placement(root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11802,10 +11850,11 @@ class ValidateCommand:
             )
             for i in raw
         ]
+        target = root / "books" if (root / "books").is_dir() else root
         return ValidationRunResult(
             name="index-tag-placement",
             description="\\index{} forbidden placement (bold/code/headings)",
-            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
+            files_checked=len(list(target.rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11815,8 +11864,7 @@ class ValidateCommand:
         from cli.commands._index_checks import check_xref_resolves
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        raw = check_xref_resolves(repo_root)
+        raw = check_xref_resolves(root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11824,10 +11872,11 @@ class ValidateCommand:
             )
             for i in raw
         ]
+        target = root / "books" if (root / "books").is_dir() else root
         return ValidationRunResult(
             name="index-xref-resolves",
             description="\\index{} see/seealso target resolution",
-            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
+            files_checked=len(list(target.rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -11837,8 +11886,7 @@ class ValidateCommand:
         from cli.commands._index_checks import check_makeindex_encap_conflicts
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        raw = check_makeindex_encap_conflicts(repo_root)
+        raw = check_makeindex_encap_conflicts(root)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -11846,10 +11894,11 @@ class ValidateCommand:
             )
             for i in raw
         ]
+        target = root / "books" if (root / "books").is_dir() else root
         return ValidationRunResult(
             name="index-encap-conflicts",
             description="\\index{} makeindex encap conflict check",
-            files_checked=len(list((repo_root  / "books").rglob("*.qmd"))),
+            files_checked=len(list(target.rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
