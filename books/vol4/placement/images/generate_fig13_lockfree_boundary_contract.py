@@ -118,7 +118,7 @@ def build_svg():
         
     ET.SubElement(svg, 'text', x="500", y="530", class_="warn", text_anchor="middle").text = "Guarantees continuous 1000 Hz actuator regulation even during host crashes"
     
-    with open("/Users/VJ/GitHub/MLSysBook-brain-figs/images/svg/fig13_lockfree_boundary_contract.svg", "w") as f:
+    with open("svg/fig13_lockfree_boundary_contract.svg", "w") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write(ET.tostring(svg, encoding="unicode"))
 

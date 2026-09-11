@@ -47,8 +47,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <rect x="330" y="140" width="100" height="40" class="box" />
 <text x="380" y="165" class="text-small" text-anchor="middle">Isolated SHM</text>
 
-<path d="M 270 160 L 320 160" class="line-dashed" marker-end="url(#arrowhead)" />
-<path d="M 430 160 L 480 160" class="line-dashed" marker-end="url(#arrowhead)" />
+<path fill="none" d="M 270 160 L 320 160" class="line-dashed" marker-end="url(#arrowhead)" />
+<path fill="none" d="M 430 160 L 480 160" class="line-dashed" marker-end="url(#arrowhead)" />
 
 <!-- Real-Time Microcontroller -->
 <rect x="490" y="80" width="220" height="160" rx="8" class="box-blue" />
@@ -64,15 +64,15 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <text x="860" y="165" class="title" text-anchor="middle">Motor Registers</text>
 <text x="860" y="185" class="text-small" text-anchor="middle">Hardware Drive Config</text>
 
-<path d="M 710 160 L 760 160" class="line-blue" marker-end="url(#arrowhead-blue)" />
+<path fill="none" d="M 710 160 L 760 160" class="line-blue" marker-end="url(#arrowhead-blue)" />
 <text x="735" y="150" class="text-small" text-anchor="middle" fill="#1F407A">Verified (ut)</text>
 
-<path d="M 860 200 L 860 230" class="line-blue" marker-end="url(#arrowhead-blue)" />
+<path fill="none" d="M 860 200 L 860 230" class="line-blue" marker-end="url(#arrowhead-blue)" />
 <rect x="770" y="240" width="180" height="40" class="box" />
 <text x="860" y="265" class="text" text-anchor="middle">Gate Drivers / Hardware</text>
 
 <!-- Dynamic braking -->
-<path d="M 600 225 L 600 260 L 760 260" class="line-red" marker-end="url(#arrowhead-red)" />
+<path fill="none" d="M 600 225 L 600 260 L 760 260" class="line-red" marker-end="url(#arrowhead-red)" />
 <text x="680" y="255" class="text-small" text-anchor="middle" fill="#A51C30">Violation -&gt; Brake (bot)</text>
 
 <!-- Divider -->
@@ -94,11 +94,11 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <text x="490" y="475" class="title" text-anchor="middle">Motor Registers</text>
 <text x="490" y="495" class="text-small" text-anchor="middle">Unrestricted Write Access</text>
 
-<path d="M 270 480 L 390 480" class="line-red-dashed" marker-end="url(#arrowhead-red)" />
+<path fill="none" d="M 270 480 L 390 480" class="line-red-dashed" marker-end="url(#arrowhead-red)" />
 <text x="330" y="470" class="text" text-anchor="middle" fill="#A51C30">Direct Write</text>
 <text x="330" y="500" class="text-small" text-anchor="middle" fill="#A51C30">Dangerous Action</text>
 
-<path d="M 490 510 L 490 540" class="line-red" marker-end="url(#arrowhead-red)" />
+<path fill="none" d="M 490 510 L 490 540" class="line-red" marker-end="url(#arrowhead-red)" />
 <rect x="400" y="550" width="180" height="40" class="box" />
 <text x="490" y="575" class="text" text-anchor="middle">Gate Drivers / Hardware</text>
 

@@ -55,12 +55,12 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" 
     <text x="320" y="340" class="math" fill="#A51C30">h(x) &lt; 0</text>
     
     <!-- Physical Boundary -->
-    <path d="M -50 380 Q 200 200 380 -50" class="boundary-physical"/>
+    <path fill="none" d="M -50 380 Q 200 200 380 -50" class="boundary-physical"/>
     <text x="330" y="25" class="math" fill="#A51C30">&#x2202;C</text>
     
     <!-- Inset Boundary -->
     <!-- Offset by roughly 50px normal -->
-    <path d="M -90 340 Q 150 150 340 -90" class="boundary-inset"/>
+    <path fill="none" d="M -90 340 Q 150 150 340 -90" class="boundary-inset"/>
     <text x="210" y="40" class="math" fill="#1F407A">Inset Boundary</text>
     
     <!-- Margin notation -->

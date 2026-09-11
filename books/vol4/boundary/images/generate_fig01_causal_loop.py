@@ -47,7 +47,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow -->
-        <path d="M 180 60 L 320 60" class="path-line" />
+        <path fill="none" d="M 180 60 L 320 60" class="path-line" />
         
         <!-- ML Model -->
         <g transform="translate(320, 0)">
@@ -57,7 +57,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow -->
-        <path d="M 500 60 L 640 60" class="path-line" />
+        <path fill="none" d="M 500 60 L 640 60" class="path-line" />
         
         <!-- Glass Barrier -->
         <line x1="570" y1="-20" x2="570" y2="140" stroke="#2D3748" stroke-width="3" stroke-dasharray="10,5" />
@@ -88,7 +88,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow to Deliberation -->
-        <path d="M 180 50 L 260 50" class="path-line" />
+        <path fill="none" d="M 180 50 L 260 50" class="path-line" />
         
         <!-- Neural Deliberation -->
         <g transform="translate(260, 0)">
@@ -98,7 +98,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow to Safety Gate -->
-        <path d="M 460 50 L 540 50" class="path-line" />
+        <path fill="none" d="M 460 50 L 540 50" class="path-line" />
         
         <!-- Safety Gate -->
         <g transform="translate(540, 0)">
@@ -108,7 +108,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow to Motors -->
-        <path d="M 720 50 L 800 50" class="path-line" />
+        <path fill="none" d="M 720 50 L 800 50" class="path-line" />
         
         <!-- Motors/Actuators -->
         <g transform="translate(800, 0)">
@@ -118,7 +118,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Arrow to Environment -->
-        <path d="M 890 100 L 890 170 L 760 170" class="path-line" />
+        <path fill="none" d="M 890 100 L 890 170 L 760 170" class="path-line" />
         
         <!-- Physical Environment -->
         <g transform="translate(260, 120)">
@@ -128,7 +128,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
         </g>
         
         <!-- Feedback Arrow from Environment to Sensors -->
-        <path d="M 260 170 L 90 170 L 90 100" class="path-line-feedback" />
+        <path fill="none" d="M 260 170 L 90 170 L 90 100" class="path-line-feedback" />
     </g>
   </g>
 </svg>"""

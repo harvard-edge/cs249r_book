@@ -22,8 +22,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Recovery: 0%</text>
         
-        <path d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
-        <path d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
+        <path fill="none" d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
+        <path fill="none" d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
         <text x="65" y="175" font-family="sans-serif" font-size="12" fill="#1F407A" font-weight="bold" text-anchor="middle">Success</text>
         <text x="175" y="175" font-family="sans-serif" font-size="12" fill="#A51C30" font-weight="bold" text-anchor="middle">Failure</text>
     </g>
@@ -42,8 +42,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Peak Force: 68N (Break)</text>
         
-        <path d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
-        <path d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
+        <path fill="none" d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
+        <path fill="none" d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
         <text x="65" y="175" font-family="sans-serif" font-size="12" fill="#1F407A" font-weight="bold" text-anchor="middle">Success</text>
         <text x="175" y="175" font-family="sans-serif" font-size="12" fill="#A51C30" font-weight="bold" text-anchor="middle">Failure</text>
     </g>
@@ -62,8 +62,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Chatter/Trip: 12%</text>
         
-        <path d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
-        <path d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
+        <path fill="none" d="M 65 110 L 65 160" stroke="#1F407A" stroke-width="2" marker-end="url(#arrow-blue)"/>
+        <path fill="none" d="M 175 110 L 175 160" stroke="#A51C30" stroke-width="2" marker-end="url(#arrow-red)"/>
         <text x="65" y="175" font-family="sans-serif" font-size="12" fill="#1F407A" font-weight="bold" text-anchor="middle">Success</text>
         <text x="175" y="175" font-family="sans-serif" font-size="12" fill="#A51C30" font-weight="bold" text-anchor="middle">Failure</text>
     </g>
@@ -80,5 +80,5 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
 </svg>
 """
 
-with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_policy_ranking_inversion.svg", "w") as f:
+with open("svg/fig06_policy_ranking_inversion.svg", "w") as f:
     f.write(svg_content)

@@ -115,7 +115,7 @@ def build_svg():
     ET.SubElement(svg, 'text', x="750", y="360", class_="warn", text_anchor="middle").text = "Emergency Clock Halving (1.2 GHz → 600 MHz)"
     
     # Write to file
-    with open("/Users/VJ/GitHub/MLSysBook-brain-figs/images/svg/fig13_soc_contention_droop.svg", "w") as f:
+    with open("svg/fig13_soc_contention_droop.svg", "w") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write(ET.tostring(svg, encoding="unicode"))
 

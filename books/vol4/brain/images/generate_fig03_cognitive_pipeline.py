@@ -16,7 +16,7 @@ def create_svg():
         <text x="95" y="195" fill="#2D3748">Sensors</text>
 
         <!-- Arrow -->
-        <path d="M 160 190 L 190 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 160 190 L 190 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Ingestion -->
         <rect x="200" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
@@ -24,7 +24,7 @@ def create_svg():
         <text x="265" y="215" font-size="12" fill="#E2E8F0">(Tokenization)</text>
 
         <!-- Arrow -->
-        <path d="M 330 190 L 360 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 330 190 L 360 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Perception -->
         <rect x="370" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
@@ -32,7 +32,7 @@ def create_svg():
         <text x="435" y="215" font-size="12" fill="#E2E8F0">(Spatial/Afford.)</text>
 
         <!-- Arrow -->
-        <path d="M 500 190 L 530 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 500 190 L 530 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Memory -->
         <rect x="540" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
@@ -40,7 +40,7 @@ def create_svg():
         <text x="605" y="215" font-size="12" fill="#E2E8F0">(World Model)</text>
 
         <!-- Arrow -->
-        <path d="M 670 190 L 700 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 670 190 L 700 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Intent -->
         <rect x="710" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
@@ -48,7 +48,7 @@ def create_svg():
         <text x="775" y="215" font-size="12" fill="#E2E8F0">(Goal Leases)</text>
 
         <!-- Arrow -->
-        <path d="M 840 190 L 870 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 840 190 L 870 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Planning -->
         <rect x="880" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
@@ -56,7 +56,7 @@ def create_svg():
         <text x="945" y="215" font-size="12" fill="#E2E8F0">(Action Chunk.)</text>
 
         <!-- Arrow to Boundary -->
-        <path d="M 1010 190 L 1040 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
+        <path fill="none" d="M 1010 190 L 1040 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Proposal-Permission Boundary Line -->
         <line x1="1060" y1="100" x2="1060" y2="280" stroke="#A51C30" stroke-width="4" stroke-dasharray="8,8" />
@@ -78,7 +78,7 @@ def create_svg():
 </svg>
 """
     
-    out_dir = '/Users/VJ/GitHub/MLSysBook-brain-figs/images/svg'
+    out_dir = "svg"
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, 'fig03_cognitive_pipeline_horizontal.svg')
     with open(out_path, 'w') as f:

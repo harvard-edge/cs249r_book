@@ -25,12 +25,12 @@ svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1
   <text x="300" y="540" class="label" text-anchor="middle">Speed (rad/s)</text>
 
   <!-- S1 Continuous Region -->
-  <path d="M 100 500 L 100 350 L 350 350 L 450 500 Z" class="region-s1" />
+  <path fill="none" d="M 100 500 L 100 350 L 350 350 L 450 500 Z" class="region-s1" />
   <text x="225" y="450" class="annotation" text-anchor="middle">S1 Continuous</text>
   <text x="225" y="470" class="label" text-anchor="middle">Thermal Equilibrium</text>
 
   <!-- S3 Intermittent Region -->
-  <path d="M 100 350 L 100 150 L 250 150 C 300 150 320 250 350 350 Z" class="region-s3" />
+  <path fill="none" d="M 100 350 L 100 150 L 250 150 C 300 150 320 250 350 350 Z" class="region-s3" />
   <text x="200" y="250" class="annotation-red" text-anchor="middle">S3 Intermittent</text>
   <text x="200" y="270" class="label" text-anchor="middle">Peak Acceleration</text>
 
@@ -61,13 +61,13 @@ svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1
   <!-- Curve: Heat up then cool down -->
   <!-- Start at ambient (650, 450) -->
   <!-- Heat up exponentially to 150 y over 100 x (750, 150) -->
-  <path d="M 650 450 Q 700 450 720 250 T 750 160" class="line-temp" />
+  <path fill="none" d="M 650 450 Q 700 450 720 250 T 750 160" class="line-temp" />
   <!-- Cool down exponentially from 750 to 950 -->
-  <path d="M 750 160 Q 800 400 950 430" class="line-temp" stroke="#1F407A" />
+  <path fill="none" d="M 750 160 Q 800 400 950 430" class="line-temp" stroke="#1F407A" />
   
   <!-- Second cycle -->
-  <path d="M 950 430 Q 1000 430 1020 230 T 1050 160" class="line-temp" />
-  <path d="M 1050 160 Q 1100 400 1150 430" class="line-temp" stroke="#1F407A" />
+  <path fill="none" d="M 950 430 Q 1000 430 1020 230 T 1050 160" class="line-temp" />
+  <path fill="none" d="M 1050 160 Q 1100 400 1150 430" class="line-temp" stroke="#1F407A" />
 
   <!-- Time markers -->
   <line x1="650" y1="500" x2="650" y2="510" class="axis" />

@@ -9,7 +9,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
         <rect width="380" height="150" fill="#E2E8F0" rx="4" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(a) Dynamics &amp; Contact Mismatch</text>
         <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
-        <path d="M 30 110 L 350 110" stroke="#2D3748" stroke-width="1" />
+        <path fill="none" d="M 30 110 L 350 110" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 110 L 80 110 L 120 50 L 300 50" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 30 110 L 90 110 L 150 40 L 180 70 L 300 70" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real -->
         <text x="250" y="45" font-family="sans-serif" font-size="10" fill="#1F407A">Simulated (Ideal)</text>
@@ -21,7 +21,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
         <rect width="380" height="150" fill="#E2E8F0" rx="4" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(b) Actuator &amp; Pipeline Latency</text>
         <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
-        <path d="M 30 100 L 350 100" stroke="#2D3748" stroke-width="1" />
+        <path fill="none" d="M 30 100 L 350 100" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 80 Q 90 40 150 80 T 270 80" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 70 80 Q 130 40 190 80 T 310 80" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real shifted -->
         <line x1="150" y1="80" x2="190" y2="80" stroke="#2D3748" stroke-width="1" stroke-dasharray="2" />
@@ -33,7 +33,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
         <rect width="380" height="150" fill="#E2E8F0" rx="4" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(c) Sensing &amp; Transduction</text>
         <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
-        <path d="M 30 90 L 350 90" stroke="#2D3748" stroke-width="1" />
+        <path fill="none" d="M 30 90 L 350 90" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 70 L 150 70 L 180 70 L 300 70" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 30 60 L 120 60 L 130 110 L 140 110 L 150 60 L 300 60" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real with dropout & bias -->
         <text x="135" y="125" font-family="sans-serif" font-size="10" fill="#A51C30" text-anchor="middle">Dropout</text>
@@ -61,5 +61,5 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
 </svg>
 """
 
-with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_sim2real_gap.svg", "w") as f:
+with open("svg/fig06_sim2real_gap.svg", "w") as f:
     f.write(svg_content)

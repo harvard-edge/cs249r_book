@@ -1,8 +1,8 @@
 import os
 
 # Define output paths
-repo_dir = "/Users/VJ/GitHub/MLSysBook-brain-figs"
-images_dir = os.path.join(repo_dir, "images")
+repo_dir = "../../"
+images_dir = os.path.join(os.path.dirname(__file__), "")
 svg_dir = os.path.join(images_dir, "svg")
 svg_path = os.path.join(svg_dir, "fig03_vla_architecture.svg")
 
@@ -83,23 +83,23 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     </g>
 
     <!-- Arrows from Inputs to Encoders -->
-    <path d="M 240 130 L 295 130" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
-    <path d="M 240 210 L 295 210" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
-    <path d="M 240 290 L 295 290" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+    <path fill="none" d="M 240 130 L 295 130" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+    <path fill="none" d="M 240 210 L 295 210" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+    <path fill="none" d="M 240 290 L 295 290" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
 
     <!-- Arrows from Encoders to Backbone -->
-    <path d="M 460 170 L 515 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
-    <path d="M 460 290 L 490 290 L 490 230 L 515 230" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 460 170 L 515 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 460 290 L 490 290 L 490 230 L 515 230" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
 
     <!-- Arrows from Backbone to Decoders -->
-    <path d="M 680 150 L 745 150" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
-    <path d="M 680 270 L 745 270" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 680 150 L 745 150" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 680 270 L 745 270" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
 
     <!-- Arrows from Decoders to Monitors -->
-    <path d="M 830 320 L 830 360 L 500 360 L 500 405" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 830 320 L 830 360 L 500 360 L 500 405" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
 
     <!-- Arrows from Monitors to Actuators -->
-    <path d="M 700 450 L 795 450" stroke="#A51C30" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <path fill="none" d="M 700 450 L 795 450" stroke="#A51C30" stroke-width="3" marker-end="url(#arrow-red)"/>
     <text x="750" y="440" font-family="sans-serif" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle">Commands</text>
     
     <!-- Legend / Quote -->

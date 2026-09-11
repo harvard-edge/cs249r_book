@@ -88,10 +88,10 @@ svg_code.append(f'<line x1="{ms_to_x(52)}" y1="{y_refl+10}" x2="550" y2="250" st
 svg_code.append(f'<line x1="{ms_to_x(53)}" y1="{y_refl+10}" x2="850" y2="250" stroke="#A0AEC0" stroke-width="1" stroke-dasharray="4,4"/>')
 
 # Path connections
-svg_code.append(f'<path d="M {ms_to_x(10)} {y_perc+15} L {ms_to_x(10)} {y_pol-20}" stroke="#1F407A" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>')
-svg_code.append(f'<path d="M {ms_to_x(30)} {y_perc+15} L {ms_to_x(30)} {y_pol-20}" stroke="#1F407A" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>')
-svg_code.append(f'<path d="M {ms_to_x(30)} {y_pol+20} L {ms_to_x(30)} {y_refl-20}" stroke="#A51C30" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead-red)"/>')
-svg_code.append(f'<path d="M {ms_to_x(52)} {y_pol+20} L {ms_to_x(52)} {y_refl-20}" stroke="#A51C30" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead-red)"/>')
+svg_code.append(f'<path fill="none" d="M {ms_to_x(10)} {y_perc+15} L {ms_to_x(10)} {y_pol-20}" stroke="#1F407A" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>')
+svg_code.append(f'<path fill="none" d="M {ms_to_x(30)} {y_perc+15} L {ms_to_x(30)} {y_pol-20}" stroke="#1F407A" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>')
+svg_code.append(f'<path fill="none" d="M {ms_to_x(30)} {y_pol+20} L {ms_to_x(30)} {y_refl-20}" stroke="#A51C30" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead-red)"/>')
+svg_code.append(f'<path fill="none" d="M {ms_to_x(52)} {y_pol+20} L {ms_to_x(52)} {y_refl-20}" stroke="#A51C30" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrowhead-red)"/>')
 svg_code.append(f'<text x="{ms_to_x(30)+5}" y="{y_refl-30}" class="tiny-label" fill="#A51C30">Write to Buffer</text>')
 
 
@@ -136,7 +136,7 @@ svg_code.append('<rect x="390" y="605" width="120" height="30" fill="#F7FAFC" st
 svg_code.append('<text x="450" y="625" class="small-label" font-weight="bold" text-anchor="middle">seqlock: cseq</text>')
 
 # Arrows 
-svg_code.append('<path d="M 220 520 L 290 520 L 290 475 L 350 475" class="arrow" marker-end="url(#arrowhead)"/>')
+svg_code.append('<path fill="none" d="M 220 520 L 290 520 L 290 475 L 350 475" class="arrow" marker-end="url(#arrowhead)"/>')
 svg_code.append('<text x="290" y="470" class="tiny-label" text-anchor="middle">Write Data</text>')
 
 svg_code.append('<path d="M 160 540 L 160 620 L 380 620" stroke="#1F407A" stroke-width="1.5" stroke-dasharray="4,4" fill="none" marker-end="url(#arrowhead)"/>')
@@ -145,7 +145,7 @@ svg_code.append('<text x="245" y="601" class="tiny-label" text-anchor="middle">1
 svg_code.append('<rect x="180" y="625" width="130" height="24" fill="#FFFFFF" stroke="#CBD5E0"/>')
 svg_code.append('<text x="245" y="641" class="tiny-label" text-anchor="middle">2. atomic_store(even)</text>')
 
-svg_code.append('<path d="M 540 555 L 610 555 L 610 520 L 670 520" class="arrow-red" marker-end="url(#arrowhead-red)"/>')
+svg_code.append('<path fill="none" d="M 540 555 L 610 555 L 610 520 L 670 520" class="arrow-red" marker-end="url(#arrowhead-red)"/>')
 svg_code.append('<text x="610" y="515" class="tiny-label" text-anchor="middle">Read Data</text>')
 
 svg_code.append('<path d="M 740 540 L 740 620 L 520 620" stroke="#A51C30" stroke-width="1.5" stroke-dasharray="4,4" fill="none" marker-end="url(#arrowhead-red)"/>')

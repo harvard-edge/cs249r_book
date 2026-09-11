@@ -10,8 +10,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(a) State-Space Trajectory</text>
         
         <!-- Axes -->
-        <path d="M 30 170 L 350 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
-        <path d="M 30 170 L 30 50" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
+        <path fill="none" d="M 30 170 L 350 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
+        <path fill="none" d="M 30 170 L 30 50" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
         
         <!-- Nominal Support -->
         <path d="M 30 140 L 330 140" stroke="#1F407A" stroke-width="20" stroke-opacity="0.2" fill="none" />
@@ -34,8 +34,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(b) Cumulative Error Scaling</text>
         
         <!-- Axes -->
-        <path d="M 30 170 L 350 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
-        <path d="M 30 170 L 30 50" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
+        <path fill="none" d="M 30 170 L 350 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
+        <path fill="none" d="M 30 170 L 30 50" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>
         
         <!-- Lines -->
         <path d="M 30 170 Q 150 170 330 30" stroke="#A51C30" stroke-width="3" fill="none" />
@@ -53,5 +53,5 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
 </svg>
 """
 
-with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/images/svg/fig06_compounding_error.svg", "w") as f:
+with open("svg/fig06_compounding_error.svg", "w") as f:
     f.write(svg_content)
