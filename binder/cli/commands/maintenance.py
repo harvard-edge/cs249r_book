@@ -317,6 +317,8 @@ class MaintenanceCommand:
         parser.add_argument("action", nargs="?")
         parser.add_argument("--vol1", action="store_true", help="Scope to vol1")
         parser.add_argument("--vol2", action="store_true", help="Scope to vol2")
+        parser.add_argument("--vol3", action="store_true", help="Scope to vol3")
+        parser.add_argument("--vol4", action="store_true", help="Scope to vol4")
         parser.add_argument("--path", default=None, help="File or directory path")
         parser.add_argument("-f", "--file", action="append", default=[], help="Image file to process (repeatable)")
         parser.add_argument("--all", action="store_true", help="Process all matching images")
@@ -343,7 +345,7 @@ class MaintenanceCommand:
             if ns.action not in (None, "paths"):
                 console.print("[red]❌ Supported action: fix glossary paths[/red]")
                 return False
-            volume = "vol1" if ns.vol1 and not ns.vol2 else "vol2" if ns.vol2 and not ns.vol1 else None
+            volume = "vol1" if ns.vol1 and not (ns.vol2 or ns.vol3 or ns.vol4) else "vol2" if ns.vol2 and not (ns.vol1 or ns.vol3 or ns.vol4) else "vol3" if ns.vol3 and not (ns.vol1 or ns.vol2 or ns.vol4) else "vol4" if ns.vol4 and not (ns.vol1 or ns.vol2 or ns.vol3) else None
             return self._maintain_glossary_paths(volume=volume)
 
         if ns.topic == "images":
@@ -373,7 +375,7 @@ class MaintenanceCommand:
             if ns.action not in valid_actions:
                 console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
                 return False
-            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2)
+            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2, ns.vol3, ns.vol4)
             return self._maintain_section_ids(
                 root=root,
                 action=ns.action,
@@ -387,7 +389,7 @@ class MaintenanceCommand:
             if ns.action not in valid_actions:
                 console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
                 return False
-            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2)
+            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2, ns.vol3, ns.vol4)
             return self._maintain_footnotes(
                 root=root,
                 action=ns.action,
@@ -417,16 +419,20 @@ class MaintenanceCommand:
         console.print("  [cyan]./binder/binder fix footnotes cleanup --vol1 --dry-run[/cyan]")
         console.print()
 
-    def _resolve_content_path(self, path_arg, vol1: bool, vol2: bool) -> Path:
+    def _resolve_content_path(self, path_arg, vol1: bool, vol2: bool, vol3: bool = False, vol4: bool = False) -> Path:
         """Resolve content path from args."""
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else (Path.cwd() / p).resolve()
         base = self.config_manager.book_dir
-        if vol1 and not vol2:
+        if vol1 and not (vol2 or vol3 or vol4):
             return base / "vol1"
-        if vol2 and not vol1:
+        if vol2 and not (vol1 or vol3 or vol4):
             return base / "vol2"
+        if vol3 and not (vol1 or vol2 or vol4):
+            return base / "vol3"
+        if vol4 and not (vol1 or vol2 or vol3):
+            return base / "vol4"
         return base
 
     # ------------------------------------------------------------------
@@ -871,14 +877,20 @@ class MaintenanceCommand:
     def _maintain_glossary_paths(self, volume: str = None) -> bool:
         """Show the canonical glossary source files."""
         book_dir = self.config_manager.book_dir
-        volumes = [volume] if volume else ["vol1", "vol2"]
+        volumes = [volume] if volume else ["vol1", "vol2", "vol3", "vol4"]
+        labels = {
+            "vol1": "Volume I",
+            "vol2": "Volume II",
+            "vol3": "Volume III",
+            "vol4": "Volume IV",
+        }
         console.print("[bold]Glossary source of truth[/bold]")
         console.print("The book renders glossary content directly from the volume QMD files.")
         console.print("Glossary JSON generation has been retired to avoid stale parallel sources.\n")
 
         for vol in volumes:
             path = book_dir / vol / "backmatter" / "glossary" / "glossary.qmd"
-            label = "Volume I" if vol == "vol1" else "Volume II"
+            label = labels.get(vol, vol)
             if path.exists():
                 console.print(f"[green]✓[/green] {label}: {path}")
             else:
