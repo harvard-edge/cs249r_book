@@ -6,7 +6,6 @@
 
 :::
 
-
 ::: {#fig-09-locator fig-env="figure" fig-pos="H" fig-cap="**The Memory Stage in the Physical AI Stack**: The four-tier physical AI systems architecture highlights the cognitive deliberation tier, with memory as the third brain stage and this chapter's active focus. The stage carries latent state $z_t$ into a persistent spatial belief $b_t$, making it the only place the system holds what its sensors can no longer see." fig-alt="Diagram titled Physical AI Systems Architecture Stack, drawn as four stacked tiers. Layer 4 is system governance and assurance at 0.1 to 1 hertz, holding boxes for shared autonomy, verification, safety cases, and frontier limits. Layer 3 is the brain, a cognitive deliberation tier at 1 to 50 hertz, holding five stages named ingestion, perception, memory, intent, and planner. A dashed proposal-permission privilege boundary separates it from layer 2, the nervous system, a real-time safety and timing tier at 1000 hertz. Layer 1 is the physical body and continuous plant. Layer 3 is shaded and its memory stage is outlined; the badge reads Active Focus, Chapter 09, Temporal Memory."}
 ![](images/svg/fig_locator.svg){width="100%"}
 :::
@@ -18,29 +17,25 @@
 
 *How fast does a spatial belief turn into dangerous fiction once a sensor loses sight of an object?*
 
-Physical interaction within a dynamic real-world environment is fundamentally non-Markovian: an obstacle that temporarily passes behind an occluding pillar, a heavy tool resting inside a closed bin, or a rigid surface whose mechanical compliance was probed only seconds ago continues to exert absolute physical constraints on the workspace regardless of its current visibility. An embodied agent cannot survive by reacting solely to instantaneous sensory inputs; it must actively maintain a highly coherent, continuous temporal belief state that persistently tracks unseen entities without fatally confusing past historical observations with present physical reality. Because the physical world is in constant motion, as occlusion duration grows, the spatial uncertainty of any hidden object inherently expands, and unobserved dynamic objects inevitably drift from their last known coordinates. Dependable physical AI architectures must therefore systematically separate geometric spatial covariance from discrete existence probability to accurately model the world. They must rigidly anchor abstract perceptual tokens to mathematically structured coordinate transform trees, and mathematically enforce explicit temporal decay horizons ($t_{\text{exp}}$) across all memory structures. By treating memory not as a static database but as a dynamically decaying physical model, this rigorous expiration mechanism guarantees that phantom, stale representations of the environment never induce catastrophic planning collisions or misguide high-frequency control loops. This chapter explores how temporal belief states are constructed, updated, and safely expired, ensuring that the system's internal spatial memory always reliably bounds the dynamic physical reality it navigates.
+A moving obstacle remains a constraint after it disappears behind a pillar. The machine must remember it, yet its last observed position becomes less reliable as time passes. Treating that position as current can send a planner into occupied space; discarding it immediately can erase a hazard that remains nearby. Spatial memory must therefore carry both an estimate and the limits of what that estimate supports. Observation age, uncertainty, and coordinate alignment determine whether a remembered object can still guide motion. A frozen coordinate transform is especially dangerous because it can make an old estimate appear current to every downstream consumer. Expiration must withdraw that estimate's authority without treating the unseen region as empty. In the physical AI stack, memory connects the brain's account of the world to the nervous system's permission to move, with validity windows set by how quickly uncertainty consumes the body's available clearance.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
-After studying this chapter, you will be able to:
 
-1. State what a belief must carry in addition to a value, and why each part is required.
-2. Predict how long a belief remains usable after its last measurement, from the dynamics rather than from habit.
-3. Set an expiry from a measured decay rate and defend the number against mechanical clearance budgets.
-4. Identify which belief failures are visible downstream and which are silent.
-5. Contrast volumetric representations (TSDF voxel grids, OctoMaps, 3D Gaussian Splats) across memory footprints and query latencies.
-6. Design lock-free coordinate transform and raycasting pipelines that assert negative evidence to prevent the frozen transform trap.
-
-*Core chapter takeaway.* Belief has a rate of decay, and it must expire on that rate rather than on convenience. A frozen transform is more dangerous than a missing one, because nothing downstream can tell.
+- Specify belief records that preserve measurement time, coordinate frame, uncertainty, and conditions for use
+- Set belief expiry from measured uncertainty growth and the task's physical error budget
+- Compare spatial representations by memory cost, query time, and information needed for action
+- Design spatial updates that preserve evidence age and distinguish missing observations from verified free space
+- Diagnose stale transforms and other belief failures that downstream consumers may not detect
 
 :::
 
 ## Preserving Spatial Belief {#sec-memory-9-1}
 
-As highlighted in @fig-09-locator, this section introduces the core focus of the chapter within the broader physical AI systems architecture. A physical sensor observation records what was true at one discrete, unrepeatable instant in the past. A **belief**\index{Belief} is the estimate the machine carries forward after that instant, representing what the policy assumes to be true about the environment at the present moment. Between consecutive sensor frames, no physical system possesses direct knowledge of its surroundings. Instead, it operates entirely on belief, projecting past data into the immediate present. Because the physical world does not stop moving when an exposure ends, an optical link drops packets, or an obstacle occludes a line of sight, every belief carries an intrinsic rate of decay, drifting away from physical reality until it becomes fiction.
+A manipulator may lose sight of a moving fixture just as its tool approaches contact. Discarding the last observation would leave it without a target; treating that observation as current would hide the fixture's continued motion. The machine needs a **belief**\index{Belief}, an estimate carried forward from sensory evidence together with the uncertainty in that estimate. Perception supplies a dated observation. Memory must determine how long that observation, combined with a model of possible motion, can still support the task.
 
-In the four-tier architectural hierarchy of Physical AI (@sec-nervous), the **brain**\index{Brain} organ sits between incoming sensory observations and low-level nervous system enforcement. Within this cognitive layer, **spatial memory**\index{Spatial memory} serves as the temporal bridge that carries geometric, spatial, and physical beliefs forward in time ( The primary systems challenge of memory is to bound this uncertainty growth against task-defined usability thresholds before stale data can misguide downstream planning.
+Within the **brain**\index{Brain}, the memory stage in @fig-09-locator connects perception to intent and planning. Its **spatial memory**\index{Spatial memory} carries geometric and physical estimates forward while tracking their uncertainty against task-defined limits. The authority separation established in @sec-nervous gives those limits an operational consequence: once a belief can no longer support a proposed action, downstream execution must be able to withdraw permission to use it.
 
 In a canonical heterogeneous dual-brain System-on-Chip (SoC) architecture, this principle governs the division of responsibility between compute tiers. The unprivileged application processor (Linux MPU) maintains high-dimensional spatial memory structures, processes multi-modal perception, and generates candidate trajectory proposals. The real-time safety processor (deterministic bare-metal microcontroller unit, MCU) acts as the permission referee, enforcing hard temporal deadlines and physical validity limits. Because the Linux MPU experiences scheduling jitter, memory bus contention, and inference latency, it cannot be trusted to self-report temporal freshness. The real-time MCU evaluates every incoming proposal against independent hardware timers, revoking tracking authority the moment an unrefreshed belief breaches task safety margins.
 
@@ -48,13 +43,15 @@ Consider an analytical example of a manipulator tasked with touching a workpiece
 
 In software systems, data age is frequently measured from the instant a message was serialized, published over an inter-process bus, or updated in a shared memory table. In a physical AI system, this convention is dangerous. Propagating a state estimate through an extended Kalman filter at $1000\text{ Hz}$ or republishing a kinematic transform at $200\text{ Hz}$ creates a stream of fresh timestamps, but it does not refresh the underlying information. The true age of a belief is determined strictly by the timestamp of the last physical measurement that constrained it. A downstream tracking loop that reads a position estimate generated by dead reckoning or policy rollouts may observe a publish timestamp only $2\text{ ms}$ old, yet the physical error envelope continues to expand at the velocity of the unobserved drift. Timestamping an inference output or a cache lookup records when compute occurred, but it tells the receiver nothing about when reality was last checked.
 
-In traditional computing architectures, an immutable variable in memory retains its validity indefinitely until an explicit write modifies its bits. A cached key-value pair remains accurate as long as the underlying database record has not signaled an invalidation. In physical systems, the failure mode is inverted. An unchanged value in memory becomes progressively less true because physical state evolves under external forces while the stored bits remain static. The bits do not spoil through corruption; they spoil through divergence. As proven in the classical theoretical foundation of Simultaneous Localization and Mapping (SLAM) by @durrant2006simultaneous, dead-reckoned spatial error covariances compound monotonically over time, correlating landmark estimates and causing open-loop spatial memory to diverge unless anchored by global sensor measurements and loop-closure constraints. When a camera is occluded or an optical link drops frames, a register holding the last observed object pose retains its floating-point value with perfect numerical precision. If the machine continues executing trajectory commands against that frozen value, the discrepancy between the stored representation and physical geometry compounds with every millisecond of unobserved motion, eventually driving the end-effector into collision.
+The stored bits can remain intact while the physical claim they represent loses support. A register preserves the last observed pose even when the fixture has moved, so memory integrity alone cannot establish geometric validity. The treatment of Simultaneous Localization and Mapping (SLAM) by @durrant2006simultaneous explains how uncertainty in motion and landmark estimates must be managed through measurement updates and spatial constraints. When a camera is occluded or an optical link drops frames, the missing evidence must remain visible in the estimate. Otherwise, a controller may continue tracking a precise stored coordinate after the real object has left it.
 
 To prevent a machine from acting on stale data, memory systems must treat expiry as an explicit interface event. An expired belief is not a missing variable or a null pointer in an operating system; it is a formal boundary condition where the uncertainty envelope around a state estimate exceeds the safety tolerance of the task. The **belief state invalidation horizon**\index{Belief state invalidation horizon} ($t_{\mathrm{exp}} = \inf \{ t \ge 0 : E(t) \ge E_{\max} \}$) marks the exact temporal deadline where unobserved kinematic drift and process noise drive accumulated error past the mechanical clearance or safety margin ($E_{\max}$), revoking tracking authority and forcing an explicit transition to a safe fallback mode. Managing this boundary requires treating every stored quantity not merely as a coordinate or a vector, but as an active contract defined by when it was measured, the reference frame in which it was established, and the bounded rate at which its validity drains away.
 
 ::: {#psp-memory-evidence-epoch-invariant .callout-perspective title="The evidence epoch invariant"}
 *Extrapolation advances timestamps without refreshing evidence age. Unmonitored belief drifts into physical failure. Never let an intermediate predictor, filter, or transport bridge reset the evidence acquisition epoch $t_0$; compute freshness is a software artifact, but physical freshness belongs strictly to the hardware transducer.*
 :::
+
+Preserving the evidence epoch is one part of making a belief usable outside the estimator that produced it. The receiving component also needs to know what the estimate describes, how uncertain it is, and when that uncertainty invalidates the intended action. These requirements determine the belief record that memory hands downstream.
 
 ## What Memory Hands Over {#sec-memory-9-2}
 
@@ -287,8 +284,6 @@ The volumetric belief state produced by this pipeline adheres to the abstract da
 
 : **Abstract Volumetric Spatial Belief Manifest Schema**\index{Abstract Volumetric Spatial Belief Manifest Schema}: Structural parameters, data types, physical SI units, and invariant constraints governing 3D TSDF and occupancy state memory handoffs between spatial estimation backbones and downstream motion planning controllers. {#tbl-09-schema-volumetric-belief tbl-colwidths="[20,18,22,40]"}
 
-### Autoregressive VLA temporal memory and KV-cache ring-buffering
-
 While volumetric occupancy grids, TSDF maps, and coordinate trees defend metric clearance and geometric relationships, modern Physical AI systems increasingly deploy autoregressive Vision-Language-Action (VLA) foundation models (such as RT-2 [@brohan2023rt2], OpenVLA [@kim2024openvla], and Octo [@octo_2023]) and recurrent world models (such as DreamerV3 [@hafner2023mastering]). In these systems, temporal belief across extended manipulation tasks is maintained directly within the neural memory of the model. In an autoregressive transformer processing multimodal sensory telemetry, every interaction step appends new tokens—including multi-view visual patch tokens, proprioceptive joint states, and predicted action tokens—to the attention Key-Value (KV) cache.
 
 The physical memory footprint of this KV-cache scales linearly with cumulative sequence context length $L$:
@@ -454,17 +449,13 @@ When each individual state record faithfully accounts for its own decay and stri
 
 ## Fallacies and Pitfalls {#sec-memory-9-10}
 
-When individual state records are evaluated in isolation, each may satisfy its freshness deadline, maintain bounded covariance, and present clean cryptographic provenance. In a physical machine that touches and regulates, failures rarely announce themselves through a single expired record. Instead, hazardous behaviors emerge when multiple estimates, each internally consistent and unexpired, are evaluated jointly by a downstream policy or controller. The following five stress tests evaluate how joint inconsistency across asynchronous sensing, spatial frame fusion, track termination, common-cause sensor bias, and kinematic epoch skew creates physical failure modes:
+Individually valid records do not necessarily form a consistent account of the workspace. A controller must reconcile their times, coordinate frames, and physical sources before using them together to authorize motion.
 
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Evaluating spatial clearance between moving bodies using asynchronous timestamps.*
 
-*The scenario.* A dual-arm assembly cell seats a cylindrical shaft into a moving collar. Arm 1 moves the shaft along the insertion axis at $v_1 = 0.35\text{ m/s}$, while Arm 2 tracks the collar translating at $v_2 = -0.15\text{ m/s}$ (relative closing velocity $v_{\mathrm{rel}} = 0.50\text{ m/s}$). Both state estimators publish records with a $50.0\text{ ms}$ expiry. Camera 1 captures shaft position at $t_1 = 100.0\text{ ms}$ and Camera 2 captures collar position at $t_2 = 120.0\text{ ms}$. At evaluation time $t = 125.0\text{ ms}$, both records remain unexpired. The insertion policy commands alignment based on a nominal radial clearance of $1.5\text{ mm}$.
-
-*The dilemma.* The controller evaluates spatial separation without reconciling timestamps. Over the skew interval $\Delta t = |t_2 - t_1| = 20.0\text{ ms}$, relative displacement shifts by $\Delta x = v_{\mathrm{rel}} \Delta t = 0.50\text{ m/s} \times 0.020\text{ s} = 10.0\text{ mm}$. Because this $10.0\text{ mm}$ skew error exceeds the $1.5\text{ mm}$ clearance by more than a factor of six, the commanded trajectory drives the shaft directly into the collar lip.
-
-*Systems takeaway: Joint Temporal Alignment Law.* Individual freshness guarantees only that a measurement was true when acquired, but multi-body physical interaction demands that multiple beliefs be reconciled to the same microsecond instant. Multi-entity controllers must forward-propagate asynchronous beliefs through their dynamic models or enforce maximum allowable observation skew $\Delta t_{\mathrm{max}} = \delta_{\mathrm{clearance}} / v_{\mathrm{rel}}$.
+Two arms bring a shaft and collar together at a relative closing velocity of $v_{\mathrm{rel}} = 0.50\text{ m/s}$. Their position records differ in acquisition time by 20.0 ms, although both remain within a $50.0\text{ ms}$ expiry window. Comparing the records directly combines positions that never described the same instant. During the time gap, the relative configuration changes by $10.0\text{ mm}$, enough to matter for a precision insertion. Individual freshness checks cannot establish joint alignment. The controller must propagate both estimates to a common evaluation time or bound their allowable skew using the interaction's motion and clearance requirements.
 
 :::
 
@@ -472,11 +463,7 @@ When individual state records are evaluated in isolation, each may satisfy its f
 
 **Fallacy**: *Averaging conflicting spatial estimates resolves uncertainty when measurements disagree.*
 
-*The scenario.* An overhead vision system and an in-hand optical profilometer estimate the origin of a titanium blank clamped to a workbench. The overhead camera reports origin at $x_{\mathrm{base}} = 145.0\text{ mm} \pm 1.5\text{ mm}$ ($3\sigma$). The in-hand profilometer reports the same feature at $x_{\mathrm{base}} = 149.0\text{ mm} \pm 1.0\text{ mm}$. The combined error bound is $2.5\text{ mm}$, but the spatial separation between means is $|145.0\text{ mm} - 149.0\text{ mm}| = 4.0\text{ mm}$.
-
-*The dilemma.* An unvalidated sensor fusion module computes a variance-weighted average of $147.4\text{ mm} \pm 0.83\text{ mm}$. When the cutter approaches at rapid traverse, the tool plunges into material $2.4\text{ mm}$ deeper than intended, inducing severe chatter and spindle overcurrent.
-
-*Systems takeaway: Geometric Innovation Gating Law.* Averaging conflicting spatial estimates whose separation exceeds the Minkowski sum of their bounds does not resolve uncertainty; it fabricates a confident midpoint where no physical surface exists. Spatial estimators must reject fusion and halt motion when Chi-squared innovation gates fail.
+An overhead camera and an in-hand profilometer locate the same workpiece feature, but their means differ by 4.0 mm while their stated error bounds sum to $2.5\text{ mm}$. A fusion routine averages the reports and returns a narrower uncertainty interval without first investigating the disagreement. The cutter then acts on a position estimate whose apparent precision conceals inconsistent evidence. Averaging cannot repair a violated measurement assumption. The estimator must apply its innovation gate and withhold the fused estimate when the consistency check fails, allowing the motion controller to stop or defer the operation until the discrepancy is resolved.
 
 :::
 
@@ -484,11 +471,7 @@ When individual state records are evaluated in isolation, each may satisfy its f
 
 **Fallacy**: *Bounded spatial covariance proves that a physical entity still exists in the workspace.*
 
-*The scenario.* A robotic arm picks steel components from a feed belt moving at $0.80\text{ m/s}$. An operator removes a component before the pick zone. The tracking filter receives no subsequent visual detections, but continues extrapolating component position using its belt velocity model ($\sigma_x(t) = \sigma_0 + \alpha t$), maintaining variance below the rejection threshold for $300.0\text{ ms}$.
-
-*The dilemma.* At $t = 200.0\text{ ms}$ after removal, the gripper executes a ballistic descent to grasp the component at the extrapolated coordinate, slamming fingers into an empty belt and striking an alignment guide.
-
-*Systems takeaway: Existence Decoupling Law.* Spatial covariance represents geometric uncertainty assuming an entity exists. It contains zero information regarding whether the entity remains present in the physical world. Estimators must couple spatial propagation with an existence probability field that decays upon negative visual evidence.
+An operator removes a component from a moving feed belt before it reaches the pick zone. The tracker receives no further detections but continues predicting the component's location, keeping its spatial covariance below the rejection threshold for $300.0\text{ ms}$. At $t = 200.0\text{ ms}$ after removal, the gripper descends toward the predicted position and strikes the empty belt. The position estimate was conditional on the component still being present. A tracker must maintain evidence of existence separately from spatial uncertainty and update it when expected detections are absent, so a precise extrapolation does not authorize a pick on a vanished object.
 
 :::
 
@@ -496,11 +479,7 @@ When individual state records are evaluated in isolation, each may satisfy its f
 
 **Fallacy**: *Agreement between redundant estimators implies independent physical evidence.*
 
-*The scenario.* An articulated press regulates $200.0\text{ N}$ normal force against an aircraft panel using two estimators: an analytical joint-current model and a learned neural estimator ingesting wrist strain-gauge voltages. A nearby radiant heater elevates the wrist casing by $18.0^{\circ}\text{C}$, introducing a $+15.0\text{ N}$ thermal zero-point bias into the shared strain-gauge bridge.
-
-*The dilemma.* Because both estimators draw from the same uncompensated analog channel, both report an applied force of $200.0\text{ N}$ with zero residual, showing perfect mutual agreement. In physical reality, the exerted force is only $185.0\text{ N}$, leaving the structural bond dangerously under-compacted.
-
-*Systems takeaway: Sensor Provenance Invariant.* Redundant software estimators provide zero safety margin if their noise models and systematic biases share a common physical hardware transducer or analog line. Genuine redundancy requires heterogeneous sensing modalities.
+A press relies on two force estimators that share an uncompensated strain-gauge channel. Heating introduces a $+15.0\text{ N}$ bias into that channel, so both estimators report $200.0\text{ N}$ while the panel receives only $185.0\text{ N}$. Their agreement reveals nothing about the shared error, and the resulting bond can remain under-compacted. Comparing software outputs detects only faults that produce different outputs. An independence claim must trace each estimate back through its physical transducers and analog processing, identifying common sources of bias. Different algorithms alone do not supply independent evidence when both depend on the same affected measurement.
 
 :::
 
@@ -508,11 +487,7 @@ When individual state records are evaluated in isolation, each may satisfy its f
 
 **Pitfall**: *Applying an unexpired kinematic transform from an asynchronous epoch to sensor data.*
 
-*The scenario.* A mobile manipulator finishes a turbine blade while its base translates at $0.20\text{ m/s}$. An in-hand scanner acquires surface profile points at $t_{\mathrm{scan}} = 50.0\text{ ms}$. The kinematics engine computes the base-to-tip coordinate transform at $t_{\mathrm{kin}} = 70.0\text{ ms}$ while the arm decelerates at $2.0\text{ m/s}^2$. Both records carry a $100.0\text{ ms}$ expiry window.
-
-*The dilemma.* The surface reconstruction node transforms the $50.0\text{ ms}$ point cloud using the $70.0\text{ ms}$ kinematic matrix because both records are unexpired. Over the $20.0\text{ ms}$ epoch gap, the base moves $4.0\text{ mm}$ and the arm flexes under deceleration, inducing a $5.8\text{ mm}$ spatial distortion in the computed surface normal that causes the grinder to gouge the blade.
-
-*Systems takeaway: Transform Epoch Invariant.* Kinematic transforms are continuous functions of time. Applying an unexpired transform from the wrong epoch distorts geometric truth as destructively as corrupting raw sensor packets. State records must enforce strict epoch matching ($|t_{\mathrm{scan}} - t_{\mathrm{kin}}| \le \epsilon$) across transform lookups.
+A mobile manipulator scans a turbine blade at $t_{\mathrm{scan}} = 50.0\text{ ms}$, then transforms the points using its pose at $t_{\mathrm{kin}} = 70.0\text{ ms}$. Both records satisfy their expiry checks, but the base has moved $4.0\text{ mm}$ between those instants. The resulting surface reconstruction incorporates machine motion as though it were workpiece geometry, shifting the grinder's intended contact. A transform is valid for a particular time as well as a coordinate frame. The lookup must match the acquisition epoch within the allowed tolerance, $|t_{\mathrm{scan}} - t_{\mathrm{kin}}| \le \epsilon$, rather than selecting any transform that has not expired.
 
 :::
 

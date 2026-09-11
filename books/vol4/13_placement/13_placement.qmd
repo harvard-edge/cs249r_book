@@ -17,25 +17,23 @@
 
 *The boundaries were drawn on a diagram. Do they exist on the die?*
 
-In beautifully abstracted system architecture diagrams, complex processes like neural perception, continuous trajectory planning, and deterministic safety enforcement invariably appear as clean, functionally independent blocks gracefully connected by ideal, latency-free mathematical arrows. However, the critical question remains: do these pristine logical boundaries actually exist on the physical die? In a deployed physical machine, these disparate and demanding workloads are invariably forced onto shared, heavily contended system-on-chip silicon to meet strict and unforgiving size, weight, power, and cost constraints. The physical reality is that when a dense neural accelerator initiates a massive burst across a unified memory interconnect, it can instantaneously saturate shared DRAM controllers and introduce catastrophic queuing contention, potentially delaying a safety-critical encoder interrupt by several physically devastating milliseconds. Heterogeneous compute placement emerges as the vital engineering discipline tasked with resolving this interference, meticulously allocating asynchronous cognitive tasks and hard real-time reflex workloads across a diverse array of CPUs, NPUs, GPUs, and specialized real-time microcontrollers. True isolation must be measured rather than merely assumed. By strategically implementing hardware-enforced AXI QoS arbitration, stringent power rail decoupling, and proactive thermal mass management, engineers can mathematically and empirically prove that real-time safety guarantees definitively survive execution on shared silicon. This rigorous approach ensures that cognitive bursts and reflex loops coexist safely without compromising the microsecond determinism required to govern kinetic energy and safeguard the broader physical AI system.
+Separate blocks in an architecture diagram can still compete for the same memory bus, power supply, and cooling capacity. A burst of neural computation may delay a control task even when the tasks run on different processor cores. The delay matters because the machine continues moving while the safety path waits for data or recovers from a power disturbance. Compute placement must therefore establish how much interference each shared resource permits and whether the remaining response time fits the physical deadline. Software privilege boundaries alone cannot answer that question. Measurements under contention can expose a failed isolation claim, while resource reservations or separate hardware can reduce the coupling that caused it. Those choices also consume space and power that the machine must supply. Placing the brain and nervous system on silicon is consequently a co-design decision about workload interference, execution deadlines, and the body's tolerance for delayed correction.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
-After studying this chapter, you will be able to:
 
-1. Name every claimant on each shared resource in a given heterogeneous design.
-2. Measure the tail latency distribution of the enforcement path under synthetic contention on the proposal path.
-3. State what experimental result would falsify an independence claim, then construct the test harness to run it.
-4. Predict how a power step or thermal excursion in the accelerator domain alters the execution timing and clock stability of the safety core.
-5. Evaluate the four remediation strategies (static reservation, spatial partitioning, workload reduction, and separate silicon) against the physical dynamics of the plant.
+- Inventory shared hardware resources used by learned proposal and safety enforcement paths
+- Measure enforcement latency while competing workloads stress shared memory, power, and thermal resources
+- Design tests that could disprove a claimed separation between proposal and enforcement
+- Analyze how power transients and thermal coupling change the safety path's timing margins
+- Select isolation remedies using measured interference, resource availability, and the plant's response deadlines
 
-*Core chapter takeaway.* Independence claimed on a block diagram is not independence measured under load. Two paths on one die share a bus, a rail, and a thermal mass, and physical separation must be demonstrated through worst-case empirical measurement rather than asserted through logical privilege.
 :::
 
 ## The Silicon Substrate {#sec-placement-13-1}
 
-As highlighted in @fig-13-locator, this section introduces the core focus of the chapter within the broader physical AI systems architecture. Consider an industrial bypass valve regulating high-pressure fuel flow into a gas turbine combustion chamber. Upstream sensors monitor manifold pressure, mass flow rate, and fuel temperature. A learned policy running on an integrated neural accelerator evaluates these telemetry streams every $20\text{ ms}$, proposing continuous micro-adjustments to the valve actuator to optimize combustion efficiency. Parallel to this proposal pipeline, a deterministic safety enforcer executes on a separate real-time processor core, evaluating flow rate limits and chamber pressure thresholds every $1.0\text{ ms}$. If chamber pressure exceeds a critical limit, the enforcer must immediately override the policy, command the valve servo to clamp shut within $2.0\text{ ms}$, and prevent an overpressure blowout. In the four-tier architecture stack of  On an architectural block diagram, the proposal path and the enforcement path appear as two completely isolated functional blocks connected only by a logical interface. On the physical system-on-chip installed inside the valve actuator housing, such as a canonical heterogeneous dual-brain System-on-Chip (SoC), both compute engines reside on the same square centimeter of silicon, sharing memory buses, power rails, clock trees, and peripheral controllers.
+A safety enforcer can have its own processor core and still miss a deadline because a learned policy is using the same memory bus. Consider an industrial bypass valve regulating high-pressure fuel flow into a gas turbine combustion chamber. A learned policy evaluates pressure, flow, and temperature telemetry every $20\text{ ms}$, while an enforcer on a separate real-time core checks limits every $1.0\text{ ms}$. When chamber pressure exceeds a critical limit, the design requires the enforcer to override the policy and command the valve servo to clamp shut within $2.0\text{ ms}$. Those logical responsibilities are clear, but their physical independence remains untested. On a heterogeneous System-on-Chip (SoC), both engines may share memory buses, power rails, clock trees, and peripheral controllers. The silicon placement and bus-quality stage highlighted in @fig-13-locator must preserve the enforcement contract under those shared-resource demands.
 
 This shared-silicon reality governs every domain of physical embodiment across all Three Physical Machine Archetypes:
 
@@ -52,7 +50,7 @@ This shared-silicon reality governs every domain of physical embodiment across a
 
 :::
 
-In traditional software systems operating "behind glass," computing is idempotent and isolation is easily abstracted through virtual memory, kernel time-slicing, and software containers. A delayed database query or an unhandled exception causes temporary software stalls without altering physical reality. Following the end-to-end argument in system design [@saltzer1984end], safety cannot be established as an afterthought by intermediate software shims; safety arguments constructed in @sec-nervous and @sec-enforcement depend on maintaining strict physical separation between the untrusted cognitive authority that proposes action and the deterministic reflex authority that permits it. On a shared heterogeneous die, this separation requires **operational independence**\index{Operational independence!definition}, which can be defined through two concrete physical requirements. First, no computational activity, memory transfer, or burst traffic originating from the proposal path may cause the execution latency of the enforcement path to exceed its bounded deadline. Second, no failure mode, software crash, or privilege escalation within the proposal path may inhibit the enforcer from evaluating safety invariants or asserting a safe default state. If an unconstrained tensor calculation on the Linux Microprocessor Unit (MPU) delays a safety evaluation on the Real-Time Microcontroller Unit (MCU) long enough for pressure in the valve manifold to spike past its structural limit, the logical isolation depicted on the architecture diagram has failed in hardware.
+Memory protection and process isolation do not by themselves bound interference through a shared bus or power rail. Following the end-to-end argument in system design [@saltzer1984end], the separation required by @sec-nervous and @sec-enforcement must hold across the complete proposal-to-actuation path. On a heterogeneous die, **operational independence**\index{Operational independence!definition} requires that proposal-side activity cannot push enforcement beyond its deadline and that proposal-side failures cannot disable its authority to refuse. If a tensor calculation on the Linux Microprocessor Unit (MPU) delays the Real-Time Microcontroller Unit (MCU) while valve pressure rises, the architectural separation has failed at the resource they share.
 
 To understand how logical isolation breaks down on silicon, consider an analytical example of this flow-regulating system implemented on a single system-on-chip. The deterministic enforcer runs at $1000\text{ Hz}$, initiating a state evaluation cycle every $1.0\text{ ms}$. In each cycle, the enforcer reads $64\text{ KB}$ of calibrated sensor history from main memory, verifies boundary conditions, and issues an actuator command, requiring $120\,\mu\text{s}$ of baseline execution time when memory access is uncontended. The chip uses a shared 64-bit LPDDR4 memory subsystem running at a data rate of $1600\text{ MT/s}$, delivering a peak theoretical bandwidth of $12.8\text{ GB/s}$. In isolation, streaming the enforcer's $64\text{ KB}$ sensor buffer over this bus requires $64\text{ KB} / (12.8\text{ GB/s}) = 5.0\,\mu\text{s}$.
 
@@ -62,7 +60,7 @@ Main memory bandwidth is merely one member of an extensive list of shared on-chi
 
 Because these interactions are governed by physical coupling rather than software abstractions, architectural claims of independence must be treated as hypotheses to be falsified through rigorous measurement. Verifying a system requires four distinct steps. First, an engineer builds a claimant inventory, identifying every physical resource shared between proposal and enforcement domains, from memory channels and interconnect queues down to voltage regulators and thermal interfaces. Second, the system undergoes loaded measurement, subjecting the proposal path to synthetic worst-case compute, memory, and bus traffic while logging the full tail latency distribution of the enforcement path at $P_{99}$ and $P_{99.9}$. Third, the system undergoes warm measurement, operating under peak ambient temperatures and sustained thermal dissipation to measure clock throttling and voltage droop under load. Fourth, the engineer records a formal placement decision, verifying that the worst-case response time of the safety loop remains strictly within physical requirements under all possible operating states.
 
-When empirical testing reveals that shared hardware invalidates safety margins, modifying software task priorities or adjusting thread scheduling cannot resolve the underlying physical contention. The coupling exists in the silicon wiring, the queue depths of the crossbar arbiters, and the thermal resistance of the integrated circuit package. Determining which compute engines can safely reside on the same die, how shared interconnects must be partitioned, and where physical isolation boundaries must be enforced represents the fundamental engineering problem of physical placement.
+If shared hardware erodes the enforcement margin, a placement decision must address the resource causing the interference. Scheduling may help when it bounds access to that resource; it cannot remove an unaccounted power or thermal coupling. The starting point is therefore to trace the proposal and permission paths onto the actual die and identify every place where they compete. Only then can reservation, partitioning, workload reduction, or separate silicon be evaluated against the physical deadline.
 
 ## Two Paths on One Die {#sec-placement-13-2}
 
@@ -393,17 +391,13 @@ A placement record produced under standard test conditions demonstrates that phy
 
 ## Fallacies and Pitfalls {#sec-placement-13-9}
 
-A physical separation that holds at room temperature can fail when the die warms to operational equilibrium. On a cold test bench at $25.0^{\circ}\text{C}$, power distribution networks operate with minimal resistance, transistor switching margins remain wide, and memory controllers spend negligible bandwidth on refresh commands. Once an autonomous machine runs under continuous load, junction temperatures reach $85.0^{\circ}\text{C}$ to $105.0^{\circ}\text{C}$. At these temperatures, metal line resistance increases, propagation delays stretch, and resource contention sharpens. A placement claim cannot rest on nominal traces. The following fallacies and pitfalls evaluate where logical boundaries collapse into physical interference under thermal and electrical stress:
+Placement determines which physical resources the proposal and enforcement domains share. Nominal traces cannot establish their independence when power transients, clock faults, memory contention, or a stalled producer exercise those shared paths.
 
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Logical privilege rings protect real-time enforcers from shared-rail electrical droop.*
 
-*The scenario.* A natural gas flow unit integrates an 8-core neural accelerator and an isolated lockstep MCU core on one SoC. The enforcer must read line pressure ($12.0\text{ MPa}$) and verify valve current within $1.20\text{ ms}$ at $1000\text{ Hz}$. At a junction temperature of $95.0^{\circ}\text{C}$, the accelerator draws a $22.0\text{ A}$ current step ($35.0\text{ ns}$ rise time) on the shared $0.85\text{ V}$ rail.
-
-*The dilemma.* The transient load induces a $165.0\text{ mV}$ droop across package parasitics, triggering on-chip DVFS circuits to scale enforcer clock frequency from $400.0\text{ MHz}$ to $200.0\text{ MHz}$ to prevent timing faults. At $200.0\text{ MHz}$, enforcement execution time stretches beyond the $1.20\text{ ms}$ pressure rise deadline, causing physical over-pressurization.
-
-*Systems takeaway: Power Grid Isolation Law.* Electrical rails do not honor logical privilege levels. An accelerator burst inside a software container can collapse the power grid of the safety enforcer, turning a compute spike into actuator control failure unless protected by on-package decoupling and hardware current-slew limiters.
+A gas-flow controller places a neural accelerator and a lockstep enforcement core on the same SoC. An accelerator current burst depresses their shared rail, causing protection circuitry to reduce the enforcer clock from $400.0\text{ MHz}$ to $200.0\text{ MHz}$. The enforcement task then exceeds its pressure-response deadline despite retaining its software privileges. Access control has prevented unauthorized memory writes, but it has not preserved execution timing through the electrical transient. Placement qualification must test shared-rail interference and establish adequate decoupling, current-slew limits, or supply separation so accelerator activity does not consume the enforcer's timing margin.
 
 :::
 
@@ -411,11 +405,7 @@ A physical separation that holds at room temperature can fail when the die warms
 
 **Pitfall**: *Sharing Phase-Locked Loops or reset controllers across proposal and permission domains.*
 
-*The scenario.* A cryogenic propellant regulator uses an on-chip PLL to synthesize clocks for vision pipelines, policy runtimes, and the real-time enforcement bus. While regulating liquid oxygen at $6.50\text{ kg/s}$, a thermal transient unlocks the primary PLL, or a watchdog asserts a warm reset of the stalled policy cluster across a shared reset controller.
-
-*The dilemma.* Reset assertions in the proposal domain induce transient electrical glitches and metastable states in the shared enforcement register file, disabling the enforcer. The enforcer requires a dedicated crystal oscillator and independent power-on-reset rail, transitioning valve drivers to a passive spring-return bypass state within $0.60\text{ ms}$ of clock instability.
-
-*Systems takeaway: Clock and Reset Domain Invariant.* A safety enforcer cannot outlive the clock distribution network that drives its flip-flops. When clock trees or reset lines are shared across failure domains, a fault in an unverified policy engine propagates directly into the nervous system.
+A propellant regulator uses one PLL and reset controller for policy processing and real-time enforcement. A thermal clock fault or a watchdog reset of the stalled policy cluster can therefore interrupt the enforcement domain as well. The nominal block diagram shows separate processors, but both depend on infrastructure that the same event can disable. Clock and reset dependencies must be traced through the implementation, with independent resources where continued enforcement is required. The valve drivers also need a defined transition to their passive return state when active control becomes unavailable; restarting the policy processor cannot be the only recovery mechanism.
 
 :::
 
@@ -423,11 +413,7 @@ A physical separation that holds at room temperature can fail when the die warms
 
 **Fallacy**: *Low average memory bus utilization guarantees bounded read latency for real-time safety tasks.*
 
-*The scenario.* A chemical metering machine streams camera DMA traffic at $950.0\text{ MB/s}$ into shared DRAM while logging flushes $128.0\text{ KB}$ buffers. The enforcer reads calibration tables and pressure across the main crossbar. Although average bandwidth utilization is $28\%$, DMA bursts align with enforcer reads at $T_j = 90.0^{\circ}\text{C}$, where DRAM refresh overhead consumes $12\%$ of total channel availability.
-
-*The dilemma.* The phase-aligned collision expands enforcer read latency from $35.0\ \mu\text{s}$ to a $P_{99.99}$ tail of $840.0\ \mu\text{s}$, starving the $1000\text{ Hz}$ control loop. Relocating safety-critical state and calibration tables to tightly-coupled SRAM (TCM) bounds read latency below $100.0\ \text{ns}$ under full bus saturation.
-
-*Systems takeaway: Peak Contention Law.* Average memory bandwidth is meaningless for real-time safety. Interference on shared interconnects is instantaneous and phase-dependent; safety state must reside in tightly-coupled static memory isolated from shared DRAM traffic.
+A metering machine uses only $28\%$ of its average memory bandwidth, but camera DMA bursts and logging flushes sometimes coincide with enforcement reads. DRAM refresh further delays service, producing an $840.0\ \mu\text{s}$ latency tail on a control loop that runs at $1000\text{ Hz}$. The average utilization hides when the critical request must wait. Locating safety state and calibration tables in tightly coupled memory removes that shared-DRAM dependency, subject to verification of the actual access path. Placement decisions must follow worst-case interference at the required deadline, rather than available bandwidth averaged over a longer interval.
 
 :::
 
@@ -435,11 +421,7 @@ A physical separation that holds at room temperature can fail when the die warms
 
 **Pitfall**: *Using blocking software mutexes across inter-processor communication boundaries with untrusted neural policies.*
 
-*The scenario.* The policy governing a gas blending manifold experiences an unhandled numeric exception while writing a $256\text{ byte}$ flow schedule into a shared lock-free ring buffer, terminating with sequence counters half-updated while gas flows at $25.0\text{ m/s}$.
-
-*The dilemma.* If the interface relies on software mutexes, the crashed producer leaves locks permanently acquired, deadlocking the enforcer. The boundary detector must identify malformed or partial records in under $5.0\ \mu\text{s}$, dropping proposals without blocking and executing deterministic tracking fallback.
-
-*Systems takeaway: Adversarial Producer Law.* An untrusted proposal engine must be treated as an adversarial producer. The nervous system must reject corrupt or partial publications with zero wait states, ensuring that a policy crash never consumes enforcement execution budget.
+A gas-blending policy crashes halfway through publishing a $256\text{ byte}$ flow schedule. If the enforcer must acquire a mutex held by that producer, the policy failure can block enforcement indefinitely. A nonblocking publication protocol lets the consumer identify an incomplete record and reject it, but its validation and retry behavior must also remain bounded. The controller must continue with its defined fallback instead of waiting for the producer to finish or repair the record. The communication contract therefore needs to specify behavior for interrupted publication as carefully as it specifies the format of a valid schedule.
 
 :::
 
