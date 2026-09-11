@@ -12,8 +12,8 @@ record graded under a superseded gate cannot report its own result.
 | Dimension | Result |
 |:---|:---|
 | Workloads registered | 14 |
-| Quality contract passed | 8 |
-| Target missed, recorded | 6 |
+| Quality contract passed | 9 |
+| Target missed, recorded | 5 |
 | Blocked on a local backend | 0 |
 | Configuration defects | 0 |
 | Cases with repeated timing | 1 |
@@ -39,7 +39,7 @@ gates a quality decision.
 | `recommendation` | ok | **MISS*** | 0.6232 | ≥ 0.6350 | n/a | import result into evidence index |
 | `reinforcement-learning` | ok | **MISS*** | 0.0276 | ≥ 0.4000 | n/a | import result into evidence index |
 | `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | 5 run(s) | none |
-| `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | 1 run(s) | target gap, investigated |
+| `time-series-forecasting` | ok | **PASS** | 0.2924 ⚠ | ≤ 0.2900 | 1 run(s) | none |
 | `visual-wake-words` | ok | **PASS** | 0.8510 | ≥ 0.8000 | 5 run(s) | none |
 
 `MISS*` means the authoritative contract ran and missed its target, and the
