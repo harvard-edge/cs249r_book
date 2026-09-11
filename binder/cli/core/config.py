@@ -4,11 +4,11 @@ Configuration management for MLSysBook CLI.
 Handles Quarto configuration files, the generated _quarto.yml, and format-specific settings.
 """
 
-import shutil
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
+from .volume_index import volume_index_source, write_volume_index
 
 console = Console()
 
@@ -158,12 +158,12 @@ class ConfigManager:
         self.active_config = self.book_dir / "_quarto.yml"
         self.active_index = self.book_dir / "index.qmd"
 
-        # Volume-specific site entry points. Keep this aligned with the
-        # GitHub build matrix, which links index.qmd to index-vol{N}.qmd.
+        # Canonical sources shared with the Linux and Windows CI builds.
         self.index_vol1 = self.book_dir / "index-vol1.qmd"
         self.index_vol2 = self.book_dir / "index-vol2.qmd"
         self.index_vol3 = self.book_dir / "index-vol3.qmd"
-        self.index_vol4 = self.book_dir / "index-vol4.qmd"
+        self.index_vol4 = volume_index_source(self.book_dir, "vol4", "pdf")
+        self.html_index_vol4 = volume_index_source(self.book_dir, "vol4", "html")
 
     def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the configuration file for a specific format and optional volume.
@@ -235,9 +235,9 @@ class ConfigManager:
 
         self.activate_config_file(config_file)
 
-        # Volume builds also need that volume's landing page as index.qmd
+        # Volume builds need a root entry point for the selected format.
         if volume:
-            self._activate_index(volume)
+            self._activate_index(volume, format_type)
 
         return config_file.name
 
@@ -249,47 +249,20 @@ class ConfigManager:
         """Return the config file the active ``_quarto.yml`` was copied from."""
         return active_config_source(self.active_config)
 
-    def _activate_index(self, volume: str) -> None:
-        """Copy the volume's landing page to ``index.qmd``.
-
-        Quarto book projects require index.qmd at the root level, so each
-        volume build copies ``index-volN.qmd`` there.
-
-        Args:
-            volume: Volume ('vol1'-'vol4')
-        """
-        index_map = {
-            "vol1": self.index_vol1,
-            "vol2": self.index_vol2,
-            "vol3": self.index_vol3,
-            "vol4": self.index_vol4,
-        }
-
-        if volume not in index_map:
-            console.print(f"[yellow]⚠️ Unknown volume: {volume}[/yellow]")
-            return
-
-        index_file = index_map[volume]
-
-        if not index_file.exists():
-            console.print(f"[yellow]⚠️ Volume index not found: {index_file}[/yellow]")
-            return
-
-        # Earlier binder versions left a symlink here; copying through it
-        # would overwrite another volume's index, so remove it first.
-        if self.active_index.is_symlink():
-            self.active_index.unlink()
-        shutil.copyfile(index_file, self.active_index)
-        console.print(f"[dim]📄 Copied {index_file.name} → index.qmd[/dim]")
+    def _activate_index(self, volume: str, format_type: str = "pdf") -> None:
+        """Generate ``index.qmd`` from the canonical volume/format source."""
+        source = write_volume_index(self.book_dir, volume, format_type)
+        console.print(f"[dim]📄 Copied {source.relative_to(self.book_dir).as_posix()} → index.qmd[/dim]")
 
     def active_index_source(self) -> Optional[str]:
         """Return the volume index whose content ``index.qmd`` holds, or None."""
         if not self.active_index.is_file():
             return None
         content = self.active_index.read_bytes()
-        for index_file in (self.index_vol1, self.index_vol2, self.index_vol3, self.index_vol4):
+        for index_file in (self.index_vol1, self.index_vol2, self.index_vol3,
+                           self.index_vol4, self.html_index_vol4):
             if index_file.is_file() and index_file.read_bytes() == content:
-                return index_file.name
+                return index_file.relative_to(self.book_dir).as_posix()
         return None
 
     def get_output_dir(self, format_type: str, volume: Optional[str] = None) -> Path:

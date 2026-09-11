@@ -15,8 +15,8 @@ or switch volume/format:
 
     books/_quarto.yml   <-  config/_quarto-{html,pdf,epub}-{vol1,vol2,vol3,vol4}.yml
 
-The first line of the copy names its source. Volume builds also copy
-`index-volN.qmd` to `books/index.qmd`. Both copies are gitignored.
+The first line of the copy names its source. Volume builds also generate
+`books/index.qmd` from the entry-point sources below. Both copies are gitignored.
 
 **Do not edit `books/_quarto.yml` directly.** Edit the canonical file
 under `config/` instead. The next build overwrites the copy.
@@ -30,21 +30,27 @@ or copy by hand:
 
 ### Per-volume landing pages
 
-There are **two** landing page files, one per volume, both at the project root:
+Volume IV keeps its authored entry-point content inside the volume:
 
-    books/index-vol1.qmd   (rendered by every vol1 build)
-    books/index-vol2.qmd   (rendered by every vol2 build)
+| Format | Source copied to `books/index.qmd` |
+|---|---|
+| HTML | `books/vol4/index.qmd` |
+| PDF / EPUB | `books/vol4/frontmatter/about.qmd` |
 
-Each sets `output-file: index.html` in its frontmatter and is referenced
-explicitly by the matching `config/_quarto-<format>-<vol>.yml` render list.
-This ensures `vol1`'s deployed `index.html` contains vol1 content and `vol2`'s
-contains vol2 content.
+The HTML site renders the preface separately from the homepage. PDF and EPUB
+include it only through `index.qmd`, with no second `about.qmd` chapter.
+Volumes I–III retain `books/index-volN.qmd` as their source for every format.
 
-**Never commit a `books/index.qmd`** (symlink *or* regular file). A root
-`index.qmd` is auto-discovered by Quarto's website type and silently clobbers
-the per-volume `index-volX.qmd` during render — the vol1 build ends up
-deploying vol2 content. The path is listed in `.gitignore` so the `binder`
-CLI's per-build copy is never checked in accidentally.
+Local Binder and Linux/Windows CI call the same generator,
+`binder/cli/core/volume_index.py`. It creates a fresh copy rather than a symlink,
+and removes legacy symlinks before copying so a build cannot overwrite their
+targets. Root-relative asset paths keep the Volume IV homepage valid when
+rendered through the generated root entry point.
+
+**Never commit or edit `books/index.qmd`** (symlink *or* regular file). The
+canonical source is the only editing location; the next build replaces the
+ignored root copy. The matching render list includes only the generated
+homepage, avoiding a second render of the source to a competing index page.
 
 ## Layout
 
