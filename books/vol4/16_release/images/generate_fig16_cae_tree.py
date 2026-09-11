@@ -68,10 +68,10 @@ def create_svg():
     svg += path(160, 310, 160, 260, color=c_red, marker="arrow-red")
     
     # D1 to Fallback
-    svg += path(160, 400, 310, 400, color=c_dark_grey, dash="5,5")
+    svg += path(270, 400, 310, 400, color=c_dark_grey, dash="5,5")
     
     # C1.2 to Fallback
-    svg += path(450, 250, 450, 350)
+    svg += path(450, 260, 450, 350)
     
     # Fallback to Adjudication
     svg += path(450, 450, 450, 500, color=c_blue, marker="arrow-blue")
@@ -80,16 +80,16 @@ def create_svg():
     svg += box(250, 40, 400, 80, "Claim C1: Operational Safety", 
                ["Normal force ≤ 50 N, Shear force ≤ 20 N", "Maintained across all operational states and faults"])
                
-    svg += box(50, 170, 220, 90, "Sub-Claim C1.1: Tactile Reflex",
+    svg += box(50, 170, 220, 90, "C1.1: Tactile Reflex",
                ["Soft tactile slip detector", "halts arm before normal", "force reaches 14 N"])
                
-    svg += box(340, 170, 220, 90, "Sub-Claim C1.2: Torque Tripwire",
+    svg += box(340, 170, 220, 90, "C1.2: Torque Tripwire",
                ["Secondary torque tripwire", "halts arm at F_trip = 35 N"])
                
-    svg += box(630, 170, 220, 90, "Sub-Claim C1.3: Deterministic Exec",
+    svg += box(630, 170, 220, 90, "C1.3: Deterministic Exec",
                ["Nervous system hardware", "guarantees loop latency", "≤ 25 ms (worst-case)"])
                
-    svg += box(50, 310, 220, 110, "Defeater D1: Adversarial Audit",
+    svg += box(50, 310, 220, 140, "Defeater D1: Adversarial Audit",
                ["Residual cutting oil drops", "friction (μ = 0.85 → 0.12).", "Workpiece slips silently", "without elastomer strain.", "Reflex fails!"],
                stroke=c_red, title_bg=c_red)
                
@@ -106,8 +106,8 @@ def create_svg():
                fill="#F0F4F8", stroke=c_blue, title_bg=c_blue)
                
     # Add text labels on arrows
-    svg += f'<text x="110" y="295" class="red-text" transform="rotate(-90 150 295)">DEFEATS</text>\n'
-    svg += f'<text x="210" y="390" class="bold-text">Fallback evaluates</text>\n'
+    svg += f'<text x="175" y="295" class="red-text" transform="rotate(-90 175 295)">DEFEATS</text>\n'
+    svg += f'<text x="290" y="380" class="bold-text" text-anchor="middle">Fallback</text>\n'
 
     svg += "</svg>"
     

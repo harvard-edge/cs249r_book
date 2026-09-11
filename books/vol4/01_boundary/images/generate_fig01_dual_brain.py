@@ -83,7 +83,7 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
 
 <!-- Actuator Output Arrow -->
 <line x1="400" y1="800" x2="400" y2="840" stroke="#333333" stroke-width="4" marker-end="url(#arrow-down)"/>
-<text x="410" y="825" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#333333" text-anchor="start">Verified Control Signals</text>
+<text x="415" y="825" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#333333" text-anchor="start">Verified Control Signals</text>
 
 <!-- BASE: Actuators -->
 <g id="physical_actuators">

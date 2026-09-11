@@ -1,7 +1,7 @@
-import math
+import os
 
 def generate_coordinate_tree():
-    svg_width = 900
+    svg_width = 1100
     svg_height = 450
     
     # Colors
@@ -36,11 +36,11 @@ def generate_coordinate_tree():
     # We lay them out left to right: earth -> map -> odom -> body -> sensor
     
     frames = [
-        {"id": "earth", "label": "F_earth", "desc": "Root Datum", "x": 100, "y": 200},
-        {"id": "map", "label": "F_map", "desc": "Global Map", "x": 280, "y": 200},
-        {"id": "odom", "label": "F_odom", "desc": "Local Odometry", "x": 460, "y": 200},
-        {"id": "body", "label": "F_body", "desc": "base_link", "x": 640, "y": 200},
-        {"id": "sensor", "label": "F_sensor", "desc": "sensor_link", "x": 820, "y": 200},
+        {"id": "earth", "label": "F_earth", "desc": "Root Datum", "x": 110, "y": 200},
+        {"id": "map", "label": "F_map", "desc": "Global Map", "x": 330, "y": 200},
+        {"id": "odom", "label": "F_odom", "desc": "Local Odometry", "x": 550, "y": 200},
+        {"id": "body", "label": "F_body", "desc": "base_link", "x": 770, "y": 200},
+        {"id": "sensor", "label": "F_sensor", "desc": "sensor_link", "x": 990, "y": 200},
     ]
     
     box_w = 120
@@ -68,7 +68,7 @@ def generate_coordinate_tree():
     
     # Draw boxes
     for f in frames:
-        svg += f'<rect x="{f["x"]-box_w/2}" y="{f["y"]-box_h/2}" width="{box_w}" height="{box_h}" fill="{c_gray_light}" stroke="{c_blue}" stroke-width="2"/>\n'
+        svg += f'<rect x="{f["x"]-box_w/2}" y="{f["y"]-box_h/2}" width="{box_w}" height="{box_h}" rx="6" ry="6" fill="{c_gray_light}" stroke="{c_blue}" stroke-width="2"/>\n'
         # Label (e.g. F_earth)
         label_text = f['label'].replace('F_', 'F<tspan baseline-shift="sub" font-size="10">') + '</tspan>'
         svg += f'<text x="{f["x"]}" y="{f["y"]}" font-family="sans-serif" font-weight="bold" font-size="16" fill="{c_blue}" text-anchor="middle">{label_text}</text>\n'
@@ -76,8 +76,8 @@ def generate_coordinate_tree():
 
     # Add the Covariance Equation Box at the bottom
     eq_y = 350
-    svg += f'<rect x="100" y="{eq_y-40}" width="700" height="80" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1" stroke-dasharray="4,4"/>\n'
-    svg += f'<text x="450" y="{eq_y-15}" font-family="sans-serif" font-weight="bold" font-size="14" fill="{c_gray_dark}" text-anchor="middle">Spatial Covariance Composition</text>\n'
+    svg += f'<rect x="150" y="{eq_y-40}" width="800" height="80" rx="4" ry="4" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1.5" stroke-dasharray="6,4"/>\n'
+    svg += f'<text x="550" y="{eq_y-15}" font-family="sans-serif" font-weight="bold" font-size="14" fill="{c_gray_dark}" text-anchor="middle">Spatial Covariance Composition</text>\n'
     
     # Sigma_map approx J_odom Sigma_drift J_odom^T + R_body Sigma_ext R_body^T + R_tot Sigma_z R_tot^T
     # Using simple text approximation
@@ -86,13 +86,18 @@ def generate_coordinate_tree():
     eq_text += 'R<tspan baseline-shift="sub" font-size="10">body</tspan> &#931;<tspan baseline-shift="sub" font-size="10">ext</tspan> R<tspan baseline-shift="sub" font-size="10">body</tspan><tspan baseline-shift="super" font-size="10">T</tspan> + '
     eq_text += 'R<tspan baseline-shift="sub" font-size="10">tot</tspan> &#931;<tspan baseline-shift="sub" font-size="10">z</tspan> R<tspan baseline-shift="sub" font-size="10">tot</tspan><tspan baseline-shift="super" font-size="10">T</tspan>'
     
-    svg += f'<text x="450" y="{eq_y+15}" font-family="serif" font-style="italic" font-size="16" fill="{c_blue}" text-anchor="middle">{eq_text}</text>\n'
+    svg += f'<text x="550" y="{eq_y+15}" font-family="serif" font-style="italic" font-size="16" fill="{c_blue}" text-anchor="middle">{eq_text}</text>\n'
 
     # Close SVG
     svg += '</svg>\n'
     
-    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/08_perception/images/svg/fig08_coordinate_frame_tree.svg', 'w') as f:
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'fig08_coordinate_frame_tree.svg')
+    
+    with open(out_path, 'w') as f:
         f.write(svg)
+    print("Generated:", out_path)
 
 if __name__ == "__main__":
     generate_coordinate_tree()

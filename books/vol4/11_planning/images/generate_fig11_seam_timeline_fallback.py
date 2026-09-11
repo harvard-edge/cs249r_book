@@ -54,7 +54,7 @@ def generate_svg():
         
         <!-- t_commit -->
         <line x1="580" y1="15" x2="580" y2="500" stroke="#C53030" stroke-width="2" stroke-dasharray="6,4" />
-        <text x="580" y="10" class="label-bold" text-anchor="middle" fill="#C53030">t_commit=360</text>
+        <text x="580" y="35" class="label-bold" text-anchor="middle" fill="#C53030">t_commit=360</text>
         
         <!-- t_exp -->
         <line x1="633" y1="15" x2="633" y2="500" class="milestone-line" />
@@ -77,7 +77,7 @@ def generate_svg():
         <text x="366" y="35" class="label">Active Chunk A</text>
         
         <rect x="340" y="25" width="400" height="40" class="chunk-b" />
-        <text x="540" y="50" class="label">Incoming Chunk B (Arrived 180 ms)</text>
+        <text x="660" y="50" class="label">Incoming Chunk B (Arrived 180 ms)</text>
         
         <rect x="500" y="10" width="133" height="55" class="blend-window" />
         <text x="566" y="35" class="label" text-anchor="middle">Full 100ms Blend</text>
@@ -89,7 +89,7 @@ def generate_svg():
         <text x="50" y="0" class="subtitle">Regime 2: Late-but-Blendable (P99 = 340 ms)</text>
         
         <rect x="100" y="10" width="533" height="40" class="chunk-a" />
-        <text x="366" y="35" class="label">Active Chunk A</text>
+        <text x="320" y="35" class="label">Active Chunk A</text>
         
         <rect x="553" y="25" width="280" height="40" class="chunk-b" />
         <text x="693" y="50" class="label">Incoming Chunk B (Arrived 340 ms)</text>
@@ -113,10 +113,10 @@ def generate_svg():
         
         <!-- Distances -->
         <line x1="500" y1="65" x2="580" y2="65" stroke="#2D3748" stroke-width="2" marker-end="url(#arrowhead)" marker-start="url(#arrowhead)"/>
-        <text x="540" y="80" class="callout-text" text-anchor="middle">d_late (72mm)</text>
+        <text x="540" y="85" class="callout-text" text-anchor="middle">d_late (72mm)</text>
         
         <line x1="580" y1="65" x2="846" y2="65" stroke="#C53030" stroke-width="2" marker-end="url(#arrowhead)" marker-start="url(#arrowhead)"/>
-        <text x="713" y="80" class="callout-text" text-anchor="middle">d_brake (120mm) at a_max=6.0 m/s²</text>
+        <text x="713" y="85" class="callout-text" text-anchor="middle">d_brake (120mm) at a_max=6.0 m/s²</text>
         
         <!-- Clearance total -->
         <line x1="500" y1="100" x2="846" y2="100" stroke="#1F407A" stroke-width="2" stroke-dasharray="4,4" />
@@ -158,7 +158,7 @@ def generate_svg():
 
 </svg>
 """
-    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/11_planning/images/svg/fig11_seam_timeline_fallback.svg', 'w') as f:
+    with open('/Users/VJ/GitHub/MLSysBook/books/vol4/11_planning/images/svg/fig11_seam_timeline_fallback.svg', 'w') as f:
         f.write(svg_content)
 
 if __name__ == "__main__":

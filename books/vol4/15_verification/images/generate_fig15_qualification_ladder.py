@@ -24,13 +24,13 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" 
 
     <!-- Axis Lines -->
     <!-- X-axis: Hardware Fidelity -->
-    <path d="M 250 560 L 900 560" fill="none" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M 230 560 L 960 560" fill="none" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
     <text x="500" y="590" font-size="14" font-weight="bold" fill="#2D3748">Hardware &amp; Physical Fidelity (%)</text>
     <text x="250" y="580" font-size="12" fill="#2D3748">0%</text>
-    <text x="900" y="580" font-size="12" fill="#2D3748">100%</text>
+    <text x="940" y="580" font-size="12" fill="#2D3748">100%</text>
     
     <!-- Y-axis: Throughput -->
-    <path d="M 230 540 L 230 100" fill="none" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M 230 560 L 230 100" fill="none" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
     <!-- We need to rotate the Y-axis label properly. Wait, SVG transform rotate takes x,y -->
     <text x="-380" y="180" font-size="14" font-weight="bold" fill="#2D3748" transform="rotate(-90)">Throughput (runs / day)</text>
     <text x="180" y="540" font-size="12" fill="#2D3748">10^0</text>

@@ -40,7 +40,7 @@ def build_svg():
     ET.SubElement(svg, 'text', x="20", y="30", class_="title").text = "(a) Inter-Core Lock-Free State Exchange (Seqlock)"
     
     # Writer
-    ET.SubElement(svg, 'rect', x="20", y="60", width="220", height="160",, class_="box-light-blue")
+    ET.SubElement(svg, 'rect', x="20", y="60", width="220", height="160", class_="box-light-blue")
     ET.SubElement(svg, 'text', x="130", y="90", class_="title", text_anchor="middle").text = "Proposal Writer"
     ET.SubElement(svg, 'text', x="130", y="110", class_="small", text_anchor="middle").text = "(Untrusted NPU/MPU)"
     
@@ -49,7 +49,7 @@ def build_svg():
     ET.SubElement(svg, 'text', x="130", y="190", class_="text", text_anchor="middle").text = "3. S = S + 1 (even)"
     
     # Shared Memory
-    ET.SubElement(svg, 'rect', x="350", y="60", width="280", height="240",, class_="box")
+    ET.SubElement(svg, 'rect', x="350", y="60", width="280", height="240", class_="box")
     ET.SubElement(svg, 'text', x="490", y="90", class_="title", text_anchor="middle").text = "Shared SRAM (Zero-Copy)"
     ET.SubElement(svg, 'text', x="490", y="110", class_="small", text_anchor="middle").text = "No mutex, no allocation"
     
@@ -65,7 +65,7 @@ def build_svg():
     ET.SubElement(svg, 'text', x="380", y="270", class_="small").text = "• Lease Validity (Δt_valid), CRC-32"
     
     # Reader
-    ET.SubElement(svg, 'rect', x="740", y="60", width="240", height="160",, class_="box-light-red")
+    ET.SubElement(svg, 'rect', x="740", y="60", width="240", height="160", class_="box-light-red")
     ET.SubElement(svg, 'text', x="860", y="90", class_="title", text_anchor="middle").text = "Safety Reader"
     ET.SubElement(svg, 'text', x="860", y="110", class_="small", text_anchor="middle").text = "(Deterministic MCU)"
     
@@ -120,7 +120,7 @@ def build_svg():
     
     with open("svg/fig13_lockfree_boundary_contract.svg", "w") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-        f.write(ET.tostring(svg, encoding="unicode"))
+        f.write(ET.tostring(svg, encoding="unicode").replace("class_", "class").replace("text_anchor", "text-anchor").replace("marker_end", "marker-end"))
 
 if __name__ == "__main__":
     build_svg()

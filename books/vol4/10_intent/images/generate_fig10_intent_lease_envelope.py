@@ -43,12 +43,12 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     
     <!-- Target Point -->
     <circle cx="0" cy="0" r="5" fill="#1F407A" />
-    <text x="15" y="-15" class="text-bold" fill="#1F407A">p₀ (Nominal Target)</text>
+    <text x="20" y="5" class="text-bold" fill="#1F407A">p₀ (Nominal Target)</text>
     
     <!-- Semi-axes labels -->
-    <text x="65" y="-30" class="text-small">a_x = 11.2 mm</text>
-    <text x="75" y="40" class="text-small">a_y = 16.8 mm</text>
-    <text x="-90" y="115" class="text-small">a_z = 41.9 mm</text>
+    <text x="75" y="-20" class="text-small">a_x = 11.2 mm</text>
+    <text x="85" y="45" class="text-small">a_y = 16.8 mm</text>
+    <text x="-60" y="125" class="text-small">a_z = 41.9 mm</text>
     
     <!-- Approach velocity -->
     <line x1="-120" y1="-150" x2="-20" y2="-25" class="vector-blue" />
@@ -92,7 +92,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <text x="325" y="25" class="text-small">300ms</text>
     <circle cx="340" cy="40" r="4" fill="#38A169" />
     
-    <text x="40" y="70" class="text-small" fill="#38A169">C²-smooth quintic spline tracking</text>
+    <text x="40" y="65" class="text-small" fill="#38A169">C²-smooth quintic spline tracking</text>
     
     <!-- Velocity curve -->
     <path d="M 40 80 Q 240 60 400 80" fill="none" stroke="#38A169" stroke-width="2" />
@@ -128,7 +128,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     
     <text x="210" y="140" class="text-small" fill="#1F407A">Autonomous Deceleration</text>
     <text x="210" y="155" class="text-small" fill="#1F407A">t_decel = 112ms, d_stop = 28mm</text>
-    <text x="310" y="105" class="text-small" fill="#1F407A">Active Hold</text>
+    <text x="310" y="95" class="text-small" fill="#1F407A">Active Hold</text>
   </g>
 
   <g transform="translate(500, 440)">
@@ -149,9 +149,9 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     
     <line x1="320" y1="35" x2="320" y2="45" class="axis" />
     
-    <path d="M 40 80 L 320 80 L 320 20" fill="none" stroke="#A51C30" stroke-width="2.5" />
+    <path d="M 40 80 L 320 80 L 320 30" fill="none" stroke="#A51C30" stroke-width="2.5" />
     
-    <text x="270" y="10" class="text-bold" fill="#A51C30">IMPACT!</text>
+    <text x="270" y="20" class="text-bold" fill="#A51C30">IMPACT!</text>
     <text x="200" y="100" class="text-small" fill="#A51C30">Open-loop continuation at 1.4 m/s</text>
     <text x="250" y="115" class="text-small" fill="#A51C30">F_peak = 1420 N</text>
   </g>

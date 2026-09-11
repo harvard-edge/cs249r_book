@@ -101,8 +101,8 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
     <text x="337" y="220" font-size="12" font-weight="bold" fill="#1F407A" text-anchor="middle">Proposal</text>
     <text x="337" y="245" font-size="10" fill="#2D3748" text-anchor="middle">u_hat</text>
     
-    <text x="337" y="160" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle" transform="rotate(-90, 337, 160)">Causal Boundary</text>
-    <line x1="337" y1="180" x2="337" y2="400" stroke="#A51C30" stroke-width="2" stroke-dasharray="6,4"/>
+    <text x="337" y="320" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle" transform="rotate(-90, 337, 320)">Causal Boundary</text>
+    <line x1="337" y1="110" x2="337" y2="400" stroke="#A51C30" stroke-width="2" stroke-dasharray="6,4"/>
 
     <!-- Nervous System to Body (Current) -->
     <path fill="none" d="M 625 330 L 700 330" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>

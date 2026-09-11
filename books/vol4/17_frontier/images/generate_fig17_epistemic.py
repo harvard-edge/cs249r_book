@@ -45,11 +45,11 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
         <!-- Deadline vs Detection -->
         <line x1="240" y1="70" x2="240" y2="160" stroke="#2D3748" stroke-width="2" stroke-dasharray="4,4"/>
-        <text x="240" y="60" font-size="12" font-weight="bold" fill="#2D3748" text-anchor="middle">Action Deadline</text>
+        <text x="235" y="60" font-size="12" font-weight="bold" fill="#2D3748" text-anchor="end">Action Deadline</text>
         <text x="240" y="175" font-size="12" fill="#2D3748" text-anchor="middle">t_deadline</text>
 
         <line x1="310" y1="70" x2="310" y2="160" stroke="#A51C30" stroke-width="2" stroke-dasharray="4,4"/>
-        <text x="310" y="60" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle">Detection</text>
+        <text x="315" y="60" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="start">Detection</text>
         <text x="310" y="175" font-size="12" fill="#A51C30" text-anchor="middle">t_detect</text>
 
         <!-- Highlight region -->

@@ -65,7 +65,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <text x="860" y="185" class="text-small" text-anchor="middle">Hardware Drive Config</text>
 
 <path fill="none" d="M 710 160 L 760 160" class="line-blue" marker-end="url(#arrowhead-blue)" />
-<text x="735" y="150" class="text-small" text-anchor="middle" fill="#1F407A">Verified (ut)</text>
+<text x="735" y="135" class="text-small" text-anchor="middle" fill="#1F407A">Verified (ut)</text>
 
 <path fill="none" d="M 860 200 L 860 230" class="line-blue" marker-end="url(#arrowhead-blue)" />
 <rect x="770" y="240" width="180" height="40" class="box" />
@@ -73,7 +73,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 
 <!-- Dynamic braking -->
 <path fill="none" d="M 600 225 L 600 260 L 760 260" class="line-red" marker-end="url(#arrowhead-red)" />
-<text x="680" y="255" class="text-small" text-anchor="middle" fill="#A51C30">Violation -&gt; Brake (bot)</text>
+<text x="680" y="240" class="text-small" text-anchor="middle" fill="#A51C30">Violation -&gt; Brake (bot)</text>
 
 <!-- Divider -->
 <line x1="30" y1="330" x2="970" y2="330" stroke="#E2E8F0" stroke-width="2" />

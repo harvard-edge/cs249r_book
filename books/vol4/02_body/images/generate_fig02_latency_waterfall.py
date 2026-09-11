@@ -68,13 +68,13 @@ svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1
   <!-- 6. Stator Current (32.7 - 35.0) -->
   <text x="140" y="315" class="label" text-anchor="end">6. Stator Current Rise</text>
   <rect x="395.25" y="300" width="17.25" height="20" class="bar" />
-  <text x="420" y="315" class="label">2.3 ms</text>
+  <text x="455" y="315" class="label">2.3 ms</text>
 
   <!-- Cumulative P50 -->
   <text x="140" y="375" class="label" text-anchor="end" font-weight="bold">Nominal (P50)</text>
   <rect x="150" y="360" width="262.5" height="20" class="bar-bg" />
   <rect x="150" y="360" width="262.5" height="20" fill="none" stroke="#1F407A" stroke-width="2" />
-  <text x="420" y="375" class="label" font-weight="bold">35.0 ms (Pass)</text>
+  <text x="455" y="375" class="label" font-weight="bold">35.0 ms (Pass)</text>
 
   <!-- Cumulative P99.9 -->
   <text x="140" y="415" class="label" text-anchor="end" font-weight="bold">Tail Spike (P99.9)</text>

@@ -100,7 +100,7 @@ def generate_svg():
     
     # Total error arrow
     svg.append(f'  <line x1="{tx1}" y1="{ty1}" x2="{tx2-5}" y2="{ty2-5}" stroke="{c_red}" stroke-width="2" marker-end="url(#arrow_red)"/>')
-    svg.append(f'  <text x="{tx1 + 50}" y="{ty1 + 20}" font-size="16" fill="{c_red}" font-weight="bold" text-anchor="start">Total Error: e_tool = 6.80 cm</text>')
+    svg.append(f'  <text x="{(tx1+tx2)/2}" y="{ty1 + 35}" font-size="16" fill="{c_red}" font-weight="bold" text-anchor="middle">Total Error: e_tool = 6.80 cm</text>')
     
     # Add arm length label
     mid_x = x2 + (l/2) * math.cos(angle2) + 20
@@ -109,7 +109,7 @@ def generate_svg():
     
     # Labels
     svg.append(f'  <text x="{x1}" y="{y1+70}" font-size="14" fill="{c_grey_dark}" font-weight="bold" text-anchor="middle">t = 0 (Reported State)</text>')
-    svg.append(f'  <text x="{x2}" y="{y1+70}" font-size="14" fill="{c_dark_blue}" font-weight="bold" text-anchor="middle">t = 40 ms (True State)</text>')
+    svg.append(f'  <text x="{x2}" y="{y1+95}" font-size="14" fill="{c_dark_blue}" font-weight="bold" text-anchor="middle">t = 40 ms (True State)</text>')
     
     # Workpiece clearance line
     wx1 = tx1 - 30
@@ -124,17 +124,19 @@ def generate_svg():
     svg.append(f'  <text x="{tx2+35}" y="{ty2+10}" font-size="14" fill="{c_red}" font-weight="bold">Collision</text>')
     
     # Title/Description text box
-    svg.append(f'  <rect x="20" y="20" width="300" height="80" fill="{c_grey_light}"/>')
+    svg.append(f'  <rect x="20" y="20" width="300" height="80" rx="4" ry="4" fill="{c_grey_light}"/>')
     svg.append(f'  <text x="30" y="45" font-size="16" fill="{c_dark_blue}" font-weight="bold">Coordinate Staleness Error</text>')
     svg.append(f'  <text x="30" y="65" font-size="14" fill="{c_grey_dark}">v = 0.80 m/s</text>')
     svg.append(f'  <text x="30" y="85" font-size="14" fill="{c_grey_dark}">ω = 1.50 rad/s, Δt = 40 ms</text>')
     
     svg.append('</svg>')
     
-    os.makedirs(os.path.dirname('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/09_memory/images/svg/fig09_frame_staleness_error.svg'), exist_ok=True)
-    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/09_memory/images/svg/fig09_frame_staleness_error.svg', 'w') as f:
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'fig09_frame_staleness_error.svg')
+    with open(out_path, 'w') as f:
         f.write('\\n'.join(svg))
-    print("fig09_frame_staleness_error.svg generated")
+    print("Generated:", out_path)
 
 if __name__ == "__main__":
     generate_svg()

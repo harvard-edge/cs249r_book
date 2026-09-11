@@ -22,7 +22,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     </style>
   </defs>
 
-  <text x="500" y="30" class="title" text-anchor="middle">Grounded Intent Architecture: Multimodal Cross-Attention to Expiring Lease</text>
+  <text x="50" y="30" class="title" text-anchor="start">Grounded Intent Architecture: Multimodal Cross-Attention to Expiring Lease</text>
 
   <!-- Section 1: Multimodal Tokenization -->
   <rect x="50" y="60" width="220" height="480" class="box-dark" />
@@ -108,5 +108,5 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 </svg>
 """
 
-with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/10_intent/images/svg/fig10_vla_cross_attention_intent_lease.svg", "w") as f:
+with open("/Users/VJ/GitHub/MLSysBook/books/vol4/10_intent/images/svg/fig10_vla_cross_attention_intent_lease.svg", "w") as f:
     f.write(svg_content)

@@ -1,7 +1,7 @@
 import os
 
 def create_svg():
-    width = 980
+    width = 1050
     height = 500
     
     # Colors
@@ -52,15 +52,15 @@ def create_svg():
         return f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{color}" stroke-width="{thick}" marker-end="url(#{marker})" {d_attr}/>'
 
     # Arrows between main blocks
-    svg += path(300, 220, 360, 220, color=c_blue, marker="arrow-blue", thick=3)
-    svg += f'<text x="315" y="210" class="blue-text">Verifies</text>\n'
+    svg += path(290, 220, 370, 220, color=c_blue, marker="arrow-blue", thick=3)
+    svg += f'<text x="330" y="210" class="blue-text" text-anchor="middle">Verifies</text>\n'
     
-    svg += path(620, 220, 680, 220, color=c_blue, marker="arrow-blue", thick=3)
-    svg += f'<text x="625" y="210" class="blue-text">Permits</text>\n'
+    svg += path(630, 220, 710, 220, color=c_blue, marker="arrow-blue", thick=3)
+    svg += f'<text x="670" y="210" class="blue-text" text-anchor="middle">Permits</text>\n'
 
     # Block 1: Release Record
-    svg += box(40, 80, 260, 300, "1. Cryptographic Release Record", fill="#F8FAFC", stroke=c_blue)
-    svg += f'<text x="55" y="130" class="sub-title">Immutable Engineering Manifest</text>\n'
+    svg += box(30, 80, 260, 300, "1. Cryptographic Release Record", fill="#F8FAFC", stroke=c_blue)
+    svg += f'<text x="45" y="130" class="sub-title">Immutable Engineering Manifest</text>\n'
     
     y = 155
     items = [
@@ -72,49 +72,49 @@ def create_svg():
         ("RTOS Kernel:", "0x77C1...99AA")
     ]
     for k, v in items:
-        svg += f'<text x="55" y="{y}" class="box-text">{k}</text>\n'
-        svg += f'<text x="175" y="{y}" class="mono-text">{v}</text>\n'
+        svg += f'<text x="45" y="{y}" class="box-text">{k}</text>\n'
+        svg += f'<text x="165" y="{y}" class="mono-text">{v}</text>\n'
         y += 24
         
-    svg += f'<rect x="55" y="320" width="230" height="40" fill="{c_light_grey}" stroke="{c_dark_grey}" />\n'
-    svg += f'<text x="65" y="344" class="box-text" font-weight="bold">Adjudicator Signature: VALID</text>\n'
+    svg += f'<rect x="45" y="320" width="230" height="40" fill="{c_light_grey}" stroke="{c_dark_grey}" />\n'
+    svg += f'<text x="55" y="344" class="box-text" font-weight="bold">Adjudicator Signature: VALID</text>\n'
 
     # Block 2: Boot Verification
-    svg += box(360, 80, 260, 300, "2. Hardware Root of Trust", fill="#F8FAFC", stroke=c_blue)
+    svg += box(370, 80, 260, 300, "2. Hardware Root of Trust", fill="#F8FAFC", stroke=c_blue)
     
-    svg += f'<rect x="380" y="125" width="220" height="40" fill="{c_white}" stroke="{c_dark_grey}" />\n'
-    svg += f'<text x="395" y="150" class="box-text" font-weight="bold">Silicon OTP eFuses (Keys)</text>\n'
+    svg += f'<rect x="390" y="125" width="220" height="40" fill="{c_white}" stroke="{c_dark_grey}" />\n'
+    svg += f'<text x="405" y="150" class="box-text" font-weight="bold">Silicon OTP eFuses (Keys)</text>\n'
     
-    svg += path(490, 165, 490, 195)
+    svg += path(500, 165, 500, 195)
     
-    svg += f'<rect x="380" y="195" width="220" height="60" fill="{c_light_grey}" stroke="{c_dark_grey}" />\n'
-    svg += f'<text x="395" y="215" class="sub-title">Bootloader Verification</text>\n'
-    svg += f'<text x="395" y="235" class="box-text">Validates hashes &amp; signatures</text>\n'
-    svg += f'<text x="395" y="250" class="box-text">against eFuse public keys</text>\n'
+    svg += f'<rect x="390" y="195" width="220" height="60" fill="{c_light_grey}" stroke="{c_dark_grey}" />\n'
+    svg += f'<text x="405" y="215" class="sub-title">Bootloader Verification</text>\n'
+    svg += f'<text x="405" y="235" class="box-text">Validates hashes &amp; signatures</text>\n'
+    svg += f'<text x="405" y="250" class="box-text">against eFuse public keys</text>\n'
     
-    svg += path(490, 255, 490, 285)
+    svg += path(500, 255, 500, 285)
     
-    svg += f'<rect x="380" y="285" width="220" height="45" fill="#E6FFFA" stroke="#319795" />\n'
-    svg += f'<text x="395" y="305" class="box-text" font-weight="bold" fill="#285E61">Energize Motor Inverters</text>\n'
-    svg += f'<text x="395" y="320" class="box-text" fill="#285E61">(Hardware Permit Asserted)</text>\n'
+    svg += f'<rect x="390" y="285" width="220" height="45" fill="#E6FFFA" stroke="#319795" />\n'
+    svg += f'<text x="405" y="305" class="box-text" font-weight="bold" fill="#285E61">Energize Motor Inverters</text>\n'
+    svg += f'<text x="405" y="320" class="box-text" fill="#285E61">(Hardware Permit Asserted)</text>\n'
 
     # Block 3: Runtime Invalidation
-    svg += box(680, 80, 260, 300, "3. Runtime Nervous System", fill="#FFF5F5", stroke=c_red, title_bg=c_red)
+    svg += box(710, 80, 260, 300, "3. Runtime Nervous System", fill="#FFF5F5", stroke=c_red, title_bg=c_red)
     
-    svg += f'<text x="695" y="130" class="sub-title">Continuous Envelope Monitor</text>\n'
-    svg += f'<text x="695" y="150" class="box-text">1000 Hz Hard Real-Time Loop</text>\n'
+    svg += f'<text x="725" y="130" class="sub-title">Continuous Envelope Monitor</text>\n'
+    svg += f'<text x="725" y="150" class="box-text">1000 Hz Hard Real-Time Loop</text>\n'
     
-    svg += f'<rect x="695" y="165" width="230" height="75" fill="{c_white}" stroke="{c_dark_grey}" />\n'
-    svg += f'<text x="705" y="185" class="box-text" font-weight="bold">Envelope Trichotomy Eval</text>\n'
-    svg += f'<text x="705" y="205" class="box-text">✓ Known-True (Permitted)</text>\n'
-    svg += f'<text x="705" y="220" class="box-text" fill="{c_red}">✗ Known-False / Unknown</text>\n'
+    svg += f'<rect x="725" y="165" width="230" height="75" fill="{c_white}" stroke="{c_dark_grey}" />\n'
+    svg += f'<text x="735" y="185" class="box-text" font-weight="bold">Envelope Trichotomy Eval</text>\n'
+    svg += f'<text x="735" y="205" class="box-text">✓ Known-True (Permitted)</text>\n'
+    svg += f'<text x="735" y="220" class="box-text" fill="{c_red}">✗ Known-False / Unknown</text>\n'
     
-    svg += path(810, 240, 810, 270, color=c_red, marker="arrow-red", thick=2)
-    svg += f'<text x="820" y="260" class="red-text">Violation / Epistemic Gap</text>\n'
+    svg += path(840, 240, 840, 270, color=c_red, marker="arrow-red", thick=2)
+    svg += f'<text x="850" y="260" class="red-text">Violation / Epistemic Gap</text>\n'
     
-    svg += f'<rect x="695" y="270" width="230" height="70" fill="{c_red}" stroke="{c_dark_grey}" />\n'
-    svg += f'<text x="705" y="295" class="box-title">LATCH INTERLOCKS</text>\n'
-    svg += f'<text x="705" y="315" class="box-title" font-size="13px">Revoke Operating Authority</text>\n'
+    svg += f'<rect x="725" y="270" width="230" height="70" fill="{c_red}" stroke="{c_dark_grey}" />\n'
+    svg += f'<text x="735" y="295" class="box-title">LATCH INTERLOCKS</text>\n'
+    svg += f'<text x="735" y="315" class="box-title" font-size="13px">Revoke Operating Authority</text>\n'
 
     svg += "</svg>"
     

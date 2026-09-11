@@ -85,7 +85,7 @@ def generate_svg():
     svg.append(f'  <polyline points="{" ".join(path_points)}" fill="none" stroke="{c_dark_blue}" stroke-width="3"/>')
     
     # Equation label
-    svg.append(f'  <text x="{x_origin+50}" y="{y_origin-150}" font-size="14" fill="{c_dark_blue}" font-weight="bold">E(t) = E(0) + 3σ_v t + 1/2 a_dist t²</text>')
+    svg.append(f'  <text x="{x_origin+50}" y="{y_origin-180}" font-size="14" fill="{c_dark_blue}" font-weight="bold">E(t) = E(0) + 3σ_v t + 1/2 a_dist t²</text>')
     
     # Invalidation horizon
     t_exp = 66
@@ -117,10 +117,12 @@ def generate_svg():
     
     svg.append('</svg>')
     
-    os.makedirs(os.path.dirname('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/09_memory/images/svg/fig09_uncertainty_growth.svg'), exist_ok=True)
-    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/09_memory/images/svg/fig09_uncertainty_growth.svg', 'w') as f:
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'fig09_uncertainty_growth.svg')
+    with open(out_path, 'w') as f:
         f.write('\\n'.join(svg))
-    print("fig09_uncertainty_growth.svg generated")
+    print("Generated:", out_path)
 
 if __name__ == "__main__":
     generate_svg()
