@@ -208,15 +208,83 @@ Selecting an appropriate mathematical representation for candidate trajectories 
 
 : **Trajectory Representation Comparison Matrix for Physical AI Systems**: Comparative analysis of classical continuous spline parameterizations and modern learned discrete action representations across continuity degree, synthesis latency, dynamic feasibility guarantees, and mechanical jerk mitigation. While generative models provide high-level semantic generalization, their discrete, unconstrained outputs ($C^{-1}$) require downstream spline interpolation ($C^2$/$C^3$) and constraint projection before reaching motor drive current loops. {#tbl-11-trajectory-representations tbl-colwidths="[14,14,14,16,14,14,14]"}
 
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_qty,
+    fmt_latency,
+    fmt_multiple,
+    fmt,
+    fmt_display_math,
+    check,
+)
+
+class PlanningSeamInertia:
+    """Reflected rotor inertia and seam torque spikes under trajectory discontinuities."""
+
+    # LOAD
+    gear_ratio = 50.0
+    rotor_inertia = 1e-4 * (kilogram * (meter**2))
+    delta_omega = 0.2 * (ureg.radian / second)
+    dt_tick = 1.0 * millisecond
+    t_blend = 50.0 * millisecond
+
+    # EXECUTE
+    j_reflected = calc_reflected_inertia(gear_ratio, rotor_inertia)
+    alpha_unblended = (delta_omega / dt_tick).to(ureg.radian / (second**2))
+    tau_unblended = calc_seam_acceleration_torque_jump(gear_ratio, rotor_inertia, alpha_unblended)
+    alpha_blended = (delta_omega / t_blend).to(ureg.radian / (second**2))
+    tau_blended = calc_seam_acceleration_torque_jump(gear_ratio, rotor_inertia, alpha_blended)
+    torque_reduction_ratio = tau_unblended / tau_blended
+
+    # GUARD
+    check(abs(j_reflected.magnitude - 0.25) < 0.001, f"Unexpected reflected inertia: {j_reflected}")
+    check(abs(alpha_unblended.magnitude - 200.0) < 0.1, f"Unexpected unblended acceleration: {alpha_unblended}")
+    check(abs(tau_unblended.magnitude - 50.0) < 0.1, f"Unexpected unblended torque: {tau_unblended}")
+    check(abs(alpha_blended.magnitude - 4.0) < 0.01, f"Unexpected blended acceleration: {alpha_blended}")
+    check(abs(tau_blended.magnitude - 1.0) < 0.01, f"Unexpected blended torque: {tau_blended}")
+    check(abs(torque_reduction_ratio.magnitude - 50.0) < 0.1, f"Unexpected reduction ratio: {torque_reduction_ratio}")
+
+    # OUTPUT
+    gear_ratio_str = fmt(gear_ratio, precision=0)
+    rotor_inertia_str = fmt_qty(rotor_inertia, kilogram * (meter**2), precision=4)
+    j_reflected_str = fmt_qty(j_reflected, kilogram * (meter**2), precision=2)
+    delta_omega_str = fmt_qty(delta_omega, ureg.radian / second, precision=1)
+    dt_tick_str = fmt_latency(dt_tick, unit=millisecond, precision=0)
+    t_blend_str = fmt_latency(t_blend, unit=millisecond, precision=0)
+    alpha_unblended_str = fmt_qty(alpha_unblended, ureg.radian / (second**2), precision=0)
+    tau_unblended_str = fmt_qty(tau_unblended, ureg.newton * meter, precision=0)
+    alpha_blended_str = fmt_qty(alpha_blended, ureg.radian / (second**2), precision=0)
+    tau_blended_str = fmt_qty(tau_blended, ureg.newton * meter, precision=0)
+    reduction_mult_str = fmt_multiple(50, precision=0)
+
+    j_refl_display_math = fmt_display_math(
+        rf"J_{{\text{{refl}}}} = N^2 J_{{\text{{rotor}}}} = ({gear_ratio_str})^2 \times ({rotor_inertia_str}) = {j_reflected_str}"
+    )
+    unblended_display_math = fmt_display_math(
+        rf"\Delta \alpha_{{\text{{step}}}} = \frac{{\Delta \dot{{q}}}}{{\Delta t}} = \frac{{{delta_omega_str}}}{{{dt_tick_str}}} = {alpha_unblended_str} \implies \tau_{{\text{{spike}}}} = J_{{\text{{refl}}}} \cdot \Delta \alpha = ({j_reflected_str}) \times ({alpha_unblended_str}) = {tau_unblended_str}"
+    )
+    blended_display_math = fmt_display_math(
+        rf"\Delta \alpha_{{\text{{smooth}}}} = \frac{{\Delta \dot{{q}}}}{{T_{{\text{{blend}}}}}} = \frac{{{delta_omega_str}}}{{{t_blend_str}}} = {alpha_blended_str} \implies \tau_{{\text{{smooth}}}} = ({j_reflected_str}) \times ({alpha_blended_str}) = {tau_blended_str}"
+    )
+```
+
 ::: {#nbk-planning-seam-acceleration-jump-reflected-inertia-torque .callout-notebook title="Seam acceleration jump and reflected inertia torque spike"}
 To quantify why $C^0$ position matching destroys transmissions, consider what happens when two trajectory chunks meet with a velocity mismatch across three physical machine embodiments:
 
 **1. Industrial Manipulator Joint (Cycloidal Reducer):**
 
-- Parameters: Rotor inertia, link inertia, gear ratio, and servo cycle duration.
-- Effective reflected inertia acts as a massive multiplier for any unblended motion.
-- Unblended seam jump: A velocity step across a single control tick demands an extreme, instantaneous acceleration. Because the physical structure has inertia, this acceleration command is converted into massive impulsive torque. Even if the motor drive current loop saturates at its hardware limit, the resulting shock exceeds the structural yield limit of the mechanical transmission, causing gear fracture almost instantly.
-- Smooth Spline Solution: Splicing the transition over a short blending window caps the peak acceleration. This limits the required torque, allowing the joint to operate safely within its continuous thermal envelope.
+- Parameters: Rotor inertia $J_{\text{rotor}} =$ `{python} PlanningSeamInertia.rotor_inertia_str`, gear reduction ratio $N =$ `{python} PlanningSeamInertia.gear_ratio_str`, servo tick $\Delta t =$ `{python} PlanningSeamInertia.dt_tick_str`.
+- Reflected rotor inertia seen at the link output shaft:
+  `{python} PlanningSeamInertia.j_refl_display_math`
+- Unblended seam jump: A velocity step $\Delta \dot{q} =$ `{python} PlanningSeamInertia.delta_omega_str` across a single control tick demands an extreme, instantaneous acceleration spike:
+  `{python} PlanningSeamInertia.unblended_display_math`
+  Even if the motor drive current loop saturates at its hardware limit, this shock exceeds the structural yield limit of the mechanical transmission, causing gear fracture almost instantly.
+- Smooth Spline Solution: Splicing the transition over a blending window $T_{\text{blend}} =$ `{python} PlanningSeamInertia.t_blend_str` caps the peak acceleration:
+  `{python} PlanningSeamInertia.blended_display_math`
+  Blending achieves a `{python} PlanningSeamInertia.reduction_mult_str` torque reduction, operating safely within the continuous thermal envelope.
 
 **2. Autonomous Mobile Robot (Differential-Drive AGV):**
 

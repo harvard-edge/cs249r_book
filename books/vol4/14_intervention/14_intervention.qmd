@@ -50,15 +50,90 @@ Naming the operations separates **intervention**\index{Intervention} from **safe
 
 When an operator attempts an intervention, human biology imposes a hard real-time latency budget before any physical corrective action can occur. Human response time is not a single point event, but a cascaded pipeline of physiological and mechanical stages. In an analytical breakdown of an operator monitoring a vehicle telemetry stream, the sensory recognition stage requires $150\text{ ms}$ to $300\text{ ms}$ for light to strike the retina, travel through the visual pathway, and register as an optical anomaly. The situational assessment stage, in which the operator recognizes that the learned policy is drifting toward a hazard and selects an appropriate counter-action, demands $500\text{ ms}$ to $1500\text{ ms}$. Finally, the motor actuation stage, covering the transmission of motor signals down the spinal cord, muscle recruitment in the hand, and the physical displacement of an override switch, consumes $200\text{ ms}$ to $400\text{ ms}$. Summing these sequential budgets establishes the physiological **takeover reaction floor**\index{Takeover reaction floor}, defined as $T_{\text{reaction}} = T_{\text{sensory}} + T_{\text{cognitive}} + T_{\text{motor}}$ ($850\text{--}2200\text{ ms}$ under active visual-manual monitoring, and expanding beyond $3500\text{ ms}$ when an operator is out-of-the-loop). During this reaction interval, the machine coasts blind, traversing an unmonitored drift distance $d_{\text{drift}} = v \cdot T_{\text{reaction}}$ under unchecked policy authority before the electrical intervention signal ever reaches the hardware arbiter. Once the operator engages physical braking, the vehicle requires an additional stopping distance governed by its maximum deceleration $a_{\text{max}}$. Integrating the constant velocity phase during human reaction with the uniform deceleration phase produces the minimum safe intervention distance.[^fn-math-intervention-distance] The total physical distance required for a human operator to detect an obstacle, actuate an override, and bring the plant to rest is heavily dominated by human neurological and muscular delay before the brakes engage. Because the reaction distance scales linearly with velocity while the deceleration distance scales quadratically, human intervention becomes physically incapable of averting close-range collisions as operational speed increases.
 
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_qty,
+    fmt_length,
+    fmt_latency,
+    fmt_time,
+    fmt_multiple,
+    fmt_display_math,
+    check,
+)
+
+class InterventionTakeoverBudget:
+    """Quantitative operator takeover and spatial clearance budget across intervention tiers."""
+
+    # LOAD
+    v0 = 5.0 * (meter / second)
+    a_max = 2.5 * (meter / (second**2))
+
+    # Bilateral haptic teleoperation (tight proprioceptive loop)
+    t_haptic = 150.0 * millisecond
+    # Passive out-of-the-loop takeover (cognitive re-engagement delay)
+    t_out_of_loop = 2500.0 * millisecond
+
+    # EXECUTE
+    d_brake = ((v0**2) / (2 * a_max)).to(meter)
+
+    d_drift_haptic = (v0 * t_haptic).to(meter)
+    d_stop_haptic = calc_safe_stopping_distance(v0, t_haptic, a_max)
+
+    d_drift_ool = (v0 * t_out_of_loop).to(meter)
+    d_stop_ool = calc_safe_stopping_distance(v0, t_out_of_loop, a_max)
+
+    drift_expansion_ratio = d_drift_ool / d_drift_haptic
+    stop_expansion_ratio = d_stop_ool / d_stop_haptic
+
+    # GUARD
+    check(abs(d_brake.magnitude - 5.0) < 0.01, f"Unexpected braking distance: {d_brake}")
+    check(abs(d_drift_haptic.magnitude - 0.75) < 0.01, f"Unexpected haptic drift: {d_drift_haptic}")
+    check(abs(d_stop_haptic.magnitude - 5.75) < 0.01, f"Unexpected haptic stop: {d_stop_haptic}")
+    check(abs(d_drift_ool.magnitude - 12.5) < 0.01, f"Unexpected out-of-loop drift: {d_drift_ool}")
+    check(abs(d_stop_ool.magnitude - 17.5) < 0.01, f"Unexpected out-of-loop stop: {d_stop_ool}")
+    check(abs(drift_expansion_ratio.magnitude - 16.67) < 0.1, f"Unexpected drift expansion: {drift_expansion_ratio}")
+
+    # OUTPUT
+    v0_str = fmt_qty(v0, meter / second, precision=0)
+    a_max_str = fmt_qty(a_max, meter / (second**2), precision=1)
+    d_brake_str = fmt_length(d_brake, unit=meter, precision=0)
+
+    t_haptic_str = fmt_latency(t_haptic, unit=millisecond, precision=0)
+    d_drift_haptic_str = fmt_length(d_drift_haptic, unit=meter, precision=2)
+    d_stop_haptic_str = fmt_length(d_stop_haptic, unit=meter, precision=2)
+
+    t_out_of_loop_str = fmt_time(t_out_of_loop, 'millisecond', precision=0)
+    d_drift_ool_str = fmt_length(d_drift_ool, unit=meter, precision=1)
+    d_stop_ool_str = fmt_length(d_stop_ool, unit=meter, precision=1)
+    stop_expansion_mult_str = fmt_multiple(round(stop_expansion_ratio.magnitude), precision=0)
+
+    haptic_display_math = fmt_display_math(
+        rf"d_{{\text{{stop,haptic}}}} = ({v0_str}) \times ({t_haptic_str}) + \frac{{({v0_str})^2}}{{2 \times ({a_max_str})}} = {d_drift_haptic_str} + {d_brake_str} = {d_stop_haptic_str}"
+    )
+    ool_display_math = fmt_display_math(
+        rf"d_{{\text{{stop,ool}}}} = ({v0_str}) \times ({t_out_of_loop_str}) + \frac{{({v0_str})^2}}{{2 \times ({a_max_str})}} = {d_drift_ool_str} + {d_brake_str} = {d_stop_ool_str}"
+    )
+```
+
 ::: {#nbk-intervention-operator-takeover-budget-spatial-clearance-margin .callout-notebook title="Operator takeover budget and spatial clearance margin"}
-**Concept**: Calculating the total stopping distance during a human intervention requires adding up every source of delay before the machine comes to a complete halt. We can break this down conceptually into four phases:
+**Concept**: Calculating the total stopping distance during a human intervention requires adding up every source of delay before the machine comes to a complete halt across four distinct phases:
 
-1. **Reaction Drift**: The distance the machine travels while the human perceives the obstacle and physically reacts.
-2. **Handshake Drift**: The distance covered while the machine's internal software verifies the human's command.
-3. **Actuator Blending**: The distance traveled while the machine executes the C² bumpless authority transfer ramp to safely smooth the transition from autonomous to manual control, preventing mechanical shock and maintaining kinodynamic feasibility (@sec-kinematics-11).
-4. **Physical Braking**: The final distance required for the brakes to decelerate the mass to zero.
+1. **Reaction Drift**: The distance the machine travels while the human perceives the obstacle and physically reacts ($v_0 \cdot T_{\text{reaction}}$).
+2. **Handshake Drift**: The distance covered while the machine's internal software verifies the human's command ($v_0 \cdot T_{\text{handshake}}$).
+3. **Actuator Blending**: The distance traveled while the machine executes the $C^2$ bumpless authority transfer ramp to safely smooth the transition from autonomous to manual control (@sec-kinematics-11).
+4. **Physical Braking**: The final distance required for the brakes to decelerate the mass to rest ($v_0^2 / (2 a_{\text{max}})$).
 
-When adding these up for a typical autonomous vehicle on a highway, the combined delays often consume nearly the entire safety margin. Even a fraction of a second drop in human attention can turn a safe stop into a collision. For the rigorous kinematic derivation of these stopping distances, see @sec-appendix-systems.
+**Worked Comparison**: At nominal speed $v_0 =$ `{python} InterventionTakeoverBudget.v0_str` under maximum braking $a_{\text{max}} =$ `{python} InterventionTakeoverBudget.a_max_str` ($d_{\text{brake}} =$ `{python} InterventionTakeoverBudget.d_brake_str`):
+
+- **Direct Bilateral Teleoperation** ($T_{\Sigma} =$ `{python} InterventionTakeoverBudget.t_haptic_str`):
+  `{python} InterventionTakeoverBudget.haptic_display_math`
+- **Out-of-the-Loop Takeover** ($T_{\Sigma} =$ `{python} InterventionTakeoverBudget.t_out_of_loop_str`):
+  `{python} InterventionTakeoverBudget.ool_display_math`
+
+**Systems Insight**: Passive monitoring inflates reaction delay from `{python} InterventionTakeoverBudget.t_haptic_str` to `{python} InterventionTakeoverBudget.t_out_of_loop_str`, expanding total stopping distance by `{python} InterventionTakeoverBudget.stop_expansion_mult_str` (from `{python} InterventionTakeoverBudget.d_stop_haptic_str` to `{python} InterventionTakeoverBudget.d_stop_ool_str`). When adding these up for an autonomous vehicle on a highway, the combined delays often consume nearly the entire safety margin. Even a fraction of a second drop in human attention can turn a safe stop into a collision. For the rigorous kinematic derivation of these stopping distances, see @sec-appendix-systems.
 :::
 
 ::: {#psp-intervention-spatial-takeover-budget .callout-perspective title="The spatial takeover budget law"}

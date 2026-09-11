@@ -121,25 +121,107 @@ Given a detected obstacle at distance $D_{\text{clear}}$, physical safety requir
 $$v_{\text{max}} = -a_{\text{brake}} \Delta t_{\text{delay}} + \sqrt{(a_{\text{brake}} \Delta t_{\text{delay}})^2 + 2 a_{\text{brake}} (D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}})}$$
 When sensor range degrades or an obstacle enters the trajectory, $D_{\text{clear}}$ contracts, forcing $v_{\text{max}}$ down along a square-root trajectory. If $D_{\text{clear}} \le \delta_{\text{loc}} + \delta_{\text{margin}}$, available distance reaches zero, the square-root term collapses to $a_{\text{brake}} \Delta t_{\text{delay}}$, and $v_{\text{max}}$ evaluates to zero, commanding an immediate stop reflex.
 
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_qty, fmt_length, fmt_energy, fmt_time, check
+
+class AMRStoppingBudget:
+    """Stopping distance budgeting for an autonomous mobile robot under high-tail compute latency."""
+
+    # LOAD
+    mass = 150 * kilogram
+    v0 = 1.8 * (meter / second)
+    tau_delay = 65 * millisecond
+    a_brake = 3.0 * (meter / (second**2))
+    delta_loc = 0.05 * meter
+    delta_margin = 0.10 * meter
+
+    # EXECUTE
+    d_react = (v0 * tau_delay).to(meter)
+    d_brake = ((v0**2) / (2 * a_brake)).to(meter)
+    ke = calc_kinetic_energy(mass, v0)
+    d_stop = calc_safe_stopping_distance(v0, tau_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
+
+    # Scaling at v1 = 2.4 m/s (+33%)
+    v1 = 2.4 * (meter / second)
+    d_react_v1 = (v1 * tau_delay).to(meter)
+    d_brake_v1 = ((v1**2) / (2 * a_brake)).to(meter)
+    d_stop_v1 = calc_safe_stopping_distance(v1, tau_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
+    d_stop_expansion = d_stop_v1 - d_stop
+
+    # GUARD
+    check(abs(d_react.magnitude - 0.117) < 0.001, f"Unexpected reaction drift: {d_react}")
+    check(abs(d_brake.magnitude - 0.540) < 0.001, f"Unexpected braking distance: {d_brake}")
+    check(abs(ke.to(joule).magnitude - 243.0) < 0.1, f"Unexpected kinetic energy: {ke}")
+    check(abs(d_stop.magnitude - 0.807) < 0.001, f"Unexpected stopping distance: {d_stop}")
+    check(abs(d_react_v1.magnitude - 0.156) < 0.001, f"Unexpected scaled reaction drift: {d_react_v1}")
+    check(abs(d_brake_v1.magnitude - 0.960) < 0.001, f"Unexpected scaled braking distance: {d_brake_v1}")
+    check(abs(d_stop_v1.magnitude - 1.266) < 0.001, f"Unexpected scaled stopping distance: {d_stop_v1}")
+    check(abs(d_stop_expansion.magnitude - 0.459) < 0.001, f"Unexpected clearance buffer loss: {d_stop_expansion}")
+
+    # OUTPUT
+    mass_str = fmt_qty(mass, kilogram, precision=0)
+    v0_str = fmt_qty(v0, meter / second, precision=1)
+    tau_delay_str = fmt_time(tau_delay, 'millisecond', precision=0)
+    a_brake_str = fmt_qty(a_brake, meter / (second**2), precision=1)
+    delta_loc_str = fmt_length(delta_loc.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    delta_margin_str = fmt_length(delta_margin.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    d_react_m_str = fmt_length(d_react, unit=meter, precision=3)
+    d_react_cm_str = fmt_length(d_react.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    d_brake_m_str = fmt_length(d_brake, unit=meter, precision=3)
+    d_brake_cm_str = fmt_length(d_brake.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    ke_str = fmt_energy(ke, unit=joule, precision=0)
+    d_stop_cm_str = fmt_length(d_stop.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+
+    v1_str = fmt_qty(v1, meter / second, precision=1)
+    d_react_v1_m_str = fmt_length(d_react_v1, unit=meter, precision=3)
+    d_react_v1_cm_str = fmt_length(d_react_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    d_brake_v1_m_str = fmt_length(d_brake_v1, unit=meter, precision=3)
+    d_brake_v1_cm_str = fmt_length(d_brake_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    d_stop_v1_cm_str = fmt_length(d_stop_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+    d_stop_expansion_cm_str = fmt_length(d_stop_expansion.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
+
+    d_react_display_math = fmt_display_math(
+        rf"d_{{\text{{react}}}} = v_0 \Delta t_{{\text{{delay}}}} = ({v0_str}) \times ({tau_delay_str}) \approx {d_react_m_str} = {d_react_cm_str}"
+    )
+    d_brake_display_math = fmt_display_math(
+        rf"d_{{\text{{brake}}}} = \frac{{v_0^2}}{{2 a_{{\text{{brake}}}}}} = \frac{{({v0_str})^2}}{{2 \times ({a_brake_str})}} \approx {d_brake_m_str} = {d_brake_cm_str}"
+    )
+    d_stop_display_math = fmt_display_math(
+        rf"d_{{\text{{stop}}}} = d_{{\text{{react}}}} + d_{{\text{{brake}}}} + \delta_{{\text{{loc}}}} + \delta_{{\text{{margin}}}} = {d_react_cm_str} + {d_brake_cm_str} + {delta_loc_str} + {delta_margin_str} = {d_stop_cm_str}"
+    )
+    d_scale_react_display_math = fmt_display_math(
+        rf"d_{{\text{{react}}}} = ({v1_str}) \times ({tau_delay_str}) = {d_react_v1_cm_str} \quad (+33.3\%)"
+    )
+    d_scale_brake_display_math = fmt_display_math(
+        rf"d_{{\text{{brake}}}} = \frac{{({v1_str})^2}}{{2 \times ({a_brake_str})}} = {d_brake_v1_cm_str} \quad (+77.8\%)"
+    )
+    d_scale_stop_display_math = fmt_display_math(
+        rf"d_{{\text{{stop}}}} = {d_react_v1_cm_str} + {d_brake_v1_cm_str} + 15.0\text{{ cm}} = {d_stop_v1_cm_str} \quad (+56.9\%)"
+    )
+```
+
 ::: {#nbk-body-stopping-distance-budgeting-high-tail-compute .callout-notebook title="Stopping distance budgeting under high-tail compute latency"}
-**Problem**: A $150\text{ kg}$ autonomous mobile robot (AMR) operates at forward speed $v_0 = 1.8\text{ m/s}$ in a logistics facility. The real-time perception pipeline runs at $20\text{ Hz}$ ($50\text{ ms}$ nominal compute), but experiencing an inference tail spike, direct memory access crossbar contention, and fieldbus serialization pushes total sense-to-actuation lag to $\Delta t_{\text{delay}} = 65\text{ ms}$ ($P_{99.9}$). Maximum emergency friction deceleration is measured at $a_{\text{brake}} = 3.0\text{ m/s}^2$, localization uncertainty is bounded by $\delta_{\text{loc}} = 5.0\text{ cm}$, and the statutory obstacle clearance margin is $\delta_{\text{margin}} = 10.0\text{ cm}$. What is the minimum physical defended stopping envelope $d_{\text{stop}}$, and how does it scale if the operational speed increases by $33\%$ to $2.4\text{ m/s}$?
+**Problem**: A `{python} AMRStoppingBudget.mass_str` autonomous mobile robot (AMR) operates at forward speed $v_0 =$ `{python} AMRStoppingBudget.v0_str` in a logistics facility. The real-time perception pipeline runs at $20\text{ Hz}$ ($50\text{ ms}$ nominal compute), but experiencing an inference tail spike, direct memory access crossbar contention, and fieldbus serialization pushes total sense-to-actuation lag to $\Delta t_{\text{delay}} =$ `{python} AMRStoppingBudget.tau_delay_str` ($P_{99.9}$). Maximum emergency friction deceleration is measured at $a_{\text{brake}} =$ `{python} AMRStoppingBudget.a_brake_str`, localization uncertainty is bounded by $\delta_{\text{loc}} =$ `{python} AMRStoppingBudget.delta_loc_str`, and the statutory obstacle clearance margin is $\delta_{\text{margin}} =$ `{python} AMRStoppingBudget.delta_margin_str`. What is the minimum physical defended stopping envelope $d_{\text{stop}}$, and how does it scale if the operational speed increases by $33\%$ to `{python} AMRStoppingBudget.v1_str`?
 
 **1. Reaction travel ($d_{\text{react}}$):**
-During the $65\text{ ms}$ sensing and compute delay, the chassis coasts unguided:
-$$d_{\text{react}} = v_0 \Delta t_{\text{delay}} = (1.8\text{ m/s}) \times (0.065\text{ s}) = 0.117\text{ m} = 11.7\text{ cm}$$
+During the `{python} AMRStoppingBudget.tau_delay_str` sensing and compute delay, the chassis coasts unguided:
+`{python} AMRStoppingBudget.d_react_display_math`
 
 **2. Braking travel ($d_{\text{brake}}$):**
-Dissipating kinetic energy ($E_k = \frac{1}{2} m v_0^2 = 243\text{ J}$) under sustained mechanical deceleration:
-$$d_{\text{brake}} = \frac{v_0^2}{2 a_{\text{brake}}} = \frac{(1.8\text{ m/s})^2}{2 \times (3.0\text{ m/s}^2)} = \frac{3.24}{6.0} = 0.540\text{ m} = 54.0\text{ cm}$$
+Dissipating kinetic energy ($E_k = \frac{1}{2} m v_0^2 =$ `{python} AMRStoppingBudget.ke_str`) under sustained mechanical deceleration:
+`{python} AMRStoppingBudget.d_brake_display_math`
 
 **3. Total defended stopping envelope ($d_{\text{stop}}$):**
-$$d_{\text{stop}} = d_{\text{react}} + d_{\text{brake}} + \delta_{\text{loc}} + \delta_{\text{margin}} = 11.7\text{ cm} + 54.0\text{ cm} + 5.0\text{ cm} + 10.0\text{ cm} = 80.7\text{ cm}$$
+`{python} AMRStoppingBudget.d_stop_display_math`
 
-**4. Scaling impact of $+33\%$ speed increase ($v_0 = 2.4\text{ m/s}$):**
-$$d_{\text{react}} = (2.4\text{ m/s}) \times (0.065\text{ s}) = 0.156\text{ m} = 15.6\text{ cm} \quad (+33.3\%)$$
-$$d_{\text{brake}} = \frac{(2.4\text{ m/s})^2}{2 \times (3.0\text{ m/s}^2)} = \frac{5.76}{6.0} = 0.960\text{ m} = 96.0\text{ cm} \quad (+77.8\%)$$
-$$d_{\text{stop}} = 15.6\text{ cm} + 96.0\text{ cm} + 15.0\text{ cm} = 126.6\text{ cm} \quad (+56.9\%)$$
-A $33\%$ increase in travel speed expands total stopping distance by nearly $57\%$, eroding $45.9\text{ cm}$ of clearance buffer.
+**4. Scaling impact of $+33\%$ speed increase ($v_0 =$ `{python} AMRStoppingBudget.v1_str`):**
+`{python} AMRStoppingBudget.d_scale_react_display_math`
+`{python} AMRStoppingBudget.d_scale_brake_display_math`
+`{python} AMRStoppingBudget.d_scale_stop_display_math`
+A $33\%$ increase in travel speed expands total stopping distance by nearly $57\%$, eroding `{python} AMRStoppingBudget.d_stop_expansion_cm_str` of clearance buffer.
 
 **Architect's Rule of Thumb**: *Doubling travel speed quadruples kinetic braking distance while doubling reaction travel; never increase velocity setpoints without dynamically solving the clearance quadratic.*
 :::

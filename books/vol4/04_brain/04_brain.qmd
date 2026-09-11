@@ -344,35 +344,101 @@ The complete operational loop spanning intent reasoning, action chunk synthesis,
 \end{algorithm}
 ```
 
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_params,
+    fmt_memory,
+    fmt_bandwidth,
+    fmt_latency,
+    fmt_time,
+    fmt_qty,
+    fmt_int,
+    fmt_display_math,
+    check,
+)
+
+class ActionChunkingLPDDR5:
+    """Memory wall and action chunking amortization on an embedded physical AI SoC."""
+
+    # LOAD
+    params = 7 * Bparam
+    bytes_per_param = 2 * (byte / param)
+    b_peak = 204.8 * (GB / second)
+    bus_efficiency = 0.70
+    chunk_horizon = 32
+
+    # EXECUTE
+    weight_mem = memory_from_params(params, bytes_per_param)
+    b_sustained = b_peak * bus_efficiency
+    t_stream = transfer_time(weight_mem, b_sustained).to(millisecond)
+    f_single = (1.0 / t_stream.to(second)).to(ureg.hertz)
+    tau_step = (t_stream / chunk_horizon).to(millisecond)
+    f_effective = (1.0 / tau_step.to(second)).to(ureg.hertz)
+
+    # GUARD
+    check(abs(weight_mem.to(GB).magnitude - 14.0) < 0.1, f"Unexpected weight footprint: {weight_mem}")
+    check(abs(b_sustained.to(GB / second).magnitude - 143.36) < 0.1, f"Unexpected sustained bandwidth: {b_sustained}")
+    check(abs(t_stream.to(millisecond).magnitude - 97.66) < 0.2, f"Unexpected streaming time: {t_stream}")
+    check(abs(f_single.magnitude - 10.24) < 0.1, f"Unexpected single frequency: {f_single}")
+    check(abs(tau_step.to(millisecond).magnitude - 3.05) < 0.1, f"Unexpected step latency: {tau_step}")
+    check(abs(f_effective.magnitude - 327.68) < 1.0, f"Unexpected effective frequency: {f_effective}")
+
+    # OUTPUT
+    params_str = fmt_params(params, precision=0)
+    weight_mem_str = fmt_memory(weight_mem, unit=GB, precision=0)
+    b_peak_str = fmt_bandwidth(b_peak, unit=GB / second, precision=1)
+    b_sustained_str = fmt_bandwidth(b_sustained, unit=GB / second, precision=1)
+    t_stream_ms_str = fmt_latency(t_stream, unit=millisecond, precision=1)
+    t_stream_s_str = fmt_time(t_stream.to(second), 'second', precision=4)
+    f_single_str = fmt_qty(f_single, ureg.hertz, precision=1)
+    chunk_horizon_str = fmt_int(chunk_horizon)
+    tau_step_str = fmt_latency(tau_step, unit=millisecond, precision=2)
+    f_effective_str = fmt_qty(f_effective, ureg.hertz, precision=1)
+
+    t_stream_display_math = fmt_display_math(rf"t_{{\text{{stream}}}} = \frac{{{weight_mem_str}}}{{{b_sustained_str}}} \approx {t_stream_ms_str}")
+    f_single_display_math = fmt_display_math(
+        rf"f_{{\text{{single}}}} = \frac{{1}}{{t_{{\text{{stream}}}}}} \approx \frac{{1}}{{{t_stream_s_str}}} \approx {f_single_str}"
+    )
+    tau_step_display_math = fmt_display_math(
+        rf"\tau_{{\text{{step}}}} = \frac{{t_{{\text{{stream}}}}}}{{H}} = \frac{{{t_stream_ms_str}}}{{{chunk_horizon_str}\text{{ steps}}}} \approx {tau_step_str}\text{{/step}}"
+    )
+    f_effective_display_math = fmt_display_math(
+        rf"f_{{\text{{effective}}}} = \frac{{1}}{{\tau_{{\text{{step}}}}}} \approx {f_effective_str}\text{{ (amortized)}}"
+    )
+```
+
 ::: {#nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking .callout-notebook title="The LPDDR5 memory-wall bottleneck and action chunking speedup"}
 How does Action Chunking overcome the memory bus bottleneck on an embedded physical AI compute module?
 
 *1. The single-token memory bottleneck.*
-Consider a 7-billion parameter Vision-Language-Action (VLA) policy stored in 16-bit precision (FP16) on an embedded edge System-on-Chip (e.g., a canonical heterogeneous SoC with a 256-bit LPDDR5 interface):
+Consider a `{python} ActionChunkingLPDDR5.params_str` Vision-Language-Action (VLA) policy stored in 16-bit precision (FP16) on an embedded edge System-on-Chip (e.g., a canonical heterogeneous SoC with a 256-bit LPDDR5 interface):
 
-- Weight footprint: $M_{\text{weights}} = 7 \times 10^9 \text{ params} \times 2\text{ bytes} = 14.0\text{ GB}$.
-- Theoretical memory bandwidth: $B_{\text{peak}} = 204.8\text{ GB/s}$.
-- Realistic sustained DRAM bandwidth (accounting for $\sim 70\%$ bus scheduling efficiency and row-buffer turnaround delays, the physical time required to close one memory bank page and open another): $B_{\text{sustained}} \approx 143.4\text{ GB/s}$.
+- Weight footprint: $M_{\text{weights}} = 7 \times 10^9 \text{ params} \times 2\text{ bytes} \approx$ `{python} ActionChunkingLPDDR5.weight_mem_str`.
+- Theoretical memory bandwidth: $B_{\text{peak}} =$ `{python} ActionChunkingLPDDR5.b_peak_str`.
+- Realistic sustained DRAM bandwidth (accounting for $\sim 70\%$ bus scheduling efficiency and row-buffer turnaround delays, the physical time required to close one memory bank page and open another): $B_{\text{sustained}} \approx$ `{python} ActionChunkingLPDDR5.b_sustained_str`.
 
 Minimum streaming latency to fetch the weights from DRAM across the silicon bus once:
-$$t_{\text{stream}} = \frac{14.0\text{ GB}}{143.4\text{ GB/s}} \approx 97.6\text{ ms}$$
+`{python} ActionChunkingLPDDR5.t_stream_display_math`
 
 Maximum attainable control frequency for single-step autoregressive token generation:
-$$f_{\text{single}} = \frac{1}{t_{\text{stream}}} \approx \frac{1}{0.0976\text{ s}} \approx 10.2\text{ Hz}$$
+`{python} ActionChunkingLPDDR5.f_single_display_math`
 When accounting for vision transformer (ViT) image tokenization ($15\text{ ms}$) and KV-cache lookups, live single-step frequency drops to $1\text{--}5\text{ Hz}$. This is far too slow to stabilize a robotic limb or mobile chassis without severe mechanical stuttering.
 
 *2. The action chunking amortization.*
-Instead of predicting one action step per DRAM weight sweep, the policy generates an action chunk of $H = 32$ future time steps ($\Delta t = 20\text{ ms}$, spanning a $640\text{ ms}$ trajectory horizon) in a single neural forward pass.
+Instead of predicting one action step per DRAM weight sweep, the policy generates an action chunk of $H =$ `{python} ActionChunkingLPDDR5.chunk_horizon_str` future time steps ($\Delta t = 20\text{ ms}$, spanning a $640\text{ ms}$ trajectory horizon) in a single neural forward pass.
 
-- Number of weight memory sweeps: 1 sweep ($97.6\text{ ms}$).
+- Number of weight memory sweeps: 1 sweep (`{python} ActionChunkingLPDDR5.t_stream_ms_str`).
 - Parallel matrix multiplications across $H$ steps reuse weights resident in on-chip SRAM/caches, elevating arithmetic intensity from $I \approx 1.0\text{ FLOP/byte}$ to $I \ge 65\text{ FLOP/byte}$. This dataflow mirrors the microarchitectural evolution of dedicated neural accelerators, such as Google's Tensor Processing Units (TPUv1 through TPUv4) [@jouppi2017; @jouppi2023], which utilize 2D systolic arrays with stationary weight or output registers to stream operands directly between neighboring arithmetic processing elements (PEs), eliminating repetitive DRAM round-trips.
 - Amortized compute latency per control step:
-$$\tau_{\text{step}} = \frac{t_{\text{stream}}}{H} = \frac{97.6\text{ ms}}{32\text{ steps}} \approx 3.05\text{ ms/step}$$
+`{python} ActionChunkingLPDDR5.tau_step_display_math`
 
 *3. Physical AI systems impact.*
-By amortizing weight streaming across the temporal chunk horizon, the effective control generation rate climbs from $10.2\text{ Hz}$ to:
-$$f_{\text{effective}} = \frac{1}{\tau_{\text{step}}} \approx 328\text{ Hz (amortized)}$$
-The embedded compute module synthesizes a new 32-step chunk in the background (e.g., at $5\text{--}10\text{ Hz}$), providing a continuous stream of overlapping waypoints to the $1000\text{ Hz}$ spline interpolator while dedicated host CPU cores and real-time MCUs retain over $80\%$ spare execution margin for hard real-time safety monitoring and bus arbitration.
+By amortizing weight streaming across the temporal chunk horizon, the effective control generation rate climbs from `{python} ActionChunkingLPDDR5.f_single_str` to:
+`{python} ActionChunkingLPDDR5.f_effective_display_math`
+The embedded compute module synthesizes a new `{python} ActionChunkingLPDDR5.chunk_horizon_str`-step chunk in the background (e.g., at $5\text{--}10\text{ Hz}$), providing a continuous stream of overlapping waypoints to the $1000\text{ Hz}$ spline interpolator while dedicated host CPU cores and real-time MCUs retain over $80\%$ spare execution margin for hard real-time safety monitoring and bus arbitration.
 :::
 
 ::: {#psp-brain-embodied-cognition .callout-perspective title="Embodied cognition guidelines"}
