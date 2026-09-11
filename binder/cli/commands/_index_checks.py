@@ -44,7 +44,19 @@ def _skip_file(path: Path, root: Path) -> bool:
     return any(part in s for part in _SKIP_PATH_PARTS)
 
 
+def _rel_path(f: Path, root: Path) -> str:
+    """Return a display path relative to root, or filename if root is a file."""
+    if root.is_file():
+        return f.name
+    try:
+        return str(f.relative_to(root))
+    except ValueError:
+        return str(f)
+
+
 def _iter_qmd_files(root: Path) -> list[Path]:
+    if root.is_file():
+        return [root] if root.suffix == ".qmd" and not _skip_file(root, root.parent) else []
     if (root / "books").is_dir():
         contents = root / "books"
     elif root.is_dir():
@@ -130,7 +142,7 @@ def check_tag_placement(root: Path) -> list[IndexIssue]:
     """Check for ``\\index{}`` inside bold, code, or headings."""
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
-        rel = str(f.relative_to(root))
+        rel = _rel_path(f, root)
         text = f.read_text(encoding="utf-8", errors="replace")
         in_code_block = False
         for i, line in enumerate(text.splitlines(), 1):
@@ -174,7 +186,7 @@ def check_xref_resolves(root: Path) -> list[IndexIssue]:
     see_refs: list[tuple[str, int, str, str]] = []
 
     for f in _iter_qmd_files(root):
-        rel = str(f.relative_to(root))
+        rel = _rel_path(f, root)
         text = f.read_text(encoding="utf-8", errors="replace")
         for m in INDEX_RE.finditer(text):
             k = m.group(1)
@@ -202,7 +214,7 @@ def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
     """Check for terms with both direct \\index{X} and \\index{X|see{Y}} in the same QMD file."""
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
-        rel = str(f.relative_to(root))
+        rel = _rel_path(f, root)
         lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
         terms: dict[str, int] = {}
         see_terms: dict[str, tuple[int, str]] = {}

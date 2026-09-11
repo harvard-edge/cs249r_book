@@ -368,8 +368,12 @@ class MLSysBookCLI:
             console.print("[dim]Layout rule: --layout is accepted only for `build pdf --vol1|--vol2`; it runs the same planner as `binder layout --vol1|--vol2 --no-build`.[/dim]")
             return True
 
-        self.config_manager.show_active_config()
         json_output = any(a.lower() == "--json" for a in args) if args else False
+        status_console = Console(stderr=True) if json_output else console
+
+        if not json_output:
+            self.config_manager.show_active_config()
+
         (
             format_type,
             volume,
@@ -383,16 +387,16 @@ class MLSysBookCLI:
         ) = self._parse_build_args(args)
 
         if build_all and chapters_arg:
-            console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
+            status_console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
             return False
 
         if layout_after and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
+            status_console.print(
                 "[red]❌ `--layout` is supported for full-volume PDF builds only.[/red]"
             )
-            console.print(
+            status_console.print(
                 "[yellow]Use: ./binder/binder build pdf --vol1 --layout "
                 "or ./binder/binder build pdf --vol2 --layout[/yellow]"
             )
@@ -401,7 +405,7 @@ class MLSysBookCLI:
         if no_cover and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
+            status_console.print(
                 "[yellow]⚠️ `--no-cover` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
@@ -409,7 +413,7 @@ class MLSysBookCLI:
         if print_marks and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
+            status_console.print(
                 "[yellow]⚠️ `--print-marks` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
@@ -419,14 +423,14 @@ class MLSysBookCLI:
 
         if build_all:
             if format_type == "html":
-                console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
+                status_console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
                 ok = self.build_command.build_html_only()
             else:
-                console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+                status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
                 ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
         elif volume and not chapters_arg:
             volume_name = format_volume_display_name(volume)
-            console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
+            status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
             ok = self.build_command.build_volume(
                 volume,
                 format_type,
@@ -439,14 +443,14 @@ class MLSysBookCLI:
                 ok = self.layout_command.run([f"--{volume}", "--no-build"])
         elif volume and chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
+            status_console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
             ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
         elif chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
+            status_console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
             ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
         else:
-            console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+            status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
             if format_type == "html":
                 ok = self.build_command.build_full("html")
             else:
@@ -463,7 +467,7 @@ class MLSysBookCLI:
                 "elapsed_seconds": round(time.time() - t0, 2),
                 "log_path": str(getattr(self.build_command, "_last_build_log", "")) or None,
             }
-            console.print(_json.dumps(result_payload, indent=2))
+            console.print(_json.dumps(result_payload, indent=2), soft_wrap=True, highlight=False)
 
         return ok
 

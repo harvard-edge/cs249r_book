@@ -1,0 +1,78 @@
+import io
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+from rich.console import Console
+
+from binder.cli.commands._index_checks import check_tag_placement
+from binder.cli.commands.validate import ValidateCommand
+import binder.cli.main as m
+
+
+def test_build_json_output_parseable_and_unwrapped():
+    """Ensure `binder build --json` produces valid, parseable JSON without wrapping."""
+    cli = object.__new__(m.MLSysBookCLI)
+    cli.config_manager = SimpleNamespace(show_active_config=lambda: None)
+    cli.build_command = SimpleNamespace(
+        build_volume=lambda *a, **kw: True,
+        _last_build_log="/a/" + "x" * 100 + ".log",
+    )
+    f = io.StringIO()
+    m.console = Console(file=f, width=80, color_system=None)
+    ok = cli.handle_build_command(["html", "--vol1", "--json"])
+    assert ok is True
+
+    raw = f.getvalue()
+    # The output in console must be directly parseable as JSON without errors
+    data = json.loads(raw)
+    assert data["success"] is True
+    assert data["volume"] == "vol1"
+    assert data["log_path"] == "/a/" + "x" * 100 + ".log"
+    assert "\n" not in data["log_path"]
+
+
+def test_resolve_pdf_volumes_preserves_multiple_flags():
+    """Ensure `--vol1 --vol2` preserves both volumes rather than early-returning first."""
+    cmd = object.__new__(ValidateCommand)
+    vols = cmd._resolve_pdf_volumes(Path("books/vol1"), Path("books"), vol1=True, vol2=True)
+    assert vols == ["vol1", "vol2"]
+
+    vols_single = cmd._resolve_pdf_volumes(Path("books/vol1"), Path("books"), vol1=True)
+    assert vols_single == ["vol1"]
+
+    vols_path = cmd._resolve_pdf_volumes(Path("books/vol3"), Path("books"))
+    assert vols_path == ["vol3"]
+
+
+def test_index_scanner_handles_single_qmd_file():
+    """Ensure index scanner works when given an individual QMD file."""
+    with TemporaryDirectory() as d:
+        p = Path(d) / "chapter.qmd"
+        p.write_text("## Heading \\index{Example}\n", encoding="utf-8")
+        dir_issues = check_tag_placement(p.parent)
+        file_issues = check_tag_placement(p)
+        assert len(dir_issues) == 1
+        assert len(file_issues) == 1
+        assert file_issues[0].code == "V4_heading"
+        assert file_issues[0].file == "chapter.qmd"
+
+
+def test_content_tree_skips_outside_volume_collection():
+    """Ensure content-tree validation is a no-op when path is not a volume collection."""
+    cmd = object.__new__(ValidateCommand)
+    # Chapter directory
+    r_dir = cmd._run_content_tree(Path("books/vol1/introduction"))
+    assert len(r_dir.issues) == 0
+    assert r_dir.files_checked == 0
+
+    # Chapter file
+    r_file = cmd._run_content_tree(Path("books/vol1/introduction/introduction.qmd"))
+    assert len(r_file.issues) == 0
+    assert r_file.files_checked == 0
+
+    # Volume directory
+    r_vol = cmd._run_content_tree(Path("books/vol1"))
+    assert len(r_vol.issues) == 0
+    assert r_vol.files_checked == 2

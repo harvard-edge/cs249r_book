@@ -9515,10 +9515,6 @@ class ValidateCommand:
         vol4: bool = False,
         tinytorch: bool = False,
     ) -> List[str]:
-        from cli.core.discovery import discover_volumes
-        all_vols = discover_volumes(quarto_dir)
-        if root and root.name in all_vols:
-            return [root.name]
         volumes: List[str] = []
         if vol1:
             volumes.append("vol1")
@@ -9530,7 +9526,13 @@ class ValidateCommand:
             volumes.append("vol4")
         if tinytorch:
             volumes.append("tinytorch")
-        return volumes if volumes else ["vol1", "vol2"]
+        if volumes:
+            return volumes
+        from cli.core.discovery import discover_volumes
+        all_vols = discover_volumes(quarto_dir)
+        if root and root.name in all_vols:
+            return [root.name]
+        return ["vol1", "vol2"]
 
     def _run_pdf_verify(
         self,
@@ -9828,14 +9830,32 @@ class ValidateCommand:
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
         """Ensure book volumes have the expected release-time structure."""
         t0 = time.time()
+        if not root.is_dir():
+            return ValidationRunResult(
+                name="content-tree",
+                description="Content tree (volume frontmatter required)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
         if (root.name.startswith("vol") or root.name == "tinytorch") and root.parent.name in ("books", "contents"):
             contents_dir = root.parent
+            target_vols = [root.name]
+        elif (root / "books").is_dir():
+            contents_dir = root / "books"
+            target_vols = sorted([
+                d.name for d in contents_dir.iterdir()
+                if d.is_dir() and ((d.name.startswith("vol") and d.name[3:].isdigit()) or d.name == "tinytorch")
+            ])
         else:
             contents_dir = root
+            target_vols = sorted([
+                d.name for d in contents_dir.iterdir()
+                if d.is_dir() and ((d.name.startswith("vol") and d.name[3:].isdigit()) or d.name == "tinytorch")
+            ])
 
-        from cli.core.discovery import discover_volumes
-        vols = discover_volumes(contents_dir)
-        if not vols:
+        if not target_vols or not (contents_dir / "vol1").is_dir():
             return ValidationRunResult(
                 name="content-tree",
                 description="Content tree (volume frontmatter required)",
@@ -9845,7 +9865,7 @@ class ValidateCommand:
             )
 
         required_paths = []
-        for vol in vols:
+        for vol in target_vols:
             required_paths.append((f"{vol}/frontmatter", True))
             required_paths.append((f"{vol}/frontmatter/notation.qmd", False))
 
