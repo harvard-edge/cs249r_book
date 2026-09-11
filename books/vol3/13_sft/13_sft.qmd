@@ -28,7 +28,7 @@ Standard foundation models are trained to maximize likelihood over static textua
 - Design curriculum staging strategies and replay regularization mechanisms that preserve general base model capabilities during specialized agent compilation.
 :::
 
-## 13.1 Formatting Trajectories for Autoregressive SFT {#sec-vol3-sft-formatting}
+## Formatting Trajectories for Autoregressive SFT {#sec-vol3-sft-formatting}
 
 During a continuous deployment roll-out in an automated site reliability engineering platform, an agent fine-tuned using standard markdown backticks emitted a bash script containing an unescaped double quotation mark within a nested heredoc string. The runtime parser misidentified the inner delimiter as the closing boundary of the execution envelope, executed the truncated command string up to the syntax boundary, and silently orphaned dozens of cloud storage volumes without running the subsequent cleanup logic. The agent runtime hung indefinitely waiting for a process exit code that never arrived, consuming active server threads and exhausting the connection pool. This systems failure was not caused by a flawed planning policy or insufficient parameter capacity; it was the direct consequence of naive trajectory serialization that allowed ambiguous string delimiters to bridge the boundary between agent intent and execution syntax.
 
@@ -49,7 +49,7 @@ where:
 4. $s_{t+1} \in \mathcal{S}$ represents the updated internal belief state of the agent, comprising the cumulative history of all prior interactions:
    $$s_{t+1} = \left( s_0, a_0, o_0, a_1, o_1, \dots, a_t, o_t \right)$$
 
-In classical supervised learning, training examples are assumed to be independently and identically distributed (i.i.d.). In an agent trajectory, every emitted token $x_i \in a_t$ is conditioned causally on the entire prior sequence history $x_{<i}$. The language model parameterizes this policy autoregressively:
+In classical supervised learning, training examples are assumed to be independent and identically distributed (i.i.d.). In an agent trajectory, every emitted token $x_i \in a_t$ is conditioned causally on the entire prior sequence history $x_{<i}$. The language model parameterizes this policy autoregressively:
 
 $$P_\theta(a_t \mid s_t) = \prod_{j=1}^{|a_t|} P_\theta\left( x_{t,j} \mid s_t, x_{t,<j} \right)$$
 
@@ -63,7 +63,7 @@ While in-context prompting requires no training infrastructure, it imposes sever
 
 1. **Quadratic Prefill Saturation:** Standard multi-head self-attention scales quadratically with sequence length $T$ during prompt prefill. For a transformer layer with model dimension $d_{\text{model}}$ and sequence length $T_{\text{prompt}}$, the floating-point operations (FLOPs) required for the prefill forward pass scale as:
    $$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot N_{\text{params}} \cdot T_{\text{prompt}} + \frac{4}{3} L \cdot d_{\text{model}} \cdot T_{\text{prompt}}^2$$
-   When an agent prepends $16{,}384$ tokens of OpenAPI documentation and exemplars to every execution step, prefill compute dominates the inference cycle, bottlenecking accelerator compute units and driving Time-to-First-Token (TTFT) beyond interactive latency service-level agreements (SLAs).
+   When an agent prepends $16{,}384$ tokens of OpenAPI documentation and exemplars to every execution step, prefill compute dominates the inference cycle, bottlenecking accelerator compute units and driving Time-to-First-Token (TTFT) beyond interactive latency service level agreement (SLA) thresholds.
 2. **Key-Value Cache Memory Exhaustion:** High-bandwidth memory (HBM) allocated to the **Key-Value (KV) cache**\index{Key-Value (KV) cache} scales linearly with sequence length, batch size, and layer count:
    $$M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_h \cdot T_{\text{seq}} \cdot b_{\text{bytes}}$$
    where $L$ is the number of transformer layers, $H_{\text{KV}}$ is the number of key-value heads, $d_h$ is the per-head dimension, and $b_{\text{bytes}}$ is the precision storage size (e.g., 2 bytes for 16-bit floating point). For a 70B parameter model ($L=80, H_{\text{KV}}=8, d_h=128$) serving a $32\text{K}$ context window, a single concurrent agent instance consumes over $10.5\text{ GB}$ of HBM exclusively for KV cache storage. Across a multi-tenant serving cluster, KV cache bloat throttles maximum serving concurrency, inducing memory-bound GPU starvation.
@@ -116,7 +116,8 @@ The serialization format chosen to represent trajectory components in the token 
    <|im_start|>thought
    Examining the lock acquisition logic in src/cache.py...<|im_end|>
    <|im_start|>action
-   <|tool_call_start|>{"name": "grep_search", "arguments": {"path": "src/cache.py", "query": "acquire_lock"}}<|tool_call_end|><|im_end|>
+   <|tool_call_start|>{"name": "grep_search", "arguments":
+     {"path": "src/cache.py", "query": "acquire_lock"}}<|tool_call_end|><|im_end|>
    <|im_start|>observation
    src/cache.py:42:    def acquire_lock(self, timeout=None):<|im_end|>
    ```
@@ -127,7 +128,7 @@ Using dedicated control tokens guarantees that role delimiters cannot be spoofed
 
 | **Dialect Architecture**             | **Delimiter Mechanism**                 | **Token Overhead**   | **Parser Complexity**   | **Collision Vulnerability** | **Injection Immunity** |
 |:-------------------------------------|:----------------------------------------|:---------------------|:------------------------|:----------------------------|:-----------------------|
-| **Markdown Code Blocks**             | Standard string literals (`\`\`\``)     | Low (+4 tokens)      | High (stateful regex)   | Extreme (nested code fails) | Nil (trivial escape)   |
+| **Markdown Code Blocks**             | Standard code fences (triple backticks) | Low (+4 tokens)      | High (stateful regex)   | Extreme (nested code fails) | Nil (trivial escape)   |
 | **Structured XML Envelopes**         | Textual tag pairs (`<call>`, `</call>`) | High (+12-24 tokens) | Moderate (DOM/SAX tree) | Low (with CDATA escaping)   | Moderate               |
 | **Reserved Control Tokens (ChatML)** | Dedicated vocabulary IDs (token IDs)    | Minimal (+2 tokens)  | Negligible (exact ID)   | Zero (un-emittable by text) | High (kernel enforced) |
 
@@ -191,7 +192,7 @@ class AgentTrajectoryCollator:
 
 Once trajectories are serialized into unambiguous, compact token streams, the training framework must compute loss across these tokens. However, treating every token as an active optimization target violates environmental causality.
 
-## 13.2 Masked Cross-Entropy Loss: Training Only on Actions {#sec-vol3-sft-masked-loss}
+## Masked Cross-Entropy Loss: Training Only on Actions {#sec-vol3-sft-masked-loss}
 
 A high-capacity 70B parameter foundation model was fine-tuned to execute database migrations across an enterprise infrastructure cluster. The engineering team collected $100{,}000$ complete multi-turn console trajectories and trained the model using standard next-token prediction across the entire token sequence. In staging, the model was tasked with querying the schema of a customer database containing over $50{,}000$ records. The agent emitted the shell command `psql -c "\d customers"`. Instead of terminating its generation, waiting for the operating system to execute the query, and absorbing the real console output, the model immediately generated:
 
@@ -284,7 +285,7 @@ $$N_{\text{global}} = \sum_{k=1}^K \sum_{b=1}^{B_{\text{local}}} \sum_{i=1}^{T} 
 
 ### High-performance CUDA and PyTorch implementation
 
-In high-throughput distributed training stacks (such as PyTorch with Megatron-LM [@shoeybi2019megatron] or DeepSpeed [@rasley2020deepspeed]), action masking is executed by remapping target labels prior to invoking hardware-optimized cross-entropy kernels. Standard cross-entropy loss functions expose an `ignore_index` argument (conventionally set to `-100`). Tokens assigned this target index are skipped directly within the fused CUDA kernel, executing zero memory writes and bypassing backward gradient passes.
+In high-throughput distributed training stacks (such as PyTorch with Megatron-LM [@shoeybi2019megatron] or DeepSpeed [@rasley2020]), action masking is executed by remapping target labels prior to invoking hardware-optimized cross-entropy kernels. Standard cross-entropy loss functions expose an `ignore_index` argument (conventionally set to `-100`). Tokens assigned this target index are skipped directly within the fused CUDA kernel, executing zero memory writes and bypassing backward gradient passes.
 
 ```python
 import torch
@@ -343,7 +344,7 @@ To eliminate memory fragmentation from padding tokens in variable-length multi-t
 
 While masked cross-entropy isolates the policy from environment noise, updating the full parameter weights of massive foundation models for specialized agent tools remains economically and computationally prohibitive.
 
-## 13.3 Parameter-Efficient Fine-Tuning (PEFT) and LoRA Adapter Swapping {#sec-vol3-sft-peft-lora}
+## Parameter-Efficient Fine-Tuning (PEFT) and LoRA Adapter Swapping {#sec-vol3-sft-peft-lora}
 
 Consider an enterprise agent platform designed to operate across diverse technical workflows: managing Kubernetes clusters, refactoring legacy C++ repositories, navigating dynamic DOM trees in web browsers, and generating optimized SQL analytical queries. Each domain requires distinct tool schemas, reasoning styles, and error-recovery heuristics.
 
@@ -375,7 +376,7 @@ During backward propagation, gradients are computed exclusively with respect to 
 
 $$\frac{\partial \mathcal{L}}{\partial A} = \frac{\alpha}{r} B^T \left( \frac{\partial \mathcal{L}}{\partial h_{\text{out}}} \right) h, \quad \frac{\partial \mathcal{L}}{\partial B} = \frac{\alpha}{r} \left( \frac{\partial \mathcal{L}}{\partial h_{\text{out}}} \right) (h A^T)$$
 
-The frozen base weights $W_0$ receive zero gradient updates, eliminating the memory overhead of storing optimizer states (e.g., Adam momentum and variance tensors) for the base model parameters.
+The frozen base weights $W_0$ receive zero gradient updates, eliminating the memory overhead of storing optimizer states (e.g., Adaptive Moment Estimation (Adam) momentum and variance tensors) for the base model parameters.
 
 ### Quantized low-rank adaptation (qlora)
 
@@ -410,7 +411,7 @@ The runtime implements a three-tier memory hierarchy:
    $$t_{\text{transfer}} = \frac{150 \times 10^6 \text{ bytes}}{48 \times 10^9 \text{ bytes/second}} \approx 3.125 \text{ ms}$$
    By prefetching adapters during the preceding token generation cycle, transfer overhead is completely hidden behind decode compute.
 
-To execute inference across a heterogeneous batch containing requests with different active adapters, the runtime executes **Segmented Batched GEMM**\index{Segmented Batched GEMM} kernels. Given a batch of $B$ requests where request $i$ invokes adapter index $a(i) \in \{1, \dots, K\}$:
+To execute inference across a heterogeneous batch containing requests with different active adapters, the runtime executes segmented batched general matrix multiply (GEMM)\index{Segmented Batched GEMM} kernels. Given a batch of $B$ requests where request $i$ invokes adapter index $a(i) \in \{1, \dots, K\}$:
 
 $$Y = X W_0 + \text{SegmentedGEMM}\left( X, A_{a(1:B)}, B_{a(1:B)}, \frac{\alpha}{r} \right)$$
 
@@ -430,7 +431,7 @@ To force the adapter to learn generalizable tool-following circuits rather than 
 
 Even with robust parameter efficiency and generalization regularizers, supervised fine-tuning remains vulnerable to an inherent flaw in sequential decision making: exposure bias.
 
-## 13.4 Mitigating Exposure Bias and Compounding Drift {#sec-vol3-sft-exposure-bias}
+## Mitigating Exposure Bias and Compounding Drift {#sec-vol3-sft-exposure-bias}
 
 A site reliability agent tasked with rolling out a Kubernetes canary update achieved a $98.2\%$ per-token accuracy on offline held-out test datasets. During a live test in a staging cluster, the agent issued a command to drain node `worker-node-04`. Due to a transient network blip, the cluster API returned an unexpected status: `Error from server (ServiceUnavailable): the server is currently unable to handle the request`.
 
@@ -589,13 +590,13 @@ Normalizing masked trajectory cross-entropy loss by the total sequence length $T
 ::: {.fallacy-pitfall}
 **Fallacy**: *Low-rank adapters with rank $r=4$ are sufficient for tool-following agent policies.*
 
-While rank $r=4$ or $r=8$ is often sufficient for adapting conversational style or sentiment, it lacks sufficient parameter capacity for compiling rigid syntactic grammars, typed JSON Schema compliance, and multi-turn state tracking. Empirical evaluations demonstrate that low-rank adapters with $r \le 8$ exhibit a $35\text{--}45\%$ schema validation failure rate when exposed to complex nested APIs. Sizing adapter capacity for agent policies requires setting rank $r \ge 16$ (and often $r=32$ or $r=64$) and targeting all linear projection layers (including attention output and MLP feedforward projections) to ensure sufficient capacity for syntax compilation.
+While rank $r=4$ or $r=8$ is often sufficient for adapting conversational style or sentiment, it lacks sufficient parameter capacity for compiling rigid syntactic grammars, typed JSON Schema compliance, and multi-turn state tracking. Empirical evaluations demonstrate that low-rank adapters with $r \le 8$ exhibit a $35\text{--}45\%$ schema validation failure rate when exposed to complex nested APIs. Sizing adapter capacity for agent policies requires setting rank $r \ge 16$ (and often $r=32$ or $r=64$) and targeting all linear projection layers (including attention output and multilayer perceptron (MLP) feedforward projections) to ensure sufficient capacity for syntax compilation.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Evaluation benchmark contamination through unwashed web scraping.*
 
-Public agent benchmarks (such as SWE-bench [@jimenez2024swebench] and GAIA [@mialon2023gaia]) evaluate agents on real GitHub issues and web tasks. When scraping public code repositories or issue trackers to synthesize SFT trajectory datasets, evaluation tasks frequently leak into training splits. Contaminated models memorize specific bug fixes and patch hunks rather than learning generalizable debugging heuristics, showing artificially inflated benchmark scores that collapse when deployed on private enterprise codebases. Data pipelines must implement rigorous 13-gram decontamination, AST diff filtering, and repository commit blacklisting.
+Public agent benchmarks (such as SWE-bench [@jimenez2024swebench] and GAIA [@mialon2023gaia]) evaluate agents on real GitHub issues and web tasks. When scraping public code repositories or issue trackers to synthesize SFT trajectory datasets, evaluation tasks frequently leak into training splits. Contaminated models memorize specific bug fixes and patch hunks rather than learning generalizable debugging heuristics, showing artificially inflated benchmark scores that collapse when deployed on private enterprise codebases. Data pipelines must implement rigorous 13-gram decontamination, abstract syntax tree (AST) diff filtering, and repository commit blacklisting.
 :::
 
 @Tbl-vol3-sft-failure-modes synthesizes these core failure mechanisms, mapping each to its root cause, operational symptoms, and systems mitigations.
