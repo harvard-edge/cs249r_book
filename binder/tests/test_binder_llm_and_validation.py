@@ -129,3 +129,29 @@ def test_volume_bibliographies_preserves_missing_dedicated_bib():
         assert len(findings) == 1
         assert findings[0].code == "missing-bibliography"
         assert findings[0].file.endswith("references-vol4.bib")
+
+
+def test_build_json_emits_json_on_conflicting_volumes():
+    """Ensure conflicting volume arguments return valid JSON error payload."""
+    from contextlib import redirect_stdout
+    buf = io.StringIO()
+    cli = m.MLSysBookCLI()
+    with redirect_stdout(buf):
+        ok = cli.handle_build_command(["pdf", "--vol1", "--vol2", "--json"])
+    assert ok is False
+    data = json.loads(buf.getvalue())
+    assert data["success"] is False
+    assert "Select only one volume" in data.get("error", "")
+
+
+def test_build_json_emits_json_on_chapters_with_all():
+    """Ensure combining explicit chapters with --all returns valid JSON error payload."""
+    from contextlib import redirect_stdout
+    buf = io.StringIO()
+    cli = m.MLSysBookCLI()
+    with redirect_stdout(buf):
+        ok = cli.handle_build_command(["html", "01_intro", "--all", "--json"])
+    assert ok is False
+    data = json.loads(buf.getvalue())
+    assert data["success"] is False
+    assert "Cannot combine explicit chapters with --all" in data.get("error", "")
