@@ -170,7 +170,7 @@ class ConfigManager:
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1', 'vol2', 'vol3', 'vol4') for volume-specific builds
+            volume: Optional volume (e.g. 'vol1', 'vol2', 'vol3', 'vol4', 'vol5')
 
         Returns:
             Path to the configuration file
@@ -178,41 +178,19 @@ class ConfigManager:
         Raises:
             ValueError: If format_type is not supported
         """
-        # Volume-specific config map
-        if volume:
-            volume_config_map = {
-                ("html", "vol1"): self.html_vol1_config,
-                ("html", "vol2"): self.html_vol2_config,
-                ("html", "vol3"): self.html_vol3_config,
-                ("html", "vol4"): self.html_vol4_config,
-                ("pdf", "vol1"): self.pdf_vol1_config,
-                ("pdf", "vol2"): self.pdf_vol2_config,
-                ("pdf", "vol3"): self.pdf_vol3_config,
-                ("pdf", "vol4"): self.pdf_vol4_config,
-                ("epub", "vol1"): self.epub_vol1_config,
-                ("epub", "vol2"): self.epub_vol2_config,
-                ("epub", "vol3"): self.epub_vol3_config,
-                ("epub", "vol4"): self.epub_vol4_config,
-            }
-            key = (format_type, volume)
-            if key in volume_config_map:
-                config_file = volume_config_map[key]
-                if config_file.exists():
-                    return config_file
-                else:
-                    console.print(f"[yellow]⚠️ Volume config not found: {config_file}, falling back to combined config[/yellow]")
-
-        # Combined config map (fallback)
-        config_map = {
-            "html": self.html_config,
-            "pdf": self.pdf_config,
-            "epub": self.epub_config
-        }
-
-        if format_type not in config_map:
+        if format_type not in ("html", "pdf", "epub"):
             raise ValueError(f"Unsupported format type: {format_type}")
 
-        return config_map[format_type]
+        if volume:
+            config_file = self.book_dir / "config" / f"_quarto-{format_type}-{volume}.yml"
+            if config_file.exists():
+                return config_file
+            console.print(f"[yellow]⚠️ Volume config not found: {config_file}, falling back to default config[/yellow]")
+
+        default_config = self.book_dir / "config" / f"_quarto-{format_type}-vol1.yml"
+        if default_config.exists():
+            return default_config
+        return self.book_dir / "config" / f"_quarto-{format_type}.yml"
 
     def activate_config(self, format_type: str, volume: Optional[str] = None) -> str:
         """Copy the config for a format and optional volume to ``_quarto.yml``.
@@ -259,10 +237,15 @@ class ConfigManager:
         if not self.active_index.is_file():
             return None
         content = self.active_index.read_bytes()
-        for index_file in (self.index_vol1, self.index_vol2, self.index_vol3,
-                           self.index_vol4, self.html_index_vol4):
-            if index_file.is_file() and index_file.read_bytes() == content:
-                return index_file.relative_to(self.book_dir).as_posix()
+        for index_candidate in sorted(self.book_dir.glob("index-*.qmd")):
+            if index_candidate.is_file() and index_candidate.read_bytes() == content:
+                return index_candidate.relative_to(self.book_dir).as_posix()
+        for vol_dir in self.book_dir.iterdir():
+            if vol_dir.is_dir() and (vol_dir.name.startswith("vol") or vol_dir.name == "tinytorch"):
+                for rel in ("index.qmd", "frontmatter/about.qmd"):
+                    idx = vol_dir / rel
+                    if idx.is_file() and idx.read_bytes() == content:
+                        return idx.relative_to(self.book_dir).as_posix()
         return None
 
     def get_output_dir(self, format_type: str, volume: Optional[str] = None) -> Path:

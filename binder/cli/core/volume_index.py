@@ -10,15 +10,32 @@ import shutil
 
 def volume_index_source(book_dir: Path, volume: str, format_type: str) -> Path:
     """Select the homepage for HTML and the preface for PDF/EPUB."""
-    if volume not in {"vol1", "vol2", "vol3", "vol4"}:
-        raise ValueError(f"Unknown volume: {volume}")
     if format_type not in {"html", "pdf", "epub"}:
         raise ValueError(f"Unsupported format: {format_type}")
-    if volume == "vol4":
-        relative = "vol4/index.qmd" if format_type == "html" else "vol4/frontmatter/about.qmd"
+    book_dir = Path(book_dir)
+
+    # If root-level index-{volume}.qmd exists (canonical for legacy vol1-vol3)
+    root_index = book_dir / f"index-{volume}.qmd"
+    if root_index.is_file():
+        return root_index
+
+    # Otherwise resolve from volume directory (e.g. vol4, volN, tinytorch)
+    if format_type == "html":
+        html_idx = book_dir / volume / "index.qmd"
+        if html_idx.is_file():
+            return html_idx
+        about_idx = book_dir / volume / "frontmatter" / "about.qmd"
+        if about_idx.is_file():
+            return about_idx
+        return html_idx
     else:
-        relative = f"index-{volume}.qmd"
-    return Path(book_dir) / relative
+        about_idx = book_dir / volume / "frontmatter" / "about.qmd"
+        if about_idx.is_file():
+            return about_idx
+        idx = book_dir / volume / "index.qmd"
+        if idx.is_file():
+            return idx
+        return about_idx
 
 
 def write_volume_index(book_dir: Path, volume: str, format_type: str) -> Path:
@@ -36,7 +53,7 @@ def write_volume_index(book_dir: Path, volume: str, format_type: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--book-dir", type=Path, default=Path.cwd())
-    parser.add_argument("--volume", required=True, choices=("vol1", "vol2", "vol3", "vol4"))
+    parser.add_argument("--volume", required=True, help="Volume name (e.g. vol1, vol2, vol4, etc.)")
     parser.add_argument("--format", dest="format_type", type=str.lower,
                         required=True, choices=("html", "pdf", "epub"))
     args = parser.parse_args()

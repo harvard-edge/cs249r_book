@@ -6,6 +6,7 @@ A refactored, modular command-line interface for building, previewing,
 and managing the Machine Learning Systems textbook.
 """
 
+import re
 import sys
 from pathlib import Path
 from rich.console import Console
@@ -44,6 +45,17 @@ console = Console()
 def _cmd(text: str) -> str:
     """Escape command examples before rendering in Rich tables."""
     return _rich_escape(text)
+
+
+def format_volume_display_name(volume: str) -> str:
+    """Format volume identifier into human-friendly name."""
+    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
+    if volume.startswith("vol") and volume[3:].isdigit():
+        num = int(volume[3:])
+        return f"Volume {roman_map.get(num, str(num))}"
+    if volume == "tinytorch":
+        return "TinyTorch"
+    return volume.capitalize()
 
 
 class MLSysBookCLI:
@@ -238,10 +250,16 @@ class MLSysBookCLI:
         no_cover = False
         print_marks = False
         remaining = []
-        explicit_volumes = {
-            f"vol{number}" for number in range(1, 5)
-            if any(arg.lower() in (f"--vol{number}", f"-{number}") for arg in args)
-        }
+        explicit_volumes = set()
+        for arg in args:
+            lower = arg.lower()
+            m_vol = re.match(r"^--(vol\d+)$", lower) or re.match(r"^-(\d+)$", lower)
+            if m_vol:
+                val = m_vol.group(1)
+                explicit_volumes.add(val if val.startswith("vol") else f"vol{val}")
+            elif lower in ("--tinytorch",):
+                explicit_volumes.add("tinytorch")
+
         if len(explicit_volumes) > 1:
             raise ValueError("Select only one volume for a build")
 
@@ -253,13 +271,22 @@ class MLSysBookCLI:
                 remaining.append(arg)
                 continue
             previous_volume = volume
-            if lower in ("--vol1", "-1", "vol1", "v1", "intro"):
+            m_vol = (
+                re.match(r"^--(vol\d+)$", lower)
+                or re.match(r"^-(\d+)$", lower)
+                or re.match(r"^(vol\d+)$", lower)
+                or re.match(r"^v(\d+)$", lower)
+            )
+            if m_vol:
+                v = m_vol.group(1)
+                volume = v if v.startswith("vol") else f"vol{v}"
+            elif lower in ("intro",):
                 volume = "vol1"
-            elif lower in ("--vol2", "-2", "vol2", "v2", "scaling"):
+            elif lower in ("scaling",):
                 volume = "vol2"
-            elif lower in ("--vol3", "-3", "vol3", "v3", "agentic"):
+            elif lower in ("agentic",):
                 volume = "vol3"
-            elif lower in ("--vol4", "-4", "vol4", "v4", "physical", "--physical"):
+            elif lower in ("physical", "--physical"):
                 volume = "vol4"
             elif lower in ("--tinytorch", "tinytorch"):
                 volume = "tinytorch"
@@ -402,13 +429,7 @@ class MLSysBookCLI:
             return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if volume and not chapters_arg:
-            volume_name = {
-                "vol1": "Volume I",
-                "vol2": "Volume II",
-                "vol3": "Volume III",
-                "vol4": "Volume IV",
-                "tinytorch": "TinyTorch",
-            }.get(volume, volume)
+            volume_name = format_volume_display_name(volume)
             console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
             ok = self.build_command.build_volume(
                 volume,
@@ -590,10 +611,11 @@ class MLSysBookCLI:
         i = 0
         while i < len(args):
             arg = args[i]
-            if arg == "--vol1":
-                volume = "vol1"
-            elif arg == "--vol2":
-                volume = "vol2"
+            m_vol = re.match(r"^--(vol\d+)$", arg.lower()) or re.match(r"^-(vol\d+)$", arg.lower())
+            if m_vol:
+                volume = m_vol.group(1)
+            elif arg.lower() in ("--tinytorch", "tinytorch"):
+                volume = "tinytorch"
             elif arg == "--chapter" and i + 1 < len(args):
                 i += 1
                 chapter = args[i]
@@ -611,8 +633,8 @@ class MLSysBookCLI:
         if not format_type:
             format_type = "pdf"  # Default to PDF
         if not volume:
-            console.print("[red]Please specify --vol1 or --vol2[/red]")
-            console.print("[yellow]Usage: ./binder/binder debug <pdf|html|epub> --vol1|--vol2 [--chapter <name>][/yellow]")
+            console.print("[red]Please specify a volume (e.g. --vol1, --vol2)[/red]")
+            console.print("[yellow]Usage: ./binder/binder debug <pdf|html|epub> --volN [--chapter <name>][/yellow]")
             return False
 
         return self.debug_command.debug_build(format_type, volume, chapter)
@@ -620,12 +642,16 @@ class MLSysBookCLI:
     def handle_list_command(self, args):
         """Handle list chapters command."""
         if args and args[0].lower() in ("help", "-h", "--help"):
-            console.print("Usage: ./binder/binder list [--vol1|--vol2|--vol3|--vol4]", markup=False)
+            console.print("Usage: ./binder/binder list [--vol1|--vol2|...]", markup=False)
             return True
         volume = None
         if len(args) > 0:
-            if args[0] in ("--vol1", "--vol2", "--vol3", "--vol4"):
-                volume = args[0][2:]
+            lower = args[0].lower()
+            m_vol = re.match(r"^--(vol\d+)$", lower) or re.match(r"^(vol\d+)$", lower)
+            if m_vol:
+                volume = m_vol.group(1)
+            elif lower in ("--tinytorch", "tinytorch"):
+                volume = "tinytorch"
 
         self.chapter_discovery.show_chapters(volume=volume)
         return True
