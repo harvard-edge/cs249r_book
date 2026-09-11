@@ -61,7 +61,21 @@ class Finding:
 
 
 def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
-    """Each volume that carries case studies, and the bibliography its keys resolve against."""
+    """Map each volume carrying case studies to its designated bibliography file.
+
+    Volumes with dedicated, isolated bibliographies (such as 'vol3' and 'vol4')
+    are always mapped to their specific ``references-{vol}.bib`` file. This
+    guarantees that a missing dedicated bibliography triggers a missing-bibliography
+    error rather than silently falling back to the shared bibliography. Other
+    volumes map to their dedicated bibliography if it exists, falling back to
+    the project-wide ``references.bib``.
+
+    Args:
+        repo: Path to the repository root directory.
+
+    Returns:
+        List of (volume_directory, bibliography_file) tuples.
+    """
     books_dir = repo / "books" if (repo / "books").is_dir() else repo
     dedicated_volumes = {"vol3", "vol4"}
     pairs = []
@@ -79,13 +93,28 @@ def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
 
 
 def bib_keys(path: Path) -> set[str]:
+    """Extract all BibTeX citation keys defined in a bibliography file.
+
+    Args:
+        path: Path to the .bib file.
+
+    Returns:
+        Set of citation key strings found in the file, or empty set if missing.
+    """
     if not path.exists():
         return set()
     return set(re.findall(r"^@\w+\{([^,]+),", path.read_text(errors="replace"), re.M))
 
 
 def blocks(lines: list[str]):
-    """Yield (start_line, body) for each case-study callout."""
+    """Yield (start_line, body) for each case-study callout.
+
+    Args:
+        lines: Lines of the QMD file content.
+
+    Yields:
+        Tuple of (start_line_number, callout_body_string).
+    """
     for i, line in enumerate(lines):
         if CALLOUT not in line:
             continue
@@ -105,6 +134,14 @@ def blocks(lines: list[str]):
 
 
 def cites(text: str) -> list[str]:
+    """Extract citation keys from callout text, excluding non-citation labels.
+
+    Args:
+        text: Raw callout text.
+
+    Returns:
+        List of citation keys referenced in the text.
+    """
     return [
         c for c in re.findall(r"@([A-Za-z][A-Za-z0-9_:+.-]*[A-Za-z0-9])", text)
         if not NOT_A_CITEKEY.match(c)
@@ -112,11 +149,28 @@ def cites(text: str) -> list[str]:
 
 
 def title_of(body: str) -> str:
+    """Extract the title attribute from a callout definition line.
+
+    Args:
+        body: Callout body text.
+
+    Returns:
+        Title string, or '(untitled)' if no title attribute was found.
+    """
     m = re.search(r'title="([^"]*)"', body)
     return m.group(1) if m else "(untitled)"
 
 
 def _rel(path: Path, repo: Path) -> str:
+    """Return path relative to repository root for display.
+
+    Args:
+        path: Target path.
+        repo: Repository root path.
+
+    Returns:
+        Relative path string if inside repo, otherwise absolute path string.
+    """
     try:
         return str(path.resolve().relative_to(repo))
     except ValueError:
@@ -128,6 +182,13 @@ def collect(paths: list[Path] | None = None, repo: Path = REPO) -> tuple[int, li
 
     With ``paths``, only those files inside a case-study volume are scanned;
     otherwise every ``.qmd`` in each volume is.
+
+    Args:
+        paths: Optional subset of files to scan.
+        repo: Repository root directory.
+
+    Returns:
+        Tuple of (checked_callouts_count, list_of_findings).
     """
     findings: list[Finding] = []
     checked = 0
@@ -187,6 +248,14 @@ def collect(paths: list[Path] | None = None, repo: Path = REPO) -> tuple[int, li
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for case study provenance validation.
+
+    Args:
+        argv: Command line arguments.
+
+    Returns:
+        0 on success, 1 on failure.
+    """
     argv = sys.argv[1:] if argv is None else argv
     strict = "--strict" in argv
     checked, findings = collect([Path(a) for a in argv if not a.startswith("--")])

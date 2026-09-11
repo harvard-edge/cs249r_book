@@ -443,7 +443,20 @@ class MaintenanceCommand:
         console.print()
 
     def _maintain_volume_bib(self, volume: str, check_only: bool = False) -> bool:
-        """Build or check volume bibliography via build_volume_bib.py."""
+        """Build or check dedicated volume bibliography via build_volume_bib.py.
+
+        Invokes ``build_volume_bib.py`` relative to the repository root so the
+        operation behaves identically regardless of the current working directory.
+        Checks supported isolated volumes (currently 'vol3' and 'vol4'); volumes
+        using the shared bibliography are reported with explanatory feedback.
+
+        Args:
+            volume: Target volume identifier ('vol3', 'vol4', etc.).
+            check_only: If True, check freshness without rewriting the bibliography file.
+
+        Returns:
+            True if the check or synchronization succeeded (exit code 0), False otherwise.
+        """
         supported_vols = ("vol3", "vol4")
         if volume not in supported_vols:
             disp_name = format_volume_display_name(volume)
@@ -479,7 +492,16 @@ class MaintenanceCommand:
             return False
 
     def _resolve_content_path(self, path_arg, volume: Optional[str] = None, **kwargs) -> Path:
-        """Resolve content path from args."""
+        """Resolve content path from argument, volume name, or book directory.
+
+        Args:
+            path_arg: Explicit path passed by the user, if any.
+            volume: Optional volume name (e.g., 'vol1', 'vol4').
+            **kwargs: Additional volume name flags.
+
+        Returns:
+            Resolved absolute Path to the target content directory.
+        """
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else (Path.cwd() / p).resolve()

@@ -21,6 +21,11 @@ def write_active_config(active_config: Path, source: Path, book_dir: Path) -> No
     Quarto only reads ``_quarto.yml``, so every build copies the chosen
     configuration there. The first line records the source file so status
     output and post-render scripts can tell which configuration is active.
+
+    Args:
+        active_config: Destination path (usually ``book_dir / "_quarto.yml"``).
+        source: Source configuration file to copy.
+        book_dir: Project books root directory for relative provenance path.
     """
     header = (
         f"{ACTIVE_CONFIG_MARKER}{source.relative_to(book_dir).as_posix()}\n"
@@ -34,7 +39,14 @@ def write_active_config(active_config: Path, source: Path, book_dir: Path) -> No
 
 
 def active_config_source(active_config: Path) -> Optional[str]:
-    """Return the source file recorded in a generated ``_quarto.yml``, or None."""
+    """Return the source file recorded in a generated ``_quarto.yml``, or None.
+
+    Args:
+        active_config: Path to the active ``_quarto.yml`` file.
+
+    Returns:
+        Relative path string recorded in the header marker, or None if invalid or missing.
+    """
     if not active_config.is_file():
         return None
     with active_config.open(encoding="utf-8") as fh:
@@ -49,6 +61,13 @@ def get_output_file(output_dir: Path, format_type: str) -> Optional[Path]:
 
     Used by build (open output) and debug (success check) so all commands use the same
     rule: PDF = first .pdf in dir, EPUB = first .epub in dir, HTML = index.html.
+
+    Args:
+        output_dir: Directory where build output was emitted.
+        format_type: Output format ("html", "pdf", or "epub").
+
+    Returns:
+        Path to primary output file if found, otherwise None.
     """
     if not output_dir.exists():
         return None
@@ -80,6 +99,15 @@ def get_chapter_output_file(
 
     HTML: ``contents/<vol>/.../<chapter>.html`` when present, else ``index.html``.
     PDF/EPUB: ``<chapter>.pdf`` under the output tree when present, else first match.
+
+    Args:
+        output_dir: Directory where single-chapter build output was emitted.
+        format_type: Output format ("html", "pdf", or "epub").
+        chapter_name: Chapter stem or name.
+        volume: Volume identifier (e.g. "vol1", "vol2", "vol4").
+
+    Returns:
+        Path to chapter output file if found, otherwise None.
     """
     if not output_dir.exists():
         return None
@@ -197,7 +225,7 @@ class ConfigManager:
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1'-'vol4') for volume-specific builds
+            volume: Optional volume (e.g., 'vol1', 'vol2', 'vol4', 'tinytorch') for volume-specific builds
 
         Returns:
             Name of the config file that was copied
@@ -253,7 +281,7 @@ class ConfigManager:
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
+            volume: Optional volume (e.g., 'vol1', 'vol2', 'vol4') for volume-specific builds
 
         Returns:
             Path to the output directory
@@ -290,7 +318,7 @@ class ConfigManager:
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
-            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
+            volume: Optional volume (e.g., 'vol1', 'vol2', 'vol4') for volume-specific builds
 
         Returns:
             Parsed configuration as dictionary

@@ -40,12 +40,29 @@ class IndexIssue:
 
 
 def _skip_file(path: Path, root: Path) -> bool:
+    """Check if a path matches ignored content partitions (frontmatter, appendix, shelved, etc.).
+
+    Args:
+        path: File path to test.
+        root: Scoping root path.
+
+    Returns:
+        True if the file should be skipped from index scanning, False otherwise.
+    """
     s = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
     return any(part in s for part in _SKIP_PATH_PARTS)
 
 
 def _rel_path(f: Path, root: Path) -> str:
-    """Return a display path relative to root, or filename if root is a file."""
+    """Return a display path relative to root, or filename if root is a file.
+
+    Args:
+        f: File path.
+        root: Scoping root path or file.
+
+    Returns:
+        Relative path string or filename.
+    """
     if root.is_file():
         return f.name
     try:
@@ -55,6 +72,14 @@ def _rel_path(f: Path, root: Path) -> str:
 
 
 def _iter_qmd_files(root: Path) -> list[Path]:
+    """Iterate over all testable QMD files within root or return root if a single QMD.
+
+    Args:
+        root: Target file or directory path.
+
+    Returns:
+        Sorted list of resolved QMD file Paths.
+    """
     if root.is_file():
         return [root] if root.suffix == ".qmd" and not _skip_file(root, root.parent) else []
     if (root / "books").is_dir():
@@ -70,7 +95,18 @@ def _iter_qmd_files(root: Path) -> list[Path]:
 
 
 def check_anti_patterns(root: Path) -> list[IndexIssue]:
-    """Corpus-level \\index{} anti-patterns from index.md §9."""
+    """Check corpus-level \\index{} anti-patterns from index.md §9.
+
+    Scans for sub-subentries (A!B!C), author-year subentries, generic-bare entries,
+    inline-Python markers, unescaped ampersands, leading articles, and unallowlisted
+    lowercase or acronym headwords.
+
+    Args:
+        root: Target directory or file path to check.
+
+    Returns:
+        List of discovered IndexIssue instances.
+    """
     keys: set[str] = set()
     for f in _iter_qmd_files(root):
         text = f.read_text(encoding="utf-8", errors="replace")
@@ -139,7 +175,14 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
 
 
 def check_tag_placement(root: Path) -> list[IndexIssue]:
-    """Check for ``\\index{}`` inside bold, code, or headings."""
+    """Check for forbidden ``\\index{}`` tag placement inside bold spans, inline code, or headings.
+
+    Args:
+        root: Target directory or file path to check.
+
+    Returns:
+        List of discovered IndexIssue instances.
+    """
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
         rel = _rel_path(f, root)
@@ -181,7 +224,17 @@ def check_tag_placement(root: Path) -> list[IndexIssue]:
 
 
 def _find_volume_root(path: Path) -> Optional[Path]:
-    """Find the containing volume directory for a path, if any."""
+    """Find the containing volume directory for a path, if any.
+
+    Traverses upward from the given path until a volume root directory
+    (e.g., 'vol1', 'vol4', 'tinytorch') is identified.
+
+    Args:
+        path: File or directory path.
+
+    Returns:
+        Path to containing volume root, or None if outside any volume.
+    """
     curr = path.resolve() if path.is_file() else path
     if curr.is_file():
         curr = curr.parent
@@ -193,7 +246,18 @@ def _find_volume_root(path: Path) -> Optional[Path]:
 
 
 def check_xref_resolves(root: Path) -> list[IndexIssue]:
-    """Every |see / |seealso target resolves to a main entry."""
+    """Verify that every |see and |seealso target resolves to an existing index headword.
+
+    When scanning a single chapter file, target headwords are collected from the
+    entire containing volume so cross-chapter index references resolve cleanly
+    without false positives.
+
+    Args:
+        root: Target directory or file path to check.
+
+    Returns:
+        List of discovered IndexIssue instances with code "xref_unresolved".
+    """
     main_heads: set[str] = set()
     see_refs: list[tuple[str, int, str, str]] = []
 
@@ -232,7 +296,17 @@ def check_xref_resolves(root: Path) -> list[IndexIssue]:
 
 
 def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
-    """Check for terms with both direct \\index{X} and \\index{X|see{Y}} in the same QMD file."""
+    """Check for terms with both direct \\index{X} and \\index{X|see{Y}} in the same file.
+
+    MakeIndex fails during index collation when a headword receives both page-number
+    entries and cross-reference encapsulates within the same collation run.
+
+    Args:
+        root: Target directory or file path to check.
+
+    Returns:
+        List of discovered IndexIssue instances with code "makeindex_encap_conflict".
+    """
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
         rel = _rel_path(f, root)
