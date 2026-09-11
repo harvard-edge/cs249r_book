@@ -771,19 +771,21 @@ To preserve agent reasoning fidelity under aggressive compression, serving runti
 
 An alternative to scalar quantization is exploiting the intrinsic low-rank dimensionality of attention activations via **Singular Value Decomposition (SVD)**\index{Singular Value Decomposition}.
 
-Let $\mathbf{K}^{(l)} \in \mathbb{R}^{S \times d_{\text{model}}}$ denote the uncompressed Key matrix accumulated across an agent trajectory at layer $l$. Because token representations inhabit a low-dimensional semantic subspace, the matrix $\mathbf{K}^{(l)}$ exhibits rapid singular value decay. Computing a truncated SVD of rank $r \ll d_{\text{model}}$ yields:
+In deep transformer architectures, token representations inhabit a low-dimensional semantic subspace where activation matrices exhibit rapid singular value decay. Rather than storing the full $d_{\text{head}}$-dimensional Key and Value vectors in accelerator HBM, the runtime projects each activation into a compact $r$-dimensional latent representation governed by @eq-vol3-virtualmem-lowrank-kv:
 
-$$\mathbf{K}^{(l)} \approx \mathbf{U}_r^{(l)} \mathbf{\Sigma}_r^{(l)} \left(\mathbf{V}_r^{(l)}\right)^T$$
+$$\mathbf{c}_{K, k}^{(l)} = \mathbf{k}_k^{(l)} \mathbf{V}_r^{(l)} \in \mathbb{R}^r {#eq-vol3-virtualmem-lowrank-kv}$$
 
-Rather than caching the full $S \times d_{\text{model}}$ elements in HBM, the runtime stores the compressed latent representations:
+where $r \ll d_{\text{head}}$ is the target latent rank and $\mathbf{V}_r^{(l)} \in \mathbb{R}^{d_{\text{head}} \times r}$ is the right-singular projection matrix obtained via calibration or architectural design.[^fn-virtualmem-svd-reconstruction]
 
-$$\mathbf{C}_K^{(l)} = \mathbf{K}^{(l)} \mathbf{V}_r^{(l)} \in \mathbb{R}^{S \times r}$$
+During autoregressive decode, the query vector $\mathbf{q}_i$ is projected into the identical latent subspace before computing attention scores: $\mathbf{q}_i^T \mathbf{k}_k^{(l)} \approx (\mathbf{q}_i \mathbf{V}_r^{(l)}) (\mathbf{c}_{K, k}^{(l)})^T$. This associative property allows the paged attention kernel to evaluate attention directly within the $r$-dimensional space, reducing both HBM memory bus traffic and SRAM register footprint by a factor of $d_{\text{head}} / r$.
 
-During the decode step, the query vector $\mathbf{q}_i$ is projected into the low-rank subspace before computing attention scores:
+This mathematical formulation connects directly to the architectural design of **Multi-Head Latent Attention (MLA)** [@deepseek2024v3]: by compressing Key and Value states into low-rank latent manifolds, the physical memory footprint of long agent contexts collapses by a factor of $4\times$ to $8\times$ with provably bounded reconstruction error, establishing a durable memory capacity policy.
 
-$$\mathbf{q}_i^T \left(\mathbf{k}_k^{(l)}\right) \approx \left(\mathbf{q}_i \mathbf{V}_r^{(l)}\right) \left(\mathbf{c}_{K, k}^{(l)}\right)^T$$
+::: {.callout-principle title="Systems Rule of Thumb: The Low-Rank Projection Invariant"}
+While post-hoc SVD compression requires runtime matrix projections ($\mathcal{O}(S \cdot d \cdot r)$ GEMM overhead) that can degrade decode arithmetic intensity, architecturally native latent attention (such as MLA) integrates projection directly into the model weights. For production agent clusters operating at high concurrency, native latent compression provides a $5\times$ to $7\times$ KV memory reduction while avoiding post-training calibration degradation.
+:::
 
-This mathematical formulation connects directly to the architectural philosophy of **Multi-Head Latent Attention (MLA)** [@deepseek2024v3]: by compressing Key and Value states into low-rank latent manifolds, the physical memory footprint of long contexts collapses by a factor of $4\times$ to $8\times$ with provably bounded reconstruction error.
+[^fn-virtualmem-svd-reconstruction]: By the Eckart-Young-Mirsky theorem, the truncated SVD $\mathbf{K}^{(l)} \approx \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$ minimizes Frobenius reconstruction error $\|\mathbf{K}^{(l)} - \hat{\mathbf{K}}^{(l)}\|_F = \sqrt{\sum_{j=r+1}^d \sigma_j^2}$. When singular values decay exponentially, retaining $r = d_{\text{head}} / 4$ preserves over $98\%$ of attention score variance.
 
 ### Hardware co-design: Tensor Core throughput and memory bandwidth
 
