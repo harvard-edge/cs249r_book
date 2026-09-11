@@ -30,13 +30,10 @@ entrypoints for generation, insertion, inventory, rendering, and compatibility.
 That keeps book-owned plotting policy out of `mlsysim` while preserving simple
 CLI commands for production work.
 
-Related editorial rules and records:
+Related editorial records:
 
-- `.claude/rules/margin-figures.md`
-- `.claude/rules/figure-visual-language.md`
 - `binder/tools/audit/margin_figure_opportunities.yml`
 - `binder/tools/audit/margin_figure_decisions.yml`
-- `binder/tools/audit/margin_figure_style_audit.md`
 
 ## Generate
 
@@ -210,15 +207,16 @@ python3 binder/tools/scripts/margin_figures/render_margin_reader_link_audit.py
 ```
 
 The default output is
-`binder/tools/audit/margin_figure_reader_link_audit.md`. Each entry embeds the SVG,
+`binder/tools/audit/margin_figure_reader_link_audit.md`, a local review file that
+is not tracked. Each entry embeds the SVG,
 shows the exact QMD `.column-margin` source excerpt, records the caption and
 `fig-alt`, and quotes the nearest prose before and after the margin block. This
 is the preferred evidence artifact for editor and LLM-style review.
 
-The corresponding author-facing verdict record is
-`binder/tools/audit/margin_figure_reader_alignment_verdicts.md`. It summarizes the
-same 224 placements with a pass/fix reader-alignment verdict and a compact prose
-anchor for each figure.
+An optional verdict record at
+`binder/tools/audit/margin_figure_reader_alignment_verdicts.md` adds a pass/fix
+reader-alignment verdict and a compact prose anchor for each figure. It is also a
+local review file.
 
 For a browser-readable version of the same audit, run:
 
@@ -227,7 +225,7 @@ python3 binder/tools/scripts/margin_figures/render_margin_reader_alignment_html.
 ```
 
 The default output is
-`binder/tools/audit/margin_figure_reader_alignment.html`. Open this file directly
+`binder/tools/audit/margin_figure_reader_alignment.html` (local, not tracked). Open this file directly
 in a browser to review each figure as a card with the SVG, caption, source QMD
 line, strongest prose anchor, `fig-alt`, and expandable placement context. The
 preview SVGs are embedded into the HTML so the page works from `file://` without
@@ -330,7 +328,7 @@ that the spacing is not a quantitative axis.
 
 The generator decides how an asset is drawn. It does not decide the final prose
 anchor. Placement belongs in the QMD `.column-margin` block and must satisfy the
-spatial-contiguity rule in `.claude/rules/margin-figures.md`.
+spatial-contiguity rule: the figure sits beside the prose it supports.
 
 For curated/generic figures, the durable bookkeeping is:
 

@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="100%" height="100%">
+import os
+
+SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="100%" height="100%">
 <defs>
     <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="90">
         <path d="M 0 0 L 10 5 L 0 10 z" fill="#333333"/>
@@ -93,3 +95,15 @@
 </g>
 
 </svg>
+"""
+
+def main():
+    svg_dir = os.path.dirname(os.path.abspath(__file__))
+    svg_path = os.path.join(svg_dir, "svg", "fig01_dual_brain_soc.svg")
+    os.makedirs(os.path.dirname(svg_path), exist_ok=True)
+    with open(svg_path, "w") as f:
+        f.write(SVG_CONTENT)
+    print(f"Successfully generated {svg_path}")
+
+if __name__ == "__main__":
+    main()

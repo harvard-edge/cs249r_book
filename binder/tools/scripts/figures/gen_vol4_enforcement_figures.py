@@ -8,11 +8,14 @@ Generate publication-grade vector SVG figures for Chapter 12: Enforcement.
 import os
 import subprocess
 
-SVG_CBF_PATH = "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/12-enforcement/figures/fig12_cbf_safety_filter.svg"
-PDF_CBF_PATH = "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/12-enforcement/figures/fig12_cbf_safety_filter.pdf"
+FIG_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../books/vol4/enforcement/images/svg")
+)
+SVG_CBF_PATH = os.path.join(FIG_DIR, "fig12_cbf_safety_filter.svg")
+PDF_CBF_PATH = os.path.join(FIG_DIR, "fig12_cbf_safety_filter.pdf")
 
-SVG_LADDER_PATH = "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/12-enforcement/figures/fig12_fallback_ladder.svg"
-PDF_LADDER_PATH = "/Users/VJ/GitHub/PhysicalAI-draft/book/chapters/12-enforcement/figures/fig12_fallback_ladder.pdf"
+SVG_LADDER_PATH = os.path.join(FIG_DIR, "fig12_fallback_ladder.svg")
+PDF_LADDER_PATH = os.path.join(FIG_DIR, "fig12_fallback_ladder.pdf")
 
 def generate_cbf_diagram():
     svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">

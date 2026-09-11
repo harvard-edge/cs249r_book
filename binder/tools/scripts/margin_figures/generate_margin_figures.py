@@ -3,8 +3,8 @@
 
 The output is intentionally SVG. The figures are authored at the native
 margin-column scale, use the book Helvetica stack through Book Tools, and
-reuse the canonical margin-device vocabulary documented in
-``.claude/rules/margin-figures.md``.
+reuse the canonical margin-device vocabulary defined in
+``binder/tools/figures/margin/devices.py``.
 
 LLM/editor notes:
     * Treat this file plus ``book.tools.figures.margin.devices`` as the source
