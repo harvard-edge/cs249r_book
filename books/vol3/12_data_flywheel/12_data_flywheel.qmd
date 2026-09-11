@@ -210,7 +210,7 @@ The selection of temperature $T$ navigates a fundamental systems tension between
 - **High Temperature Regime ($T > 1.0$):** High sampling entropy encourages radical exploratory branching across tool spaces. However, the probability of emitting malformed JSON arguments, syntax errors, or hallucinated file paths compounds exponentially across trajectory depth $H$. The probability of surviving to the final step without fatal syntax corruption approaches zero, collapsing the acceptance yield.
 - **Optimal Synthesis Regime ($T \in [0.6, 0.8]$):** The sampling distribution maintains sufficient entropy to explore alternative algorithmic strategies while preserving high token-level syntax and schema fidelity.
 
-To evaluate synthesis efficiency across temperatures, pipelines compute the unbiased $\text{pass@k}$ estimator [@chen2021evaluating]. When drawing $n$ candidate rollouts for a task ($n \ge k$) and observing $c$ passing completions, the probability that at least one of $k$ randomly chosen candidates succeeds is:
+To evaluate synthesis efficiency across temperatures, pipelines compute the unbiased $\text{pass@k}$ estimator (@eq-pass-at-k-eval) [@chen2021evaluating]. When drawing $n$ candidate rollouts for a task ($n \ge k$) and observing $c$ passing completions, the probability that at least one of $k$ randomly chosen candidates succeeds is:
 
 $$
 \text{pass}@k = \mathbb{E}_{x \sim \mathcal{D}} \left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]
@@ -663,43 +663,3 @@ However, possessing a massive corpus of structured execution traces is only the 
 In @sec-vol3-sft, we turn from data synthesis to the optimization mechanics of the policy compiler. We formulate the trajectory Supervised Fine-Tuning (SFT) loss objective, derive why the **Environmental Causality Boundary**\index{Environmental Causality Boundary} mandates strict token loss masking on external observations, analyze how sequence-length versus active-token normalization impacts optimization stability, and engineer parameter-efficient multi-tenant serving runtimes utilizing dynamically swapped LoRA adapters.
 
 :::
-
----
-
-## Quantitative Problems {#sec-vol3-data-flywheel-problems}
-
-Apply the trajectory filtering math, fleet balance equations, and majority voting models established in this chapter to solve the following quantitative problems.
-
-### Problem 1: Disaggregated fleet sizing and Amdahl balance
-
-An infrastructure engineering team operates a distributed synthetic trajectory generation cluster. The rollout tier consists of $N_{\text{GPU}} = 32$ NVIDIA H100 SXM5 accelerators running continuous batching inference. Across the target task distribution, an agent trajectory averages $\bar{H} = 25$ interaction turns. At each turn, the model generates an average of $120$ tokens (including internal thoughts and tool calls), resulting in $\bar{L}_{\text{gen}} = 3{,}000$ generated tokens per trajectory. Under continuous batching at an average batch size of $B = 16$, each H100 sustains an aggregate generation throughput of $\mu_{\text{GPU}} = 2{,}400$ tokens/second.
-
-The verification tier consists of commodity dual-socket CPU server nodes (64 physical cores per node, 128 hardware threads). Each verification task requires spinning up an isolated execution sandbox, executing a build toolchain, running a unit test suite, and computing filesystem diffs. Across the task distribution, the mean CPU verification time is $\bar{t}_{\text{verify}} = 18.0$ seconds of single-threaded compute.
-
-1. Calculate the aggregate trajectory generation rate $T_{\text{GPU}}$ (in trajectories per second) produced by the 32-GPU rollout cluster.
-2. Determine the minimum number of dedicated CPU verification cores ($N_{\text{CPU\_cores}}$) and the minimum number of 64-core CPU server nodes required to prevent verification backpressure from stalling the GPU rollout fleet, assuming a CPU core utilization efficiency of $\mu_{\text{core}} = 0.85$.
-3. Suppose the infrastructure uses standard Docker containers where container creation, disk cleanup, and teardown add an overhead of $t_{\text{docker}} = 3.5$ seconds per verification. Recalculate the required number of CPU server nodes. If the team replaces Docker with AWS Firecracker microVMs backed by Copy-on-Write `tmpfs` overlays that reduce lifecycle overhead to $t_{\text{microVM}} = 0.05$ seconds, how many CPU server nodes are saved?
-
----
-
-### Problem 2: Rejection sampling yield, temperature optimization, and pass@k
-
-A research laboratory is synthesizing training data for a complex repository-level coding benchmark. For each task specification $x$, the system samples $n = 32$ independent candidate trajectories from a 70B parameter teacher policy. The task difficulty follows a bimodal distribution:
-
-- **Tier A (Standard Tasks, 60 percent of corpus):** The per-candidate verification success probability under softmax temperature $T = 0.7$ is $p_A = 0.25$.
-- **Tier B (Hard Tasks, 40 percent of corpus):** The per-candidate verification success probability under temperature $T = 0.7$ is $p_B = 0.04$.
-1. Using the $\text{pass@k}$ formulation (@eq-pass-at-k-eval), calculate the expected $\text{pass@1}$, $\text{pass@8}$, and $\text{pass@32}$ metrics across the entire corpus distribution under temperature $T = 0.7$.
-2. Suppose the team evaluates an elevated temperature $T = 1.1$. Exploratory diversity increases the probability of finding a solution on Hard Tasks to $p_B' = 0.08$. However, increased token entropy causes syntax errors and schema invalidations that degrade the success probability on Standard Tasks to $p_A' = 0.12$. Calculate the new aggregate $\text{pass@1}$ and $\text{pass@32}$. Which temperature regime is optimal if the goal is maximizing $\text{pass@32}$?
-3. Generating an individual candidate rollout costs $\$0.045$ in GPU inference compute, while running the CPU verification sandbox costs $\$0.003$ per candidate. Calculate the expected compute cost required to produce one verified passing trajectory on Tier B tasks under $T = 0.7$ versus $T = 1.1$. At what human labor cost per trajectory does synthetic generation under $T = 1.1$ achieve a $100\times$ cost reduction?
-
----
-
-### Problem 3: Autoregressive covariate shift and error compounding
-
-An autonomous IT operations agent is deployed to execute multi-step database maintenance workflows with an average horizon of $H = 30$ steps. At each step $t$, the agent receives the current state $s_t$, emits a bash action $a_t$, and receives the system output $o_t$.
-
-During live deployment, external systems exhibit stochastic transient faults (e.g., temporary network disconnects, locked file descriptors) with probability $\delta = 0.05$ per step.
-
-1. **Model A (Trained Exclusively on Golden Paths):** Model A was fine-tuned on a pristine dataset containing zero errors ($100\%$ golden paths). When conditioned on an error-free state, its 1-step action error probability is $\epsilon_0 = 0.02$. However, when conditioned on an error state (such as a nonzero exit code), the model experiences covariate shift: its 1-step error probability spikes to $\epsilon_{\text{err}} = 0.75$. Furthermore, if Model A emits an incorrect action, it has a zero percent chance of recovering ($P(\text{recover}) = 0$). Calculate the probability that Model A successfully completes the entire 30-step trajectory without failing.
-2. **Model B (Trained on Bifurcated Flywheel Data):** Model B was fine-tuned on a curated dataset containing 70 percent golden paths and 30 percent mined error-recovery traces. When conditioned on an error-free state, its baseline error probability is $\epsilon_0' = 0.025$ (slightly higher due to regularization). However, when conditioned on an error state, its 1-step error probability is only $\epsilon_{\text{err}}' = 0.15$, and it successfully executes a diagnostic and recovery action with probability $P(\text{recover}) = 0.85$. Formulate the state transition dynamics as a Markov chain and calculate the probability that Model B successfully completes the 30-step trajectory.
-3. Quantify the relative improvement in end-to-end task completion rate ($\text{Success}_{\text{Model B}} / \text{Success}_{\text{Model A}}$) and explain the systems engineering justification for sacrificing a small amount of golden-path precision to eliminate autoregressive covariate shift.

@@ -503,11 +503,11 @@ In 1974, John W. Young [-@young1974] formulated the classical first-order checkp
 * $T_{\text{save}}$ denote the time required to serialize and commit a full checkpoint to non-volatile storage.
 * $T_{\text{opt}}$ denote the optimal temporal checkpoint interval that minimizes aggregate compute waste.
 
-Young's classical formula evaluates to:
+Young's classical formula evaluates to @eq-checkpoint-young-formula:
 
 $$T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$$ {#eq-checkpoint-young-formula}
 
-Young's derivation, however, assumes that the time required to restart and hydrate the process is negligible ($T_{\text{restart}} \approx 0$) and that the system is not vulnerable to failures during the checkpoint commit phase itself. In 2006, J. T. Daly [-@daly2006] extended Young's model to a higher-order Taylor expansion that explicitly incorporates restart latency $T_{\text{restart}}$ and failure rates during checkpoint serialization:
+Young's derivation, however, assumes that the time required to restart and hydrate the process is negligible ($T_{\text{restart}} \approx 0$) and that the system is not vulnerable to failures during the checkpoint commit phase itself. In 2006, J. T. Daly [-@daly2006] extended Young's model to a higher-order Taylor expansion (@eq-checkpoint-daly-formula) that explicitly incorporates restart latency $T_{\text{restart}}$ and failure rates during checkpoint serialization:
 
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}} \cdot \left[ 1 + \frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \right] - T_{\text{save}} \quad \left(\text{for } T_{\text{save}} < 2 M_{\text{MTBF}}\right)$$ {#eq-checkpoint-daly-formula}
 
@@ -650,7 +650,7 @@ The probability $P(\text{fail at } k)$ that execution halts precisely at step $k
 
 $$P(\text{fail at } k) = (1 - p_k) \prod_{m=1}^{k-1} p_m$$
 
-The expected latency $\mathbb{E}[T_{\text{saga}}]$ across all possible execution outcomes over an $N$-step saga evaluates to:
+The expected latency $\mathbb{E}[T_{\text{saga}}]$ across all possible execution outcomes over an $N$-step saga evaluates to @eq-checkpoint-expected-saga:
 
 $$\mathbb{E}[T_{\text{saga}}] = \left( \prod_{m=1}^N p_m \right) \sum_{i=1}^N T_{\text{fwd}}(i) + \sum_{k=1}^N \left[ (1 - p_k) \prod_{m=1}^{k-1} p_m \right] T_{\text{saga}}(k)$$ {#eq-checkpoint-expected-saga}
 
@@ -927,60 +927,3 @@ Once trajectories can be cleanly snapshotted, suspended, and restored to disk, a
 
 In @sec-vol3-scheduling, we explore the bimodal execution profile of agents, formalize Multi-Level Feedback Queues for token generation, and resolve the catastrophic Tool-Wait memory wall through preemptive context swapping.
 :::
-
----
-
-## Quantitative Problems {#sec-vol3-checkpoint-problems}
-
-Apply the mathematical models and fault-tolerance derivations established throughout this chapter to solve the following quantitative problems.
-
-### Problem 1: Optimal checkpoint cadence under combined failure distributions
-
-An autonomous software engineering agent operates on a cluster of cloud spot instances. The physical cluster exhibits a Mean Time Between Failures due to node preemptions and hardware faults of $\text{MTBF}_{\text{infra}} = 6\text{ hours}$ ($21{,}600\text{ seconds}$).
-
-The agent executes an iterative coding and testing loop where each turn takes exactly $T_{\text{turn}} = 20\text{ seconds}$. At each turn, the agent's policy has an independent probability $\epsilon_{\text{semantic}} = 0.015$ of emitting a fail-plausible semantic defect that fails the project test suite and mandates a state rollback.
-
-Serializing the Agent Control Block (ACB) and flushing the workspace OverlayFS UpperDir layer to NVMe storage requires $T_{\text{save}} = 1.8\text{ seconds}$. Hydrating a checkpoint and rebuilding the execution environment on a replacement node requires $T_{\text{restart}} = 12.0\text{ seconds}$.
-
-1. Calculate the combined Mean Time Between Recovery Events ($M_{\text{MTBF}}$) in seconds, accounting for both physical infrastructure faults and semantic defects.
-2. Using Young's classical formula (@eq-checkpoint-young-formula), calculate the optimal checkpoint interval $T_{\text{opt}}^{\text{Young}}$ in seconds, and determine the optimal checkpoint cadence in terms of execution turns.
-3. Using Daly's higher-order formula (@eq-checkpoint-daly-formula), calculate the refined optimal checkpoint interval $T_{\text{opt}}^{\text{Daly}}$ in seconds. What is the percentage difference between Young's first-order approximation and Daly's model?
-4. If an unmanaged agent system operates without checkpointing (relying on naive full restart from turn zero upon any failure), calculate the probability that the agent successfully completes an extended $N = 120$-step refactoring trajectory without experiencing a crash or semantic failure.
-
----
-
-### Problem 2: High-bandwidth memory (HBM) stranding and asynchronous suspension economics
-
-An enterprise runs a cluster of 64 dedicated NVIDIA H100 SXM5 GPUs (8 nodes with 8 GPUs each) hosting a 70B parameter instruction-tuned model. Each H100 GPU provides $80\text{ GB}$ of High-Bandwidth Memory (HBM3) with a memory bus bandwidth of $3.35\text{ TB/s}$. The cluster is leased at a flat rate of $\$3.50$ per GPU-hour.
-
-Each agent running on the platform consumes an active context of $S = 64{,}000$ tokens. The model architecture utilizes Grouped-Query Attention (GQA) with $L = 80$ transformer layers, $H_{\text{KV}} = 8$ Key-Value attention heads, and head dimension $d_h = 128$, stored in 16-bit precision (FP16, 2 bytes per element).
-
-During trajectory execution, agents invoke high-consequence external tools requiring human oversight approval. The human review latency follows an exponential distribution with a mean of $\tau_{\text{human}} = 45\text{ minutes}$ ($2{,}700\text{ seconds}$).
-
-The systems team evaluates two architectural options for managing the human oversight gate:
-
-* **Strategy A (Synchronous Pinning):** The agent thread blocks synchronously. The KV cache remains allocated in GPU HBM throughout the review period, preventing other requests from utilizing that memory capacity.
-* **Strategy B (Asynchronous State Suspension):** The runtime suspends the agent: serializing the Agent Control Block and transferring the active KV cache blocks across a PCIe 5.0 x16 bus ($B_{\text{transfer}} = 32.0\text{ GB/s}$ effective sequential bandwidth) to host NVMe storage. Upon receiving the human approval signal, the state is read back and restored to GPU HBM.
-1. Calculate the physical memory footprint of the Key-Value cache in gigabytes for a single agent instance at $S = 64{,}000$ tokens.
-2. Calculate the capital idle cost in dollars incurred under Strategy A for a single human review pause lasting exactly $\tau_{\text{human}} = 45\text{ minutes}$. For an enterprise executing 1,200 human oversight checkpoints per day, what is the annual financial waste of Strategy A?
-3. Under Strategy B, calculate the total I/O time in seconds required to dehydrate (suspend) and rehydrate (resume) the agent's KV cache across the PCIe bus.
-4. Assuming host NVMe storage and CPU cycles incur negligible marginal cost compared to GPU HBM leases, derive the break-even human review duration $\tau^*$ (in seconds) beyond which Strategy B is economically superior to Strategy A.
-
----
-
-### Problem 3: Distributed saga latency overhead and compensation cascades
-
-An autonomous multi-cloud provisioning agent executes an $N = 5$ step distributed saga across heterogeneous cloud and SaaS providers:
-
-* **Step 1 ($T_1$):** Provision Virtual Private Cloud (VPC) and subnet topology. Forward latency $T_{\text{fwd}}(1) = 4.0\text{ s}$; Compensating latency $T_{\text{comp}}(1) = 2.5\text{ s}$; Success probability $p_1 = 0.98$.
-* **Step 2 ($T_2$):** Provision security groups and IAM role leases. Forward latency $T_{\text{fwd}}(2) = 2.0\text{ s}$; Compensating latency $T_{\text{comp}}(2) = 1.0\text{ s}$; Success probability $p_2 = 0.95$.
-* **Step 3 ($T_3$):** Allocate 4x NVIDIA H100 GPU compute instances. Forward latency $T_{\text{fwd}}(3) = 15.0\text{ s}$; Compensating latency $T_{\text{comp}}(3) = 8.0\text{ s}$; Success probability $p_3 = 0.85$.
-* **Step 4 ($T_4$):** Configure DNS routing records via third-party provider. Forward latency $T_{\text{fwd}}(4) = 3.0\text{ s}$; Compensating latency $T_{\text{comp}}(4) = 1.5\text{ s}$; Success probability $p_4 = 0.90$.
-* **Step 5 ($T_5$):** Mount distributed shared filesystem volume. Forward latency $T_{\text{fwd}}(5) = 6.0\text{ s}$; Compensating latency $T_{\text{comp}}(5) = 3.0\text{ s}$; Success probability $p_5 = 0.80$.
-
-Each compensating action is deterministic, pre-compiled, and has a 100 percent success rate if executed.
-
-1. Calculate the overall probability $P_{\text{success}}$ that the entire 5-step saga completes successfully on its first attempt.
-2. If the saga fails at Step 5 ($T_5$), calculate the total elapsed time in seconds from the initiation of $T_1$ until the system successfully completes all compensating rollbacks and returns to baseline. What fraction of this time was spent on unproductive forward execution versus backward compensation?
-3. Using @eq-checkpoint-expected-saga, calculate the expected execution latency $\mathbb{E}[T_{\text{saga}}]$ across all possible outcomes (including both complete successes and partial rollbacks).
-4. Suppose an engineer proposes re-ordering the workflow such that the high-risk, un-compensable filesystem allocation (Step 5) is executed first (as Step 1), assuming its dependencies can be mocked. If Step 5 executes first and fails with probability $1 - p_5 = 0.20$, what is the new total elapsed rollback latency for that failure, and how does this re-ordering optimize the system's expected compute waste?

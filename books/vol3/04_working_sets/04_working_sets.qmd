@@ -779,30 +779,3 @@ When hundreds of concurrent agents execute dynamic, unpredictable tool calls, th
 
 In @sec-vol3-virtual-memory, we scale from working-set theory to the physical virtual memory manager of the agentic operating system: diving into **PagedAttention**, block translation tables, prefix sharing via radix trees, hierarchical KV swapping across host RAM and NVMe SSDs, and disaggregated prefill-decode serving clusters.
 :::
-
-<!-- ======================================================================= -->
-<!-- SECTION: QUANTITATIVE PROBLEMS                                          -->
-<!-- ======================================================================= -->
-## Quantitative Problems {#sec-vol3-working-sets-problems}
-
-1. **KV Cache Memory Sizing and Autoregressive Decode Bandwidth Wall:**
-   An autonomous software engineering agent runs on a dual-NVIDIA H100 SXM5 node. Each GPU provides 80 GB of HBM3 memory with a measured memory bandwidth of $B_{\text{mem}} = 3.35\text{ TB/s}$ (aggregate $6.70\text{ TB/s}$ across both GPUs). The underlying agent policy is a 70-billion parameter dense model using Grouped-Query Attention (GQA) with the following architectural specifications: $L = 80$ layers, $d_{\text{model}} = 8{,}192$, query heads $H_Q = 64$, key/value heads $H_{\text{KV}} = 8$, head dimension $d_h = 128$, and BF16 precision ($b_{\text{elem}} = 2\text{ bytes}$). The model weights occupy exactly $140\text{ GB}$ of HBM distributed equally across the two GPUs ($70\text{ GB}$ per GPU). The runtime reserves $4\text{ GB}$ per GPU for activation scratchpads and CUDA runtime overhead.
-   a) Calculate the KV cache memory footprint per token ($M_{\text{KV, token}}$) in bytes.
-   b) Calculate the maximum theoretical sequence length $N_{\max}$ that a single agent stream can sustain before the system encounters an Out-Of-Memory (OOM) fault.
-   c) Assuming a current trajectory length of $N = 65{,}536$ tokens, calculate the total memory bytes transferred across the memory bus to decode a single token ($B_{\text{decode}}$), and determine the maximum theoretical autoregressive token generation rate ($\text{tokens/sec}$) bounded by memory bandwidth.
-   d) If the orchestrator schedules $B = 4$ concurrent agent streams, each at $N = 65{,}536$ tokens, calculate the new per-token generation rate per stream. Does the aggregate memory footprint fit within the dual-GPU node?
-
-2. **Attention Sink Probability Dynamics and Softmax Denominator Rescaling:**
-   An inference engine serves an agent with an active context of $N = 2{,}048$ tokens. For a specific middle-layer attention head $\ell = 40, h = 4$, the pre-softmax attention logit vector is $\mathbf{z} \in \mathbb{R}^{2048}$. Empirical profiling reveals that the first four tokens ($i \in \{0, 1, 2, 3\}$, corresponding to initial attention sinks) have exceptionally large logits: $z_0 = 18.2, z_1 = 17.5, z_2 = 17.1, z_3 = 16.8$. The remaining $2{,}044$ tokens have logits normally distributed with mean $\mu = 4.2$ and standard deviation $\sigma = 1.1$.
-   a) Compute the exact softmax denominator $D_{\text{full}} = \sum_{j=0}^{2047} \exp(z_j)$ using the approximation $\sum_{j=4}^{2047} \exp(z_j) \approx 2044 \cdot \exp\left(\mu + \frac{\sigma^2}{2}\right)$.
-   b) Calculate the aggregate percentage of probability mass absorbed by the 4 attention sink tokens ($P_{\text{sink}} = \sum_{j=0}^3 \alpha_j$).
-   c) Suppose a naive sliding-window eviction policy discards the 4 sink tokens, retaining only the remaining $2{,}044$ tokens. Calculate the new softmax denominator $D_{\text{evicted}}$ and determine the amplification factor $K = D_{\text{full}} / D_{\text{evicted}}$ by which the attention weights of all remaining intermediate tokens are artificially inflated. Explain the impact of this rescaling on the activation variance in downstream residual layers.
-
-3. **Multi-Head Latent Attention (MLA) vs. GQA Memory and Concurrency Sizing:**
-   A high-throughput enterprise agent cluster is evaluating an architectural migration from a standard GQA model to a Multi-Head Latent Attention (MLA) model for its 60-layer reasoning policy.
-   - **Configuration A (GQA):** $L = 60$, $H_Q = 64$, $H_{\text{KV}} = 8$, $d_h = 128$, $b_{\text{elem}} = 2\text{ bytes}$ (BF16).
-   - **Configuration B (MLA):** $L = 60$, latent compression dimension $d_c = 512$, decoupled rotary head dimension $d_h^R = 64$, $b_{\text{elem}} = 2\text{ bytes}$ (BF16).
-   Both models have identical model weight footprints of $60\text{ GB}$ in FP16 and are deployed on single 80 GB NVIDIA H100 GPUs (leaving $16\text{ GB}$ available strictly for KV cache storage after reserving $4\text{ GB}$ for workspace buffers).
-   a) Calculate the KV cache memory requirement per token (in KB/token) for both Configuration A and Configuration B. What is the exact compression ratio achieved by MLA?
-   b) For an agentic coding benchmark where trajectories average $N = 32{,}768$ tokens, calculate the maximum number of concurrent agent streams ($B_{\max}$) that can be served on a single 80 GB GPU without exceeding the $16\text{ GB}$ KV cache budget for both configurations.
-   c) For Configuration B (MLA) operating at its maximum concurrency $B_{\max}$ derived in part (b), calculate the total bytes transferred across the memory bus per decode step ($B_{\text{decode}}$), and compute the sustained aggregate generation throughput ($\text{tokens/sec}$) assuming a memory bandwidth of $B_{\text{mem}} = 3.35\text{ TB/s}$.
