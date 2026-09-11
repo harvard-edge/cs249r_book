@@ -53,53 +53,35 @@ While continuous batching dramatically improves accelerator throughput for short
 
 ### The arithmetic intensity divergence and phase contention
 
-The hardware efficiency of any workload on a modern accelerator is governed by the Williams-Waterman-Patterson Roofline model [@williams2009]. Let $P_{\text{peak}}$ denote the peak floating-point throughput of the processor (in $\text{FLOP/s}$), and let $B_{\text{mem}}$ denote the memory bandwidth between High-Bandwidth Memory (HBM) and the compute cores (in $\text{bytes/s}$). The **arithmetic intensity**\index{Arithmetic intensity} (or operational intensity) $\mathcal{I}$ of an algorithm is defined as the ratio of total floating-point operations executed to total bytes transferred from memory:
-$$\mathcal{I} = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{Memory Data Transferred (Bytes)}} \quad \left[ \frac{\text{FLOP}}{\text{Byte}} \right]$$
+The hardware efficiency of any workload on a modern accelerator is governed by the Williams-Waterman-Patterson Roofline model [@williams2009]. Let $P_{\text{peak}}$ denote the peak floating-point throughput of the processor (in $\text{FLOP/s}$), and let $B_{\text{mem}}$ denote the memory bandwidth between High-Bandwidth Memory (HBM) and the compute cores (in $\text{bytes/s}$). The **arithmetic intensity**\index{Arithmetic intensity} (or operational intensity) $\mathcal{I}$ of an algorithm is defined as the ratio of total floating-point operations executed to total bytes transferred from memory: $\mathcal{I} = \text{FLOPs} / \text{Bytes}$.
 
-The hardware platform's **machine balance** or **ridge point** $\mathcal{I}_{\text{knee}}$ defines the critical threshold separating memory-bandwidth-bound operations from compute-bound operations:
-$$\mathcal{I}_{\text{knee}} = \frac{P_{\text{peak}}}{B_{\text{mem}}} \quad \left[ \frac{\text{FLOP}}{\text{Byte}} \right]$$
+The hardware platform's **machine balance** or **ridge point** $\mathcal{I}_{\text{knee}}$ defines the critical threshold separating memory-bandwidth-bound operations from compute-bound operations in @eq-vol3-scheduling-ridge-point:
 
-Consider an NVIDIA H100 SXM5 accelerator operating on 16-bit half-precision floating-point numbers (FP16/BF16):
+$$
+\mathcal{I}_{\text{knee}} = \frac{P_{\text{peak}}}{B_{\text{mem}}} \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-ridge-point}
 
-- Dense peak Tensor Core throughput: $P_{\text{peak}} = 989 \times 10^{12}\text{ FLOP/s} = 989\text{ TFLOPS}$.
-- HBM3 memory bandwidth: $B_{\text{mem}} = 3.35 \times 10^{12}\text{ B/s} = 3.35\text{ TB/s}$.
-- The machine ridge point is:
-$$\mathcal{I}_{\text{knee}} = \frac{989 \times 10^{12}\text{ FLOP/s}}{3.35 \times 10^{12}\text{ B/s}} \approx 295.2\text{ FLOP/Byte}$$
-
-Any kernel whose operational intensity $\mathcal{I} < 295.2\text{ FLOP/Byte}$ is strictly bounded by HBM bandwidth; its execution time is dominated by reading data across the memory bus, leaving the vast majority of Tensor Cores powered down or stalled. Conversely, any kernel with $\mathcal{I} \ge 295.2\text{ FLOP/Byte}$ is compute-bound, fully utilizing the Tensor Cores.
+Consider an NVIDIA H100 SXM5 accelerator operating on 16-bit half-precision floating-point numbers (FP16/BF16), where dense peak Tensor Core throughput reaches $P_{\text{peak}} = 989\text{ TFLOPS}$ ($989 \times 10^{12}\text{ FLOP/s}$) and HBM3 memory bandwidth provides $B_{\text{mem}} = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ B/s}$). Evaluating @eq-vol3-scheduling-ridge-point yields a machine ridge point of $\mathcal{I}_{\text{knee}} \approx 295.2\text{ FLOP/byte}$. Any kernel whose operational intensity satisfies $\mathcal{I} < 295.2\text{ FLOP/byte}$ is strictly bounded by HBM streaming bandwidth; its execution time is dominated by reading data across the memory bus, leaving the vast majority of Tensor Cores powered down or stalled. Conversely, any kernel with $\mathcal{I} \ge 295.2\text{ FLOP/byte}$ is compute-bound, fully utilizing the Tensor Cores.
 
 Now examine the two distinct operational phases of a decoder-only transformer model with $N_{\text{params}}$ parameters, $L$ transformer layers, hidden dimension $d_{\text{model}}$, $H$ query attention heads, $H_{\text{KV}}$ key-value heads, and per-head dimension $d_h = d_{\text{model}} / H$.
 
 #### The prefill phase (compute-bound)
-In the prefill phase, the model ingests an entire prompt sequence of length $S$ tokens in a single forward pass. Because all $S$ tokens are known simultaneously, the matrix-vector products across linear projections ($W_Q, W_K, W_V, W_O$ and the multi-layer perceptron feed-forward blocks $W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) are batched across all $S$ positions into General Matrix Multiplies (GEMMs).
+In the prefill phase, the model ingests an entire prompt sequence of length $S$ tokens in a single forward pass. Because all $S$ tokens are known simultaneously, the matrix-vector products across linear projections ($W_Q, W_K, W_V, W_O$ and the feed-forward blocks $W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) are batched across all $S$ positions into General Matrix Multiplies (GEMMs). Weights are read from HBM once ($2 N_{\text{params}}$ bytes in 16-bit precision), amortizing memory transfers across all $S$ tokens. Operational intensity scales directly with sequence length in @eq-vol3-scheduling-prefill-intensity:
 
-The floating-point operations required to project the weights scale as:
-$$\text{FLOPs}_{\text{weights}} \approx 2 N_{\text{params}} S$$
-Evaluating multi-head self-attention across the sequence requires computing the attention scores $Q K^T$ and multiplying by values $A V$, contributing:
-$$\text{FLOPs}_{\text{attn}} \approx 4 L H d_h S^2 = 4 L d_{\text{model}} S^2$$
-Total floating-point operations for prefill are therefore:
-$$\text{FLOPs}_{\text{prefill}} \approx 2 N_{\text{params}} S + 4 L d_{\text{model}} S^2$$
+$$
+\mathcal{I}_{\text{prefill}}(S) \approx S \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-prefill-intensity}
 
-To execute these operations in half precision ($2\text{ bytes}$ per parameter), the model weights must be read from HBM once:
-$$\text{Bytes}_{\text{weights}} = 2 N_{\text{params}} \quad \text{Bytes}$$
-For moderate sequence lengths where attention compute is smaller than weight projections ($S \ll N_{\text{params}} / 2 L d_{\text{model}}$), the operational intensity of prefill is:
-$$\mathcal{I}_{\text{prefill}} \approx \frac{2 N_{\text{params}} S}{2 N_{\text{params}}} = S \quad \left[ \frac{\text{FLOP}}{\text{Byte}} \right]$$
-
-When an agent prompt contains $S \ge 512$ tokens, its operational intensity $\mathcal{I}_{\text{prefill}} \ge 512\text{ FLOP/Byte} > \mathcal{I}_{\text{knee}} = 295.2\text{ FLOP/Byte}$. The prefill phase operates squarely in the **compute-bound regime**. The hardware bottleneck is Tensor Core floating-point throughput, and the kernel maximizes accelerator arithmetic utilization.
+When an agent prompt contains $S \ge 512$ tokens, its operational intensity $\mathcal{I}_{\text{prefill}} \ge 512\text{ FLOP/byte} > \mathcal{I}_{\text{knee}} = 295.2\text{ FLOP/byte}$. The prefill phase operates squarely in the **compute-bound regime**, saturating accelerator Tensor Cores.
 
 #### The decode phase (memory-bandwidth bound)
-In the autoregressive decode phase, the model generates exactly one new token at position $S + t$ for each active sequence in the batch. Let $B_{\text{dec}}$ denote the number of concurrent decoding sequences. For each sequence, the model must evaluate all $N_{\text{params}}$ weights against a single activation vector of length $1$.
+In the autoregressive decode phase, the model generates exactly one new token at position $S + t$ for each active sequence in the batch. Let $B_{\text{dec}}$ denote the number of concurrent decoding sequences. For each sequence, the model must evaluate all $N_{\text{params}}$ weights against a single activation vector of length $1$. Operations degenerate from compute-dense GEMM to memory-bound GEMV (matrix-vector multiplication). All $N_{\text{params}}$ weights must still be streamed from HBM for every individual token step, alongside the historical Key-Value (KV) cache for all $B_{\text{dec}}$ sequences across all $L$ layers, yielding operational intensity in @eq-vol3-scheduling-decode-intensity:
 
-The operations degenerate from GEMM (matrix-matrix multiplication) to GEMV (matrix-vector multiplication). The compute required is:
-$$\text{FLOPs}_{\text{decode}} \approx 2 N_{\text{params}} B_{\text{dec}}$$
-Crucially, all $N_{\text{params}}$ weights must still be streamed from HBM into the register files and on-chip SRAM for every single token step:
-$$\text{Bytes}_{\text{weights}} = 2 N_{\text{params}} \quad \text{Bytes}$$
-In addition, the forward pass must stream the historical Key-Value (KV) cache for all $B_{\text{dec}}$ sequences across all $L$ layers to compute cross-attention over historical tokens:
-$$\text{Bytes}_{\text{KV}} = 2 \times 2 \times L \times H_{\text{KV}} \times d_h \times \sum_{i=1}^{B_{\text{dec}}} S_i \quad \text{Bytes}$$
-The operational intensity of the decode phase is therefore:
-$$\mathcal{I}_{\text{decode}} = \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}} + \text{Bytes}_{\text{KV}}} \le B_{\text{dec}} \quad \left[ \frac{\text{FLOP}}{\text{Byte}} \right]$$
+$$
+\mathcal{I}_{\text{decode}}(B_{\text{dec}}) = \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}} + M_{\text{KV}}} \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-decode-intensity}
 
-For typical serving batch sizes ($B_{\text{dec}} \in [1, 64]$), the operational intensity $\mathcal{I}_{\text{decode}} \le 64\text{ FLOP/Byte}$, which is far below the machine knee of $295.2\text{ FLOP/Byte}$. Autoregressive decoding is severely **memory-bandwidth bound**. Over $80\text{--}90\%$ of peak Tensor Core capacity sits completely idle, waiting for the memory controllers to stream parameter weights across the HBM bus.
+where $M_{\text{KV}} = 4 L H_{\text{KV}} d_h \sum_{i=1}^{B_{\text{dec}}} S_i$ bytes.[^fn-scheduling-intensity-divergence] Because $M_{\text{KV}} \ge 0$, decode operational intensity is fundamentally capped by batch size: $\mathcal{I}_{\text{decode}} \le B_{\text{dec}}\text{ FLOP/byte}$. For typical serving batch sizes ($B_{\text{dec}} \in [1, 64]$), decode operational intensity satisfies $\mathcal{I}_{\text{decode}} \le 64\text{ FLOP/byte} \ll 295.2\text{ FLOP/byte}$. Autoregressive decoding is severely **memory-bandwidth bound**, stranding over 80 to 90 percent of peak Tensor Core capacity idle awaiting HBM weight streaming.
 
 #### Phase contention
 When a monolithic continuous batching engine attempts to schedule an incoming prefill request alongside active decode sequences in the same iteration, a destructive phenomenon known as **phase contention**\index{Phase contention} (or phase interference) occurs (@tbl-vol3-scheduling-monolithic-batching):
@@ -115,22 +97,22 @@ When a monolithic continuous batching engine attempts to schedule an incoming pr
 
 The compute-dense GEMM kernel of the prefill request claims all available Streaming Multiprocessors (SMs) and thread blocks. The lightweight GEMV kernels of the decoding sequences are serialized or starved of memory issue slots. Because modern GPU hardware schedulers cannot preempt an active cooperative thread array (CTA) mid-kernel, the decoding sequences must pause until the entire prefill GEMM executes to completion. The result is an explosive spike in tail Inter-Token Latency.
 
+> **The Systems Rule of Thumb (The Arithmetic Intensity Divergence):** Prefill and decode occupy diametrically opposed hardware regimes: prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S \ge 512\text{ FLOP/byte}$), while autoregressive decode is memory-bus bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}} \le 64\text{ FLOP/byte} \ll \mathcal{I}_{\text{knee}}$). Co-scheduling an unchunked prefill alongside active decode streams causes severe phase contention: the compute-dense GEMM monopolizes accelerator streaming multiprocessors, serializing memory-bound decode iterations and inducing tail latency spikes of 150 to 200 milliseconds.
+
+[^fn-scheduling-intensity-divergence]: Total prefill operations equal $2 N_{\text{params}} S + 4 L d_{\text{model}} S^2$ FLOPs while streaming $2 N_{\text{params}}$ bytes of weights in half precision; for $S \ll N_{\text{params}} / (2 L d_{\text{model}})$, this simplifies to $\mathcal{I}_{\text{prefill}} \approx S$. Decode evaluates $2 N_{\text{params}} B_{\text{dec}}$ FLOPs while streaming all weights and historical Key-Value caches from HBM, capping operational intensity at $B_{\text{dec}}$.
+
 ### Chunked prefill and iteration piggybacking
 
 To resolve phase contention without abandoning iteration-level scheduling, Sarathi [@agrawal2024sarathi] introduced **chunked prefill**\index{Chunked prefill} and **iteration piggybacking**\index{Iteration piggybacking}.
 
-Instead of executing a long prompt of length $S$ as a single, monolithic, atomic GEMM, the scheduler slices the prompt into a sequence of smaller, uniform token chunks of size $C$ (e.g., $C = 512$ or $C = 1024$ tokens). The total number of chunk iterations required to ingest the prompt is:
-$$K = \left\lceil \frac{S}{C} \right\rceil$$
+Instead of executing a long prompt of length $S$ as a single, monolithic, atomic GEMM, the scheduler slices the prompt into a sequence of smaller, uniform token chunks of size $C$ (e.g., $C = 512$ or $C = 1024$ tokens). The total number of chunk iterations required to ingest the prompt is $K = \lceil S / C \rceil$.
 
 In each serving iteration $t$, the scheduler constructs a **hybrid batch** comprising:
 
 1. All $B_{\text{dec}}$ ready decode sequences (each contributing $1$ token).
 2. A single prefill chunk of size $C_{\text{eff}} \le C$ selected from the head of the prefill queue.
 
-The total token budget per iteration is constrained by a strict ceiling $T_{\text{budget}}$:
-$$N_{\text{iter}}(t) = B_{\text{dec}}(t) + C_{\text{eff}}(t) \le T_{\text{budget}}$$
-
-By fixing $T_{\text{budget}}$ such that the total execution time of the hybrid batch matches the target Service-Level Objective for Inter-Token Latency ($\Delta t_{\text{iter}} \le SLO_{\text{ITL}}$), the runtime guarantees bounded latency jitter for active decode streams while steadily advancing prefill computation (@tbl-vol3-scheduling-chunked-piggybacking).
+The total token budget per iteration is constrained by a strict ceiling $T_{\text{budget}}$, satisfying $N_{\text{iter}}(t) = B_{\text{dec}}(t) + C_{\text{eff}}(t) \le T_{\text{budget}}$. By fixing $T_{\text{budget}}$ such that the total execution time of the hybrid batch matches the target Service-Level Objective for Inter-Token Latency ($\Delta t_{\text{iter}} \le SLO_{\text{ITL}}$), the runtime guarantees bounded latency jitter for active decode streams while steadily advancing prefill computation (@tbl-vol3-scheduling-chunked-piggybacking).
 
 | Serving Iteration | Time Window                | Prefill Chunk Progress                       | Decode Batch Status                       | Iteration Compute Profile                                      | ITL SLA Compliance             |
 |:------------------|:---------------------------|:---------------------------------------------|:------------------------------------------|:---------------------------------------------------------------|:-------------------------------|
@@ -152,25 +134,25 @@ Only when the final chunk $K$ finishes does the request transition from the pref
 
 #### Mathematical derivation of the optimal chunk budget
 
-What is the optimal token budget $T_{\text{budget}}^*$ that maximizes accelerator throughput without violating an operator's SLA? Let $\tau_{\text{target}}$ denote the target inter-token latency bound (e.g., $\tau_{\text{target}} = 25\text{ ms}$).
+What is the optimal token budget $T_{\text{budget}}^*$ that maximizes accelerator throughput without violating an operator's SLA? Let $\tau_{\text{target}}$ denote the target inter-token latency bound (e.g., $\tau_{\text{target}} = 25\text{ ms}$). The execution duration of an iteration processing $B_{\text{dec}}$ decode tokens and $C$ prefill tokens is governed by the two-term Roofline formulation in @eq-chunk-iter-time:
 
-The execution duration of an iteration processing $B_{\text{dec}}$ decode tokens and $C$ prefill tokens can be modeled via the two-term Roofline formulation:
-$$\Delta t_{\text{iter}}(B_{\text{dec}}, C) = \max \left( \frac{2 N_{\text{params}} + \text{Bytes}_{\text{KV}}(B_{\text{dec}})}{B_{\text{mem}}}, \; \frac{2 N_{\text{params}} (B_{\text{dec}} + C) + 4 L d_{\text{model}} C S_{\text{avg}}}{P_{\text{peak}}} \right) + \delta_{\text{launch}}$$ {#eq-chunk-iter-time}
+$$
+\Delta t_{\text{iter}}(B_{\text{dec}}, C) = \max \left( \frac{2 N_{\text{params}} + \text{Bytes}_{\text{KV}}(B_{\text{dec}})}{B_{\text{mem}}}, \; \frac{2 N_{\text{params}} (B_{\text{dec}} + C) + 4 L d_{\text{model}} C S_{\text{avg}}}{P_{\text{peak}}} \right) + \delta_{\text{launch}}
+$$ {#eq-chunk-iter-time}
+
 where $\delta_{\text{launch}}$ represents kernel launch overhead and synchronization latency (typically $0.1\text{--}0.3\text{ ms}$).
 
-Notice the duality in @eq-chunk-iter-time:
+Notice the duality in @eq-chunk-iter-time: reading model weights requires a baseline memory transfer time $t_{\text{weights}} = 2 N_{\text{params}} / B_{\text{mem}}$ regardless of whether $C=0$ or $C>0$. For a 70B parameter model on an H100 ($B_{\text{mem}} = 3.35\text{ TB/s}$), streaming weights across the memory bus takes $t_{\text{weights}} = (2 \times 70 \times 10^9) / (3.35 \times 10^{12}) \approx 41.8\text{ ms}$.
 
-- The first term represents the memory bandwidth boundary: reading model weights requires a baseline time $t_{\text{weights}} = 2 N_{\text{params}} / B_{\text{mem}}$ regardless of whether $C=0$ or $C>0$. For a 70B parameter model on an H100 ($B_{\text{mem}} = 3.35\text{ TB/s}$), this floor is:
-$$t_{\text{weights}} = \frac{2 \times 70 \times 10^9\text{ B}}{3.35 \times 10^{12}\text{ B/s}} \approx 41.8\text{ ms}$$
-- During this $41.8\text{ ms}$ memory-read interval, the Tensor Cores are largely idle. We can "piggyback" prefill tokens $C$ into the computation essentially for free until the floating-point execution time equals the memory fetch time!
+During this $41.8\text{ ms}$ memory-read interval, the Tensor Cores are largely idle. Schedulers can "piggyback" prefill tokens $C$ into the computation without increasing step latency until floating-point execution time matches memory fetch time. The critical chunk threshold $C^*$ at which the iteration transitions from memory-bound to compute-bound is determined by @eq-vol3-scheduling-optimal-chunk:
 
-The critical chunk threshold $C^*$ at which the kernel transitions from memory-bound to compute-bound is given by equating the two terms:
-$$\frac{2 N_{\text{params}}}{B_{\text{mem}}} = \frac{2 N_{\text{params}} (B_{\text{dec}} + C^*) + 4 L d_{\text{model}} C^* S_{\text{avg}}}{P_{\text{peak}}}$$
+$$
+C^* = \frac{2 N_{\text{params}} \left( \mathcal{I}_{\text{knee}} - B_{\text{dec}} \right)}{2 N_{\text{params}} + 4 L d_{\text{model}} S_{\text{avg}}}
+$$ {#eq-vol3-scheduling-optimal-chunk}
 
-Solving for $C^*$:
-$$C^* = \frac{\frac{2 N_{\text{params}}}{B_{\text{mem}}} P_{\text{peak}} - 2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}} + 4 L d_{\text{model}} S_{\text{avg}}} = \frac{2 N_{\text{params}} \left( \mathcal{I}_{\text{knee}} - B_{\text{dec}} \right)}{2 N_{\text{params}} + 4 L d_{\text{model}} S_{\text{avg}}}$$
+where $\mathcal{I}_{\text{knee}} = P_{\text{peak}} / B_{\text{mem}}$ is the machine balance.[^fn-scheduling-chunk-derivation]
 
-For realistic batch sizes $B_{\text{dec}} \ll \mathcal{I}_{\text{knee}}$, this derivation yields a remarkable architectural insight: **an accelerator can process hundreds of prefill tokens concurrently with ongoing decode passes without increasing iteration duration by even a single microsecond**. The prefill compute is entirely absorbed by the spare arithmetic capacity stranded by the memory-bandwidth-bound decode stream.
+For realistic batch sizes $B_{\text{dec}} \ll \mathcal{I}_{\text{knee}}$, this derivation yields a remarkable architectural insight: an accelerator can process hundreds of prefill tokens concurrently with ongoing decode passes without increasing iteration duration by even a single microsecond. The prefill compute is entirely absorbed by the spare arithmetic capacity stranded by the memory-bandwidth-bound decode stream.
 
 @Tbl-scheduling-batching-comparison summarizes the trade-offs across batching architectures.
 
@@ -184,6 +166,10 @@ For realistic batch sizes $B_{\text{dec}} \ll \mathcal{I}_{\text{knee}}$, this d
 | **KV Cache Allocation**       | Static maximum                       | Dynamic (PagedAttention)          | Progressive per chunk                     |
 
 : **Comparison of Inference Serving Batching Strategies**: Performance profiles, latency predictability, and accelerator resource utilization across static, monolithic continuous, and chunked prefill batching architectures. {#tbl-scheduling-batching-comparison tbl-colwidths="[20,25,25,30]"}
+
+> **The Systems Rule of Thumb (The Piggybacking Invariant):** Because single-token autoregressive decoding is strictly memory-bus bound, accelerator tensor cores sit idle for tens of milliseconds per step awaiting parameter streaming ($t_{\text{weights}} \approx 41.8\text{ ms}$ for 70B on H100). Iteration piggybacking allows schedulers to inject up to $C^*$ prefill tokens per step without increasing inter-token latency by a single microsecond, turning stranded compute capacity into free prompt ingestion.
+
+[^fn-scheduling-chunk-derivation]: Equating the memory streaming floor $2 N_{\text{params}} / B_{\text{mem}}$ with execution compute time $[2 N_{\text{params}} (B_{\text{dec}} + C^*) + 4 L d_{\text{model}} C^* S_{\text{avg}}] / P_{\text{peak}}$ and solving for $C^*$ yields the critical chunk threshold that fully saturates arithmetic units without delaying decode step completion.
 
 ### Python implementation: Chunked prefill scheduler
 
@@ -330,42 +316,38 @@ The lifecycle of an agent execution turn in a disaggregated serving system proce
 
 The primary engineering challenge in disaggregated serving is the **KV transfer tax**\index{KV transfer tax}: moving gigabytes of intermediate activation memory across network switches without destroying the latency gains achieved by compute specialization.
 
-To quantify this challenge, we derive the exact physical footprint of the KV cache for a context sequence of length $S$. In a transformer with $L$ layers, $H_{\text{KV}}$ key-value heads, per-head dimension $d_h$, and numerical precision of $b_{\text{bytes}}$ bytes per element, each token generates two activation vectors (Key and Value) at each layer:
-$$S_{\text{KV}}(S) = 2 \times L \times H_{\text{KV}} \times d_h \times S \times b_{\text{bytes}} \quad \text{Bytes}$$
+To quantify this challenge, consider the physical footprint of the KV cache for a context sequence of length $S$. In a transformer with $L$ layers, $H_{\text{KV}}$ key-value heads, per-head dimension $d_h$, and numerical precision of $b_{\text{elem}}$ bytes per element, total resident memory footprint is governed by @eq-vol3-scheduling-kv-footprint:
 
-Let $\sigma_{\text{KV}}$ denote the **KV cache memory density per token** (in bytes per token):
-$$\sigma_{\text{KV}} = \frac{S_{\text{KV}}(S)}{S} = 2 L H_{\text{KV}} d_h b_{\text{bytes}} \quad \left[ \frac{\text{Bytes}}{\text{Token}} \right]$$
+$$
+S_{\text{KV}}(S) = 2 L H_{\text{KV}} d_h S \cdot b_{\text{elem}} \quad \text{bytes}
+$$ {#eq-vol3-scheduling-kv-footprint}
 
-Consider the popular Llama-3-70B architecture [@dubey2024llama]:
+For the standard Llama-3-70B architecture ($L = 80, d_{\text{model}} = 8192, H_{\text{KV}} = 8, d_h = 128, b_{\text{elem}} = 2$) [@dubey2024llama], the KV cache memory density evaluates to $\sigma_{\text{KV}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes/token} \approx 320\text{ KB/token}$. For an agent operating with an extended horizon of $S = 64\text{k} = 65{,}536$ tokens, resident context memory footprint reaches $S_{\text{KV}}(64\text{k}) \approx 21.47\text{ GB}$.
 
-- Layers: $L = 80$
-- Hidden dimension: $d_{\text{model}} = 8192$
-- Query attention heads: $H_Q = 64$
-- Key-Value heads (Grouped-Query Attention, GQA): $H_{\text{KV}} = 8$
-- Head dimension: $d_h = d_{\text{model}} / H_Q = 8192 / 64 = 128$
-- Precision: 16-bit half-precision ($b_{\text{bytes}} = 2\text{ bytes}$)
+Transferring $21.47\text{ GB}$ of raw activation memory across a network interface introduces physical communication delay. Total transfer latency $t_{\text{transfer}}$ across an effective network bandwidth $B_{\text{net}}$ is governed by @eq-vol3-scheduling-kv-transfer:
 
-Evaluating $\sigma_{\text{KV}}$ for Llama-3-70B:
-$$\sigma_{\text{KV}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ Bytes/Token} \approx 320\text{ KB/Token}$$
+$$
+t_{\text{transfer}} = \frac{S_{\text{KV}}}{B_{\text{net}}} + t_{\text{setup}}
+$$ {#eq-vol3-scheduling-kv-transfer}
 
-For an agent operating with a long context of $S = 64\text{k} = 65{,}536$ tokens:
-$$S_{\text{KV}}(64\text{k}) = 65{,}536 \times 327{,}680\text{ Bytes} \approx 21.47 \times 10^9\text{ Bytes} \approx 21.47\text{ GB}$$
+where $t_{\text{setup}}$ represents RDMA queue pair connection and memory registration overhead ($\approx 0.5\text{--}2\text{ ms}$).[^fn-scheduling-network-fabrics]
 
-Transferring $21.47\text{ GB}$ of raw memory across a network interface introduces physical communication delay. The total transfer latency $t_{\text{transfer}}$ across an effective network bandwidth $B_{\text{net}}$ is:
-$$t_{\text{transfer}} = \frac{S_{\text{KV}}}{B_{\text{net}}} + t_{\text{setup}}$$
-where $t_{\text{setup}}$ represents RDMA queue pair connection and memory registration overhead ($\approx 0.5\text{--}2\text{ ms}$).
+@Tbl-vol3-scheduling-network-fabrics evaluates transfer latency across four generations of data center network fabrics.
 
-Let us evaluate $t_{\text{transfer}}$ across four generations of enterprise network fabrics:
+| Network Fabric Generation           | Physical Link Rate | Effective Bandwidth ($B_{\text{net}}$) | 64k KV Transfer Time ($21.47\text{ GB}$) | Time-to-First-Token Consequence               |
+|:------------------------------------|:------------------:|:-------------------------------------:|:---------------------------------------:|:----------------------------------------------|
+| **Standard Ethernet**               | 100 Gbps           | $12.5\text{ GB/s}$                    | $1{,}718\text{ ms}$ ($1.72\text{ s}$)   | Catastrophic (completely wipes prefill gains) |
+| **RoCEv2 / InfiniBand (NDR)**       | 400 Gbps           | $50\text{ GB/s}$                      | $429.4\text{ ms}$                       | Substantial delay (exceeds interactive target)|
+| **InfiniBand (XDR / 2x NDR)**       | 800 Gbps           | $100\text{ GB/s}$                     | $214.7\text{ ms}$                       | Bounded overhead                              |
+| **Scale-Up NVLink Network**         | 3.6 Tbps           | $450\text{ GB/s}$                     | $47.7\text{ ms}$                        | Negligible (well within TTFT budget)          |
 
-1. **Standard 100 Gbps Ethernet:** Effective bandwidth $B_{\text{net}} \approx 12.5\text{ GB/s}$:
-   $$t_{\text{transfer}} = \frac{21.47\text{ GB}}{12.5\text{ GB/s}} \approx 1.718\text{ seconds}$$
-   A $1.7\text{-second}$ transfer latency is catastrophic: it completely erases the speedup of running prefill on dedicated hardware and breaches interactive TTFT targets.
-2. **400 Gbps RoCEv2 / InfiniBand (NDR):** Effective bandwidth $B_{\text{net}} \approx 50\text{ GB/s}$:
-   $$t_{\text{transfer}} = \frac{21.47\text{ GB}}{50\text{ GB/s}} \approx 429.4\text{ ms}$$
-3. **800 Gbps InfiniBand (XDR / 2x NDR):** Effective bandwidth $B_{\text{net}} \approx 100\text{ GB/s}$:
-   $$t_{\text{transfer}} = \frac{21.47\text{ GB}}{100\text{ GB/s}} \approx 214.7\text{ ms}$$
-4. **Scale-Up NVLink Network Fabric:** Effective bandwidth $B_{\text{net}} \approx 450\text{ GB/s}$:
-   $$t_{\text{transfer}} = \frac{21.47\text{ GB}}{450\text{ GB/s}} \approx 47.7\text{ ms}$$
+: **Interconnect Fabric Bandwidth and 64k KV Transfer Latency**: Physical transfer time and operational consequences of migrating a $21.47\text{ GB}$ context memory buffer across network generations. {#tbl-vol3-scheduling-network-fabrics tbl-colwidths="[25,18,18,20,19]"}
+
+On standard 100 Gbps Ethernet, a $1.72\text{-second}$ transfer latency erases the speedup of running prefill on dedicated accelerator nodes and breaches interactive TTFT service-level objectives. Even on 400 Gbps RoCEv2 fabrics, raw bulk transfer adds over $400\text{ ms}$ of unmasked delay unless the runtime actively overlaps transmission with execution.
+
+> **The Systems Rule of Thumb (The KV Network Invariant):** Disaggregated serving only preserves Time-to-First-Token advantages when network interconnect throughput exceeds the KV state footprint: $t_{\text{transfer}} \ll t_{\text{prefill}}$. Transferring a $64\text{k}$ KV cache ($21.47\text{ GB}$ on 70B models) across commodity 100 Gbps Ethernet introduces an intolerable $1.72\text{-second}$ delay that wipes out prefill speedups. Production disaggregation requires high-performance RDMA fabrics ($\ge 400\text{ Gbps}$) or pipelined layer streaming to keep transfer latency bounded below 50 milliseconds.
+
+[^fn-scheduling-network-fabrics]: Effective bandwidth assumes unconstrained line-rate transfers without queue congestion or packet drops. In multi-tenant enterprise clusters, incast congestion and switch buffer oversubscription can inflate tail transfer times by $2\times$ to $5\times$.
 
 ### The KV streaming invariant
 
@@ -373,21 +355,29 @@ To prevent $t_{\text{transfer}}$ from penalizing Time-To-First-Token, modern dis
 
 Rather than waiting for the entire forward pass across all $L$ layers to conclude before opening network sockets, the $P$-node initiates an asynchronous Remote Direct Memory Access (RDMA) write into the $D$-node's pre-allocated HBM buffer as soon as layer $l$'s Key and Value tensors are produced.
 
-Let $\tau_{\text{compute}}(l)$ denote the computation duration of layer $l$, and let $\tau_{\text{transfer}}(l)$ denote the network transmission duration of layer $l$'s KV cache:
-$$\tau_{\text{compute}}(l) \approx \frac{2 N_{\text{params, layer}} S + 4 H d_h S^2}{P_{\text{eff}}}$$
-$$\tau_{\text{transfer}}(l) = \frac{2 H_{\text{KV}} d_h S \cdot b_{\text{bytes}}}{B_{\text{RDMA}}}$$
+Let $\tau_{\text{compute}}(l) \approx (2 N_{\text{params, layer}} S + 4 H d_h S^2) / P_{\text{eff}}$ denote the computation duration of layer $l$, and let $\tau_{\text{transfer}}(l) = (2 H_{\text{KV}} d_h S \cdot b_{\text{elem}}) / B_{\text{RDMA}}$ denote the network transmission duration of layer $l$'s Key-Value activations.
 
 ::: {.callout-note title="Lemma 8.1: The KV streaming invariant"}
 If the network transmission time of layer $l$'s KV cache is strictly less than or equal to the computation time of layer $l+1$'s forward pass (@eq-kv-streaming-invariant):
-$$\tau_{\text{transfer}}(l) \le \tau_{\text{compute}}(l+1) \quad \forall l \in \{1, \dots, L-1\}$$ {#eq-kv-streaming-invariant}
-then all intermediate network transfer latency is completely hidden (overlapped) behind forward-pass compute. The effective transfer penalty observed by the end-user collapses to the transfer time of the final layer $L$:
-$$\Delta t_{\text{visible}} = \tau_{\text{transfer}}(L) = \frac{S_{\text{KV}}}{L \cdot B_{\text{RDMA}}}$$
+
+$$
+\tau_{\text{transfer}}(l) \le \tau_{\text{compute}}(l+1) \quad \forall l \in \{1, \dots, L-1\}
+$$ {#eq-kv-streaming-invariant}
+
+then all intermediate network transfer latency is completely hidden behind forward-pass compute. The effective transfer penalty observed by the end-user collapses to the transmission duration of the final layer $L$ ($\Delta t_{\text{visible}} = \tau_{\text{transfer}}(L)$), governed by @eq-vol3-scheduling-visible-transfer:
+
+$$
+\Delta t_{\text{visible}} = \frac{S_{\text{KV}}}{L \cdot B_{\text{RDMA}}}
+$$ {#eq-vol3-scheduling-visible-transfer}
 :::
 
-For Llama-3-70B with $S = 64\text{k}$ over a 400 Gbps RDMA interconnect ($B_{\text{RDMA}} = 50\text{ GB/s}$):
-$$\Delta t_{\text{visible}} = \frac{21.47\text{ GB}}{80 \times 50\text{ GB/s}} \approx 5.37\text{ ms}$$
+For Llama-3-70B with an extended context of $S = 64\text{k}$ across a 400 Gbps RDMA interconnect ($B_{\text{RDMA}} = 50\text{ GB/s}$), @eq-vol3-scheduling-visible-transfer evaluates to $\Delta t_{\text{visible}} = 21.47\text{ GB} / (80 \times 50\text{ GB/s}) \approx 5.37\text{ ms}$.[^fn-scheduling-streaming-overlap]
 
 By enforcing the KV streaming invariant, the disaggregated runtime transfers over $21\text{ GB}$ of activation context while adding only $5.4\text{ ms}$ of visible overhead to the end-to-end Time-To-First-Token.
+
+> **The Systems Rule of Thumb (The Pipelined Streaming Invariant):** Asynchronous layer-by-layer KV streaming hides network latency behind forward-pass compute whenever layer transmission time is less than subsequent layer compute time ($\tau_{\text{transfer}}(l) \le \tau_{\text{compute}}(l+1)$). When satisfied, visible transfer latency collapses from the entire context footprint down to a single layer ($S_{\text{KV}} / (L \cdot B_{\text{RDMA}}) \approx 5.4\text{ ms}$ for 64k context on 400 Gbps RDMA), completely neutralizing the disaggregation network tax.
+
+[^fn-scheduling-streaming-overlap]: While layer $l+1$ executes forward-pass matrix multiplications, layer $l$'s Key-Value activations are transmitted concurrently over direct memory access (DMA) channels. Because network transmission finishes before subsequent layer computation concludes, only the terminal layer's transfer remains unoverlapped.
 
 With compute and memory physically specialized, how should a cluster control plane schedule incoming requests across these pools when workloads exhibit extreme priority differences and heavy-tailed execution horizons? This is the domain of priority scheduling.
 
@@ -424,45 +414,40 @@ Why do classical scheduling disciplines fail so completely when applied to multi
 
 In human conversational search, prompt and generation lengths cluster around moderate values with bounded variance (often modeled as log-normal or Poisson arrivals with bounded service times). In contrast, autonomous agent trajectories exhibit **heavy-tailed Pareto distributions**\index{Heavy-tailed Pareto distributions}. An agent tasked with finding a bug may terminate in 2 steps (a missing semicolon) or expand into 300 steps across multiple subagents (bisecting commits, compiling binaries, executing integration tests).
 
-Let $X$ denote the service time (measured in total generated tokens or forward-pass execution steps) of an agent trajectory. The Pareto distribution is defined by:
-$$P(X > x) = \left( \frac{x_m}{x} \right)^\alpha \quad \text{for } x \ge x_m$$
-where $x_m > 0$ is the minimum execution horizon (e.g., $x_m = 2$ steps), and $\alpha > 0$ is the Pareto shape parameter (tail index).
+Let $X$ denote the service time (measured in total generated tokens or forward-pass execution steps) of an agent trajectory. While conversational chatbot queries exhibit bounded variance, autonomous agent execution steps follow a heavy-tailed Pareto distribution: $P(X > x) = (x_m / x)^\alpha$ for $x \ge x_m$, where $x_m > 0$ is the minimum task horizon (e.g., $x_m = 2$ steps) and $\alpha > 0$ is the Pareto tail index.
 
-The moments of the Pareto distribution reveal a profound mathematical boundary:
-$$\mathbb{E}[X] = \begin{cases} \frac{\alpha x_m}{\alpha - 1} & \text{if } \alpha > 1 \\ \infty & \text{if } \alpha \le 1 \end{cases}$$
-$$\mathbb{E}[X^2] = \begin{cases} \frac{\alpha x_m^2}{\alpha - 2} & \text{if } \alpha > 2 \\ \infty & \text{if } \alpha \le 2 \end{cases}$$
-
-Empirical measurements across production agent fleets (such as SWE-bench execution traces and autonomous web-browsing agents) reveal tail indices in the range:
-$$\alpha \in [1.1, \, 1.4]$$
-
-Notice the critical consequence: because $\alpha < 2$, **the second moment $\mathbb{E}[X^2]$ diverges to infinity**. The workload exhibits **infinite theoretical variance**.
+For $\alpha > 1$, the first moment (mean service time) converges to $\mathbb{E}[X] = \alpha x_m / (\alpha - 1)$. However, when $\alpha \le 2$, the second raw moment $\mathbb{E}[X^2]$ diverges to infinity.[^fn-scheduling-pareto-variance] Empirical measurements across production agent fleets (such as SWE-bench execution traces and autonomous web-browsing agents) reveal tail indices strictly within the heavy-tailed band $\alpha \in [1.1, 1.4]$. The workload exhibits **infinite theoretical variance**.
 
 #### The mathematical collapse of FIFO queueing
 Consider an inference serving node modeled as an $M/G/1$ queue with Poisson arrival rate $\lambda$, arbitrary service time distribution $X$, and server utilization $\rho = \lambda \mathbb{E}[X] < 1$.
 
-By the classical Pollaczek-Khinchine formula [@kleinrock1975queueing], the expected waiting time in the queue under a First-In-First-Out (FIFO) discipline is:
-$$\mathbb{E}[W_{\text{FIFO}}] = \frac{\lambda \mathbb{E}[X^2]}{2(1 - \rho)}$$ {#eq-pollaczek-khinchine}
+By the classical Pollaczek-Khinchine formula [@kleinrock1975queueing], the expected waiting time in the queue under a First-In-First-Out (FIFO) discipline is governed by @eq-pollaczek-khinchine:
 
-Substitute the Pareto second moment into @eq-pollaczek-khinchine when $\alpha \le 2$:
-$$\lim_{\mathbb{E}[X^2] \to \infty} \mathbb{E}[W_{\text{FIFO}}] = \infty$$
+$$
+\mathbb{E}[W_{\text{FIFO}}] = \frac{\lambda \mathbb{E}[X^2]}{2(1 - \rho)}
+$$ {#eq-pollaczek-khinchine}
 
-This result is not a mere theoretical curiosity; it is the mathematical explanation for real-world cluster freezes. Under FIFO, whenever a long-running 300-step agent enters the server, it blocks the head of the queue. Because variance is unbounded, the probability of encountering an extraordinarily long task is non-negligible. The long task monopolizes the accelerator, causing the waiting queue to back up indefinitely and driving average waiting times toward infinity, even when the server's nominal utilization is well below capacity ($\rho = 0.6$). FIFO is structurally incapable of serving heavy-tailed agent workloads.
+Under @eq-pollaczek-khinchine, expected waiting time scales linearly with the second moment of service time. When $\alpha \le 2$, $\mathbb{E}[X^2] \to \infty$, causing the expected FIFO queue delay to diverge to infinity ($\mathbb{E}[W_{\text{FIFO}}] \to \infty$) regardless of how low the nominal server utilization $\rho$ is provisioned.
+
+This result is not a mere theoretical curiosity; it is the mathematical explanation for real-world cluster freezes. Under FIFO, whenever a long-running 300-step agent enters the server, it blocks the head of the queue. Because variance is unbounded, long-horizon tasks frequently monopolize accelerator compute, causing the waiting queue to back up indefinitely and driving average waiting times toward infinity, even when server utilization appears healthy ($\rho \approx 0.6$). FIFO is structurally incapable of serving heavy-tailed agent workloads.
+
+> **The Systems Rule of Thumb (The Heavy-Tailed Queueing Catastrophe):** Because autonomous agent trajectories exhibit heavy-tailed Pareto execution horizons with shape parameter $\alpha \in [1.1, 1.4]$, workload service times have divergent variance ($\mathbb{E}[X^2] \to \infty$). Under standard First-In-First-Out (FIFO) queueing, the Pollaczek-Khinchine formula guarantees infinite average waiting times ($\mathbb{E}[W_{\text{FIFO}}] \to \infty$) as long-running reasoning trajectories block the queue. Serving runtimes must never schedule heterogeneous agent workloads via FIFO; non-clairvoyant prioritization or preemptive multi-level feedback queues are strictly required.
+
+[^fn-scheduling-pareto-variance]: For a continuous Pareto distribution with probability density function $f(x) = \alpha x_m^\alpha x^{-(\alpha+1)}$, the second raw moment evaluates to $\int_{x_m}^\infty x^2 f(x) dx = [\alpha x_m^\alpha / (2 - \alpha)] [x^{2 - \alpha}]_{x_m}^\infty$, which diverges whenever the tail index satisfies $\alpha \le 2$.
 
 ### Least attained service (LAS) scheduling
 
-In classical operating systems, when task durations are known in advance, **shortest remaining processing time** (SRPT) is provably optimal for minimizing mean response time. In autonomous agent serving, however, remaining processing time is fundamentally unknown. An agent is a stochastic, closed-loop process; whether it will resolve its task on the next turn or require 50 more turns depends on the unpredictable return values of external tools. We cannot implement clairvoyant SRPT.
+In classical operating systems, when task durations are known in advance, **shortest remaining processing time** (SRPT) is provably optimal for minimizing mean response time. In autonomous agent serving, however, remaining processing time is fundamentally unknown. An agent is a stochastic, closed-loop process; whether it will resolve its task on the next turn or require 50 more turns depends on the unpredictable return values of external tools. Clairvoyant SRPT cannot be implemented.
 
 We must turn to **non-clairvoyant scheduling**\index{Non-clairvoyant scheduling}. Fortunately, heavy-tailed distributions possess a structural property that makes non-clairvoyant optimization possible: the **Decreasing Hazard Rate (DHR)**\index{Decreasing Hazard Rate}.
 
-The hazard rate $h(x)$ represents the conditional probability density that a task will finish in the next infinitesimal interval, given that it has already executed for duration $x$:
-$$h(x) = \frac{f(x)}{1 - F(x)}$$
+The hazard rate $h(x) = f(x) / [1 - F(x)]$ represents the conditional probability density that a task will finish in the next infinitesimal interval, given that it has already executed for duration $x$. For a Pareto distribution with tail index $\alpha > 0$, the hazard rate evaluates to $h(x) = \alpha / x$, yielding a strictly negative derivative in @eq-decreasing-hazard:
 
-For a Pareto distribution:
-$$f(x) = \frac{\alpha x_m^\alpha}{x^{\alpha + 1}}, \quad 1 - F(x) = \left( \frac{x_m}{x} \right)^\alpha$$
-$$h(x) = \frac{\frac{\alpha x_m^\alpha}{x^{\alpha + 1}}}{\frac{x_m^\alpha}{x^\alpha}} = \frac{\alpha}{x}$$
+$$
+\frac{d}{dx} h(x) = -\frac{\alpha}{x^2} < 0 \quad \forall x > 0
+$$ {#eq-decreasing-hazard}
 
-Because $\alpha > 0$, the hazard rate $h(x) = \alpha / x$ is a **strictly decreasing function of attained service $x$**:
-$$\frac{d}{dx} h(x) = -\frac{\alpha}{x^2} < 0 \quad \forall x > 0$$ {#eq-decreasing-hazard}
+where $h(x)$ decreases monotonically with attained service $x$.[^fn-scheduling-decreasing-hazard]
 
 The physical implication of @eq-decreasing-hazard is profound: **the longer an agent has been running, the less likely it is to complete in the next step**. An agent that has consumed only 2 steps has a high probability of terminating quickly. An agent that has already consumed 150 steps has entered an extended reasoning or debugging cycle and is statistically likely to run for dozens more steps.
 
@@ -476,6 +461,10 @@ Under LAS:
 
 LAS exploits the Pareto property: it prioritizes the vast majority of tasks that terminate quickly, clearing them from the system with near-zero waiting time, while gracefully degrading the latency of the few massive outlier tasks that would otherwise starve the cluster.
 
+> **The Systems Rule of Thumb (The Decreasing Hazard Principle):** For heavy-tailed agent workloads, the longer an agent has executed, the lower its instantaneous probability of completion ($d h(x) / dx = -\alpha / x^2 < 0$). Least Attained Service (LAS) scheduling minimizes mean cluster completion time by continuously giving priority to newly spawned tasks over aging, compute-heavy trajectories, preventing outlier agents from starving interactive workloads.
+
+[^fn-scheduling-decreasing-hazard]: For Pareto density $f(x) = \alpha x_m^\alpha x^{-(\alpha + 1)}$ and survival function $1 - F(x) = (x_m / x)^\alpha$, the quotient simplifies directly to $h(x) = \alpha / x$. The strictly negative derivative confirms that remaining lifetime stochastically increases with attained service.
+
 ### Multi-level feedback queues (MLFQ) for continuous token runtimes
 
 Implementing pure LAS requires continuous fine-grained preemption at every forward pass. In production serving clusters, frequent context eviction incurs bus transfer overheads. Schedulers approximate LAS using a discrete **Multi-Level Feedback Queue (MLFQ)**\index{Multi-Level Feedback Queue} (@fig-vol3-scheduling-architecture).
@@ -484,10 +473,7 @@ Implementing pure LAS requires continuous fine-grained preemption at every forwa
 ![](images/svg/trajectory_scheduling_architecture.svg)
 :::
 
-The MLFQ architecture partitions pending and active agent contexts across $K$ priority queues:
-$$\mathcal{Q} = \{Q_0, Q_1, \dots, Q_{K-1}\}$$
-governed by an increasing vector of service quantum thresholds:
-$$0 = T_0 < T_1 < T_2 < \dots < T_K = \infty$$
+The MLFQ architecture partitions pending and active agent contexts across $K$ priority queues $\mathcal{Q} = \{Q_0, Q_1, \dots, Q_{K-1}\}$, governed by an increasing sequence of service quantum thresholds $0 = T_0 < T_1 < T_2 < \dots < T_K = \infty$.
 
 The dispatch and promotion policies operate under strict invariants:
 
@@ -495,6 +481,8 @@ The dispatch and promotion policies operate under strict invariants:
 2. **Prioritize Low Service:** The scheduler always fills available accelerator batch slots from queue $Q_i$ before examining queue $Q_{i+1}$.
 3. **Demote on Attainment:** When an agent running in queue $Q_i$ accumulates total service tokens $s \ge T_{i+1}$ without terminating or blocking on external I/O, it is preempted from the batch, demoted to queue $Q_{i+1}$, and yields its slot to waiting higher-priority agents.
 4. **Starvation Prevention via Priority Boosting:** If an agent in the lowest-priority queue $Q_{K-1}$ sits idle for longer than a starvation threshold $t_{\text{starve}}$, the scheduler temporarily boosts its priority to $Q_0$, guaranteeing eventual forward progress.
+
+> **The Systems Rule of Thumb (The MLFQ Demotion Invariant):** Multi-Level Feedback Queues discretize Least Attained Service without incurring continuous preemption overhead. By admitting all new agent tasks into highest priority ($Q_0$) and demoting them across service quantum thresholds ($s \ge T_{i+1}$), interactive developer requests complete with near-zero queueing latency while long-running reasoning loops are gracefully isolated into lower-priority queues without starving the cluster.
 
 While MLFQ governs the temporal prioritization of compute across heavy-tailed workloads, how should an orchestrator distribute requests spatially across a distributed cluster when multiple agents share identical prompt prefixes? This requires cache-aware load balancing.
 
@@ -551,10 +539,7 @@ In a cache-aware cluster, the global routing layer maintains a **Global Prefix D
 :::
 
 #### Prefix fingerprinting and chunk hashing
-To avoid transmitting full multi-thousand-token prompts to the router for string comparison, prompts are fingerprinted using cryptographic or rolling chunk hashes. The token sequence $\mathbf{x} = (x_1, \dots, x_S)$ is partitioned into chunks of $B_{\text{chunk}} = 16$ tokens:
-$$c_k = (x_{(k-1)B_{\text{chunk}} + 1}, \dots, x_{k B_{\text{chunk}}})$$
-Each chunk's prefix hash is computed recursively using a rolling Merkle hash:
-$$h_0 = \text{IV}, \quad h_k = \text{Hash}(h_{k-1} \parallel c_k)$$
+To avoid transmitting full multi-thousand-token prompts to the router for string comparison, prompts are fingerprinted using rolling chunk hashes. The token sequence $\mathbf{x} = (x_1, \dots, x_S)$ is partitioned into chunks of $B_{\text{chunk}} = 16$ tokens ($c_k = (x_{(k-1)B_{\text{chunk}} + 1}, \dots, x_{k B_{\text{chunk}}})$), with recursive Merkle chunk hashes computed via $h_k = \text{Hash}(h_{k-1} \parallel c_k)$ from initial vector $h_0 = \text{IV}$.
 
 A request's prefix is thus uniquely represented as a sequence of 64-bit integers $[h_1, h_2, \dots, h_m]$. The router maintains a hash-indexed Trie mapping prefix hashes $h_k$ to the set of worker nodes $\mathcal{W}(h_k) \subseteq \{1, \dots, M\}$ that currently hold that prefix in HBM.
 
@@ -563,14 +548,19 @@ Routing purely on prefix cache hits can create devastating load imbalances: if 9
 
 The cache-aware router must optimize a joint objective balancing **cache affinity** against **worker queue load**.
 
-Let $\mathcal{W} = \{w_1, \dots, w_M\}$ denote the set of active serving nodes. For an incoming request $r$ with sequence length $S$, let $\text{MatchTokens}(r, w_j)$ denote the number of prefix tokens of $r$ currently cached in node $w_j$'s HBM. Let $L_j$ denote the current load of node $w_j$ (measured as the fraction of allocated memory blocks or queued tokens relative to capacity $L_{\text{max}}$).
+Let $\mathcal{W} = \{w_1, \dots, w_M\}$ denote the set of active serving nodes. For an incoming request $r$ with sequence length $S$, let $\text{MatchTokens}(r, w_j)$ denote the number of prefix tokens of $r$ currently cached in node $w_j$'s HBM. Let $L_j$ denote the current load of node $w_j$ (measured as the fraction of allocated memory blocks or queued tokens relative to capacity $L_{\text{max}}$). The router selects worker node $w^*$ via @eq-vol3-scheduling-cache-routing:
 
-The router selects worker node $w^*$ according to:
-$$w^* = \arg\max_{w_j \in \mathcal{W}} \left\{ \mu \cdot \frac{\text{MatchTokens}(r, w_j)}{S} - (1 - \mu) \cdot \left(\frac{L_j}{L_{\text{max}}}\right)^\gamma \right\}$$
-where:
+$$
+w^* = \arg\max_{w_j \in \mathcal{W}} \left\{ \mu \cdot \frac{\text{MatchTokens}(r, w_j)}{S} - (1 - \mu) \cdot \left(\frac{L_j}{L_{\text{max}}}\right)^\gamma \right\}
+$$ {#eq-vol3-scheduling-cache-routing}
 
-- $\mu \in [0, 1]$ is the **cache affinity coefficient**. When $\mu = 1$, routing is purely cache-greedy; when $\mu = 0$, routing is pure load-balancing.
-- $\gamma \ge 1$ is the **load penalty exponent**, which creates steep non-linear resistance as a node approaches memory saturation ($L_j \to L_{\text{max}}$), preventing queue hot-spotting.
+where $\mu \in [0, 1]$ is the cache affinity coefficient ($\mu = 1$ is pure cache affinity, $\mu = 0$ is pure load-balancing) and $\gamma \ge 1$ is the load penalty exponent.[^fn-scheduling-affinity-routing]
+
+The load penalty exponent $\gamma$ creates steep non-linear resistance as a node approaches memory saturation ($L_j \to L_{\text{max}}$), preventing queue hot-spotting and avoiding cache thrashing.
+
+> **The Systems Rule of Thumb (The Affinity-Load Balance Principle):** Routing multi-agent traffic purely on prefix cache hits ($\mu = 1$) triggers devastating queue hot-spotting, while naive round-robin routing ($\mu = 0$) wastes terabytes of GPU memory recomputing identical system prefixes. Schedulers must evaluate a joint objective balancing matched prefix tokens against memory utilization with non-linear saturation penalties ($\gamma \ge 2$), ensuring high KV cache hit rates without stranding peer accelerators.
+
+[^fn-scheduling-affinity-routing]: The non-linear load penalty exponent ($\gamma \in [2, 3]$) creates steep deflection away from worker nodes operating above 85 percent memory capacity, preventing queue spillover and avoiding expensive GPU out-of-memory preemption.
 
 ### Consistent hashing with bounded loads for token prefixes
 
@@ -769,39 +759,33 @@ When an agent enters the `SUSPENDED_TOOL_WAIT` state, the memory manager faces a
 
 Under what conditions is swapping strictly superior to pinning and recomputation? We formalize this through the **Breakeven Suspension Duration ($T_{\text{breakeven}}$)**\index{Breakeven Suspension Duration}.
 
-Let $S_{\text{KV}}$ denote the size of the agent's KV cache (in bytes), and let $B_{\text{PCIe}}$ denote the effective unidirectional Direct Memory Access (DMA) bandwidth over the host-to-device interconnect (e.g., PCIe Gen5 x16: theoretical $64\text{ GB/s}$, effective DMA $\approx 55\text{ GB/s}$).
+Let $S_{\text{KV}}$ denote the size of the agent's KV cache (in bytes), and let $B_{\text{PCIe}}$ denote the effective unidirectional DMA bandwidth over the host-to-device interconnect (e.g., PCIe Gen5 x16: theoretical $64\text{ GB/s}$, effective DMA $\approx 55\text{ GB/s}$). Round-trip context migration duration comprises swap-out to host DRAM, swap-in back to HBM, and DMA queue setup latencies $\delta_{\text{setup}}$: $T_{\text{swap\_overhead}} = 2 S_{\text{KV}} / B_{\text{PCIe}} + 2\delta_{\text{setup}}$.
 
-The round-trip context migration duration $T_{\text{swap\_overhead}}$ comprises swap-out to host DRAM, swap-in back to HBM, and DMA queue setup latencies $\delta_{\text{setup}}$:
-$$T_{\text{swap\_overhead}} = t_{\text{swap-out}} + t_{\text{swap-in}} = \frac{S_{\text{KV}}}{B_{\text{PCIe}}} + \frac{S_{\text{KV}}}{B_{\text{PCIe}}} + 2\delta_{\text{setup}} = \frac{2 S_{\text{KV}}}{B_{\text{PCIe}}} + 2\delta_{\text{setup}}$$
+Holding memory pinned in HBM during tool waits of duration $T_{\text{wait}}$ strands accelerator capital and memory capacity ($\text{Cost}_{\text{pin}} = S_{\text{KV}} \times T_{\text{wait}} \times C_{\text{HBM}}$). Swapping yields net positive cluster throughput whenever tool wait duration satisfies $T_{\text{wait}} \ge T_{\text{breakeven}}$, governed by @eq-breakeven-formula:
 
-During the tool wait of duration $T_{\text{wait}}$, holding memory pinned in HBM strands capital and memory capacity. Let $C_{\text{HBM}}$ denote the opportunity cost per gigabyte-second of holding accelerator HBM (measured in tokens of concurrent decode throughput foregone by other agents):
-$$\text{Cost}_{\text{pin}} = S_{\text{KV}} \times T_{\text{wait}} \times C_{\text{HBM}}$$
+$$
+T_{\text{breakeven}} = \frac{2 S_{\text{KV}}}{B_{\text{PCIe}}} + 2\delta_{\text{setup}} + \Delta t_{\text{slack}}
+$$ {#eq-breakeven-formula}
 
-If the context is swapped out, the memory is reclaimed by peer agents for duration $(T_{\text{wait}} - T_{\text{swap\_overhead}})$. Swapping yields net positive cluster throughput if and only if the wait duration exceeds the migration penalty plus safety scheduling slack $\Delta t_{\text{slack}}$:
-$$T_{\text{wait}} \ge T_{\text{breakeven}} = \frac{2 S_{\text{KV}}}{B_{\text{PCIe}}} + 2\delta_{\text{setup}} + \Delta t_{\text{slack}}$$ {#eq-breakeven-formula}
+where $\Delta t_{\text{slack}}$ represents safety scheduling margin (typically $100\text{ ms}$).[^fn-scheduling-breakeven-derivation]
 
-Now compare swapping against Strategy C (recomputation). Recomputing the prefill from scratch requires time:
-$$T_{\text{recompute}} \approx \frac{2 N_{\text{params}} S + 4 L d_{\text{model}} S^2}{P_{\text{eff}}}$$
+Now compare swapping against recomputation (Strategy C). Recomputing the prefill from scratch requires time $T_{\text{recompute}} \approx (2 N_{\text{params}} S + 4 L d_{\text{model}} S^2) / P_{\text{eff}}$. Swapping to host DRAM is strictly faster than recomputing whenever $\sigma_{\text{KV}} / B_{\text{PCIe}} < N_{\text{params}} / P_{\text{eff}}$.
 
-Swapping to host DRAM is strictly faster than recomputing whenever:
-$$T_{\text{swap\_overhead}} < T_{\text{recompute}} \iff \frac{2 \sigma_{\text{KV}} S}{B_{\text{PCIe}}} < \frac{2 N_{\text{params}} S}{P_{\text{eff}}} \implies \frac{\sigma_{\text{KV}}}{B_{\text{PCIe}}} < \frac{N_{\text{params}}}{P_{\text{eff}}}$$
-
-Let us evaluate this for Llama-3-70B on an NVIDIA H100 GPU over PCIe Gen5:
+Consider an autonomous software engineering agent running Llama-3-70B on an NVIDIA H100 GPU over PCIe Gen5:
 
 - Context length: $S = 48\text{k} = 49{,}152$ tokens
 - KV cache size: $S_{\text{KV}} = 49{,}152 \times 327{,}680\text{ bytes} \approx 16.1\text{ GB}$
-- Effective PCIe Gen5 DMA bandwidth: $B_{\text{PCIe}} = 55\text{ GB/s}$
-- Setup latency: $\delta_{\text{setup}} \approx 3\text{ ms}$
-- Recomputation throughput ($P_{\text{eff}} \approx 400\text{ TFLOPS}$ sustained):
-  $$T_{\text{recompute}} \approx \frac{2 \times 70 \times 10^9 \times 49{,}152}{400 \times 10^{12}\text{ FLOP/s}} \approx 17.2\text{ seconds}$$
+- Effective PCIe Gen5 DMA bandwidth: $B_{\text{PCIe}} = 55\text{ GB/s}$, with setup latency $\delta_{\text{setup}} \approx 3\text{ ms}$
+- Recomputation throughput ($P_{\text{eff}} \approx 400\text{ TFLOPS}$): $T_{\text{recompute}} \approx (2 \times 70 \times 10^9 \times 49{,}152) / (400 \times 10^{12}) \approx 17.2\text{ seconds}$
+- Round-trip swap overhead: $T_{\text{swap\_overhead}} = (2 \times 16.1\text{ GB}) / (55\text{ GB/s}) + 0.006\text{ s} \approx 591\text{ ms}$
 
-Evaluating the swap overhead:
-$$T_{\text{swap\_overhead}} = \frac{2 \times 16.1\text{ GB}}{55\text{ GB/s}} + 0.006\text{ s} \approx 0.585\text{ s} + 0.006\text{ s} \approx 591\text{ ms}$$
+With scheduling slack $\Delta t_{\text{slack}} = 100\text{ ms}$, @eq-breakeven-formula yields $T_{\text{breakeven}} = 591\text{ ms} + 100\text{ ms} \approx 0.7\text{ seconds}$.
 
-With scheduling slack $\Delta t_{\text{slack}} = 100\text{ ms}$, the analytical breakeven duration is:
-$$T_{\text{breakeven}} = 591\text{ ms} + 100\text{ ms} = 691\text{ ms} \approx 0.7\text{ seconds}$$
+This derivation reveals a critical operational threshold: **whenever an external tool call is anticipated to block for longer than $0.7\text{ seconds}$, the runtime must immediately evict the KV cache to host DRAM** (@fig-vol3-scheduling-swapping). Because software compilations, web requests, and database queries routinely take 2 to 60 seconds ($T_{\text{wait}} \gg 0.7\text{ s}$), preemptive swapping frees $16.1\text{ GB}$ of HBM for 95 percent of the agent's lifetime, boosting cluster concurrency by up to $8\times$. Furthermore, swapping back in takes only $295\text{ ms}$—which is $58\times$ faster than recomputing the prefill from scratch ($17.2\text{ seconds}$).
 
-This derivation reveals a critical operational threshold: **whenever an external tool call is anticipated to block for longer than $0.7\text{ seconds}$, the runtime must immediately evict the KV cache to host DRAM** (@fig-vol3-scheduling-swapping). Because software compilations, web requests, and database queries routinely take $2\text{ to }60\text{ seconds}$ ($T_{\text{wait}} \gg 0.7\text{ s}$), preemptive swapping frees $16.1\text{ GB}$ of HBM for 95 percent of the agent's lifetime, boosting cluster concurrency by up to $8\times$. Furthermore, swapping back in takes only $295\text{ ms}$—which is $58\times$ faster than recomputing the prefill from scratch ($17.2\text{ seconds}$).
+> **The Systems Rule of Thumb (The Breakeven Swapping Threshold):** Accelerator memory managers must decouple tool-wait suspension from physical memory residency. Whenever an external tool call or human interaction is anticipated to block for longer than $T_{\text{breakeven}} = 2 S_{\text{KV}} / B_{\text{PCIe}} + 2\delta_{\text{setup}} + \Delta t_{\text{slack}} \approx 0.7\text{ seconds}$ (for $48\text{k}$ context on PCIe Gen5), runtimes must preemptively DMA-swap the KV cache to host DRAM, reclaiming gigabytes of high-bandwidth memory at a $58\times$ latency advantage over recomputation.
+
+[^fn-scheduling-breakeven-derivation]: Migration overhead accounts for unidirectional DMA push to host DDR5 DRAM, subsequent pull back to HBM, and driver registration delays. Holding pinned HBM throughout prolonged tool waits wastes $S_{\text{KV}} \cdot T_{\text{wait}} \cdot C_{\text{HBM}}$ byte-seconds of high-bandwidth memory capacity.
 
 ::: {#fig-vol3-scheduling-swapping fig-env="figure" fig-pos="htb" fig-cap="**Preemptive KV Cache Memory Swapping Across Hardware Tiers**: When an agent enters a blocking tool wait exceeding $T_{\text{breakeven}}$, the memory manager asynchronously DMA-swaps its PagedAttention blocks across PCIe Gen5 to Host DDR5 DRAM, reclaiming HBM for active decode streams and restoring it prior to tool return. Source: Author design." fig-alt="Diagram showing three memory tiers: Accelerator HBM, Host DDR5 DRAM, and Local NVMe Storage. PagedAttention block tables are shown migrating asynchronously across PCIe Gen5 over the course of tool execution."}
 ![](images/svg/acb_memory_swapping.svg)
@@ -818,21 +802,20 @@ When hundreds of diverse agent swarms share a physical cluster, they contend for
 Static resource partitioning or single-scalar fair sharing (such as token-based fair share) leads to resource starvation and cluster inefficiency. The agent runtime must implement **Dominant Resource Fairness (DRF)** [@ghodsi2011].
 
 ::: {#dfn-drf .callout-definition title="Definition 8.2: Dominant resource fairness (DRF)"}
-Let $\mathcal{R} = \{1, \dots, m\}$ denote the set of $m$ shared physical resources with total cluster capacities $\mathbf{R} = [R_1, \dots, R_m]^T$. Let $\mathcal{A} = \{1, \dots, n\}$ denote $n$ active agent tenants. Tenant $i$ requires a resource demand vector $\mathbf{c}_i = [c_{i,1}, \dots, c_{i,m}]^T$ to execute one unit trajectory.
+Let $\mathcal{R} = \{1, \dots, m\}$ denote the set of $m$ shared physical resources with total cluster capacities $\mathbf{R} = [R_1, \dots, R_m]^T$. Let $\mathcal{A} = \{1, \dots, n\}$ denote $n$ active agent tenants. Tenant $i$ requires a resource demand vector $\mathbf{c}_i = [c_{i,1}, \dots, c_{i,m}]^T$ to execute one unit trajectory, yielding normalized resource share $s_{i,r} = c_{i,r} / R_r$.
 
-Tenant $i$'s share of resource $r$ is:
-$$s_{i,r} = \frac{c_{i,r}}{R_r}$$
-Tenant $i$'s **dominant resource** is the resource for which it claims the largest share of total cluster capacity:
-$$r_i^* = \arg\max_{r \in \mathcal{R}} \{ s_{i,r} \}$$
-Tenant $i$'s **dominant share** is:
-$$s_i^* = \max_{r \in \mathcal{R}} \{ s_{i,r} \}$$
+Tenant $i$'s **dominant resource** is the resource for which it claims the largest share of cluster capacity ($r_i^* = \arg\max_{r \in \mathcal{R}} s_{i,r}$), with dominant share $s_i^* = \max_{r \in \mathcal{R}} s_{i,r}$.
 
-Dominant Resource Fairness allocates resources such that all tenants' dominant shares are equalized across the cluster:
-$$s_1^* = s_2^* = \dots = s_n^*$$
-subject to cluster capacity constraints $\sum_i N_i \mathbf{c}_i \le \mathbf{R}$.
+Dominant Resource Fairness equalizes dominant shares across all active tenants via the max-min allocation in @eq-vol3-scheduling-drf-allocation:
+
+$$
+\max \min_{i \in \mathcal{A}} s_i^* \quad \text{subject to} \quad \sum_{i=1}^n N_i \mathbf{c}_i \le \mathbf{R}
+$$ {#eq-vol3-scheduling-drf-allocation}
+
+where $N_i$ denotes the allocated concurrency for tenant $i$.
 :::
 
-DRF guarantees four essential systems properties: **Sharing Incentive** (no tenant is worse off than under uniform partitioning $1/n$), **Strategy-Proofness** (no tenant can game the system by misrepresenting its demands), **Envy-Freeness** (no tenant prefers another's allocation), and **Pareto Efficiency** (it is impossible to allocate more resources to an agent without reducing another's allocation).
+DRF guarantees four essential systems properties: **Sharing Incentive** (no tenant is worse off than under uniform partitioning $1/n$), **Strategy-Proofness** (no tenant can game the system by misrepresenting its demands), **Envy-Freeness** (no tenant prefers another's allocation), and **Pareto Efficiency** (it is impossible to allocate more resources to an agent without reducing another's allocation).[^fn-scheduling-drf-fairness]
 
 @Tbl-drf-allocation-matrix illustrates a numerical allocation across two competing agent classes on a cluster consisting of 8 H100 GPUs ($640\text{ GB}$ HBM, $8000\text{ TFLOPS}$) and $1024\text{ GB}$ host DRAM, and @fig-vol3-scheduling-drf-allocation illustrates the multi-dimensional geometric balancing across coupled resources:
 
@@ -846,6 +829,10 @@ DRF guarantees four essential systems properties: **Sharing Incentive** (no tena
 ::: {#fig-vol3-scheduling-drf-allocation fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation across GPU Compute (TFLOPS), Accelerator Memory (KV Blocks), and External Tool API Leases. Equalizing dominant shares prevents single-tenant monopolization and maximizes aggregate cluster throughput. Source: Author design." fig-alt="Diagram showing Dominant Resource Fairness across coupled agent resources: Cluster Resource Pools on the left, Tenant Demand Profiles in the center, and DRF Equalization Engine on the right."}
 ![](images/svg/drf_multi_resource_agent_allocation.svg)
 :::
+
+> **The Systems Rule of Thumb (The Multi-Resource Dominant Share Law):** Single-scalar token accounting fails in agentic clusters because workloads simultaneously bottleneck on disparate physical tiers: memory-dense agents saturate HBM while compute-dense agents saturate tensor cores. Dominant Resource Fairness equalizes each tenant's maximum normalized resource share ($\max \min_i s_i^*$), preventing high-memory agents from starving high-compute workers and maximizing aggregate cluster concurrency.
+
+[^fn-scheduling-drf-fairness]: Dominant share equalization ($s_1^* = s_2^* = \dots = s_n^*$) ensures Pareto efficiency, sharing incentive, strategy-proofness, and envy-freeness across multi-resource clusters.
 
 ### Preemption, reversibility boundaries, and coffman deadlock prevention
 
