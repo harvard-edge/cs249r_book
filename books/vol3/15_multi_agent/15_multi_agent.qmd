@@ -101,7 +101,61 @@ Analyzing the behavior of $S(M)$ in @eq-multiagent-amdahl reveals three distinct
    Because $\alpha > 0$, $\beta > 0$, and $(1 - s) > 0$, Descartes' Rule of Signs guarantees exactly one positive real root $M^*$.
 3. **The Negative Return Collapse Zone ($M > M^*$):** Beyond $M^*$, the quadratic coordination term $\alpha M^2$ overwhelms the marginal parallel gains. Every additional agent added to the cluster increases total wall-clock completion time while consuming additional token budgets. Past a critical threshold $M_{\text{cross}}$, $S(M) < 1.0$, meaning the multi-agent ensemble takes longer to finish the task than a single focused agent working alone.
 
-::: {.callout-note title="Numerical derivation: Sizing an enterprise agent fleet"}
+```{python}
+#| echo: false
+#| label: multi-agent-fleet-sizing-notebook
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MULTI-AGENT FLEET SIZING (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Sizing an enterprise agent fleet" .callout-notebook
+# │
+# │ Goal: Derive the optimal agent fleet concurrency under Multi-Agent Amdahl's Law.
+# │ Show: Peak speedup at M*=4 (1.83x); negative returns past M=12 (0.86x throughput).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+
+sys.path.insert(0, "./mlsysim")
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty
+
+class MultiAgentFleetSizing:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    s_serial = 0.15  # serial planning fraction
+    p_parallel = 0.85  # parallel work fraction (1 - s)
+    alpha = 0.004  # quadratic synchronization coefficient
+    beta = 0.030  # linear provisioning coefficient
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Cubic stationary equation: 2*alpha*M^3 + beta*M^2 - (1 - s) = 0
+    f_3 = 2 * alpha * (3**3) + beta * (3**2) - p_parallel  # -0.364
+    f_4 = 2 * alpha * (4**3) + beta * (4**2) - p_parallel  # +0.142
+
+    # Denominator D(M) = s + (1 - s)/M + alpha*M^2 + beta*M
+    d_1 = s_serial + p_parallel / 1 + alpha * (1**2) + beta * 1  # 1.034
+    d_4 = s_serial + p_parallel / 4 + alpha * (4**2) + beta * 4  # 0.5465
+    d_8 = s_serial + p_parallel / 8 + alpha * (8**2) + beta * 8  # 0.75225
+    d_12 = s_serial + p_parallel / 12 + alpha * (12**2) + beta * 12  # 1.156833
+
+    s_1 = 1.0 / d_1  # 0.967
+    s_4 = 1.0 / d_4  # 1.830
+    s_8 = 1.0 / d_8  # 1.329
+    s_12 = 1.0 / d_12  # 0.864
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(f_3 < 0 < f_4, f"Stationary root not bounded between M=3 and M=4: f(3)={f_3}, f(4)={f_4}")
+    check(abs(s_4 - 1.83) < 0.01, f"Expected S(4) ≈ 1.83, got {s_4}")
+    check(abs(s_8 - 1.33) < 0.01, f"Expected S(8) ≈ 1.33, got {s_8}")
+    check(abs(s_12 - 0.86) < 0.01, f"Expected S(12) ≈ 0.86, got {s_12}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    s_4_str = fmt(s_4, precision=2)
+    s_8_str = fmt(s_8, precision=2)
+    s_12_str = fmt(s_12, precision=2)
+```
+
+::: {#nbk-multiagent-enterprise-fleet-sizing .callout-notebook title="Sizing an enterprise agent fleet"}
 Consider a representative enterprise repository refactoring workload characterized by the following measured systems parameters:
 
 - Serial planning and integration fraction: $s = 0.15$ ($1 - s = 0.85$).
@@ -198,6 +252,20 @@ P2P topologies are frequently employed in dialectical debate frameworks (such as
 3. **Correlated Sycophancy Cascades:** Because foundation models share common pretraining corpora and alignment objectives, peer debate often reinforces shared cognitive blind spots [@ouyang2022instructgpt]. An erroneous assertion by a confident model causes peers to revise their own correct outputs to conform with the perceived consensus [@du2023improving].
 
 P2P debate is viable only when strictly bounded to small ensembles ($M \le 3$) operating under hard turn limits and evaluated by deterministic external test harnesses.
+
+::: {#ws-multi-agent-kinesis-2020 .callout-war-story title="Amazon Kinesis front-end thread exhaustion (2020)"}
+
+**Context:** In November 2020, Amazon Web Services provisioned additional server capacity to the front-end fleet of Amazon Kinesis in the `us-east-1` region [@aws2020kinesis].
+
+**Mechanism:** The Kinesis front-end fleet was architected as an unconstrained peer mesh: every front-end server maintained an in-memory shard map cache by communicating with every other front-end server in the fleet. Each server created operating system threads for every peer in the cluster. Because communication was pairwise, total thread consumption scaled quadratically with fleet size ($O(M^2)$). When the newly provisioned servers joined, total threads exceeded the Linux kernel configured maximum (`threads-max`).
+
+**Impact:** Servers could no longer spawn operating system threads, cache construction failed, and the entire front-end fleet became unable to route incoming requests. When engineers attempted to restart the nodes, each restarting server attempted to re-establish peer connections to all other servers simultaneously, causing recovery to self-deadlock. The outage lasted over 19 hours and cascaded into Cognito, CloudWatch, Lambda, and EventBridge across the entire `us-east-1` region.
+
+**Response:** AWS engineers moved the shard-map cache to dedicated, segregated caching nodes, strictly bounded per-node connection pools, and introduced rate-limiting and backpressure on cluster join events.
+
+**Systems Lesson:** A peer-to-peer topology hides its coordination cost in a resource nobody budgeted. When agents communicate as an unconstrained peer mesh, every added agent adds load to every existing agent. High-reliability architectures strictly prohibit peer meshes, enforcing hierarchical supervisor trees with bounded $O(M)$ fan-out.
+
+:::
 
 ### Market-based topologies and contract networks {#sec-vol3-multiagent-market}
 

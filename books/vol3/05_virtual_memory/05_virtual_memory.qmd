@@ -176,7 +176,83 @@ $$S_{\text{terminal}} = 16\text{,}000 + (19 \times 800) = 31\text{,}200\text{ to
 
 Stateless serving forces the accelerator cluster to recompute **$440\text{,}800$ redundant tokens**—a staggering **$93.4\%$ waste of compute capacity**.
 
-::: {.callout-note title="Napkin math: TTFT latency collapse and redundant prefill arithmetic"}
+```{python}
+#| echo: false
+#| label: vm-ttft-collapse-notebook
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VIRTUAL MEMORY TTFT COLLAPSE (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "TTFT latency collapse and redundant prefill arithmetic" .callout-notebook
+# │
+# │ Goal: Quantify speedup of stateful prefix caching over stateless multi-turn prefill.
+# │ Show: 15.1x cumulative prefill speedup, 39x turn-20 TTFT reduction, 61.71 PFLOPs saved.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+
+sys.path.insert(0, "./mlsysim")
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty
+
+class VirtualMemoryTtftCollapse:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9  # 70B parameters
+    r_prefill_flops = 5e14  # 500 TFLOPS effective throughput
+    t_turns = 20  # trajectory horizon (turns)
+    l_root = 16_000  # initial root prompt length (tokens)
+    delta_s = 800  # tokens appended per turn
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    flops_per_token = 2 * p_params
+    tau_token_sec = flops_per_token / r_prefill_flops  # 0.28 ms/token
+
+    # Stateless
+    s_stateless_total = t_turns * l_root + delta_s * (t_turns * (t_turns - 1) // 2)
+    t_stateless_total_sec = s_stateless_total * tau_token_sec
+    s_turn_20 = l_root + (t_turns - 1) * delta_s
+    ttft_turn_20_stateless_sec = s_turn_20 * tau_token_sec
+
+    # Stateful (prefix caching)
+    t_turn_1_sec = l_root * tau_token_sec
+    t_subsequent_sec = (t_turns - 1) * delta_s * tau_token_sec
+    t_cached_total_sec = t_turn_1_sec + t_subsequent_sec
+    ttft_cached_sec = delta_s * tau_token_sec
+
+    speedup_prefill = t_stateless_total_sec / t_cached_total_sec
+    speedup_ttft_turn_20 = ttft_turn_20_stateless_sec / ttft_cached_sec
+    redundant_tokens = s_stateless_total - s_turn_20
+    redundant_pct = (redundant_tokens / s_stateless_total) * 100
+    flops_saved_pflops = (redundant_tokens * flops_per_token) / 1e15
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(s_stateless_total == 472_000, f"Expected 472,000 tokens, got {s_stateless_total}")
+    check(s_turn_20 == 31_200, f"Expected 31,200 tokens, got {s_turn_20}")
+    check(redundant_tokens == 440_800, f"Expected 440,800 tokens, got {redundant_tokens}")
+    check(abs(t_stateless_total_sec - 132.16) < 1e-3, f"Expected 132.16s, got {t_stateless_total_sec}")
+    check(abs(ttft_turn_20_stateless_sec - 8.736) < 1e-3, f"Expected 8.736s, got {ttft_turn_20_stateless_sec}")
+    check(abs(t_cached_total_sec - 8.736) < 1e-3, f"Expected 8.736s, got {t_cached_total_sec}")
+    check(abs(ttft_cached_sec - 0.224) < 1e-3, f"Expected 0.224s, got {ttft_cached_sec}")
+    check(abs(speedup_prefill - 15.128) < 0.1, f"Expected 15.1x, got {speedup_prefill}")
+    check(abs(speedup_ttft_turn_20 - 39.0) < 1e-3, f"Expected 39.0x, got {speedup_ttft_turn_20}")
+    check(abs(flops_saved_pflops - 61.712) < 0.01, f"Expected 61.71 PFLOPs, got {flops_saved_pflops}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    s_stateless_total_str = fmt_int(s_stateless_total, commas=True)
+    s_turn_20_str = fmt_int(s_turn_20, commas=True)
+    redundant_tokens_str = fmt_int(redundant_tokens, commas=True)
+    redundant_pct_str = fmt(redundant_pct, precision=1)
+    t_stateless_total_str = fmt(t_stateless_total_sec, precision=2)
+    ttft_turn_20_stateless_str = fmt(ttft_turn_20_stateless_sec, precision=2)
+    t_turn_1_str = fmt(t_turn_1_sec, precision=2)
+    t_cached_total_str = fmt(t_cached_total_sec, precision=2)
+    ttft_cached_ms_str = fmt_int(round(ttft_cached_sec * 1000))
+    speedup_prefill_str = fmt(speedup_prefill, precision=1)
+    speedup_ttft_str = fmt(speedup_ttft_turn_20, precision=0)
+    flops_saved_pflops_str = fmt(flops_saved_pflops, precision=2)
+```
+
+::: {#nbk-vm-ttft-collapse .callout-notebook title="TTFT latency collapse and redundant prefill arithmetic"}
 
 **Problem:** An autonomous software engineering agent runs a $T = 20$-turn debugging trajectory on an 8-GPU NVIDIA H100 node serving Llama-3 70B in BF16 ($P = 70 \times 10^9$ parameters). The cluster sustains an effective prefill compute throughput of $R_{\text{prefill}} = 500\text{ TFLOPS}$ ($5 \times 10^{14}\text{ FLOPs/s}$). The agent prompt contains an initial root sequence of $L_{\text{root}} = 16\text{,}000$ tokens, expanding by $\Delta S = 800$ tokens per turn. Calculate: (1) the cumulative prefill compute time and turn-20 Time-to-First-Token (TTFT) under stateless serving, (2) the corresponding metrics under stateful prefix caching, and (3) the net speedup delivered by virtual context retention.
 
@@ -344,7 +420,65 @@ $$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
 
-::: {.callout-note title="Napkin math: Speculative branching capacity on an 8-GPU node"}
+```{python}
+#| echo: false
+#| label: vm-branch-capacity-notebook
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATIVE BRANCH CAPACITY (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Speculative branching capacity on an 8-GPU node" .callout-notebook
+# │
+# │ Goal: Contrast concurrent speculative branches under contiguous replication vs PagedAttention CoW.
+# │ Show: 32 naive branches vs 1,240 CoW branches (38.75x capacity expansion on 8x H100).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+
+sys.path.insert(0, "./mlsysim")
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty
+
+class SpeculativeBranchCapacity:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    c_kv_gb = 436.0  # dedicated KV cache memory (GB)
+    l_prefix = 40_000  # shared parent context (tokens)
+    l_branch = 1_024  # speculative branch length (tokens)
+    s_token_bytes = 327_680  # bytes per token KV footprint
+    b_block = 16  # PagedAttention block size
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_token_gb = s_token_bytes / 1e9
+    m_prefix_gb = l_prefix * s_token_gb
+    m_branch_gb = l_branch * s_token_gb
+
+    # 1. Naive Contiguous Replication
+    m_per_branch_naive_gb = m_prefix_gb + m_branch_gb
+    k_naive = int(c_kv_gb // m_per_branch_naive_gb)
+
+    # 2. PagedAttention Copy-on-Write
+    c_avail_cow_gb = c_kv_gb - m_prefix_gb
+    m_tail_frag_gb = b_block * s_token_gb
+    m_per_branch_cow_gb = m_branch_gb + m_tail_frag_gb
+    k_cow = int(c_avail_cow_gb // m_per_branch_cow_gb)
+
+    capacity_expansion = k_cow / k_naive
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(k_naive == 32, f"Expected 32 naive branches, got {k_naive}")
+    check(k_cow == 1240, f"Expected 1,240 CoW branches, got {k_cow}")
+    check(abs(capacity_expansion - 38.75) < 1e-3, f"Expected 38.75x expansion, got {capacity_expansion}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_naive_str = fmt_int(k_naive)
+    k_cow_str = fmt_int(k_cow, commas=True)
+    m_prefix_str = fmt(m_prefix_gb, precision=2)
+    m_branch_str = fmt(m_branch_gb, precision=3)
+    c_avail_cow_str = fmt(c_avail_cow_gb, precision=2)
+    capacity_expansion_str = fmt(capacity_expansion, precision=2)
+```
+
+::: {#nbk-vm-branch-capacity .callout-notebook title="Speculative branching capacity on an 8-GPU node"}
 
 **Problem:** An 8-GPU NVIDIA H100 node ($640\text{ GB}$ total HBM3) hosts Llama-3 70B in BF16 ($S_{\text{token}} = 320\text{ KB}$). The model weights consume $140\text{ GB}$, while CUDA runtime buffers and activation scratchpads reserve $64\text{ GB}$, leaving $C_{\text{KV}} = 436\text{ GB}$ dedicated entirely to the KV cache. An agent forks speculative rollouts from a massive repository context of $L_{\text{prefix}} = 40\text{,}000$ tokens, where each speculative branch generates an exploration trace of $L_{\text{branch}} = 1\text{,}024$ tokens. Calculate the maximum number of concurrent speculative branches ($K$) that can be evaluated simultaneously under naive contiguous replication versus PagedAttention Copy-on-Write.
 
@@ -504,9 +638,9 @@ When the tool execution nears completion (or when the orchestrator receives an a
 
 **Impact:** For a nine-hour operational window, active users were exposed to conversation titles, the initial message of newly created chats, and payment-related metadata (billing names, email addresses, and the last four digits of credit cards) belonging to other accounts.
 
-**Systems Lesson:** The Redis key-lookup logic was mathematically correct; the vulnerability stemmed from assuming that the underlying transport channel delivering a cache payload was inherently bound to the security context of the requester.
+**Response:** OpenAI took the service offline, flushed all shared Redis connection pools, patched `redis-py` to discard and reset connections on client cancellation, and restructured session state caching to enforce cryptographic tenant token binding across all transport requests.
 
-A neural Radix prefix cache introduces an identical systems vulnerability: **physical KV blocks are indexed purely by token sequence identity**, completely agnostic to tenant identity or authorization boundaries. If a multi-tenant serving cluster caches a proprietary prompt containing private API keys, proprietary code, or confidential system instructions, an adversarial tenant who guesses or crafts that identical prompt prefix could observe or reconstruct those cached activations. Production agent serving runtimes must partition shared prefix trees by cryptographic tenant leases, enforcing strict capability tokens on block table mappings to prevent cross-tenant information leakage.
+**Systems Lesson:** The Redis key-lookup logic was mathematically correct; the vulnerability stemmed from assuming that the underlying transport channel delivering a cache payload was inherently bound to the security context of the requester. A neural Radix prefix cache introduces an identical systems vulnerability: **physical KV blocks are indexed purely by token sequence identity**, completely agnostic to tenant identity or authorization boundaries. Production agent serving runtimes must partition shared prefix trees by cryptographic tenant leases, enforcing strict capability tokens on block table mappings to prevent cross-tenant information leakage.
 
 :::
 

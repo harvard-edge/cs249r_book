@@ -733,11 +733,17 @@ where:
 
 : **Architectural Duality between POSIX PCB and Agent Control Block**: Structural comparison of execution primitives, memory isolation handles, authority structures, and scheduling granularities between classical operating system processes and autonomous agents. {#tbl-vol3-pcb-vs-acb tbl-colwidths="[20,35,45]"}
 
+The structural divergence between classical operating system descriptors and the Agent Control Block is contrasted in @fig-vol3-scheduling-pcb-vs-acb.
+
+::: {#fig-vol3-scheduling-pcb-vs-acb fig-env="figure" fig-pos="htb" fig-cap="**Architectural Duality between POSIX Process Control Block and Agent Control Block**: Structural comparison of execution descriptors across classical operating systems and autonomous machine learning runtimes. The POSIX PCB (left, slate) encapsulates deterministic CPU execution state (registers, MMU page tables, file descriptors) enabling microsecond context switching. In contrast, the Agent Control Block (right, purple) encapsulates stochastic trajectory state across distributed accelerator clusters: tracking prompt token working sets, PagedAttention block tables, attenuating cryptographic capability leases, and causal vector clocks required for asynchronous tool-wait suspension and state hydration." fig-alt="Side-by-side comparison cards illustrating the POSIX Process Control Block on the left and the Agent Control Block on the right, contrasting registers and page tables with capability leases and PagedAttention memory handles."}
+![](images/svg/pcb_vs_acb.svg)
+:::
+
 ### The ACB lifecycle finite state machine
 
 An agent does not run as an unbroken stream of computation. It transitions through a formal **Finite State Machine (FSM)**\index{Finite State Machine} managed by the runtime kernel (@fig-vol3-scheduling-acb-lifecycle).
 
-::: {#fig-vol3-scheduling-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The ACB Lifecycle Finite State Machine**: Deterministic state transitions governing an agent trajectory across active prefill and decode compute phases, bimodal tool-wait suspensions, asynchronous memory swapping, and compensating rollback paths. Source: Author design." fig-alt="Finite State Machine diagram showing ACB states: Initialized, Active Prefill, Active Decode, Suspended Tool Wait, Memory Swapping, Suspended Human Gate, Rollback Compensating, Terminated Success, Terminated Failed."}
+::: {#fig-vol3-scheduling-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The ACB Lifecycle Finite State Machine**: Deterministic state transitions governing an agent trajectory across active prefill and decode compute phases, bimodal tool-wait suspensions, asynchronous memory swapping, and compensating rollback paths." fig-alt="Finite State Machine diagram showing ACB states: Initialized, Active Prefill, Active Decode, Suspended Tool Wait, Memory Swapping, Suspended Human Gate, Rollback Compensating, Terminated Success, Terminated Failed."}
 ![](images/svg/acb_lifecycle_state_machine.svg)
 :::
 
@@ -962,16 +968,18 @@ The runtime must encapsulate each turn within the Agent Control Block using Lamp
 
 :::
 
-::: {#ws-scheduling-cluster-freeze .callout-war-story title="War story: The 1.2 terabyte cluster memory freeze"}
-In late 2024, an enterprise software company deployed an autonomous coding fleet of 60 agents to automatically generate unit tests across a legacy microservices repository. The runtime utilized a state-of-the-art inference engine with continuous batching, but lacked an Agent Control Block descriptor and bimodal suspension mechanics.
+::: {#ws-scheduling-cluster-freeze .callout-war-story title="The 1.2 terabyte cluster memory freeze"}
 
-At 02:00 UTC, an upstream network partition severed connectivity to the company's internal artifact registry. Simultaneously, all 60 agents executed a `bash(npm test)` tool invocation. Because the network was down, the npm CLI commands hung indefinitely awaiting TCP socket timeouts (configured to 15 minutes).
+**Context:** In late 2024, an enterprise software company deployed an autonomous coding fleet of 60 agents to automatically generate unit tests across a legacy microservices repository, served by an inference engine with continuous batching across 12 NVIDIA H100 GPUs (960 GB HBM).
 
-Because the serving runtime possessed no bimodal swapping, all 60 agents remained resident in GPU memory. Each agent held an active $48\text{k}$-token context window, pinning $15.7\text{ GB}$ of HBM per instance—locking up over $940\text{ GB}$ of HBM across 12 NVIDIA H100 GPUs.
+**Mechanism:** An upstream network partition severed connectivity to an internal npm registry while all 60 agents concurrently executed `bash(npm test)`. The commands blocked indefinitely awaiting 15-minute TCP socket timeouts. Because the serving runtime lacked bimodal context swapping and Agent Control Block (ACB) descriptors, each blocked agent held its active $48\text{k}$-token context window pinned in physical HBM ($15.7\text{ GB}$ per instance), locking up over $940\text{ GB}$ of GPU memory.
 
-When high-priority interactive developer queries arrived at the cluster, the allocator found zero free PagedAttention blocks. The scheduler had no mechanism to preempt the blocked agents because their process state was tied directly to the running forward passes. The entire cluster entered a catastrophic Coffman livelock: memory allocation threads spun at $100\%$ CPU, health check heartbeats timed out across Kubernetes pods, and the automated cluster orchestrator declared the entire GPU fleet unhealthy, triggering an automated rolling reboot storm that wiped all in-flight trajectory states.
+**Impact:** Incoming high-priority developer requests found zero free PagedAttention blocks. Memory allocation threads spun at 100 percent CPU in a catastrophic Coffman livelock, Kubernetes node health checks failed, and the orchestrator initiated a cluster-wide rolling reboot storm that destroyed all in-flight trajectory states.
 
-**The Lesson:** Never permit a stochastic agent process to hold physical accelerator frames across an un-sandboxed external boundary. The absence of bimodal context swapping transforms a minor external network glitch into a total cluster infrastructure collapse.
+**Response:** Schedulers implemented asynchronous DMA context swapping to host DRAM triggered whenever an agent enters an out-of-band tool wait exceeding $T_{\text{breakeven}}$ (700 ms), releasing physical GPU page frames back to the allocator's free pool.
+
+**Systems Lesson:** Never permit a stochastic agent process to hold physical accelerator frames across an unsandboxed external boundary. The absence of bimodal context swapping transforms an ordinary network latency hiccup into a total cluster infrastructure collapse.
+
 :::
 
 ## Summary {#sec-vol3-scheduling-summary}

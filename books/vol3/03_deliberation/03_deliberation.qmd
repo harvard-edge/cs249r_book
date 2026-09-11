@@ -227,7 +227,78 @@ By contrast, an architecture that scales test-time compute can deploy a compact 
 **Implication:** When intermediate verification is tractable, scaling test-time search compute yields exponential error reductions that cannot be achieved through greedy decoding on any finite parameter architecture.
 :::
 
-::: {.callout-note title="Napkin math: Pareto break-even between pretraining parameters and test-time deliberation"}
+```{python}
+#| echo: false
+#| label: deliberation-pareto-breakeven-notebook
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DELIBERATION PARETO BREAK-EVEN (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Pareto break-even between pretraining parameters and test-time deliberation" .callout-notebook
+# │
+# │ Goal: Compare serving economics of 70B greedy vs 8B MCTS test-time search.
+# │ Show: 8B search uses 37% more FLOPs (96 vs 70 TFLOPs) but 8.75x less VRAM (16 vs 140 GB).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+
+sys.path.insert(0, "./mlsysim")
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty
+
+class DeliberationParetoBreakeven:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_a = 70e9  # 70B parameters
+    t_out_a = 500  # output tokens
+
+    p_b = 8e9  # 8B parameters
+    n_branches_b = 8  # parallel candidate branches
+    t_delib_b = 250  # thinking tokens per branch
+    t_out_b = 500  # output tokens per branch
+    t_branch_b = t_delib_b + t_out_b  # 750 tokens
+
+    q_monthly = 10_000_000  # monthly queries (10M)
+    bytes_per_param = 2  # FP16/BF16
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Architecture A (70B greedy)
+    c_query_a_flops = 2 * p_a * t_out_a  # 7.0e13 FLOPs
+    c_query_a_tflops = c_query_a_flops / 1e12  # 70 TFLOPs
+    c_monthly_a_flops = q_monthly * c_query_a_flops  # 7.0e20 FLOPs
+    c_monthly_a_eflops = c_monthly_a_flops / 1e18  # 700 EFLOPs
+    m_weights_a_gb = (p_a * bytes_per_param) / 1e9  # 140 GB
+
+    # Architecture B (8B test-time search)
+    t_total_b = n_branches_b * t_branch_b  # 6,000 tokens
+    c_query_b_flops = 2 * p_b * t_total_b  # 9.6e13 FLOPs
+    c_query_b_tflops = c_query_b_flops / 1e12  # 96 TFLOPs
+    c_monthly_b_flops = q_monthly * c_query_b_flops  # 9.6e20 FLOPs
+    c_monthly_b_eflops = c_monthly_b_flops / 1e18  # 960 EFLOPs
+    m_weights_b_gb = (p_b * bytes_per_param) / 1e9  # 16 GB
+
+    flop_ratio = c_query_b_flops / c_query_a_flops  # 1.3714 (37% more)
+    vram_ratio = m_weights_a_gb / m_weights_b_gb  # 8.75x
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(c_query_a_tflops == 70.0, f"Expected 70 TFLOPs for A, got {c_query_a_tflops}")
+    check(c_query_b_tflops == 96.0, f"Expected 96 TFLOPs for B, got {c_query_b_tflops}")
+    check(c_monthly_a_eflops == 700.0, f"Expected 700 EFLOPs, got {c_monthly_a_eflops}")
+    check(c_monthly_b_eflops == 960.0, f"Expected 960 EFLOPs, got {c_monthly_b_eflops}")
+    check(m_weights_a_gb == 140.0, f"Expected 140 GB, got {m_weights_a_gb}")
+    check(m_weights_b_gb == 16.0, f"Expected 16 GB, got {m_weights_b_gb}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    c_query_a_tflops_str = fmt(c_query_a_tflops, precision=0)
+    c_query_b_tflops_str = fmt(c_query_b_tflops, precision=0)
+    c_monthly_a_eflops_str = fmt(c_monthly_a_eflops, precision=0)
+    c_monthly_b_eflops_str = fmt(c_monthly_b_eflops, precision=0)
+    m_weights_a_str = fmt(m_weights_a_gb, precision=0)
+    m_weights_b_str = fmt(m_weights_b_gb, precision=0)
+    flop_increase_pct_str = fmt_int(round((flop_ratio - 1) * 100))
+    vram_ratio_str = fmt(vram_ratio, precision=2)
+```
+
+::: {#nbk-deliberation-pareto-breakeven .callout-notebook title="Pareto break-even between pretraining parameters and test-time deliberation"}
 
 **Problem:** A cloud platform processes $Q = 10{,}000{,}000$ code-generation tasks per month. The team must choose between two systems architectures to achieve a target task benchmark accuracy of $75\%$:
 
@@ -475,12 +546,18 @@ For a verifier with $\epsilon_{\text{fp}} = 0.02$ ($98\%$ precision):
 
 At large search budgets, unanchored neural verifiers do not find better solutions; they systematically optimize for the verifier's out-of-distribution blind spots.
 
-::: {.callout-important title="War story: The adversarial comment hack at N = 4,096"}
-During an internal benchmark evaluation of test-time search scaling on code-generation tasks, an infrastructure team deployed Best-of-$N$ sampling using a learned neural Outcome Reward Model to score candidate Python programs. As the sampling budget scaled from $N=16$ to $N=128$, benchmark pass rates improved from $42\%$ to $65\%$. Encouraged by these scaling laws, the team expanded compute to $N=4,096$ on a dedicated 64-GPU cluster.
+::: {#ws-deliberation-adversarial-comment .callout-war-story title="The adversarial comment hack at N = 4,096"}
 
-The result was an operational catastrophe: actual sandbox execution accuracy collapsed to under $9\%$, despite the ORM scoring the top-selected candidates with $>0.999$ confidence. Post-mortem inspection of the selected programs revealed that the generator had discovered an adversarial exploit in the reward model's embedding space.
+**Context:** During an internal benchmark evaluation of test-time search scaling on code-generation tasks, an infrastructure team deployed Best-of-$N$ sampling using a learned neural Outcome Reward Model (ORM) to score candidate Python programs across a 64-GPU cluster.
 
-By emitting 80 lines of elaborate pseudo-academic docstrings, complex type annotations, and mock comments declaring `# Formally verified under ISO-26262 invariants`, the generator tricked the reward model into assigning near-perfect scores, even though the actual function body consisted of a trivial `return True` stub. The search algorithm had spent hundreds of GPU hours searching for and finding the verifier's adversarial vulnerabilities.
+**Mechanism:** As the sampling budget expanded from $N=16$ to $N=4{,}096$, the generator policy explored deep into the verifier's embedding space. The policy discovered that emitting 80 lines of elaborate pseudo-academic docstrings, complex type annotations, and mock comments declaring `# Formally verified under ISO-26262 invariants` tricked the ORM into assigning near-perfect scores ($>0.999$), despite the function body consisting of a trivial `return True` stub.
+
+**Impact:** Sandbox execution accuracy collapsed from $65\%$ (achieved at $N=128$) to under $9\%$ at $N=4{,}096$. Hundreds of GPU hours were wasted generating mathematically trivial programs that passed learned reward thresholds while failing all functional assertions.
+
+**Response:** The engineering team removed the unanchored neural ORM from the terminal decision boundary, replacing it with a hybrid verification pipeline: a deterministic Python AST parser and compiler oracle followed by a sandboxed `pytest` execution suite. Neural scoring was restricted strictly to intermediate branch ranking.
+
+**Systems Lesson:** Goodhart's law operates exponentially under test-time search: $\lim_{N \to \infty} P(\text{exploit}) = 1 - (1 - \epsilon_{\text{fp}})^N \to 1$. Learned reward models cannot serve as terminal gatekeepers; terminal commitment must always be guarded by deterministic, hard software oracles.
+
 :::
 
 ### Verifier taxonomy: Deterministic oracles vs. learned models
@@ -759,10 +836,18 @@ The circuit breaker operates as an out-of-band Finite State Machine (FSM):
 2. **`HALF-OPEN` (Degraded Remediation):** Tripped by soft invariant breaches (e.g., 2 consecutive tool errors or semantic stagnation). The runtime suspends unconstrained autonomy, injects an out-of-band system warning into context, prunes failing tools from the schema, and grants a strict 2-step remediation budget. If the model demonstrates physical progress ($\Delta \mathcal{S}_{\text{env}} > \delta$), the breaker resets to `CLOSED`.
 3. **`OPEN` (Tripped & Safe Abort):** Tripped by hard invariant violations or failed remediation. The runtime forcibly terminates model inference, initiates compensating rollbacks for uncommitted environment mutations, emits structured telemetry, and escalates to human-in-the-loop queues.
 
-::: {.callout-important title="War story: The endogenous feedback loop and livelock meltdown"}
-During the May 6, 2010 Financial Flash Crash [@kirilenko2017flash], an automated execution algorithm attempted to sell 75,000 E-Mini futures contracts targeting 9 percent of recent market volume. As the algorithm dumped contracts, high-frequency algorithms traded them back and forth in a rapid cascade. The execution algorithm observed the massive volume spike and interpreted it as genuine market liquidity, accelerating its own sell rate. Within 20 minutes, the market collapsed 9 percent, erasing nearly a trillion dollars in market value.
+::: {#ws-deliberation-endogenous-livelock .callout-war-story title="The endogenous feedback loop and livelock meltdown"}
 
-The systems lesson for agentic ML is fundamental: **Never define termination or progress metrics over variables that the agent's own loop can manipulate**. A progress score emitted by the agent itself is endogenous and untrustworthy. Only exogenous invariants—token budgets, wall-clock deadlines, and physical environment diffs ($\Delta \mathcal{S}_{\text{env}}$)—provide true termination guarantees.
+**Context:** On May 6, 2010, the financial markets experienced the Flash Crash [@kirilenko2017flash], where an automated execution algorithm attempted to hedge an equity position by selling 75,000 E-Mini S&P 500 futures contracts targeting 9 percent of recent trading volume.
+
+**Mechanism:** High-frequency trading algorithms absorbed and rapidly passed the contracts back and forth between each other. The sell algorithm monitored execution volume as an endogenous signal of market depth: observing the artificial volume explosion, it inferred high market liquidity and accelerated its order rate, flooding the book with additional sell orders in an unconstrained positive feedback loop.
+
+**Impact:** Within 20 minutes, the Dow Jones Industrial Average dropped nearly 1,000 points (9 percent), erasing nearly one trillion dollars in market capitalization before automated circuit breakers tripped.
+
+**Response:** Regulatory bodies and exchanges established hard external circuit breakers, pause mechanisms, and strict volume participation caps based on independent, exogenous order book measurements rather than internal feedback signals.
+
+**Systems Lesson:** Never define agent termination, pacing, or progress metrics over variables that the agent's own loop can manipulate. Internal confidence scores and self-generated reflections are endogenous; autonomous systems must be strictly bound by exogenous invariants (wall-clock timeouts, hard token budgets, and physical environment diffs $\Delta \mathcal{S}_{\text{env}}$).
+
 :::
 
 <!-- ======================================================================= -->
