@@ -111,7 +111,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
         
         <!-- Row 2 -->
         <text x="150" y="150" font-size="12" fill="#2D3748" text-anchor="middle">Ceramic void vol</text>
-        <text x="350" y="150" font-size="12" fill="#A51C30" text-anchor="middle">Brittle fracture \u003c 38 ms</text>
+        <text x="350" y="150" font-size="12" fill="#A51C30" text-anchor="middle">Brittle fracture &lt; 38 ms</text>
         <rect x="470" y="135" width="220" height="22" fill="#1F407A" rx="2"/>
         <text x="580" y="150" font-size="11" fill="#FFFFFF" text-anchor="middle">Mechanical Compliance Interface</text>
         <text x="780" y="150" font-size="12" fill="#2D3748" text-anchor="middle">Tooling Lead</text>
