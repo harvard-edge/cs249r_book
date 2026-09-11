@@ -28,7 +28,7 @@ This chapter establishes the systems architecture required to transform volatile
 - **Quantify** the trade-offs of hardware-aware KV cache compression, comparing FP8 numerical representations (E4M3 versus E5M2), outlier-channel isolation, and low-rank singular value decomposition (SVD) on Tensor Core throughput.
 :::
 
-## 5.1 The Physical Geometry of Attention Memory {#sec-vol3-virtualmem-geometry}
+## The Physical Geometry of Attention Memory {#sec-vol3-virtualmem-geometry}
 
 An enterprise inference cluster hosting a fleet of 128 autonomous software engineering agents on an 8-GPU NVIDIA H100 node crashes with an Out-of-Memory (OOM) fault during a synchronized test-suite run. Hardware telemetry collected at the instant of failure reveals a striking physical anomaly: while the CUDA driver reports $100\%$ allocated capacity across all $640\text{ GB}$ of High-Bandwidth Memory (HBM3), the aggregate token occupancy across active agent contexts accounts for only $218.8\text{ GB}$—an effective memory utilization of just $34.2\%$. More than $420\text{ GB}$ of expensive silicon memory sits completely idle, trapped inside pre-allocated contiguous tensor buffers reserved for theoretical worst-case sequence lengths that the agents never reached.
 
@@ -221,16 +221,7 @@ $$\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\tex
 
 The arithmetic necessity of retaining the Key-Value cache reveals an inescapable hardware trade-off: an inference engine cannot eliminate redundant prefill without physically storing multi-gigabyte activation tensors across long temporal horizons. Solving this challenge without succumbing to the contiguous allocation fragmentation crisis requires virtualizing the memory addressing architecture.
 
-::: {.callout-note title="Checkpoint: Attention geometry and memory fragmentation"}
-Before proceeding to block paging mechanics, verify your analytical grasp of physical KV cache geometry:
-
-- [ ] **Head Geometry Scaling**: Can you derive the precise memory footprint per token ($S_{\text{token}}$) for a 64-layer model with $d_{\text{model}} = 8192$, using GQA with 64 query heads and 8 KV heads under FP8 precision ($b = 1$ byte)?
-- [ ] **MLA Latent Decoupling**: Why does DeepSeek-V3 store only a compressed latent vector $d_c = 512$ and decoupled rotary key $d_R = 64$ per layer rather than physical attention heads? How are full Key and Value heads reconstructed during attention execution?
-- [ ] **External Fragmentation Collapse**: Under dynamic tensor resizing without paging, describe the exact physical memory state where an inference engine triggers an Out-of-Memory (OOM) abort despite $40\text{ GB}$ of unallocated HBM being physically present on the device.
-- [ ] **Prefix Sharing Asymptotics**: For an agent trajectory appending $\Delta S = 500$ tokens per turn to an initial prompt of $L_{\text{root}} = 10\text{,}000$ tokens, calculate the prefix sharing ratio $\rho(t, t+1)$ at turn $t = 1$, $t = 5$, and $t = 20$.
-:::
-
-## 5.2 PagedAttention: Virtual Memory for KV Caches {#sec-vol3-virtualmem-pagedattention}
+## PagedAttention: Virtual Memory for KV Caches {#sec-vol3-virtualmem-pagedattention}
 
 An autonomous agent attempting to solve an issue in an open-source repository appends a 2,048-token stack trace into an active context of 64,000 tokens. The serving runtime throws a runtime exception: `CUDA out of memory: tried to allocate 10.49 GB`. The on-call systems engineer inspects the GPU status via `nvidia-smi` and discovers that $22.4\text{ GB}$ of unallocated HBM remains completely free. The allocator failed because physical memory was partitioned into dozens of non-contiguous segments; the largest contiguous free memory slice spanned only $6.2\text{ GB}$. The runtime was forced to terminate the agent's task because it could not allocate a single physically contiguous buffer for the expanding KV cache.
 
@@ -388,16 +379,7 @@ $$K_{\text{CoW}} = \left\lfloor \frac{422.89\text{ GB}}{M_{\text{branch}} + B_{\
 
 PagedAttention resolves the physical memory addressing problem: it allows arbitrary non-contiguous physical blocks to back a logical sequence and enables zero-copy sharing across known, explicitly forked branches. However, PagedAttention assumes the serving system already knows which requests share memory. In an autonomous multi-agent swarm where dozens of heterogeneous agents submit requests asynchronously, the runtime requires a dynamic indexing data structure to discover, match, and reuse shared prefixes automatically.
 
-::: {.callout-note title="Checkpoint: PagedAttention and address translation"}
-Verify your systems understanding of virtual memory block mapping:
-
-- [ ] **Address Calculation**: An agent sequence reaches logical token index $i = 1\text{,}047$. The runtime uses block size $B_{\text{block}} = 16$. Calculate the logical block index $j$, the intra-block offset $o$, and the byte offset within the physical block for layer $l = 12$ on Llama-3 70B ($S_{\text{token\_layer}} = 4\text{,}096$ bytes).
-- [ ] **FlashAttention Fusion**: How does the PagedAttention kernel traverse the block table inside GPU Shared Memory (SRAM) without paying global memory latency penalties on every token dot product?
-- [ ] **CoW Reference Lifecycle**: Trace the exact value of $\text{ref\_count}(P)$ for a physical block holding a system prompt when an agent forks into 8 speculative rollouts, 3 rollouts are pruned by a verifier, 4 rollouts complete execution, and 1 rollout continues generating.
-- [ ] **Block Sizing Trade-Offs**: Why does selecting $B_{\text{block}} = 4$ degrade memory bus efficiency on an NVIDIA H100 GPU compared to $B_{\text{block}} = 16$, even though it reduces tail internal waste?
-:::
-
-## 5.3 Memory Defragmentation, Page Tables, and Block Allocation {#sec-vol3-virtualmem-defrag}
+## Memory Defragmentation, Page Tables, and Block Allocation {#sec-vol3-virtualmem-defrag}
 
 An asynchronous multi-agent orchestrator managing 32 automated pull-request evaluation workers encounters severe latency jitter: while the cluster's median Time-to-First-Token (TTFT) is $210\text{ ms}$, the 99th-percentile tail latency explodes to $16.4\text{ seconds}$. Profiling the host CPU serving process reveals that the runtime is suffering from severe **prefix cache thrashing**. Because worker agents submit prompts with minor cosmetic variations in their system instructions and tool definitions, an unindexed page allocator fails to recognize common token substrings. The host engine repeatedly evicts warm physical blocks to satisfy incoming allocations, only to immediately re-prefill those exact same tokens hundreds of milliseconds later.
 
@@ -530,16 +512,7 @@ A neural Radix prefix cache introduces an identical systems vulnerability: **phy
 
 Dynamic prefix trees, chunked prefill, and hierarchical memory swapping optimize the management of physical memory on a single machine. However, as agent context windows expand beyond 100,000 tokens and swarms scale across hundreds of accelerators, co-locating compute-bound prefill and memory-bound decode on the same silicon creates an unresolvable hardware bottleneck. Breaking this bottleneck requires physical disaggregation.
 
-::: {.callout-note title="Checkpoint: Radix trees and memory scheduling"}
-Verify your analytical command of dynamic prefix indexing and memory scheduling:
-
-- [ ] **Radix Tree Splitting**: Trace the exact node and edge modifications when a Radix tree containing edge `"def test_login():\n    user = "` is matched by a new prompt `"def test_login():\n    admin = "`. What happens to the physical block mappings?
-- [ ] **Leaf Eviction Safety**: Under severe memory pressure, why must the cache manager evict unpinned leaf nodes before internal branch nodes? What systemic failure occurs if an intermediate node is evicted while child leaves remain indexed?
-- [ ] **Chunked Prefill Roofline**: How does co-scheduling a 512-token prefill chunk alongside 32 decode tokens alter the arithmetic intensity of the GPU execution batch?
-- [ ] **Tool-Wait Swapping Economics**: If an agent context of 64,000 tokens ($20.97\text{ GB}$) is swapped to host DRAM over PCIe Gen5 x16 ($64\text{ GB/s}$), what is the minimum tool execution time required to completely hide the round-trip swap latency?
-:::
-
-## 5.4 Prefill-Decode Disaggregation and Remote KV Paging {#sec-vol3-virtualmem-disaggregation}
+## Prefill-Decode Disaggregation and Remote KV Paging {#sec-vol3-virtualmem-disaggregation}
 
 A high-scale agent infrastructure serving an enterprise code-generation fleet deploys 64 homogeneous nodes, each equipped with 8 NVIDIA H100 GPUs. The platform encounters an insoluble operational dilemma: if the nodes are configured with large batch sizes to maximize decode throughput and amortize parameter streaming costs, incoming 32,000-token tool observations cause massive Time-to-First-Token (TTFT) stalls, halting generation across all active streams for up to 8 seconds. Conversely, if the scheduler reserves GPU compute headroom to process incoming prefills instantaneously, the cluster's sustained decode throughput collapses by $65\%$, stranding millions of dollars of GPU capital equipment.
 
@@ -617,16 +590,7 @@ In an agentic cluster where $\gamma = 25$, prefill nodes represent over $60\%$ o
 
 Even with disaggregated serving over $800\text{ Gbps}$ RDMA networks, the absolute size of the Key-Value cache remains the fundamental ceiling on concurrency. Storing multi-gigabyte activation tensors in 16-bit precision exhausts accelerator memory when context windows scale to 128,000 or 1,000,000 tokens. Unlocking the next order of magnitude in agent concurrency requires compressing the activations themselves.
 
-::: {.callout-note title="Checkpoint: Prefill-decode disaggregation"}
-Evaluate your understanding of disaggregated serving mechanics:
-
-- [ ] **Roofline Divergence**: Why does the arithmetic intensity of prompt prefill scale linearly with prompt length ($\mathcal{I} \approx S / b$), while the arithmetic intensity of autoregressive decode remains strictly constant ($\mathcal{I} \approx B_{\text{batch}} / b$)?
-- [ ] **Network Bandwidth Ceiling**: Calculate the minimum network bandwidth required to transfer a 64,000-token KV cache on Llama-3 70B ($20.97\text{ GB}$) in less than $150\text{ ms}$.
-- [ ] **Pipelined RDMA Overlap**: Explain how layer-by-layer RDMA Write operations hide network serialization latency behind GPU Tensor Core computation during the prefill phase.
-- [ ] **Cluster Ratio Sizing**: An agent platform experiences an average prompt length of $\bar{S}_{\text{prompt}} = 20\text{,}000$ tokens and an average generation length of $\bar{S}_{\text{gen}} = 500$ tokens. If $T_{\text{prefill\_token}} = 0.25\text{ ms}$ and $T_{\text{decode\_token}} = 25\text{ ms}$, calculate the optimal ratio of Prefill nodes to Decode nodes ($N_P : N_D$).
-:::
-
-## 5.5 Hardware-Aware KV Cache Compression: Quantization and SVD {#sec-vol3-virtualmem-compression}
+## Hardware-Aware KV Cache Compression: Quantization and SVD {#sec-vol3-virtualmem-compression}
 
 A frontier autonomous agent platform serving 1,000 concurrent developer agents hits an insurmountable memory capacity barrier when sequences reach 64,000 tokens. Adding additional GPU nodes is cost-prohibitive, requiring millions of dollars in capital expenditure. To double agent concurrency on existing hardware, the platform's infrastructure team enables naive INT4 uniform quantization across all Key and Value caches. Within hours, customer error reports surge: the agents' pass rate on HumanEval code-generation benchmarks plummets from $84.2\%$ to $32.8\%$. Detailed activation logs reveal that the model has begun emitting corrupted JSON schemas, generating invalid variable names, and getting trapped in infinite repetition loops. The cause: numerical underflow and severe clipping error in attention outlier channels.
 
@@ -701,15 +665,6 @@ Compressing the KV cache from 16-bit (FP16, $b = 2$) to 8-bit (FP8, $b = 1$) cut
 On an NVIDIA H100 GPU serving a 64,000-token context on Llama-3 70B, halving the KV cache byte footprint doubles the effective token generation throughput of the memory bus. Modern high-performance kernels (such as FlashInfer and vLLM) fuse the dequantization step directly into the GPU SRAM registers: low-precision bytes are loaded from HBM, dequantized on the fly into FP16 registers, and passed immediately to the Tensor Cores without incurring any additional global memory read/write traffic.
 
 Virtual context memory, block-level paging, dynamic prefix indexing, disaggregated streaming, and hardware-aware compression form the complete physical substrate for autonomous agent execution. However, deploying these complex distributed mechanisms in production environments introduces subtle systems traps that routinely compromise real-world clusters.
-
-::: {.callout-note title="Checkpoint: KV cache compression and numerical hardware"}
-Verify your analytical command of KV cache compression mechanics:
-
-- [ ] **FP8 Format Selection**: Why is FP8 E4M3 strictly preferred for Value activation vectors, while FP8 E5M2 is preferred for Key vectors under Rotary Position Embeddings (RoPE)?
-- [ ] **Outlier Channel Underflow**: Explain mathematically how a single outlier activation dimension of magnitude $100\times$ typical variance causes uniform quantization to destroy semantic precision across normal channels.
-- [ ] **SVD vs Quantization**: Compare the computational overhead of truncated SVD low-rank compression against scalar INT4 quantization. Under what specific context horizon does SVD become computationally viable?
-- [ ] **Decode Throughput Speedup**: On a memory-bandwidth-bound GPU cluster serving an agent context of 128,000 tokens, calculate the theoretical speedup in decode token throughput when migrating from FP16 to FP8 E4M3/E5M2.
-:::
 
 ## Fallacies and Pitfalls {#sec-vol3-virtualmem-fallacies}
 
