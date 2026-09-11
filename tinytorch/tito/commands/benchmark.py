@@ -601,7 +601,9 @@ class BenchmarkCommand(BaseCommand):
 
     def _get_config(self) -> Dict[str, Any]:
         """Get community configuration."""
-        config_file = self.config.project_root / ".tinytorch" / "config.json"
+        tito_config = self.config.project_root / ".tito" / "config.json"
+        legacy_config = self.config.project_root / ".tinytorch" / "config.json"
+        config_file = tito_config if (tito_config.exists() or not legacy_config.exists()) else legacy_config
         default_config = {
             "website": {
                 "base_url": "https://tinytorch.ai",
@@ -625,9 +627,9 @@ class BenchmarkCommand(BaseCommand):
             except Exception:
                 pass
 
-        # Create default config if it doesn't exist
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_file, 'w', encoding='utf-8') as f:
+        # Create default config in .tito if it doesn't exist
+        tito_config.parent.mkdir(parents=True, exist_ok=True)
+        with open(tito_config, 'w', encoding='utf-8') as f:
             json.dump(default_config, f, indent=2)
 
         return default_config
