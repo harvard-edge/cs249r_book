@@ -127,3 +127,149 @@ def training_measurement_protocol(workload) -> dict:
             f"{workload.id} does not declare a training measurement protocol"
         )
     return deepcopy(protocol)
+
+
+SUPPORTED_PRECISIONS = ("float32", "float16", "bfloat16", "int8")
+
+
+def resolve_precision(env_var: str) -> str:
+    """Read and validate a runner's precision lever."""
+    precision = os.environ.get(env_var, "float32").lower()
+    if precision not in SUPPORTED_PRECISIONS:
+        raise ValueError(
+            f"{env_var} must be one of {', '.join(SUPPORTED_PRECISIONS)}; "
+            f"got {precision!r}"
+        )
+    return precision
+
+
+def apply_precision(model, precision, device):
+    """Cast or quantize a model for the Algorithm-lens precision lever.
+
+    Returns the model and a dtype tag for the report, so a manifest records the
+    precision that actually executed rather than the one that was requested.
+
+    The tag carries the number of modules that were swapped for int8. Dynamic
+    quantization only replaces Linear layers, so a convolutional network sees
+    almost none and the saving is far smaller than a naive four-times estimate.
+    Reporting the count makes a near-no-op visible instead of letting a run
+    claim int8 while executing float32 arithmetic nearly everywhere.
+    """
+    import torch
+
+    if precision == "float32":
+        return model, "float32"
+    if precision == "float16":
+        return model.half(), "float16"
+    if precision == "bfloat16":
+        return model.to(torch.bfloat16), "bfloat16"
+    if precision == "int8":
+        if device.type != "cpu":
+            raise ValueError(
+                "dynamic INT8 quantization is CPU-only in PyTorch; "
+                f"requested on device {device.type!r}"
+            )
+        # PyTorch ships the quantized engine unselected on Apple Silicon, so
+        # quantize_dynamic fails with NoQEngine unless a backend is chosen. The
+        # engine is recorded because int8 numerics are backend-dependent.
+        engine = torch.backends.quantized.engine
+        if engine == "none":
+            supported = list(torch.backends.quantized.supported_engines)
+            preferred = [name for name in ("qnnpack", "fbgemm") if name in supported]
+            if not preferred:
+                raise RuntimeError(
+                    "no PyTorch quantized engine is available on this host; "
+                    f"supported_engines={supported}"
+                )
+            engine = preferred[0]
+            torch.backends.quantized.engine = engine
+        before = sum(1 for m in model.modules() if isinstance(m, torch.nn.Linear))
+        quantized = torch.ao.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+        # The count is taken from the RETURNED module, not the one passed in, so
+        # the tag is evidence that the transform happened rather than a
+        # restatement of what was requested. quantize_dynamic returns a new
+        # module; a caller that assigns it to a read-only property or discards
+        # it keeps executing float32, and an input-side count would still have
+        # produced a confident "38linear" tag on that run.
+        after = sum(
+            1
+            for m in quantized.modules()
+            if type(m).__name__ == "Linear" and "quantized" in type(m).__module__
+        )
+        if before and not after:
+            raise RuntimeError(
+                f"dynamic quantization replaced none of the {before} Linear "
+                "modules; the model would execute float32 while reporting int8"
+            )
+        return quantized, f"int8-dynamic-qint8-{engine}-{after}linear"
+    raise ValueError(f"unsupported precision {precision!r}")
+
+
+TRAINING_PRECISIONS = ("float32", "float16", "bfloat16")
+
+
+def resolve_training_precision(env_var: str) -> str:
+    """Read and validate a runner's mixed-precision training lever.
+
+    Deliberately excludes int8. Dynamic quantization leaves no trainable
+    parameters, so an int8 training request is a category error rather than a
+    configuration to honour.
+    """
+    precision = os.environ.get(env_var, "float32").lower()
+    if precision not in TRAINING_PRECISIONS:
+        raise ValueError(
+            f"{env_var} must be one of {', '.join(TRAINING_PRECISIONS)}; "
+            f"got {precision!r}. Quantized training is not supported: a "
+            "dynamically quantized module has no trainable parameters."
+        )
+    return precision
+
+
+def training_autocast(precision: str, device):
+    """Return (context_factory, grad_scaler_or_None, recorded_dtype).
+
+    Mixed-precision training is not a cast of the model. The weights stay in
+    float32 and only the forward pass runs in reduced precision, which is why
+    this is a different mechanism from the inference precision lever rather than
+    a variation on it.
+
+    float16 additionally needs loss scaling: gradients underflow to zero in
+    fp16's narrow exponent range, and a run without a scaler trains quietly
+    wrong rather than failing. bfloat16 keeps float32's exponent range and needs
+    no scaler.
+    """
+    import contextlib
+
+    import torch
+
+    if precision == "float32":
+        return (contextlib.nullcontext, None, "float32")
+
+    dtype = torch.float16 if precision == "float16" else torch.bfloat16
+    device_type = device.type
+
+    if device_type == "cpu" and precision == "float16":
+        # CPU autocast supports bfloat16; float16 autocast on CPU is not a
+        # supported path and would silently fall back or error mid-training.
+        raise ValueError(
+            "float16 autocast is not supported on CPU; use bfloat16 for "
+            "mixed-precision training on the CPU backend"
+        )
+
+    def _context():
+        return torch.autocast(device_type=device_type, dtype=dtype)
+
+    scaler = None
+    if precision == "float16":
+        # GradScaler is device-scoped in current torch; MPS has no scaler, so a
+        # float16 request there is rejected rather than run unscaled.
+        if device_type == "cuda":
+            scaler = torch.amp.GradScaler("cuda")
+        else:
+            raise ValueError(
+                f"float16 training requires a gradient scaler, which is not "
+                f"available on the {device_type!r} backend; use bfloat16"
+            )
+    return (_context, scaler, f"autocast-{precision}")

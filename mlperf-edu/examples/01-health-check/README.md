@@ -56,7 +56,7 @@ target was evaluated.
 | Claim boundary | 2 | Explanation that `min` makes no quality claim |
 | Next-step reasoning | 2 | A justified laptop-capable `max` workload choice |
 
-Submit the validation JSON and HTML, `min-all/grade.json`, the complete
-`min-all/` child report and manifest tree, and `answers.md` containing the four
+Submit the validation JSON and HTML, `submissions/01-health/grade.json`, the complete
+`submissions/01-health/` child report and manifest tree, and `answers.md` containing the four
 numbered responses. The summary is the grading view; the child tree lets a TA
 reverify every manifest.

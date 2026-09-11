@@ -1,0 +1,82 @@
+schema: mlperf-edu-experiment-plan/0.3
+id: dam-algorithm-lens-precision
+title: DAM Algorithm lens, precision sweep on text classification
+description: >
+  Measure the precision axis of the Algorithm lens against the inherited SST-2
+  accuracy target. This is the ablation the paper leans on most heavily and the
+  one that could not previously be run, because no runner exposed a dtype lever.
+  MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION now selects float32, float16,
+  bfloat16, or weight-only dynamic int8, and the setting is registered in
+  fingerprint.py so it is captured in each provenance manifest.
+
+  Dynamic int8 quantizes Linear weights only and is CPU-only in PyTorch, so the
+  int8 cell runs on CPU and its footprint reduction is smaller than a naive
+  four-times estimate. The float16 and bfloat16 cells run on MPS where reduced
+  precision is actually accelerated.
+profile: pro
+power: false
+keep_going: true
+study:
+  question: >
+    Which reduced-precision formats preserve the inherited SST-2 accuracy target,
+    and what do they actually cost or save on this host?
+  hypothesis: >
+    float16 and bfloat16 will hold the target because DistilBERT inference is
+    numerically forgiving at this scale. Weight-only int8 is the format most
+    likely to move accuracy, and its footprint saving will fall short of four
+    times because the embedding table is not quantized.
+  independent_variables:
+    - MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION
+  controls:
+    - pinned DistilBERT SST-2 checkpoint and revision
+    - GLUE SST-2 validation split
+    - batch size 32, sequence length 128
+    - random seed
+    - inherited accuracy target
+  analysis_metrics:
+    - accuracy against the inherited target
+    - inference wall-clock seconds
+    - recorded execution dtype
+defaults:
+  device: auto
+  repetitions: 1
+output:
+  directory: submissions/research/dam-algorithm-lens-precision
+  open_report: false
+runs:
+  - name: fp32-cpu
+    role: baseline
+    workload: text-classification
+    mode: inference
+    device: cpu
+    environment:
+      MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION: float32
+  - name: int8-cpu
+    role: candidate
+    workload: text-classification
+    mode: inference
+    device: cpu
+    environment:
+      MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION: int8
+
+  - name: fp32-mps
+    role: candidate
+    workload: text-classification
+    mode: inference
+    device: mps
+    environment:
+      MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION: float32
+  - name: fp16-mps
+    role: candidate
+    workload: text-classification
+    mode: inference
+    device: mps
+    environment:
+      MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION: float16
+  - name: bf16-mps
+    role: candidate
+    workload: text-classification
+    mode: inference
+    device: mps
+    environment:
+      MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION: bfloat16

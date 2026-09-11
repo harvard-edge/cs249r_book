@@ -247,9 +247,19 @@ def harness_metrics(
     }
 
 
-def percentile(values: list[float], percentile_value: int) -> float:
+def percentile(values: list[float], percentile_value: float) -> float:
+    """Ceil-rank percentile, the single estimator for every latency report.
+
+    Accepts a percentile in 0..100. Returns NaN for an empty sample rather than
+    0.0: a p99 of zero seconds is a claim about latency, whereas NaN correctly
+    says nothing was measured. Report writers must not substitute a number.
+
+    This is the only percentile implementation in the project. Runners import it
+    rather than defining their own, so a field named p99 means one thing
+    everywhere.
+    """
     if not values:
-        return 0.0
-    ordered = sorted(values)
+        return float("nan")
+    ordered = sorted(float(value) for value in values)
     rank = max(1, math.ceil((percentile_value / 100.0) * len(ordered)))
     return float(ordered[min(len(ordered) - 1, rank - 1)])

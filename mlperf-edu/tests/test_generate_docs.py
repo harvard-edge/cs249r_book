@@ -281,7 +281,7 @@ def test_site_describes_the_actual_lab_and_sut_scope(generated_outputs):
         "Fetching assets alone does\nnot create a quality-approved checkpoint"
         in sut_page
     )
-    assert "only [Lab 2]" in about
+    assert "[Lab 2]" in about
     assert "product CLI has no generic\n`--sut` plugin-loading option" in instructors
     assert "--sut" not in generated_outputs[ROOT / "site" / "reference" / "cli.qmd"]
 

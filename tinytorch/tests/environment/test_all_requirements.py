@@ -171,9 +171,17 @@ def check_package_functionality(package_name: str, import_name: str) -> Tuple[bo
             return True, f"Command available ({result.stdout.strip()})"
 
         elif package_name.lower() == 'jupyterlab':
-            # Resolve jupyter next to the interpreter running the tests. A bare
-            # "jupyter" resolves against PATH, which finds a different Python's
-            # jupyter when the suite runs as `.venv/bin/python -m pytest`.
+            # Run jupyter lab via the active interpreter directly to avoid stale shebangs
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "jupyter", "lab", "--version"],
+                    capture_output=True,
+                    text=True, encoding='utf-8', errors='replace'
+                )
+                if result.returncode == 0:
+                    return True, f"Command available ({result.stdout.strip()})"
+            except Exception:
+                pass
             exe = Path(sys.executable).parent / "jupyter"
             cmd = [str(exe)] if exe.exists() else ["jupyter"]
             result = subprocess.run(

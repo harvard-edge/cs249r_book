@@ -20,6 +20,8 @@ from mlperf.runners.common import (
     configured_seed,
     select_torch_device,
     synchronize_device,
+    resolve_training_precision,
+    training_autocast,
 )
 
 
@@ -185,6 +187,16 @@ def run_graph_node_classification_max(
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     n_params = sum(parameter.numel() for parameter in model.parameters())
+    # Mixed-precision training lever. Weights stay float32; only the forward
+    # pass runs reduced. The evaluation forward is deliberately left outside
+    # autocast so the reported accuracy is computed at full precision and a
+    # quality change reflects training, not a lower-precision evaluation.
+    training_precision = resolve_training_precision(
+        "MLPERF_EDU_GRAPH_TRAINING_PRECISION"
+    )
+    autocast_context, grad_scaler, training_dtype = training_autocast(
+        training_precision, device
+    )
 
     losses: list[float] = []
     train_accuracies: list[float] = []
@@ -201,10 +213,16 @@ def run_graph_node_classification_max(
         epoch_start = time.perf_counter()
         model.train()
         optimizer.zero_grad(set_to_none=True)
-        output = model(data.x, data.edge_index)
-        loss = F.nll_loss(output[train_index], data.y.squeeze(1)[train_index])
-        loss.backward()
-        optimizer.step()
+        with autocast_context():
+            output = model(data.x, data.edge_index)
+            loss = F.nll_loss(output[train_index], data.y.squeeze(1)[train_index])
+        if grad_scaler is not None:
+            grad_scaler.scale(loss).backward()
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         model.eval()
         with torch.inference_mode():
             prediction = model(data.x, data.edge_index).argmax(dim=-1, keepdim=True)
@@ -277,6 +295,8 @@ def run_graph_node_classification_max(
         "seed": seed,
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
+            "training_dtype": training_dtype,
+            "requested_training_precision": training_precision,
             "epochs": epochs,
             "hidden_channels": hidden_channels,
             "num_layers": num_layers,

@@ -270,6 +270,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     health_opening = health.add_mutually_exclusive_group()
     health_opening.add_argument(
+        "-o",
+        "--open",
         "--open-report",
         dest="open_report",
         action="store_true",
@@ -321,10 +323,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_opening = run.add_mutually_exclusive_group()
     report_opening.add_argument(
+        "-o",
+        "--open",
         "--open-report",
         dest="open_report",
         action="store_true",
-        help="Open the generated HTML dashboard.",
+        help="Automatically open the interactive HTML dashboard with curves and provenance upon completion.",
     )
     report_opening.add_argument(
         "--no-open-report",
@@ -1416,7 +1420,24 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         | set(experiment_api.RESERVED_ENVIRONMENT_KEYS)
         | set(experiment_api.IMMUTABLE_CONTRACT_KEYS)
     )
+    # Idle settle between cells. Back-to-back timing runs contaminate each
+    # other in two opposing directions: sustained load throttles the CPU, while
+    # an accelerator gets faster as its shader and kernel caches warm. Measured
+    # on text-classification at identical settings, the CPU arm ran 74 percent
+    # slower and the MPS arm 38 percent faster after eighty minutes of prior
+    # training, moving the reported speedup by 2.81x. A plan that does not
+    # settle between cells reports an order effect as a workload difference.
+    settle_seconds = float(os.environ.get("MLPERF_EDU_PLAN_SETTLE_SECONDS", 0) or 0)
+    if settle_seconds < 0:
+        raise ValueError("MLPERF_EDU_PLAN_SETTLE_SECONDS must be >= 0")
+
     for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
+        if settle_seconds and index > 1:
+            print(
+                f"settling {settle_seconds:.0f}s before {run['name']} "
+                "so the previous cell's thermal and cache state decays"
+            )
+            time.sleep(settle_seconds)
         run_dir = output_dir / "runs" / f"{index:02d}-{run['name']}"
         environment = dict(run["environment"])
         environment["MLPERF_EDU_PRO_REPETITIONS"] = str(run["repetitions"])
@@ -1474,7 +1495,11 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                 "mode": mode,
                 "phase": phase,
                 "status": "execution_failed",
-                "note": str(exc),
+                # Qualified with the type because some libraries raise bare
+                # exceptions: transformers' BatchEncoding.__getattr__ raises
+                # AttributeError with no args, so str(exc) is the empty string
+                # and the recorded note said nothing about what broke.
+                "note": f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__,
                 "experiment_run": {
                     "plan_id": plan["id"],
                     "plan_source_sha256": plan["source_sha256"],
@@ -1487,7 +1512,9 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     "imported": bool(run.get("baseline_import")),
                 },
             }
-            console.print(f"[red]{run['name']} failed:[/red] {exc}")
+            console.print(
+                f"[red]{run['name']} failed:[/red] {report['note']}"
+            )
         finally:
             for key, value in previous.items():
                 if value is None:
@@ -1792,10 +1819,36 @@ def write_aggregate_report(
             report["artifacts"]["instructor_reference_plan"] = str(
                 experiment_reference_path
             )
+        # `complete` is answered against the runs the plan DECLARED, not against
+        # the runs that happened to produce a report. Deriving the denominator
+        # from produced reports let a plan that stopped early, or whose cells
+        # all failed, publish complete=true: a 12-cell sweep that executed 10
+        # reported expected=10, and a 2-cell plan where both cells failed
+        # reported expected=0. A reader of the manifest, or an aggregator keying
+        # on this field, would take either at face value.
+        failed_children = [
+            item
+            for item in workload_reports
+            if item.get("status") == "execution_failed"
+        ]
+        planned_runs = len(experiment_plan.get("runs") or [])
         report["experiment_evidence"] = {
+            "planned_runs": planned_runs,
+            "executed_runs": len(workload_reports),
+            "failed_runs": len(failed_children),
             "expected_child_manifests": len(expected_children),
             "verified_child_manifests": len(child_manifest_paths),
-            "complete": len(child_manifest_paths) == len(expected_children),
+            # Retained as the narrower claim it always was: every run that did
+            # succeed emitted a verified manifest.
+            "manifests_verified_for_successful_runs": (
+                len(child_manifest_paths) == len(expected_children)
+            ),
+            "complete": (
+                planned_runs > 0
+                and len(workload_reports) == planned_runs
+                and not failed_children
+                and len(child_manifest_paths) == len(expected_children)
+            ),
         }
     attach_run_fingerprints(report, hardware=hardware)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

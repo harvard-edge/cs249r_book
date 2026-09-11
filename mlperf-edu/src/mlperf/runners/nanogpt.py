@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from mlperf.assets import ensure_tinyshakespeare, sha256_file
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd, verify_provd
+from mlperf.harness import percentile as harness_percentile
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
     TrainingProgress,
@@ -22,6 +23,8 @@ from mlperf.runners.common import (
     select_torch_device,
     synchronize_device,
     training_measurement_protocol,
+    apply_precision,
+    resolve_precision,
 )
 
 
@@ -947,10 +950,19 @@ def _load_max_nanogpt_model(
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state)
     model.eval()
+    # Precision is applied after the checkpoint loads so the weights are
+    # verified against the source manifest in float32 first, then cast. The
+    # executed dtype is threaded back through lineage so every inference path
+    # (prefill, decode, full) records what actually ran rather than assuming
+    # float32.
+    precision = resolve_precision("MLPERF_EDU_CAUSAL_LM_PRECISION")
+    model, execution_dtype = apply_precision(model, precision, device)
     metrics = source_report.get("metrics") or {}
     lineage = {
         "checkpoint_path": str(checkpoint),
         "checkpoint_sha256": checkpoint_sha256,
+        "execution_dtype": execution_dtype,
+        "requested_precision": precision,
         "source_workload": "causal-language-modeling",
         "source_report_path": str(source_report_path),
         "source_report_sha256": f"sha256:{sha256_file(source_report_path)}",
@@ -1071,11 +1083,13 @@ def _aggregate_decode_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _percentile(values: list[float], quantile: float) -> float:
-    ordered = sorted(float(value) for value in values)
-    if not ordered:
-        return float("nan")
-    index = max(0, min(len(ordered) - 1, int(len(ordered) * quantile + 0.999999) - 1))
-    return ordered[index]
+    """Adapter onto the project's single percentile estimator.
+
+    Kept as a thin quantile-taking wrapper so the many call sites in this module
+    stay readable, but the arithmetic now lives in harness.percentile so a field
+    named p99 means the same thing in every report.
+    """
+    return harness_percentile(values, quantile * 100.0)
 
 
 def _read_tokens(path: Path) -> torch.Tensor:
