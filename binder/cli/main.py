@@ -8,6 +8,7 @@ and managing the Machine Learning Systems textbook.
 
 import re
 import sys
+import time
 from pathlib import Path
 from rich.console import Console
 from rich.markup import escape as _rich_escape
@@ -42,20 +43,15 @@ from cli.commands.release import ReleaseCommand
 console = Console()
 
 
+try:
+    from cli.core.discovery import format_volume_display_name
+except ImportError:
+    from core.discovery import format_volume_display_name
+
+
 def _cmd(text: str) -> str:
     """Escape command examples before rendering in Rich tables."""
     return _rich_escape(text)
-
-
-def format_volume_display_name(volume: str) -> str:
-    """Format volume identifier into human-friendly name."""
-    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
-    if volume.startswith("vol") and volume[3:].isdigit():
-        num = int(volume[3:])
-        return f"Volume {roman_map.get(num, str(num))}"
-    if volume == "tinytorch":
-        return "TinyTorch"
-    return volume.capitalize()
 
 
 class MLSysBookCLI:
@@ -240,7 +236,31 @@ class MLSysBookCLI:
         console.print(Panel(options_text, title="⚙️ Options", border_style="yellow"))
 
     def _parse_build_args(self, args):
-        """Parse `binder build` arguments into format, scope, and targets."""
+        """Parse `binder build` arguments into format, scope, and target components.
+
+        Extracts output format ('html', 'pdf', 'epub'), volume selectors
+        (e.g., '--vol1', '--vol4', '-1', '--tinytorch'), multi-volume flags ('--all'),
+        chapter targets, and execution toggles ('--skip-hygiene', '--skip-validate',
+        '--layout', '--no-cover', '--print-marks').
+
+        Args:
+            args: Raw CLI argument list.
+
+        Returns:
+            Tuple of:
+                format_type (str): "html", "pdf", or "epub".
+                volume (Optional[str]): Volume identifier or None.
+                build_all (bool): True if full multi-volume build requested.
+                chapters_arg (Optional[str]): Space/comma separated chapter specifications.
+                skip_hygiene (bool): True if EPUB hygiene preflight should be bypassed.
+                skip_validate (bool): True if post-render validation should be bypassed.
+                layout_after (bool): True if auto-layout analysis should run after build.
+                no_cover (bool): True if PDF cover page should be omitted.
+                print_marks (bool): True if printer crop/trim marks should be included.
+
+        Raises:
+            ValueError: If more than one volume is explicitly specified.
+        """
         format_type = None
         volume = None
         build_all = False
@@ -310,6 +330,8 @@ class MLSysBookCLI:
                 no_cover = True
             elif lower == "--print-marks":
                 print_marks = True
+            elif lower == "--json":
+                pass
             elif format_type is None and lower in ("html", "pdf", "epub"):
                 format_type = lower
             else:
@@ -334,7 +356,17 @@ class MLSysBookCLI:
         )
 
     def handle_build_command(self, args):
-        """Handle unified build command.
+        """Handle the unified build command.
+
+        Coordinates configuration activation, chapter resolution, rendering execution,
+        and post-render validation. If ``--json`` is present, redirects diagnostic and
+        progress output to stderr and emits a machine-readable JSON summary on stdout.
+
+        Args:
+            args: CLI arguments passed after 'build'.
+
+        Returns:
+            True if the build and all post-flight checks passed, False otherwise.
 
         Usage:
             ./binder/binder build
@@ -348,7 +380,7 @@ class MLSysBookCLI:
             return False
 
         if "-h" in args or "--help" in args:
-            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks]", markup=False)
+            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json]", markup=False)
             console.print("[dim]Build renders source artifacts. For PDF layout polish, add --layout to a full-volume PDF build.[/dim]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder/binder build[/dim]")
@@ -365,101 +397,199 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder/binder build epub --vol1 --skip-hygiene    # bypass pre-render hygiene check[/dim]")
             console.print("[dim]  ./binder/binder build epub --vol1 --skip-validate   # bypass post-render validation[/dim]")
             console.print("[dim]  ./binder/binder build pdf --vol1                  # runs pdftotext cross-ref scan after render[/dim]")
+            console.print("[dim]  ./binder/binder build html intro --vol1 --json    # machine-readable build summary[/dim]")
             console.print("[dim]Layout rule: --layout is accepted only for `build pdf --vol1|--vol2`; it runs the same planner as `binder layout --vol1|--vol2 --no-build`.[/dim]")
             return True
 
-        self.config_manager.show_active_config()
-        (
-            format_type,
-            volume,
-            build_all,
-            chapters_arg,
-            skip_hygiene,
-            skip_validate,
-            layout_after,
-            no_cover,
-            print_marks,
-        ) = self._parse_build_args(args)
+        json_output = any(a.lower() == "--json" for a in args) if args else False
+        status_console = Console(stderr=True) if json_output else console
+
+        def _emit_json(
+            success: bool,
+            fmt=None,
+            vol=None,
+            b_all=False,
+            chs=None,
+            elapsed=0.0,
+            err_msg=None,
+        ):
+            """Emit a pure JSON summary to stdout without soft-wrap distortion."""
+            import json as _json
+            result_payload = {
+                "success": bool(success),
+                "format": fmt,
+                "volume": vol,
+                "all": b_all,
+                "chapters": chs,
+                "elapsed_seconds": round(elapsed, 2),
+                "log_path": str(getattr(self.build_command, "_last_build_log", "")) or None,
+            }
+            if err_msg:
+                result_payload["error"] = err_msg
+            json_text = _json.dumps(result_payload, indent=2)
+            if console.file not in (sys.stdout, sys.__stdout__, sys.stderr, sys.__stderr__):
+                console.print(json_text, soft_wrap=True, highlight=False)
+            else:
+                sys.stdout.write(json_text + "\n")
+                sys.stdout.flush()
+
+        if not json_output:
+            self.config_manager.show_active_config()
+
+        format_type = None
+        volume = None
+        build_all = False
+        chapters_arg = None
+        skip_hygiene = False
+        skip_validate = False
+        layout_after = False
+        no_cover = False
+        print_marks = False
+
+        try:
+            (
+                format_type,
+                volume,
+                build_all,
+                chapters_arg,
+                skip_hygiene,
+                skip_validate,
+                layout_after,
+                no_cover,
+                print_marks,
+            ) = self._parse_build_args(args)
+        except Exception as e:
+            status_console.print(f"[red]❌ Error: {e}[/red]")
+            if json_output:
+                _emit_json(False, fmt=format_type, vol=volume, b_all=build_all, err_msg=str(e))
+            return False
 
         if build_all and chapters_arg:
-            console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
+            status_console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
+            if json_output:
+                _emit_json(
+                    False,
+                    fmt=format_type,
+                    vol=volume,
+                    b_all=True,
+                    chs=[ch.strip() for ch in chapters_arg.split(",")],
+                    err_msg="Cannot combine explicit chapters with --all",
+                )
             return False
 
         if layout_after and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
+            status_console.print(
                 "[red]❌ `--layout` is supported for full-volume PDF builds only.[/red]"
             )
-            console.print(
+            status_console.print(
                 "[yellow]Use: ./binder/binder build pdf --vol1 --layout "
                 "or ./binder/binder build pdf --vol2 --layout[/yellow]"
             )
+            if json_output:
+                _emit_json(
+                    False,
+                    fmt=format_type,
+                    vol=volume,
+                    b_all=build_all,
+                    err_msg="`--layout` is supported for full-volume PDF builds only",
+                )
             return False
 
         if no_cover and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
-                "[red]❌ `--no-cover` is supported for full-volume PDF builds only.[/red]"
-            )
-            console.print(
-                "[yellow]Use: ./binder/binder build pdf --vol1 --no-cover "
+            status_console.print(
+                "[yellow]⚠️ `--no-cover` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
-            return False
 
         if print_marks and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
-            console.print(
-                "[red]❌ `--print-marks` is supported for full-volume PDF builds only.[/red]"
-            )
-            console.print(
-                "[yellow]Use: ./binder/binder build pdf --vol1 --print-marks "
+            status_console.print(
+                "[yellow]⚠️ `--print-marks` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
+
+        t0 = time.time()
+        ok = False
+
+        from contextlib import redirect_stdout, nullcontext
+        stdout_redirect = redirect_stdout(sys.stderr) if json_output else nullcontext()
+
+        try:
+            with stdout_redirect:
+                if build_all:
+                    if format_type == "html":
+                        status_console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
+                        ok = self.build_command.build_html_only()
+                    else:
+                        status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+                        ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                elif volume and not chapters_arg:
+                    volume_name = format_volume_display_name(volume)
+                    status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
+                    ok = self.build_command.build_volume(
+                        volume,
+                        format_type,
+                        skip_hygiene=skip_hygiene,
+                        skip_validate=skip_validate,
+                        no_cover=no_cover,
+                        print_marks=print_marks,
+                    )
+                    if ok and layout_after:
+                        ok = self.layout_command.run([f"--{volume}", "--no-build"])
+                elif volume and chapters_arg:
+                    chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+                    status_console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
+                    ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                elif chapters_arg:
+                    chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+                    status_console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
+                    ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                else:
+                    status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+                    if format_type == "html":
+                        ok = self.build_command.build_full("html")
+                    else:
+                        ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        except Exception as e:
+            status_console.print(f"[red]❌ Build error: {e}[/red]")
+            if json_output:
+                _emit_json(
+                    False,
+                    fmt=format_type,
+                    vol=volume,
+                    b_all=build_all,
+                    chs=[ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None,
+                    elapsed=time.time() - t0,
+                    err_msg=str(e),
+                )
             return False
 
-        if build_all:
-            if format_type == "html":
-                console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
-                return self.build_command.build_html_only()
-            console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-            return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-
-        if volume and not chapters_arg:
-            volume_name = format_volume_display_name(volume)
-            console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
-            ok = self.build_command.build_volume(
-                volume,
-                format_type,
-                skip_hygiene=skip_hygiene,
-                skip_validate=skip_validate,
-                no_cover=no_cover,
-                print_marks=print_marks,
+        if json_output:
+            _emit_json(
+                ok,
+                fmt=format_type,
+                vol=volume,
+                b_all=build_all,
+                chs=[ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None,
+                elapsed=time.time() - t0,
             )
-            if ok and layout_after:
-                return self.layout_command.run([f"--{volume}", "--no-build"])
-            return ok
 
-        if volume and chapters_arg:
-            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
-            return self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-
-        if chapters_arg:
-            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
-            console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
-            return self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-
-        console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-        if format_type == "html":
-            return self.build_command.build_full("html")
-        return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        return ok
 
     def handle_preview_command(self, args):
-        """Handle preview command."""
+        """Handle preview command to launch Quarto live dev server with hot reload.
+
+        Args:
+            args: CLI arguments (optional single chapter specification).
+
+        Returns:
+            True if dev server exited cleanly, False on error.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder preview [chapter]", markup=False)
             console.print("[dim]Examples:[/dim]")
@@ -485,7 +615,14 @@ class MLSysBookCLI:
             return self.preview_command.preview_chapter(chapter)
 
     def handle_doctor_command(self, args):
-        """Handle doctor/health check command."""
+        """Handle doctor health check command to verify dependencies and configuration.
+
+        Args:
+            args: CLI arguments.
+
+        Returns:
+            True if all required health checks passed, False otherwise.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder doctor", markup=False)
             console.print("[dim]Run comprehensive local tooling and repository health checks.[/dim]")
@@ -493,7 +630,14 @@ class MLSysBookCLI:
         return self.doctor_command.run_health_check()
 
     def handle_clean_command(self, args):
-        """Handle clean command."""
+        """Handle clean command to remove generated build artifacts and caches.
+
+        Args:
+            args: Target format or scope ('html', 'pdf', 'epub', 'artifacts', or empty for all).
+
+        Returns:
+            True on successful cleanup, False on error.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             self.clean_command.print_help()
             return True
@@ -512,7 +656,14 @@ class MLSysBookCLI:
             return self.clean_command.clean_all()
 
     def handle_switch_command(self, args):
-        """Handle switch command."""
+        """Handle switch command to swap active _quarto.yml and index.qmd configuration.
+
+        Args:
+            args: Target format ('html', 'pdf', 'epub').
+
+        Returns:
+            True on successful switch, False on error.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder switch <html|pdf|epub>", markup=False)
             return True
@@ -525,7 +676,14 @@ class MLSysBookCLI:
         return self.maintenance_command.switch_format(format_type)
 
     def handle_setup_command(self, args):
-        """Handle setup command."""
+        """Handle setup command to configure development environment and hooks.
+
+        Args:
+            args: CLI arguments.
+
+        Returns:
+            True on success, False on error.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder setup", markup=False)
             console.print("[dim]Install/setup local development dependencies and pre-commit hooks.[/dim]")
@@ -533,64 +691,168 @@ class MLSysBookCLI:
         return self.maintenance_command.setup_environment()
 
     def handle_hello_command(self, args):
-        """Handle hello command."""
+        """Handle hello command.
+
+        Args:
+            args: CLI arguments.
+
+        Returns:
+            True.
+        """
         return self.maintenance_command.show_hello()
 
     def handle_about_command(self, args):
-        """Handle about command."""
+        """Handle about command.
+
+        Args:
+            args: CLI arguments.
+
+        Returns:
+            True.
+        """
         return self.maintenance_command.show_about()
 
     def handle_audit_command(self, args):
-        """Handle audit command group (chapter-level build audits)."""
+        """Handle audit command group for chapter-level build audits.
+
+        Args:
+            args: CLI arguments passed to AuditCommand.
+
+        Returns:
+            True if audit checks passed, False otherwise.
+        """
         return self.audit_command.run(args)
 
     def handle_check_command(self, args):
-        """Handle check (validation) command group."""
+        """Handle check (validation) command group.
+
+        Args:
+            args: CLI arguments passed to ValidateCommand.
+
+        Returns:
+            True if validation checks passed, False otherwise.
+        """
         return self.validate_command.run(args)
 
     def handle_fix_command(self, args):
-        """Handle fix (maintenance) namespace command."""
+        """Handle fix (maintenance) namespace command.
+
+        Args:
+            args: CLI arguments passed to MaintenanceCommand.
+
+        Returns:
+            True if fix operations succeeded, False otherwise.
+        """
         return self.maintenance_command.run_namespace(args)
 
     def handle_format_command(self, args):
-        """Handle format command group."""
+        """Handle format command group for automated content formatting.
+
+        Args:
+            args: CLI arguments passed to FormatCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.format_command.run(args)
 
     def handle_info_command(self, args):
-        """Handle info command group (stats, figures)."""
+        """Handle info command group (statistics, figures, concepts, acronyms).
+
+        Args:
+            args: CLI arguments passed to InfoCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.info_command.run(args)
 
     def handle_bib_command(self, args):
-        """Handle bib command group (list, clean, update, sync)."""
+        """Handle bib command group for bibliography management and verification.
+
+        Args:
+            args: CLI arguments passed to BibCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.bib_command.run(args)
 
     def handle_render_command(self, args):
-        """Handle render command group (plots)."""
+        """Handle render command group for figure and plot generation.
+
+        Args:
+            args: CLI arguments passed to RenderCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.render_command.run(args)
 
     def handle_newsletter_command(self, args):
-        """Handle newsletter command group (new, list, preview, publish, fetch, status)."""
+        """Handle newsletter command group (creation, preview, publication).
+
+        Args:
+            args: CLI arguments passed to NewsletterCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.newsletter_command.run(args)
 
     def handle_headings_command(self, args):
-        """Handle headings command group (check, dry-run, apply)."""
+        """Handle headings command group for header formatting and capitalization.
+
+        Args:
+            args: CLI arguments passed to HeadingsCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.headings_command.run(args)
 
     def handle_layout_command(self, args):
-        """Handle layout command group (check)."""
+        """Handle layout command group for PDF layout analysis and geometry checks.
+
+        Args:
+            args: CLI arguments passed to LayoutCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.layout_command.run(args)
 
     def handle_reset_command(self, args):
-        """Handle reset command group."""
+        """Handle reset command group to restore pristine YAML configuration files.
+
+        Args:
+            args: CLI arguments passed to ResetCommand.
+
+        Returns:
+            True on success, False on error.
+        """
         return self.reset_command.run(args)
 
     def handle_release_command(self, args):
-        """Handle release orchestration."""
+        """Handle release orchestration and release gate execution.
+
+        Args:
+            args: CLI arguments passed to ReleaseCommand.
+
+        Returns:
+            True on successful release verification, False otherwise.
+        """
         return self.release_command.run(args)
 
 
     def handle_debug_command(self, args):
-        """Handle debug command.
+        """Handle debug command for pinpointing failing chapters and sections.
+
+        Args:
+            args: CLI arguments specifying format, volume, and optional chapter.
+
+        Returns:
+            True if debug run completed successfully, False otherwise.
 
         Usage:
             ./binder/binder debug pdf --vol1
@@ -640,7 +902,14 @@ class MLSysBookCLI:
         return self.debug_command.debug_build(format_type, volume, chapter)
 
     def handle_list_command(self, args):
-        """Handle list chapters command."""
+        """Handle list chapters command to display discovered chapters and metadata.
+
+        Args:
+            args: CLI arguments specifying optional volume filter.
+
+        Returns:
+            True.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder list [--vol1|--vol2|...]", markup=False)
             return True
@@ -657,7 +926,14 @@ class MLSysBookCLI:
         return True
 
     def handle_status_command(self, args):
-        """Handle status command."""
+        """Handle status command to display current active configuration and index state.
+
+        Args:
+            args: CLI arguments.
+
+        Returns:
+            True.
+        """
         if args and args[0].lower() in ("help", "-h", "--help"):
             console.print("Usage: ./binder/binder status", markup=False)
             return True
@@ -675,7 +951,14 @@ class MLSysBookCLI:
         return True
 
     def run(self, args):
-        """Run the CLI with given arguments."""
+        """Dispatch CLI command and arguments to the appropriate handler.
+
+        Args:
+            args: Full command line arguments excluding the script name.
+
+        Returns:
+            True if the executed command succeeded, False on failure or error.
+        """
         if len(args) < 1:
             self.show_help()
             return True
@@ -759,7 +1042,7 @@ class MLSysBookCLI:
 
 
 def main():
-    """Main entry point."""
+    """Main CLI entry point: parses global verbose and open flags and invokes MLSysBookCLI."""
     # Check for global flags
     args = sys.argv[1:]
     verbose = False

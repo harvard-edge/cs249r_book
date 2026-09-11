@@ -15,9 +15,15 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Dict, Any, Set, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+try:
+    from cli.core.discovery import discover_volumes, format_volume_display_name
+except ImportError:
+    from core.discovery import discover_volumes, format_volume_display_name
 
 console = Console()
 
@@ -313,12 +319,11 @@ class MaintenanceCommand:
             description="Fix and manage book content",
             add_help=True,
         )
-        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "headers", "footnotes"])
+        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "headers", "footnotes", "bib"])
         parser.add_argument("action", nargs="?")
-        parser.add_argument("--vol1", action="store_true", help="Scope to vol1")
-        parser.add_argument("--vol2", action="store_true", help="Scope to vol2")
-        parser.add_argument("--vol3", action="store_true", help="Scope to vol3")
-        parser.add_argument("--vol4", action="store_true", help="Scope to vol4")
+        discovered_vols = discover_volumes(self.config_manager.book_dir)
+        for v in discovered_vols:
+            parser.add_argument(f"--{v}", action="store_true", help=f"Scope to {format_volume_display_name(v)}")
         parser.add_argument("--path", default=None, help="File or directory path")
         parser.add_argument("-f", "--file", action="append", default=[], help="Image file to process (repeatable)")
         parser.add_argument("--all", action="store_true", help="Process all matching images")
@@ -331,6 +336,7 @@ class MaintenanceCommand:
         parser.add_argument("--force", action="store_true", help="Skip interactive confirmations")
         parser.add_argument("--dry-run", action="store_true", help="Preview changes without modifying files")
         parser.add_argument("--backup", action="store_true", help="Create backup files before changes")
+        parser.add_argument("--check", action="store_true", help="Check without modifying")
 
         try:
             ns = parser.parse_args(args)
@@ -341,12 +347,17 @@ class MaintenanceCommand:
             self._print_fix_help()
             return True
 
+        selected_volume = None
+        for v in discovered_vols:
+            if getattr(ns, v, False):
+                selected_volume = v
+                break
+
         if ns.topic == "glossary":
             if ns.action not in (None, "paths"):
                 console.print("[red]❌ Supported action: fix glossary paths[/red]")
                 return False
-            volume = "vol1" if ns.vol1 and not (ns.vol2 or ns.vol3 or ns.vol4) else "vol2" if ns.vol2 and not (ns.vol1 or ns.vol3 or ns.vol4) else "vol3" if ns.vol3 and not (ns.vol1 or ns.vol2 or ns.vol4) else "vol4" if ns.vol4 and not (ns.vol1 or ns.vol2 or ns.vol3) else None
-            return self._maintain_glossary_paths(volume=volume)
+            return self._maintain_glossary_paths(volume=selected_volume)
 
         if ns.topic == "images":
             if ns.action not in (None, "compress"):
@@ -375,7 +386,7 @@ class MaintenanceCommand:
             if ns.action not in valid_actions:
                 console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
                 return False
-            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2, ns.vol3, ns.vol4)
+            root = self._resolve_content_path(ns.path, volume=selected_volume)
             return self._maintain_section_ids(
                 root=root,
                 action=ns.action,
@@ -389,13 +400,22 @@ class MaintenanceCommand:
             if ns.action not in valid_actions:
                 console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
                 return False
-            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2, ns.vol3, ns.vol4)
+            root = self._resolve_content_path(ns.path, volume=selected_volume)
             return self._maintain_footnotes(
                 root=root,
                 action=ns.action,
                 dry_run=ns.dry_run,
                 backup=ns.backup,
             )
+
+        if ns.topic == "bib":
+            valid_actions = (None, "sync", "build", "check")
+            if ns.action not in valid_actions:
+                console.print("[red]❌ Supported actions: sync, check[/red]")
+                return False
+            check_only = ns.action == "check" or getattr(ns, "check", False) or ns.dry_run
+            target_vol = selected_volume or "vol3"
+            return self._maintain_volume_bib(volume=target_vol, check_only=check_only)
 
         return False
 
@@ -410,6 +430,7 @@ class MaintenanceCommand:
         table.add_row("repo-health", "check", "Report oversized/generated repository files")
         table.add_row("headers", "add, repair, list, remove", "Manage section IDs")
         table.add_row("footnotes", "cleanup, reorganize, remove", "Repair footnote layout")
+        table.add_row("bib", "sync, check", "Synchronize volume bibliography (references-<vol>.bib)")
         console.print(Panel(table, title="binder fix <topic> <action>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder/binder fix headers add --vol1 --dry-run[/cyan]")
@@ -417,22 +438,79 @@ class MaintenanceCommand:
         console.print("  [cyan]./binder/binder fix images compress --all --smart-compression --apply[/cyan]")
         console.print("  [cyan]./binder/binder fix repo-health --json[/cyan]")
         console.print("  [cyan]./binder/binder fix footnotes cleanup --vol1 --dry-run[/cyan]")
+        console.print("  [cyan]./binder/binder fix bib sync --vol3[/cyan]")
+        console.print("  [cyan]./binder/binder fix bib check --vol4[/cyan]")
         console.print()
 
-    def _resolve_content_path(self, path_arg, vol1: bool, vol2: bool, vol3: bool = False, vol4: bool = False) -> Path:
-        """Resolve content path from args."""
+    def _maintain_volume_bib(self, volume: str, check_only: bool = False) -> bool:
+        """Build or check dedicated volume bibliography via build_volume_bib.py.
+
+        Invokes ``build_volume_bib.py`` relative to the repository root so the
+        operation behaves identically regardless of the current working directory.
+        Checks supported isolated volumes (currently 'vol3' and 'vol4'); volumes
+        using the shared bibliography are reported with explanatory feedback.
+
+        Args:
+            volume: Target volume identifier ('vol3', 'vol4', etc.).
+            check_only: If True, check freshness without rewriting the bibliography file.
+
+        Returns:
+            True if the check or synchronization succeeded (exit code 0), False otherwise.
+        """
+        supported_vols = ("vol3", "vol4")
+        if volume not in supported_vols:
+            disp_name = format_volume_display_name(volume)
+            console.print(
+                f"[yellow]ℹ️  {disp_name} ({volume}) uses the shared bibliography (books/shared/references.bib).\n"
+                f"Dedicated bibliography maintenance applies only to volumes with isolated bibliographies ({', '.join(supported_vols)}).[/yellow]"
+            )
+            return False
+
+        import sys as _sys
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
+        if not script.exists():
+            console.print(f"[red]❌ Script not found: {script}[/red]")
+            return False
+        cmd = [_sys.executable, str(script), volume]
+        if check_only:
+            cmd.append("--check")
+        action_name = "Checking" if check_only else "Synchronizing"
+        disp_name = format_volume_display_name(volume)
+        console.print(f"[blue]📚 {action_name} {disp_name} bibliography ({volume})...[/blue]")
+        res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+        if res.stdout:
+            console.print(res.stdout.strip())
+        if res.stderr:
+            console.print(f"[yellow]{res.stderr.strip()}[/yellow]")
+        if res.returncode == 0:
+            status_text = "is current" if check_only else "updated successfully"
+            console.print(f"[green]✓ {disp_name} bibliography {status_text}[/green]")
+            return True
+        else:
+            console.print(f"[red]✗ {disp_name} bibliography verification failed (exit code {res.returncode})[/red]")
+            return False
+
+    def _resolve_content_path(self, path_arg, volume: Optional[str] = None, **kwargs) -> Path:
+        """Resolve content path from argument, volume name, or book directory.
+
+        Args:
+            path_arg: Explicit path passed by the user, if any.
+            volume: Optional volume name (e.g., 'vol1', 'vol4').
+            **kwargs: Additional volume name flags.
+
+        Returns:
+            Resolved absolute Path to the target content directory.
+        """
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else (Path.cwd() / p).resolve()
         base = self.config_manager.book_dir
-        if vol1 and not (vol2 or vol3 or vol4):
-            return base / "vol1"
-        if vol2 and not (vol1 or vol3 or vol4):
-            return base / "vol2"
-        if vol3 and not (vol1 or vol2 or vol4):
-            return base / "vol3"
-        if vol4 and not (vol1 or vol2 or vol3):
-            return base / "vol4"
+        if volume and (base / volume).is_dir():
+            return base / volume
+        for k, v in kwargs.items():
+            if v and (base / k).is_dir():
+                return base / k
         return base
 
     # ------------------------------------------------------------------
@@ -877,27 +955,26 @@ class MaintenanceCommand:
     def _maintain_glossary_paths(self, volume: str = None) -> bool:
         """Show the canonical glossary source files."""
         book_dir = self.config_manager.book_dir
-        volumes = [volume] if volume else ["vol1", "vol2", "vol3", "vol4"]
-        labels = {
-            "vol1": "Volume I",
-            "vol2": "Volume II",
-            "vol3": "Volume III",
-            "vol4": "Volume IV",
-        }
+        volumes = [volume] if volume else discover_volumes(book_dir)
         console.print("[bold]Glossary source of truth[/bold]")
         console.print("The book renders glossary content directly from the volume QMD files.")
         console.print("Glossary JSON generation has been retired to avoid stale parallel sources.\n")
 
+        all_ok = True
         for vol in volumes:
-            path = book_dir / vol / "backmatter" / "glossary" / "glossary.qmd"
-            label = labels.get(vol, vol)
+            candidates = [
+                book_dir / vol / "backmatter" / "glossary" / "glossary.qmd",
+                book_dir / vol / "glossary" / "glossary.qmd",
+            ]
+            path = next((p for p in candidates if p.exists()), candidates[0])
+            label = format_volume_display_name(vol)
             if path.exists():
                 console.print(f"[green]✓[/green] {label}: {path}")
             else:
                 console.print(f"[red]✗[/red] {label}: missing {path}")
-                return False
+                all_ok = False
 
-        return True
+        return all_ok
 
     def _find_images_for_compression(self, min_size_mb: int):
         """Find large images under contents for bulk compression."""

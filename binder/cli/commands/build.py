@@ -1064,8 +1064,23 @@ class BuildCommand:
                     return True
                 else:
                     console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
-                    if result.stderr:
-                        console.print(f"[red]Error: {result.stderr}[/red]")
+                    if result.stderr and result.stderr.strip():
+                        console.print(f"[red]Error output (stderr):[/red]\n{result.stderr.strip()}")
+                    elif result.stdout and result.stdout.strip():
+                        # Quarto often writes fatal Lua/TeX/render errors to stdout.
+                        stdout_lines = result.stdout.strip().splitlines()
+                        error_lines = [
+                            line for line in stdout_lines
+                            if any(k in line.lower() for k in ("error", "fatal", "failed", "undefined control sequence", "compilation error"))
+                        ]
+                        if error_lines:
+                            sample = "\n".join(error_lines[-15:])
+                            console.print(f"[red]Error diagnostics detected in output:[/red]\n{sample}")
+                        else:
+                            tail = "\n".join(stdout_lines[-20:])
+                            console.print(f"[yellow]Last output lines before failure:[/yellow]\n{tail}")
+                    if cwd and getattr(self, "_last_build_log", None):
+                        console.print(f"[dim]Full build log saved at: {self._last_build_log}[/dim]")
                     return False
 
         except subprocess.TimeoutExpired:

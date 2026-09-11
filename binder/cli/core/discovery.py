@@ -19,7 +19,20 @@ from rich.console import Console
 console = Console()
 
 def discover_volumes(book_dir: Path) -> List[str]:
-    """Dynamically discover all volume directories under book_dir."""
+    """Dynamically discover all volume directories under book_dir.
+
+    Scans the given directory for subdirectories matching the pattern ``vol\\d+``
+    as well as standalone named volumes like ``tinytorch``. Sorts volume names
+    numerically (e.g., vol1, vol2, vol3, vol4), followed by non-numeric volumes.
+    If the directory does not exist or yields no volume folders, returns the
+    canonical default list (``["vol1", "vol2", "vol3", "vol4"]``).
+
+    Args:
+        book_dir: Path to the books root directory containing volume folders.
+
+    Returns:
+        Sorted list of volume directory names.
+    """
     if not book_dir.exists():
         return ["vol1", "vol2", "vol3", "vol4"]
     vols = [
@@ -36,6 +49,28 @@ def discover_volumes(book_dir: Path) -> List[str]:
     )
 
 
+def format_volume_display_name(volume: str) -> str:
+    """Format volume identifier into human-friendly display name.
+
+    Converts identifiers like ``"vol1"`` to ``"Volume I"``, ``"vol4"`` to
+    ``"Volume IV"``, and ``"tinytorch"`` to ``"TinyTorch"``. Any other volume
+    identifier is capitalized.
+
+    Args:
+        volume: Volume directory identifier (e.g., ``"vol1"``, ``"tinytorch"``).
+
+    Returns:
+        Formatted human-readable display string.
+    """
+    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
+    if volume.startswith("vol") and volume[3:].isdigit():
+        num = int(volume[3:])
+        return f"Volume {roman_map.get(num, str(num))}"
+    if volume == "tinytorch":
+        return "TinyTorch"
+    return volume.capitalize()
+
+
 # Default volume directories; dynamic discovery should be preferred via ChapterDiscovery or discover_volumes()
 VOLUME_DIRS = ["vol1", "vol2", "vol3", "vol4"]
 
@@ -49,7 +84,18 @@ SKIP_STEMS = frozenset({"index", "references"})
 
 
 def _chapters_from_html_sidebar(book_dir: Path, volume: str) -> List[str]:
-    """Extract buildable chapter stems from the HTML config sidebar (href entries)."""
+    """Extract buildable chapter stems from the HTML config sidebar (href entries).
+
+    Parses ``binder/config/_quarto-html-{volume}.yml`` for sidebar hrefs matching
+    the volume, excluding stems in ``SKIP_STEMS`` (e.g. index, references).
+
+    Args:
+        book_dir: Path to the books root directory.
+        volume: Target volume identifier (e.g., ``"vol1"``, ``"vol4"``).
+
+    Returns:
+        Ordered list of buildable chapter file stems from the sidebar.
+    """
     html_config = book_dir / "config" / f"_quarto-html-{volume}.yml"
     if not html_config.is_file():
         return []
@@ -77,7 +123,7 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
 
     Args:
         book_dir: Path to the ``books/`` directory.
-        volume: ``"vol1"`` or ``"vol2"``.
+        volume: Volume identifier (e.g., ``"vol1"``, ``"vol2"``, ``"vol4"``).
 
     Returns:
         Ordered list of file stems in YAML order (e.g. ``["dedication",
@@ -233,11 +279,26 @@ class ChapterDiscovery:
 
     @staticmethod
     def _normalized_name(value: str) -> str:
+        """Normalize chapter name or title for case- and punctuation-insensitive matching.
+
+        Args:
+            value: Raw string to normalize.
+
+        Returns:
+            Space-delimited string of lowercased alphanumeric tokens.
+        """
         return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
 
     @staticmethod
     def _chapter_title(path: Path) -> str:
-        """Read the first H1 or YAML title without scanning the chapter body."""
+        """Read the first H1 or YAML title without scanning the full chapter body.
+
+        Args:
+            path: Path to the target QMD file.
+
+        Returns:
+            Extracted title string, or an empty string if neither H1 nor YAML title was found.
+        """
         with path.open(encoding="utf-8") as source:
             opening = source.read(16384)
         heading = re.search(r"^# +(.+?)\s*(?:\{[^}]*\})?\s*$", opening, re.MULTILINE)
@@ -258,6 +319,16 @@ class ChapterDiscovery:
         Explicit volume prefixes constrain every matching stage. Exact paths
         and stems win, then normalized titles, unique substrings, and finally
         conservative typo matching. Ambiguous queries always list candidates.
+
+        Args:
+            chapter_spec: Chapter filename, path, or title (e.g., 'intro', 'vol1/intro', '01_intro').
+            allow_fuzzy: If True, enable substring and typo-tolerant fuzzy matching.
+
+        Returns:
+            Resolved Path to the chapter QMD file, or None if not found.
+
+        Raises:
+            AmbiguousChapterError: If the specification matches multiple chapters.
         """
         from difflib import SequenceMatcher
 
@@ -317,7 +388,7 @@ class ChapterDiscovery:
         """Get all chapter files with metadata.
 
         Args:
-            volume: Optional volume filter ('vol1', 'vol2', or None for all)
+            volume: Optional volume filter (e.g., 'vol1', 'vol2', 'vol4', or None for all)
 
         Returns:
             List of dictionaries containing chapter information
@@ -371,7 +442,7 @@ class ChapterDiscovery:
         """Get all chapter file paths for a specific volume.
 
         Args:
-            volume: Volume to get chapters for ('vol1' or 'vol2')
+            volume: Volume to get chapters for (e.g., 'vol1', 'vol2', 'vol4')
 
         Returns:
             List of chapter file paths
@@ -383,7 +454,7 @@ class ChapterDiscovery:
         """Display available chapters in a formatted table.
 
         Args:
-            volume: Optional volume filter ('vol1', 'vol2', or None for all)
+            volume: Optional volume filter (e.g., 'vol1', 'vol2', 'vol4', or None for all)
         """
         from rich.table import Table
 
